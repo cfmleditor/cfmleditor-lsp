@@ -14,8 +14,10 @@ type Server struct {
 	logger      *zap.Logger
 	initialized bool
 
-	mu        sync.RWMutex
-	documents map[uri.URI]string
+	mu             sync.RWMutex
+	documents      map[uri.URI]string
+	workspaceRoots []string
+	index          *Index
 }
 
 func NewServer(conn jsonrpc2.Conn, logger *zap.Logger) *Server {
@@ -23,6 +25,7 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger) *Server {
 		conn:      conn,
 		logger:    logger,
 		documents: make(map[uri.URI]string),
+		index:     NewIndex(),
 	}
 }
 
@@ -32,6 +35,13 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			OpenClose: true,
 			Change:    protocol.TextDocumentSyncKindFull,
 		},
+		CompletionProvider: &protocol.CompletionOptions{
+			TriggerCharacters: []string{"<", " ", "/"},
+		},
+		DefinitionProvider:      true,
+		DocumentSymbolProvider:  true,
+		WorkspaceSymbolProvider: true,
+		HoverProvider:           true,
 	}
 }
 

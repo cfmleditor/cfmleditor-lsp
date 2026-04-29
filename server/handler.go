@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -27,14 +28,40 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleDidChange(ctx, reply, req)
 		case protocol.MethodTextDocumentDidClose:
 			return s.handleDidClose(ctx, reply, req)
+		case protocol.MethodTextDocumentCompletion:
+			return s.handleCompletion(ctx, reply, req)
+		case protocol.MethodTextDocumentDefinition:
+			return s.handleDefinition(ctx, reply, req)
+		case protocol.MethodTextDocumentDocumentSymbol:
+			return s.handleDocumentSymbol(ctx, reply, req)
+		case protocol.MethodWorkspaceSymbol:
+			return s.handleWorkspaceSymbol(ctx, reply, req)
+		case protocol.MethodTextDocumentHover:
+			return s.handleHover(ctx, reply, req)
 		default:
 			return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
 		}
 	}
 }
 
-func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, _ jsonrpc2.Request) error {
+func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.InitializeParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, err)
+	}
+
 	s.initialized = true
+
+	for _, folder := range params.WorkspaceFolders {
+		root := strings.TrimPrefix(string(folder.URI), "file://")
+		s.workspaceRoots = append(s.workspaceRoots, root)
+	}
+	if len(s.workspaceRoots) == 0 && params.RootURI != "" {
+		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://"))
+	}
+
+	go s.indexWorkspace()
+
 	s.logger.Info("CFML LSP initialized")
 
 	return reply(ctx, protocol.InitializeResult{
@@ -54,6 +81,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
+	s.reindexIfCFC(docURI, params.TextDocument.Text)
 	s.logger.Info("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -67,7 +95,9 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	docURI := uri.URI(params.TextDocument.URI)
 	if len(params.ContentChanges) > 0 {
-		s.setDocument(docURI, params.ContentChanges[len(params.ContentChanges)-1].Text)
+		newText := params.ContentChanges[len(params.ContentChanges)-1].Text
+		s.setDocument(docURI, newText)
+		s.reindexIfCFC(docURI, newText)
 	}
 
 	return reply(ctx, nil, nil)
@@ -81,7 +111,14 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.removeDocument(docURI)
+	s.index.removeFile(docURI)
 	s.logger.Info("document closed", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
+}
+
+func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
+	if strings.HasSuffix(strings.ToLower(string(docURI)), ".cfc") {
+		s.index.indexFile(docURI, content)
+	}
 }
