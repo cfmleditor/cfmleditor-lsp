@@ -33,3 +33,8 @@ go.work.sum
 
 # Build output
 target/
+
+# Downloaded Lucee docs (fetched at build time)
+docs/
+docs/data/
+docs/.etag

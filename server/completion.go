@@ -46,32 +46,30 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			})
 		}
 	case tagName != "":
-
-		attrs := cfml.TagAttributes()[tagName]
-		for _, attr := range attrs {
+		for _, p := range cfml.TagParams(tagName) {
 			items = append(items, protocol.CompletionItem{
-				Label:            attr.Name,
+				Label:            p.Name,
 				Kind:             protocol.CompletionItemKindProperty,
-				Detail:           attr.Detail,
-				InsertText:       attr.Name + `="$1"`,
+				Detail:           p.Description,
+				InsertText:       p.Name + `="$1"`,
 				InsertTextFormat: protocol.InsertTextFormatSnippet,
 			})
 		}
 	case triggeredByTag:
-		for _, tag := range cfml.Tags() {
+		for _, tag := range cfml.AllTags() {
 			items = append(items, protocol.CompletionItem{
 				Label:  tag.Name,
 				Kind:   protocol.CompletionItemKindKeyword,
-				Detail: tag.Detail,
+				Detail: tag.Description,
 			})
 		}
 	default:
-		for _, fn := range cfml.Functions() {
+		for _, fn := range cfml.AllFunctions() {
 			items = append(items, protocol.CompletionItem{
 				Label:            fn.Name,
 				Kind:             protocol.CompletionItemKindFunction,
-				Detail:           fn.Signature,
-				Documentation:    fn.Detail,
+				Detail:           fn.Syntax,
+				Documentation:    fn.Description,
 				InsertTextFormat: protocol.InsertTextFormatPlainText,
 			})
 		}

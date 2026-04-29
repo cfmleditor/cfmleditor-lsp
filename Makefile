@@ -1,9 +1,15 @@
 BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 
-.PHONY: build test install clean
+.PHONY: build test install clean docs generate
 
-build:
+docs:
+	@./scripts/fetch-docs.sh
+
+generate: docs
+	go run scripts/gen-builtin.go
+
+build: generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w" -o $(OUT) .
 

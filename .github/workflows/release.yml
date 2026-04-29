@@ -29,6 +29,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Fetch Lucee docs
+        run: ./scripts/fetch-docs.sh
+
+      - name: Generate built-in entries
+        run: go run scripts/gen-builtin.go
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}

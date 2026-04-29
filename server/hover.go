@@ -27,20 +27,20 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, nil)
 	}
 
-	if f, ok := cfml.LookupFunction(word); ok {
+	if e, ok := cfml.LookupFunction(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.Markdown,
-				Value: fmt.Sprintf("**%s**\n\n```cfml\n%s\n```\n\n%s", f.Name, f.Signature, f.Doc),
+				Value: fmt.Sprintf("**%s**\n\n```cfml\n%s\n```\n\n%s", e.Name, e.Syntax, e.Doc()),
 			},
 		}, nil)
 	}
 
-	if t, ok := cfml.LookupTag(word); ok {
+	if e, ok := cfml.LookupTag(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.Markdown,
-				Value: fmt.Sprintf("**<%s>**\n\n%s", t.Name, t.Doc),
+				Value: fmt.Sprintf("**<%s>**\n\n%s", e.Name, e.Doc()),
 			},
 		}, nil)
 	}
