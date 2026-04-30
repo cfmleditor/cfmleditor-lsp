@@ -815,17 +815,98 @@ func completionListFromResult(t *testing.T, result interface{}) *protocol.Comple
 	return &list
 }
 
-func TestExtraIndexPathsAreIndexed(t *testing.T) {
+func TestWorkspaceFoldersAreIndexed(t *testing.T) {
 	dir := t.TempDir()
-	cfcPath := filepath.Join(dir, "Shared.cfc")
-	os.WriteFile(cfcPath, []byte("function sharedHelper() {}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Shared.cfc"), []byte("function sharedHelper() {}"), 0o644)
 
 	srv := newTestServer()
-	srv.ExtraIndexPaths = []string{dir}
+	srv.WorkspaceFolders = []string{dir}
 	srv.indexWorkspace()
 
 	if defs := srv.index.Lookup("sharedHelper"); len(defs) != 1 {
-		t.Errorf("expected sharedHelper to be indexed from ExtraIndexPaths, got %d defs", len(defs))
+		t.Errorf("expected sharedHelper indexed, got %d defs", len(defs))
+	}
+}
+
+func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
+	wsDir := t.TempDir()
+	os.WriteFile(filepath.Join(wsDir, "Local.cfc"), []byte("function localFunc() {}"), 0o644)
+
+	folderDir := t.TempDir()
+	os.WriteFile(filepath.Join(folderDir, "Extra.cfc"), []byte("function extraFunc() {}"), 0o644)
+
+	srv := newTestServer()
+	srv.workspaceRoots = []string{wsDir}
+	srv.WorkspaceFolders = []string{folderDir}
+	srv.indexWorkspace()
+
+	if defs := srv.index.Lookup("localFunc"); len(defs) != 0 {
+		t.Errorf("workspace root should be skipped when WorkspaceFolders set, got %d defs", len(defs))
+	}
+	if defs := srv.index.Lookup("extraFunc"); len(defs) != 1 {
+		t.Errorf("expected extraFunc indexed, got %d defs", len(defs))
+	}
+}
+
+func TestIndexGlobsFilterFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Wanted.cfc"), []byte("function wantedFunc() {}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Unwanted.cfc"), []byte("function unwantedFunc() {}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.IndexGlobs = []string{dir + "/Wanted.cfc"}
+	srv.indexWorkspace()
+
+	if defs := srv.index.Lookup("wantedFunc"); len(defs) != 1 {
+		t.Errorf("expected wantedFunc indexed, got %d defs", len(defs))
+	}
+	if defs := srv.index.Lookup("unwantedFunc"); len(defs) != 0 {
+		t.Errorf("unwantedFunc should not be indexed, got %d defs", len(defs))
+	}
+}
+
+func TestReindexWithGlobsFilter(t *testing.T) {
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{"/project"}
+	srv.IndexGlobs = []string{"/project/**/*.cfc"}
+
+	srv.reindexIfCFC("file:///project/Service.cfc", "function allowedFunc() {}")
+	if defs := srv.index.Lookup("allowedFunc"); len(defs) != 1 {
+		t.Errorf("expected allowedFunc indexed, got %d defs", len(defs))
+	}
+
+	srv.reindexIfCFC("file:///project/sub/Deep.cfc", "function deepFunc() {}")
+	if defs := srv.index.Lookup("deepFunc"); len(defs) != 1 {
+		t.Errorf("expected deepFunc indexed, got %d defs", len(defs))
+	}
+
+	srv.reindexIfCFC("file:///other/Rogue.cfc", "function rogueFunc() {}")
+	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
+		t.Errorf("rogueFunc should not be indexed, got %d defs", len(defs))
+	}
+}
+
+func TestReindexFoldersWithoutGlobs(t *testing.T) {
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{"/project"}
+
+	srv.reindexIfCFC("file:///project/Any.cfc", "function anyFunc() {}")
+	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
+		t.Errorf("expected anyFunc indexed under workspace folder, got %d defs", len(defs))
+	}
+
+	srv.reindexIfCFC("file:///outside/Rogue.cfc", "function rogueFunc() {}")
+	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
+		t.Errorf("rogueFunc outside workspace folders should not be indexed, got %d defs", len(defs))
+	}
+}
+
+func TestReindexNoFilterWithoutFolders(t *testing.T) {
+	srv := newTestServer()
+	srv.reindexIfCFC("file:///anywhere/Thing.cfc", "function anyFunc() {}")
+	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
+		t.Errorf("expected anyFunc indexed without WorkspaceFolders, got %d defs", len(defs))
 	}
 }
 
@@ -900,9 +981,9 @@ func TestRemoveFilesUnder(t *testing.T) {
 	}
 }
 
-func TestDidChangeWorkspaceFoldersRemoveProtectsExtraPaths(t *testing.T) {
+func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	srv := newTestServer()
-	srv.ExtraIndexPaths = []string{"/shared/lib"}
+	srv.WorkspaceFolders = []string{"/shared/lib"}
 	srv.index.indexFile("file:///shared/lib/Utils.cfc", "function sharedUtil() {}")
 	srv.index.indexFile("file:///workspace/App.cfc", "function appFunc() {}")
 	srv.workspaceRoots = []string{"/shared/lib", "/workspace"}
@@ -925,7 +1006,7 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsExtraPaths(t *testing.T) {
 	}
 
 	if defs := srv.index.Lookup("sharedUtil"); len(defs) != 1 {
-		t.Error("sharedUtil should be preserved (extra index path)")
+		t.Error("sharedUtil should be preserved (workspace folder)")
 	}
 	if defs := srv.index.Lookup("appFunc"); len(defs) != 0 {
 		t.Error("appFunc should have been removed")

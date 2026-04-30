@@ -124,9 +124,13 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
-	if strings.HasSuffix(strings.ToLower(string(docURI)), ".cfc") {
-		s.index.indexFile(docURI, content)
+	if !strings.HasSuffix(strings.ToLower(string(docURI)), ".cfc") {
+		return
 	}
+	if len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
+		return
+	}
+	s.index.indexFile(docURI, content)
 }
 
 func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -137,7 +141,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 
 	for _, removed := range params.Event.Removed {
 		root := strings.TrimPrefix(removed.URI, "file://")
-		if !s.isExtraIndexPath(root) {
+		if !s.isWorkspaceFolder(root) {
 			s.index.removeFilesUnder(removed.URI)
 		}
 		s.mu.Lock()

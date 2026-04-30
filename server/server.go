@@ -1,6 +1,8 @@
 package server
 
 import (
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"go.lsp.dev/jsonrpc2"
@@ -14,11 +16,12 @@ type Server struct {
 	logger      *zap.Logger
 	initialized bool
 
-	mu              sync.RWMutex
-	documents       map[uri.URI]string
-	workspaceRoots  []string
-	ExtraIndexPaths []string
-	index           *Index
+	mu               sync.RWMutex
+	documents        map[uri.URI]string
+	workspaceRoots   []string
+	WorkspaceFolders []string // project folders from config
+	IndexGlobs       []string // optional glob filters (absolute paths)
+	index            *Index
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -77,9 +80,53 @@ func (s *Server) removeDocument(docURI uri.URI) {
 	delete(s.documents, docURI)
 }
 
-func (s *Server) isExtraIndexPath(root string) bool {
-	for _, p := range s.ExtraIndexPaths {
+func (s *Server) isWorkspaceFolder(root string) bool {
+	for _, p := range s.WorkspaceFolders {
 		if p == root {
+			return true
+		}
+	}
+	return false
+}
+
+// isIncludedPath checks whether a file URI should be indexed based on config.
+func (s *Server) isIncludedPath(rawURI string) bool {
+	filePath := strings.TrimPrefix(rawURI, "file://")
+	// If index globs are defined, match against them
+	if len(s.IndexGlobs) > 0 {
+		return matchesGlob(filePath, s.IndexGlobs)
+	}
+	// Otherwise, any .cfc under a workspace folder is included
+	for _, f := range s.WorkspaceFolders {
+		if strings.HasPrefix(filePath, f+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesGlob(filePath string, globs []string) bool {
+	for _, g := range globs {
+		if !strings.Contains(g, "**") {
+			if matched, _ := filepath.Match(g, filePath); matched {
+				return true
+			}
+			if strings.HasPrefix(filePath, g+"/") || filePath == g {
+				return true
+			}
+			continue
+		}
+		idx := strings.Index(g, "**")
+		base := filepath.Clean(g[:idx])
+		suffix := g[idx+2:]
+		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
+		if !strings.HasPrefix(filePath, base+"/") && filePath != base {
+			continue
+		}
+		if suffix == "" {
+			return true
+		}
+		if matched, _ := filepath.Match(suffix, filepath.Base(filePath)); matched {
 			return true
 		}
 	}

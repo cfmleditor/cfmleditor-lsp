@@ -32,17 +32,19 @@ func main() {
 
 		sharedIndex := server.NewIndex()
 		ct := daemon.NewConnTracker()
-		extraPaths := cfg.SharedIndexPaths()
+		folders := cfg.WorkspaceFolders()
+		globs := cfg.IndexGlobs()
 
 		// Serve the socket listener in the background
-		go daemon.Serve(ctx, sock, logger, sharedIndex, ct, extraPaths)
+		go daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs)
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
 		stream := jsonrpc2.NewStream(newStdio())
 		conn := jsonrpc2.NewConn(stream)
 		srv := server.NewServer(conn, logger, sharedIndex)
-		srv.ExtraIndexPaths = extraPaths
+		srv.WorkspaceFolders = folders
+		srv.IndexGlobs = globs
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			<-conn.Done()
