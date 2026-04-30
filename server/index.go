@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
 )
@@ -49,20 +48,7 @@ func (idx *Index) indexFile(fileURI uri.URI, content string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// Remove old entries for this file
-	for key, entries := range idx.funcs {
-		filtered := entries[:0]
-		for _, e := range entries {
-			if e.URI != fileURI {
-				filtered = append(filtered, e)
-			}
-		}
-		if len(filtered) == 0 {
-			delete(idx.funcs, key)
-		} else {
-			idx.funcs[key] = filtered
-		}
-	}
+	idx.removeFileEntries(fileURI)
 
 	for _, d := range defs {
 		key := strings.ToLower(d.Name)
@@ -73,6 +59,28 @@ func (idx *Index) indexFile(fileURI uri.URI, content string) {
 func (idx *Index) removeFile(fileURI uri.URI) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	idx.removeFileEntries(fileURI)
+}
+
+func (idx *Index) removeFilesUnder(prefix string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	for key, entries := range idx.funcs {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if !strings.HasPrefix(string(e.URI), prefix) {
+				filtered = append(filtered, e)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(idx.funcs, key)
+		} else {
+			idx.funcs[key] = filtered
+		}
+	}
+}
+
+func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	for key, entries := range idx.funcs {
 		filtered := entries[:0]
 		for _, e := range entries {
@@ -121,21 +129,26 @@ func parseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 }
 
 func (s *Server) indexWorkspace() {
-	for _, root := range s.workspaceRoots {
-		s.logger.Info("indexing workspace", zap.String("root", root))
-		filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+	roots := append(s.workspaceRoots, s.ExtraIndexPaths...)
+	for _, root := range roots {
+		s.indexRoot(root)
+	}
+}
+
+func (s *Server) indexRoot(root string) {
+	s.logger.Info("indexing workspace", zap.String("root", root))
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
+			data, err := os.ReadFile(path)
+			if err != nil {
 				return nil
 			}
-			if strings.ToLower(filepath.Ext(path)) == ".cfc" {
-				data, err := os.ReadFile(path)
-				if err != nil {
-					return nil
-				}
-				fileURI := uri.URI(protocol.DocumentURI("file://" + path))
-				s.index.indexFile(fileURI, string(data))
-			}
-			return nil
-		})
-	}
+			fileURI := uri.File(path)
+			s.index.indexFile(fileURI, string(data))
+		}
+		return nil
+	})
 }

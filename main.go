@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/garethedwards/cfmleditor-lsp/daemon"
 	"github.com/garethedwards/cfmleditor-lsp/server"
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/zap"
@@ -13,13 +14,52 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	ctx := context.Background()
+	cwd, _ := os.Getwd()
+	cfg, _ := daemon.FindConfig(cwd)
+
+	if cfg != nil {
+		sock := cfg.SocketPath()
+
+		// Try to connect to an existing daemon
+		if err := daemon.Proxy(sock); err == nil {
+			return
+		}
+
+		// No daemon running — become the daemon and serve this client over stdio
+		logger.Info("starting daemon mode", zap.String("socket", sock))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sharedIndex := server.NewIndex()
+		ct := daemon.NewConnTracker()
+		extraPaths := cfg.SharedIndexPaths()
+
+		// Serve the socket listener in the background
+		go daemon.Serve(ctx, sock, logger, sharedIndex, ct, extraPaths)
+
+		// Serve this editor session over stdio with the shared index
+		ct.Add()
+		stream := jsonrpc2.NewStream(newStdio())
+		conn := jsonrpc2.NewConn(stream)
+		srv := server.NewServer(conn, logger, sharedIndex)
+		srv.ExtraIndexPaths = extraPaths
+		conn.Go(ctx, srv.Handler())
+		go func() {
+			<-conn.Done()
+			ct.Remove()
+		}()
+
+		// Shut down when all clients have disconnected
+		<-ct.Done()
+		cancel()
+		return
+	}
+
+	// No config found — standalone mode
 	stream := jsonrpc2.NewStream(newStdio())
 	conn := jsonrpc2.NewConn(stream)
-
 	srv := server.NewServer(conn, logger)
-	conn.Go(ctx, srv.Handler())
-
+	conn.Go(context.Background(), srv.Handler())
 	<-conn.Done()
 }
 

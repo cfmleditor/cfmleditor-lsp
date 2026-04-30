@@ -38,6 +38,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleWorkspaceSymbol(ctx, reply, req)
 		case protocol.MethodTextDocumentHover:
 			return s.handleHover(ctx, reply, req)
+		case protocol.MethodWorkspaceDidChangeWorkspaceFolders:
+			return s.handleDidChangeWorkspaceFolders(ctx, reply, req)
 		default:
 			return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
 		}
@@ -52,6 +54,11 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	s.initialized = true
 
+	s.logger.Info("initialize params workspace folders", zap.Int("count", len(params.WorkspaceFolders)))
+	for i, folder := range params.WorkspaceFolders {
+		s.logger.Info("workspace folder", zap.Int("index", i), zap.String("name", folder.Name), zap.String("uri", string(folder.URI)))
+	}
+
 	for _, folder := range params.WorkspaceFolders {
 		root := strings.TrimPrefix(string(folder.URI), "file://")
 		s.workspaceRoots = append(s.workspaceRoots, root)
@@ -62,7 +69,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	go s.indexWorkspace()
 
-	s.logger.Info("CFML LSP initialized")
+	s.logger.Info("CFML LSP initialized", zap.Strings("workspaceRoots", s.workspaceRoots))
 
 	return reply(ctx, protocol.InitializeResult{
 		Capabilities: s.capabilities(),
@@ -111,7 +118,6 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.removeDocument(docURI)
-	s.index.removeFile(docURI)
 	s.logger.Info("document closed", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -121,4 +127,38 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 	if strings.HasSuffix(strings.ToLower(string(docURI)), ".cfc") {
 		s.index.indexFile(docURI, content)
 	}
+}
+
+func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidChangeWorkspaceFoldersParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, err)
+	}
+
+	for _, removed := range params.Event.Removed {
+		root := strings.TrimPrefix(removed.URI, "file://")
+		if !s.isExtraIndexPath(root) {
+			s.index.removeFilesUnder(removed.URI)
+		}
+		s.mu.Lock()
+		for i, r := range s.workspaceRoots {
+			if r == root {
+				s.workspaceRoots = append(s.workspaceRoots[:i], s.workspaceRoots[i+1:]...)
+				break
+			}
+		}
+		s.mu.Unlock()
+		s.logger.Info("workspace folder removed", zap.String("uri", removed.URI))
+	}
+
+	for _, added := range params.Event.Added {
+		root := strings.TrimPrefix(added.URI, "file://")
+		s.mu.Lock()
+		s.workspaceRoots = append(s.workspaceRoots, root)
+		s.mu.Unlock()
+		s.indexRoot(root)
+		s.logger.Info("workspace folder added", zap.String("uri", added.URI))
+	}
+
+	return reply(ctx, nil, nil)
 }

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,11 +121,13 @@ func TestHandleDidChange(t *testing.T) {
 
 func TestHandleDidClose(t *testing.T) {
 	srv := newTestServer()
-	srv.setDocument(uri.URI("file:///test.cfm"), "content")
+	cfcURI := uri.URI("file:///test.cfc")
+	srv.setDocument(cfcURI, "function hello() {}")
+	srv.index.indexFile(cfcURI, "function hello() {}")
 
 	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
 	})
 
 	if err := srv.handleDidClose(context.Background(), reply, req); err != nil {
@@ -133,8 +137,11 @@ func TestHandleDidClose(t *testing.T) {
 		t.Fatal(*replyErr)
 	}
 
-	if _, ok := srv.getDocument(uri.URI("file:///test.cfm")); ok {
-		t.Error("document should have been removed")
+	if _, ok := srv.getDocument(cfcURI); ok {
+		t.Error("document should have been removed from open docs")
+	}
+	if defs := srv.index.Lookup("hello"); len(defs) != 1 {
+		t.Error("index entry should be preserved after close")
 	}
 }
 
@@ -806,4 +813,121 @@ func completionListFromResult(t *testing.T, result interface{}) *protocol.Comple
 		t.Fatal(err)
 	}
 	return &list
+}
+
+func TestExtraIndexPathsAreIndexed(t *testing.T) {
+	dir := t.TempDir()
+	cfcPath := filepath.Join(dir, "Shared.cfc")
+	os.WriteFile(cfcPath, []byte("function sharedHelper() {}"), 0o644)
+
+	srv := newTestServer()
+	srv.ExtraIndexPaths = []string{dir}
+	srv.indexWorkspace()
+
+	if defs := srv.index.Lookup("sharedHelper"); len(defs) != 1 {
+		t.Errorf("expected sharedHelper to be indexed from ExtraIndexPaths, got %d defs", len(defs))
+	}
+}
+
+func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
+	dir := t.TempDir()
+	cfcPath := filepath.Join(dir, "Added.cfc")
+	os.WriteFile(cfcPath, []byte("function addedFunc() {}"), 0o644)
+
+	srv := newTestServer()
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Added: []protocol.WorkspaceFolder{{URI: "file://" + dir, Name: "added"}},
+		},
+	})
+
+	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	if defs := srv.index.Lookup("addedFunc"); len(defs) != 1 {
+		t.Errorf("expected addedFunc to be indexed, got %d defs", len(defs))
+	}
+}
+
+func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
+	srv := newTestServer()
+	srv.index.indexFile("file:///workspace/A/Service.cfc", "function svcFunc() {}")
+	srv.index.indexFile("file:///workspace/B/Other.cfc", "function otherFunc() {}")
+	srv.workspaceRoots = []string{"/workspace/A", "/workspace/B"}
+
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Removed: []protocol.WorkspaceFolder{{URI: "file:///workspace/A", Name: "A"}},
+		},
+	})
+
+	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	if defs := srv.index.Lookup("svcFunc"); len(defs) != 0 {
+		t.Error("svcFunc should have been removed from index")
+	}
+	if defs := srv.index.Lookup("otherFunc"); len(defs) != 1 {
+		t.Error("otherFunc should still be in index")
+	}
+	if len(srv.workspaceRoots) != 1 || srv.workspaceRoots[0] != "/workspace/B" {
+		t.Errorf("expected workspaceRoots [/workspace/B], got %v", srv.workspaceRoots)
+	}
+}
+
+func TestRemoveFilesUnder(t *testing.T) {
+	idx := NewIndex()
+	idx.indexFile("file:///project/a/One.cfc", "function oneFunc() {}")
+	idx.indexFile("file:///project/b/Two.cfc", "function twoFunc() {}")
+
+	idx.removeFilesUnder("file:///project/a")
+
+	if defs := idx.Lookup("oneFunc"); len(defs) != 0 {
+		t.Error("oneFunc should have been removed")
+	}
+	if defs := idx.Lookup("twoFunc"); len(defs) != 1 {
+		t.Error("twoFunc should still exist")
+	}
+}
+
+func TestDidChangeWorkspaceFoldersRemoveProtectsExtraPaths(t *testing.T) {
+	srv := newTestServer()
+	srv.ExtraIndexPaths = []string{"/shared/lib"}
+	srv.index.indexFile("file:///shared/lib/Utils.cfc", "function sharedUtil() {}")
+	srv.index.indexFile("file:///workspace/App.cfc", "function appFunc() {}")
+	srv.workspaceRoots = []string{"/shared/lib", "/workspace"}
+
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Removed: []protocol.WorkspaceFolder{
+				{URI: "file:///shared/lib", Name: "lib"},
+				{URI: "file:///workspace", Name: "workspace"},
+			},
+		},
+	})
+
+	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	if defs := srv.index.Lookup("sharedUtil"); len(defs) != 1 {
+		t.Error("sharedUtil should be preserved (extra index path)")
+	}
+	if defs := srv.index.Lookup("appFunc"); len(defs) != 0 {
+		t.Error("appFunc should have been removed")
+	}
 }
