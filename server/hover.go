@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/garethedwards/cfmleditor-lsp/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/cfml"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"

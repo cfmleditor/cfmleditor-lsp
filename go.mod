@@ -1,4 +1,4 @@
-module github.com/garethedwards/cfmleditor-lsp
+module github.com/cfmleditor/cfmleditor-lsp
 
 go 1.23
 

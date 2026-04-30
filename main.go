@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/garethedwards/cfmleditor-lsp/daemon"
-	"github.com/garethedwards/cfmleditor-lsp/server"
+	"github.com/cfmleditor/cfmleditor-lsp/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/server"
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/zap"
 )
