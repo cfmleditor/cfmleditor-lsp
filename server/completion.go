@@ -18,6 +18,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	items := []protocol.CompletionItem{}
+	tags := make(map[string]int)
 
 	content, hasDoc := s.getDocument(uri.URI(params.TextDocument.URI))
 
@@ -38,12 +39,16 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	switch {
 	case closing:
 		for _, tag := range findUnclosedTags(content, int(params.Position.Line), int(params.Position.Character)) {
-			items = append(items, protocol.CompletionItem{
-				Label:      tag,
-				Kind:       protocol.CompletionItemKindKeyword,
-				Detail:     "Close tag",
-				InsertText: tag + ">",
-			})
+			_, ok := tags[tag]
+			if ( !ok ) {
+				items = append(items, protocol.CompletionItem{
+					Label:      tag,
+					Kind:       protocol.CompletionItemKindKeyword,
+					Detail:     "Close tag",
+					InsertText: tag + ">",
+				})
+				tags[tag] = len(items);
+			}
 		}
 	case tagName != "":
 		for _, p := range cfml.TagParams(tagName) {
@@ -87,6 +92,29 @@ func isClosingTagContext(content string, line, char int) bool {
 	return strings.HasSuffix(textBefore, "</")
 }
 
+func isVoidTag(name string) bool {
+    switch name {
+    case "cfparam", "cfargument", "cfproperty", "cfrethrow", "cfthrow", "cfschedule", "cfhttpparam", "cfqueryparam", "cftimer", "cfflush", "cfcache", "cflogout", "cfprocessingdirective", "cfzipelement",
+    "cfbreak", "cfcontinue", "cfabort", "cfexit", "cfinclude", "cflocation", "cfheader", "cfdump",
+    "cfcontent", "cfcookie", "cflog", "cffile", "cfdirectory", "cfsetting", "cfwddx",
+    "cfhtmlhead", "cfhtmlbody", "cfauthenticate", "cfntauthenticate", "cfreportparam",
+    "cfprocparam", "cfprocresult", "cfinvokeargument", "cfspreadsheet", "cfpdfparam",
+    "cfpdfformparam", "cfpdfsubform", "cfmailparam", "cfgridrow", "cfgridupdate", "cfimage",
+    "cftreeitem", "cfmenuitem", "cfmaplocation", "cfpresenteritem", "cfimport", "cftrace", "br", "hr", "input",
+    "cfgridcolumn":
+        return true
+    }
+    return false
+}
+
+func isSpecialTag(name string) bool {
+    switch name {
+    case "cfset", "cfelse", "cfelseif":
+        return true
+    }
+    return false
+}
+
 // findUnclosedTags scans the document up to the cursor and returns tag names
 // that have been opened but not yet closed, most recent first.
 func findUnclosedTags(content string, line, char int) []string {
@@ -127,7 +155,7 @@ func findUnclosedTags(content string, line, char int) []string {
 				break
 			}
 			name := strings.ToLower(text[i : i+end])
-			if name == "" || name[0] == '!' {
+			if name == "" || name[0] == '!' || isSpecialTag(name) || isVoidTag(name) {
 				i += end
 				continue
 			}
