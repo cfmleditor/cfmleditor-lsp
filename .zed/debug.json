@@ -1,0 +1,24 @@
+[
+  {
+    "label": "Debug Go Test (current package)",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "exec",
+    "program": "${ZED_WORKTREE_ROOT}/__debug_test",
+    "args": ["-test.v", "-test.run", "${ZED_SYMBOL}"],
+    "cwd": "${ZED_DIRNAME}",
+    "build": {
+      "command": "go",
+      "args": [
+        "test",
+        "-c",
+        "-gcflags",
+        "github.com/cfmleditor/cfmleditor-lsp/...=-N -l",
+        "-o",
+        "${ZED_WORKTREE_ROOT}/__debug_test",
+        "."
+      ],
+      "cwd": "${ZED_DIRNAME}"
+    }
+  }
+]
