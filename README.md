@@ -56,3 +56,12 @@ Without a config file the server runs in standalone mode — a single session wi
 - [x] textDocument/didOpen
 - [x] textDocument/didChange (full sync)
 - [x] textDocument/didClose
+
+
+## Local Development
+
+Add cfmleditor-lsp to your path
+
+```bash
+sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /usr/local/bin/cfmleditor-lsp
+```

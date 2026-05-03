@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/cfml"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -122,8 +123,9 @@ func TestHandleDidChange(t *testing.T) {
 func TestHandleDidClose(t *testing.T) {
 	srv := newTestServer()
 	cfcURI := uri.URI("file:///test.cfc")
-	srv.setDocument(cfcURI, "function hello() {}")
-	srv.index.indexFile(cfcURI, "function hello() {}")
+	cfcContent := "component {\nfunction hello() {}\n}"
+	srv.setDocument(cfcURI, cfcContent)
+	srv.index.indexFile(cfcURI, cfcContent)
 
 	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
@@ -498,14 +500,14 @@ func TestParseFunctionDefs(t *testing.T) {
 		want    []string
 	}{
 		{"tag-based", `<cffunction name="getUser">`, []string{"getUser"}},
-		{"script public", "public function getData() {", []string{"getData"}},
-		{"script bare", "function doStuff() {", []string{"doStuff"}},
-		{"script with return type", "private struct function buildQuery() {", []string{"buildQuery"}},
-		{"multiple", "<cffunction name=\"a\">\nfunction b() {", []string{"a", "b"}},
+		{"script public", "component {\npublic function getData() {\n}\n}", []string{"getData"}},
+		{"script bare", "component {\nfunction doStuff() {\n}\n}", []string{"doStuff"}},
+		{"script with return type", "component {\nprivate struct function buildQuery() {\n}\n}", []string{"buildQuery"}},
+		{"mixed tag and script", "<cfcomponent>\n<cffunction name=\"a\">\n</cffunction>\n<cfscript>\nfunction b() {\n}\n</cfscript>\n</cfcomponent>", []string{"a", "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := parseFunctionDefs("file:///test.cfc", tt.content)
+			defs := cfml.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}
@@ -610,12 +612,12 @@ func TestIndexReindexOnChange(t *testing.T) {
 	srv := newTestServer()
 	cfcURI := uri.URI("file:///app/Service.cfc")
 
-	srv.index.indexFile(cfcURI, `function oldFunc() {}`)
+	srv.index.indexFile(cfcURI, "component {\nfunction oldFunc() {}\n}")
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 1 {
 		t.Fatal("expected oldFunc indexed")
 	}
 
-	srv.index.indexFile(cfcURI, `function newFunc() {}`)
+	srv.index.indexFile(cfcURI, "component {\nfunction newFunc() {}\n}")
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 0 {
 		t.Error("oldFunc should be removed after reindex")
 	}
@@ -629,8 +631,10 @@ func TestDocumentSymbol(t *testing.T) {
 	content := `<cfcomponent>
 <cffunction name="getUser">
 </cffunction>
+<cfscript>
 function saveUser() {
 }
+</cfscript>
 </cfcomponent>`
 	srv.setDocument(uri.URI("file:///app/User.cfc"), content)
 
@@ -663,9 +667,8 @@ function saveUser() {
 
 func TestWorkspaceSymbol(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///app/User.cfc", `function getUser() {}
-function deleteUser() {}`)
-	srv.index.indexFile("file:///app/Order.cfc", `function getOrder() {}`)
+	srv.index.indexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
+	srv.index.indexFile("file:///app/Order.cfc", "component {\nfunction getOrder() {}\n}")
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "get"})
@@ -693,8 +696,7 @@ function deleteUser() {}`)
 
 func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///app/User.cfc", `function getUser() {}
-function deleteUser() {}`)
+	srv.index.indexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: ""})
@@ -817,7 +819,7 @@ func completionListFromResult(t *testing.T, result interface{}) *protocol.Comple
 
 func TestWorkspaceFoldersAreIndexed(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Shared.cfc"), []byte("function sharedHelper() {}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Shared.cfc"), []byte("component {\nfunction sharedHelper() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
@@ -830,10 +832,10 @@ func TestWorkspaceFoldersAreIndexed(t *testing.T) {
 
 func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
 	wsDir := t.TempDir()
-	os.WriteFile(filepath.Join(wsDir, "Local.cfc"), []byte("function localFunc() {}"), 0o644)
+	os.WriteFile(filepath.Join(wsDir, "Local.cfc"), []byte("component {\nfunction localFunc() {}\n}"), 0o644)
 
 	folderDir := t.TempDir()
-	os.WriteFile(filepath.Join(folderDir, "Extra.cfc"), []byte("function extraFunc() {}"), 0o644)
+	os.WriteFile(filepath.Join(folderDir, "Extra.cfc"), []byte("component {\nfunction extraFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.workspaceRoots = []string{wsDir}
@@ -850,8 +852,8 @@ func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
 
 func TestIndexGlobsFilterFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Wanted.cfc"), []byte("function wantedFunc() {}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "Unwanted.cfc"), []byte("function unwantedFunc() {}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Wanted.cfc"), []byte("component {\nfunction wantedFunc() {}\n}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "Unwanted.cfc"), []byte("component {\nfunction unwantedFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
@@ -871,17 +873,17 @@ func TestReindexWithGlobsFilter(t *testing.T) {
 	srv.WorkspaceFolders = []string{"/project"}
 	srv.IndexGlobs = []string{"/project/**/*.cfc"}
 
-	srv.reindexIfCFC("file:///project/Service.cfc", "function allowedFunc() {}")
+	srv.reindexIfCFC("file:///project/Service.cfc", "component {\nfunction allowedFunc() {}\n}")
 	if defs := srv.index.Lookup("allowedFunc"); len(defs) != 1 {
 		t.Errorf("expected allowedFunc indexed, got %d defs", len(defs))
 	}
 
-	srv.reindexIfCFC("file:///project/sub/Deep.cfc", "function deepFunc() {}")
+	srv.reindexIfCFC("file:///project/sub/Deep.cfc", "component {\nfunction deepFunc() {}\n}")
 	if defs := srv.index.Lookup("deepFunc"); len(defs) != 1 {
 		t.Errorf("expected deepFunc indexed, got %d defs", len(defs))
 	}
 
-	srv.reindexIfCFC("file:///other/Rogue.cfc", "function rogueFunc() {}")
+	srv.reindexIfCFC("file:///other/Rogue.cfc", "component {\nfunction rogueFunc() {}\n}")
 	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
 		t.Errorf("rogueFunc should not be indexed, got %d defs", len(defs))
 	}
@@ -891,12 +893,12 @@ func TestReindexFoldersWithoutGlobs(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/project"}
 
-	srv.reindexIfCFC("file:///project/Any.cfc", "function anyFunc() {}")
+	srv.reindexIfCFC("file:///project/Any.cfc", "component {\nfunction anyFunc() {}\n}")
 	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
 		t.Errorf("expected anyFunc indexed under workspace folder, got %d defs", len(defs))
 	}
 
-	srv.reindexIfCFC("file:///outside/Rogue.cfc", "function rogueFunc() {}")
+	srv.reindexIfCFC("file:///outside/Rogue.cfc", "component {\nfunction rogueFunc() {}\n}")
 	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
 		t.Errorf("rogueFunc outside workspace folders should not be indexed, got %d defs", len(defs))
 	}
@@ -904,7 +906,7 @@ func TestReindexFoldersWithoutGlobs(t *testing.T) {
 
 func TestReindexNoFilterWithoutFolders(t *testing.T) {
 	srv := newTestServer()
-	srv.reindexIfCFC("file:///anywhere/Thing.cfc", "function anyFunc() {}")
+	srv.reindexIfCFC("file:///anywhere/Thing.cfc", "component {\nfunction anyFunc() {}\n}")
 	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
 		t.Errorf("expected anyFunc indexed without WorkspaceFolders, got %d defs", len(defs))
 	}
@@ -913,7 +915,7 @@ func TestReindexNoFilterWithoutFolders(t *testing.T) {
 func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 	dir := t.TempDir()
 	cfcPath := filepath.Join(dir, "Added.cfc")
-	os.WriteFile(cfcPath, []byte("function addedFunc() {}"), 0o644)
+	os.WriteFile(cfcPath, []byte("component {\nfunction addedFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	reply, _, replyErr := captureReply(t)
@@ -937,8 +939,8 @@ func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 
 func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///workspace/A/Service.cfc", "function svcFunc() {}")
-	srv.index.indexFile("file:///workspace/B/Other.cfc", "function otherFunc() {}")
+	srv.index.indexFile("file:///workspace/A/Service.cfc", "component {\nfunction svcFunc() {}\n}")
+	srv.index.indexFile("file:///workspace/B/Other.cfc", "component {\nfunction otherFunc() {}\n}")
 	srv.workspaceRoots = []string{"/workspace/A", "/workspace/B"}
 
 	reply, _, replyErr := captureReply(t)
@@ -968,8 +970,8 @@ func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 
 func TestRemoveFilesUnder(t *testing.T) {
 	idx := NewIndex()
-	idx.indexFile("file:///project/a/One.cfc", "function oneFunc() {}")
-	idx.indexFile("file:///project/b/Two.cfc", "function twoFunc() {}")
+	idx.indexFile("file:///project/a/One.cfc", "component {\nfunction oneFunc() {}\n}")
+	idx.indexFile("file:///project/b/Two.cfc", "component {\nfunction twoFunc() {}\n}")
 
 	idx.removeFilesUnder("file:///project/a")
 
@@ -984,8 +986,8 @@ func TestRemoveFilesUnder(t *testing.T) {
 func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/shared/lib"}
-	srv.index.indexFile("file:///shared/lib/Utils.cfc", "function sharedUtil() {}")
-	srv.index.indexFile("file:///workspace/App.cfc", "function appFunc() {}")
+	srv.index.indexFile("file:///shared/lib/Utils.cfc", "component {\nfunction sharedUtil() {}\n}")
+	srv.index.indexFile("file:///workspace/App.cfc", "component {\nfunction appFunc() {}\n}")
 	srv.workspaceRoots = []string{"/shared/lib", "/workspace"}
 
 	reply, _, replyErr := captureReply(t)

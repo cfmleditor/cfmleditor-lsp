@@ -3,39 +3,33 @@ package server
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/cfml"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
 )
 
-type FunctionDef struct {
-	Name string
-	URI  uri.URI
-	Line uint32
-}
-
 type Index struct {
 	mu    sync.RWMutex
-	funcs map[string][]FunctionDef // lowercase name -> definitions
+	funcs map[string][]cfml.FunctionDef // lowercase name -> definitions
 }
 
 func NewIndex() *Index {
-	return &Index{funcs: make(map[string][]FunctionDef)}
+	return &Index{funcs: make(map[string][]cfml.FunctionDef)}
 }
 
-func (idx *Index) Lookup(name string) []FunctionDef {
+func (idx *Index) Lookup(name string) []cfml.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.funcs[strings.ToLower(name)]
 }
 
-func (idx *Index) AllFunctions() []FunctionDef {
+func (idx *Index) AllFunctions() []cfml.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	var all []FunctionDef
+	var all []cfml.FunctionDef
 	for _, defs := range idx.funcs {
 		all = append(all, defs...)
 	}
@@ -43,7 +37,7 @@ func (idx *Index) AllFunctions() []FunctionDef {
 }
 
 func (idx *Index) indexFile(fileURI uri.URI, content string) {
-	defs := parseFunctionDefs(fileURI, content)
+	defs := cfml.ParseFunctionDefs(fileURI, content)
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -94,38 +88,6 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 			idx.funcs[key] = filtered
 		}
 	}
-}
-
-// Tag-based: <cffunction name="myFunc"
-var tagFuncRe = regexp.MustCompile(`(?i)<cffunction\s[^>]*name\s*=\s*["']([^"']+)["']`)
-
-// Script-based: access? returntype? function name(
-var scriptFuncRe = regexp.MustCompile(`(?im)(?:(?:public|private|remote|package)\s+)?(?:\w+\s+)?function\s+(\w+)\s*\(`)
-
-func parseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
-	lines := strings.Split(content, "\n")
-	var defs []FunctionDef
-	seen := make(map[string]bool)
-
-	for i, line := range lines {
-		for _, m := range tagFuncRe.FindAllStringSubmatch(line, -1) {
-			name := m[1]
-			key := strings.ToLower(name) + ":" + string(rune(i))
-			if !seen[key] {
-				seen[key] = true
-				defs = append(defs, FunctionDef{Name: name, URI: fileURI, Line: uint32(i)})
-			}
-		}
-		for _, m := range scriptFuncRe.FindAllStringSubmatch(line, -1) {
-			name := m[1]
-			key := strings.ToLower(name) + ":" + string(rune(i))
-			if !seen[key] {
-				seen[key] = true
-				defs = append(defs, FunctionDef{Name: name, URI: fileURI, Line: uint32(i)})
-			}
-		}
-	}
-	return defs
 }
 
 func (s *Server) indexWorkspace() {
