@@ -16,6 +16,9 @@ build: generate
 test:
 	go test ./...
 
+formattest:
+	go test -v -run TestFormatOutput ./internal/formatter/
+
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)
 
