@@ -418,8 +418,15 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 			kind == "cf_attribute" || kind == "cf_start_tag" {
 			continue
 		}
-		// Content children (query text, output expressions, etc.)
-		f.formatNode(c)
+		// Leaf content nodes (e.g. cf_query_content) include trailing
+		// whitespace from the source. Trim it so the formatter's own
+		// newline before the closing tag doesn't accumulate extra blanks.
+		if c.ChildCount() == 0 {
+			f.write(strings.TrimRight(f.text(c), " \t\n\r"))
+			f.write("\n")
+		} else {
+			f.formatNode(c)
+		}
 	}
 
 	if isBlock {

@@ -1,4 +1,4 @@
-package formatter_test
+package formatter
 
 import (
 	"fmt"

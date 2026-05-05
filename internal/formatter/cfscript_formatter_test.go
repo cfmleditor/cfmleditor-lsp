@@ -1,5 +1,5 @@
 
-package formatter_test
+package formatter
 
 // cfscript_formatter_test.go — tests for the recursive CFScript sub-formatter.
 //
@@ -9,8 +9,6 @@ package formatter_test
 import (
 	"strings"
 	"testing"
-
-	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 )
 
 // wrap wraps CFScript content in a <cfscript> block.
@@ -281,7 +279,7 @@ func TestScriptIdempotency(t *testing.T) {
 }`)
 	got1 := format(t, src)
 	tree2 := parse(t, got1)
-	got2, err := formatter.Format([]byte(got1), tree2, testOpts())
+	got2, err := Format([]byte(got1), tree2, testOpts())
 	if err != nil {
 		t.Fatalf("second format error: %v", err)
 	}

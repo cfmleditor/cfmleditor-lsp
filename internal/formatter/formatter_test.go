@@ -1,12 +1,11 @@
 
-package formatter_test
+package formatter
 
 import (
 	"strings"
 	"testing"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
@@ -15,8 +14,8 @@ func parse(t *testing.T, src string) *sitter.Tree {
 	return parser.Parse(parser.CFML, []byte(src), nil)
 }
 
-func testOpts() formatter.Options {
-	opts := formatter.DefaultOptions()
+func testOpts() Options {
+	opts := DefaultOptions()
 	opts.ParseScript = func(src []byte) *sitter.Tree {
 		return parser.Parse(parser.CFScript, src, nil)
 	}
@@ -26,7 +25,7 @@ func testOpts() formatter.Options {
 func format(t *testing.T, src string) string {
 	t.Helper()
 	tree := parse(t, src)
-	out, err := formatter.Format([]byte(src), tree, testOpts())
+	out, err := Format([]byte(src), tree, testOpts())
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}
@@ -140,7 +139,7 @@ func TestIdempotency(t *testing.T) {
 `
 	got1 := format(t, src)
 	tree2 := parse(t, got1)
-	got2, err := formatter.Format([]byte(got1), tree2, testOpts())
+	got2, err := Format([]byte(got1), tree2, testOpts())
 	if err != nil {
 		t.Fatalf("second format error: %v", err)
 	}
