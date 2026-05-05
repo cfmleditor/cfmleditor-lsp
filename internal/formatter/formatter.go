@@ -40,6 +40,9 @@ type Options struct {
 	// ParseScript re-parses cfscript content. If nil, script blocks are
 	// emitted verbatim.
 	ParseScript ParseFunc
+	// ParseQuery re-parses cfquery content. If nil, query blocks are
+	// emitted verbatim.
+	ParseQuery ParseFunc
 }
 
 func (o Options) indent(level int) string {
@@ -173,6 +176,28 @@ func (f *Formatter) writeIndent() {
 	}
 }
 
+// countIndentLevel counts the indentation level of a line, treating each tab
+// as one level and each indentWidth spaces as one level.
+func (f *Formatter) countIndentLevel(line string, indentWidth int) int {
+	level := 0
+	spaces := 0
+	for _, ch := range line {
+		if ch == '\t' {
+			level++
+			spaces = 0
+		} else if ch == ' ' {
+			spaces++
+			if spaces >= indentWidth {
+				level++
+				spaces = 0
+			}
+		} else {
+			break
+		}
+	}
+	return level
+}
+
 // ─── attribute formatting ────────────────────────────────────────────────────
 
 type cfAttr struct {
@@ -303,9 +328,12 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case kind == "cf_else_tag":
 		f.formatCFElse(n)
 
-	case kind == "cf_output_tag", kind == "cf_query_tag",
+	case kind == "cf_output_tag",
 		kind == "cf_xml_tag", kind == "cf_savecontent_tag":
 		f.formatCFBlockTag(n)
+
+	case kind == "cf_query_tag":
+		f.formatCFQuery(n)
 
 	case kind == "cf_script_tag":
 		f.formatCFScript(n)
@@ -326,6 +354,9 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 		// Handled by parent (formatCFSelfClosingTag / formatCFSelfCloseAttrTag).
 		// Emit verbatim if reached directly.
 		f.write(f.text(n))
+
+	case kind == "implicit_end_tag":
+		// Whitespace between tags — suppress since the formatter handles spacing.
 
 	case kind == "assignment_expression", kind == "binary_expression",
 		kind == "unary_expression", kind == "ternary_expression",
@@ -476,6 +507,32 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	f.write("\n")
 }
 
+// normalizeCond collapses internal newlines and leading whitespace in a
+// multi-line condition expression into properly indented continuation lines.
+func (f *Formatter) normalizeCond(raw string) string {
+	lines := strings.Split(raw, "\n")
+	if len(lines) <= 1 {
+		return raw
+	}
+	var parts []string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	if len(parts) <= 1 {
+		return strings.TrimSpace(raw)
+	}
+	// First line + continuation lines indented with current indent + extra padding
+	result := parts[0]
+	indent := f.indented() + strings.Repeat(" ", 4)
+	for _, p := range parts[1:] {
+		result += "\n" + indent + p
+	}
+	return result
+}
+
 // formatCFIfTag handles cf_if_tag with its condition, body, and optional cf_if_alt.
 func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	// Collect condition expression (named children before ">")
@@ -507,7 +564,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		}
 	}
 
-	cond := strings.Join(condParts, " ")
+	cond := f.normalizeCond(strings.Join(condParts, " "))
 	f.nl()
 	f.writeIndent()
 	f.write("<cfif " + cond + ">")
@@ -577,7 +634,7 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 		f.write("<cfelse>")
 		f.write("\n")
 	} else {
-		cond := strings.Join(condParts, " ")
+		cond := f.normalizeCond(strings.Join(condParts, " "))
 		f.nl()
 		f.writeIndent()
 		f.write("<cfelseif " + cond + ">")
@@ -636,9 +693,60 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 		}
 	}
 
+	body := strings.Join(exprParts, " ")
+
+	// If the body spans multiple lines, the parser has mis-parsed due to ##
+	// in strings consuming content across lines. Emit the full source span
+	// verbatim with re-indentation to avoid corrupting the content.
+	if strings.Contains(body, "\n") {
+		raw := f.text(n)
+		lines := strings.Split(raw, "\n")
+		// The first line lacks leading whitespace (node starts mid-line).
+		// Use the first non-empty line AFTER line 0 to determine base indent.
+		baseIndent := 0
+		indentWidth := f.opts.IndentWidth
+		if indentWidth == 0 {
+			indentWidth = 4
+		}
+		for _, l := range lines[1:] {
+			if strings.TrimSpace(l) == "" {
+				continue
+			}
+			baseIndent = f.countIndentLevel(l, indentWidth)
+			break
+		}
+		// Emit first line (the cfset tag itself)
+		firstTrimmed := strings.TrimSpace(lines[0])
+		if firstTrimmed != "" {
+			f.nl()
+			f.writeIndent()
+			f.write(firstTrimmed)
+			f.write("\n")
+		}
+		// Emit remaining lines with re-indentation
+		for _, l := range lines[1:] {
+			trimmed := strings.TrimSpace(l)
+			if trimmed == "" {
+				f.write("\n")
+				continue
+			}
+			level := f.countIndentLevel(l, indentWidth)
+			extraLevels := level - baseIndent
+			if extraLevels < 0 {
+				extraLevels = 0
+			}
+			f.writeIndent()
+			if extraLevels > 0 {
+				f.write(strings.Repeat("    ", extraLevels))
+			}
+			f.write(trimmed)
+			f.write("\n")
+		}
+		return
+	}
+
 	f.nl()
 	f.writeIndent()
-	body := strings.Join(exprParts, " ")
 	if body != "" {
 		f.write("<" + name + " " + body + ">")
 	} else {
@@ -707,13 +815,6 @@ func (f *Formatter) formatHashExpression(n *sitter.Node) {
 	}
 }
 
-// ─── HTML element ────────────────────────────────────────────────────────────
-
-// formatElement emits HTML elements verbatim (pass-through).
-func (f *Formatter) formatElement(n *sitter.Node) {
-	f.write(f.text(n))
-}
-
 // ─── component file ──────────────────────────────────────────────────────────
 
 // formatComponentContent formats a script-based component file by re-parsing
@@ -738,26 +839,26 @@ func (f *Formatter) formatComponentContent(n *sitter.Node) {
 
 func (f *Formatter) formatText(n *sitter.Node) {
 	raw := f.text(n)
-	// Trim leading/trailing blank lines, preserve internal whitespace.
 	lines := strings.Split(raw, "\n")
-	var out []string
-	for _, l := range lines {
-		out = append(out, l)
-	}
 	// Strip purely-blank leading / trailing lines
-	for len(out) > 0 && strings.TrimSpace(out[0]) == "" {
-		out = out[1:]
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
 	}
-	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
-		out = out[:len(out)-1]
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
 	}
-	if len(out) == 0 {
+	if len(lines) == 0 {
 		f.write("\n")
 		return
 	}
-	for _, l := range out {
+	for _, l := range lines {
+		trimmed := strings.TrimLeft(l, " \t")
+		if trimmed == "" {
+			f.write("\n")
+			continue
+		}
 		f.writeIndent()
-		f.write(strings.TrimRight(l, " \t"))
+		f.write(trimmed)
 		f.write("\n")
 	}
 }

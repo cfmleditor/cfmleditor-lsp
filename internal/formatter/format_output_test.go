@@ -28,6 +28,70 @@ return greeting;
 }
 </cfscript>`},
 		{"component with function", `<cfcomponent><cffunction name="getData" access="public" returntype="query"><cfargument name="id" type="numeric" required="true"><cfquery name="q" datasource="myds">SELECT * FROM items WHERE id = <cfqueryparam value="#arguments.id#" cfsqltype="cf_sql_integer"></cfquery><cfreturn q></cffunction></cfcomponent>`},
+		{"test", `<cfif ARGUMENTS.step GT 1>
+
+				<cfset tempPreviousRoute = URLDecode(getToken(previousRoute,ARGUMENTS.step, '|')) />
+				<cfset tempHash = URLDecode(ListRest(tempPreviousRoute,'##')) />
+
+				<cfif Len(Trim(tempPreviousRoute)) GT 0>
+
+					<cfset result = "#ListFirst(tempPreviousRoute,'##')#" />
+
+					<cfif ListLen(tempPreviousRoute,'|') GT ARGUMENTS.step>
+
+						<cfset tempNewPreviousRoute = "" />
+						<cfset tempNewPreviousCriteria = "" />
+
+						<cfloop from="#ARGUMENTS.step#" to="#ListLen(tempPreviousRoute,'|')#" index="j">
+							<cfset tempNewPreviousRoute = ListAppend(getToken(previousRoute, j, '|'),'|') />
+							<cfset tempNewPreviousCriteria = ListAppend(getToken(previousCriteria, j, '|'),'|') />
+						</cfloop>
+
+						<cfif FindNoCase(".cfm",ListFirst(tempPreviousRoute,'##')) GT 0
+						AND findNoCase("?", ListFirst(tempPreviousRoute,'##')) LTE 0>
+							<cfset result = "#result#?previousRoute=#ReplaceList(tempNewPreviousRoute,'&,##,=,?,|','%26,%23,%3D,%3F,%7C')#&previousCriteria=#ReplaceList(tempNewPreviousCriteria,'&,##,=,|','%26,%23,%3D,%7C')#" />
+						<cfelse>
+							<cfset result = "#result#&previousRoute=#ReplaceList(tempNewPreviousRoute,'&,##,=,?,|','%26,%23,%3D,%3F,%7C')#&previousCriteria=#ReplaceList(tempNewPreviousCriteria,'&,##,=,|','%26,%23,%3D,%7C')#" />
+						</cfif>
+
+					</cfif>
+
+				</cfif>
+
+<cfelseif ListLen(previousRoute,"|") GT 1>
+
+				<cfset tempPreviousRoute = URLDecode(ListFirst(previousRoute,'|')) />
+				<cfset tempHash = URLDecode(ListRest(tempPreviousRoute,'##')) />
+				<cfif FindNoCase(".cfm",ListFirst(tempPreviousRoute,'##')) GT 0
+				AND findNoCase("?", ListFirst(tempPreviousRoute,'##')) LTE 0>
+					<cfset result = "#ListFirst(tempPreviousRoute,'##')#?previousRoute=#ReplaceList(ListRest(previousRoute,'|'),'&,##,=,?,|','%26,%23,%3D,%3F,%7C')#&previousCriteria=#ReplaceList(ListRest(previousCriteria,'|'),'&,##,=,|','%26,%23,%3D,%7C')#" />
+				<cfelse>
+					<cfset result = "#ListFirst(tempPreviousRoute,'##')#&previousRoute=#ReplaceList(ListRest(previousRoute,'|'),'&,##,=,?,|','%26,%23,%3D,%3F,%7C')#&previousCriteria=#ReplaceList(ListRest(previousCriteria,'|'),'&,##,=,|','%26,%23,%3D,%7C')#" />
+				</cfif>
+
+<cfelse>
+
+				<cfset previousRoute = URLDecode(previousRoute) />
+				<cfif FindNoCase(".cfm",previousRoute) GT 0
+				AND findNoCase("?", previousRoute) LTE 0>
+					<cfset previousRoute = previousRoute & "?" />
+				</cfif>
+				<cfset result = ListFirst(previousRoute,'##') />
+				<cfset tempHash = ListRest(previousRoute,'##') />
+
+</cfif>
+
+<container:lockaction mode="set" batch_ID="#URL.batch_ID#" returnVariable="recordLocked">
+				<cfloop from="1" to="#ArrayLen(arrExisting)#" index="j">
+					<container:lockactionitem table_ID="arrExisting[j].table_id" record_ID="#arrExisting[j].record_id#">
+				</cfloop>
+</container:lockaction>
+
+<div>
+				<cfloop>
+					<span>
+				</cfloop>
+</div>`},
 	}
 
 	for _, s := range samples {

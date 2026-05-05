@@ -19,6 +19,9 @@ func testOpts() Options {
 	opts.ParseScript = func(src []byte) *sitter.Tree {
 		return parser.Parse(parser.CFScript, src, nil)
 	}
+	opts.ParseQuery = func(src []byte) *sitter.Tree {
+		return parser.Parse(parser.CFQuery, src, nil)
+	}
 	return opts
 }
 

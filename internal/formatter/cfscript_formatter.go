@@ -30,7 +30,7 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 	// ── declarations ──────────────────────────────────────────────────────
 	case "component_declaration":
 		f.scriptComponent(n)
-	case "function_definition", "method_definition":
+	case "function_definition", "function_declaration", "method_definition":
 		f.scriptFunction(n)
 	case "property_declaration":
 		f.scriptProperty(n)
@@ -412,11 +412,65 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	if params == nil {
 		return "()"
 	}
+	// Check if parameters use the flat structure (function_declaration grammar)
+	// where required/type/name are siblings separated by commas, rather than
+	// being wrapped in required_parameter/optional_parameter nodes.
+	if f.hasFlatParams(params) {
+		return "(" + f.flatParams(params) + ")"
+	}
 	var parts []string
 	for i := uint(0); i < params.NamedChildCount(); i++ {
 		parts = append(parts, f.exprParam(params.NamedChild(i)))
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// hasFlatParams returns true if formal_parameters uses the flat structure
+// (parameter_type as a direct child rather than wrapped in required_parameter).
+func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
+	for i := uint(0); i < params.ChildCount(); i++ {
+		if params.Child(i).Kind() == "parameter_type" {
+			return true
+		}
+	}
+	return false
+}
+
+// flatParams renders parameters from the flat formal_parameters structure
+// used by function_declaration: [required] [type] name [= default], ...
+func (f *Formatter) flatParams(params *sitter.Node) string {
+	var result []string
+	var current []string
+	for i := uint(0); i < params.ChildCount(); i++ {
+		c := params.Child(i)
+		switch c.Kind() {
+		case "(", ")":
+			continue
+		case ",":
+			if len(current) > 0 {
+				result = append(result, strings.Join(current, " "))
+				current = nil
+			}
+		case "required":
+			current = append(current, "required")
+		case "parameter_type":
+			current = append(current, f.text(c.Child(0)))
+		case "identifier":
+			current = append(current, f.text(c))
+		case "assignment_pattern":
+			left := c.ChildByFieldName("left")
+			right := c.ChildByFieldName("right")
+			current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
+		default:
+			if c.IsNamed() {
+				current = append(current, f.text(c))
+			}
+		}
+	}
+	if len(current) > 0 {
+		result = append(result, strings.Join(current, " "))
+	}
+	return strings.Join(result, ", ")
 }
 
 func (f *Formatter) exprParam(n *sitter.Node) string {
