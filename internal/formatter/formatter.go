@@ -276,8 +276,11 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 func (f *Formatter) formatNode(n *sitter.Node) {
 	kind := n.Kind()
 	switch {
-	case kind == "program":
+	case kind == "program", kind == "component_file":
 		f.formatChildren(n)
+
+	case kind == "cf_component_content":
+		f.formatComponentContent(n)
 
 	case kind == "cf_tag":
 		f.formatCFTag(n)
@@ -291,20 +294,52 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case kind == "cf_if_tag":
 		f.formatCFIfTag(n)
 
-	case kind == "cf_output_tag", kind == "cf_query_tag":
+	case kind == "cf_if_alt":
+		f.formatCFIfAlt(n)
+
+	case kind == "cf_elseif_tag":
+		f.formatCFElseIf(n)
+
+	case kind == "cf_else_tag":
+		f.formatCFElse(n)
+
+	case kind == "cf_output_tag", kind == "cf_query_tag",
+		kind == "cf_xml_tag", kind == "cf_savecontent_tag":
 		f.formatCFBlockTag(n)
 
 	case kind == "cf_script_tag":
 		f.formatCFScript(n)
 
-	case kind == "html_text":
+	case kind == "hash_expression":
+		f.formatHashExpression(n)
+
+	case kind == "element":
+		f.formatElement(n)
+
+	case kind == "html_text", kind == "text":
 		f.formatText(n)
 
 	case kind == "comment":
 		f.formatComment(n)
 
+	case kind == "cf_selfclose_void_tag_end":
+		// Handled by parent (formatCFSelfClosingTag / formatCFSelfCloseAttrTag).
+		// Emit verbatim if reached directly.
+		f.write(f.text(n))
+
+	case kind == "assignment_expression", kind == "binary_expression",
+		kind == "unary_expression", kind == "ternary_expression",
+		kind == "elvis_expression", kind == "update_expression",
+		kind == "call_expression", kind == "member_expression",
+		kind == "subscript_expression", kind == "new_expression",
+		kind == "sequence_expression", kind == "augmented_assignment_expression",
+		kind == "parenthesized_expression":
+		// Expression nodes may have operators/punctuation in gaps between
+		// children. Emit the full source span verbatim.
+		f.write(f.text(n))
+
 	default:
-		// HTML elements, expressions, etc. — pass through verbatim.
+		// Leaf nodes emit verbatim; non-leaf recurse into children.
 		if n.ChildCount() == 0 {
 			f.write(f.text(n))
 		} else {
@@ -418,12 +453,15 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 			kind == "cf_attribute" || kind == "cf_start_tag" {
 			continue
 		}
-		// Leaf content nodes (e.g. cf_query_content) include trailing
-		// whitespace from the source. Trim it so the formatter's own
-		// newline before the closing tag doesn't accumulate extra blanks.
+		// Leaf content nodes (e.g. cf_query_content, html_text) may
+		// include surrounding whitespace from the source. Trim it so
+		// the formatter's own newlines don't accumulate extra blanks.
 		if c.ChildCount() == 0 {
-			f.write(strings.TrimRight(f.text(c), " \t\n\r"))
-			f.write("\n")
+			trimmed := strings.TrimSpace(f.text(c))
+			if trimmed != "" {
+				f.write(trimmed)
+				f.write("\n")
+			}
 		} else {
 			f.formatNode(c)
 		}
@@ -652,6 +690,49 @@ func (f *Formatter) formatScriptChildren(n *sitter.Node) {
 		prevEndRow = int(c.EndPosition().Row)
 		f.formatScriptNode(c)
 	}
+}
+
+// ─── hash expression ─────────────────────────────────────────────────────────
+
+// formatHashExpression emits #expr# preserving the delimiters.
+// The opening # is an external token not exposed as a child node.
+func (f *Formatter) formatHashExpression(n *sitter.Node) {
+	f.write("#")
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() == "#" {
+			f.write("#")
+		} else {
+			f.write(f.text(c))
+		}
+	}
+}
+
+// ─── HTML element ────────────────────────────────────────────────────────────
+
+// formatElement emits HTML elements verbatim (pass-through).
+func (f *Formatter) formatElement(n *sitter.Node) {
+	f.write(f.text(n))
+}
+
+// ─── component file ──────────────────────────────────────────────────────────
+
+// formatComponentContent formats a script-based component file by re-parsing
+// the content with the CFScript grammar.
+func (f *Formatter) formatComponentContent(n *sitter.Node) {
+	if f.opts.ParseScript != nil {
+		scriptSrc := f.src[n.StartByte():n.EndByte()]
+		tree := f.opts.ParseScript(scriptSrc)
+		if tree != nil {
+			defer tree.Close()
+			origSrc := f.src
+			f.src = scriptSrc
+			f.formatScriptChildren(tree.RootNode())
+			f.src = origSrc
+			return
+		}
+	}
+	f.write(f.text(n))
 }
 
 // ─── text / comment pass-through ─────────────────────────────────────────────
