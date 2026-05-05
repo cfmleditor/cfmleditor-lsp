@@ -531,57 +531,63 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 }
 
 func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-		switch c.Kind() {
-		case "cf_elseif_tag":
-			f.formatCFElseIf(c)
-		case "cf_else_tag":
-			f.formatCFElse(c)
-		}
-	}
-}
-
-func (f *Formatter) formatCFElseIf(n *sitter.Node) {
+	// cf_if_alt structure:
+	//   <cf (anonymous), cf_elseif_tag (condition + ">"), body nodes..., cf_if_alt (nested)
+	//   OR: <cf (anonymous), cf_else_tag (">"), body nodes...
+	// Body nodes are siblings of cf_elseif_tag/cf_else_tag, not children.
 	var condParts []string
 	var bodyNodes []*sitter.Node
 	var altNode *sitter.Node
+	isElse := false
 	inBody := false
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		kind := c.Kind()
-		if kind == "<cf" {
+		switch {
+		case kind == "<cf":
 			continue
-		}
-		if kind == ">" {
-			inBody = true
-			continue
-		}
-		if kind == "cf_if_alt" {
-			altNode = c
-			continue
-		}
-		if !inBody {
-			if c.IsNamed() {
-				condParts = append(condParts, f.text(c))
+		case kind == "cf_elseif_tag":
+			// Extract condition from inside cf_elseif_tag
+			for j := uint(0); j < c.ChildCount(); j++ {
+				gc := c.Child(j)
+				if gc.Kind() == ">" {
+					break
+				}
+				if gc.IsNamed() {
+					condParts = append(condParts, f.text(gc))
+				}
 			}
-		} else {
-			bodyNodes = append(bodyNodes, c)
+			inBody = true
+		case kind == "cf_else_tag":
+			isElse = true
+			inBody = true
+		case kind == "cf_if_alt":
+			altNode = c
+		default:
+			if inBody {
+				bodyNodes = append(bodyNodes, c)
+			}
 		}
 	}
 
-	cond := strings.Join(condParts, " ")
-	f.nl()
-	f.writeIndent()
-	f.write("<cfelseif " + cond + ">")
-	f.write("\n")
-	f.level++
+	if isElse {
+		f.nl()
+		f.writeIndent()
+		f.write("<cfelse>")
+		f.write("\n")
+	} else {
+		cond := strings.Join(condParts, " ")
+		f.nl()
+		f.writeIndent()
+		f.write("<cfelseif " + cond + ">")
+		f.write("\n")
+	}
 
+	f.level++
 	for _, c := range bodyNodes {
 		f.formatNode(c)
 	}
-
 	f.level--
 
 	if altNode != nil {
@@ -589,23 +595,16 @@ func (f *Formatter) formatCFElseIf(n *sitter.Node) {
 	}
 }
 
+func (f *Formatter) formatCFElseIf(n *sitter.Node) {
+	// Called when cf_elseif_tag is visited directly (not via formatCFIfAlt).
+	// In practice, formatCFIfAlt handles this inline, but keep for safety.
+	f.write(f.text(n))
+}
+
 func (f *Formatter) formatCFElse(n *sitter.Node) {
-	f.nl()
-	f.writeIndent()
-	f.write("<cfelse>")
-	f.write("\n")
-	f.level++
-
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-		kind := c.Kind()
-		if kind == "<cf" || kind == ">" {
-			continue
-		}
-		f.formatNode(c)
-	}
-
-	f.level--
+	// Called when cf_else_tag is visited directly (not via formatCFIfAlt).
+	// In practice, formatCFIfAlt handles this inline, but keep for safety.
+	f.write(f.text(n))
 }
 
 // formatCFSelfCloseAttrTag handles cf_selfclose_tag (cfparam, cfargument, etc.)

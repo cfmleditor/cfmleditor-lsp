@@ -16,7 +16,7 @@ build: generate
 test:
 	go test ./...
 
-formattest:
+visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
 
 install: build
