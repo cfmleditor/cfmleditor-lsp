@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parse"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -508,7 +508,7 @@ func TestParseFunctionDefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := cfml.ParseFunctionDefs("file:///test.cfc", tt.content)
+			defs := parse.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}

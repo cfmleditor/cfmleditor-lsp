@@ -1,4 +1,4 @@
-package cfml
+package parse
 
 import (
 	"regexp"

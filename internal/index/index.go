@@ -4,29 +4,29 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parse"
 	"go.lsp.dev/uri"
 )
 
 type Index struct {
 	mu    sync.RWMutex
-	funcs map[string][]cfml.FunctionDef // lowercase name -> definitions
+	funcs map[string][]parse.FunctionDef // lowercase name -> definitions
 }
 
 func New() *Index {
-	return &Index{funcs: make(map[string][]cfml.FunctionDef)}
+	return &Index{funcs: make(map[string][]parse.FunctionDef)}
 }
 
-func (idx *Index) Lookup(name string) []cfml.FunctionDef {
+func (idx *Index) Lookup(name string) []parse.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.funcs[strings.ToLower(name)]
 }
 
-func (idx *Index) AllFunctions() []cfml.FunctionDef {
+func (idx *Index) AllFunctions() []parse.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	var all []cfml.FunctionDef
+	var all []parse.FunctionDef
 	for _, defs := range idx.funcs {
 		all = append(all, defs...)
 	}
@@ -34,7 +34,7 @@ func (idx *Index) AllFunctions() []cfml.FunctionDef {
 }
 
 func (idx *Index) IndexFile(fileURI uri.URI, content string) {
-	defs := cfml.ParseFunctionDefs(fileURI, content)
+	defs := parse.ParseFunctionDefs(fileURI, content)
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

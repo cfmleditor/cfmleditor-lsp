@@ -2,6 +2,7 @@ package server
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -83,12 +84,7 @@ func (s *Server) removeDocument(docURI uri.URI) {
 }
 
 func (s *Server) isWorkspaceFolder(root string) bool {
-	for _, p := range s.WorkspaceFolders {
-		if p == root {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.WorkspaceFolders, root)
 }
 
 // isIncludedPath checks whether a file URI should be indexed based on config.
