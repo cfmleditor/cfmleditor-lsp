@@ -3,7 +3,7 @@ module github.com/cfmleditor/cfmleditor-lsp
 go 1.23
 
 require (
-	github.com/cfmleditor/tree-sitter-cfml v0.26.9
+	github.com/cfmleditor/tree-sitter-cfml v0.26.10
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/protocol v0.12.0

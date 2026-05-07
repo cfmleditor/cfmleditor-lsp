@@ -2,9 +2,11 @@ package server
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -21,13 +23,13 @@ type Server struct {
 	workspaceRoots   []string
 	WorkspaceFolders []string // project folders from config
 	IndexGlobs       []string // optional glob filters (absolute paths)
-	index            *Index
+	index            *index.Index
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
 // instead of creating a private index, allowing multiple sessions to share one.
-func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*Index) *Server {
-	idx := NewIndex()
+func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Index) *Server {
+	idx := index.New()
 	if len(sharedIndex) > 0 && sharedIndex[0] != nil {
 		idx = sharedIndex[0]
 	}
@@ -46,9 +48,10 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			Change:    protocol.TextDocumentSyncKindFull,
 		},
 		CompletionProvider: &protocol.CompletionOptions{
-			TriggerCharacters: []string{"<", " ", "/"},
+			TriggerCharacters: []string{"<", " ", "/", "."},
 		},
-		DefinitionProvider:      true,
+		DocumentFormattingProvider: true,
+		DefinitionProvider:         true,
 		DocumentSymbolProvider:  true,
 		WorkspaceSymbolProvider: true,
 		HoverProvider:           true,
@@ -81,12 +84,7 @@ func (s *Server) removeDocument(docURI uri.URI) {
 }
 
 func (s *Server) isWorkspaceFolder(root string) bool {
-	for _, p := range s.WorkspaceFolders {
-		if p == root {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.WorkspaceFolders, root)
 }
 
 // isIncludedPath checks whether a file URI should be indexed based on config.

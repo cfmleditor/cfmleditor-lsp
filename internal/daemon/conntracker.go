@@ -25,7 +25,11 @@ func (ct *ConnTracker) Remove() {
 	ct.mu.Lock()
 	ct.count--
 	if ct.count == 0 {
-		close(ct.done)
+		select {
+		case <-ct.done:
+		default:
+			close(ct.done)
+		}
 	}
 	ct.mu.Unlock()
 }

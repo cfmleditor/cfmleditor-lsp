@@ -38,8 +38,9 @@ func NewParser(g Grammar) *sitter.Parser {
 
 // Parse parses source code using the given grammar and returns the tree.
 // The caller must call Close() on the returned tree when done.
-func Parse(g Grammar, src []byte) *sitter.Tree {
+func Parse(g Grammar, src []byte, oldTree *sitter.Tree) *sitter.Tree {
 	p := NewParser(g)
 	defer p.Close()
-	return p.Parse(src, nil)
+	return p.Parse(src, oldTree)
 }
+

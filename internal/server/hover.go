@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/cfmleditor/cfmleditor-lsp/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -27,7 +27,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, nil)
 	}
 
-	if e, ok := cfml.LookupFunction(word); ok {
+	if e, ok := docs.LookupFunction(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.Markdown,
@@ -36,7 +36,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}, nil)
 	}
 
-	if e, ok := cfml.LookupTag(word); ok {
+	if e, ok := docs.LookupTag(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.Markdown,

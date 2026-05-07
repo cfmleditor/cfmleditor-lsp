@@ -4,8 +4,9 @@ import (
 	"context"
 	"os"
 
-	"github.com/cfmleditor/cfmleditor-lsp/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/server"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/zap"
 )
@@ -30,7 +31,7 @@ func main() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		sharedIndex := server.NewIndex()
+		sharedIndex := index.New()
 		ct := daemon.NewConnTracker()
 		folders := cfg.WorkspaceFolders()
 		globs := cfg.IndexGlobs()

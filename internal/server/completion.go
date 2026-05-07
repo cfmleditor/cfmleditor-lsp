@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -51,7 +51,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	case tagName != "":
-		for _, p := range cfml.TagParams(tagName) {
+		for _, p := range docs.TagParams(tagName) {
 			items = append(items, protocol.CompletionItem{
 				Label:            p.Name,
 				Kind:             protocol.CompletionItemKindProperty,
@@ -61,7 +61,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			})
 		}
 	case triggeredByTag:
-		for _, tag := range cfml.AllTags() {
+		for _, tag := range docs.AllTags() {
 			items = append(items, protocol.CompletionItem{
 				Label:  tag.Name,
 				Kind:   protocol.CompletionItemKindKeyword,
@@ -69,7 +69,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			})
 		}
 	default:
-		for _, fn := range cfml.AllFunctions() {
+		for _, fn := range docs.AllFunctions() {
 			items = append(items, protocol.CompletionItem{
 				Label:            fn.Name,
 				Kind:             protocol.CompletionItemKindFunction,

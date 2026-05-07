@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/cfml"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/funcdef"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -125,7 +126,7 @@ func TestHandleDidClose(t *testing.T) {
 	cfcURI := uri.URI("file:///test.cfc")
 	cfcContent := "component {\nfunction hello() {}\n}"
 	srv.setDocument(cfcURI, cfcContent)
-	srv.index.indexFile(cfcURI, cfcContent)
+	srv.index.IndexFile(cfcURI, cfcContent)
 
 	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
@@ -507,7 +508,7 @@ func TestParseFunctionDefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := cfml.ParseFunctionDefs("file:///test.cfc", tt.content)
+			defs := funcdef.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}
@@ -529,7 +530,7 @@ func TestDefinitionLookup(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 	cfcURI := uri.URI("file:///app/User.cfc")
-	srv.index.indexFile(cfcURI, cfcContent)
+	srv.index.IndexFile(cfcURI, cfcContent)
 
 	callerContent := `<cfset result = getUser()>`
 	callerURI := uri.URI("file:///app/index.cfm")
@@ -612,12 +613,12 @@ func TestIndexReindexOnChange(t *testing.T) {
 	srv := newTestServer()
 	cfcURI := uri.URI("file:///app/Service.cfc")
 
-	srv.index.indexFile(cfcURI, "component {\nfunction oldFunc() {}\n}")
+	srv.index.IndexFile(cfcURI, "component {\nfunction oldFunc() {}\n}")
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 1 {
 		t.Fatal("expected oldFunc indexed")
 	}
 
-	srv.index.indexFile(cfcURI, "component {\nfunction newFunc() {}\n}")
+	srv.index.IndexFile(cfcURI, "component {\nfunction newFunc() {}\n}")
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 0 {
 		t.Error("oldFunc should be removed after reindex")
 	}
@@ -667,8 +668,8 @@ function saveUser() {
 
 func TestWorkspaceSymbol(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
-	srv.index.indexFile("file:///app/Order.cfc", "component {\nfunction getOrder() {}\n}")
+	srv.index.IndexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
+	srv.index.IndexFile("file:///app/Order.cfc", "component {\nfunction getOrder() {}\n}")
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "get"})
@@ -696,7 +697,7 @@ func TestWorkspaceSymbol(t *testing.T) {
 
 func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
+	srv.index.IndexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: ""})
@@ -939,8 +940,8 @@ func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 
 func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 	srv := newTestServer()
-	srv.index.indexFile("file:///workspace/A/Service.cfc", "component {\nfunction svcFunc() {}\n}")
-	srv.index.indexFile("file:///workspace/B/Other.cfc", "component {\nfunction otherFunc() {}\n}")
+	srv.index.IndexFile("file:///workspace/A/Service.cfc", "component {\nfunction svcFunc() {}\n}")
+	srv.index.IndexFile("file:///workspace/B/Other.cfc", "component {\nfunction otherFunc() {}\n}")
 	srv.workspaceRoots = []string{"/workspace/A", "/workspace/B"}
 
 	reply, _, replyErr := captureReply(t)
@@ -969,11 +970,11 @@ func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 }
 
 func TestRemoveFilesUnder(t *testing.T) {
-	idx := NewIndex()
-	idx.indexFile("file:///project/a/One.cfc", "component {\nfunction oneFunc() {}\n}")
-	idx.indexFile("file:///project/b/Two.cfc", "component {\nfunction twoFunc() {}\n}")
+	idx := index.New()
+	idx.IndexFile("file:///project/a/One.cfc", "component {\nfunction oneFunc() {}\n}")
+	idx.IndexFile("file:///project/b/Two.cfc", "component {\nfunction twoFunc() {}\n}")
 
-	idx.removeFilesUnder("file:///project/a")
+	idx.RemoveFilesUnder("file:///project/a")
 
 	if defs := idx.Lookup("oneFunc"); len(defs) != 0 {
 		t.Error("oneFunc should have been removed")
@@ -986,8 +987,8 @@ func TestRemoveFilesUnder(t *testing.T) {
 func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/shared/lib"}
-	srv.index.indexFile("file:///shared/lib/Utils.cfc", "component {\nfunction sharedUtil() {}\n}")
-	srv.index.indexFile("file:///workspace/App.cfc", "component {\nfunction appFunc() {}\n}")
+	srv.index.IndexFile("file:///shared/lib/Utils.cfc", "component {\nfunction sharedUtil() {}\n}")
+	srv.index.IndexFile("file:///workspace/App.cfc", "component {\nfunction appFunc() {}\n}")
 	srv.workspaceRoots = []string{"/shared/lib", "/workspace"}
 
 	reply, _, replyErr := captureReply(t)

@@ -32,6 +32,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleCompletion(ctx, reply, req)
 		case protocol.MethodTextDocumentDefinition:
 			return s.handleDefinition(ctx, reply, req)
+		case protocol.MethodTextDocumentFormatting:
+			return s.handleFormatting(ctx, reply, req)
 		case protocol.MethodTextDocumentDocumentSymbol:
 			return s.handleDocumentSymbol(ctx, reply, req)
 		case protocol.MethodWorkspaceSymbol:
@@ -130,7 +132,7 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 	if len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
 		return
 	}
-	s.index.indexFile(docURI, content)
+	s.index.IndexFile(docURI, content)
 }
 
 func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -142,7 +144,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 	for _, removed := range params.Event.Removed {
 		root := strings.TrimPrefix(removed.URI, "file://")
 		if !s.isWorkspaceFolder(root) {
-			s.index.removeFilesUnder(removed.URI)
+			s.index.RemoveFilesUnder(removed.URI)
 		}
 		s.mu.Lock()
 		for i, r := range s.workspaceRoots {

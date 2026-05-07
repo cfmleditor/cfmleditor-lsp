@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/server"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/zap"
 )
@@ -15,7 +16,7 @@ import (
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *server.Index, ct *ConnTracker, folders []string, globs []string) error {
+func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}

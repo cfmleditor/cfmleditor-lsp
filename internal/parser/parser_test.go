@@ -1,21 +1,19 @@
-package parser_test
+package parser
 
 import (
 	"testing"
-
-	"github.com/cfmleditor/cfmleditor-lsp/parser"
 )
 
 func TestLanguageLoads(t *testing.T) {
 	for _, g := range []struct {
 		name    string
-		grammar parser.Grammar
+		grammar Grammar
 	}{
-		{"CFML", parser.CFML},
-		{"CFScript", parser.CFScript},
-		{"CFQuery", parser.CFQuery},
+		{"CFML", CFML},
+		{"CFScript", CFScript},
+		{"CFQuery", CFQuery},
 	} {
-		if parser.Language(g.grammar) == nil {
+		if Language(g.grammar) == nil {
 			t.Errorf("%s language failed to load", g.name)
 		}
 	}
@@ -23,7 +21,7 @@ func TestLanguageLoads(t *testing.T) {
 
 func TestParseCFML(t *testing.T) {
 	src := []byte(`component { public void function hello() { return; } }`)
-	tree := parser.Parse(parser.CFML, src)
+	tree := Parse(CFML, src, nil)
 	defer tree.Close()
 	root := tree.RootNode()
 	if root.ChildCount() == 0 {
@@ -33,7 +31,7 @@ func TestParseCFML(t *testing.T) {
 
 func TestParseCFScript(t *testing.T) {
 	src := []byte(`function greet(name) { return "Hello " & name; }`)
-	tree := parser.Parse(parser.CFScript, src)
+	tree := Parse(CFScript, src, nil)
 	defer tree.Close()
 	root := tree.RootNode()
 	if root.ChildCount() == 0 {
@@ -43,7 +41,7 @@ func TestParseCFScript(t *testing.T) {
 
 func TestParseCFQuery(t *testing.T) {
 	src := []byte(`SELECT id, name FROM users WHERE active = 1`)
-	tree := parser.Parse(parser.CFQuery, src)
+	tree := Parse(CFQuery, src, nil)
 	defer tree.Close()
 	root := tree.RootNode()
 	if root.ChildCount() == 0 {

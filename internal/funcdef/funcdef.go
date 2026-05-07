@@ -1,4 +1,4 @@
-package cfml
+package funcdef
 
 import (
 	"regexp"

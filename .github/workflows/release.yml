@@ -33,7 +33,7 @@ jobs:
         run: ./scripts/fetch-docs.sh
 
       - name: Generate built-in entries
-        run: go run scripts/gen-builtin.go
+        run: go run scripts/generate_docs.go
 
       - name: Build
         env:
