@@ -57,17 +57,21 @@ func TestServeMultipleClients(t *testing.T) {
 	go Serve(ctx, sock, logger, idx, ct, nil, nil)
 	waitForSocket(t, sock)
 
-	// Two socket clients connect (like additional editor windows)
-	c1, rpc1 := dialRPC(t, ctx, sock)
-	defer c1.Close()
-	c2, rpc2 := dialRPC(t, ctx, sock)
-	defer c2.Close()
-
+	// Connect 6 socket clients
+	const total = 6
+	conns := make([]net.Conn, total)
+	rpcs := make([]jsonrpc2.Conn, total)
+	for i := range total {
+		conns[i], rpcs[i] = dialRPC(t, ctx, sock)
+		defer conns[i].Close()
+	}
 	time.Sleep(50 * time.Millisecond)
 
-	// Disconnect first socket client — daemon should stay alive
-	rpc1.Close()
-	c1.Close()
+	// Disconnect half — daemon must stay alive
+	for i := range total / 2 {
+		rpcs[i].Close()
+		conns[i].Close()
+	}
 	time.Sleep(100 * time.Millisecond)
 	select {
 	case <-ct.Done():
@@ -75,9 +79,11 @@ func TestServeMultipleClients(t *testing.T) {
 	default:
 	}
 
-	// Disconnect second socket client — stdio client still holds it open
-	rpc2.Close()
-	c2.Close()
+	// Disconnect the rest
+	for i := total / 2; i < total; i++ {
+		rpcs[i].Close()
+		conns[i].Close()
+	}
 	time.Sleep(100 * time.Millisecond)
 	select {
 	case <-ct.Done():
@@ -128,6 +134,47 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	}
 }
 
+func TestMultipleConnectionsShareIndex(t *testing.T) {
+	sock := shortSock(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	idx := index.New()
+	ct := NewConnTracker()
+	ct.Add() // stdio slot
+
+	go Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil)
+	waitForSocket(t, sock)
+
+	// Client 1 opens a CFC file — this indexes it into the shared index
+	_, rpc1 := dialRPC(t, ctx, sock)
+	callRPC(t, ctx, rpc1, "initialize", `{"capabilities":{}}`)
+	callRPC(t, ctx, rpc1, "textDocument/didOpen", `{
+		"textDocument":{
+			"uri":"file:///project/User.cfc",
+			"languageId":"cfml",
+			"version":1,
+			"text":"component {\n  public void function getUser() {}\n}"
+		}
+	}`)
+
+	// Give indexing a moment
+	time.Sleep(50 * time.Millisecond)
+
+	// Client 2 connects and queries workspace symbols — should see getUser
+	_, rpc2 := dialRPC(t, ctx, sock)
+	callRPC(t, ctx, rpc2, "initialize", `{"capabilities":{}}`)
+
+	var symbols []json.RawMessage
+	raw := callRPC(t, ctx, rpc2, "workspace/symbol", `{"query":"getUser"}`)
+	if err := json.Unmarshal(raw, &symbols); err != nil {
+		t.Fatalf("unmarshal symbols: %v", err)
+	}
+	if len(symbols) == 0 {
+		t.Fatal("client 2 could not find symbol indexed by client 1")
+	}
+}
+
 // helpers
 
 func shortSock(t *testing.T) string {
@@ -165,4 +212,14 @@ func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2
 		return reply(ctx, nil, nil)
 	})
 	return c, rpc
+}
+
+func callRPC(t *testing.T, ctx context.Context, rpc jsonrpc2.Conn, method, params string) json.RawMessage {
+	t.Helper()
+	var result json.RawMessage
+	_, err := rpc.Call(ctx, method, json.RawMessage(params), &result)
+	if err != nil {
+		t.Fatalf("%s failed: %v", method, err)
+	}
+	return result
 }
