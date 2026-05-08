@@ -298,7 +298,7 @@ func isTypingTagName(content string, line, char int) bool {
 	if len(rest) == 0 || rest[0] == '/' || rest[0] == '!' {
 		return false
 	}
-	if strings.IndexAny(rest, " \t\r\n/>") != -1 {
+	if strings.ContainsAny(rest, " \t\r\n/>") {
 		return false
 	}
 	return true
