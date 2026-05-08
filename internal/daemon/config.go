@@ -1,9 +1,11 @@
+// Package daemon manages multi-session daemon mode and configuration.
 package daemon
 
 import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -128,8 +130,11 @@ func expandGlob(pattern string) []string {
 	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
 
 	var out []string
-	filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if suffix == "" {
@@ -141,6 +146,11 @@ func expandGlob(pattern string) []string {
 		}
 		return nil
 	})
+
+	if err != nil {
+	    // Handle error (e.g., log it or return it)
+	    log.Fatalf("failed to write file: %s", err)
+	}
 	return out
 }
 

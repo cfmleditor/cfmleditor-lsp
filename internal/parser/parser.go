@@ -1,6 +1,9 @@
+// Package parser provides tree-sitter parsing for CFML grammars.
 package parser
 
 import (
+	"log"
+
 	tree_sitter_cfml "github.com/cfmleditor/tree-sitter-cfml/bindings/go"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -8,13 +11,14 @@ import (
 // Grammar identifies which tree-sitter grammar to use.
 type Grammar int
 
+// Supported grammars.
 const (
 	CFML Grammar = iota
 	CFScript
 	CFQuery
 )
 
-// Languages returns the tree-sitter Language for the given grammar.
+// Language returns the tree-sitter Language for the given grammar.
 func Language(g Grammar) *sitter.Language {
 	switch g {
 	case CFML:
@@ -32,7 +36,10 @@ func Language(g Grammar) *sitter.Language {
 // The caller must call Close() on the returned parser when done.
 func NewParser(g Grammar) *sitter.Parser {
 	p := sitter.NewParser()
-	p.SetLanguage(Language(g))
+	err := p.SetLanguage(Language(g))
+	if ( err != nil ) {
+		log.Fatalf("Couldnt set parser language: %s", err)
+	}
 	return p
 }
 

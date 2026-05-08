@@ -33,7 +33,7 @@ func TestFindConfigInDir(t *testing.T) {
 func TestFindConfigInParent(t *testing.T) {
 	parent := t.TempDir()
 	child := filepath.Join(parent, "sub")
-	os.MkdirAll(child, 0o755)
+	_ = os.MkdirAll(child, 0o755)
 	writeConfig(t, parent, `{"workspaceName":"parentproj"}`)
 
 	cfg, err := FindConfig(child)
@@ -76,7 +76,7 @@ func TestSocketPathDerivedFromName(t *testing.T) {
 func TestWorkspaceFolders(t *testing.T) {
 	root := t.TempDir()
 	tassweb := filepath.Join(root, "tassweb")
-	os.MkdirAll(tassweb, 0o755)
+	_ = os.MkdirAll(tassweb, 0o755)
 
 	dir := filepath.Join(root, "project")
 	writeConfig(t, dir, `{"workspaceName":"proj","workspacePaths":["../tassweb","."]}`)
@@ -97,7 +97,7 @@ func TestWorkspaceFolders(t *testing.T) {
 func TestIndexGlobsResolvesBaseName(t *testing.T) {
 	root := t.TempDir()
 	tassweb := filepath.Join(root, "tassweb")
-	os.MkdirAll(tassweb, 0o755)
+	_ = os.MkdirAll(tassweb, 0o755)
 
 	dir := filepath.Join(root, "project")
 	writeConfig(t, dir, `{
@@ -130,10 +130,10 @@ func TestIndexGlobsNilWhenNotDefined(t *testing.T) {
 func TestExpandGlobDoubleStar(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "models")
-	os.MkdirAll(sub, 0o755)
-	os.WriteFile(filepath.Join(root, "Top.cfc"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(sub, "Deep.cfc"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(sub, "skip.txt"), []byte(""), 0o644)
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "Top.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "Deep.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "skip.txt"), []byte(""), 0o644)
 
 	matches := expandGlob(root + "/**/*.cfc")
 	sort.Strings(matches)
@@ -146,9 +146,9 @@ func TestExpandGlobDoubleStar(t *testing.T) {
 func TestExpandGlobParentRefDoubleStar(t *testing.T) {
 	root := t.TempDir()
 	tassweb := filepath.Join(root, "tassweb", "sub")
-	os.MkdirAll(tassweb, 0o755)
-	os.WriteFile(filepath.Join(root, "tassweb", "Root.cfc"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(tassweb, "Nested.cfc"), []byte(""), 0o644)
+	_ = os.MkdirAll(tassweb, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "tassweb", "Root.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(tassweb, "Nested.cfc"), []byte(""), 0o644)
 
 	pattern := filepath.Join(root, "tassweb") + "/**/*.cfc"
 	matches := expandGlob(pattern)

@@ -1,7 +1,6 @@
 package funcdef
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -375,8 +374,4 @@ func assertDefs(t *testing.T, defs []FunctionDef, want []string) {
 			t.Errorf("def[%d].Name = %q, want %q", i, d.Name, want[i])
 		}
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(sub) > 0 && strings.Contains(s, sub)
 }

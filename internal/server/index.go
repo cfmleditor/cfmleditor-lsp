@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,8 +48,11 @@ func expandGlob(pattern string) []string {
 	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
 
 	var out []string
-	filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if suffix == "" {
@@ -60,22 +64,32 @@ func expandGlob(pattern string) []string {
 		}
 		return nil
 	})
+
+	if ( err != nil ) {
+		 log.Fatalf("failed to write file: %s", err)
+	}
 	return out
 }
 
 func (s *Server) indexRoot(root string) {
 	s.logger.Info("indexing workspace", zap.String("root", root))
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+	        return err // WRONG: returns a non-nil interface containing a nil pointer
+	    }
+		if info.IsDir() {
 			return nil
 		}
 		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return nil
+				return err
 			}
 			s.index.IndexFile(uri.File(path), string(data))
 		}
 		return nil
 	})
+	if ( err != nil ) {
+		 log.Fatalf("failed to write file: %s", err)
+	}
 }

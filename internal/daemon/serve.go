@@ -20,15 +20,15 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
-	os.Remove(sockPath)
+	_ = os.Remove(sockPath)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		ln.Close()
-		os.Remove(sockPath)
+		_ = ln.Close()
+		_ = os.Remove(sockPath)
 	}()
 
 	logger.Info("daemon listening", zap.String("socket", sockPath))
@@ -36,7 +36,7 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 	var wg sync.WaitGroup
 	go func() {
 		<-ctx.Done()
-		ln.Close()
+		_ = ln.Close()
 	}()
 
 	for {
@@ -53,7 +53,7 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer c.Close()
+			defer func() { _ = c.Close() }()
 			if ct != nil {
 				ct.Add()
 				defer ct.Remove()

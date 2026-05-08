@@ -14,7 +14,8 @@ func Proxy(sockPath string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+
+	defer func() { _ = conn.Close() }()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -22,17 +23,17 @@ func Proxy(sockPath string) error {
 	// stdin → socket
 	go func() {
 		defer wg.Done()
-		io.Copy(conn, os.Stdin)
+		_, _ = io.Copy(conn, os.Stdin)
 		// Editor closed stdin; signal the socket we're done writing
 		if uc, ok := conn.(*net.UnixConn); ok {
-			uc.CloseWrite()
+			_ = uc.CloseWrite()
 		}
 	}()
 
 	// socket → stdout
 	go func() {
 		defer wg.Done()
-		io.Copy(os.Stdout, conn)
+		_, _ = io.Copy(os.Stdout, conn)
 	}()
 
 	wg.Wait()

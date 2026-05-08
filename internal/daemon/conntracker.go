@@ -9,6 +9,7 @@ type ConnTracker struct {
 	done  chan struct{}
 }
 
+// NewConnTracker creates a ConnTracker ready to track connections.
 func NewConnTracker() *ConnTracker {
 	return &ConnTracker{done: make(chan struct{})}
 }

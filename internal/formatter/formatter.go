@@ -56,6 +56,7 @@ func (o Options) indent(level int) string {
 	return strings.Repeat(" ", w*level)
 }
 
+// DefaultOptions returns Options with sensible defaults (4-space indent, 120 col width).
 func DefaultOptions() Options {
 	return Options{
 		IndentWidth:        4,
@@ -80,15 +81,15 @@ var blockTags = map[string]bool{
 }
 
 // selfClosingTags never have a separate closing tag.
-var selfClosingTags = map[string]bool{
-	"cfset": true, "cfparam": true, "cfreturn": true,
-	"cfthrow": true, "cfabort": true, "cfbreak": true,
-	"cfcontinue": true, "cfinvoke": true, "cfargument": true,
-	"cfinclude": true, "cflocation": true, "cfcookie": true,
-	"cfheader": true, "cfcontent": true, "cfflush": true,
-	"cflog": true, "cfsetting": true, "cfprocessingdirective": true,
-	"cfdump": true, "cfimage": true, "cfpdf": true,
-}
+// var selfClosingTags = map[string]bool{
+// 	"cfset": true, "cfparam": true, "cfreturn": true,
+// 	"cfthrow": true, "cfabort": true, "cfbreak": true,
+// 	"cfcontinue": true, "cfinvoke": true, "cfargument": true,
+// 	"cfinclude": true, "cflocation": true, "cfcookie": true,
+// 	"cfheader": true, "cfcontent": true, "cfflush": true,
+// 	"cflog": true, "cfsetting": true, "cfprocessingdirective": true,
+// 	"cfdump": true, "cfimage": true, "cfpdf": true,
+// }
 
 // Formatter holds state during a single formatting pass.
 type Formatter struct {
@@ -131,15 +132,15 @@ func (f *Formatter) text(n *sitter.Node) string {
 	return string(f.src[n.StartByte():n.EndByte()])
 }
 
-func (f *Formatter) childByField(n *sitter.Node, field string) *sitter.Node {
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-		if n.FieldNameForChild(uint32(i)) == field {
-			return c
-		}
-	}
-	return nil
-}
+// func (f *Formatter) childByField(n *sitter.Node, field string) *sitter.Node {
+// 	for i := uint(0); i < n.ChildCount(); i++ {
+// 		c := n.Child(i)
+// 		if n.FieldNameForChild(uint32(i)) == field {
+// 			return c
+// 		}
+// 	}
+// 	return nil
+// }
 
 // ─── output helpers ──────────────────────────────────────────────────────────
 
@@ -182,17 +183,18 @@ func (f *Formatter) countIndentLevel(line string, indentWidth int) int {
 	level := 0
 	spaces := 0
 	for _, ch := range line {
-		if ch == '\t' {
-			level++
-			spaces = 0
-		} else if ch == ' ' {
-			spaces++
-			if spaces >= indentWidth {
+		switch ch {
+			case '\t':
 				level++
 				spaces = 0
-			}
-		} else {
-			break
+			case ' ':
+				spaces++
+				if spaces >= indentWidth {
+					level++
+					spaces = 0
+				}
+		  default:
+      		return level
 		}
 	}
 	return level
@@ -287,7 +289,7 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 		if a.value == "" {
 			sb.WriteString(a.name)
 		} else {
-			sb.WriteString(fmt.Sprintf("%s=%s", a.name, a.value))
+			sb.WriteString(fmt.Sprintf("%s=%s", a.name, a.value)) //nolint:staticcheck // QF1012: intentional for readability
 		}
 		if i < len(attrs)-1 {
 			sb.WriteString(" ")
@@ -300,71 +302,71 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 
 func (f *Formatter) formatNode(n *sitter.Node) {
 	kind := n.Kind()
-	switch {
-	case kind == "program", kind == "component_file":
+	switch kind {
+	case "program", "component_file":
 		f.formatChildren(n)
 
-	case kind == "cf_component_content":
+	case "cf_component_content":
 		f.formatComponentContent(n)
 
-	case kind == "cf_tag":
+	case "cf_tag":
 		f.formatCFTag(n)
 
-	case kind == "cf_set_tag", kind == "cf_return_tag":
+	case "cf_set_tag", "cf_return_tag":
 		f.formatCFSelfClosingTag(n)
 
-	case kind == "cf_selfclose_tag":
+	case "cf_selfclose_tag":
 		f.formatCFSelfCloseAttrTag(n)
 
-	case kind == "cf_if_tag":
+	case "cf_if_tag":
 		f.formatCFIfTag(n)
 
-	case kind == "cf_if_alt":
+	case "cf_if_alt":
 		f.formatCFIfAlt(n)
 
-	case kind == "cf_elseif_tag":
+	case "cf_elseif_tag":
 		f.formatCFElseIf(n)
 
-	case kind == "cf_else_tag":
+	case "cf_else_tag":
 		f.formatCFElse(n)
 
-	case kind == "cf_output_tag",
-		kind == "cf_xml_tag", kind == "cf_savecontent_tag":
+	case "cf_output_tag",
+		"cf_xml_tag", "cf_savecontent_tag":
 		f.formatCFBlockTag(n)
 
-	case kind == "cf_query_tag":
+	case "cf_query_tag":
 		f.formatCFQuery(n)
 
-	case kind == "cf_script_tag":
+	case "cf_script_tag":
 		f.formatCFScript(n)
 
-	case kind == "hash_expression":
+	case "hash_expression":
 		f.formatHashExpression(n)
 
-	case kind == "element":
+	case "element":
 		f.formatElement(n)
 
-	case kind == "html_text", kind == "text":
+	case "html_text", "text":
 		f.formatText(n)
 
-	case kind == "comment":
+	case "comment":
 		f.formatComment(n)
 
-	case kind == "cf_selfclose_void_tag_end":
+	case "cf_selfclose_void_tag_end":
 		// Handled by parent (formatCFSelfClosingTag / formatCFSelfCloseAttrTag).
 		// Emit verbatim if reached directly.
 		f.write(f.text(n))
 
-	case kind == "implicit_end_tag":
+	case "implicit_end_tag":
 		// Whitespace between tags — suppress since the formatter handles spacing.
 
-	case kind == "assignment_expression", kind == "binary_expression",
-		kind == "unary_expression", kind == "ternary_expression",
-		kind == "elvis_expression", kind == "update_expression",
-		kind == "call_expression", kind == "member_expression",
-		kind == "subscript_expression", kind == "new_expression",
-		kind == "sequence_expression", kind == "augmented_assignment_expression",
-		kind == "parenthesized_expression":
+	case "assignment_expression", "binary_expression",
+		"unary_expression", "ternary_expression",
+		"elvis_expression", "update_expression",
+		"call_expression", "member_expression",
+		"subscript_expression", "new_expression",
+		"sequence_expression", "augmented_assignment_expression",
+		"parenthesized_expression":
 		// Expression nodes may have operators/punctuation in gaps between
 		// children. Emit the full source span verbatim.
 		f.write(f.text(n))
@@ -601,10 +603,10 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		kind := c.Kind()
-		switch {
-		case kind == "<cf":
+		switch kind {
+		case "<cf":
 			continue
-		case kind == "cf_elseif_tag":
+		case "cf_elseif_tag":
 			// Extract condition from inside cf_elseif_tag
 			for j := uint(0); j < c.ChildCount(); j++ {
 				gc := c.Child(j)
@@ -616,10 +618,10 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 				}
 			}
 			inBody = true
-		case kind == "cf_else_tag":
+		case "cf_else_tag":
 			isElse = true
 			inBody = true
-		case kind == "cf_if_alt":
+		case "cf_if_alt":
 			altNode = c
 		default:
 			if inBody {

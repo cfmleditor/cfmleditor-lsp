@@ -34,6 +34,7 @@ func TestConnTrackerShutdownOnLastDisconnect(t *testing.T) {
 	}
 }
 
+//nolint:revive // t is required by testing convention
 func TestConnTrackerSafeDoubleZero(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add()
@@ -54,7 +55,7 @@ func TestServeMultipleClients(t *testing.T) {
 	// Simulate the stdio client that main.go adds before Serve starts
 	ct.Add()
 
-	go Serve(ctx, sock, logger, idx, ct, nil, nil)
+	go func() { _ = Serve(ctx, sock, logger, idx, ct, nil, nil) }()
 	waitForSocket(t, sock)
 
 	// Connect 6 socket clients
@@ -63,14 +64,14 @@ func TestServeMultipleClients(t *testing.T) {
 	rpcs := make([]jsonrpc2.Conn, total)
 	for i := range total {
 		conns[i], rpcs[i] = dialRPC(t, ctx, sock)
-		defer conns[i].Close()
+		defer func() { _ = conns[i].Close() }()
 	}
 	time.Sleep(50 * time.Millisecond)
 
 	// Disconnect half — daemon must stay alive
 	for i := range total / 2 {
-		rpcs[i].Close()
-		conns[i].Close()
+		_ = rpcs[i].Close()
+		_ = conns[i].Close()
 	}
 	time.Sleep(100 * time.Millisecond)
 	select {
@@ -81,8 +82,8 @@ func TestServeMultipleClients(t *testing.T) {
 
 	// Disconnect the rest
 	for i := total / 2; i < total; i++ {
-		rpcs[i].Close()
-		conns[i].Close()
+		_ = rpcs[i].Close()
+		_ = conns[i].Close()
 	}
 	time.Sleep(100 * time.Millisecond)
 	select {
@@ -109,18 +110,18 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	idx := index.New()
 
 	// No ConnTracker — we just verify the RPC layer works
-	go Serve(ctx, sock, logger, idx, nil, nil, nil)
+	go func(){ _ = Serve(ctx, sock, logger, idx, nil, nil, nil) }()
 	waitForSocket(t, sock)
 
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		t.Fatalf("proxy dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	stream := jsonrpc2.NewStream(conn)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error { //nolint:revive // req required by handler signature
 		return reply(ctx, nil, nil)
 	})
 
@@ -143,7 +144,7 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add() // stdio slot
 
-	go Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil)
+	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil) }()
 	waitForSocket(t, sock)
 
 	// Client 1 opens a CFC file — this indexes it into the shared index
@@ -183,7 +184,9 @@ func shortSock(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { 
+		_ = os.RemoveAll(dir)
+	})
 	return filepath.Join(dir, "d.sock")
 }
 
@@ -192,7 +195,7 @@ func waitForSocket(t *testing.T, sock string) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if c, err := net.Dial("unix", sock); err == nil {
-			c.Close()
+			_ = c.Close()
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -200,6 +203,7 @@ func waitForSocket(t *testing.T, sock string) {
 	t.Fatal("socket never became available")
 }
 
+//nolint:revive // context-as-argument: keeping t first for test helper consistency
 func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2.Conn) {
 	t.Helper()
 	c, err := net.Dial("unix", sock)
@@ -208,12 +212,13 @@ func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2
 	}
 	stream := jsonrpc2.NewStream(c)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error { //nolint:revive // req required by handler signature
 		return reply(ctx, nil, nil)
 	})
 	return c, rpc
 }
 
+//nolint:revive // context-as-argument: keeping t first for test helper consistency
 func callRPC(t *testing.T, ctx context.Context, rpc jsonrpc2.Conn, method, params string) json.RawMessage {
 	t.Helper()
 	var result json.RawMessage

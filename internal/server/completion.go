@@ -31,12 +31,23 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		params.Context.TriggerCharacter == "<"
 
+	triggeredByClose := params.Context != nil &&
+		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
+		params.Context.TriggerCharacter == ">"
+
 	closing := false
 	if hasDoc {
 		closing = isClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
 	}
 
 	switch {
+	case triggeredByClose && hasDoc:
+		if item, ok := duplicateGtCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
+			items = append(items, item)
+		}
+		if item, ok := closeTagCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
+			items = append(items, item)
+		}
 	case closing:
 		for _, tag := range findUnclosedTags(content, int(params.Position.Line), int(params.Position.Character)) {
 			_, ok := tags[tag]
@@ -50,7 +61,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				tags[tag] = len(items);
 			}
 		}
-	case tagName != "":
+	case tagName != "" && !isSpecialTag(tagName):
 		for _, p := range docs.TagParams(tagName) {
 			items = append(items, protocol.CompletionItem{
 				Label:            p.Name,
@@ -60,6 +71,25 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				InsertTextFormat: protocol.InsertTextFormatSnippet,
 			})
 		}
+	case tagName == "cfelse":
+		// Compute the column of the '<' that starts this tag.
+		textBefore := textBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))
+		tagStart := strings.LastIndex(textBefore, "<")
+		startChar := int(params.Position.Character) - (len(textBefore) - tagStart)
+		items = append(items, protocol.CompletionItem{
+			Label:           "if",
+			Kind:            protocol.CompletionItemKindKeyword,
+			Detail:          "Convert to cfelseif",
+			FilterText:      "if",
+			InsertTextFormat: protocol.InsertTextFormatSnippet,
+			TextEdit: &protocol.TextEdit{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: params.Position.Line, Character: uint32(startChar)},
+					End:   params.Position,
+				},
+				NewText: "<cfelseif $1",
+			},
+		})
 	case triggeredByTag:
 		for _, tag := range docs.AllTags() {
 			items = append(items, protocol.CompletionItem{
@@ -94,7 +124,7 @@ func isClosingTagContext(content string, line, char int) bool {
 
 func isVoidTag(name string) bool {
     switch name {
-    case "cfparam", "cfargument", "cfproperty", "cfrethrow", "cfthrow", "cfschedule", "cfhttpparam", "cfqueryparam", "cftimer", "cfflush", "cfcache", "cflogout", "cfprocessingdirective", "cfzipelement",
+    case "cfparam", "cfreturn", "cfargument", "cfproperty", "cfrethrow", "cfthrow", "cfschedule", "cfhttpparam", "cfqueryparam", "cftimer", "cfflush", "cfcache", "cflogout", "cfprocessingdirective", "cfzipelement",
     "cfbreak", "cfcontinue", "cfabort", "cfexit", "cfinclude", "cflocation", "cfheader", "cfdump",
     "cfcontent", "cfcookie", "cflog", "cffile", "cfdirectory", "cfsetting", "cfwddx",
     "cfhtmlhead", "cfhtmlbody", "cfauthenticate", "cfntauthenticate", "cfreportparam",
@@ -109,7 +139,17 @@ func isVoidTag(name string) bool {
 
 func isSpecialTag(name string) bool {
     switch name {
-    case "cfset", "cfelse", "cfelseif":
+    case "cfset", "cfif", "cfelse", "cfelseif":
+        return true
+    }
+    return false
+}
+
+// isSubordinateTag returns true for tags that share another tag's closing tag
+// (e.g. cfelse and cfelseif are closed by </cfif>).
+func isSubordinateTag(name string) bool {
+    switch name {
+    case "cfelse", "cfelseif":
         return true
     }
     return false
@@ -155,7 +195,7 @@ func findUnclosedTags(content string, line, char int) []string {
 				break
 			}
 			name := strings.ToLower(text[i : i+end])
-			if name == "" || name[0] == '!' || isSpecialTag(name) || isVoidTag(name) {
+			if name == "" || name[0] == '!' || name == "cfset" || isSubordinateTag(name) || isVoidTag(name) {
 				i += end
 				continue
 			}
@@ -229,4 +269,98 @@ func findEnclosingTag(content string, line, char int) string {
 	}
 
 	return tagName
+}
+
+// duplicateGtCompletion offers to remove a duplicate '>' when the user types
+// '>' immediately after an existing tag-closing '>'.
+func duplicateGtCompletion(content string, line, char int) (protocol.CompletionItem, bool) {
+	lines := strings.SplitAfter(content, "\n")
+	if line >= len(lines) || char < 2 {
+		return protocol.CompletionItem{}, false
+	}
+	lineText := lines[line]
+	if char > len(lineText) || lineText[char-2] != '>' {
+		return protocol.CompletionItem{}, false
+	}
+	// Verify the previous '>' closes a tag.
+	before := lineText[:char-1]
+	openIdx := strings.LastIndexByte(before, '<')
+	if openIdx == -1 {
+		return protocol.CompletionItem{}, false
+	}
+	if strings.ContainsRune(before[openIdx:len(before)-1], '>') {
+		return protocol.CompletionItem{}, false
+	}
+	return protocol.CompletionItem{
+		Label:      ">",
+		Kind:       protocol.CompletionItemKindKeyword,
+		Detail:     "Remove duplicate >",
+		FilterText: ">",
+		TextEdit: &protocol.TextEdit{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
+				End:   protocol.Position{Line: uint32(line), Character: uint32(char)},
+			},
+			NewText: "",
+		},
+	}, true
+}
+
+// closeTagCompletion returns a completion item when '>' is typed mid-tag
+// with non-whitespace content between the typed '>' and the tag's existing '>'.
+// The completion moves the content before the '>' and removes the duplicate.
+func closeTagCompletion(content string, line, char int) (protocol.CompletionItem, bool) {
+	lines := strings.SplitAfter(content, "\n")
+	if line >= len(lines) {
+		return protocol.CompletionItem{}, false
+	}
+	lineText := lines[line]
+	if char >= len(lineText) {
+		return protocol.CompletionItem{}, false
+	}
+
+	// Find next '>' after cursor.
+	rest := lineText[char:]
+	idx := strings.IndexByte(rest, '>')
+	if idx == -1 {
+		return protocol.CompletionItem{}, false
+	}
+
+	middle := rest[:idx]
+
+	// Only offer completion when there's non-whitespace content.
+	if strings.TrimSpace(middle) == "" {
+		return protocol.CompletionItem{}, false
+	}
+
+	// Must not contain '<' (would mean we left the tag).
+	if strings.ContainsRune(middle, '<') {
+		return protocol.CompletionItem{}, false
+	}
+
+	// Verify we're inside a tag.
+	before := lineText[:char]
+	openIdx := strings.LastIndexByte(before, '<')
+	if openIdx == -1 {
+		return protocol.CompletionItem{}, false
+	}
+	if strings.ContainsRune(lineText[openIdx:char-1], '>') {
+		return protocol.CompletionItem{}, false
+	}
+
+	endChar := char + idx + 1
+	return protocol.CompletionItem{
+		Label:           ">",
+		Kind:            protocol.CompletionItemKindKeyword,
+		Detail:          "Close tag",
+		FilterText:      ">",
+		InsertTextFormat: protocol.InsertTextFormatSnippet,
+		TextEdit: &protocol.TextEdit{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
+				End:   protocol.Position{Line: uint32(line), Character: uint32(endChar)},
+			},
+			NewText: middle + ">",
+		},
+	}, true
 }

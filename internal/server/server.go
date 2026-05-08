@@ -1,3 +1,4 @@
+// Package server implements the CFML Language Server Protocol handler.
 package server
 
 import (
@@ -13,6 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Server implements the CFML Language Server Protocol handler.
 type Server struct {
 	conn        jsonrpc2.Conn
 	logger      *zap.Logger
@@ -48,9 +50,12 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			Change:    protocol.TextDocumentSyncKindFull,
 		},
 		CompletionProvider: &protocol.CompletionOptions{
-			TriggerCharacters: []string{"<", " ", "/", "."},
+			TriggerCharacters: []string{"<", " ", "/", ".", ">"},
 		},
-		DocumentFormattingProvider: true,
+		DocumentFormattingProvider:      true,
+		DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
+			FirstTriggerCharacter: ">",
+		},
 		DefinitionProvider:         true,
 		DocumentSymbolProvider:  true,
 		WorkspaceSymbolProvider: true,

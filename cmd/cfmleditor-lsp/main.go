@@ -1,3 +1,4 @@
+// Package main is the entry point for the cfmleditor-lsp server.
 package main
 
 import (
@@ -13,8 +14,7 @@ import (
 
 func main() {
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
-
+	defer func() { _ = logger.Sync() }()
 	cwd, _ := os.Getwd()
 	cfg, _ := daemon.FindConfig(cwd)
 
@@ -37,7 +37,7 @@ func main() {
 		globs := cfg.IndexGlobs()
 
 		// Serve the socket listener in the background
-		go daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs)
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -70,6 +70,11 @@ type stdio struct{}
 
 func newStdio() stdio { return stdio{} }
 
-func (s stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+// Read reads from stdin.
+func (s stdio) Read(p []byte) (int, error) { return os.Stdin.Read(p) }
+
+// Write writes to stdout.
 func (s stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
-func (s stdio) Close() error                { return nil }
+
+// Close is a no-op.
+func (s stdio) Close() error { return nil }

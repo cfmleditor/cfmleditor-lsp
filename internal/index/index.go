@@ -1,3 +1,4 @@
+// Package index maintains a searchable index of CFML function definitions.
 package index
 
 import (
@@ -8,21 +9,25 @@ import (
 	"go.lsp.dev/uri"
 )
 
+// Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
 	mu    sync.RWMutex
 	funcs map[string][]funcdef.FunctionDef // lowercase name -> definitions
 }
 
+// New creates an empty Index.
 func New() *Index {
 	return &Index{funcs: make(map[string][]funcdef.FunctionDef)}
 }
 
+// Lookup returns all function definitions matching the given name (case-insensitive).
 func (idx *Index) Lookup(name string) []funcdef.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.funcs[strings.ToLower(name)]
 }
 
+// AllFunctions returns every indexed function definition.
 func (idx *Index) AllFunctions() []funcdef.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -33,6 +38,7 @@ func (idx *Index) AllFunctions() []funcdef.FunctionDef {
 	return all
 }
 
+// IndexFile parses the given CFC content and updates the index for that file URI.
 func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	defs := funcdef.ParseFunctionDefs(fileURI, content)
 
@@ -47,6 +53,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	}
 }
 
+// RemoveFilesUnder removes all indexed entries whose URI starts with prefix.
 func (idx *Index) RemoveFilesUnder(prefix string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

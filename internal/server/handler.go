@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
 	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 		switch req.Method() {
@@ -34,6 +35,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleDefinition(ctx, reply, req)
 		case protocol.MethodTextDocumentFormatting:
 			return s.handleFormatting(ctx, reply, req)
+		case protocol.MethodTextDocumentOnTypeFormatting:
+			return s.handleOnTypeFormatting(ctx, reply, req)
 		case protocol.MethodTextDocumentDocumentSymbol:
 			return s.handleDocumentSymbol(ctx, reply, req)
 		case protocol.MethodWorkspaceSymbol:
@@ -65,8 +68,10 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		root := strings.TrimPrefix(string(folder.URI), "file://")
 		s.workspaceRoots = append(s.workspaceRoots, root)
 	}
-	if len(s.workspaceRoots) == 0 && params.RootURI != "" {
-		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://"))
+	
+	
+	if len(s.workspaceRoots) == 0 && params.RootURI != "" { //nolint:all // this is for compatibility
+		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://")) //nolint:all // this is for compatibility
 	}
 
 	go s.indexWorkspace()

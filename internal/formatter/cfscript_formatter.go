@@ -137,26 +137,26 @@ func (f *Formatter) scriptBlock(n *sitter.Node) {
 
 // scriptBlockOf renders the named child at field `field` as a block.
 // Falls back to scriptBlock on the node directly if field lookup fails.
-func (f *Formatter) scriptBlockOf(n *sitter.Node, field string) {
-	body := n.ChildByFieldName(field)
-	if body == nil {
-		// try last child heuristic
-		body = n.Child(n.ChildCount() - 1)
-	}
-	if body.Kind() == "statement_block" || body.Kind() == "block" {
-		f.scriptBlock(body)
-	} else {
-		// single-statement body — still wrap in braces for canonical form
-		f.scriptWrite(" {")
-		f.scriptWrite("\n")
-		f.level++
-		f.formatScriptNode(body)
-		f.scriptWrite("\n")
-		f.level--
-		f.writeIndent()
-		f.scriptWrite("}")
-	}
-}
+// func (f *Formatter) scriptBlockOf(n *sitter.Node, field string) {
+// 	body := n.ChildByFieldName(field)
+// 	if body == nil {
+// 		// try last child heuristic
+// 		body = n.Child(n.ChildCount() - 1)
+// 	}
+// 	if body.Kind() == "statement_block" || body.Kind() == "block" {
+// 		f.scriptBlock(body)
+// 	} else {
+// 		// single-statement body — still wrap in braces for canonical form
+// 		f.scriptWrite(" {")
+// 		f.scriptWrite("\n")
+// 		f.level++
+// 		f.formatScriptNode(body)
+// 		f.scriptWrite("\n")
+// 		f.level--
+// 		f.writeIndent()
+// 		f.scriptWrite("}")
+// 	}
+// }
 
 // expr renders an expression node inline and returns the string.
 // Expressions are never written directly; they are embedded in statements.

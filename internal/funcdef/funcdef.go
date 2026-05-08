@@ -1,3 +1,4 @@
+// Package funcdef extracts user-defined function definitions from CFC source files.
 package funcdef
 
 import (
@@ -26,6 +27,7 @@ type FunctionDef struct {
 // RegionKind classifies a span of CFC content.
 type RegionKind int
 
+// RegionKind values.
 const (
 	RegionScript RegionKind = iota
 	RegionTag

@@ -311,6 +311,86 @@ func TestCompletionTagAttributesMultiline(t *testing.T) {
 	}
 }
 
+func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
+	tags := []struct {
+		doc string
+		pos protocol.Position
+	}{
+		{"<cfset ", protocol.Position{Line: 0, Character: 6}},
+		{"<cfif ", protocol.Position{Line: 0, Character: 5}},
+		{"<cfelseif ", protocol.Position{Line: 0, Character: 9}},
+	}
+	for _, tc := range tags {
+		srv := newTestServer()
+		srv.setDocument(uri.URI("file:///test.cfm"), tc.doc)
+
+		reply, result, replyErr := captureReply(t)
+		req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+				Position:     tc.pos,
+			},
+			Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		})
+
+		if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+			t.Fatalf("%s: %v", tc.doc, err)
+		}
+		if *replyErr != nil {
+			t.Fatalf("%s: %v", tc.doc, *replyErr)
+		}
+
+		list := completionListFromResult(t, *result)
+		if len(list.Items) == 0 {
+			t.Fatalf("%s: expected function completions", tc.doc)
+		}
+		for _, item := range list.Items {
+			if item.Kind != protocol.CompletionItemKindFunction {
+				t.Errorf("%s: expected Function kind, got %v for %s", tc.doc, item.Kind, item.Label)
+			}
+		}
+	}
+}
+
+func TestCompletionCfElseOffersIf(t *testing.T) {
+	srv := newTestServer()
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfelse ")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 8},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(list.Items))
+	}
+	item := list.Items[0]
+	if item.Label != "if" {
+		t.Errorf("expected label 'if', got %q", item.Label)
+	}
+	if item.TextEdit == nil {
+		t.Fatal("expected TextEdit to be set")
+	}
+	if item.TextEdit.Range.Start.Character != 0 {
+		t.Errorf("expected start char 0, got %d", item.TextEdit.Range.Start.Character)
+	}
+	if item.TextEdit.NewText != "<cfelseif $1" {
+		t.Errorf("expected NewText '<cfelseif $1', got %q", item.TextEdit.NewText)
+	}
+}
+
 func TestCompletionAfterClosedTag(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello")
@@ -452,6 +532,10 @@ func TestFindUnclosedTags(t *testing.T) {
 		{"nested", "<cfoutput><cfloop query=\"q\"></", 0, 30, []string{"cfloop", "cfoutput"}},
 		{"all closed", "<cfoutput></cfoutput></", 0, 22, nil},
 		{"self closing", "<cfset value=\"1\" /></", 0, 21, nil},
+		{"cfif is unclosed", "<cfif true></", 0, 13, []string{"cfif"}},
+		{"cfif closed", "<cfif true></cfif></", 0, 19, nil},
+		{"cfelse not in stack", "<cfif true><cfelse></", 0, 20, []string{"cfif"}},
+		{"cfelseif not in stack", "<cfif true><cfelseif false></", 0, 29, []string{"cfif"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -820,7 +904,7 @@ func completionListFromResult(t *testing.T, result interface{}) *protocol.Comple
 
 func TestWorkspaceFoldersAreIndexed(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Shared.cfc"), []byte("component {\nfunction sharedHelper() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Shared.cfc"), []byte("component {\nfunction sharedHelper() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
@@ -833,10 +917,10 @@ func TestWorkspaceFoldersAreIndexed(t *testing.T) {
 
 func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
 	wsDir := t.TempDir()
-	os.WriteFile(filepath.Join(wsDir, "Local.cfc"), []byte("component {\nfunction localFunc() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(wsDir, "Local.cfc"), []byte("component {\nfunction localFunc() {}\n}"), 0o644)
 
 	folderDir := t.TempDir()
-	os.WriteFile(filepath.Join(folderDir, "Extra.cfc"), []byte("component {\nfunction extraFunc() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(folderDir, "Extra.cfc"), []byte("component {\nfunction extraFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.workspaceRoots = []string{wsDir}
@@ -853,8 +937,8 @@ func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
 
 func TestIndexGlobsFilterFiles(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "Wanted.cfc"), []byte("component {\nfunction wantedFunc() {}\n}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "Unwanted.cfc"), []byte("component {\nfunction unwantedFunc() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Wanted.cfc"), []byte("component {\nfunction wantedFunc() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Unwanted.cfc"), []byte("component {\nfunction unwantedFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
@@ -916,7 +1000,7 @@ func TestReindexNoFilterWithoutFolders(t *testing.T) {
 func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 	dir := t.TempDir()
 	cfcPath := filepath.Join(dir, "Added.cfc")
-	os.WriteFile(cfcPath, []byte("component {\nfunction addedFunc() {}\n}"), 0o644)
+	_ = os.WriteFile(cfcPath, []byte("component {\nfunction addedFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
 	reply, _, replyErr := captureReply(t)
@@ -1013,5 +1097,213 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	}
 	if defs := srv.index.Lookup("appFunc"); len(defs) != 0 {
 		t.Error("appFunc should have been removed")
+	}
+}
+
+func TestOnTypeFormattingRemovesDuplicateClose(t *testing.T) {
+	srv := newTestServer()
+	// User typed '>' before existing '>'. Doc now has '>>' at indices 21-22. Cursor at 22.
+	srv.setDocument(uri.URI("file:///test.cfm"), `<cfoutput name="test">>hello</cfoutput>`)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 22}, // after the typed '>'
+		Ch:           ">",
+	})
+
+	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	edits, ok := (*result).([]protocol.TextEdit)
+	if !ok {
+		t.Fatalf("expected []TextEdit, got %T", *result)
+	}
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(edits))
+	}
+	if edits[0].NewText != ">" {
+		t.Errorf("expected NewText '>', got %q", edits[0].NewText)
+	}
+	if edits[0].Range.Start.Character != 21 || edits[0].Range.End.Character != 23 {
+		t.Errorf("expected range [21,23), got [%d,%d)", edits[0].Range.Start.Character, edits[0].Range.End.Character)
+	}
+}
+
+func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
+	srv := newTestServer()
+	// User typed '>' with only whitespace before existing '>'. Doc: "<cfif>  >"
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif>  >")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 6},
+		Ch:           ">",
+	})
+
+	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	edits, ok := (*result).([]protocol.TextEdit)
+	if !ok {
+		t.Fatalf("expected []TextEdit, got %T", *result)
+	}
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(edits))
+	}
+	// Replaces [typed>, whitespace, orig>] with just ">"
+	if edits[0].NewText != ">" {
+		t.Errorf("expected NewText '>', got %q", edits[0].NewText)
+	}
+	if edits[0].Range.Start.Character != 5 || edits[0].Range.End.Character != 9 {
+		t.Errorf("expected range [5,9), got [%d,%d)", edits[0].Range.Start.Character, edits[0].Range.End.Character)
+	}
+}
+
+func TestOnTypeFormattingNoOpNonWhitespace(t *testing.T) {
+	srv := newTestServer()
+	// Non-whitespace between typed '>' and existing '>': should not act.
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif> true>")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 6},
+		Ch:           ">",
+	})
+
+	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	edits, ok := (*result).([]protocol.TextEdit)
+	if !ok {
+		t.Fatalf("expected []TextEdit, got %T", *result)
+	}
+	if len(edits) != 0 {
+		t.Errorf("expected no edits, got %d", len(edits))
+	}
+}
+
+func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
+	srv := newTestServer()
+	// User typed '>' mid-tag with non-whitespace after. Doc: "<cfif> true>"
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif> true>")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 6},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ">",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(list.Items))
+	}
+	item := list.Items[0]
+	if item.Label != ">" {
+		t.Errorf("expected label '>', got %q", item.Label)
+	}
+	if item.TextEdit == nil {
+		t.Fatal("expected TextEdit")
+	}
+	if item.TextEdit.NewText != " true>" {
+		t.Errorf("expected NewText ' true>', got %q", item.TextEdit.NewText)
+	}
+}
+
+func TestCompletionDuplicateGtAfterTag(t *testing.T) {
+	srv := newTestServer()
+	// User typed '>' after existing '>'. Doc: "<cfif test>></cfif>", cursor at 12.
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif test>></cfif>")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 12},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ">",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(list.Items))
+	}
+	item := list.Items[0]
+	if item.Detail != "Remove duplicate >" {
+		t.Errorf("expected detail 'Remove duplicate >', got %q", item.Detail)
+	}
+	if item.TextEdit == nil {
+		t.Fatal("expected TextEdit")
+	}
+	if item.TextEdit.NewText != "" {
+		t.Errorf("expected empty NewText, got %q", item.TextEdit.NewText)
+	}
+	if item.TextEdit.Range.Start.Character != 11 || item.TextEdit.Range.End.Character != 12 {
+		t.Errorf("expected range [11,12), got [%d,%d)", item.TextEdit.Range.Start.Character, item.TextEdit.Range.End.Character)
+	}
+}
+
+func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
+	srv := newTestServer()
+	// Document after user typed '>': the '>' at index 21 is the one they typed, cursor at 22.
+	srv.setDocument(uri.URI("file:///test.cfm"), `<cfoutput name="test">hello</cfoutput>`)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 22}, // after the '>'
+		Ch:           ">",
+	})
+
+	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	edits, ok := (*result).([]protocol.TextEdit)
+	if !ok {
+		t.Fatalf("expected []TextEdit, got %T", *result)
+	}
+	if len(edits) != 0 {
+		t.Errorf("expected no edits, got %d", len(edits))
 	}
 }

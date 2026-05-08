@@ -19,6 +19,12 @@ test:
 visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
 
+lint:
+	golangci-lint run --enable bodyclose,gocritic ./...
+
+lint-fix:
+		golangci-lint run --enable bodyclose,gocritic --fix ./...
+		
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)
 
