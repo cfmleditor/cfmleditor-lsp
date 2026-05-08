@@ -36,11 +36,58 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		params.Context.TriggerCharacter == ">"
 
 	closing := false
+	typingTag := false
+	inHashExpr := false
+	inAttrValue := false
 	if hasDoc {
 		closing = isClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
+		if !closing && tagName == "" {
+			typingTag = isTypingTagName(content, int(params.Position.Line), int(params.Position.Character))
+		}
+		inHashExpr = isInsideHashExpr(content, int(params.Position.Line), int(params.Position.Character))
+		inAttrValue = isInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
 	}
 
 	switch {
+	case inHashExpr:
+		for _, fn := range docs.AllFunctions() {
+			items = append(items, protocol.CompletionItem{
+				Label:            fn.Name,
+				Kind:             protocol.CompletionItemKindFunction,
+				Detail:           fn.Syntax,
+				Documentation:    fn.Description,
+				InsertTextFormat: protocol.InsertTextFormatPlainText,
+			})
+		}
+	case inAttrValue:
+		attrName := findCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
+		if attrName != "" && tagName != "" {
+			attrs := docs.TagParams(tagName)
+			if attrs == nil {
+				attrs = docs.HTMLTagParams(tagName)
+			}
+			for i := range attrs {
+				if strings.ToLower(attrs[i].Name) == attrName {
+					for _, v := range attrs[i].ParamValues() {
+						items = append(items, protocol.CompletionItem{
+							Label:  v,
+							Kind:   protocol.CompletionItemKindValue,
+							Detail: attrName + " value",
+						})
+					}
+					break
+				}
+			}
+		}
+		for _, fn := range docs.AllFunctions() {
+			items = append(items, protocol.CompletionItem{
+				Label:            fn.Name,
+				Kind:             protocol.CompletionItemKindFunction,
+				Detail:           fn.Syntax,
+				Documentation:    fn.Description,
+				InsertTextFormat: protocol.InsertTextFormatPlainText,
+			})
+		}
 	case triggeredByClose && hasDoc:
 		if item, ok := duplicateGtCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
 			items = append(items, item)
@@ -49,20 +96,49 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			items = append(items, item)
 		}
 	case closing:
+		// Check if there's a '>' after the cursor on the same line.
+		trailingGt := -1
+		if hasDoc {
+			lines := strings.SplitAfter(content, "\n")
+			if int(params.Position.Line) < len(lines) {
+				lineText := lines[int(params.Position.Line)]
+				if int(params.Position.Character) < len(lineText) {
+					after := lineText[int(params.Position.Character):]
+					if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
+						trailingGt = int(params.Position.Character) + idx + 1
+					}
+				}
+			}
+		}
 		for _, tag := range findUnclosedTags(content, int(params.Position.Line), int(params.Position.Character)) {
 			_, ok := tags[tag]
-			if ( !ok ) {
-				items = append(items, protocol.CompletionItem{
-					Label:      tag,
-					Kind:       protocol.CompletionItemKindKeyword,
-					Detail:     "Close tag",
-					InsertText: tag + ">",
-				})
-				tags[tag] = len(items);
+			if !ok {
+				item := protocol.CompletionItem{
+					Label:  tag,
+					Kind:   protocol.CompletionItemKindKeyword,
+					Detail: "Close tag",
+				}
+				if trailingGt >= 0 {
+					item.TextEdit = &protocol.TextEdit{
+						Range: protocol.Range{
+							Start: params.Position,
+							End:   protocol.Position{Line: params.Position.Line, Character: uint32(trailingGt)},
+						},
+						NewText: tag + ">",
+					}
+				} else {
+					item.InsertText = tag + ">"
+				}
+				items = append(items, item)
+				tags[tag] = len(items)
 			}
 		}
 	case tagName != "" && !isSpecialTag(tagName):
-		for _, p := range docs.TagParams(tagName) {
+		attrs := docs.TagParams(tagName)
+		if attrs == nil {
+			attrs = docs.HTMLTagParams(tagName)
+		}
+		for _, p := range attrs {
 			items = append(items, protocol.CompletionItem{
 				Label:            p.Name,
 				Kind:             protocol.CompletionItemKindProperty,
@@ -98,6 +174,28 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				Detail: tag.Description,
 			})
 		}
+		for _, tag := range docs.HTMLTags() {
+			items = append(items, protocol.CompletionItem{
+				Label:  tag.Name,
+				Kind:   protocol.CompletionItemKindKeyword,
+				Detail: tag.Description,
+			})
+		}
+	case typingTag:
+		for _, tag := range docs.AllTags() {
+			items = append(items, protocol.CompletionItem{
+				Label:  tag.Name,
+				Kind:   protocol.CompletionItemKindKeyword,
+				Detail: tag.Description,
+			})
+		}
+		for _, tag := range docs.HTMLTags() {
+			items = append(items, protocol.CompletionItem{
+				Label:  tag.Name,
+				Kind:   protocol.CompletionItemKindKeyword,
+				Detail: tag.Description,
+			})
+		}
 	default:
 		for _, fn := range docs.AllFunctions() {
 			items = append(items, protocol.CompletionItem{
@@ -122,6 +220,90 @@ func isClosingTagContext(content string, line, char int) bool {
 	return strings.HasSuffix(textBefore, "</")
 }
 
+// isInsideHashExpr returns true if the cursor is inside a #...# expression.
+func isInsideHashExpr(content string, line, char int) bool {
+	textBefore := textBeforeCursor(content, line, char)
+	return strings.Count(textBefore, "#")%2 == 1
+}
+
+// isInsideAttrValue returns true if the cursor is inside a quoted attribute value.
+func isInsideAttrValue(content string, line, char int) bool {
+	textBefore := textBeforeCursor(content, line, char)
+	// Find the last '<' not closed by '>'
+	lastOpen := strings.LastIndex(textBefore, "<")
+	if lastOpen == -1 {
+		return false
+	}
+	afterOpen := textBefore[lastOpen:]
+	if strings.Contains(afterOpen, ">") {
+		return false
+	}
+	// Count quotes after the tag open to determine if we're inside a string
+	inSingle := false
+	inDouble := false
+	for _, ch := range afterOpen {
+		switch {
+		case ch == '"' && !inSingle:
+			inDouble = !inDouble
+		case ch == '\'' && !inDouble:
+			inSingle = !inSingle
+		}
+	}
+	return inSingle || inDouble
+}
+
+// findCurrentAttr returns the attribute name whose value the cursor is inside.
+func findCurrentAttr(content string, line, char int) string {
+	textBefore := textBeforeCursor(content, line, char)
+	lastOpen := strings.LastIndex(textBefore, "<")
+	if lastOpen == -1 {
+		return ""
+	}
+	afterOpen := textBefore[lastOpen:]
+	// Find the last '=' before an open quote that isn't closed
+	inSingle := false
+	inDouble := false
+	lastEq := -1
+	for i, ch := range afterOpen {
+		switch {
+		case ch == '=' && !inSingle && !inDouble:
+			lastEq = i
+		case ch == '"' && !inSingle:
+			inDouble = !inDouble
+		case ch == '\'' && !inDouble:
+			inSingle = !inSingle
+		}
+	}
+	if lastEq == -1 {
+		return ""
+	}
+	// Extract attribute name before the '='
+	before := strings.TrimRight(afterOpen[:lastEq], " \t")
+	start := strings.LastIndexAny(before, " \t\r\n") + 1
+	return strings.ToLower(before[start:])
+}
+
+// isTypingTagName returns true if the cursor is inside an incomplete tag name (e.g. "<cfif").
+func isTypingTagName(content string, line, char int) bool {
+	textBefore := textBeforeCursor(content, line, char)
+	lastOpen := strings.LastIndex(textBefore, "<")
+	if lastOpen == -1 {
+		return false
+	}
+	after := textBefore[lastOpen:]
+	if strings.Contains(after, ">") {
+		return false
+	}
+	rest := after[1:]
+	if len(rest) == 0 || rest[0] == '/' || rest[0] == '!' {
+		return false
+	}
+	if strings.IndexAny(rest, " \t\r\n/>") != -1 {
+		return false
+	}
+	return true
+}
+
 func isVoidTag(name string) bool {
     switch name {
     case "cfparam", "cfreturn", "cfargument", "cfproperty", "cfrethrow", "cfthrow", "cfschedule", "cfhttpparam", "cfqueryparam", "cftimer", "cfflush", "cfcache", "cflogout", "cfprocessingdirective", "cfzipelement",
@@ -130,8 +312,9 @@ func isVoidTag(name string) bool {
     "cfhtmlhead", "cfhtmlbody", "cfauthenticate", "cfntauthenticate", "cfreportparam",
     "cfprocparam", "cfprocresult", "cfinvokeargument", "cfspreadsheet", "cfpdfparam",
     "cfpdfformparam", "cfpdfsubform", "cfmailparam", "cfgridrow", "cfgridupdate", "cfimage",
-    "cftreeitem", "cfmenuitem", "cfmaplocation", "cfpresenteritem", "cfimport", "cftrace", "br", "hr", "input",
-    "cfgridcolumn":
+    "cftreeitem", "cfmenuitem", "cfmaplocation", "cfpresenteritem", "cfimport", "cftrace",
+    "cfgridcolumn",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr":
         return true
     }
     return false

@@ -316,9 +316,9 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 		doc string
 		pos protocol.Position
 	}{
-		{"<cfset ", protocol.Position{Line: 0, Character: 6}},
-		{"<cfif ", protocol.Position{Line: 0, Character: 5}},
-		{"<cfelseif ", protocol.Position{Line: 0, Character: 9}},
+		{"<cfset ", protocol.Position{Line: 0, Character: 7}},
+		{"<cfif ", protocol.Position{Line: 0, Character: 6}},
+		{"<cfelseif ", protocol.Position{Line: 0, Character: 10}},
 	}
 	for _, tc := range tags {
 		srv := newTestServer()
