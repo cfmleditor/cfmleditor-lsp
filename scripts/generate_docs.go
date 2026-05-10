@@ -12,16 +12,32 @@ import (
 )
 
 type Param struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Type        string `json:"type"`
-	Required    bool   `json:"required"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Type        string            `json:"type"`
+	Required    bool              `json:"required"`
+	RawValues   []json.RawMessage `json:"values"`
+}
+
+func (p *Param) Values() []string {
+	var out []string
+	for _, raw := range p.RawValues {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			out = append(out, s)
+		} else {
+			out = append(out, strings.TrimSpace(string(raw)))
+		}
+	}
+	return out
 }
 
 type Entry struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Syntax      string  `json:"syntax"`
+	Member      string  `json:"member"`
+	Script      string  `json:"script"`
 	Returns     string  `json:"returns"`
 	Type        string  `json:"type"`
 	Params      []Param `json:"params"`
@@ -30,7 +46,7 @@ type Entry struct {
 func main() {
 	files, err := filepath.Glob("docs/data/*.json")
 	if err != nil || len(files) == 0 {
-		fmt.Fprintln(os.Stderr, "no docs/data/*.json files found — run scripts/fetch-docs.sh first")
+		fmt.Fprintln(os.Stderr, "no docs/data/*.json files found — run scripts/fetch-docs-cfdocs.sh or scripts/fetch-docs-lucee.sh first")
 		os.Exit(1)
 	}
 
@@ -71,13 +87,26 @@ func main() {
 	fmt.Fprintln(out, "\treturn []Entry{")
 
 	for _, e := range entries {
-		fmt.Fprintf(out, "\t\t{Name: %s, Description: %s, Syntax: %s, Returns: %s, Type: %s",
-			goStr(e.Name), goStr(e.Description), goStr(e.Syntax), goStr(e.Returns), goStr(e.Type))
+		fmt.Fprintf(out, "\t\t{Name: %s, Description: %s, Syntax: %s, Member: %s, Script: %s, Returns: %s, Type: %s",
+			goStr(e.Name), goStr(e.Description), goStr(e.Syntax), goStr(e.Member), goStr(e.Script), goStr(e.Returns), goStr(e.Type))
 		if len(e.Params) > 0 {
 			fmt.Fprintln(out, ", Params: []Param{")
 			for _, p := range e.Params {
-				fmt.Fprintf(out, "\t\t\t{Name: %s, Description: %s, Type: %s, Required: %v},\n",
-					goStr(p.Name), goStr(p.Description), goStr(p.Type), p.Required)
+				vals := p.Values()
+				if len(vals) > 0 {
+					fmt.Fprintf(out, "\t\t\t{Name: %s, Description: %s, Type: %s, Required: %v, Values: []string{",
+						goStr(p.Name), goStr(p.Description), goStr(p.Type), p.Required)
+					for i, v := range vals {
+						if i > 0 {
+							fmt.Fprint(out, ", ")
+						}
+						fmt.Fprint(out, goStr(v))
+					}
+					fmt.Fprintln(out, "}},")
+				} else {
+					fmt.Fprintf(out, "\t\t\t{Name: %s, Description: %s, Type: %s, Required: %v},\n",
+						goStr(p.Name), goStr(p.Description), goStr(p.Type), p.Required)
+				}
 			}
 			fmt.Fprintln(out, "\t\t}},")
 		} else {

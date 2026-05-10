@@ -1,10 +1,15 @@
 BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 
-.PHONY: build test install clean docs generate
+.PHONY: build test install clean docs docs-cfdocs docs-lucee generate
 
-docs:
-	@./scripts/fetch-docs.sh
+docs: docs-cfdocs
+
+docs-cfdocs:
+	@./scripts/fetch-docs-cfdocs.sh
+
+docs-lucee:
+	@./scripts/fetch-docs-lucee.sh
 
 generate: docs
 	go run scripts/generate_docs.go
