@@ -40,7 +40,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp .
+        run: go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
 
       - name: Package
         run: tar czf cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz cfmleditor-lsp
