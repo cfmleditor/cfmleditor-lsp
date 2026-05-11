@@ -1,4 +1,4 @@
-// Package funcdef extracts user-defined function definitions from CFC source files.
+// Package parser extracts user-defined function definitions from CFC source files.
 package parser
 
 import (

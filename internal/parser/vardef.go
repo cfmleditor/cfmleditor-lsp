@@ -1,4 +1,4 @@
-// Package vardef extracts local variable declarations from CFML source with
+// Package parser extracts local variable declarations from CFML source with
 // scope information based on CFML scoping rules.
 package parser
 

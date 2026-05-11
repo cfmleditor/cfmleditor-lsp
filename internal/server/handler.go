@@ -149,14 +149,15 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	s.setDocument(docURI, content)
 
-	if !editInFuncBody {
+	switch {
+	case !editInFuncBody:
 		s.reindexIfCFC(docURI, content)
 		s.mu.Lock()
 		s.funcRanges[docURI] = s.funcRangesForContent(docURI, content)
 		s.mu.Unlock()
 		// Immediate rebuild — structure changed
 		go s.rebuildCompletionCache(docURI, content)
-	} else if lineDelta != 0 {
+	case lineDelta != 0:
 		// Shift function ranges and index line numbers for functions below the edit
 		editLine := int(params.ContentChanges[0].Range.Start.Line)
 		s.mu.Lock()
@@ -174,7 +175,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.index.ShiftLines(docURI, editLine, lineDelta)
 		// Debounced rebuild — only local vars changed
 		s.debounceCacheRebuild(docURI, content)
-	} else {
+	default:
 		// No line change, still inside function — debounce
 		s.debounceCacheRebuild(docURI, content)
 	}
