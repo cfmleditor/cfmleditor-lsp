@@ -66,7 +66,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			Save:      &protocol.SaveOptions{},
 		},
 		CompletionProvider: &protocol.CompletionOptions{
-			TriggerCharacters: []string{"<", " ", "/", ".", ">"},
+			TriggerCharacters: []string{"<", "/", ".", ">"},
 		},
 		DocumentFormattingProvider:      true,
 		DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{

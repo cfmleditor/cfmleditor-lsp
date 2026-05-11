@@ -210,8 +210,8 @@ func TestCompletionTriggeredByTyping(t *testing.T) {
 		t.Fatal("expected function completions")
 	}
 	for _, item := range list.Items {
-		if item.Kind != protocol.CompletionItemKindFunction {
-			t.Errorf("expected Function kind for %s, got %v", item.Label, item.Kind)
+		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
+			t.Errorf("expected Function or Keyword kind for %s, got %v", item.Label, item.Kind)
 		}
 	}
 }
@@ -230,7 +230,7 @@ func TestCompletionWithNilContext(t *testing.T) {
 
 	list := completionListFromResult(t, *result)
 	for _, item := range list.Items {
-		if item.Kind != protocol.CompletionItemKindFunction {
+		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("nil context should return functions, got kind %v for %s", item.Kind, item.Label)
 		}
 	}
@@ -345,8 +345,8 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 			t.Fatalf("%s: expected function completions", tc.doc)
 		}
 		for _, item := range list.Items {
-			if item.Kind != protocol.CompletionItemKindFunction {
-				t.Errorf("%s: expected Function kind, got %v for %s", tc.doc, item.Kind, item.Label)
+			if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
+				t.Errorf("%s: expected Function or Keyword kind, got %v for %s", tc.doc, item.Kind, item.Label)
 			}
 		}
 	}
@@ -415,7 +415,7 @@ func TestCompletionAfterClosedTag(t *testing.T) {
 
 	list := completionListFromResult(t, *result)
 	for _, item := range list.Items {
-		if item.Kind != protocol.CompletionItemKindFunction {
+		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("after closed tag should return functions, got kind %v for %s", item.Kind, item.Label)
 		}
 	}
@@ -539,7 +539,7 @@ func TestFindUnclosedTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findUnclosedTags(tt.content, tt.line, tt.char)
+			got := findUnclosedTags(tt.content, 0, tt.line, tt.char)
 			if len(got) != len(tt.want) {
 				t.Fatalf("findUnclosedTags() = %v, want %v", got, tt.want)
 			}

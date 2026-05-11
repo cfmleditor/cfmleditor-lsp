@@ -229,11 +229,25 @@ func varsInBody(body string) []string {
 }
 
 func globalVarsFromSegments(segments []string) []string {
+	vars := variablesVarsFromSegments(segments)
+	vars = append(vars, thisVarsFromSegments(segments)...)
+	return vars
+}
+
+// VariablesVarsFromLayout returns variables-scoped names from a precomputed FileLayout.
+func VariablesVarsFromLayout(fl *FileLayout) []string {
+	return variablesVarsFromSegments(fl.globalSegments)
+}
+
+// ThisVarsFromLayout returns this-scoped property names from a precomputed FileLayout.
+func ThisVarsFromLayout(fl *FileLayout) []string {
+	return thisVarsFromSegments(fl.globalSegments)
+}
+
+func thisVarsFromSegments(segments []string) []string {
 	seen := make(map[string]bool)
 	var names []string
-
 	for _, seg := range segments {
-		// this.x
 		for _, re := range []*regexp.Regexp{thisRe, tagThisRe} {
 			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {
 				name := seg[m[2]:m[3]]
@@ -243,7 +257,15 @@ func globalVarsFromSegments(segments []string) []string {
 				}
 			}
 		}
+	}
+	return names
+}
 
+func variablesVarsFromSegments(segments []string) []string {
+	seen := make(map[string]bool)
+	var names []string
+
+	for _, seg := range segments {
 		// variables.x
 		for _, re := range []*regexp.Regexp{variablesRe, tagVariablesRe} {
 			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {

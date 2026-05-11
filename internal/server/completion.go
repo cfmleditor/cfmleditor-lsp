@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +43,8 @@ var (
 func getBuiltinFuncItems() []protocol.CompletionItem {
 	builtinFuncItemsOnce.Do(func() {
 		fns := docs.AllFunctions()
-		builtinFuncItems = make([]protocol.CompletionItem, 0, len(fns))
+		scopes := []string{"VARIABLES", "ARGUMENTS", "THIS", "SERVER", "APPLICATION", "REQUEST", "SESSION"}
+		builtinFuncItems = make([]protocol.CompletionItem, 0, len(fns)+len(scopes))
 		for _, fn := range fns {
 			builtinFuncItems = append(builtinFuncItems, protocol.CompletionItem{
 				Label:            fn.Name,
@@ -49,6 +52,12 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 				Detail:           fn.Syntax,
 				Documentation:    fn.Description,
 				InsertTextFormat: protocol.InsertTextFormatPlainText,
+			})
+		}
+		for _, s := range scopes {
+			builtinFuncItems = append(builtinFuncItems, protocol.CompletionItem{
+				Label: s,
+				Kind:  protocol.CompletionItemKindKeyword,
 			})
 		}
 	})
@@ -78,8 +87,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, err)
 	}
 
-	items := []protocol.CompletionItem{}
-	tags := make(map[string]int)
+	items := []protocol.CompletionItem(nil)
 
 	content, hasDoc := s.getDocument(uri.URI(params.TextDocument.URI))
 
@@ -157,24 +165,37 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			t1 := time.Now()
 			trailingGt := -1
 			if hasDoc {
-				lines := strings.SplitAfter(content, "\n")
-				if int(params.Position.Line) < len(lines) {
-					lineText := lines[int(params.Position.Line)]
-					if int(params.Position.Character) < len(lineText) {
-						after := lineText[int(params.Position.Character):]
-						if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
-							trailingGt = int(params.Position.Character) + idx + 1
-						}
+				lineStart := 0
+				for i := 0; i < int(params.Position.Line); i++ {
+					idx := strings.IndexByte(content[lineStart:], '\n')
+					if idx < 0 {
+						lineStart = len(content)
+						break
+					}
+					lineStart += idx + 1
+				}
+				lineEnd := strings.IndexByte(content[lineStart:], '\n')
+				if lineEnd < 0 {
+					lineEnd = len(content) - lineStart
+				}
+				lineText := content[lineStart : lineStart+lineEnd]
+				charPos := int(params.Position.Character)
+				if charPos < len(lineText) {
+					after := lineText[charPos:]
+					if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
+						trailingGt = charPos + idx + 1
 					}
 				}
 			}
-			for _, tag := range findUnclosedTags(content, int(params.Position.Line), int(params.Position.Character)) {
+			tags := make(map[string]int)
+			for i, tag := range s.findUnclosedTagsScoped(content, uri.URI(params.TextDocument.URI), int(params.Position.Line), int(params.Position.Character)) {
 				_, ok := tags[tag]
 				if !ok {
 					item := protocol.CompletionItem{
-						Label:  tag,
-						Kind:   protocol.CompletionItemKindKeyword,
-						Detail: "Close tag",
+						Label:    tag,
+						Kind:     protocol.CompletionItemKindKeyword,
+						Detail:   "Close tag",
+						SortText: fmt.Sprintf("%04d", i),
 					}
 					if trailingGt >= 0 {
 						item.TextEdit = &protocol.TextEdit{
@@ -413,10 +434,40 @@ func isSubordinateTag(name string) bool {
 	return false
 }
 
-// findUnclosedTags scans the document up to the cursor and returns tag names
+// findUnclosedTagsScoped scans for unclosed tags within the enclosing function body,
+// falling back to the full file if the cursor is outside any function.
+func (s *Server) findUnclosedTagsScoped(content string, docURI uri.URI, line, char int) []string {
+	s.mu.RLock()
+	funcs := s.funcRanges[docURI]
+	s.mu.RUnlock()
+
+	startLine := 0
+	idx := sort.Search(len(funcs), func(i int) bool {
+		return funcs[i].End >= line
+	})
+	if idx < len(funcs) && line >= funcs[idx].Start {
+		startLine = funcs[idx].Start
+	}
+	return findUnclosedTags(content, startLine, line, char)
+}
+
+// findUnclosedTags scans the document from startLine to the cursor and returns tag names
 // that have been opened but not yet closed, most recent first.
-func findUnclosedTags(content string, line, char int) []string {
+func findUnclosedTags(content string, startLine, line, char int) []string {
 	text := textBeforeCursor(content, line, char)
+	// Trim to startLine offset
+	if startLine > 0 {
+		offset := 0
+		for i := 0; i < startLine; i++ {
+			idx := strings.IndexByte(text[offset:], '\n')
+			if idx < 0 {
+				offset = len(text)
+				break
+			}
+			offset += idx + 1
+		}
+		text = text[offset:]
+	}
 
 	var stack []string
 	i := 0
@@ -482,20 +533,19 @@ func findUnclosedTags(content string, line, char int) []string {
 }
 
 func textBeforeCursor(content string, line, char int) string {
-	lines := strings.SplitAfter(content, "\n")
-	if line >= len(lines) {
-		return content
-	}
-	var sb strings.Builder
+	offset := 0
 	for i := 0; i < line; i++ {
-		sb.WriteString(lines[i])
+		idx := strings.IndexByte(content[offset:], '\n')
+		if idx < 0 {
+			return content
+		}
+		offset += idx + 1
 	}
-	lineText := lines[line]
-	if char > len(lineText) {
-		char = len(lineText)
+	end := offset + char
+	if end > len(content) {
+		end = len(content)
 	}
-	sb.WriteString(lineText[:char])
-	return sb.String()
+	return content[:end]
 }
 
 // findEnclosingTag scans backwards from the cursor position to determine
@@ -635,17 +685,18 @@ func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.Comple
 		fileItems = getBuiltinFuncItems()
 	}
 
-	for _, f := range funcs {
-		if line >= f.Start && line <= f.End {
-			funcItems := s.compCache.GetFuncStale(docURI, f.Name)
-			if len(funcItems) == 0 {
-				return fileItems
-			}
-			items := make([]protocol.CompletionItem, 0, len(fileItems)+len(funcItems))
-			items = append(items, fileItems...)
-			items = append(items, funcItems...)
-			return items
+	idx := sort.Search(len(funcs), func(i int) bool {
+		return funcs[i].End >= line
+	})
+	if idx < len(funcs) && line >= funcs[idx].Start {
+		funcItems := s.compCache.GetFuncStale(docURI, funcs[idx].Name)
+		if len(funcItems) == 0 {
+			return fileItems
 		}
+		items := make([]protocol.CompletionItem, 0, len(fileItems)+len(funcItems))
+		items = append(items, fileItems...)
+		items = append(items, funcItems...)
+		return items
 	}
 
 	return fileItems
@@ -661,29 +712,29 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 	s.mu.RUnlock()
 
 	if editLine >= 0 {
-		for _, f := range funcs {
-			if editLine < f.Start || editLine > f.End {
-				continue
-			}
+		// Binary search — funcRanges is sorted by Start line
+		idx := sort.Search(len(funcs), func(i int) bool {
+			return funcs[i].End >= editLine
+		})
+		if idx < len(funcs) && editLine >= funcs[idx].Start {
+			f := funcs[idx]
 			hash := cache.HashScope(content, f.Start, f.End)
-			if s.compCache.GetFunc(docURI, f.Name, hash) != nil {
-				break
+			if s.compCache.GetFunc(docURI, f.Name, hash) == nil {
+				vars := parser.VarsInFunc(content, f.Start, f.End)
+				items := make([]protocol.CompletionItem, 0, len(vars))
+				for _, v := range vars {
+					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
+				}
+				s.compCache.PutFunc(docURI, f.Name, hash, items)
+				s.logger.Info("completion: func vars rebuilt",
+					zap.String("uri", string(docURI)),
+					zap.String("func", f.Name),
+					zap.Int("vars", len(vars)),
+					zap.Duration("dur", time.Since(start)),
+				)
 			}
-			vars := parser.VarsInFunc(content, f.Start, f.End)
-			items := make([]protocol.CompletionItem, 0, len(vars))
-			for _, v := range vars {
-				items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
-			}
-			s.compCache.PutFunc(docURI, f.Name, hash, items)
-			break
 		}
 	}
-
-	s.logger.Info("completion: cache rebuilt",
-		zap.String("uri", string(docURI)),
-		zap.Int("scopes", len(funcs)+1),
-		zap.Duration("dur", time.Since(start)),
-	)
 }
 
 // rebuildFileCompletionCache rebuilds the file-level completion cache (builtins + globals).
@@ -694,6 +745,7 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 	if !ok {
 		return
 	}
+	start := time.Now()
 	builtins := getBuiltinFuncItems()
 	layout := parser.NewFileLayout(content)
 	globals := parser.GlobalVarsFromLayout(layout)
@@ -703,6 +755,24 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 		items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
 	}
 	s.compCache.PutFile(docURI, items)
+
+	// Store scope-specific items for dot completion
+	varsItems := make([]protocol.CompletionItem, 0)
+	for _, v := range parser.VariablesVarsFromLayout(layout) {
+		varsItems = append(varsItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
+	}
+	s.compCache.PutFunc(docURI, "__variables__", 0, varsItems)
+
+	thisItems := make([]protocol.CompletionItem, 0)
+	for _, v := range parser.ThisVarsFromLayout(layout) {
+		thisItems = append(thisItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindProperty})
+	}
+	s.compCache.PutFunc(docURI, "__this__", 0, thisItems)
+	s.logger.Info("completion: file globals rebuilt",
+		zap.String("uri", string(docURI)),
+		zap.Int("globals", len(globals)),
+		zap.Duration("dur", time.Since(start)),
+	)
 }
 
 // funcRangesForContent returns function line ranges for cache scope detection.
@@ -727,6 +797,41 @@ func (s *Server) funcRangesForContent(docURI uri.URI, content string) []cache.Fu
 	return ranges
 }
 
+// scopeArgumentsCompletion returns the declared arguments for the enclosing function.
+func (s *Server) scopeArgumentsCompletion(docURI uri.URI, line int) []protocol.CompletionItem {
+	s.mu.RLock()
+	funcs := s.funcRanges[docURI]
+	s.mu.RUnlock()
+
+	idx := sort.Search(len(funcs), func(i int) bool {
+		return funcs[i].End >= line
+	})
+	if idx >= len(funcs) || line < funcs[idx].Start {
+		return nil
+	}
+	funcName := funcs[idx].Name
+
+	defs := s.index.FunctionsForFile(docURI)
+	for _, d := range defs {
+		if strings.EqualFold(d.Name, funcName) {
+			items := make([]protocol.CompletionItem, 0, len(d.Arguments))
+			for _, arg := range d.Arguments {
+				detail := arg.Type
+				if arg.Required {
+					detail += " required"
+				}
+				items = append(items, protocol.CompletionItem{
+					Label:  arg.Name,
+					Kind:   protocol.CompletionItemKindVariable,
+					Detail: strings.TrimSpace(detail),
+				})
+			}
+			return items
+		}
+	}
+	return nil
+}
+
 // dotCompletionMethods returns completion items for methods on a component
 // instance variable. It extracts the word before the dot, looks up the
 // component ref, resolves the CFC path, and returns its function defs.
@@ -735,6 +840,16 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	varName := wordBeforeDot(content, line, char)
 	if varName == "" {
 		return nil
+	}
+
+	// Scope dot completion: VARIABLES., ARGUMENTS., THIS.
+	switch strings.ToUpper(varName) {
+	case "VARIABLES":
+		return s.compCache.GetFuncStale(docURI, "__variables__")
+	case "THIS":
+		return s.compCache.GetFuncStale(docURI, "__this__")
+	case "ARGUMENTS":
+		return s.scopeArgumentsCompletion(docURI, line)
 	}
 
 	// Look up component ref for this variable in the current file
