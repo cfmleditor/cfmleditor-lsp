@@ -106,7 +106,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.funcRanges[docURI] = s.funcRangesForContent(docURI, params.TextDocument.Text)
 	s.mu.Unlock()
 
-	go s.rebuildCompletionCache(docURI, params.TextDocument.Text)
+	go s.rebuildFileCompletionCache(docURI)
 	s.logger.Info("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -149,17 +149,16 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	s.setDocument(docURI, content)
 
+	editLine := int(params.ContentChanges[0].Range.Start.Line)
+
 	switch {
 	case !editInFuncBody:
 		s.reindexIfCFC(docURI, content)
 		s.mu.Lock()
 		s.funcRanges[docURI] = s.funcRangesForContent(docURI, content)
 		s.mu.Unlock()
-		// Immediate rebuild — structure changed
-		go s.rebuildCompletionCache(docURI, content)
 	case lineDelta != 0:
 		// Shift function ranges and index line numbers for functions below the edit
-		editLine := int(params.ContentChanges[0].Range.Start.Line)
 		s.mu.Lock()
 		ranges := s.funcRanges[docURI]
 		for i := range ranges {
@@ -174,10 +173,10 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.mu.Unlock()
 		s.index.ShiftLines(docURI, editLine, lineDelta)
 		// Debounced rebuild — only local vars changed
-		s.debounceCacheRebuild(docURI, content)
+		s.debounceCacheRebuild(docURI, content, editLine)
 	default:
 		// No line change, still inside function — debounce
-		s.debounceCacheRebuild(docURI, content)
+		s.debounceCacheRebuild(docURI, content, editLine)
 	}
 
 	return reply(ctx, nil, nil)
@@ -209,13 +208,13 @@ func (s *Server) isEditInsideFuncBody(docURI uri.URI, r protocol.Range) bool {
 const cacheRebuildDelay = 150 * time.Millisecond
 
 // debounceCacheRebuild resets the debounce timer for a file's completion cache rebuild.
-func (s *Server) debounceCacheRebuild(docURI uri.URI, content string) {
+func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine int) {
 	s.mu.Lock()
 	if t, ok := s.cacheTimers[docURI]; ok {
 		t.Stop()
 	}
 	s.cacheTimers[docURI] = time.AfterFunc(cacheRebuildDelay, func() {
-		s.rebuildCompletionCache(docURI, content)
+		s.rebuildCompletionCache(docURI, content, editLine)
 	})
 	s.mu.Unlock()
 }
@@ -275,6 +274,7 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	docURI := uri.URI(params.TextDocument.URI)
 	go s.runDiagnostics(ctx, docURI)
+	go s.rebuildFileCompletionCache(docURI)
 
 	return reply(ctx, nil, nil)
 }

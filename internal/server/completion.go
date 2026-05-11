@@ -117,16 +117,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 	switch {
 	case inHashExpr:
-		if cached := s.completionFromCache(content, uri.URI(params.TextDocument.URI), int(params.Position.Line)); cached != nil {
-			items = cached
-		} else {
-			items = append(items, getBuiltinFuncItems()...)
-			if CompletionLocalVariables && hasDoc {
-				for _, v := range parser.VarsAt(content, int(params.Position.Line)) {
-					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
-				}
-			}
-		}
+		items = s.completionFromCache(uri.URI(params.TextDocument.URI), int(params.Position.Line))
 	case inAttrValue:
 		if CompletionAttributes {
 			attrName := findCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
@@ -283,16 +274,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	default:
-		if cached := s.completionFromCache(content, uri.URI(params.TextDocument.URI), int(params.Position.Line)); cached != nil {
-			items = cached
-		} else {
-			items = append(items, getBuiltinFuncItems()...)
-			if CompletionLocalVariables && hasDoc {
-				for _, v := range parser.VarsAt(content, int(params.Position.Line)) {
-					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
-				}
-			}
-		}
+		items = s.completionFromCache(uri.URI(params.TextDocument.URI), int(params.Position.Line))
 	}
 
 	s.logger.Info("completion: total",
@@ -641,47 +623,60 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 	}, true
 }
 
-// completionFromCache returns cached items for the cursor's scope, or nil on miss.
-func (s *Server) completionFromCache(content string, docURI uri.URI, line int) []protocol.CompletionItem {
-	funcs := s.funcRangesForContent(docURI, content)
+// completionFromCache returns cached items for the cursor's scope.
+// File cache already contains builtins + globals. Function cache has local vars only.
+func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.CompletionItem {
+	s.mu.RLock()
+	funcs := s.funcRanges[docURI]
+	s.mu.RUnlock()
+
+	fileItems := s.compCache.GetFile(docURI)
+	if fileItems == nil {
+		fileItems = getBuiltinFuncItems()
+	}
+
 	for _, f := range funcs {
 		if line >= f.Start && line <= f.End {
-			hash := cache.HashScope(content, f.Start, f.End)
-			return s.compCache.GetFunc(docURI, f.Name, hash)
+			funcItems := s.compCache.GetFuncStale(docURI, f.Name)
+			if len(funcItems) == 0 {
+				return fileItems
+			}
+			items := make([]protocol.CompletionItem, 0, len(fileItems)+len(funcItems))
+			items = append(items, fileItems...)
+			items = append(items, funcItems...)
+			return items
 		}
 	}
-	hash := cache.HashScope(content, 0, strings.Count(content, "\n"))
-	return s.compCache.GetFile(docURI, hash)
+
+	return fileItems
 }
 
-// rebuildCompletionCache pre-computes completion items for all scopes in a file.
-func (s *Server) rebuildCompletionCache(docURI uri.URI, content string) {
+// rebuildCompletionCache pre-computes completion items for scopes in a file.
+// editLine indicates which line was edited; only the function containing that line
+// has its local vars scanned. Pass -1 to skip function scanning (file-level only).
+func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine int) {
 	start := time.Now()
-	funcs := s.funcRangesForContent(docURI, content)
-	builtins := getBuiltinFuncItems()
+	s.mu.RLock()
+	funcs := s.funcRanges[docURI]
+	s.mu.RUnlock()
 
-	for _, f := range funcs {
-		hash := cache.HashScope(content, f.Start, f.End)
-		if s.compCache.GetFunc(docURI, f.Name, hash) != nil {
-			continue
+	if editLine >= 0 {
+		for _, f := range funcs {
+			if editLine < f.Start || editLine > f.End {
+				continue
+			}
+			hash := cache.HashScope(content, f.Start, f.End)
+			if s.compCache.GetFunc(docURI, f.Name, hash) != nil {
+				break
+			}
+			vars := parser.VarsInFunc(content, f.Start, f.End)
+			items := make([]protocol.CompletionItem, 0, len(vars))
+			for _, v := range vars {
+				items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
+			}
+			s.compCache.PutFunc(docURI, f.Name, hash, items)
+			break
 		}
-		items := make([]protocol.CompletionItem, 0, len(builtins)+8)
-		items = append(items, builtins...)
-		for _, v := range parser.VarsAt(content, f.End) {
-			items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
-		}
-		s.compCache.PutFunc(docURI, f.Name, hash, items)
-	}
-
-	fileHash := cache.HashScope(content, 0, strings.Count(content, "\n"))
-	if s.compCache.GetFile(docURI, fileHash) == nil {
-		items := make([]protocol.CompletionItem, 0, len(builtins)+8)
-		items = append(items, builtins...)
-		lastLine := strings.Count(content, "\n")
-		for _, v := range parser.VarsAt(content, lastLine) {
-			items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
-		}
-		s.compCache.PutFile(docURI, fileHash, items)
 	}
 
 	s.logger.Info("completion: cache rebuilt",
@@ -689,6 +684,25 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string) {
 		zap.Int("scopes", len(funcs)+1),
 		zap.Duration("dur", time.Since(start)),
 	)
+}
+
+// rebuildFileCompletionCache rebuilds the file-level completion cache (builtins + globals).
+// Called on didOpen and didSave. Builtins are included here since this only runs
+// on open/save, avoiding per-request copies.
+func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
+	content, ok := s.getDocument(docURI)
+	if !ok {
+		return
+	}
+	builtins := getBuiltinFuncItems()
+	layout := parser.NewFileLayout(content)
+	globals := parser.GlobalVarsFromLayout(layout)
+	items := make([]protocol.CompletionItem, 0, len(builtins)+len(globals))
+	items = append(items, builtins...)
+	for _, v := range globals {
+		items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
+	}
+	s.compCache.PutFile(docURI, items)
 }
 
 // funcRangesForContent returns function line ranges for cache scope detection.

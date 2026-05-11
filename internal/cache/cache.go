@@ -64,6 +64,21 @@ func (c *Cache) GetFunc(fileURI uri.URI, funcName string, hash uint64) []protoco
 	return nil
 }
 
+// GetFuncStale returns cached items for a function scope ignoring hash (stale OK).
+func (c *Cache) GetFuncStale(fileURI uri.URI, funcName string) []protocol.CompletionItem {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	fc := c.files[fileURI]
+	if fc == nil {
+		return nil
+	}
+	e := fc.funcs[funcName]
+	if e != nil {
+		return e.Items
+	}
+	return nil
+}
+
 // PutFunc stores items for a function scope.
 func (c *Cache) PutFunc(fileURI uri.URI, funcName string, hash uint64, items []protocol.CompletionItem) {
 	c.mu.Lock()
@@ -72,26 +87,23 @@ func (c *Cache) PutFunc(fileURI uri.URI, funcName string, hash uint64, items []p
 	fc.funcs[funcName] = &scopeEntry{Items: items, Hash: hash}
 }
 
-// GetFile returns cached items for the file/component scope, or nil on miss.
-func (c *Cache) GetFile(fileURI uri.URI, hash uint64) []protocol.CompletionItem {
+// GetFile returns cached items for the file/component scope, or nil if not set.
+func (c *Cache) GetFile(fileURI uri.URI) []protocol.CompletionItem {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	fc := c.files[fileURI]
 	if fc == nil || fc.fileScope == nil {
 		return nil
 	}
-	if fc.fileScope.Hash == hash {
-		return fc.fileScope.Items
-	}
-	return nil
+	return fc.fileScope.Items
 }
 
 // PutFile stores items for the file/component scope.
-func (c *Cache) PutFile(fileURI uri.URI, hash uint64, items []protocol.CompletionItem) {
+func (c *Cache) PutFile(fileURI uri.URI, items []protocol.CompletionItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	fc := c.getOrCreateFile(fileURI)
-	fc.fileScope = &scopeEntry{Items: items, Hash: hash}
+	fc.fileScope = &scopeEntry{Items: items}
 }
 
 // Invalidate removes all cached entries for a file.
@@ -103,16 +115,28 @@ func (c *Cache) Invalidate(fileURI uri.URI) {
 
 // HashScope computes a fast hash of content lines [startLine, endLine].
 func HashScope(content string, startLine, endLine int) uint64 {
-	lines := strings.SplitAfter(content, "\n")
 	h := fnv.New64a()
-	if startLine < 0 {
-		startLine = 0
+	line := 0
+	i := 0
+	// Skip to startLine
+	for line < startLine && i < len(content) {
+		idx := strings.IndexByte(content[i:], '\n')
+		if idx < 0 {
+			return h.Sum64()
+		}
+		i += idx + 1
+		line++
 	}
-	if endLine >= len(lines) {
-		endLine = len(lines) - 1
-	}
-	for i := startLine; i <= endLine; i++ {
-		h.Write([]byte(lines[i]))
+	// Hash lines [startLine, endLine]
+	for line <= endLine && i < len(content) {
+		idx := strings.IndexByte(content[i:], '\n')
+		if idx < 0 {
+			h.Write([]byte(content[i:]))
+			break
+		}
+		h.Write([]byte(content[i : i+idx+1]))
+		i += idx + 1
+		line++
 	}
 	return h.Sum64()
 }

@@ -147,45 +147,241 @@ func ParseVars(content string) []VarDef {
 	return defs
 }
 
-// VarsAt returns variable names visible at the given line position,
-// respecting CFML scope visibility rules:
-//   - local/arguments: only inside the declaring function
-//   - this/variables: anywhere in the file
-//   - file-scope vars: visible everywhere (lexical scoping)
-func VarsAt(content string, line int) []string {
-	defs := ParseVars(content)
-	scopes := findFuncScopes(content)
-	curScope := findScope(line, scopes)
+// FileLayout holds precomputed byte ranges for a file, allowing GlobalVars
+// and VarsInFunc to skip recomputation.
+type FileLayout struct {
+	content        string
+	globalSegments []string // non-function, non-comment code segments
+	funcByteRanges [][2]int // [start, end) for each function
+}
 
+// NewFileLayout computes and caches the structural layout of a file.
+func NewFileLayout(content string) *FileLayout {
+	fl := &FileLayout{content: content}
+	comments := findCommentSpans(content)
+	fl.funcByteRanges = findFuncByteRangesWithComments(content, comments)
+	fl.globalSegments = computeGlobalSegments(content, fl.funcByteRanges, comments)
+	return fl
+}
+
+// VarsInFunc returns only local/arguments variable names within the function
+// that spans [funcStart, funcEnd].
+func VarsInFunc(content string, funcStart, funcEnd int) []string {
+	start, end := lineOffsets(content, funcStart, funcEnd)
+	if start < 0 {
+		return nil
+	}
+	body := content[start:end]
+	return varsInBody(body)
+}
+
+// GlobalVars returns this.x and variables.x names declared outside any function.
+func GlobalVars(content string) []string {
+	return globalVarsFromSegments(nonFuncSegments(content))
+}
+
+// GlobalVarsFromLayout returns global vars using a precomputed FileLayout.
+func GlobalVarsFromLayout(fl *FileLayout) []string {
+	return globalVarsFromSegments(fl.globalSegments)
+}
+
+// VarsInFuncFromLayout returns function-local vars using a precomputed FileLayout.
+func VarsInFuncFromLayout(fl *FileLayout, funcStart, funcEnd int) []string {
+	start, end := lineOffsets(fl.content, funcStart, funcEnd)
+	if start < 0 {
+		return nil
+	}
+	return varsInBody(fl.content[start:end])
+}
+
+func varsInBody(body string) []string {
 	seen := make(map[string]bool)
 	var names []string
 
-	for _, d := range defs {
-		if d.Line > uint32(line) {
-			continue
-		}
-		visible := false
-		switch d.Scope {
-		case ScopeLocal, ScopeArguments:
-			// Only visible inside the same function
-			visible = d.FuncStart == curScope.Start && d.FuncEnd == curScope.End
-		case ScopeThis, ScopeVariables:
-			// Visible anywhere in the file
-			visible = true
-		}
-		if visible && !seen[d.Name] {
-			seen[d.Name] = true
-			names = append(names, d.Name)
+	// local.x and var x
+	for _, re := range []*regexp.Regexp{localVarRe, tagLocalRe} {
+		for _, m := range re.FindAllStringSubmatchIndex(body, -1) {
+			var name string
+			if m[2] >= 0 {
+				name = body[m[2]:m[3]]
+			} else if m[4] >= 0 {
+				name = body[m[4]:m[5]]
+			}
+			if name != "" && !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
 		}
 	}
+
+	// arguments.x
+	for _, re := range []*regexp.Regexp{argsRe, tagArgsRe} {
+		for _, m := range re.FindAllStringSubmatchIndex(body, -1) {
+			name := body[m[2]:m[3]]
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+
 	return names
 }
 
+func globalVarsFromSegments(segments []string) []string {
+	seen := make(map[string]bool)
+	var names []string
+
+	for _, seg := range segments {
+		// this.x
+		for _, re := range []*regexp.Regexp{thisRe, tagThisRe} {
+			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {
+				name := seg[m[2]:m[3]]
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+
+		// variables.x
+		for _, re := range []*regexp.Regexp{variablesRe, tagVariablesRe} {
+			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {
+				name := seg[m[2]:m[3]]
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+
+		// var x / local.x outside functions → variables scope
+		for _, re := range []*regexp.Regexp{localVarRe, tagLocalRe} {
+			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {
+				var name string
+				if m[2] >= 0 {
+					name = seg[m[2]:m[3]]
+				} else if m[4] >= 0 {
+					name = seg[m[4]:m[5]]
+				}
+				if name != "" && !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+
+		// Plain x = ...
+		for _, re := range []*regexp.Regexp{plainAssignRe, tagPlainRe} {
+			for _, m := range re.FindAllStringSubmatchIndex(seg, -1) {
+				name := seg[m[2]:m[3]]
+				if !isKeyword(name) && !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+	}
+
+	return names
+}
+
+// computeGlobalSegments returns non-function, non-comment code segments.
+func computeGlobalSegments(content string, funcRanges [][2]int, comments []span) []string {
+	// Collect all ranges to exclude (functions + comments)
+	excluded := make([][2]int, len(funcRanges), len(funcRanges)+len(comments))
+	copy(excluded, funcRanges)
+	for _, s := range comments {
+		excluded = append(excluded, [2]int{s.Start, s.End})
+	}
+
+	// Sort by start offset
+	for i := 1; i < len(excluded); i++ {
+		for j := i; j > 0 && excluded[j][0] < excluded[j-1][0]; j-- {
+			excluded[j], excluded[j-1] = excluded[j-1], excluded[j]
+		}
+	}
+
+	var segments []string
+	pos := 0
+	for _, r := range excluded {
+		if r[0] > pos {
+			seg := content[pos:r[0]]
+			if strings.TrimSpace(seg) != "" {
+				segments = append(segments, seg)
+			}
+		}
+		if r[1] > pos {
+			pos = r[1]
+		}
+	}
+	if pos < len(content) {
+		seg := content[pos:]
+		if strings.TrimSpace(seg) != "" {
+			segments = append(segments, seg)
+		}
+	}
+	return segments
+}
+
+// nonFuncSegments returns substrings of content that are outside function bodies
+// and comments.
+func nonFuncSegments(content string) []string {
+	comments := findCommentSpans(content)
+	return computeGlobalSegments(content, findFuncByteRangesWithComments(content, comments), comments)
+}
+
+// findFuncByteRangesWithComments returns [start, end) byte ranges using precomputed comments.
+func findFuncByteRangesWithComments(content string, comments []span) [][2]int {
+	scopes := findFuncScopesWithComments(content, comments)
+	ranges := make([][2]int, 0, len(scopes))
+	for _, s := range scopes {
+		start, end := lineOffsets(content, s.Start, s.End)
+		if start >= 0 {
+			ranges = append(ranges, [2]int{start, end})
+		}
+	}
+	return ranges
+}
+
+// lineOffsets converts line numbers to byte offsets in content.
+// Returns start offset of startLine and end offset (after newline) of endLine.
+func lineOffsets(content string, startLine, endLine int) (int, int) {
+	start := 0
+	line := 0
+	for line < startLine {
+		idx := strings.IndexByte(content[start:], '\n')
+		if idx < 0 {
+			return -1, -1
+		}
+		start += idx + 1
+		line++
+	}
+	end := start
+	for line <= endLine {
+		idx := strings.IndexByte(content[end:], '\n')
+		if idx < 0 {
+			end = len(content)
+			break
+		}
+		end += idx + 1
+		line++
+	}
+	return start, end
+}
+
 func findFuncScopes(content string) []FuncScope {
+	return findFuncScopesWithComments(content, findCommentSpans(content))
+}
+
+func findFuncScopesWithComments(content string, comments []span) []FuncScope {
 	var scopes []FuncScope
 	lines := strings.Split(content, "\n")
 
 	for _, m := range scriptFuncStartRe.FindAllStringIndex(content, -1) {
+		if inComment(m[0], comments) {
+			continue
+		}
 		startLine := strings.Count(content[:m[0]], "\n")
 		bracePos := m[1] - 1
 		endLine := findMatchingBrace(content, bracePos)
@@ -193,6 +389,9 @@ func findFuncScopes(content string) []FuncScope {
 	}
 
 	for _, ms := range tagFuncStartRe.FindAllStringIndex(content, -1) {
+		if inComment(ms[0], comments) {
+			continue
+		}
 		startLine := strings.Count(content[:ms[0]], "\n")
 		rest := content[ms[1]:]
 		endMatch := tagFuncEndRe.FindStringIndex(rest)

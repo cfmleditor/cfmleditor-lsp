@@ -28,8 +28,8 @@ func TestGetFunc_MissHash(t *testing.T) {
 
 func TestGetFile_Hit(t *testing.T) {
 	c := New()
-	c.PutFile(testURI, 200, []protocol.CompletionItem{{Label: "y"}})
-	got := c.GetFile(testURI, 200)
+	c.PutFile(testURI, []protocol.CompletionItem{{Label: "y"}})
+	got := c.GetFile(testURI)
 	if len(got) != 1 || got[0].Label != "y" {
 		t.Errorf("expected hit, got %v", got)
 	}
@@ -38,9 +38,9 @@ func TestGetFile_Hit(t *testing.T) {
 func TestInvalidate(t *testing.T) {
 	c := New()
 	c.PutFunc(testURI, "init", 1, []protocol.CompletionItem{{Label: "a"}})
-	c.PutFile(testURI, 2, []protocol.CompletionItem{{Label: "b"}})
+	c.PutFile(testURI, []protocol.CompletionItem{{Label: "b"}})
 	c.Invalidate(testURI)
-	if c.GetFunc(testURI, "init", 1) != nil || c.GetFile(testURI, 2) != nil {
+	if c.GetFunc(testURI, "init", 1) != nil || c.GetFile(testURI) != nil {
 		t.Error("expected all cleared")
 	}
 }
