@@ -72,6 +72,11 @@ func main() {
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 
+	if err := os.MkdirAll("internal/docs", 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	out, err := os.Create("internal/docs/generated_docs.go")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
