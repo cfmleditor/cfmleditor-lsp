@@ -35,7 +35,7 @@ go.work.sum
 target/
 
 # Downloaded Lucee docs (fetched at build time)
-docs/
-docs/data/
-docs/.etag
-docs/.sha-cfdocs
+/docs/
+/docs/data/
+/docs/.etag
+/docs/.sha-cfdocs
