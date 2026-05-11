@@ -21,6 +21,7 @@ type Server struct {
 	conn        jsonrpc2.Conn
 	logger      *zap.Logger
 	initialized bool
+	Version     string
 
 	mu               sync.RWMutex
 	documents        map[uri.URI]string

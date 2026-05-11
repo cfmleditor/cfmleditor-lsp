@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
@@ -12,7 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var version = "dev"
+
 func main() {
+	fmt.Fprintf(os.Stderr, "cfmleditor-lsp %s\n", version)
 	logger, _ := zap.NewProduction()
 	defer func() { _ = logger.Sync() }()
 	cwd, _ := os.Getwd()
@@ -44,6 +48,7 @@ func main() {
 		stream := jsonrpc2.NewStream(newStdio())
 		conn := jsonrpc2.NewConn(stream)
 		srv := server.NewServer(conn, logger, sharedIndex)
+		srv.Version = version
 		srv.WorkspaceFolders = folders
 		srv.IndexGlobs = globs
 		conn.Go(ctx, srv.Handler())
@@ -62,6 +67,7 @@ func main() {
 	stream := jsonrpc2.NewStream(newStdio())
 	conn := jsonrpc2.NewConn(stream)
 	srv := server.NewServer(conn, logger)
+	srv.Version = version
 	conn.Go(context.Background(), srv.Handler())
 	<-conn.Done()
 }

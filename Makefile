@@ -1,5 +1,6 @@
 BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
+VERSION := $(shell cat VERSION)
 
 .PHONY: build test install clean docs docs-cfdocs docs-lucee generate
 
@@ -16,7 +17,7 @@ generate: docs
 
 build: generate
 	@mkdir -p target/release
-	go build -trimpath -ldflags="-s -w" -o $(OUT) ./cmd/cfmleditor-lsp
+	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp
 
 test:
 	go test ./...

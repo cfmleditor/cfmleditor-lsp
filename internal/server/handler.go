@@ -86,7 +86,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		Capabilities: s.capabilities(),
 		ServerInfo: &protocol.ServerInfo{
 			Name:    "cfmleditor-lsp",
-			Version: "0.1.0",
+			Version: s.Version,
 		},
 	}, nil)
 }
