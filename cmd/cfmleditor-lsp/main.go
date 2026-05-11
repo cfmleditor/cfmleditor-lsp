@@ -39,9 +39,10 @@ func main() {
 		ct := daemon.NewConnTracker()
 		folders := cfg.WorkspaceFolders()
 		globs := cfg.IndexGlobs()
+		mappings := cfg.Mappings()
 
 		// Serve the socket listener in the background
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs) }()
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -51,6 +52,7 @@ func main() {
 		srv.Version = version
 		srv.WorkspaceFolders = folders
 		srv.IndexGlobs = globs
+		srv.Mappings = mappings
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			<-conn.Done()

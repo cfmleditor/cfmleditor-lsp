@@ -6,21 +6,21 @@ import (
 	"testing"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 func parse(t *testing.T, src string) *sitter.Tree {
 	t.Helper()
-	return parser.Parse(parser.CFML, []byte(src), nil)
+	return language.Parse(language.CFML, []byte(src), nil)
 }
 
 func testOpts() Options {
 	opts := DefaultOptions()
 	opts.ParseScript = func(src []byte) *sitter.Tree {
-		return parser.Parse(parser.CFScript, src, nil)
+		return language.Parse(language.CFScript, src, nil)
 	}
 	opts.ParseQuery = func(src []byte) *sitter.Tree {
-		return parser.Parse(parser.CFQuery, src, nil)
+		return language.Parse(language.CFQuery, src, nil)
 	}
 	return opts
 }

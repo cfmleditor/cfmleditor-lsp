@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/funcdef"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -592,7 +592,7 @@ func TestParseFunctionDefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := funcdef.ParseFunctionDefs("file:///test.cfc", tt.content)
+			defs := parser.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}
@@ -1305,5 +1305,99 @@ func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
 	}
 	if len(edits) != 0 {
 		t.Errorf("expected no edits, got %d", len(edits))
+	}
+}
+
+func TestCompletionDotComponentMethods(t *testing.T) {
+	// Create a temp CFC file with functions
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "models")
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.WriteFile(filepath.Join(sub, "User.cfc"), []byte("component {\nfunction getName() {}\nfunction setName(required string name) {}\n}"), 0o644)
+
+	// Set up server with a document that references the CFC
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "userObj = new models.User()\nuserObj."
+	srv.setDocument(docURI, docContent)
+
+	// Index the document so the compref is stored
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 2 {
+		t.Fatalf("expected 2 method completions, got %d", len(list.Items))
+	}
+
+	found := map[string]bool{}
+	for _, item := range list.Items {
+		found[item.Label] = true
+		if item.Kind != protocol.CompletionItemKindMethod {
+			t.Errorf("expected Method kind for %s, got %v", item.Label, item.Kind)
+		}
+	}
+	if !found["getName"] || !found["setName"] {
+		t.Errorf("expected getName and setName, got %v", found)
+	}
+}
+
+func TestCompletionDotPositionAware(t *testing.T) {
+	// Create two CFC files with different methods
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), []byte("component {\nfunction getName() {}\n}"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Order.cfc"), []byte("component {\nfunction getTotal() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	// myObj assigned to User on line 0, reassigned to Order on line 2
+	docContent := "myObj = new models.User()\nmyObj.getName()\nmyObj = new models.Order()\nmyObj."
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 6}, // after "myObj." on line 3
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 method (getTotal), got %d: %v", len(list.Items), list.Items)
+	}
+	if list.Items[0].Label != "getTotal" {
+		t.Errorf("expected getTotal, got %s", list.Items[0].Label)
 	}
 }

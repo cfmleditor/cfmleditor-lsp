@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -100,6 +101,12 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
 	s.reindexIfCFC(docURI, params.TextDocument.Text)
+
+	s.mu.Lock()
+	s.funcRanges[docURI] = s.funcRangesForContent(docURI, params.TextDocument.Text)
+	s.mu.Unlock()
+
+	go s.rebuildCompletionCache(docURI, params.TextDocument.Text)
 	s.logger.Info("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -112,13 +119,130 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	}
 
 	docURI := uri.URI(params.TextDocument.URI)
-	if len(params.ContentChanges) > 0 {
-		newText := params.ContentChanges[len(params.ContentChanges)-1].Text
-		s.setDocument(docURI, newText)
-		s.reindexIfCFC(docURI, newText)
+	if len(params.ContentChanges) == 0 {
+		return reply(ctx, nil, nil)
+	}
+
+	content, ok := s.getDocument(docURI)
+	if !ok {
+		return reply(ctx, nil, nil)
+	}
+
+	// Track edit lines before applying
+	editInFuncBody := true
+	var lineDelta int
+	for _, change := range params.ContentChanges {
+		if change.Range == (protocol.Range{}) && change.RangeLength == 0 {
+			editInFuncBody = false
+			content = change.Text
+		} else {
+			if editInFuncBody && !s.isEditInsideFuncBody(docURI, change.Range) {
+				editInFuncBody = false
+			}
+			// Compute line delta: new lines in text minus replaced lines
+			oldLines := int(change.Range.End.Line) - int(change.Range.Start.Line)
+			newLines := strings.Count(change.Text, "\n")
+			lineDelta += newLines - oldLines
+			content = applyEdit(content, change.Range, change.Text)
+		}
+	}
+
+	s.setDocument(docURI, content)
+
+	if !editInFuncBody {
+		s.reindexIfCFC(docURI, content)
+		s.mu.Lock()
+		s.funcRanges[docURI] = s.funcRangesForContent(docURI, content)
+		s.mu.Unlock()
+		// Immediate rebuild — structure changed
+		go s.rebuildCompletionCache(docURI, content)
+	} else if lineDelta != 0 {
+		// Shift function ranges and index line numbers for functions below the edit
+		editLine := int(params.ContentChanges[0].Range.Start.Line)
+		s.mu.Lock()
+		ranges := s.funcRanges[docURI]
+		for i := range ranges {
+			if ranges[i].Start > editLine {
+				ranges[i].Start += lineDelta
+				ranges[i].End += lineDelta
+			} else if ranges[i].End >= editLine {
+				// Edit is inside this function — only end shifts
+				ranges[i].End += lineDelta
+			}
+		}
+		s.mu.Unlock()
+		s.index.ShiftLines(docURI, editLine, lineDelta)
+		// Debounced rebuild — only local vars changed
+		s.debounceCacheRebuild(docURI, content)
+	} else {
+		// No line change, still inside function — debounce
+		s.debounceCacheRebuild(docURI, content)
 	}
 
 	return reply(ctx, nil, nil)
+}
+
+// isEditInsideFuncBody returns true if the edit range falls entirely within
+// a known function body (not on the signature line itself).
+func (s *Server) isEditInsideFuncBody(docURI uri.URI, r protocol.Range) bool {
+	s.mu.RLock()
+	ranges := s.funcRanges[docURI]
+	s.mu.RUnlock()
+
+	if len(ranges) == 0 {
+		return false
+	}
+
+	startLine := int(r.Start.Line)
+	endLine := int(r.End.Line)
+
+	for _, f := range ranges {
+		// Edit must be strictly inside the function (after signature line)
+		if startLine > f.Start && endLine <= f.End {
+			return true
+		}
+	}
+	return false
+}
+
+const cacheRebuildDelay = 150 * time.Millisecond
+
+// debounceCacheRebuild resets the debounce timer for a file's completion cache rebuild.
+func (s *Server) debounceCacheRebuild(docURI uri.URI, content string) {
+	s.mu.Lock()
+	if t, ok := s.cacheTimers[docURI]; ok {
+		t.Stop()
+	}
+	s.cacheTimers[docURI] = time.AfterFunc(cacheRebuildDelay, func() {
+		s.rebuildCompletionCache(docURI, content)
+	})
+	s.mu.Unlock()
+}
+
+// applyEdit replaces the text in the given range with newText.
+func applyEdit(content string, r protocol.Range, newText string) string {
+	offset := positionToOffset(content, r.Start)
+	endOffset := positionToOffset(content, r.End)
+	return content[:offset] + newText + content[endOffset:]
+}
+
+// positionToOffset converts a line/character position to a byte offset.
+func positionToOffset(content string, pos protocol.Position) int {
+	line := int(pos.Line)
+	char := int(pos.Character)
+	offset := 0
+	for i := 0; i < line; i++ {
+		idx := strings.IndexByte(content[offset:], '\n')
+		if idx < 0 {
+			return len(content)
+		}
+		offset += idx + 1
+	}
+	offset += char
+	if offset > len(content) {
+		offset = len(content)
+	}
+	return offset
 }
 
 func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -214,10 +338,13 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
-	if !strings.HasSuffix(strings.ToLower(string(docURI)), ".cfc") {
+	lower := strings.ToLower(string(docURI))
+	isCFC := strings.HasSuffix(lower, ".cfc")
+	isCFML := isCFC || strings.HasSuffix(lower, ".cfm") || strings.HasSuffix(lower, ".cfml") || strings.HasSuffix(lower, ".cfs")
+	if !isCFML {
 		return
 	}
-	if len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
+	if isCFC && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
 		return
 	}
 	s.index.IndexFile(docURI, content)

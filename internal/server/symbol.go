@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/funcdef"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -23,7 +23,7 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 		return reply(ctx, nil, nil)
 	}
 
-	defs := funcdef.ParseFunctionDefs(docURI, content)
+	defs := parser.ParseFunctionDefs(docURI, content)
 	symbols := make([]protocol.DocumentSymbol, 0, len(defs))
 	for _, d := range defs {
 		r := protocol.Range{

@@ -1,5 +1,5 @@
 // Package funcdef extracts user-defined function definitions from CFC source files.
-package funcdef
+package parser
 
 import (
 	"regexp"

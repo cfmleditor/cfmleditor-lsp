@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 // handledKinds lists every node kind that formatNode dispatches explicitly
@@ -75,14 +75,14 @@ func TestIdempotencyBroad(t *testing.T) {
 	opts := testOpts()
 	for _, s := range samples {
 		t.Run(s.name, func(t *testing.T) {
-			tree1 := parser.Parse(parser.CFML, []byte(s.src), nil)
+			tree1 := language.Parse(language.CFML, []byte(s.src), nil)
 			defer tree1.Close()
 			out1, err := Format([]byte(s.src), tree1, opts)
 			if err != nil {
 				t.Fatalf("pass 1: %v", err)
 			}
 
-			tree2 := parser.Parse(parser.CFML, out1, nil)
+			tree2 := language.Parse(language.CFML, out1, nil)
 			defer tree2.Close()
 			out2, err := Format(out1, tree2, opts)
 			if err != nil {
@@ -120,7 +120,7 @@ func TestUnhandledNodeKinds(t *testing.T) {
 	leaf := map[string]bool{}
 
 	for _, src := range samples {
-		tree := parser.Parse(parser.CFML, []byte(src), nil)
+		tree := language.Parse(language.CFML, []byte(src), nil)
 		defer tree.Close()
 		collectUnhandled(tree.RootNode(), nonLeaf, leaf)
 	}

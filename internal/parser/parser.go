@@ -1,53 +1,83 @@
-// Package parser provides tree-sitter parsing for CFML grammars.
+// Package parser extracts component references from CFML source.
 package parser
 
 import (
-	"log"
+	"regexp"
+	"sort"
 
-	tree_sitter_cfml "github.com/cfmleditor/tree-sitter-cfml/bindings/go"
-	sitter "github.com/tree-sitter/go-tree-sitter"
+	"go.lsp.dev/uri"
 )
 
-// Grammar identifies which tree-sitter grammar to use.
-type Grammar int
+// ComponentRef represents a variable assigned to a component instance.
+type ComponentRef struct {
+	Variable  string  // variable name (e.g. "myComponent")
+	Component string  // dot-path (e.g. "dir.Entity")
+	URI       uri.URI // file where the reference was found
+	Line      uint32
+}
 
-// Supported grammars.
-const (
-	CFML Grammar = iota
-	CFScript
-	CFQuery
-)
+var newRe = regexp.MustCompile(`(?im)(\w+)\s*=\s*new\s+["']?([\w.]+)["']?\s*(?:\(|[;\r\n])`)
+var createRe = regexp.MustCompile(`(?im)(\w+)\s*=\s*(?:[Cc]reate[Oo]bject\(\s*["']component["']\s*,|[Ee]ntity[Nn]ew\()\s*["']([\w.]+)["']`)
+var cfobjectRe = regexp.MustCompile(`(?i)<cfobject\s[^>]*(?:\bcomponent\s*=\s*["']([\w.]+)["'][^>]*\bname\s*=\s*["'](\w+)["']|\bname\s*=\s*["'](\w+)["'][^>]*\bcomponent\s*=\s*["']([\w.]+)["'])`)
+var cfinvokeRe = regexp.MustCompile(`(?i)<cfinvoke\s[^>]*(?:\bcomponent\s*=\s*["']([\w.]+)["'][^>]*\breturnvariable\s*=\s*["'](\w+)["']|\breturnvariable\s*=\s*["'](\w+)["'][^>]*\bcomponent\s*=\s*["']([\w.]+)["'])`)
 
-// Language returns the tree-sitter Language for the given grammar.
-func Language(g Grammar) *sitter.Language {
-	switch g {
-	case CFML:
-		return sitter.NewLanguage(tree_sitter_cfml.LanguageCfml())
-	case CFScript:
-		return sitter.NewLanguage(tree_sitter_cfml.LanguageCfscript())
-	case CFQuery:
-		return sitter.NewLanguage(tree_sitter_cfml.LanguageCfquery())
-	default:
-		return nil
+// ParseComponentRefs extracts component references from source content.
+func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
+	var refs []ComponentRef
+
+	for _, m := range newRe.FindAllStringSubmatchIndex(content, -1) {
+		refs = append(refs, ComponentRef{
+			Variable:  content[m[2]:m[3]],
+			Component: content[m[4]:m[5]],
+			URI:       fileURI,
+			Line:      uint32(countNewlines(content[:m[0]])),
+		})
+	}
+
+	for _, m := range createRe.FindAllStringSubmatchIndex(content, -1) {
+		refs = append(refs, ComponentRef{
+			Variable:  content[m[2]:m[3]],
+			Component: content[m[4]:m[5]],
+			URI:       fileURI,
+			Line:      uint32(countNewlines(content[:m[0]])),
+		})
+	}
+
+	for _, m := range cfobjectRe.FindAllStringSubmatchIndex(content, -1) {
+		refs = append(refs, extractTagRef(content, fileURI, m))
+	}
+
+	for _, m := range cfinvokeRe.FindAllStringSubmatchIndex(content, -1) {
+		refs = append(refs, extractTagRef(content, fileURI, m))
+	}
+
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Line < refs[j].Line })
+	return refs
+}
+
+func extractTagRef(content string, fileURI uri.URI, m []int) ComponentRef {
+	var component, variable string
+	if m[2] >= 0 {
+		component = content[m[2]:m[3]]
+		variable = content[m[4]:m[5]]
+	} else {
+		variable = content[m[6]:m[7]]
+		component = content[m[8]:m[9]]
+	}
+	return ComponentRef{
+		Variable:  variable,
+		Component: component,
+		URI:       fileURI,
+		Line:      uint32(countNewlines(content[:m[0]])),
 	}
 }
 
-// NewParser creates a tree-sitter parser configured for the given grammar.
-// The caller must call Close() on the returned parser when done.
-func NewParser(g Grammar) *sitter.Parser {
-	p := sitter.NewParser()
-	err := p.SetLanguage(Language(g))
-	if ( err != nil ) {
-		log.Fatalf("Couldnt set parser language: %s", err)
+func countNewlines(s string) int {
+	n := 0
+	for _, b := range []byte(s) {
+		if b == '\n' {
+			n++
+		}
 	}
-	return p
+	return n
 }
-
-// Parse parses source code using the given grammar and returns the tree.
-// The caller must call Close() on the returned tree when done.
-func Parse(g Grammar, src []byte, oldTree *sitter.Tree) *sitter.Tree {
-	p := NewParser(g)
-	defer p.Close()
-	return p.Parse(src, oldTree)
-}
-

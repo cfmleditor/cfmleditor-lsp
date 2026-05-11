@@ -1,4 +1,4 @@
-package funcdef
+package parser
 
 import (
 	"testing"

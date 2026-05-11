@@ -7,8 +7,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -28,9 +30,13 @@ type Server struct {
 	workspaceRoots   []string
 	WorkspaceFolders []string // project folders from config
 	IndexGlobs       []string // optional glob filters (absolute paths)
+	Mappings         map[string]string // component path mappings (key -> abs path)
 	index            *index.Index
 	linter           *cflint.Runner
 	lintCancels      map[uri.URI]context.CancelFunc
+	compCache        *cache.Cache
+	funcRanges       map[uri.URI][]cache.FuncRange // cached function line ranges per file
+	cacheTimers      map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -46,6 +52,9 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 		documents:   make(map[uri.URI]string),
 		index:       idx,
 		lintCancels: make(map[uri.URI]context.CancelFunc),
+		compCache:   cache.New(),
+		funcRanges:  make(map[uri.URI][]cache.FuncRange),
+		cacheTimers: make(map[uri.URI]*time.Timer),
 	}
 }
 
@@ -53,7 +62,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 	return protocol.ServerCapabilities{
 		TextDocumentSync: protocol.TextDocumentSyncOptions{
 			OpenClose: true,
-			Change:    protocol.TextDocumentSyncKindFull,
+			Change:    protocol.TextDocumentSyncKindIncremental,
 			Save:      &protocol.SaveOptions{},
 		},
 		CompletionProvider: &protocol.CompletionOptions{

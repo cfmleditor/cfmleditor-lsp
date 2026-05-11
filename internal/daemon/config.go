@@ -14,9 +14,10 @@ import (
 
 // configJSON is the on-disk shape of .cfmleditor.json.
 type configJSON struct {
-	WorkspaceName      string   `json:"workspaceName"`
-	WorkspacePaths     []string `json:"workspacePaths"`
-	WorkspaceIndexGlobs []string `json:"workspaceIndexGlobs"`
+	WorkspaceName       string            `json:"workspaceName"`
+	WorkspacePaths      []string          `json:"workspacePaths"`
+	WorkspaceIndexGlobs []string          `json:"workspaceIndexGlobs"`
+	Mappings            map[string]string `json:"mappings"`
 }
 
 // Config represents a .cfmleditor.json file.
@@ -82,7 +83,25 @@ func (c *Config) WorkspaceFolders() []string {
 	return out
 }
 
-// IndexGlobs returns the workspace index globs resolved to absolute paths by
+// Mappings returns component path mappings with values resolved to absolute paths.
+func (c *Config) Mappings() map[string]string {
+	raw := c.raw()
+	if raw == nil || len(raw.Mappings) == 0 {
+		return nil
+	}
+	dir := filepath.Dir(c.Path)
+	out := make(map[string]string, len(raw.Mappings))
+	for key, val := range raw.Mappings {
+		if filepath.IsAbs(val) {
+			out[key] = val
+		} else {
+			out[key] = filepath.Join(dir, val)
+		}
+	}
+	return out
+}
+
+// IndexGlobs returns absolute glob patterns for workspace indexing,
 // replacing the leading folder name with the corresponding resolved workspace
 // folder path. For example, if workspacePaths contains "../tassweb" and
 // workspaceIndexGlobs contains "tassweb/**/*.cfc", the result is
@@ -148,8 +167,8 @@ func expandGlob(pattern string) []string {
 	})
 
 	if err != nil {
-	    // Handle error (e.g., log it or return it)
-	    log.Fatalf("failed to write file: %s", err)
+		// Handle error (e.g., log it or return it)
+		log.Fatalf("failed to write file: %s", err)
 	}
 	return out
 }
