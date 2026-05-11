@@ -1,37 +1,100 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
 )
 
 func (s *Server) indexWorkspace() {
+	// Collect all .cfc files to index.
+	var files []string
 	if len(s.WorkspaceFolders) > 0 {
 		if len(s.IndexGlobs) > 0 {
 			for _, g := range s.IndexGlobs {
 				for _, f := range expandGlob(g) {
 					if strings.ToLower(filepath.Ext(f)) == ".cfc" {
-						if data, err := os.ReadFile(f); err == nil {
-							s.index.IndexFile(uri.File(f), string(data))
-						}
+						files = append(files, f)
 					}
 				}
 			}
 		} else {
 			for _, folder := range s.WorkspaceFolders {
-				s.indexRoot(folder)
+				files = append(files, collectCFCFiles(folder)...)
 			}
 		}
-		return
+	} else {
+		for _, root := range s.workspaceRoots {
+			files = append(files, collectCFCFiles(root)...)
+		}
 	}
-	for _, root := range s.workspaceRoots {
-		s.indexRoot(root)
+
+	total := len(files)
+	s.logger.Info("indexing workspace", zap.Int("totalFiles", total))
+
+	ctx := context.Background()
+	token := "indexing"
+
+	// Send progress begin.
+	if s.conn != nil && total > 0 {
+		_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+			"token": token,
+			"value": map[string]interface{}{"kind": "begin", "title": "Indexing", "message": fmt.Sprintf("0/%d files", total), "percentage": 0},
+		})
 	}
+
+	for i, f := range files {
+		fileURI := uri.File(f)
+		if _, open := s.getDocument(fileURI); open {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		s.index.IndexFile(fileURI, string(data))
+
+		if s.conn != nil && total > 0 {
+			pct := ((i + 1) * 100) / total
+			_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+				"token": token,
+				"value": map[string]interface{}{"kind": "report", "message": fmt.Sprintf("%d/%d files", i+1, total), "percentage": pct},
+			})
+		}
+	}
+
+	// Send progress end.
+	if s.conn != nil && total > 0 {
+		_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+			"token": token,
+			"value": map[string]interface{}{"kind": "end", "message": fmt.Sprintf("Indexed %d files", total)},
+		})
+	}
+}
+
+// collectCFCFiles walks root and returns all .cfc file paths.
+func collectCFCFiles(root string) []string {
+	var files []string
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
 }
 
 func expandGlob(pattern string) []string {
@@ -65,8 +128,8 @@ func expandGlob(pattern string) []string {
 		return nil
 	})
 
-	if ( err != nil ) {
-		 log.Fatalf("failed to write file: %s", err)
+	if err != nil {
+		log.Fatalf("failed to walk glob: %s", err)
 	}
 	return out
 }
@@ -75,21 +138,27 @@ func (s *Server) indexRoot(root string) {
 	s.logger.Info("indexing workspace", zap.String("root", root))
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-	        return err // WRONG: returns a non-nil interface containing a nil pointer
-	    }
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}
 		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
+			fileURI := uri.File(path)
+			// Skip files already open in the editor — their buffer
+			// content was indexed via didOpen and may be newer than disk.
+			if _, open := s.getDocument(fileURI); open {
+				return nil
+			}
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
-			s.index.IndexFile(uri.File(path), string(data))
+			s.index.IndexFile(fileURI, string(data))
 		}
 		return nil
 	})
-	if ( err != nil ) {
-		 log.Fatalf("failed to write file: %s", err)
+	if err != nil {
+		log.Fatalf("failed to walk directory: %s", err)
 	}
 }

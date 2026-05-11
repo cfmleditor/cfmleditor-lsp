@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"go.lsp.dev/jsonrpc2"
@@ -29,6 +30,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleDidChange(ctx, reply, req)
 		case protocol.MethodTextDocumentDidClose:
 			return s.handleDidClose(ctx, reply, req)
+		case protocol.MethodTextDocumentDidSave:
+			return s.handleDidSave(ctx, reply, req)
 		case protocol.MethodTextDocumentCompletion:
 			return s.handleCompletion(ctx, reply, req)
 		case protocol.MethodTextDocumentDefinition:
@@ -75,6 +78,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	go s.indexWorkspace()
+	go s.initLinter()
 
 	s.logger.Info("CFML LSP initialized", zap.Strings("workspaceRoots", s.workspaceRoots))
 
@@ -127,7 +131,86 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	s.removeDocument(docURI)
 	s.logger.Info("document closed", zap.String("uri", string(docURI)))
 
+	// Clear diagnostics on close
+	if s.conn != nil {
+		_ = s.conn.Notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
+			URI:         protocol.DocumentURI(docURI),
+			Diagnostics: []protocol.Diagnostic{},
+		})
+	}
+
 	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidSaveTextDocumentParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, err)
+	}
+
+	docURI := uri.URI(params.TextDocument.URI)
+	go s.runDiagnostics(ctx, docURI)
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
+	if s.linter == nil || s.conn == nil {
+		return
+	}
+
+	// Cancel any in-flight scan for this file
+	s.mu.Lock()
+	if cancel, ok := s.lintCancels[docURI]; ok {
+		cancel()
+	}
+	scanCtx, cancel := context.WithCancel(ctx)
+	s.lintCancels[docURI] = cancel
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.lintCancels, docURI)
+		s.mu.Unlock()
+		cancel()
+	}()
+
+	filePath := strings.TrimPrefix(string(docURI), "file://")
+	s.logger.Info("cflint scan starting", zap.String("file", filePath))
+
+	// Show progress
+	_ = s.conn.Notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+		"token": "cflint",
+		"value": map[string]interface{}{"kind": "begin", "title": "CFLint", "message": filepath.Base(filePath)},
+	})
+
+	diags, err := s.linter.Scan(scanCtx, filePath)
+
+	_ = s.conn.Notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+		"token": "cflint",
+		"value": map[string]interface{}{"kind": "end"},
+	})
+
+	if scanCtx.Err() != nil {
+		s.logger.Info("cflint scan cancelled", zap.String("file", filePath))
+		return
+	}
+
+	if err != nil {
+		s.logger.Warn("cflint scan failed", zap.String("file", filePath), zap.Error(err))
+		return
+	}
+
+	if diags == nil {
+		diags = []protocol.Diagnostic{}
+	}
+
+	s.logger.Info("cflint scan complete", zap.String("file", filePath), zap.Int("issues", len(diags)))
+
+	_ = s.conn.Notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
+		URI:         protocol.DocumentURI(docURI),
+		Diagnostics: diags,
+	})
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {

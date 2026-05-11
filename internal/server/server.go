@@ -2,11 +2,13 @@
 package server
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -26,6 +28,8 @@ type Server struct {
 	WorkspaceFolders []string // project folders from config
 	IndexGlobs       []string // optional glob filters (absolute paths)
 	index            *index.Index
+	linter           *cflint.Runner
+	lintCancels      map[uri.URI]context.CancelFunc
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -36,10 +40,11 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 		idx = sharedIndex[0]
 	}
 	return &Server{
-		conn:      conn,
-		logger:    logger,
-		documents: make(map[uri.URI]string),
-		index:     idx,
+		conn:        conn,
+		logger:      logger,
+		documents:   make(map[uri.URI]string),
+		index:       idx,
+		lintCancels: make(map[uri.URI]context.CancelFunc),
 	}
 }
 
@@ -48,6 +53,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		TextDocumentSync: protocol.TextDocumentSyncOptions{
 			OpenClose: true,
 			Change:    protocol.TextDocumentSyncKindFull,
+			Save:      &protocol.SaveOptions{},
 		},
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{"<", " ", "/", ".", ">"},
@@ -67,6 +73,18 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			},
 		},
 	}
+}
+
+func (s *Server) initLinter() {
+	runner, err := cflint.NewRunner()
+	if err != nil {
+		s.logger.Warn("cflint unavailable", zap.Error(err))
+		return
+	}
+	s.mu.Lock()
+	s.linter = runner
+	s.mu.Unlock()
+	s.logger.Info("cflint ready")
 }
 
 func (s *Server) getDocument(docURI uri.URI) (string, bool) {
