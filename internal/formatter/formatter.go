@@ -331,6 +331,7 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 		f.formatCFElse(n)
 
 	case "cf_output_tag",
+		"cf_function_tag",
 		"cf_xml_tag", "cf_savecontent_tag":
 		f.formatCFBlockTag(n)
 

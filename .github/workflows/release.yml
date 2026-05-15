@@ -22,6 +22,10 @@ jobs:
             goarch: arm64
           - goos: linux
             goarch: amd64
+          - goos: windows
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +44,22 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          go build -trimpath -ldflags="-s -w" -o "cfmleditor-lsp${ext}" ./cmd/cfmleditor-lsp
 
       - name: Package
-        run: tar czf cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz cfmleditor-lsp
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip cfmleditor-lsp.exe
+          else
+            tar czf cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz cfmleditor-lsp
+          fi
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          files: |
+            cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+            cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip

@@ -23,6 +23,7 @@ var handledKinds = map[string]bool{
 	"cf_elseif_tag":             true,
 	"cf_else_tag":               true,
 	"cf_output_tag":        true,
+	"cf_function_tag":      true,
 	"cf_query_tag":         true,
 	"cf_xml_tag":           true,
 	"cf_savecontent_tag":        true,
