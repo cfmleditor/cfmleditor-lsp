@@ -7,11 +7,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
 )
+
+// zapAdapter adapts *zap.Logger to cfparser.Logger.
+type zapAdapter struct{ l *zap.Logger }
+
+func (z *zapAdapter) Info(msg string, kv ...interface{}) { z.l.Sugar().Infow(msg, kv...) }
+func (z *zapAdapter) Warn(msg string, kv ...interface{}) { z.l.Sugar().Warnw(msg, kv...) }
 
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
@@ -100,13 +108,17 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
-	s.reindexIfCFC(docURI, params.TextDocument.Text)
 
+	pr := cfparser.Parse(docURI, params.TextDocument.Text)
+	pr.Log = &zapAdapter{s.logger}
 	s.mu.Lock()
-	s.funcRanges[docURI] = s.funcRangesForContent(docURI, params.TextDocument.Text)
+	s.parseResults[docURI] = pr
+	s.funcRanges[docURI] = scopesToFuncRanges(pr)
 	s.mu.Unlock()
 
-	go s.rebuildFileCompletionCache(docURI)
+	s.reindexFromParseResult(docURI, pr)
+
+	go s.rebuildFileCompletionCacheFromPR(docURI, pr)
 	s.logger.Info("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -123,86 +135,79 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, nil)
 	}
 
+	s.mu.RLock()
+	pr := s.parseResults[docURI]
+	s.mu.RUnlock()
+
 	content, ok := s.getDocument(docURI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
 
-	// Track edit lines before applying
-	editInFuncBody := true
-	var lineDelta int
+	var editLine int
+	var lastKind cfparser.EditKind
+
 	for _, change := range params.ContentChanges {
 		if change.Range == (protocol.Range{}) && change.RangeLength == 0 {
-			editInFuncBody = false
+			// Full document replacement
 			content = change.Text
-		} else {
-			if editInFuncBody && !s.isEditInsideFuncBody(docURI, change.Range) {
-				editInFuncBody = false
+			if pr != nil {
+				pr.ApplyFullReplace(content)
+				lastKind = cfparser.EditFull
 			}
-			// Compute line delta: new lines in text minus replaced lines
-			oldLines := int(change.Range.End.Line) - int(change.Range.Start.Line)
-			newLines := strings.Count(change.Text, "\n")
-			lineDelta += newLines - oldLines
+		} else {
 			content = applyEdit(content, change.Range, change.Text)
+			editLine = int(change.Range.Start.Line)
+			if pr != nil {
+				lastKind = pr.ApplyEdit(
+					int(change.Range.Start.Line), int(change.Range.Start.Character),
+					int(change.Range.End.Line), int(change.Range.End.Character),
+					change.Text,
+				)
+			}
 		}
 	}
 
 	s.setDocument(docURI, content)
 
-	editLine := int(params.ContentChanges[0].Range.Start.Line)
-
-	switch {
-	case !editInFuncBody:
-		s.reindexIfCFC(docURI, content)
+	if pr == nil {
+		// No cached parse result — fall back to full parse
+		pr = cfparser.Parse(docURI, content)
+		pr.Log = &zapAdapter{s.logger}
 		s.mu.Lock()
-		s.funcRanges[docURI] = s.funcRangesForContent(docURI, content)
+		s.parseResults[docURI] = pr
+		s.funcRanges[docURI] = scopesToFuncRanges(pr)
 		s.mu.Unlock()
-	case lineDelta != 0:
-		// Shift function ranges and index line numbers for functions below the edit
-		s.mu.Lock()
-		ranges := s.funcRanges[docURI]
-		for i := range ranges {
-			if ranges[i].Start > editLine {
-				ranges[i].Start += lineDelta
-				ranges[i].End += lineDelta
-			} else if ranges[i].End >= editLine {
-				// Edit is inside this function — only end shifts
-				ranges[i].End += lineDelta
+		s.reindexFromParseResult(docURI, pr)
+		return reply(ctx, nil, nil)
+	}
+
+	// Update funcRanges from the parse result
+	s.mu.Lock()
+	s.funcRanges[docURI] = scopesToFuncRanges(pr)
+	s.mu.Unlock()
+
+	switch lastKind {
+	case cfparser.EditGlobal, cfparser.EditFull:
+		// Signatures changed — update the index
+		s.reindexFromParseResult(docURI, pr)
+	case cfparser.EditInFunc:
+		// Only function body changed — shift index lines and rebuild local vars
+		lineDelta := 0
+		for _, change := range params.ContentChanges {
+			if change.Range != (protocol.Range{}) || change.RangeLength != 0 {
+				oldLines := int(change.Range.End.Line) - int(change.Range.Start.Line)
+				newLines := strings.Count(change.Text, "\n")
+				lineDelta += newLines - oldLines
 			}
 		}
-		s.mu.Unlock()
-		s.index.ShiftLines(docURI, editLine, lineDelta)
-		// Debounced rebuild — only local vars changed
-		s.debounceCacheRebuild(docURI, content, editLine)
-	default:
-		// No line change, still inside function — debounce
+		if lineDelta != 0 {
+			s.index.ShiftLines(docURI, editLine, lineDelta)
+		}
 		s.debounceCacheRebuild(docURI, content, editLine)
 	}
 
 	return reply(ctx, nil, nil)
-}
-
-// isEditInsideFuncBody returns true if the edit range falls entirely within
-// a known function body (not on the signature line itself).
-func (s *Server) isEditInsideFuncBody(docURI uri.URI, r protocol.Range) bool {
-	s.mu.RLock()
-	ranges := s.funcRanges[docURI]
-	s.mu.RUnlock()
-
-	if len(ranges) == 0 {
-		return false
-	}
-
-	startLine := int(r.Start.Line)
-	endLine := int(r.End.Line)
-
-	for _, f := range ranges {
-		// Edit must be strictly inside the function (after signature line)
-		if startLine > f.Start && endLine <= f.End {
-			return true
-		}
-	}
-	return false
 }
 
 const cacheRebuildDelay = 150 * time.Millisecond
@@ -253,6 +258,9 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.removeDocument(docURI)
+	s.mu.Lock()
+	delete(s.parseResults, docURI)
+	s.mu.Unlock()
 	s.logger.Info("document closed", zap.String("uri", string(docURI)))
 
 	// Clear diagnostics on close
@@ -349,6 +357,40 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 		return
 	}
 	s.index.IndexFile(docURI, content)
+}
+
+// reindexFromParseResult updates the index using an existing ParseResult.
+func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult) {
+	lower := strings.ToLower(string(docURI))
+	isCFC := strings.HasSuffix(lower, ".cfc")
+	isCFML := isCFC || strings.HasSuffix(lower, ".cfm") || strings.HasSuffix(lower, ".cfml") || strings.HasSuffix(lower, ".cfs")
+	if !isCFML {
+		return
+	}
+	if isCFC && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
+		return
+	}
+	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+}
+
+// scopesToFuncRanges converts ParseResult scopes to cache.FuncRange slice.
+func scopesToFuncRanges(pr *cfparser.ParseResult) []cache.FuncRange {
+	ranges := make([]cache.FuncRange, 0, len(pr.Scopes))
+	for _, sc := range pr.Scopes {
+		name := ""
+		for _, f := range pr.Funcs {
+			if int(f.Line) == sc.Start {
+				name = f.Name
+				break
+			}
+		}
+		ranges = append(ranges, cache.FuncRange{
+			Name:  name,
+			Start: sc.Start,
+			End:   sc.End,
+		})
+	}
+	return ranges
 }
 
 func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

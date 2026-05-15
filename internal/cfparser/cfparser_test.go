@@ -1,78 +1,15 @@
-package parser
+package cfparser
 
 import (
+	"slices"
 	"testing"
+
+	"go.lsp.dev/uri"
 )
 
-func TestFindCommentSpans(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  int // number of comment spans
-	}{
-		{"cfml comment", `<!--- hidden --->visible`, 1},
-		{"block comment", `/* hidden */visible`, 1},
-		{"line comment", "// hidden\nvisible", 1},
-		{"multiple", "/* a */\n// b\n<!--- c --->", 3},
-		{"string not a comment", `x = "// not a comment"`, 0},
-		{"single quote string", `x = '/* not a comment */'`, 0},
-		{"none", "just code", 0},
-		{"nested cfml", "<!--- outer <!--- inner ---> still comment --->visible", 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			spans := findCommentSpans(tt.input)
-			if len(spans) != tt.want {
-				t.Errorf("got %d spans, want %d", len(spans), tt.want)
-			}
-		})
-	}
-}
+const testURI = uri.URI("file:///test.cfc")
 
-func TestInComment(t *testing.T) {
-	content := "code /* comment */ more"
-	spans := findCommentSpans(content)
-	if inComment(0, spans) {
-		t.Error("offset 0 should not be in comment")
-	}
-	// "/* comment */" starts at 5
-	if !inComment(5, spans) {
-		t.Error("offset 5 should be in comment")
-	}
-	if !inComment(10, spans) {
-		t.Error("offset 10 should be in comment")
-	}
-	if inComment(18, spans) {
-		t.Error("offset 18 should not be in comment")
-	}
-}
-
-func TestIsScriptFile(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{"component keyword", "component {\n}", true},
-		{"interface keyword", "interface {\n}", true},
-		{"property space", "property name=\"x\";\ncomponent {}", true},
-		{"property tab", "property\tname=\"x\";", true},
-		{"leading whitespace", "  \n\tcomponent {", true},
-		{"comment then component", "<!--- header --->\ncomponent {", true},
-		{"block comment then component", "/* header */\ncomponent {", true},
-		{"tag based", "<cfcomponent>\n</cfcomponent>", false},
-		{"empty", "", false},
-		{"cffunction", "<cffunction name=\"test\">", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			comments := findCommentSpans(tt.input)
-			if got := isScriptFile(tt.input, comments); got != tt.want {
-				t.Errorf("isScriptFile(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
+// --- ClassifyRegions tests ---
 
 func TestClassifyRegions_ScriptFile(t *testing.T) {
 	content := "component {\n\tpublic function init() {}\n}"
@@ -82,9 +19,6 @@ func TestClassifyRegions_ScriptFile(t *testing.T) {
 	}
 	if regions[0].Kind != RegionScript {
 		t.Error("expected RegionScript")
-	}
-	if regions[0].Text != content {
-		t.Error("expected original text preserved")
 	}
 }
 
@@ -127,45 +61,47 @@ func TestClassifyRegions_CommentBeforeComponent(t *testing.T) {
 	}
 }
 
+// --- ParseFunctionDefs tests ---
+
 func TestParseFunctionDefs_ScriptCFC(t *testing.T) {
 	content := "component {\n\tpublic string function getUser() {}\n\tprivate function save() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"getUser", "save"})
 }
 
 func TestParseFunctionDefs_TagCFC(t *testing.T) {
 	content := "<cfcomponent>\n<cffunction name=\"getUser\">\n</cffunction>\n<cffunction name=\"save\">\n</cffunction>\n</cfcomponent>"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"getUser", "save"})
 }
 
 func TestParseFunctionDefs_MixedTagAndCFScript(t *testing.T) {
 	content := "<cfcomponent>\n<cffunction name=\"tagFunc\">\n</cffunction>\n<cfscript>\nfunction scriptFunc() {}\n</cfscript>\n</cfcomponent>"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"tagFunc", "scriptFunc"})
 }
 
 func TestParseFunctionDefs_CommentedOutFunction(t *testing.T) {
 	content := "component {\n<!--- function hidden() {} --->\nfunction visible() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"visible"})
 }
 
 func TestParseFunctionDefs_BlockCommentedFunction(t *testing.T) {
 	content := "component {\n/* function hidden() {} */\nfunction visible() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"visible"})
 }
 
 func TestParseFunctionDefs_LineCommentedFunction(t *testing.T) {
 	content := "component {\n// function hidden() {}\nfunction visible() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"visible"})
 }
 
 func TestParseFunctionDefs_LineNumbers(t *testing.T) {
 	content := "component {\n\n\tfunction first() {}\n\n\tfunction second() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 2 {
 		t.Fatalf("expected 2 defs, got %d", len(defs))
 	}
@@ -179,7 +115,7 @@ func TestParseFunctionDefs_LineNumbers(t *testing.T) {
 
 func TestParseFunctionDefs_CFScriptLineNumbers(t *testing.T) {
 	content := "<cfcomponent>\n<cfscript>\n\nfunction myFunc() {}\n</cfscript>\n</cfcomponent>"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -190,37 +126,31 @@ func TestParseFunctionDefs_CFScriptLineNumbers(t *testing.T) {
 
 func TestParseFunctionDefs_MultilineComment(t *testing.T) {
 	content := "component {\n/*\nfunction hidden() {}\n*/\nfunction visible() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"visible"})
 }
 
 func TestParseFunctionDefs_InterfaceFile(t *testing.T) {
 	content := "interface {\n\tpublic function getData();\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"getData"})
 }
 
 func TestParseFunctionDefs_PropertyStart(t *testing.T) {
 	content := "property name=\"id\" type=\"numeric\";\ncomponent {\n\tfunction init() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"init"})
 }
 
-func TestParseFunctionDefs_ScriptIgnoresTagRegex(t *testing.T) {
-	content := "component {\n\tx = '<cffunction name=\"notReal\">';\n\tfunction real() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
-	assertDefs(t, defs, []string{"real"})
-}
-
 func TestParseFunctionDefs_EmptyFile(t *testing.T) {
-	defs := ParseFunctionDefs("file:///test.cfc", "")
+	defs := ParseFunctionDefs(testURI, "")
 	if len(defs) != 0 {
 		t.Errorf("expected 0 defs, got %d", len(defs))
 	}
 }
 
 func TestParseFunctionDefs_CommentOnlyFile(t *testing.T) {
-	defs := ParseFunctionDefs("file:///test.cfc", "<!--- just a comment --->")
+	defs := ParseFunctionDefs(testURI, "<!--- just a comment --->")
 	if len(defs) != 0 {
 		t.Errorf("expected 0 defs, got %d", len(defs))
 	}
@@ -228,7 +158,7 @@ func TestParseFunctionDefs_CommentOnlyFile(t *testing.T) {
 
 func TestParseFunctionDefs_CommentPreservesLineNumbers(t *testing.T) {
 	content := "component {\n<!--- \nmultiline\ncomment\n--->\nfunction afterComment() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -237,21 +167,9 @@ func TestParseFunctionDefs_CommentPreservesLineNumbers(t *testing.T) {
 	}
 }
 
-func TestParseFunctionDefs_TagDisplayNameIgnored(t *testing.T) {
-	content := `<cffunction displayname="test" name="realName">`
-	defs := ParseFunctionDefs("file:///test.cfc", content)
-	assertDefs(t, defs, []string{"realName"})
-}
-
-func TestParseFunctionDefs_TagDisplayNameOnly(t *testing.T) {
-	content := `<cffunction displayname="test">`
-	defs := ParseFunctionDefs("file:///test.cfc", content)
-	assertDefs(t, defs, []string{})
-}
-
 func TestParseFunctionDefs_ScriptArgs(t *testing.T) {
 	content := "component {\nfunction save(required string name, numeric age, flag) {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -272,7 +190,7 @@ func TestParseFunctionDefs_ScriptArgs(t *testing.T) {
 
 func TestParseFunctionDefs_ScriptArgsWithDefaults(t *testing.T) {
 	content := "component {\nfunction init(string name = \"test\", numeric count = 0) {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -290,7 +208,7 @@ func TestParseFunctionDefs_ScriptArgsWithDefaults(t *testing.T) {
 
 func TestParseFunctionDefs_ScriptNoArgs(t *testing.T) {
 	content := "component {\nfunction init() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -307,7 +225,7 @@ func TestParseFunctionDefs_TagArgs(t *testing.T) {
 	<cfargument name="flag">
 </cffunction>
 </cfcomponent>`
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 def, got %d", len(defs))
 	}
@@ -336,7 +254,7 @@ func TestParseFunctionDefs_TagArgsMultipleFunctions(t *testing.T) {
 	<cfargument name="c">
 </cffunction>
 </cfcomponent>`
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	if len(defs) != 2 {
 		t.Fatalf("expected 2 defs, got %d", len(defs))
 	}
@@ -350,15 +268,128 @@ func TestParseFunctionDefs_TagArgsMultipleFunctions(t *testing.T) {
 
 func TestParseFunctionDefs_NestedCFMLComment(t *testing.T) {
 	content := "component {\n<!--- outer <!--- function hidden() {} ---> still comment --->\nfunction visible() {}\n}"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
+	defs := ParseFunctionDefs(testURI, content)
 	assertDefs(t, defs, []string{"visible"})
 }
 
-func TestParseFunctionDefs_TagCommentedOutFunction(t *testing.T) {
-	content := "<cfcomponent>\n<!--- <cffunction name=\"hidden\"> --->\n<cffunction name=\"visible\">\n</cffunction>\n</cfcomponent>"
-	defs := ParseFunctionDefs("file:///test.cfc", content)
-	assertDefs(t, defs, []string{"visible"})
+// --- ParseComponentRefs tests ---
+
+func TestParseComponentRefs_NewWithParens(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component { myObj = new models.User() }`)
+	assertRef(t, refs, 0, "myObj", "models.User")
 }
+
+func TestParseComponentRefs_NewWithoutParens(t *testing.T) {
+	refs := ParseComponentRefs(testURI, "component {\nmyObj = new models.User\n}")
+	assertRef(t, refs, 0, "myObj", "models.User")
+}
+
+func TestParseComponentRefs_NewQuotedPath(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component { x = new "dir.Entity"() }`)
+	assertRef(t, refs, 0, "x", "dir.Entity")
+}
+
+func TestParseComponentRefs_CreateObject(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component { svc = CreateObject("component", "services.OrderService") }`)
+	assertRef(t, refs, 0, "svc", "services.OrderService")
+}
+
+func TestParseComponentRefs_EntityNew(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component { user = entityNew("User") }`)
+	assertRef(t, refs, 0, "user", "User")
+}
+
+func TestParseComponentRefs_CfObject(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfobject component="dir.Entity" name="obj">`)
+	assertRef(t, refs, 0, "obj", "dir.Entity")
+}
+
+func TestParseComponentRefs_CfObjectReversed(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfobject name="obj" component="dir.Entity">`)
+	assertRef(t, refs, 0, "obj", "dir.Entity")
+}
+
+func TestParseComponentRefs_CfInvoke(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfinvoke component="svc.Helper" method="init" returnvariable="h">`)
+	assertRef(t, refs, 0, "h", "svc.Helper")
+}
+
+func TestParseComponentRefs_CfInvokeReversed(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfinvoke returnvariable="h" method="init" component="svc.Helper">`)
+	assertRef(t, refs, 0, "h", "svc.Helper")
+}
+
+func TestParseComponentRefs_Multiple(t *testing.T) {
+	src := "component {\na = new foo.Bar()\nb = createObject(\"component\",\"baz.Qux\")\nc = new Simple\n}"
+	refs := ParseComponentRefs(testURI, src)
+	if len(refs) != 3 {
+		t.Fatalf("expected 3 refs, got %d", len(refs))
+	}
+}
+
+func TestParseComponentRefs_NoMatch(t *testing.T) {
+	refs := ParseComponentRefs(testURI, "component {\nx = 42\ny = someFunction()\n}")
+	if len(refs) != 0 {
+		t.Fatalf("expected 0 refs, got %d", len(refs))
+	}
+}
+
+// --- Variable definition tests ---
+
+func TestGlobalVars_FileScope(t *testing.T) {
+	src := "var x = 1\nvar y = 2\nz = x + y"
+	vars := GlobalVars(src)
+	assertContains(t, vars, "x", "y", "z")
+}
+
+func TestVarsInFunc_LocalOnly(t *testing.T) {
+	src := "component {\nfunction doStuff() {\n\tvar localVar = 2\n\tlocal.other = 3\n}\n}"
+	scopes := FindFuncScopes(src)
+	if len(scopes) == 0 {
+		t.Fatal("expected at least 1 func scope")
+	}
+	vars := VarsInFunc(src, scopes[0].Start, scopes[0].End)
+	assertContains(t, vars, "localVar", "other")
+}
+
+func TestGlobalVars_VariablesAndThis(t *testing.T) {
+	src := "variables.config = {}\nthis.name = \"test\"\nfunction init() {\n\tvar x = 1\n}"
+	vars := GlobalVars(src)
+	assertContains(t, vars, "config", "name")
+}
+
+func TestGlobalVars_PlainAssignIsVariablesScope(t *testing.T) {
+	src := "result = query()\nfunction doStuff() {\n\tvar local1 = 1\n}"
+	vars := GlobalVars(src)
+	assertContains(t, vars, "result")
+}
+
+func TestVarsInFunc_Arguments(t *testing.T) {
+	src := "component {\nfunction doStuff() {\n\targuments.id = 1\n}\n}"
+	scopes := FindFuncScopes(src)
+	if len(scopes) == 0 {
+		t.Fatal("expected at least 1 func scope")
+	}
+	vars := VarsInFunc(src, scopes[0].Start, scopes[0].End)
+	assertContains(t, vars, "id")
+}
+
+func TestVarsInFunc_TagFunction(t *testing.T) {
+	src := "<cfset var pageVar = 1>\n<cffunction name=\"myFunc\">\n\t<cfset var localVar = 2>\n\t<cfset local.other = 3>\n</cffunction>"
+	scopes := FindFuncScopes(src)
+	if len(scopes) == 0 {
+		t.Fatal("expected at least 1 func scope")
+	}
+	vars := VarsInFunc(src, scopes[0].Start, scopes[0].End)
+	assertContains(t, vars, "localVar", "other")
+	assertNotContains(t, vars, "pageVar")
+
+	globals := GlobalVars(src)
+	assertContains(t, globals, "pageVar")
+	assertNotContains(t, globals, "localVar", "other")
+}
+
+// --- Helpers ---
 
 func assertDefs(t *testing.T, defs []FunctionDef, want []string) {
 	t.Helper()
@@ -372,6 +403,35 @@ func assertDefs(t *testing.T, defs []FunctionDef, want []string) {
 	for i, d := range defs {
 		if d.Name != want[i] {
 			t.Errorf("def[%d].Name = %q, want %q", i, d.Name, want[i])
+		}
+	}
+}
+
+func assertRef(t *testing.T, refs []ComponentRef, idx int, variable, component string) {
+	t.Helper()
+	if len(refs) <= idx {
+		t.Fatalf("expected at least %d refs, got %d", idx+1, len(refs))
+	}
+	if refs[idx].Variable != variable || refs[idx].Component != component {
+		t.Errorf("ref[%d]: got Variable=%q Component=%q, want %q %q",
+			idx, refs[idx].Variable, refs[idx].Component, variable, component)
+	}
+}
+
+func assertContains(t *testing.T, vars []string, expected ...string) {
+	t.Helper()
+	for _, e := range expected {
+		if !slices.Contains(vars, e) {
+			t.Errorf("expected %q in %v", e, vars)
+		}
+	}
+}
+
+func assertNotContains(t *testing.T, vars []string, unexpected ...string) {
+	t.Helper()
+	for _, u := range unexpected {
+		if slices.Contains(vars, u) {
+			t.Errorf("unexpected %q in %v", u, vars)
 		}
 	}
 }

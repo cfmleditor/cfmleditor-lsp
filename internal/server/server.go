@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -37,6 +38,7 @@ type Server struct {
 	compCache        *cache.Cache
 	funcRanges       map[uri.URI][]cache.FuncRange // cached function line ranges per file
 	cacheTimers      map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
+	parseResults     map[uri.URI]*cfparser.ParseResult  // cached parse results per file
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -47,14 +49,15 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 		idx = sharedIndex[0]
 	}
 	return &Server{
-		conn:        conn,
-		logger:      logger,
-		documents:   make(map[uri.URI]string),
-		index:       idx,
-		lintCancels: make(map[uri.URI]context.CancelFunc),
-		compCache:   cache.New(),
-		funcRanges:  make(map[uri.URI][]cache.FuncRange),
-		cacheTimers: make(map[uri.URI]*time.Timer),
+		conn:         conn,
+		logger:       logger,
+		documents:    make(map[uri.URI]string),
+		index:        idx,
+		lintCancels:  make(map[uri.URI]context.CancelFunc),
+		compCache:    cache.New(),
+		funcRanges:   make(map[uri.URI][]cache.FuncRange),
+		cacheTimers:  make(map[uri.URI]*time.Timer),
+		parseResults: make(map[uri.URI]*cfparser.ParseResult),
 	}
 }
 

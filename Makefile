@@ -2,7 +2,7 @@ BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 
-.PHONY: build test install clean docs docs-cfdocs docs-lucee generate
+.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build
 
 docs: docs-cfdocs
 
@@ -33,6 +33,16 @@ lint-fix:
 		
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)
+
+cfparse-build:
+	@mkdir -p target/release
+	go build -trimpath -o target/release/cfparse ./cmd/cfparse
+
+cfparse: cfparse-build
+	@target/release/cfparse $(filter-out $@,$(MAKECMDGOALS))
+
+%:
+	@:
 
 clean:
 	rm -rf target

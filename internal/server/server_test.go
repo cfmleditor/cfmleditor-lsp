@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -186,6 +186,44 @@ func TestCompletionTriggeredByTag(t *testing.T) {
 		if !found {
 			t.Error("expected cfoutput in tag completions")
 		}
+	}
+}
+
+func TestCompletionTagWithDocContentInvoked(t *testing.T) {
+	srv := newTestServer()
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</cfoutput>\n<")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 1, Character: 1},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind: protocol.CompletionTriggerKindInvoked,
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) == 0 {
+		t.Fatal("expected tag completions when cursor is after < with Invoked trigger")
+	}
+	found := false
+	for _, item := range list.Items {
+		if strings.ToLower(item.Label) == "cfoutput" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected cfoutput in tag completions")
 	}
 }
 
@@ -592,7 +630,7 @@ func TestParseFunctionDefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := parser.ParseFunctionDefs("file:///test.cfc", tt.content)
+			defs := cfparser.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}

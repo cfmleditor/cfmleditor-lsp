@@ -13,7 +13,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -97,9 +97,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		tagName = findEnclosingTag(content, int(params.Position.Line), int(params.Position.Character))
 	}
 
-	triggeredByTag := params.Context != nil &&
+	triggeredByTag := (params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
-		params.Context.TriggerCharacter == "<"
+		params.Context.TriggerCharacter == "<") ||
+		(hasDoc && strings.HasSuffix(textBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<"))
 
 	triggeredByClose := params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
@@ -709,6 +710,7 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 	start := time.Now()
 	s.mu.RLock()
 	funcs := s.funcRanges[docURI]
+	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
 
 	if editLine >= 0 {
@@ -720,7 +722,12 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 			f := funcs[idx]
 			hash := cache.HashScope(content, f.Start, f.End)
 			if s.compCache.GetFunc(docURI, f.Name, hash) == nil {
-				vars := parser.VarsInFunc(content, f.Start, f.End)
+				var vars []string
+				if pr != nil {
+					vars = pr.FuncVars(f.Start, f.End)
+				} else {
+					vars = cfparser.VarsInFunc(content, f.Start, f.End)
+				}
 				items := make([]protocol.CompletionItem, 0, len(vars))
 				for _, v := range vars {
 					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
@@ -741,14 +748,30 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 // Called on didOpen and didSave. Builtins are included here since this only runs
 // on open/save, avoiding per-request copies.
 func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
+	s.mu.RLock()
+	pr := s.parseResults[docURI]
+	s.mu.RUnlock()
+	if pr != nil {
+		s.rebuildFileCompletionCacheFromPR(docURI, pr)
+		return
+	}
 	content, ok := s.getDocument(docURI)
 	if !ok {
 		return
 	}
+	newPR := cfparser.Parse(docURI, content)
+	newPR.Log = &zapAdapter{s.logger}
+	s.mu.Lock()
+	s.parseResults[docURI] = newPR
+	s.mu.Unlock()
+	s.rebuildFileCompletionCacheFromPR(docURI, newPR)
+}
+
+// rebuildFileCompletionCacheFromPR rebuilds file-level completion from an existing ParseResult.
+func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.ParseResult) {
 	start := time.Now()
 	builtins := getBuiltinFuncItems()
-	layout := parser.NewFileLayout(content)
-	globals := parser.GlobalVarsFromLayout(layout)
+	globals := pr.GlobalVars()
 	items := make([]protocol.CompletionItem, 0, len(builtins)+len(globals))
 	items = append(items, builtins...)
 	for _, v := range globals {
@@ -756,15 +779,14 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 	}
 	s.compCache.PutFile(docURI, items)
 
-	// Store scope-specific items for dot completion
 	varsItems := make([]protocol.CompletionItem, 0)
-	for _, v := range parser.VariablesVarsFromLayout(layout) {
+	for _, v := range pr.VariablesVars() {
 		varsItems = append(varsItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
 	}
 	s.compCache.PutFunc(docURI, "__variables__", 0, varsItems)
 
 	thisItems := make([]protocol.CompletionItem, 0)
-	for _, v := range parser.ThisVarsFromLayout(layout) {
+	for _, v := range pr.ThisVars() {
 		thisItems = append(thisItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindProperty})
 	}
 	s.compCache.PutFunc(docURI, "__this__", 0, thisItems)
@@ -773,28 +795,6 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 		zap.Int("globals", len(globals)),
 		zap.Duration("dur", time.Since(start)),
 	)
-}
-
-// funcRangesForContent returns function line ranges for cache scope detection.
-func (s *Server) funcRangesForContent(docURI uri.URI, content string) []cache.FuncRange {
-	defs := parser.ParseFunctionDefs(docURI, content)
-	ranges := make([]cache.FuncRange, 0, len(defs))
-	lines := strings.Split(content, "\n")
-	for _, d := range defs {
-		// Estimate function end by finding next function or EOF
-		end := len(lines) - 1
-		for _, d2 := range defs {
-			if d2.Line > d.Line && int(d2.Line) < end {
-				end = int(d2.Line) - 1
-			}
-		}
-		ranges = append(ranges, cache.FuncRange{
-			Name:  d.Name,
-			Start: int(d.Line),
-			End:   end,
-		})
-	}
-	return ranges
 }
 
 // scopeArgumentsCompletion returns the declared arguments for the enclosing function.

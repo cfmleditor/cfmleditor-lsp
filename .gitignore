@@ -39,3 +39,4 @@ target/
 /docs/data/
 /docs/.etag
 /docs/.sha-cfdocs
+/cfparse
