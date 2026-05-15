@@ -24,6 +24,7 @@ type ParseResult struct {
 	Funcs   []FunctionDef
 	Refs    []ComponentRef
 	Scopes  []FuncScope
+	Extends string // dot-path of parent component (from extends attribute)
 	Log     Logger // optional logger for timing and errors
 
 	// Lazy global var caches (protected by mu).
@@ -69,6 +70,9 @@ func (pr *ParseResult) extractSignatures() {
 			pr.Funcs = append(pr.Funcs, sp.funcs...)
 			pr.Refs = append(pr.Refs, sp.refs...)
 			pr.Scopes = append(pr.Scopes, sp.scopes...)
+			if sp.extends != "" {
+				pr.Extends = sp.extends
+			}
 		} else {
 			tp := newTagParser(r.Text, string(pr.URI))
 			tp.parse()
@@ -82,6 +86,9 @@ func (pr *ParseResult) extractSignatures() {
 			pr.Refs = append(pr.Refs, tp.refs...)
 			scopes := findTagFuncScopes(r.Text, r.StartLine)
 			pr.Scopes = append(pr.Scopes, scopes...)
+			if tp.extends != "" {
+				pr.Extends = tp.extends
+			}
 		}
 	}
 }

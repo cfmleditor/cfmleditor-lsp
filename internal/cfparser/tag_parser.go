@@ -11,6 +11,7 @@ type tagParser struct {
 	funcs     []FunctionDef
 	vars      []VarDef
 	refs      []ComponentRef
+	extends   string
 	lineIndex []int // byte offset of each line start
 }
 
@@ -97,6 +98,8 @@ func (p *tagParser) parse() {
 			line := p.lineAt(idx)
 
 			switch {
+			case len(tag) > 12 && strings.EqualFold(tag[:13], "<cfcomponent "):
+				p.extends = getAttr(tag, "extends")
 			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cffunction "):
 				p.parseCFFunction(tag, idx, tagEnd, line)
 				pos = tagEnd

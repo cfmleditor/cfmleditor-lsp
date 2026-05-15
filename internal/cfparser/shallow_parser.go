@@ -9,6 +9,7 @@ type shallowScriptParser struct {
 	funcs    []FunctionDef
 	refs     []ComponentRef
 	scopes   []FuncScope
+	extends  string
 	fileURI  string
 	baseLine int
 }
@@ -36,9 +37,31 @@ func (p *shallowScriptParser) parse() {
 			p.parseFunction(tok, "", "")
 		case "public", "private", "remote", "package":
 			p.parseAccessModified(tok)
+		case "component":
+			p.parseComponentAttrs()
 		default:
 			// Check for component refs in assignments: ident = new/createObject/entityNew
 			p.checkAssignRef(tok)
+		}
+	}
+}
+
+func (p *shallowScriptParser) parseComponentAttrs() {
+	for {
+		tok := p.sc.PeekSkipComments()
+		if tok.Kind == TokLBrace || tok.Kind == TokEOF {
+			return
+		}
+		p.sc.NextSkipComments()
+		if tok.Kind == TokIdent && strings.EqualFold(tok.Value, "extends") {
+			eq := p.sc.PeekSkipComments()
+			if eq.Kind == TokEquals {
+				p.sc.NextSkipComments()
+				val := p.sc.NextSkipComments()
+				if val.Kind == TokString {
+					p.extends = unquote(val.Value)
+				}
+			}
 		}
 	}
 }

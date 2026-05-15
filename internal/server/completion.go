@@ -772,10 +772,28 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 	start := time.Now()
 	builtins := getBuiltinFuncItems()
 	globals := pr.GlobalVars()
-	items := make([]protocol.CompletionItem, 0, len(builtins)+len(globals))
+	items := make([]protocol.CompletionItem, 0, len(builtins)+len(globals)+len(pr.Funcs))
 	items = append(items, builtins...)
 	for _, v := range globals {
 		items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable})
+	}
+	for _, f := range pr.Funcs {
+		detail := f.Name + "("
+		for i, arg := range f.Arguments {
+			if i > 0 {
+				detail += ", "
+			}
+			if arg.Type != "" {
+				detail += arg.Type + " "
+			}
+			detail += arg.Name
+		}
+		detail += ")"
+		items = append(items, protocol.CompletionItem{
+			Label:  f.Name,
+			Kind:   protocol.CompletionItemKindFunction,
+			Detail: detail,
+		})
 	}
 	s.compCache.PutFile(docURI, items)
 
@@ -785,9 +803,27 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 	}
 	s.compCache.PutFunc(docURI, "__variables__", 0, varsItems)
 
-	thisItems := make([]protocol.CompletionItem, 0)
+	thisItems := make([]protocol.CompletionItem, 0, len(pr.Funcs))
 	for _, v := range pr.ThisVars() {
 		thisItems = append(thisItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindProperty})
+	}
+	for _, f := range pr.Funcs {
+		detail := f.Name + "("
+		for i, arg := range f.Arguments {
+			if i > 0 {
+				detail += ", "
+			}
+			if arg.Type != "" {
+				detail += arg.Type + " "
+			}
+			detail += arg.Name
+		}
+		detail += ")"
+		thisItems = append(thisItems, protocol.CompletionItem{
+			Label:  f.Name,
+			Kind:   protocol.CompletionItemKindMethod,
+			Detail: detail,
+		})
 	}
 	s.compCache.PutFunc(docURI, "__this__", 0, thisItems)
 	s.logger.Info("completion: file globals rebuilt",
@@ -832,6 +868,63 @@ func (s *Server) scopeArgumentsCompletion(docURI uri.URI, line int) []protocol.C
 	return nil
 }
 
+// superCompletion returns functions from the parent component (extends).
+func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
+	s.mu.RLock()
+	pr := s.parseResults[docURI]
+	s.mu.RUnlock()
+	if pr == nil || pr.Extends == "" {
+		return nil
+	}
+
+	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	baseDir := filepath.Dir(currentPath)
+	cfcPath := cfpath.ResolvePath(pr.Extends, baseDir, s.Mappings)
+	if cfcPath == "" {
+		for _, root := range s.WorkspaceFolders {
+			cfcPath = cfpath.ResolvePath(pr.Extends, root, s.Mappings)
+			if cfcPath != "" {
+				break
+			}
+		}
+	}
+	if cfcPath == "" {
+		return nil
+	}
+
+	cfcURI := uri.URI("file://" + cfcPath)
+	defs := s.index.FunctionsForFile(cfcURI)
+	if len(defs) == 0 {
+		data, err := os.ReadFile(cfcPath)
+		if err != nil {
+			return nil
+		}
+		s.index.IndexFile(cfcURI, string(data))
+		defs = s.index.FunctionsForFile(cfcURI)
+	}
+
+	items := make([]protocol.CompletionItem, 0, len(defs))
+	for _, d := range defs {
+		detail := d.Name + "("
+		for i, arg := range d.Arguments {
+			if i > 0 {
+				detail += ", "
+			}
+			if arg.Type != "" {
+				detail += arg.Type + " "
+			}
+			detail += arg.Name
+		}
+		detail += ")"
+		items = append(items, protocol.CompletionItem{
+			Label:  d.Name,
+			Kind:   protocol.CompletionItemKindMethod,
+			Detail: detail,
+		})
+	}
+	return items
+}
+
 // dotCompletionMethods returns completion items for methods on a component
 // instance variable. It extracts the word before the dot, looks up the
 // component ref, resolves the CFC path, and returns its function defs.
@@ -842,7 +935,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		return nil
 	}
 
-	// Scope dot completion: VARIABLES., ARGUMENTS., THIS.
+	// Scope dot completion: VARIABLES., ARGUMENTS., THIS., SUPER.
 	switch strings.ToUpper(varName) {
 	case "VARIABLES":
 		return s.compCache.GetFuncStale(docURI, "__variables__")
@@ -850,6 +943,8 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		return s.compCache.GetFuncStale(docURI, "__this__")
 	case "ARGUMENTS":
 		return s.scopeArgumentsCompletion(docURI, line)
+	case "SUPER":
+		return s.superCompletion(docURI)
 	}
 
 	// Look up component ref for this variable in the current file
