@@ -80,8 +80,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		root := strings.TrimPrefix(string(folder.URI), "file://")
 		s.workspaceRoots = append(s.workspaceRoots, root)
 	}
-	
-	
+
 	if len(s.workspaceRoots) == 0 && params.RootURI != "" { //nolint:all // this is for compatibility
 		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://")) //nolint:all // this is for compatibility
 	}
@@ -144,11 +143,69 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, nil)
 	}
 
+	s.mu.Lock()
+	// Track rapid sequential changes: reset window if >500ms since last burst.
+	now := time.Now()
+	if ws, ok := s.changeWindowStart[docURI]; !ok || now.Sub(ws) > 200*time.Millisecond {
+		s.changeWindowStart[docURI] = now
+		s.changeCount[docURI] = 0
+	}
+	s.changeCount[docURI]++
+	rapidChanges := s.changeCount[docURI] > 5 || len(params.ContentChanges) > 50
+	s.mu.Unlock()
+
+	totalBytes := 0
+	for _, c := range params.ContentChanges {
+		totalBytes += len(c.Text)
+	}
+	s.logger.Info("didChange",
+		zap.String("uri", string(docURI)),
+		zap.Int("changeCount", s.changeCount[docURI]),
+		zap.Int("edits", len(params.ContentChanges)),
+		zap.Int("bytes", totalBytes),
+	)
+
 	var editLine int
 	var lastKind cfparser.EditKind
 
+	if rapidChanges {
+		// Too many changes in quick succession — just apply text and defer reindex.
+		for _, change := range params.ContentChanges {
+			if change.Range == (protocol.Range{}) && change.RangeLength == 0 {
+				content = change.Text
+			} else {
+				content = applyEdit(content, change.Range, change.Text)
+			}
+		}
+		s.setDocument(docURI, content)
+		s.mu.Lock()
+		if timer, ok := s.cacheTimers[docURI]; ok {
+			timer.Stop()
+		}
+		s.cacheTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
+			s.mu.Lock()
+			delete(s.changeCount, docURI)
+			delete(s.changeWindowStart, docURI)
+			existingPR := s.parseResults[docURI]
+			s.mu.Unlock()
+			latest, ok := s.getDocument(docURI)
+			if !ok {
+				return
+			}
+			if existingPR != nil {
+				existingPR.ApplyFullReplace(latest)
+				s.mu.Lock()
+				s.funcRanges[docURI] = scopesToFuncRanges(existingPR)
+				s.mu.Unlock()
+				s.reindexFromParseResult(docURI, existingPR)
+			}
+		})
+		s.mu.Unlock()
+		return reply(ctx, nil, nil)
+	}
+
 	for _, change := range params.ContentChanges {
-		if change.Range == (protocol.Range{}) && change.RangeLength == 0 {
+		if change.Range == (protocol.Range{}) && change.RangeLength == 0 { //nolint:gocritic // ifElseChain: intentional for clarity
 			// Full document replacement
 			content = change.Text
 			if pr != nil {

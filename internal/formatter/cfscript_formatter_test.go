@@ -106,19 +106,19 @@ func TestThrow(t *testing.T) {
 func TestIfOnly(t *testing.T) {
 	src := wrap(`if (x > 0) { doSomething(); }`)
 	got := format(t, src)
-	allIn(t, got, "if (x > 0) {", "doSomething();", "}")
+	allIn(t, got, "if ( x > 0 ) {", "doSomething();", "}")
 }
 
 func TestIfElse(t *testing.T) {
 	src := wrap(`if (x > 0) { pos(); } else { neg(); }`)
 	got := format(t, src)
-	allIn(t, got, "if (x > 0)", "} else {", "neg();")
+	allIn(t, got, "if ( x > 0 )", "} else {", "neg();")
 }
 
 func TestIfElseIf(t *testing.T) {
 	src := wrap(`if (x > 0) { pos(); } else if (x < 0) { neg(); } else { zero(); }`)
 	got := format(t, src)
-	allIn(t, got, "if (x > 0)", "else if (x < 0)", "else {", "zero();")
+	allIn(t, got, "if ( x > 0 )", "else if ( x < 0 )", "else {", "zero();")
 }
 
 // ─── switch ──────────────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ default:
   doDefault();
 }`)
 	got := format(t, src)
-	allIn(t, got, "switch (x)", "case 1:", "case 2:", "default:", "doOne();", "doDefault();", "break;")
+	allIn(t, got, "switch ( x )", "case 1:", "case 2:", "default:", "doOne();", "doDefault();", "break;")
 }
 
 // ─── loops ───────────────────────────────────────────────────────────────────
@@ -143,25 +143,25 @@ default:
 func TestWhile(t *testing.T) {
 	src := wrap(`while (i < 10) { i++; }`)
 	got := format(t, src)
-	allIn(t, got, "while (i < 10)", "i++;")
+	allIn(t, got, "while ( i < 10 )", "i++;")
 }
 
 func TestDoWhile(t *testing.T) {
 	src := wrap(`do { x++; } while (x < 5);`)
 	got := format(t, src)
-	allIn(t, got, "do {", "x++;", "while (x < 5);")
+	allIn(t, got, "do {", "x++;", "while ( x < 5 );")
 }
 
 func TestForLoop(t *testing.T) {
 	src := wrap(`for (var i = 0; i < 10; i++) { process(i); }`)
 	got := format(t, src)
-	allIn(t, got, "for (var i = 0; i < 10; i++)", "process(i);")
+	allIn(t, got, "for ( var i = 0; i < 10; i++ )", "process(i);")
 }
 
 func TestForIn(t *testing.T) {
 	src := wrap(`for (var key in myStruct) { writeDump(key); }`)
 	got := format(t, src)
-	allIn(t, got, "for (var key in myStruct)", "writeDump(key);")
+	allIn(t, got, "for ( var key in myStruct )", "writeDump(key);")
 }
 
 // ─── try / catch / finally ───────────────────────────────────────────────────

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
@@ -95,9 +94,6 @@ func formatDocument(content string, opts protocol.FormattingOptions) (string, er
 		return content, err
 	}
 	result := string(out)
-	if strings.Contains(result, "<>") || strings.Contains(result, "</>") {
-		return content, fmt.Errorf("formatter produced invalid output, likely a grammar parse issue")
-	}
 	return result, nil
 }
 
@@ -122,3 +118,4 @@ func findErrorNode(n *sitter.Node) *sitter.Node {
 	}
 	return nil
 }
+

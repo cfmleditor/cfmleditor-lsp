@@ -34,6 +34,8 @@ type Server struct {
 	Mappings           map[string]string      // component path mappings (key -> abs path)
 	ComponentResolvers []ComponentResolver    // custom method-to-component resolvers
 	Formatting         FormattingConfig       // formatting settings
+	changeCount        map[uri.URI]int        // rapid change counter per file
+	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
 	resolveCache       map[string]string      // cached component path resolutions
 	index            *index.Index
 	linter           *cflint.Runner
@@ -52,15 +54,17 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 		idx = sharedIndex[0]
 	}
 	return &Server{
-		conn:         conn,
-		logger:       logger,
-		documents:    make(map[uri.URI]string),
-		index:        idx,
-		lintCancels:  make(map[uri.URI]context.CancelFunc),
-		compCache:    cache.New(),
-		funcRanges:   make(map[uri.URI][]cache.FuncRange),
-		cacheTimers:  make(map[uri.URI]*time.Timer),
-		parseResults: make(map[uri.URI]*cfparser.ParseResult),
+		conn:          conn,
+		logger:        logger,
+		documents:     make(map[uri.URI]string),
+		index:         idx,
+		lintCancels:   make(map[uri.URI]context.CancelFunc),
+		compCache:     cache.New(),
+		funcRanges:    make(map[uri.URI][]cache.FuncRange),
+		cacheTimers:   make(map[uri.URI]*time.Timer),
+		parseResults:      make(map[uri.URI]*cfparser.ParseResult),
+		changeCount:       make(map[uri.URI]int),
+		changeWindowStart: make(map[uri.URI]time.Time),
 	}
 }
 

@@ -90,7 +90,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	if n != nil && n.Kind() == "parenthesized_expression" {
 		inner = f.expr(n)
 	} else {
-		inner = "(" + f.expr(n) + ")"
+		inner = "( " + f.expr(n) + " )"
 	}
 	// If the condition is too long, break at logical operators.
 	// Use the larger of lineLen or indent estimate for the check.
@@ -278,6 +278,11 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		fn := n.ChildByFieldName("function")
 		args := n.ChildByFieldName("arguments")
 		fnStr := f.expr(fn)
+		// If fn has a chain break, evaluate args at deeper level.
+		chainBroken := strings.Contains(fnStr, "\n")
+		if chainBroken {
+			f.level++
+		}
 		argsStr := f.exprArgs(args)
 		result := fnStr + argsStr
 		// If the full call exceeds line width and args are inline, split args.
@@ -292,6 +297,9 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			outerIndent := f.opts.indent(f.level)
 			argsStr = "(\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ")"
 		}
+		if chainBroken {
+			f.level--
+		}
 		return fnStr + argsStr
 
 	case "new_expression":
@@ -305,12 +313,11 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		objStr := f.expr(obj)
 		propStr := f.expr(prop)
 		inline := objStr + "." + propStr
-		// Check length of the last line to decide if chain-breaking is needed.
+		// Break if the object part is multi-line or the last line exceeds width.
 		lastLine := inline
 		if idx := strings.LastIndexByte(inline, '\n'); idx >= 0 {
 			lastLine = inline[idx+1:]
 		}
-		// Only break if the last line itself exceeds line width.
 		if len(lastLine) > f.opts.LineWidth &&
 			obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
 			indent := f.opts.indent(f.level + 1)
@@ -325,7 +332,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 
 	case "parenthesized_expression":
 		inner := n.NamedChild(0)
-		return fmt.Sprintf("(%s)", f.expr(inner))
+		return fmt.Sprintf("( %s )", f.expr(inner))
 
 	case "sequence_expression":
 		// comma-separated list
@@ -1064,7 +1071,7 @@ func (f *Formatter) scriptFor(n *sitter.Node) {
 	condStr := f.forClause(cond)
 	incrStr := f.forClause(incr)
 
-	f.iLine(fmt.Sprintf("for (%s; %s; %s)", initStr, condStr, incrStr))
+	f.iLine(fmt.Sprintf("for ( %s; %s; %s )", initStr, condStr, incrStr))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }
@@ -1090,7 +1097,7 @@ func (f *Formatter) scriptForIn(n *sitter.Node) {
 		}
 	}
 
-	f.iLine(fmt.Sprintf("for (%s%s %s %s)", varKind, f.expr(left), keyword, f.expr(right)))
+	f.iLine(fmt.Sprintf("for ( %s%s %s %s )", varKind, f.expr(left), keyword, f.expr(right)))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }

@@ -67,22 +67,6 @@ func DefaultOptions() Options {
 	}
 }
 
-// blockTags are CF tags that contain child content and need indented bodies.
-var blockTags = map[string]bool{
-	"cfif": true, "cfelseif": true, "cfelse": true,
-	"cfloop": true, "cfoutput": true, "cfquery": true,
-	"cffunction": true, "cfcomponent": true,
-	"cftry": true, "cfcatch": true, "cffinally": true,
-	"cfswitch": true, "cfcase": true, "cfdefaultcase": true,
-	"cftransaction": true, "cfthread": true, "cflock": true,
-	"cfsilent": true,
-	"cfmail": true, "cfmailpart": true,
-	"cfform": true, "cfgrid": true,
-	"cflayout": true, "cflayoutarea": true,
-	"cfdiv": true, "cfhtmlhead": true,
-	"cfscript": true,
-}
-
 // selfClosingTags never have a separate closing tag.
 // var selfClosingTags = map[string]bool{
 // 	"cfset": true, "cfparam": true, "cfreturn": true,
@@ -456,8 +440,13 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 		"cf_script_tag", "cf_xml_tag", "cf_savecontent_tag":
 		return true
 	case "cf_tag":
-		name := f.tagName(n)
-		return blockTags[name]
+		// A cf_tag with an end tag is a block tag.
+		for i := uint(0); i < n.ChildCount(); i++ {
+			if n.Child(i).Kind() == "cf_end_tag" {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -540,7 +529,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
-	isBlock := blockTags[name]
+	isBlock := true // cf_tag with start+end is always a block
 	if isBlock {
 		f.level++
 		f.write("\n")
@@ -608,7 +597,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
-	isBlock := blockTags[name]
+	isBlock := true // specific block tag types are always blocks
 	if isBlock {
 		f.level++
 		if name != "cfoutput" && (name != "cffunction" || !f.firstBodyChildIsArg(n)) {
@@ -706,23 +695,14 @@ func (f *Formatter) normalizeCond(raw string) string {
 	// Break at logical operators, indenting by paren depth.
 	baseIndent := f.indented() + f.opts.indent(1)
 	var result strings.Builder
-	depth := 0
 	i := 0
 	for i < len(single) {
 		ch := single[i]
-		if ch == '(' { //nolint:staticcheck // QF1003: intentional for clarity
-			depth++
-		} else if ch == ')' {
-			depth--
-		}
 		if i > 0 {
 			for _, op := range condBreakOperators {
 				if matchWord(single, i, op) {
 					result.WriteString("\n")
 					result.WriteString(baseIndent)
-					for d := 0; d < depth; d++ {
-						result.WriteString(f.opts.indent(1))
-					}
 					break
 				}
 			}
@@ -955,17 +935,13 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 		f.write("<" + name + " " + lines[0])
 		f.write("\n")
 		for i, l := range lines[1:] {
-			trimmed := strings.TrimSpace(l)
-			if trimmed == "" {
+			if strings.TrimSpace(l) == "" {
 				f.write("\n")
 				continue
 			}
-			f.writeIndent()
-			f.write(f.opts.indent(1))
+			f.write(l)
 			if i == len(lines)-2 {
-				f.write(trimmed + " />")
-			} else {
-				f.write(trimmed)
+				f.write(" />")
 			}
 			f.write("\n")
 		}
