@@ -52,7 +52,7 @@ func TestFunctionNoParams(t *testing.T) {
 func TestFunctionWithParams(t *testing.T) {
 	src := wrap(`function add(a, b) { return a + b; }`)
 	got := format(t, src)
-	allIn(t, got, "function add(a, b)", "return a + b;")
+	allIn(t, got, "function add(\n", "a,\n", "b\n", "return a + b;")
 }
 
 func TestFunctionWithAccessModifier(t *testing.T) {
@@ -161,7 +161,7 @@ func TestForLoop(t *testing.T) {
 func TestForIn(t *testing.T) {
 	src := wrap(`for (var key in myStruct) { writeDump(key); }`)
 	got := format(t, src)
-	allIn(t, got, "for (key in myStruct)", "writeDump(key);")
+	allIn(t, got, "for (var key in myStruct)", "writeDump(key);")
 }
 
 // ─── try / catch / finally ───────────────────────────────────────────────────
@@ -286,4 +286,19 @@ func TestScriptIdempotency(t *testing.T) {
 	if got1 != string(got2) {
 		t.Errorf("formatter is not idempotent.\nFirst pass:\n%s\nSecond pass:\n%s", got1, string(got2))
 	}
+}
+
+// ─── multi-line arguments ────────────────────────────────────────────────────
+
+func TestMultiLineArgsIndented(t *testing.T) {
+	src := wrap(`myFunction(arg1, arg2, arg3, arg4);`)
+	got := format(t, src)
+	// >3 arguments should be broken onto separate lines, each indented
+	allIn(t, got, "\n        arg1,\n        arg2,\n        arg3,\n        arg4\n")
+}
+
+func TestSingleLineArgsUnchanged(t *testing.T) {
+	src := wrap(`myFunction(arg1, arg2, arg3);`)
+	got := format(t, src)
+	allIn(t, got, "myFunction(arg1, arg2, arg3);")
 }

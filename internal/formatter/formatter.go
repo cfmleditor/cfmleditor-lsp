@@ -1,4 +1,3 @@
-
 // Package formatter walks a tree-sitter concrete syntax tree produced by the
 // cfml grammar and re-emits well-formatted CFML source.
 //
@@ -43,6 +42,9 @@ type Options struct {
 	// ParseQuery re-parses cfquery content. If nil, query blocks are
 	// emitted verbatim.
 	ParseQuery ParseFunc
+	// ParseCFML re-parses CFML source after pre-formatting. If nil,
+	// pre-formatting (e.g. converting implicit end tags to self-closing) is skipped.
+	ParseCFML ParseFunc
 }
 
 func (o Options) indent(level int) string {
@@ -60,8 +62,8 @@ func (o Options) indent(level int) string {
 func DefaultOptions() Options {
 	return Options{
 		IndentWidth:        4,
-		LineWidth:          120,
-		AttrBreakThreshold: 3,
+		LineWidth:          100,
+		AttrBreakThreshold: 4,
 	}
 }
 
@@ -73,6 +75,7 @@ var blockTags = map[string]bool{
 	"cftry": true, "cfcatch": true, "cffinally": true,
 	"cfswitch": true, "cfcase": true, "cfdefaultcase": true,
 	"cftransaction": true, "cfthread": true, "cflock": true,
+	"cfsilent": true,
 	"cfmail": true, "cfmailpart": true,
 	"cfform": true, "cfgrid": true,
 	"cflayout": true, "cflayoutarea": true,
@@ -93,13 +96,14 @@ var blockTags = map[string]bool{
 
 // Formatter holds state during a single formatting pass.
 type Formatter struct {
-	opts    Options
-	src     []byte
-	out     bytes.Buffer
-	level   int   // current indentation level
-	atBOL   bool  // at beginning of line
-	lastNL  bool  // last written byte was a newline
-	lineLen int   // approximate current line length
+	opts             Options
+	src              []byte
+	out              bytes.Buffer
+	level            int  // current indentation level
+	atBOL            bool // at beginning of line
+	lastNL           bool // last written byte was a newline
+	lineLen          int  // approximate current line length
+	lastTagMultiLine bool // last emitted tag had expanded (multi-line) attributes
 }
 
 // New creates a Formatter with the given options.
@@ -113,12 +117,21 @@ func New(opts Options) *Formatter {
 	if opts.AttrBreakThreshold == 0 {
 		opts.AttrBreakThreshold = 3
 	}
-	return &Formatter{opts: opts, atBOL: true}
+	return &Formatter{opts: opts, atBOL: true, lastNL: true}
 }
 
 // Format parses src with the provided tree-sitter parser and returns
 // formatted CFML.
-func Format(src []byte, tree *sitter.Tree, opts Options) ([]byte, error) {
+func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil
+			err = fmt.Errorf("formatter panic: %v", r)
+		}
+	}()
+	if opts.ParseCFML != nil {
+		src, tree = preformat(src, tree, opts.ParseCFML)
+	}
 	f := New(opts)
 	f.src = src
 	root := tree.RootNode()
@@ -179,26 +192,26 @@ func (f *Formatter) writeIndent() {
 
 // countIndentLevel counts the indentation level of a line, treating each tab
 // as one level and each indentWidth spaces as one level.
-func (f *Formatter) countIndentLevel(line string, indentWidth int) int {
-	level := 0
-	spaces := 0
-	for _, ch := range line {
-		switch ch {
-			case '\t':
-				level++
-				spaces = 0
-			case ' ':
-				spaces++
-				if spaces >= indentWidth {
-					level++
-					spaces = 0
-				}
-		  default:
-      		return level
-		}
-	}
-	return level
-}
+// func (f *Formatter) countIndentLevel(line string, indentWidth int) int {
+// 	level := 0
+// 	spaces := 0
+// 	for _, ch := range line {
+// 		switch ch {
+// 		case '\t':
+// 			level++
+// 			spaces = 0
+// 		case ' ':
+// 			spaces++
+// 			if spaces >= indentWidth {
+// 				level++
+// 				spaces = 0
+// 			}
+// 		default:
+// 			return level
+// 		}
+// 	}
+// 	return level
+// }
 
 // ─── attribute formatting ────────────────────────────────────────────────────
 
@@ -219,7 +232,7 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
-		case "cf_start_tag", "cf_tag_attributes":
+		case "cf_start_tag", "cf_start_tag_with_selfclose", "cf_tag_attributes":
 			f.walkAttrs(c, attrs)
 		case "cf_attribute":
 			attr := cfAttr{}
@@ -279,13 +292,13 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 		return inline
 	}
 
-	// Multi-line rendering: one attribute per line, aligned after tag name.
-	pad := strings.Repeat(" ", len(tagName)+2) // "<" + name + " "
+	// Multi-line rendering: one attribute per line, indented one level.
+	indent := f.opts.indent(1)
 	var sb strings.Builder
 	for i, a := range attrs {
 		sb.WriteString("\n")
 		sb.WriteString(f.indented())
-		sb.WriteString(pad)
+		sb.WriteString(indent)
 		if a.value == "" {
 			sb.WriteString(a.name)
 		} else {
@@ -308,6 +321,12 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 
 	case "cf_component_content":
 		f.formatComponentContent(n)
+
+	case "cf_component_open_tag":
+		f.formatCFComponentOpen(n)
+
+	case "cf_component_close_tag":
+		f.formatCFComponentClose(n)
 
 	case "cf_tag":
 		f.formatCFTag(n)
@@ -350,7 +369,7 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case "html_text", "text":
 		f.formatText(n)
 
-	case "comment":
+	case "comment", "cf_comment":
 		f.formatComment(n)
 
 	case "cf_selfclose_void_tag_end":
@@ -368,9 +387,8 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 		"subscript_expression", "new_expression",
 		"sequence_expression", "augmented_assignment_expression",
 		"parenthesized_expression":
-		// Expression nodes may have operators/punctuation in gaps between
-		// children. Emit the full source span verbatim.
-		f.write(f.text(n))
+		// Expression nodes — normalize spacing via expr().
+		f.write(f.expr(n))
 
 	default:
 		// Leaf nodes emit verbatim; non-leaf recurse into children.
@@ -383,9 +401,84 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 }
 
 func (f *Formatter) formatChildren(n *sitter.Node) {
+	prevTagKind := ""
+	prevWasComment := false
 	for i := uint(0); i < n.ChildCount(); i++ {
-		f.formatNode(n.Child(i))
+		c := n.Child(i)
+		kind := f.nodeTagKind(c)
+		if kind != "" && prevTagKind != "" && !prevWasComment &&
+			(kind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
+			f.write("\n")
+		}
+		f.formatNode(c)
+		if kind != "" && !f.nodeIsComment(c) {
+			prevTagKind = kind
+		}
+		prevWasComment = f.nodeIsComment(c)
 	}
+}
+
+// nodeTagKind returns a string identifying the "tag group" of a node for
+// blank-line-between-groups logic. Returns "" for non-tag nodes.
+func (f *Formatter) nodeTagKind(n *sitter.Node) string {
+	kind := n.Kind()
+	switch kind {
+	case "cf_set_tag":
+		// Distinguish <cfset var ...> from <cfset ...> for grouping.
+		text := f.text(n)
+		if strings.Contains(text, " var ") || strings.Contains(text, "\tvar ") {
+			return "cf_set_var_tag"
+		}
+		return kind
+	case "cf_return_tag", "cf_selfclose_tag", "cf_tag",
+		"cf_if_tag", "cf_output_tag", "cf_function_tag", "cf_query_tag",
+		"cf_script_tag", "cf_xml_tag", "cf_savecontent_tag",
+		"comment", "cf_comment":
+		return kind
+	default:
+		return ""
+	}
+}
+
+// nodeIsComment returns true if the node is a comment (used to avoid
+// updating prevTagKind so comments don't cause blank lines after them).
+func (f *Formatter) nodeIsComment(n *sitter.Node) bool {
+	kind := n.Kind()
+	return kind == "comment" || kind == "cf_comment"
+}
+
+// isBlockTagKind returns true if the node is a block-level CF tag that
+// contains indented children (cfif, cfloop, cfoutput, etc.).
+func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
+	kind := n.Kind()
+	switch kind {
+	case "cf_if_tag", "cf_output_tag", "cf_function_tag", "cf_query_tag",
+		"cf_script_tag", "cf_xml_tag", "cf_savecontent_tag":
+		return true
+	case "cf_tag":
+		name := f.tagName(n)
+		return blockTags[name]
+	}
+	return false
+}
+
+// firstBodyChildIsArg returns true if the first meaningful body child of a
+// block tag is a cfargument tag.
+func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		kind := c.Kind()
+		if kind == "<cf" || kind == "</cf" || kind == ">" || kind == "cf_tag_name" ||
+			kind == "cf_tag_attributes" || kind == "cf_end_tag" ||
+			kind == "cf_attribute" || kind == "cf_start_tag" {
+			continue
+		}
+		if kind == "cf_selfclose_tag" {
+			return f.tagName(c) == "cfargument"
+		}
+		return false
+	}
+	return false
 }
 
 // ─── CF tag formatting ───────────────────────────────────────────────────────
@@ -394,13 +487,13 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 	kind := n.Kind()
 
 	// Generic cf_tag: look for cf_tag_name in cf_start_tag child.
-	if kind == "cf_tag" || kind == "cf_start_tag" || kind == "cf_end_tag" {
+	if kind == "cf_tag" || kind == "cf_start_tag" || kind == "cf_end_tag" || kind == "cf_start_tag_with_selfclose" {
 		for i := uint(0); i < n.ChildCount(); i++ {
 			c := n.Child(i)
 			if c.Kind() == "cf_tag_name" {
 				return "cf" + strings.ToLower(f.text(c))
 			}
-			if c.Kind() == "cf_start_tag" {
+			if c.Kind() == "cf_start_tag" || c.Kind() == "cf_start_tag_with_selfclose" {
 				return f.tagName(c)
 			}
 		}
@@ -420,7 +513,7 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 	}
 
 	// Specific tags: cf_set_tag → cfset, cf_if_tag → cfif, etc.
-	if strings.HasPrefix(kind, "cf_") && strings.HasSuffix(kind, "_tag") {
+	if strings.HasPrefix(kind, "cf_") && strings.HasSuffix(kind, "_tag") && len(kind) > 7 {
 		inner := kind[3 : len(kind)-4] // strip "cf_" and "_tag"
 		return "cf" + strings.ReplaceAll(inner, "_", "")
 	}
@@ -431,6 +524,14 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 // formatCFTag handles generic cf_tag nodes (cffunction, cfloop, etc.)
 // Structure: cf_start_tag + body children + cf_end_tag
 func (f *Formatter) formatCFTag(n *sitter.Node) {
+	// Check if this is a self-closing cf_tag (e.g. <cftransaction action="commit" />)
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.Child(i).Kind() == "cf_start_tag_with_selfclose" {
+			f.formatCFSelfCloseAttrTag(n)
+			return
+		}
+	}
+
 	name := f.tagName(n)
 	attrs := f.collectAttrs(n)
 
@@ -442,24 +543,57 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	isBlock := blockTags[name]
 	if isBlock {
 		f.level++
+		f.write("\n")
 	}
 
+	prevCFTagKind := ""
+	prevCFTagWasComment := false
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_end_tag":
 			// already handled above/below
 		default:
+			tagKind := f.nodeTagKind(c)
+			if tagKind != "" && prevCFTagKind != "" && !prevCFTagWasComment &&
+				(tagKind != prevCFTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
+				f.write("\n")
+			}
 			f.formatNode(c)
+			if tagKind != "" && !f.nodeIsComment(c) {
+				prevCFTagKind = tagKind
+			}
+			prevCFTagWasComment = f.nodeIsComment(c)
 		}
 	}
 
 	if isBlock {
 		f.level--
 	}
+	f.write("\n")
 	f.nl()
 	f.writeIndent()
 	f.write("</" + name + ">")
+	f.write("\n")
+}
+
+// formatCFComponentOpen handles cf_component_open_tag (a sibling node in the tree).
+func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
+	attrs := f.collectAttrs(n)
+	f.nl()
+	f.writeIndent()
+	f.write("<cfcomponent" + f.renderAttrs("cfcomponent", attrs) + ">")
+	f.write("\n\n")
+	f.level++
+}
+
+// formatCFComponentClose handles cf_component_close_tag (a sibling node in the tree).
+func (f *Formatter) formatCFComponentClose(_ *sitter.Node) {
+	f.level--
+	f.write("\n")
+	f.nl()
+	f.writeIndent()
+	f.write("</cfcomponent>")
 	f.write("\n")
 }
 
@@ -477,8 +611,16 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	isBlock := blockTags[name]
 	if isBlock {
 		f.level++
+		if name != "cfoutput" && (name != "cffunction" || !f.firstBodyChildIsArg(n)) {
+			f.write("\n")
+		}
 	}
 
+	prevTagKind := ""
+	prevWasComment := false
+
+	// Collect body nodes (skip syntax tokens).
+	var bodyNodes []*sitter.Node
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		kind := c.Kind()
@@ -487,17 +629,46 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 			kind == "cf_attribute" || kind == "cf_start_tag" {
 			continue
 		}
-		// Leaf content nodes (e.g. cf_query_content, html_text) may
-		// include surrounding whitespace from the source. Trim it so
-		// the formatter's own newlines don't accumulate extra blanks.
-		if c.ChildCount() == 0 {
-			trimmed := strings.TrimSpace(f.text(c))
-			if trimmed != "" {
-				f.write(trimmed)
+		bodyNodes = append(bodyNodes, c)
+	}
+
+	// If all body nodes are on a single line, emit them inline.
+	if f.allSingleLine(bodyNodes) && !f.hasBlockChild(bodyNodes) && f.fitsOnLine(bodyNodes) {
+		f.formatInlineRun(bodyNodes)
+	} else {
+		for i := 0; i < len(bodyNodes); {
+			c := bodyNodes[i]
+			kind := c.Kind()
+
+			if f.isInlineNode(c) {
+				// Collect consecutive inline nodes into a run.
+				run := []*sitter.Node{c}
+				j := i + 1
+				for j < len(bodyNodes) && f.isInlineNode(bodyNodes[j]) {
+					run = append(run, bodyNodes[j])
+					j++
+				}
+				f.formatTextRun(run)
+				i = j
+				continue
+			}
+
+			// Insert blank line between groups of different tag types.
+			tagKind := f.nodeTagKind(c)
+			if tagKind != "" && prevTagKind != "" && !prevWasComment &&
+				(tagKind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 				f.write("\n")
 			}
-		} else {
-			f.formatNode(c)
+			if kind == "comment" { //nolint:gocritic // ifElseChain: intentional for readability
+				f.formatComment(c)
+			} else {
+				f.formatNode(c)
+			}
+			if tagKind != "" && kind != "comment" && kind != "cf_comment" {
+				prevTagKind = tagKind
+			}
+			prevWasComment = kind == "comment" || kind == "cf_comment"
+			i++
 		}
 	}
 
@@ -512,11 +683,11 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 // normalizeCond collapses internal newlines and leading whitespace in a
 // multi-line condition expression into properly indented continuation lines.
+// Long conditions are broken at logical operators, with indentation reflecting
+// parenthesis depth for readability.
 func (f *Formatter) normalizeCond(raw string) string {
+	// Collapse to single line first.
 	lines := strings.Split(raw, "\n")
-	if len(lines) <= 1 {
-		return raw
-	}
 	var parts []string
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
@@ -524,16 +695,62 @@ func (f *Formatter) normalizeCond(raw string) string {
 			parts = append(parts, trimmed)
 		}
 	}
-	if len(parts) <= 1 {
-		return strings.TrimSpace(raw)
+	single := strings.Join(parts, " ")
+
+	// Check if it fits on one line.
+	tagPrefix := f.lineLen
+	if tagPrefix+len(single) <= f.opts.LineWidth {
+		return single
 	}
-	// First line + continuation lines indented with current indent + extra padding
-	result := parts[0]
-	indent := f.indented() + strings.Repeat(" ", 4)
-	for _, p := range parts[1:] {
-		result += "\n" + indent + p
+
+	// Break at logical operators, indenting by paren depth.
+	baseIndent := f.indented() + f.opts.indent(1)
+	var result strings.Builder
+	depth := 0
+	i := 0
+	for i < len(single) {
+		ch := single[i]
+		if ch == '(' { //nolint:staticcheck // QF1003: intentional for clarity
+			depth++
+		} else if ch == ')' {
+			depth--
+		}
+		if i > 0 {
+			for _, op := range condBreakOperators {
+				if matchWord(single, i, op) {
+					result.WriteString("\n")
+					result.WriteString(baseIndent)
+					for d := 0; d < depth; d++ {
+						result.WriteString(f.opts.indent(1))
+					}
+					break
+				}
+			}
+		}
+		result.WriteByte(ch)
+		i++
 	}
-	return result
+	return result.String()
+}
+
+// condBreakOperators are CFML logical operators where long conditions should break.
+var condBreakOperators = []string{"&&", "||", "AND", "OR", "XOR", "EQV", "IMP"}
+
+// matchWord checks if s[pos:] starts with word preceded and followed by a space.
+func matchWord(s string, pos int, word string) bool {
+	if pos == 0 || s[pos-1] != ' ' {
+		return false
+	}
+	if pos+len(word) > len(s) {
+		return false
+	}
+	if s[pos:pos+len(word)] != word {
+		return false
+	}
+	if pos+len(word) < len(s) && s[pos+len(word)] != ' ' {
+		return false
+	}
+	return true
 }
 
 // formatCFIfTag handles cf_if_tag with its condition, body, and optional cf_if_alt.
@@ -560,7 +777,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		}
 		if !inBody {
 			if c.IsNamed() {
-				condParts = append(condParts, f.text(c))
+				condParts = append(condParts, f.expr(c))
 			}
 		} else {
 			bodyNodes = append(bodyNodes, c)
@@ -573,9 +790,21 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	f.write("<cfif " + cond + ">")
 	f.write("\n")
 	f.level++
+	f.write("\n")
 
+	prevTagKind2 := ""
+	prevWasComment2 := false
 	for _, c := range bodyNodes {
+		tagKind := f.nodeTagKind(c)
+		if tagKind != "" && prevTagKind2 != "" && !prevWasComment2 &&
+			(tagKind != prevTagKind2 || f.isBlockTagKind(c) || f.lastTagMultiLine) {
+			f.write("\n")
+		}
 		f.formatNode(c)
+		if tagKind != "" && !f.nodeIsComment(c) {
+			prevTagKind2 = tagKind
+		}
+		prevWasComment2 = f.nodeIsComment(c)
 	}
 
 	f.level--
@@ -584,6 +813,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		f.formatCFIfAlt(altNode)
 	}
 
+	f.write("\n")
 	f.nl()
 	f.writeIndent()
 	f.write("</cfif>")
@@ -615,7 +845,7 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 					break
 				}
 				if gc.IsNamed() {
-					condParts = append(condParts, f.text(gc))
+					condParts = append(condParts, f.expr(gc))
 				}
 			}
 			inBody = true
@@ -632,12 +862,14 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 	}
 
 	if isElse {
+		f.write("\n")
 		f.nl()
 		f.writeIndent()
 		f.write("<cfelse>")
 		f.write("\n")
 	} else {
 		cond := f.normalizeCond(strings.Join(condParts, " "))
+		f.write("\n")
 		f.nl()
 		f.writeIndent()
 		f.write("<cfelseif " + cond + ">")
@@ -645,8 +877,20 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 	}
 
 	f.level++
+	f.write("\n")
+	prevAltTagKind := ""
+	prevAltWasComment := false
 	for _, c := range bodyNodes {
+		tagKind := f.nodeTagKind(c)
+		if tagKind != "" && prevAltTagKind != "" && !prevAltWasComment &&
+			(tagKind != prevAltTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
+			f.write("\n")
+		}
 		f.formatNode(c)
+		if tagKind != "" && !f.nodeIsComment(c) {
+			prevAltTagKind = tagKind
+		}
+		prevAltWasComment = f.nodeIsComment(c)
 	}
 	f.level--
 
@@ -673,17 +917,20 @@ func (f *Formatter) formatCFSelfCloseAttrTag(n *sitter.Node) {
 	name := f.tagName(n)
 	attrs := f.collectAttrs(n)
 
+	rendered := f.renderAttrs(name, attrs)
+	f.lastTagMultiLine = strings.Contains(rendered, "\n")
 	f.nl()
 	f.writeIndent()
-	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
+	f.write("<" + name + rendered + " />")
 	f.write("\n")
 }
 
 func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
+	f.lastTagMultiLine = false
 	name := f.tagName(n)
 
 	// For specific self-closing tags (cf_set_tag, cf_return_tag),
-	// reconstruct from expression children.
+	// reconstruct from expression children with normalized spacing.
 	var exprParts []string
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -692,57 +939,34 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 			continue
 		}
 		if c.IsNamed() {
-			exprParts = append(exprParts, f.text(c))
+			exprParts = append(exprParts, f.expr(c))
 		}
 	}
 
 	body := strings.Join(exprParts, " ")
 
-	// If the body spans multiple lines, the parser has mis-parsed due to ##
-	// in strings consuming content across lines. Emit the full source span
-	// verbatim with re-indentation to avoid corrupting the content.
+	// If the body spans multiple lines (e.g. multi-line function args),
+	// emit with re-indentation based on the normalized expression.
 	if strings.Contains(body, "\n") {
-		raw := f.text(n)
-		lines := strings.Split(raw, "\n")
-		// The first line lacks leading whitespace (node starts mid-line).
-		// Use the first non-empty line AFTER line 0 to determine base indent.
-		baseIndent := 0
-		indentWidth := f.opts.IndentWidth
-		if indentWidth == 0 {
-			indentWidth = 4
-		}
-		for _, l := range lines[1:] {
-			if strings.TrimSpace(l) == "" {
-				continue
-			}
-			baseIndent = f.countIndentLevel(l, indentWidth)
-			break
-		}
-		// Emit first line (the cfset tag itself)
-		firstTrimmed := strings.TrimSpace(lines[0])
-		if firstTrimmed != "" {
-			f.nl()
-			f.writeIndent()
-			f.write(firstTrimmed)
-			f.write("\n")
-		}
-		// Emit remaining lines with re-indentation
-		for _, l := range lines[1:] {
+		f.lastTagMultiLine = true
+		lines := strings.Split(body, "\n")
+		f.nl()
+		f.writeIndent()
+		f.write("<" + name + " " + lines[0])
+		f.write("\n")
+		for i, l := range lines[1:] {
 			trimmed := strings.TrimSpace(l)
 			if trimmed == "" {
 				f.write("\n")
 				continue
 			}
-			level := f.countIndentLevel(l, indentWidth)
-			extraLevels := level - baseIndent
-			if extraLevels < 0 {
-				extraLevels = 0
-			}
 			f.writeIndent()
-			if extraLevels > 0 {
-				f.write(strings.Repeat("    ", extraLevels))
+			f.write(f.opts.indent(1))
+			if i == len(lines)-2 {
+				f.write(trimmed + " />")
+			} else {
+				f.write(trimmed)
 			}
-			f.write(trimmed)
 			f.write("\n")
 		}
 		return
@@ -751,9 +975,9 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	f.nl()
 	f.writeIndent()
 	if body != "" {
-		f.write("<" + name + " " + body + ">")
+		f.write("<" + name + " " + body + " />")
 	} else {
-		f.write("<" + name + ">")
+		f.write("<" + name + " />")
 	}
 	f.write("\n")
 }
@@ -842,32 +1066,19 @@ func (f *Formatter) formatComponentContent(n *sitter.Node) {
 
 func (f *Formatter) formatText(n *sitter.Node) {
 	raw := f.text(n)
-	lines := strings.Split(raw, "\n")
-	// Strip purely-blank leading / trailing lines
-	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-		lines = lines[1:]
-	}
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) == 0 {
-		f.write("\n")
+	// Suppress whitespace-only text nodes (spacing between tags is managed by the formatter).
+	if strings.TrimSpace(raw) == "" {
 		return
 	}
-	for _, l := range lines {
-		trimmed := strings.TrimLeft(l, " \t")
-		if trimmed == "" {
-			f.write("\n")
-			continue
-		}
-		f.writeIndent()
-		f.write(trimmed)
-		f.write("\n")
-	}
+	// Collapse all whitespace to single spaces (HTML whitespace rules).
+	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
 }
 
 func (f *Formatter) formatComment(n *sitter.Node) {
-	raw := f.text(n)
+	raw := strings.TrimSpace(f.text(n))
+	if raw == "" {
+		return
+	}
 	f.nl()
 	f.writeIndent()
 	f.write(raw)

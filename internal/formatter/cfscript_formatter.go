@@ -1,4 +1,3 @@
-
 package formatter
 
 // cfscript_formatter.go — recursive pretty-printer for the cfscript sub-grammar.
@@ -28,7 +27,7 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 		f.scriptBlockComment(n)
 
 	// ── declarations ──────────────────────────────────────────────────────
-	case "component_declaration":
+	case "component_declaration", "component":
 		f.scriptComponent(n)
 	case "function_definition", "function_declaration", "method_definition":
 		f.scriptFunction(n)
@@ -81,15 +80,28 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 // scriptWrite writes s, prepending indentation if we are at the beginning of
 // a line. This is the primary output primitive for script formatting.
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
-func (f *Formatter) scriptNL()             { f.nl() }
+func (f *Formatter) scriptNL()            { f.nl() }
 
 // parenExpr renders an expression wrapped in parens, avoiding double-wrapping
 // when the node is already a parenthesized_expression.
+// Long conditions are broken at logical operators.
 func (f *Formatter) parenExpr(n *sitter.Node) string {
+	var inner string
 	if n != nil && n.Kind() == "parenthesized_expression" {
-		return f.expr(n)
+		inner = f.expr(n)
+	} else {
+		inner = "(" + f.expr(n) + ")"
 	}
-	return "(" + f.expr(n) + ")"
+	// If the condition is too long, break at logical operators.
+	// Use the larger of lineLen or indent estimate for the check.
+	col := f.lineLen
+	if col == 0 {
+		col = len(f.opts.indent(f.level))
+	}
+	if col+len(inner) > f.opts.LineWidth {
+		return f.normalizeCond(inner)
+	}
+	return inner
 }
 
 // iLine emits one indented line inside a script context.
@@ -101,35 +113,45 @@ func (f *Formatter) iLine(s string) {
 
 // scriptChildren iterates named statement-level children and dispatches each.
 func (f *Formatter) scriptChildren(n *sitter.Node) {
-	prevWasBlank := false
+	prevWasBlock := false
+	prevWasMultiLine := false
+	prevWasNamed := false
+	prevEndRow := int(n.StartPosition().Row)
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		if !c.IsNamed() {
-			// anonymous punctuation / keyword tokens — skip here, handled by
-			// their parent's formatter.
 			continue
 		}
-		// Detect blank lines in the original source between statements.
-		if i > 0 {
-			prev := n.Child(i - 1)
-			linesBetween := int(c.StartPosition().Row) - int(prev.EndPosition().Row)
-			if linesBetween > 1 && !prevWasBlank {
-				f.scriptWrite("\n")
-				prevWasBlank = true
-			} else {
-				prevWasBlank = false
-			}
+		// Insert blank line after a block/multi-line statement, before a block, or when the source had one.
+		startRow := int(c.StartPosition().Row)
+		sourceGap := startRow-prevEndRow > 1
+		if prevWasBlock || prevWasMultiLine || (prevWasNamed && isScriptBlockStmt(c)) || (prevWasNamed && sourceGap) {
+			f.scriptWrite("\n")
 		}
 		f.formatScriptNode(c)
+		prevWasBlock = isScriptBlockStmt(c)
+		prevWasMultiLine = int(c.EndPosition().Row)-int(c.StartPosition().Row) > 0
+		prevWasNamed = true
+		prevEndRow = int(c.EndPosition().Row)
 	}
+}
+
+func isScriptBlockStmt(n *sitter.Node) bool {
+	switch n.Kind() {
+	case "if_statement", "for_statement", "for_in_statement", "for_of_statement",
+		"while_statement", "do_statement", "switch_statement", "try_statement":
+		return true
+	}
+	return false
 }
 
 // scriptBlock renders a `{ ... }` block, indenting its contents.
 func (f *Formatter) scriptBlock(n *sitter.Node) {
 	f.scriptWrite(" {")
-	f.scriptWrite("\n")
+	f.scriptWrite("\n\n")
 	f.level++
 	f.scriptChildren(n)
+	f.scriptWrite("\n")
 	f.level--
 	f.writeIndent()
 	f.scriptWrite("}")
@@ -187,7 +209,19 @@ func (f *Formatter) expr(n *sitter.Node) string {
 				}
 			}
 		}
-		return fmt.Sprintf("%s %s %s", f.expr(left), op, f.expr(right))
+		leftStr := f.expr(left)
+		rightStr := f.expr(right)
+		result := fmt.Sprintf("%s %s %s", leftStr, op, rightStr)
+		if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
+			f.level++
+			rightStr = f.expr(right)
+			f.level--
+			if strings.Contains(rightStr, "\n") {
+				indent := f.opts.indent(f.level + 1)
+				return fmt.Sprintf("%s %s\n%s%s", leftStr, op, indent, rightStr)
+			}
+		}
+		return result
 
 	case "augmented_assignment_expression":
 		left := n.ChildByFieldName("left")
@@ -199,6 +233,9 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		left := n.ChildByFieldName("left")
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
+		if op == "" {
+			op = f.gapOperator(n, left, right)
+		}
 		return fmt.Sprintf("%s %s %s", f.expr(left), op, f.expr(right))
 
 	case "unary_expression":
@@ -227,12 +264,35 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		cond := n.ChildByFieldName("condition")
 		cons := n.ChildByFieldName("consequence")
 		alt := n.ChildByFieldName("alternative")
-		return fmt.Sprintf("%s ? %s : %s", f.expr(cond), f.expr(cons), f.expr(alt))
+		condStr := f.expr(cond)
+		consStr := f.expr(cons)
+		altStr := f.expr(alt)
+		inline := fmt.Sprintf("%s ? %s : %s", condStr, consStr, altStr)
+		if len(inline) > f.opts.LineWidth {
+			indent := f.opts.indent(f.level + 1)
+			return condStr + "\n" + indent + "? " + consStr + "\n" + indent + ": " + altStr
+		}
+		return inline
 
 	case "call_expression":
 		fn := n.ChildByFieldName("function")
 		args := n.ChildByFieldName("arguments")
-		return fmt.Sprintf("%s%s", f.expr(fn), f.exprArgs(args))
+		fnStr := f.expr(fn)
+		argsStr := f.exprArgs(args)
+		result := fnStr + argsStr
+		// If the full call exceeds line width and args are inline, split args.
+		if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 {
+			f.level++
+			var parts []string
+			for i := uint(0); i < args.NamedChildCount(); i++ {
+				parts = append(parts, f.expr(args.NamedChild(i)))
+			}
+			indent := f.opts.indent(f.level)
+			f.level--
+			outerIndent := f.opts.indent(f.level)
+			argsStr = "(\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ")"
+		}
+		return fnStr + argsStr
 
 	case "new_expression":
 		ctor := n.ChildByFieldName("constructor")
@@ -242,7 +302,21 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "member_expression":
 		obj := n.ChildByFieldName("object")
 		prop := n.ChildByFieldName("property")
-		return fmt.Sprintf("%s.%s", f.expr(obj), f.expr(prop))
+		objStr := f.expr(obj)
+		propStr := f.expr(prop)
+		inline := objStr + "." + propStr
+		// Check length of the last line to decide if chain-breaking is needed.
+		lastLine := inline
+		if idx := strings.LastIndexByte(inline, '\n'); idx >= 0 {
+			lastLine = inline[idx+1:]
+		}
+		// Only break if the last line itself exceeds line width.
+		if len(lastLine) > f.opts.LineWidth &&
+			obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
+			indent := f.opts.indent(f.level + 1)
+			return objStr + "\n" + indent + "." + propStr
+		}
+		return inline
 
 	case "subscript_expression":
 		obj := n.ChildByFieldName("object")
@@ -275,7 +349,19 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "pair":
 		key := n.ChildByFieldName("key")
 		val := n.ChildByFieldName("value")
-		return fmt.Sprintf("%s: %s", f.expr(key), f.expr(val))
+		keyStr := f.expr(key)
+		valStr := f.expr(val)
+		result := fmt.Sprintf("%s: %s", keyStr, valStr)
+		if len(result) > f.opts.LineWidth && !strings.Contains(valStr, "\n") {
+			f.level++
+			valStr = f.expr(val)
+			f.level--
+			if strings.Contains(valStr, "\n") {
+				indent := f.opts.indent(f.level + 1)
+				return fmt.Sprintf("%s:\n%s%s", keyStr, indent, valStr)
+			}
+		}
+		return result
 
 	// ── functions ─────────────────────────────────────────────────────────
 	case "arrow_function":
@@ -322,6 +408,16 @@ func (f *Formatter) operatorToken(n *sitter.Node) string {
 	return ""
 }
 
+// gapOperator extracts a word operator (EQ, GT, AND, etc.) from the source
+// text between left and right children of a binary_expression.
+func (f *Formatter) gapOperator(_ *sitter.Node, left, right *sitter.Node) string {
+	if left == nil || right == nil {
+		return ""
+	}
+	gap := strings.TrimSpace(string(f.src[left.EndByte():right.StartByte()]))
+	return gap
+}
+
 // childToken returns the first anonymous token child matching typ.
 func (f *Formatter) childToken(n *sitter.Node, typ string) string {
 	for i := uint(0); i < n.ChildCount(); i++ {
@@ -341,15 +437,41 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	for i := uint(0); i < args.NamedChildCount(); i++ {
 		parts = append(parts, f.expr(args.NamedChild(i)))
 	}
-	return "(" + strings.Join(parts, ", ") + ")"
+	inline := "(" + strings.Join(parts, ", ") + ")"
+	// Break onto separate lines if >3 arguments or inline exceeds line width.
+	shouldBreak := len(parts) > 3 ||
+		(len(parts) > 0 && len(inline) > f.opts.LineWidth)
+	if shouldBreak {
+		// Re-evaluate at deeper level so nested splits indent correctly.
+		f.level++
+		parts = parts[:0]
+		for i := uint(0); i < args.NamedChildCount(); i++ {
+			parts = append(parts, f.expr(args.NamedChild(i)))
+		}
+		indent := f.opts.indent(f.level)
+		f.level--
+		outerIndent := f.opts.indent(f.level)
+		return "(\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ")"
+	}
+	return inline
 }
 
 func (f *Formatter) exprArray(n *sitter.Node) string {
+	if n.NamedChildCount() == 0 {
+		return "[]"
+	}
 	var parts []string
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		parts = append(parts, f.expr(n.NamedChild(i)))
 	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	inline := "[" + strings.Join(parts, ", ") + "]"
+	if f.lineLen+len(inline) <= f.opts.LineWidth {
+		return inline
+	}
+	indent := f.indented() + f.opts.indent(1)
+	return "[\n" + indent +
+		strings.Join(parts, ",\n"+indent) +
+		"\n" + f.indented() + "]"
 }
 
 func (f *Formatter) exprObject(n *sitter.Node) string {
@@ -360,13 +482,14 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		parts = append(parts, f.expr(n.NamedChild(i)))
 	}
-	// Short objects (≤2 entries, total ≤60 chars) stay on one line.
 	joined := strings.Join(parts, ", ")
-	if n.NamedChildCount() <= 2 && len(joined) <= 60 {
-		return "{ " + joined + " }"
+	inline := "{ " + joined + " }"
+	if f.lineLen+len(inline) <= f.opts.LineWidth {
+		return inline
 	}
-	return "{\n" + f.indented() + "    " +
-		strings.Join(parts, ",\n"+f.indented()+"    ") +
+	indent := f.indented() + f.opts.indent(1)
+	return "{\n" + indent +
+		strings.Join(parts, ",\n"+indent) +
 		"\n" + f.indented() + "}"
 }
 
@@ -423,6 +546,68 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 		parts = append(parts, f.exprParam(params.NamedChild(i)))
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// exprFuncDefParams renders function definition parameters, each on its own line.
+func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
+	if params == nil {
+		return "()"
+	}
+	var parts []string
+	if f.hasFlatParams(params) {
+		// Parse flat params into individual param strings.
+		var current []string
+		for i := uint(0); i < params.ChildCount(); i++ {
+			c := params.Child(i)
+			switch c.Kind() {
+			case "(", ")":
+				continue
+			case ",":
+				if len(current) > 0 {
+					parts = append(parts, strings.Join(current, " "))
+					current = nil
+				}
+			case "required":
+				current = append(current, "required")
+			case "parameter_type":
+				current = append(current, f.text(c.Child(0)))
+			case "identifier":
+				current = append(current, f.text(c))
+			case "assignment_pattern":
+				left := c.ChildByFieldName("left")
+				right := c.ChildByFieldName("right")
+				current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
+			default:
+				if c.IsNamed() {
+					current = append(current, f.text(c))
+				}
+			}
+		}
+		if len(current) > 0 {
+			parts = append(parts, strings.Join(current, " "))
+		}
+	} else {
+		for i := uint(0); i < params.NamedChildCount(); i++ {
+			parts = append(parts, f.exprParam(params.NamedChild(i)))
+		}
+	}
+	if len(parts) == 0 {
+		return "()"
+	}
+	indent := f.opts.indent(f.level + 1)
+	var sb strings.Builder
+	sb.WriteString("(\n")
+	for i, p := range parts {
+		sb.WriteString(indent)
+		sb.WriteString(p)
+		if i < len(parts)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(f.opts.indent(f.level))
+	sb.WriteString(")")
+	return sb.String()
 }
 
 // hasFlatParams returns true if formal_parameters uses the flat structure
@@ -546,7 +731,7 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
-		case "statement_block", "block", "class_body":
+		case "statement_block", "block", "class_body", "component_body":
 			body = c
 		case "identifier":
 			// 'component' keyword itself — skip
@@ -611,7 +796,9 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	if name != nil {
 		sig.WriteString(f.text(name))
 	}
-	sig.WriteString(f.exprParams(params))
+
+	paramStr := f.exprFuncDefParams(params)
+	sig.WriteString(paramStr)
 
 	f.iLine(sig.String())
 	if body != nil {
@@ -684,6 +871,25 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
 	val := n.NamedChild(0)
+	// For throw(arg, arg, ...) — split args onto new lines if too long.
+	if val != nil && val.Kind() == "parenthesized_expression" {
+		inner := val.NamedChild(0)
+		if inner != nil && inner.Kind() == "sequence_expression" {
+			var parts []string
+			for i := uint(0); i < inner.NamedChildCount(); i++ {
+				parts = append(parts, f.expr(inner.NamedChild(i)))
+			}
+			inline := "throw (" + strings.Join(parts, ", ") + ");"
+			indentLen := len(f.opts.indent(f.level))
+			if indentLen+len(inline) > f.opts.LineWidth {
+				indent := f.opts.indent(f.level + 1)
+				outerIndent := f.opts.indent(f.level)
+				f.iLine("throw (\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ");")
+				f.scriptWrite("\n")
+				return
+			}
+		}
+	}
 	f.iLine("throw " + f.expr(val) + ";")
 	f.scriptWrite("\n")
 }
@@ -875,7 +1081,16 @@ func (f *Formatter) scriptForIn(n *sitter.Node) {
 		keyword = "of"
 	}
 
-	f.iLine(fmt.Sprintf("for (%s %s %s)", f.expr(left), keyword, f.expr(right)))
+	varKind := ""
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if n.FieldNameForChild(uint32(i)) == "kind" {
+			varKind = f.text(c) + " "
+			break
+		}
+	}
+
+	f.iLine(fmt.Sprintf("for (%s%s %s %s)", varKind, f.expr(left), keyword, f.expr(right)))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }
@@ -886,6 +1101,8 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 		return ""
 	}
 	switch n.Kind() {
+	case "empty_statement":
+		return ""
 	case "variable_declaration":
 		// Inline version: var i = 0
 		keyword := "var"

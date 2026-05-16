@@ -33,6 +33,7 @@ type Server struct {
 	IndexGlobs       []string // optional glob filters (absolute paths)
 	Mappings           map[string]string      // component path mappings (key -> abs path)
 	ComponentResolvers []ComponentResolver    // custom method-to-component resolvers
+	Formatting         FormattingConfig       // formatting settings
 	resolveCache       map[string]string      // cached component path resolutions
 	index            *index.Index
 	linter           *cflint.Runner
@@ -184,6 +185,11 @@ func (s *Server) cfResolvers() []cfparser.Resolver {
 		r[i] = cfparser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
 	}
 	return r
+}
+
+// FormattingConfig holds formatting settings from .cfmleditor.json.
+type FormattingConfig struct {
+	Enabled bool
 }
 
 // ComponentResolver maps a method call pattern to a component path.

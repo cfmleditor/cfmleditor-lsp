@@ -19,12 +19,17 @@ type configJSON struct {
 	WorkspaceIndexGlobs []string            `json:"workspaceIndexGlobs"`
 	Mappings            map[string]string   `json:"mappings"`
 	ComponentResolvers  []componentResolver `json:"componentResolvers"`
+	Formatting          *formattingConfig   `json:"formatting"`
 }
 
 type componentResolver struct {
 	Match   string `json:"match"`
 	Resolve string `json:"resolve"`
 	Prefix  string `json:"prefix"`
+}
+
+type formattingConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // Config represents a .cfmleditor.json file.
@@ -106,6 +111,12 @@ func (c *Config) Mappings() map[string]string {
 		}
 	}
 	return out
+}
+
+// FormattingEnabled returns whether formatting is enabled in config.
+func (c *Config) FormattingEnabled() bool {
+	raw := c.raw()
+	return raw != nil && raw.Formatting != nil && raw.Formatting.Enabled
 }
 
 // ComponentResolvers returns the configured component resolver patterns as [match, resolve, prefix] triples.

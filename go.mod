@@ -3,7 +3,7 @@ module github.com/cfmleditor/cfmleditor-lsp
 go 1.26
 
 require (
-	github.com/cfmleditor/tree-sitter-cfml v0.26.11
+	github.com/cfmleditor/tree-sitter-cfml v0.26.12
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/protocol v0.12.0
@@ -19,5 +19,3 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/sys v0.0.0-20220319134239-a9b59b0215f8 // indirect
 )
-
-replace github.com/cfmleditor/tree-sitter-cfml => ../tree-sitter-cfml

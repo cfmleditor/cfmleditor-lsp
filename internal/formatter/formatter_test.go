@@ -22,6 +22,9 @@ func testOpts() Options {
 	opts.ParseQuery = func(src []byte) *sitter.Tree {
 		return language.Parse(language.CFQuery, src, nil)
 	}
+	opts.ParseCFML = func(src []byte) *sitter.Tree {
+		return language.Parse(language.CFML, src, nil)
+	}
 	return opts
 }
 
@@ -101,9 +104,9 @@ func TestNestedIndentation(t *testing.T) {
 }
 
 func TestMultiAttrExpansion(t *testing.T) {
-	src := `<cfquery name="q" datasource="ds" maxrows="10" timeout="30">SELECT 1</cfquery>`
+	src := `<cfquery name="q" datasource="ds" maxrows="10" timeout="30" cachedwithin="0.1">SELECT 1</cfquery>`
 	got := format(t, src)
-	// 4 attrs > default threshold of 3 → should expand
+	// 5 attrs > default threshold of 4 → should expand
 	lines := strings.Split(got, "\n")
 	cfqueryLines := 0
 	for _, l := range lines {
@@ -111,11 +114,12 @@ func TestMultiAttrExpansion(t *testing.T) {
 		if strings.HasPrefix(tr, "name=") ||
 			strings.HasPrefix(tr, "datasource=") ||
 			strings.HasPrefix(tr, "maxrows=") ||
-			strings.HasPrefix(tr, "timeout=") {
+			strings.HasPrefix(tr, "timeout=") ||
+			strings.HasPrefix(tr, "cachedwithin=") {
 			cfqueryLines++
 		}
 	}
-	if cfqueryLines < 4 {
+	if cfqueryLines < 5 {
 		t.Errorf("expected expanded attributes on separate lines, got:\n%s", got)
 	}
 }
@@ -175,4 +179,116 @@ func TestCommentPreserved(t *testing.T) {
 	got := format(t, src)
 	assertContains(t, got, "<!---")
 	assertContains(t, got, "--->")
+}
+
+func TestCFQuerySQLClauseLineBreaks(t *testing.T) {
+	src := `<cfquery name="q" datasource="ds">SELECT id, name FROM users WHERE active = 1 ORDER BY name</cfquery>`
+	got := format(t, src)
+	assertContains(t, got, "\n")
+	// Each SQL clause keyword should start on its own line
+	lines := strings.Split(got, "\n")
+	var selectLine, fromLine, whereLine, orderLine bool
+	for _, l := range lines {
+		tr := strings.TrimSpace(l)
+		if strings.HasPrefix(tr, "SELECT") {
+			selectLine = true
+		}
+		if strings.HasPrefix(tr, "FROM") {
+			fromLine = true
+		}
+		if strings.HasPrefix(tr, "WHERE") {
+			whereLine = true
+		}
+		if strings.HasPrefix(tr, "ORDER") {
+			orderLine = true
+		}
+	}
+	if !selectLine || !fromLine || !whereLine || !orderLine {
+		t.Errorf("expected SQL clauses on separate lines, got:\n%s", got)
+	}
+}
+
+func TestCFQueryWithCFQueryparam(t *testing.T) {
+	src := `<cfquery name="q" datasource="ds">SELECT id FROM users WHERE id = <cfqueryparam cfsqltype="CF_SQL_INTEGER" value="#arguments.id#"></cfquery>`
+	got := format(t, src)
+	assertContains(t, got, "cfqueryparam")
+	assertContains(t, got, "WHERE")
+}
+
+func TestTabIndentation(t *testing.T) {
+	opts := testOpts()
+	opts.UseTabs = true
+	src := `<cfif x EQ 1><cfset y = 2></cfif>`
+	tree := parse(t, src)
+	out, err := Format([]byte(src), tree, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+	lines := strings.Split(got, "\n")
+	var cfsetLine string
+	for _, l := range lines {
+		if strings.Contains(l, "<cfset") {
+			cfsetLine = l
+			break
+		}
+	}
+	if !strings.HasPrefix(cfsetLine, "\t") {
+		t.Errorf("expected tab indent, got: %q", cfsetLine)
+	}
+}
+
+func TestEmptyFile(t *testing.T) {
+	got := format(t, "")
+	if got != "" {
+		t.Errorf("expected empty output for empty input, got: %q", got)
+	}
+}
+
+func TestCFSetWithHashExpression(t *testing.T) {
+	src := `<cfset x = "#variables.name#">`
+	got := format(t, src)
+	assertContains(t, got, `"#variables.name#"`)
+}
+
+func TestCFLoopIndentation(t *testing.T) {
+	src := `<cfloop from="1" to="10" index="i"><cfset x = i></cfloop>`
+	got := format(t, src)
+	lines := strings.Split(got, "\n")
+	var cfsetLine string
+	for _, l := range lines {
+		if strings.Contains(l, "<cfset") {
+			cfsetLine = l
+			break
+		}
+	}
+	if !strings.HasPrefix(cfsetLine, "    ") {
+		t.Errorf("expected indented cfset inside cfloop, got: %q", cfsetLine)
+	}
+}
+
+func TestCFTryCatchFormatting(t *testing.T) {
+	src := `<cftry><cfset x = 1><cfcatch type="any"><cfset y = 2></cfcatch></cftry>`
+	got := format(t, src)
+	assertContains(t, got, "<cftry>")
+	assertContains(t, got, "<cfcatch")
+	assertContains(t, got, "</cftry>")
+}
+
+func TestInlineTextPreservesSpacing(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"cfoutput mixed text and hash", `<cfoutput>Hello #name# world</cfoutput>`, "Hello #name# world"},
+		{"html element with inline children", `<p>Hello <strong>world</strong> foo</p>`, "Hello <strong>world</strong> foo"},
+		{"html text between tags", `<p>text <em>emphasis</em> more text</p>`, "text <em>emphasis</em> more text"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := format(t, tc.src)
+			assertContains(t, got, tc.want)
+		})
+	}
 }

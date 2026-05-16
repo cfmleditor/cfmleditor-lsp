@@ -14,6 +14,8 @@ var handledKinds = map[string]bool{
 	"program":              true,
 	"component_file":       true,
 	"cf_component_content": true,
+	"cf_component_open_tag":  true,
+	"cf_component_close_tag": true,
 	"cf_tag":               true,
 	"cf_set_tag":           true,
 	"cf_return_tag":        true,

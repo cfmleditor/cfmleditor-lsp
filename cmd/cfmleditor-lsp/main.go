@@ -82,7 +82,7 @@ func runServer() {
 		resolverPairs := cfg.ComponentResolvers()
 
 		// Serve the socket listener in the background
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs) }()
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, cfg.FormattingEnabled()) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -96,6 +96,7 @@ func runServer() {
 		for _, p := range resolverPairs {
 			srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
 		}
+		srv.Formatting.Enabled = cfg.FormattingEnabled()
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			<-conn.Done()

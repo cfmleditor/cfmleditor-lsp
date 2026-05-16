@@ -1496,3 +1496,76 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 		t.Errorf("expected templateFunction and otherMethod, got %v", found)
 	}
 }
+
+func TestDefinitionDotQualifiedCall(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "persist.cfc"), []byte("component {\nfunction someMethod() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "service.cfc"))
+	docContent := "VARIABLES.persist = createObject(\"component\",\"persist\").init()\npersist.someMethod()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 10}, // on "someMethod"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "persist.cfc") {
+		t.Errorf("expected persist.cfc, got %s", loc.URI)
+	}
+}
+
+func TestCompletionDotInvokedTrigger(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), nil, 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), []byte("component {\nfunction getName() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "userObj = new models.User()\nuserObj."
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind: protocol.CompletionTriggerKindInvoked,
+		},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 1 || list.Items[0].Label != "getName" {
+		labels := make([]string, len(list.Items))
+		for i, item := range list.Items {
+			labels[i] = item.Label
+		}
+		t.Errorf("expected [getName], got %v", labels)
+	}
+}
