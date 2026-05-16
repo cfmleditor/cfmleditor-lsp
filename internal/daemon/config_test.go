@@ -50,15 +50,23 @@ func TestFindConfigMissingName(t *testing.T) {
 	writeConfig(t, dir, `{"workspacePaths":["lib"]}`)
 
 	cfg, _ := FindConfig(dir)
-	if cfg != nil {
-		t.Fatalf("expected nil when name missing, got %+v", cfg)
+	if cfg == nil {
+		t.Fatal("expected config with directory name fallback, got nil")
+	}
+	expected := filepath.Base(dir)
+	if cfg.Name != expected {
+		t.Fatalf("expected name %q, got %q", expected, cfg.Name)
 	}
 }
 
 func TestFindConfigNoFile(t *testing.T) {
-	cfg, _ := FindConfig(t.TempDir())
-	if cfg != nil {
-		t.Fatalf("expected nil, got %+v", cfg)
+	dir := t.TempDir()
+	cfg, _ := FindConfig(dir)
+	if cfg == nil {
+		t.Fatal("expected fallback config, got nil")
+	}
+	if cfg.Name != filepath.Base(dir) {
+		t.Fatalf("expected name %q, got %q", filepath.Base(dir), cfg.Name)
 	}
 }
 

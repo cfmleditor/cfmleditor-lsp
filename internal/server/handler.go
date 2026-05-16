@@ -158,7 +158,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	for _, c := range params.ContentChanges {
 		totalBytes += len(c.Text)
 	}
-	s.logger.Info("didChange",
+	s.logger.Debug("didChange",
 		zap.String("uri", string(docURI)),
 		zap.Int("changeCount", s.changeCount[docURI]),
 		zap.Int("edits", len(params.ContentChanges)),
@@ -240,13 +240,12 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	}
 
 	// Update funcRanges from the parse result
-	s.mu.Lock()
-	s.funcRanges[docURI] = scopesToFuncRanges(pr)
-	s.mu.Unlock()
-
 	switch lastKind {
 	case cfparser.EditGlobal, cfparser.EditFull:
-		// Signatures changed — update the index
+		// Signatures changed — update funcRanges and the index
+		s.mu.Lock()
+		s.funcRanges[docURI] = scopesToFuncRanges(pr)
+		s.mu.Unlock()
 		s.reindexFromParseResult(docURI, pr)
 	case cfparser.EditInFunc:
 		// Only function body changed — shift index lines and rebuild local vars

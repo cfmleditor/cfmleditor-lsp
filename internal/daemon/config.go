@@ -55,11 +55,11 @@ func FindConfig(dir string) (*Config, error) {
 			continue
 		}
 		if raw.WorkspaceName == "" {
-			continue
+			raw.WorkspaceName = filepath.Base(filepath.Dir(p))
 		}
 		return &Config{Path: p, Name: raw.WorkspaceName}, nil
 	}
-	return nil, nil
+	return &Config{Path: "", Name: filepath.Base(abs)}, nil
 }
 
 // SocketPath returns a deterministic Unix socket path derived from the project name.
