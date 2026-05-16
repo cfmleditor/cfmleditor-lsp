@@ -1,6 +1,10 @@
 package cfparser
 
-import "go.lsp.dev/uri"
+import (
+	"strings"
+
+	"go.lsp.dev/uri"
+)
 
 // Argument represents a parameter of a user-defined function.
 type Argument struct {
@@ -65,4 +69,74 @@ type Region struct {
 	Kind      RegionKind
 	StartLine int
 	Text      string
+}
+
+// Resolver maps a call pattern to a component path.
+type Resolver struct {
+	Match   string
+	Resolve string
+	Prefix  string
+}
+
+// ResolveFromCall matches an expression against resolvers and returns the component dot-path.
+func ResolveFromCall(expr string, resolvers []Resolver) string {
+	expr = strings.TrimSpace(expr)
+	for _, r := range resolvers {
+		if r.Prefix != "" && !containsFold(expr, r.Prefix) {
+			continue
+		}
+		if val := matchResolverPattern(expr, r.Match); val != "" {
+			resolved := strings.ReplaceAll(r.Resolve, "$1", val)
+			resolved = strings.TrimSuffix(resolved, ".cfc")
+			resolved = strings.ReplaceAll(resolved, "/", ".")
+			return resolved
+		}
+	}
+	return ""
+}
+
+func matchResolverPattern(expr, pattern string) string {
+	idx := strings.Index(pattern, "$1")
+	if idx < 0 {
+		if strings.EqualFold(expr, pattern) {
+			return "1"
+		}
+		return ""
+	}
+	prefix := pattern[:idx]
+	suffix := pattern[idx+2:]
+	// Find the prefix within the expression (may be preceded by qualifier like VARIABLES._parent.)
+	start := -1
+	for i := 0; i <= len(expr)-len(prefix); i++ {
+		if strings.EqualFold(expr[i:i+len(prefix)], prefix) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	rest := expr[start+len(prefix):]
+	if len(suffix) > 0 {
+		if !strings.EqualFold(rest[len(rest)-len(suffix):], suffix) {
+			return ""
+		}
+		rest = rest[:len(rest)-len(suffix)]
+	}
+	return strings.Trim(rest, "\"'")
+}
+
+func containsFold(s, substr string) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(substr) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if strings.EqualFold(s[i:i+len(substr)], substr) {
+			return true
+		}
+	}
+	return false
 }

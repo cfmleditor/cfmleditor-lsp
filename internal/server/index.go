@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
@@ -38,6 +40,7 @@ func (s *Server) indexWorkspace() {
 
 	total := len(files)
 	s.logger.Info("indexing workspace", zap.Int("totalFiles", total))
+	indexStart := time.Now()
 
 	ctx := context.Background()
 	token := "indexing"
@@ -59,7 +62,14 @@ func (s *Server) indexWorkspace() {
 		if err != nil {
 			continue
 		}
-		s.index.IndexFile(fileURI, string(data))
+		content := string(data)
+		if len(s.ComponentResolvers) > 0 {
+			pr := cfparser.Parse(fileURI, content, s.cfResolvers())
+			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
+			s.index.SetThisVars(fileURI, pr.ThisVars())
+		} else {
+			s.index.IndexFile(fileURI, content)
+		}
 
 		if s.conn != nil && total > 0 {
 			pct := ((i + 1) * 100) / total
@@ -77,6 +87,7 @@ func (s *Server) indexWorkspace() {
 			"value": map[string]interface{}{"kind": "end", "message": fmt.Sprintf("Indexed %d files", total)},
 		})
 	}
+	s.logger.Info("indexing complete", zap.Int("files", total), zap.Duration("dur", time.Since(indexStart)))
 }
 
 // collectCFCFiles walks root and returns all .cfc file paths.
@@ -154,7 +165,14 @@ func (s *Server) indexRoot(root string) {
 			if err != nil {
 				return err
 			}
-			s.index.IndexFile(fileURI, string(data))
+			content := string(data)
+			if len(s.ComponentResolvers) > 0 {
+				pr := cfparser.Parse(fileURI, content, s.cfResolvers())
+				s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
+				s.index.SetThisVars(fileURI, pr.ThisVars())
+			} else {
+				s.index.IndexFile(fileURI, content)
+			}
 		}
 		return nil
 	})

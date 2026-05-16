@@ -14,6 +14,7 @@ type Index struct {
 	mu       sync.RWMutex
 	funcs    map[string][]*cfparser.FunctionDef    // lowercase name -> definitions
 	comprefs map[string][]*cfparser.ComponentRef   // lowercase variable -> refs
+	thisVars map[uri.URI][]string                  // file URI -> this-scoped var names
 }
 
 // New creates an empty Index.
@@ -21,6 +22,7 @@ func New() *Index {
 	return &Index{
 		funcs:    make(map[string][]*cfparser.FunctionDef),
 		comprefs: make(map[string][]*cfparser.ComponentRef),
+		thisVars: make(map[uri.URI][]string),
 	}
 }
 
@@ -85,6 +87,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
+	idx.thisVars[fileURI] = pr.ThisVars()
 
 	for i := range pr.Funcs {
 		key := strings.ToLower(pr.Funcs[i].Name)
@@ -146,6 +149,7 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 }
 
 func (idx *Index) removeFileEntries(fileURI uri.URI) {
+	delete(idx.thisVars, fileURI)
 	for key, entries := range idx.funcs {
 		filtered := entries[:0]
 		for _, e := range entries {
@@ -179,6 +183,30 @@ func (idx *Index) LookupComponentRef(variable string) []*cfparser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.comprefs[strings.ToLower(variable)]
+}
+
+// ThisVarsForFile returns the this-scoped variable names for a file.
+func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.thisVars[fileURI]
+}
+
+// SetThisVars stores this-scoped variable names for a file.
+func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
+	idx.mu.Lock()
+	idx.thisVars[fileURI] = vars
+	idx.mu.Unlock()
+}
+
+// AddRefs appends additional component refs to the index.
+func (idx *Index) AddRefs(refs []cfparser.ComponentRef) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	for i := range refs {
+		key := strings.ToLower(refs[i].Variable)
+		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
+	}
 }
 
 // LookupComponentRefInFile returns the component ref for a variable in a specific file

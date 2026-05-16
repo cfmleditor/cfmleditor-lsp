@@ -202,26 +202,30 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		}
 	case hasPrefixFold(inner, "arguments."):
 		rest := inner[10:]
-		name, _ := splitAssign(rest)
+		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeArguments, Line: uint32(line)})
+			p.checkSetRHSStr(rhs, name, line)
 		}
 	case hasPrefixFold(inner, "this."):
 		rest := inner[5:]
-		name, _ := splitAssign(rest)
+		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: uint32(line)})
+			p.checkSetRHSStr(rhs, name, line)
 		}
 	case hasPrefixFold(inner, "variables."):
 		rest := inner[10:]
-		name, _ := splitAssign(rest)
+		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			p.checkSetRHSStr(rhs, name, line)
 		}
 	default:
-		name, _ := splitAssign(inner)
+		name, rhs := splitAssign(inner)
 		if name != "" && !isKeyword(name) {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			p.checkSetRHSStr(rhs, name, line)
 		}
 	}
 }

@@ -16,7 +16,7 @@ import (
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string) error {
+func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
@@ -64,6 +64,9 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 			srv.WorkspaceFolders = folders
 			srv.IndexGlobs = globs
 			srv.Mappings = mappings
+			for _, r := range resolvers {
+				srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
+			}
 			conn.Go(ctx, srv.Handler())
 			<-conn.Done()
 		}()

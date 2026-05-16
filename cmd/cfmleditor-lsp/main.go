@@ -79,9 +79,10 @@ func runServer() {
 		folders := cfg.WorkspaceFolders()
 		globs := cfg.IndexGlobs()
 		mappings := cfg.Mappings()
+		resolverPairs := cfg.ComponentResolvers()
 
 		// Serve the socket listener in the background
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings) }()
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -92,6 +93,9 @@ func runServer() {
 		srv.WorkspaceFolders = folders
 		srv.IndexGlobs = globs
 		srv.Mappings = mappings
+		for _, p := range resolverPairs {
+			srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
+		}
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			<-conn.Done()

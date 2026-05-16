@@ -1439,3 +1439,60 @@ func TestCompletionDotPositionAware(t *testing.T) {
 		t.Errorf("expected getTotal, got %s", list.Items[0].Label)
 	}
 }
+
+func TestCompletionDotUnscopedFromInit(t *testing.T) {
+	dir := t.TempDir()
+	// Create persist.cfc in the same directory
+	_ = os.WriteFile(filepath.Join(dir, "persist.cfc"), []byte("component {\nfunction templateFunction() {}\nfunction otherMethod() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "service.cfc"))
+	docContent := `<cfcomponent>
+	<cfset VARIABLES._parent = StructNew() />
+	<cffunction name="init" returntype="struct">
+		<cfargument name="parent" type="struct" required="Yes" />
+		<cfset VARIABLES.persist = createObject('component','persist').init(parent=VARIABLES._parent) />
+		<cfreturn this />
+	</cffunction>
+	<cffunction name="templateFunction" output="false" returntype="struct" access="public">
+		<cfset persist.>
+	</cffunction>
+</cfcomponent>`
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 8, Character: 17}, // after "persist."
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	if len(list.Items) != 2 {
+		labels := make([]string, len(list.Items))
+		for i, item := range list.Items {
+			labels[i] = item.Label
+		}
+		t.Fatalf("expected 2 completions (templateFunction, otherMethod), got %d: %v", len(list.Items), labels)
+	}
+	found := map[string]bool{}
+	for _, item := range list.Items {
+		found[item.Label] = true
+	}
+	if !found["templateFunction"] || !found["otherMethod"] {
+		t.Errorf("expected templateFunction and otherMethod, got %v", found)
+	}
+}

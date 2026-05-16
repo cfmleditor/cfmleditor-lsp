@@ -123,3 +123,165 @@ func TestParseResult_TagFile(t *testing.T) {
 		t.Fatalf("expected 1 arg, got %d", len(pr.Funcs[0].Arguments))
 	}
 }
+
+func TestParseResult_InitVars(t *testing.T) {
+	content := `component {
+	function init() {
+		variables.persist = createObject("component", "persist").init()
+		variables.logger = new utils.Logger()
+		this.ready = true
+		var local1 = 1
+	}
+	function other() {
+		variables.notInit = "x"
+	}
+}`
+	pr := Parse(testURI, content)
+	vars := pr.VariablesVars()
+	if !slices.Contains(vars, "persist") {
+		t.Errorf("expected persist in VariablesVars: %v", vars)
+	}
+	if !slices.Contains(vars, "logger") {
+		t.Errorf("expected logger in VariablesVars: %v", vars)
+	}
+	if slices.Contains(vars, "local1") {
+		t.Errorf("local1 should not be in VariablesVars: %v", vars)
+	}
+	if slices.Contains(vars, "notInit") {
+		t.Errorf("notInit should not be in VariablesVars: %v", vars)
+	}
+
+	thisVars := pr.ThisVars()
+	if !slices.Contains(thisVars, "ready") {
+		t.Errorf("expected ready in ThisVars: %v", thisVars)
+	}
+
+	// Refs should include init() body refs
+	var refComponents []string
+	for _, r := range pr.Refs {
+		refComponents = append(refComponents, r.Component)
+	}
+	if !slices.Contains(refComponents, "persist") {
+		t.Errorf("expected persist ref: %v", refComponents)
+	}
+	if !slices.Contains(refComponents, "utils.Logger") {
+		t.Errorf("expected utils.Logger ref: %v", refComponents)
+	}
+}
+
+func TestParseResult_InitVarsTag(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="init">
+	<cfset variables.persist = createObject("component","persist").init() />
+	<cfset this.ready = true />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+	vars := pr.VariablesVars()
+	if !slices.Contains(vars, "persist") {
+		t.Errorf("expected persist in VariablesVars: %v", vars)
+	}
+	thisVars := pr.ThisVars()
+	if !slices.Contains(thisVars, "ready") {
+		t.Errorf("expected ready in ThisVars: %v", thisVars)
+	}
+	var found bool
+	for _, r := range pr.Refs {
+		if r.Component == "persist" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected persist component ref in pr.Refs")
+	}
+}
+
+func TestParseResult_InitVarsNoDuplicates(t *testing.T) {
+	content := `component {
+	variables.persist = ""
+	function init() {
+		variables.persist = createObject("component", "persist").init()
+		variables.extra = "x"
+	}
+}`
+	pr := Parse(testURI, content)
+	vars := pr.VariablesVars()
+	count := 0
+	for _, v := range vars {
+		if v == "persist" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected persist once, got %d times in %v", count, vars)
+	}
+	if !slices.Contains(vars, "extra") {
+		t.Errorf("expected extra in VariablesVars: %v", vars)
+	}
+}
+
+func TestResolveFromCall(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+		{Match: "_parent", Resolve: "packages.tass.core.kernel2", Prefix: "_parent"},
+	}
+
+	tests := []struct {
+		expr string
+		want string
+	}{
+		{`getService("timetable")`, "packages.timetable.service"},
+		{`_parent.getService("general")`, "packages.general.service"},
+		{`VARIABLES._parent.getService("general")`, "packages.general.service"},
+		{`_parent`, "packages.tass.core.kernel2"},
+		{`somethingElse()`, ""},
+	}
+
+	for _, tt := range tests {
+		got := ResolveFromCall(tt.expr, resolvers)
+		if got != tt.want {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", tt.expr, got, tt.want)
+		}
+	}
+}
+
+func TestParseResult_ResolverRefs(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+	content := `<cfcomponent>
+	<cffunction name="init">
+		<cfset VARIABLES.persist = createObject('component','persist').init() />
+		<cfset var temp2 = VARIABLES._parent.getService("general") />
+	</cffunction>
+	<cffunction name="other">
+		<cfset var svc = _parent.getService("timetable") />
+	</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content, resolvers)
+
+	// temp2 should resolve via resolver (inside init)
+	var found bool
+	for _, ref := range pr.Refs {
+		if ref.Variable == "temp2" && ref.Component == "packages.general.service" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected resolver ref for temp2 -> packages.general.service")
+	}
+
+	// svc inside other() should also be indexed (resolvers work in all scopes)
+	found = false
+	for _, ref := range pr.Refs {
+		if ref.Variable == "svc" && ref.Component == "packages.timetable.service" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected resolver ref for svc -> packages.timetable.service")
+	}
+}

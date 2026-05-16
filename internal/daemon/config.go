@@ -14,10 +14,17 @@ import (
 
 // configJSON is the on-disk shape of .cfmleditor.json.
 type configJSON struct {
-	WorkspaceName       string            `json:"workspaceName"`
-	WorkspacePaths      []string          `json:"workspacePaths"`
-	WorkspaceIndexGlobs []string          `json:"workspaceIndexGlobs"`
-	Mappings            map[string]string `json:"mappings"`
+	WorkspaceName       string              `json:"workspaceName"`
+	WorkspacePaths      []string            `json:"workspacePaths"`
+	WorkspaceIndexGlobs []string            `json:"workspaceIndexGlobs"`
+	Mappings            map[string]string   `json:"mappings"`
+	ComponentResolvers  []componentResolver `json:"componentResolvers"`
+}
+
+type componentResolver struct {
+	Match   string `json:"match"`
+	Resolve string `json:"resolve"`
+	Prefix  string `json:"prefix"`
 }
 
 // Config represents a .cfmleditor.json file.
@@ -96,6 +103,21 @@ func (c *Config) Mappings() map[string]string {
 			out[key] = val
 		} else {
 			out[key] = filepath.Join(dir, val)
+		}
+	}
+	return out
+}
+
+// ComponentResolvers returns the configured component resolver patterns as [match, resolve, prefix] triples.
+func (c *Config) ComponentResolvers() [][3]string {
+	raw := c.raw()
+	if raw == nil || len(raw.ComponentResolvers) == 0 {
+		return nil
+	}
+	out := make([][3]string, 0, len(raw.ComponentResolvers))
+	for _, r := range raw.ComponentResolvers {
+		if r.Match != "" && r.Resolve != "" {
+			out = append(out, [3]string{r.Match, r.Resolve, r.Prefix})
 		}
 	}
 	return out

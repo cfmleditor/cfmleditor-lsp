@@ -31,7 +31,9 @@ type Server struct {
 	workspaceRoots   []string
 	WorkspaceFolders []string // project folders from config
 	IndexGlobs       []string // optional glob filters (absolute paths)
-	Mappings         map[string]string // component path mappings (key -> abs path)
+	Mappings           map[string]string      // component path mappings (key -> abs path)
+	ComponentResolvers []ComponentResolver    // custom method-to-component resolvers
+	resolveCache       map[string]string      // cached component path resolutions
 	index            *index.Index
 	linter           *cflint.Runner
 	lintCancels      map[uri.URI]context.CancelFunc
@@ -165,4 +167,42 @@ func matchesGlob(filePath string, globs []string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) invalidateResolveCache() {
+	s.mu.Lock()
+	s.resolveCache = nil
+	s.mu.Unlock()
+}
+
+func (s *Server) cfResolvers() []cfparser.Resolver {
+	if len(s.ComponentResolvers) == 0 {
+		return nil
+	}
+	r := make([]cfparser.Resolver, len(s.ComponentResolvers))
+	for i, cr := range s.ComponentResolvers {
+		r[i] = cfparser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
+	}
+	return r
+}
+
+// ComponentResolver maps a method call pattern to a component path.
+// Match is a pattern like getService("$1") and Resolve is a path template like packages/$1/service.cfc.
+// Prefix is a fast-check string that must appear in a line before attempting the full match.
+type ComponentResolver struct {
+	Match   string
+	Resolve string
+	Prefix  string
+}
+
+// resolveComponentFromCall matches a call expression against configured resolvers.
+func resolveComponentFromCall(expr string, resolvers []ComponentResolver) string {
+	if len(resolvers) == 0 {
+		return ""
+	}
+	cfr := make([]cfparser.Resolver, len(resolvers))
+	for i, r := range resolvers {
+		cfr[i] = cfparser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix}
+	}
+	return cfparser.ResolveFromCall(expr, cfr)
 }

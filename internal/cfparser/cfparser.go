@@ -413,6 +413,11 @@ func findFuncScope(line int, scopes []FuncScope) FuncScope {
 	return FuncScope{Start: -1, End: -1}
 }
 
+// FindFuncScopeAt returns the FuncScope containing the given line, or {-1,-1}.
+func FindFuncScopeAt(line int, scopes []FuncScope) FuncScope {
+	return findFuncScope(line, scopes)
+}
+
 func uriFromString(s string) uri.URI {
 	return uri.URI(s)
 }

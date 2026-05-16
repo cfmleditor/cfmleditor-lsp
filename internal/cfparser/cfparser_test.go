@@ -435,3 +435,22 @@ func assertNotContains(t *testing.T, vars []string, unexpected ...string) {
 		}
 	}
 }
+
+func TestParseComponentRefs_CreateObjectInit(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component {
+		var persist = createObject("component", "persist").init(parent=VARIABLES._parent)
+	}`)
+	assertRef(t, refs, 0, "persist", "persist")
+}
+
+func TestParseComponentRefs_CreateObjectInitTag(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfset VARIABLES.persist = createObject("component","persist").init(parent=VARIABLES._parent) />`)
+	assertRef(t, refs, 0, "persist", "persist")
+}
+
+func TestParseComponentRefs_CreateObjectInitScriptDot(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component {
+		VARIABLES.persist = createObject("component", "persist").init(parent=VARIABLES._parent)
+	}`)
+	assertRef(t, refs, 0, "persist", "persist")
+}

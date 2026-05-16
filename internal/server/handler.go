@@ -109,7 +109,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
 
-	pr := cfparser.Parse(docURI, params.TextDocument.Text)
+	pr := cfparser.Parse(docURI, params.TextDocument.Text, s.cfResolvers())
 	pr.Log = &zapAdapter{s.logger}
 	s.mu.Lock()
 	s.parseResults[docURI] = pr
@@ -172,7 +172,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	if pr == nil {
 		// No cached parse result — fall back to full parse
-		pr = cfparser.Parse(docURI, content)
+		pr = cfparser.Parse(docURI, content, s.cfResolvers())
 		pr.Log = &zapAdapter{s.logger}
 		s.mu.Lock()
 		s.parseResults[docURI] = pr
@@ -281,6 +281,7 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 	}
 
 	docURI := uri.URI(params.TextDocument.URI)
+	s.invalidateResolveCache()
 	go s.runDiagnostics(ctx, docURI)
 	go s.rebuildFileCompletionCache(docURI)
 
@@ -371,8 +372,10 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult
 		return
 	}
 	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	s.index.SetThisVars(docURI, pr.ThisVars())
 }
 
+// resolverRefs scans content for assignments whose RHS matches a component resolver.
 // scopesToFuncRanges converts ParseResult scopes to cache.FuncRange slice.
 func scopesToFuncRanges(pr *cfparser.ParseResult) []cache.FuncRange {
 	ranges := make([]cache.FuncRange, 0, len(pr.Scopes))

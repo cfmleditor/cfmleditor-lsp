@@ -24,8 +24,9 @@ type ParseResult struct {
 	Funcs   []FunctionDef
 	Refs    []ComponentRef
 	Scopes  []FuncScope
-	Extends string // dot-path of parent component (from extends attribute)
-	Log     Logger // optional logger for timing and errors
+	Extends   string // dot-path of parent component (from extends attribute)
+	Log       Logger // optional logger for timing and errors
+	Resolvers []Resolver // optional component resolvers for RHS matching
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -43,11 +44,14 @@ type ParseResult struct {
 
 // Parse performs a full file parse: extracts function signatures, component refs,
 // and function scopes. Function bodies are NOT parsed for variables until requested.
-func Parse(fileURI uri.URI, content string) *ParseResult {
+func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResult {
 	pr := &ParseResult{
 		URI:      fileURI,
 		Content:  content,
 		funcVars: make(map[string][]string),
+	}
+	if len(resolvers) > 0 {
+		pr.Resolvers = resolvers[0]
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
@@ -91,6 +95,10 @@ func (pr *ParseResult) extractSignatures() {
 			}
 		}
 	}
+	// Extract component refs from init() body since the shallow parse skips function bodies.
+	pr.appendInitRefs()
+	// Extract refs from resolver-matched assignments.
+	pr.appendResolverRefs()
 }
 
 // GlobalVars returns this.x and variables.x names declared outside any function.
@@ -191,7 +199,8 @@ func (pr *ParseResult) computeGlobalVars() []string {
 	return vars
 }
 
-// computeScopedVars extracts variables of a specific scope from outside functions.
+// computeScopedVars extracts variables of a specific scope from outside functions
+// and from the init() function body.
 func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 	seen := make(map[string]bool)
 	var names []string
@@ -225,7 +234,178 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 			}
 		}
 	}
+
+	// Also include vars from init() body
+	initScope := pr.initFuncScope()
+	if initScope.Start == -1 {
+		return names
+	}
+	start, end := lineOffsets(pr.Content, initScope.Start, initScope.End)
+	if start < 0 {
+		return names
+	}
+	body := pr.Content[start:end]
+	regionKind := RegionScript
+	for _, r := range pr.Regions {
+		if r.StartLine <= initScope.Start {
+			regionKind = r.Kind
+		}
+	}
+	var bodyVars []VarDef
+	if regionKind == RegionScript {
+		sp := newScriptParser(body, "", initScope.Start)
+		sp.parse()
+		bodyVars = sp.vars
+	} else {
+		tp := newTagParser(body, "")
+		tp.parse()
+		bodyVars = tp.vars
+	}
+	for _, v := range bodyVars {
+		if v.Scope == scope && !seen[v.Name] {
+			seen[v.Name] = true
+			names = append(names, v.Name)
+		}
+	}
 	return names
+}
+
+// initFuncScope returns the FuncScope for the init() function, or {-1,-1} if not found.
+func (pr *ParseResult) initFuncScope() FuncScope {
+	for _, f := range pr.Funcs {
+		if strings.EqualFold(f.Name, "init") {
+			return findFuncScope(int(f.Line), pr.Scopes)
+		}
+	}
+	return FuncScope{Start: -1, End: -1}
+}
+
+// appendInitRefs parses the init() body for component refs. Init refs replace
+// any existing ref for the same variable since init() redefines the value.
+func (pr *ParseResult) appendInitRefs() {
+	initScope := pr.initFuncScope()
+	if initScope.Start == -1 {
+		return
+	}
+	start, end := lineOffsets(pr.Content, initScope.Start, initScope.End)
+	if start < 0 {
+		return
+	}
+	body := pr.Content[start:end]
+	regionKind := RegionScript
+	for _, r := range pr.Regions {
+		if r.StartLine <= initScope.Start {
+			regionKind = r.Kind
+		}
+	}
+	var initRefs []ComponentRef
+	if regionKind == RegionScript {
+		sp := newScriptParser(body, string(pr.URI), initScope.Start)
+		sp.parse()
+		initRefs = sp.refs
+	} else {
+		tp := newTagParser(body, string(pr.URI))
+		tp.parse()
+		for i := range tp.refs {
+			tp.refs[i].Line += uint32(initScope.Start)
+		}
+		initRefs = tp.refs
+	}
+	// Replace existing refs where init provides a new value
+	for _, iref := range initRefs {
+		replaced := false
+		for i := range pr.Refs {
+			if strings.EqualFold(pr.Refs[i].Variable, iref.Variable) {
+				pr.Refs[i] = iref
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			pr.Refs = append(pr.Refs, iref)
+		}
+	}
+}
+
+// appendResolverRefs scans content for assignments matching configured resolvers.
+// Only considers global scope and init() body, same as other ref extraction.
+func (pr *ParseResult) appendResolverRefs() {
+	if len(pr.Resolvers) == 0 {
+		return
+	}
+	prefixes := make([]string, len(pr.Resolvers))
+	for i, r := range pr.Resolvers {
+		prefixes[i] = r.Prefix
+	}
+
+	content := pr.Content
+	lineNum := 0
+	for len(content) > 0 {
+		nl := strings.IndexByte(content, '\n')
+		var line string
+		if nl < 0 {
+			line = content
+			content = ""
+		} else {
+			line = content[:nl]
+			content = content[nl+1:]
+		}
+
+		// Quick prefix check
+		hasPrefix := false
+		for _, p := range prefixes {
+			if p == "" || containsFold(line, p) {
+				hasPrefix = true
+				break
+			}
+		}
+		if !hasPrefix {
+			lineNum++
+			continue
+		}
+
+		eqIdx := strings.IndexByte(line, '=')
+		if eqIdx < 0 || (eqIdx+1 < len(line) && line[eqIdx+1] == '=') {
+			lineNum++
+			continue
+		}
+		rhs := strings.TrimSpace(line[eqIdx+1:])
+		rhs = strings.TrimSuffix(strings.TrimRight(rhs, " \t"), "/>")
+		rhs = strings.TrimSuffix(rhs, ">")
+		rhs = strings.TrimSuffix(rhs, ";")
+		rhs = strings.TrimSpace(rhs)
+		if rhs == "" {
+			lineNum++
+			continue
+		}
+		comp := ResolveFromCall(rhs, pr.Resolvers)
+		if comp == "" {
+			lineNum++
+			continue
+		}
+		lhs := strings.TrimSpace(line[:eqIdx])
+		varName := lhs
+		if dotIdx := strings.LastIndexByte(lhs, '.'); dotIdx >= 0 {
+			varName = lhs[dotIdx+1:]
+		} else if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
+			varName = lhs[spIdx+1:]
+		}
+		if varName != "" {
+			// Replace existing ref or append
+			replaced := false
+			for i := range pr.Refs {
+				if strings.EqualFold(pr.Refs[i].Variable, varName) && pr.Refs[i].URI == pr.URI {
+					pr.Refs[i] = ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)}
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
+			}
+		}
+		lineNum++
+	}
 }
 
 func funcKey(start, end int) string {

@@ -106,9 +106,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		params.Context.TriggerCharacter == ">"
 
-	triggeredByDot := params.Context != nil &&
+	triggeredByDot := (params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
-		params.Context.TriggerCharacter == "."
+		params.Context.TriggerCharacter == ".") ||
+		(hasDoc && wordBeforeDot(content, int(params.Position.Line), int(params.Position.Character)) != "")
 
 	closing := false
 	typingTag := false
@@ -123,6 +124,27 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		inAttrValue = isInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
 	}
 	contextDur := time.Since(t0)
+
+	triggerKind := ""
+	if params.Context != nil {
+		switch params.Context.TriggerKind {
+		case protocol.CompletionTriggerKindInvoked:
+			triggerKind = "invoked"
+		case protocol.CompletionTriggerKindTriggerCharacter:
+			triggerKind = "char:" + params.Context.TriggerCharacter
+		case protocol.CompletionTriggerKindTriggerForIncompleteCompletions:
+			triggerKind = "incomplete"
+		}
+	}
+	s.logger.Info("completion: request",
+		zap.String("trigger", triggerKind),
+		zap.Bool("triggeredByDot", triggeredByDot),
+		zap.Bool("inHashExpr", inHashExpr),
+		zap.Bool("inAttrValue", inAttrValue),
+		zap.String("tagName", tagName),
+		zap.Uint32("line", params.Position.Line),
+		zap.Uint32("char", params.Position.Character),
+	)
 
 	switch {
 	case inHashExpr:
@@ -320,7 +342,22 @@ func isClosingTagContext(content string, line, char int) bool {
 // isInsideHashExpr returns true if the cursor is inside a #...# expression.
 func isInsideHashExpr(content string, line, char int) bool {
 	textBefore := textBeforeCursor(content, line, char)
-	return strings.Count(textBefore, "#")%2 == 1
+	// Find the relevant context boundary — last tag close or line start
+	boundary := strings.LastIndex(textBefore, ">")
+	lastOpen := strings.LastIndex(textBefore, "<")
+	if lastOpen > boundary {
+		// Inside an unclosed tag — count from tag open
+		boundary = lastOpen
+	}
+	if boundary == -1 {
+		boundary = 0
+	}
+	// In script context, limit to current line
+	lastNL := strings.LastIndex(textBefore, "\n")
+	if lastNL > boundary {
+		boundary = lastNL
+	}
+	return strings.Count(textBefore[boundary:], "#")%2 == 1
 }
 
 // isInsideAttrValue returns true if the cursor is inside a quoted attribute value.
@@ -759,7 +796,7 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 	if !ok {
 		return
 	}
-	newPR := cfparser.Parse(docURI, content)
+	newPR := cfparser.Parse(docURI, content, s.cfResolvers())
 	newPR.Log = &zapAdapter{s.logger}
 	s.mu.Lock()
 	s.parseResults[docURI] = newPR
@@ -949,18 +986,23 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	// Look up component ref for this variable in the current file
 	ref := s.index.LookupComponentRefInFile(varName, docURI, uint32(line))
-	if ref == nil {
+	var component string
+	if ref != nil {
+		component = ref.Component
+	} else if comp := resolveComponentFromCall(varName, s.ComponentResolvers); comp != "" {
+		component = comp
+	} else {
 		return nil
 	}
 
 	// Resolve the dot-path to a CFC file relative to the current file's directory
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	cfcPath := cfpath.ResolvePath(ref.Component, baseDir, s.Mappings)
+	cfcPath := cfpath.ResolvePath(component, baseDir, s.Mappings)
 	if cfcPath == "" {
 		// Try workspace folders
 		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(ref.Component, root, s.Mappings)
+			cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
 			if cfcPath != "" {
 				break
 			}
@@ -974,7 +1016,6 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	cfcURI := uri.URI("file://" + cfcPath)
 	defs := s.index.FunctionsForFile(cfcURI)
 	if len(defs) == 0 {
-		// Not indexed yet — read, parse, and store in index
 		cfcContent, ok := s.getDocument(cfcURI)
 		if !ok {
 			data, err := os.ReadFile(cfcPath)
@@ -986,11 +1027,20 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		s.index.IndexFile(cfcURI, cfcContent)
 		defs = s.index.FunctionsForFile(cfcURI)
 	}
-	if len(defs) == 0 {
+
+	thisVars := s.index.ThisVarsForFile(cfcURI)
+
+	if len(defs) == 0 && len(thisVars) == 0 {
 		return nil
 	}
 
-	items := make([]protocol.CompletionItem, 0, len(defs))
+	items := make([]protocol.CompletionItem, 0, len(defs)+len(thisVars))
+	for _, v := range thisVars {
+		items = append(items, protocol.CompletionItem{
+			Label: v,
+			Kind:  protocol.CompletionItemKindProperty,
+		})
+	}
 	for _, d := range defs {
 		detail := d.Name + "("
 		for i, arg := range d.Arguments {
@@ -1014,11 +1064,10 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 // wordBeforeDot extracts the identifier immediately before the dot at the cursor.
 func wordBeforeDot(content string, line, char int) string {
-	lines := strings.Split(content, "\n")
-	if line >= len(lines) {
+	lineText := lineAtOffset(content, line)
+	if lineText == "" && line > 0 {
 		return ""
 	}
-	lineText := lines[line]
 	// char is after the dot, so dot is at char-1
 	dotPos := char - 1
 	if dotPos < 1 || dotPos >= len(lineText) || lineText[dotPos] != '.' {
