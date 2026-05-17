@@ -11,8 +11,11 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
@@ -26,6 +29,9 @@ func main() {
 		switch os.Args[1] {
 		case "parse":
 			cmdParse(os.Args[2:])
+			return
+		case "format":
+			cmdFormat(os.Args[2:])
 			return
 		case "version":
 			fmt.Printf("cfmleditor-lsp %s\n", version)
@@ -46,11 +52,15 @@ func printHelp() {
 Commands:
   (default)    Run the LSP server over stdio
   parse        Parse CFML files and report timing
+  format       Format CFML files (stdout or in-place with -w)
   version      Print version
   help         Show this help
 
 Parse usage:
   cfmleditor-lsp parse <file-or-dir> [...]
+
+Format usage:
+  cfmleditor-lsp format [-w] <file> [...]
 `, version)
 }
 
@@ -195,4 +205,58 @@ func cmdParse(args []string) {
 	}
 	fmt.Printf("\n  total: %d files, %d funcs, %d refs in %v (avg %v/file)\n",
 		totalFiles, totalFuncs, totalRefs, totalDur, avg)
+}
+
+func cmdFormat(args []string) {
+	write := false
+	var files []string
+	for _, arg := range args {
+		if arg == "-w" {
+			write = true
+		} else {
+			files = append(files, arg)
+		}
+	}
+
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] <file> [...]\n")
+		os.Exit(1)
+	}
+
+	opts := formatter.DefaultOptions()
+	opts.ParseScript = func(src []byte) *sitter.Tree {
+		return language.Parse(language.CFScript, src, nil)
+	}
+	opts.ParseQuery = func(src []byte) *sitter.Tree {
+		return language.Parse(language.CFQuery, src, nil)
+	}
+	opts.ParseCFML = func(src []byte) *sitter.Tree {
+		return language.Parse(language.CFML, src, nil)
+	}
+
+	for _, f := range files {
+		content, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", f, err)
+			os.Exit(1)
+		}
+
+		tree := language.Parse(language.CFML, content, nil)
+		out, err := formatter.Format(content, tree, opts)
+		tree.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error formatting %s: %v\n", f, err)
+			os.Exit(1)
+		}
+
+		if write {
+			if err := os.WriteFile(f, out, 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", f, err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "formatted %s\n", f)
+		} else {
+			os.Stdout.Write(out)
+		}
+	}
 }

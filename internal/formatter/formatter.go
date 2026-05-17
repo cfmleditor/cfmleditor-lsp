@@ -31,6 +31,8 @@ type Options struct {
 	// LineWidth is the soft column limit used to decide whether to expand
 	// attributes onto separate lines (default 120).
 	LineWidth int
+	// QueryLineWidth is the soft column limit for SQL inside cfquery (default 70).
+	QueryLineWidth int
 	// AttrBreakThreshold is the number of attributes above which they are
 	// always expanded onto separate lines regardless of line width (default 3).
 	AttrBreakThreshold int
@@ -63,6 +65,7 @@ func DefaultOptions() Options {
 	return Options{
 		IndentWidth:        4,
 		LineWidth:          100,
+		QueryLineWidth:     70,
 		AttrBreakThreshold: 4,
 	}
 }
@@ -623,7 +626,22 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 	// If all body nodes are on a single line, emit them inline.
 	if f.allSingleLine(bodyNodes) && !f.hasBlockChild(bodyNodes) && f.fitsOnLine(bodyNodes) {
-		f.formatInlineRun(bodyNodes)
+		// Separate CF tags from inline text — CF tags get formatNode, text stays inline
+		var textRun []*sitter.Node
+		for _, c := range bodyNodes {
+			if strings.HasPrefix(c.Kind(), "cf_") {
+				if len(textRun) > 0 {
+					f.formatInlineRun(textRun)
+					textRun = nil
+				}
+				f.formatNode(c)
+			} else {
+				textRun = append(textRun, c)
+			}
+		}
+		if len(textRun) > 0 {
+			f.formatInlineRun(textRun)
+		}
 	} else {
 		for i := 0; i < len(bodyNodes); {
 			c := bodyNodes[i]
