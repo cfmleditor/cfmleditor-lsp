@@ -71,9 +71,9 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	s.initialized = true
 
-	s.logger.Info("initialize params workspace folders", zap.Int("count", len(params.WorkspaceFolders)))
+	s.logger.Debug("initialize params workspace folders", zap.Int("count", len(params.WorkspaceFolders)))
 	for i, folder := range params.WorkspaceFolders {
-		s.logger.Info("workspace folder", zap.Int("index", i), zap.String("name", folder.Name), zap.String("uri", string(folder.URI)))
+		s.logger.Debug("workspace folder", zap.Int("index", i), zap.String("name", folder.Name), zap.String("uri", string(folder.URI)))
 	}
 
 	for _, folder := range params.WorkspaceFolders {
@@ -118,7 +118,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.reindexFromParseResult(docURI, pr)
 
 	go s.rebuildFileCompletionCacheFromPR(docURI, pr)
-	s.logger.Info("document opened", zap.String("uri", string(docURI)))
+	s.logger.Debug("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
 }
@@ -317,7 +317,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	s.mu.Lock()
 	delete(s.parseResults, docURI)
 	s.mu.Unlock()
-	s.logger.Info("document closed", zap.String("uri", string(docURI)))
+	s.logger.Debug("document closed", zap.String("uri", string(docURI)))
 
 	// Clear diagnostics on close
 	if s.conn != nil {
@@ -366,7 +366,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	}()
 
 	filePath := strings.TrimPrefix(string(docURI), "file://")
-	s.logger.Info("cflint scan starting", zap.String("file", filePath))
+	s.logger.Debug("cflint scan starting", zap.String("file", filePath))
 
 	// Show progress
 	_ = s.conn.Notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
@@ -382,7 +382,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	})
 
 	if scanCtx.Err() != nil {
-		s.logger.Info("cflint scan cancelled", zap.String("file", filePath))
+		s.logger.Debug("cflint scan cancelled", zap.String("file", filePath))
 		return
 	}
 
@@ -395,7 +395,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 		diags = []protocol.Diagnostic{}
 	}
 
-	s.logger.Info("cflint scan complete", zap.String("file", filePath), zap.Int("issues", len(diags)))
+	s.logger.Debug("cflint scan complete", zap.String("file", filePath), zap.Int("issues", len(diags)))
 
 	_ = s.conn.Notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentURI(docURI),

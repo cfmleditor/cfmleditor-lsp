@@ -20,6 +20,7 @@ type configJSON struct {
 	Mappings            map[string]string   `json:"mappings"`
 	ComponentResolvers  []componentResolver `json:"componentResolvers"`
 	Formatting          *formattingConfig   `json:"formatting"`
+	Debug               bool                `json:"debug"`
 }
 
 type componentResolver struct {
@@ -29,7 +30,18 @@ type componentResolver struct {
 }
 
 type formattingConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled               bool   `json:"enabled"`
+	Debug                 bool   `json:"debug"`
+	SelfCloseTags         *bool  `json:"selfCloseTags"`
+	WhitespaceOnly        *bool  `json:"whitespaceOnly"`
+	LowercaseTags         *bool  `json:"lowercaseTags"`
+	LowercaseAttributes   *bool  `json:"lowercaseAttributes"`
+	DoubleQuoteAttributes *bool  `json:"doubleQuoteAttributes"`
+	UppercaseSQLKeywords  *bool  `json:"uppercaseSqlKeywords"`
+	ScopeCase             string `json:"scopeCase"`
+	LineWidth             *int   `json:"lineWidth"`
+	AttrBreakThreshold    *int   `json:"attrBreakThreshold"`
+	IndentWidth           *int   `json:"indentWidth"`
 }
 
 // Config represents a .cfmleditor.json file.
@@ -113,10 +125,114 @@ func (c *Config) Mappings() map[string]string {
 	return out
 }
 
+// Debug returns whether debug logging is enabled in config.
+func (c *Config) Debug() bool {
+	raw := c.raw()
+	return raw != nil && raw.Debug
+}
+
 // FormattingEnabled returns whether formatting is enabled in config.
 func (c *Config) FormattingEnabled() bool {
 	raw := c.raw()
 	return raw != nil && raw.Formatting != nil && raw.Formatting.Enabled
+}
+
+// FormattingDebug returns whether formatting debug checks are enabled.
+func (c *Config) FormattingDebug() bool {
+	raw := c.raw()
+	return raw != nil && raw.Formatting != nil && raw.Formatting.Debug
+}
+
+// FormattingSelfCloseTags returns whether void/implicit-end HTML tags should be self-closed.
+// Defaults to true if not specified.
+func (c *Config) FormattingSelfCloseTags() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.SelfCloseTags == nil {
+		return true
+	}
+	return *raw.Formatting.SelfCloseTags
+}
+
+// FormattingWhitespaceOnly returns whether the formatter should reject non-whitespace changes.
+// Defaults to true if not specified.
+func (c *Config) FormattingWhitespaceOnly() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.WhitespaceOnly == nil {
+		return true
+	}
+	return *raw.Formatting.WhitespaceOnly
+}
+
+// FormattingLowercaseTags returns whether CF tag names should be lowercased. Default true.
+func (c *Config) FormattingLowercaseTags() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.LowercaseTags == nil {
+		return true
+	}
+	return *raw.Formatting.LowercaseTags
+}
+
+// FormattingLowercaseAttributes returns whether attribute names should be lowercased. Default true.
+func (c *Config) FormattingLowercaseAttributes() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.LowercaseAttributes == nil {
+		return true
+	}
+	return *raw.Formatting.LowercaseAttributes
+}
+
+// FormattingDoubleQuoteAttributes returns whether attribute values should be double-quoted. Default true.
+func (c *Config) FormattingDoubleQuoteAttributes() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.DoubleQuoteAttributes == nil {
+		return true
+	}
+	return *raw.Formatting.DoubleQuoteAttributes
+}
+
+// FormattingUppercaseSQLKeywords returns whether SQL keywords should be uppercased. Default true.
+func (c *Config) FormattingUppercaseSQLKeywords() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.UppercaseSQLKeywords == nil {
+		return true
+	}
+	return *raw.Formatting.UppercaseSQLKeywords
+}
+
+// FormattingScopeCase returns the scope case setting ("upper", "lower", or "leave"). Default "leave".
+func (c *Config) FormattingScopeCase() string {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.ScopeCase == "" {
+		return "leave"
+	}
+	return raw.Formatting.ScopeCase
+}
+
+// FormattingLineWidth returns the configured line width, or 0 if not set.
+func (c *Config) FormattingLineWidth() int {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.LineWidth == nil {
+		return 0
+	}
+	return *raw.Formatting.LineWidth
+}
+
+// FormattingAttrBreakThreshold returns the configured attr break threshold, or 0 if not set.
+func (c *Config) FormattingAttrBreakThreshold() int {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.AttrBreakThreshold == nil {
+		return 0
+	}
+	return *raw.Formatting.AttrBreakThreshold
+}
+
+// FormattingIndentWidth returns the configured indent width, or 0 if not set.
+func (c *Config) FormattingIndentWidth() int {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.IndentWidth == nil {
+		return 0
+	}
+	return *raw.Formatting.IndentWidth
 }
 
 // ComponentResolvers returns the configured component resolver patterns as [match, resolve, prefix] triples.

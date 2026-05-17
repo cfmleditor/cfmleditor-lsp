@@ -2,6 +2,8 @@
 
 A Language Server Protocol (LSP) implementation for CFML / ColdFusion, written in Go.
 
+Uses [tree-sitter-cfml](https://github.com/cfmleditor/tree-sitter-cfml).
+
 ## Build
 
 ```sh
@@ -46,6 +48,8 @@ Place a `.cfmleditor.json` file in your project root to enable daemon mode and c
 | `workspaceIndexGlobs` | No | Glob patterns to filter which `.cfc` files are indexed. |
 | `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
+| `formatting` | No | Formatter configuration object. See below. |
+| `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 
 ### Mappings
 
@@ -80,6 +84,43 @@ The match is case-insensitive and works regardless of qualifiers before it. For 
 - `getService("timetable")`
 - `_parent.getService("timetable")`
 - `VARIABLES._parent.getService("timetable")`
+
+### Formatting
+
+The `formatting` object controls the built-in formatter invoked via `textDocument/formatting`.
+
+```json
+"formatting": {
+  "enabled": true,
+  "selfCloseTags": true,
+  "whitespaceOnly": true,
+  "lowercaseTags": true,
+  "lowercaseAttributes": true,
+  "doubleQuoteAttributes": true,
+  "uppercaseSqlKeywords": true,
+  "scopeCase": "leave",
+  "lineWidth": 100,
+  "attrBreakThreshold": 4,
+  "indentWidth": 4
+}
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Enable the formatter. When false, formatting requests are ignored. |
+| `selfCloseTags` | `true` | Convert void/implicit-end HTML tags to self-closing form (e.g. `<br>` → `<br />`). |
+| `whitespaceOnly` | `true` | Reject formatting results that change non-whitespace content (safety guard). |
+| `lowercaseTags` | `true` | Lowercase CF tag names (e.g. `<CFOUTPUT>` → `<cfoutput>`). |
+| `lowercaseAttributes` | `true` | Lowercase attribute names. |
+| `doubleQuoteAttributes` | `true` | Normalize attribute values to double quotes. |
+| `uppercaseSqlKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
+| `scopeCase` | `"leave"` | Case for CFML scope names. Values: `"upper"`, `"lower"`, `"leave"`. |
+| `lineWidth` | `100` | Soft column limit — attributes expand to separate lines when a tag exceeds this width. |
+| `attrBreakThreshold` | `4` | Number of attributes above which they are always expanded onto separate lines. |
+| `indentWidth` | `4` | Spaces per indentation level. Overridden by editor `tabSize` when provided. |
+| `debug` | `false` | Enable formatter debug checks. |
+
+Note: `useTabs` and `tabSize` are taken from the editor's formatting options (sent with each formatting request), not from this config.
 
 ### Daemon mode
 

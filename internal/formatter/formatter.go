@@ -29,15 +29,26 @@ type Options struct {
 	// IndentWidth is the number of spaces per indentation level (default 4).
 	IndentWidth int
 	// LineWidth is the soft column limit used to decide whether to expand
-	// attributes onto separate lines (default 120).
+	// attributes onto separate lines (default 100).
 	LineWidth int
 	// QueryLineWidth is the soft column limit for SQL inside cfquery (default 70).
 	QueryLineWidth int
 	// AttrBreakThreshold is the number of attributes above which they are
-	// always expanded onto separate lines regardless of line width (default 3).
+	// always expanded onto separate lines regardless of line width (default 4).
 	AttrBreakThreshold int
 	// UseTabs uses a single tab character instead of spaces for indentation.
 	UseTabs bool
+	// LowercaseTags lowercases CF tag names (default true).
+	LowercaseTags bool
+	// LowercaseAttributes lowercases attribute names (default true).
+	LowercaseAttributes bool
+	// DoubleQuoteAttributes normalizes attribute values to double quotes (default true).
+	DoubleQuoteAttributes bool
+	// UppercaseSQLKeywords uppercases SQL keywords in cfquery (default true).
+	UppercaseSQLKeywords bool
+	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
+	// Valid values: "upper", "lower", "leave" (default "leave").
+	ScopeCase string
 	// ParseScript re-parses cfscript content. If nil, script blocks are
 	// emitted verbatim.
 	ParseScript ParseFunc
@@ -47,6 +58,12 @@ type Options struct {
 	// ParseCFML re-parses CFML source after pre-formatting. If nil,
 	// pre-formatting (e.g. converting implicit end tags to self-closing) is skipped.
 	ParseCFML ParseFunc
+	// SelfCloseTags controls whether void/implicit-end HTML tags are
+	// converted to self-closing form (e.g. <br> → <br />). Default true.
+	SelfCloseTags bool
+	// WhitespaceOnly when true causes Format to return an error if the
+	// output differs from the input in non-whitespace content.
+	WhitespaceOnly bool
 }
 
 func (o Options) indent(level int) string {
@@ -63,10 +80,16 @@ func (o Options) indent(level int) string {
 // DefaultOptions returns Options with sensible defaults (4-space indent, 120 col width).
 func DefaultOptions() Options {
 	return Options{
-		IndentWidth:        4,
-		LineWidth:          100,
-		QueryLineWidth:     70,
-		AttrBreakThreshold: 4,
+		IndentWidth:           4,
+		LineWidth:             100,
+		QueryLineWidth:        70,
+		AttrBreakThreshold:    4,
+		UseTabs:              true,
+		LowercaseTags:        true,
+		LowercaseAttributes:  true,
+		DoubleQuoteAttributes: true,
+		UppercaseSQLKeywords:  true,
+		SelfCloseTags:        true,
 	}
 }
 
@@ -91,6 +114,7 @@ type Formatter struct {
 	lastNL           bool // last written byte was a newline
 	lineLen          int  // approximate current line length
 	lastTagMultiLine bool // last emitted tag had expanded (multi-line) attributes
+	parseErr         error // first sub-parse error encountered
 }
 
 // New creates a Formatter with the given options.
@@ -116,14 +140,176 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 			err = fmt.Errorf("formatter panic: %v", r)
 		}
 	}()
-	if opts.ParseCFML != nil {
+	if opts.SelfCloseTags && opts.ParseCFML != nil {
 		src, tree = preformat(src, tree, opts.ParseCFML)
 	}
 	f := New(opts)
 	f.src = src
 	root := tree.RootNode()
 	f.formatNode(root)
-	return f.out.Bytes(), nil
+	if f.parseErr != nil {
+		return nil, f.parseErr
+	}
+	out = f.out.Bytes()
+	if opts.WhitespaceOnly {
+		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// checkWhitespaceOnly walks both byte slices skipping whitespace, comparing
+// non-whitespace characters case-insensitively. If allowSelfClose is true,
+// a "/" immediately before ">" in either side is also skipped.
+// Returns nil if only whitespace differs, or an error describing the first mismatch.
+func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
+	i, j := 0, 0
+	for {
+		for i < len(a) && isWS(a[i]) {
+			i++
+		}
+		for j < len(b) && isWS(b[j]) {
+			j++
+		}
+		if i == len(a) && j == len(b) {
+			return nil
+		}
+		if i == len(a) || j == len(b) {
+			line := byteOffsetToLine(a, i)
+			return fmt.Errorf("formatter made non-whitespace changes near line %d (content length mismatch)", line)
+		}
+		if allowSelfClose {
+			if a[i] == '/' && i+1 < len(a) && a[i+1] == '>' && b[j] == '>' {
+				i++
+				continue
+			}
+			if b[j] == '/' && j+1 < len(b) && b[j+1] == '>' && a[i] == '>' {
+				j++
+				continue
+			}
+			// Allow added/removed quotes around attribute values
+			if a[i] == '"' && b[j] != '"' {
+				i++
+				continue
+			}
+			if b[j] == '"' && a[i] != '"' {
+				j++
+				continue
+			}
+			if a[i] == '\'' && b[j] != '\'' {
+				i++
+				continue
+			}
+			if b[j] == '\'' && a[i] != '\'' {
+				j++
+				continue
+			}
+		}
+		if toLower(a[i]) != toLower(b[j]) {
+			line := byteOffsetToLine(a, i)
+			ctx := snippetAt(a, i)
+			return fmt.Errorf("formatter made non-whitespace changes at line %d near %q", line, ctx)
+		}
+		i++
+		j++
+	}
+}
+
+func byteOffsetToLine(src []byte, offset int) int {
+	line := 1
+	for k := 0; k < offset && k < len(src); k++ {
+		if src[k] == '\n' {
+			line++
+		}
+	}
+	return line
+}
+
+func snippetAt(src []byte, offset int) string {
+	start := offset - 10
+	if start < 0 {
+		start = 0
+	}
+	end := offset + 10
+	if end > len(src) {
+		end = len(src)
+	}
+	return string(src[start:end])
+}
+
+func isWS(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+func toLower(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + 32
+	}
+	return c
+}
+
+// cfmlScopes are the built-in CFML scope names.
+var cfmlScopes = map[string]bool{
+	"variables":   true,
+	"arguments":   true,
+	"local":       true,
+	"request":     true,
+	"session":     true,
+	"application": true,
+	"server":      true,
+	"form":        true,
+	"url":         true,
+	"cgi":         true,
+	"cookie":      true,
+	"client":      true,
+	"this":        true,
+	"super":       true,
+}
+
+// recordParseError stores the first parse error encountered during sub-parsing.
+func (f *Formatter) recordParseError(context string, root *sitter.Node, src []byte, baseRow uint) {
+	if f.parseErr != nil {
+		return
+	}
+	errNode := findFirstError(root)
+	if errNode == nil {
+		f.parseErr = fmt.Errorf("parse error in %s block", context)
+		return
+	}
+	pos := errNode.StartPosition()
+	line := baseRow + pos.Row + 1
+	snippet := string(src[errNode.StartByte():errNode.EndByte()])
+	if len(snippet) > 50 {
+		snippet = snippet[:50] + "..."
+	}
+	f.parseErr = fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
+}
+
+func findFirstError(n *sitter.Node) *sitter.Node {
+	if n.IsError() || n.IsMissing() {
+		return n
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if found := findFirstError(n.Child(i)); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// applyScopeCase transforms a CFML scope name based on the ScopeCase option.
+func (f *Formatter) applyScopeCase(text string) string {
+	if f.opts.ScopeCase == "" || f.opts.ScopeCase == "leave" {
+		return text
+	}
+	if !cfmlScopes[strings.ToLower(text)] {
+		return text
+	}
+	if f.opts.ScopeCase == "upper" {
+		return strings.ToUpper(text)
+	}
+	return strings.ToLower(text)
 }
 
 // ─── node text helpers ───────────────────────────────────────────────────────
@@ -227,9 +413,24 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 				gc := c.Child(j)
 				switch gc.Kind() {
 				case "cf_attribute_name":
-					attr.name = strings.ToLower(f.text(gc))
+					name := f.text(gc)
+					if f.opts.LowercaseAttributes {
+						name = strings.ToLower(name)
+					}
+					attr.name = name
 				case "quoted_cf_attribute_value":
-					attr.value = f.normaliseAttrValue(f.text(gc))
+					if f.opts.DoubleQuoteAttributes {
+						attr.value = f.normaliseAttrValue(f.text(gc))
+					} else {
+						attr.value = strings.TrimSpace(f.text(gc))
+					}
+				case "cf_attribute_value":
+					val := strings.TrimSpace(f.text(gc))
+					if f.opts.DoubleQuoteAttributes {
+						attr.value = `"` + val + `"`
+					} else {
+						attr.value = val
+					}
 				}
 			}
 			*attrs = append(*attrs, attr)
@@ -483,7 +684,11 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 		for i := uint(0); i < n.ChildCount(); i++ {
 			c := n.Child(i)
 			if c.Kind() == "cf_tag_name" {
-				return "cf" + strings.ToLower(f.text(c))
+				name := f.text(c)
+				if f.opts.LowercaseTags {
+					name = strings.ToLower(name)
+				}
+				return "cf" + name
 			}
 			if c.Kind() == "cf_start_tag" || c.Kind() == "cf_start_tag_with_selfclose" {
 				return f.tagName(c)
@@ -497,10 +702,14 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 		if strings.HasPrefix(strings.ToLower(raw), "<cf") {
 			rest := raw[3:]
 			end := strings.IndexAny(rest, " \t\r\n/>")
+			name := rest
 			if end > 0 {
-				return "cf" + strings.ToLower(rest[:end])
+				name = rest[:end]
 			}
-			return "cf" + strings.ToLower(rest)
+			if f.opts.LowercaseTags {
+				name = strings.ToLower(name)
+			}
+			return "cf" + name
 		}
 	}
 
@@ -758,6 +967,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	inBody := false
 	var bodyNodes []*sitter.Node
 	var altNode *sitter.Node
+	var trailingNodes []*sitter.Node
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -773,11 +983,16 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 			altNode = c
 			continue
 		}
-		if !inBody {
+		switch {
+		case !inBody:
 			if c.IsNamed() {
 				condParts = append(condParts, f.expr(c))
 			}
-		} else {
+		case altNode != nil:
+			// Nodes after cf_if_alt belong to the last branch (tree-sitter
+			// sometimes places trailing comments as siblings of cf_if_alt).
+			trailingNodes = append(trailingNodes, c)
+		default:
 			bodyNodes = append(bodyNodes, c)
 		}
 	}
@@ -809,6 +1024,16 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 
 	if altNode != nil {
 		f.formatCFIfAlt(altNode)
+	}
+
+	// Emit nodes that tree-sitter placed after cf_if_alt (e.g. trailing
+	// comments) — they belong to the last branch.
+	if len(trailingNodes) > 0 {
+		f.level++
+		for _, c := range trailingNodes {
+			f.formatNode(c)
+		}
+		f.level--
 	}
 
 	f.write("\n")
@@ -992,6 +1217,9 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 			scriptSrc := f.src[c.StartByte():c.EndByte()]
 			tree := f.opts.ParseScript(scriptSrc)
 			if tree != nil {
+				if tree.RootNode().HasError() {
+					f.recordParseError("cfscript", tree.RootNode(), scriptSrc, c.StartPosition().Row)
+				}
 				defer tree.Close()
 				origSrc := f.src
 				f.src = scriptSrc
@@ -1045,6 +1273,9 @@ func (f *Formatter) formatComponentContent(n *sitter.Node) {
 		scriptSrc := f.src[n.StartByte():n.EndByte()]
 		tree := f.opts.ParseScript(scriptSrc)
 		if tree != nil {
+			if tree.RootNode().HasError() {
+				f.recordParseError("cfscript", tree.RootNode(), scriptSrc, n.StartPosition().Row)
+			}
 			defer tree.Close()
 			origSrc := f.src
 			f.src = scriptSrc
@@ -1069,7 +1300,7 @@ func (f *Formatter) formatText(n *sitter.Node) {
 }
 
 func (f *Formatter) formatComment(n *sitter.Node) {
-	raw := strings.TrimSpace(f.text(n))
+	raw := f.normalizeCFComment(strings.TrimSpace(f.text(n)))
 	if raw == "" {
 		return
 	}
@@ -1077,4 +1308,58 @@ func (f *Formatter) formatComment(n *sitter.Node) {
 	f.writeIndent()
 	f.write(raw)
 	f.write("\n")
+}
+
+// normalizeCFComment collapses extra internal whitespace in <!--- ... ---> comments.
+func (f *Formatter) normalizeCFComment(raw string) string {
+	if !strings.HasPrefix(raw, "<!---") || !strings.HasSuffix(raw, "--->") {
+		return raw
+	}
+	inner := raw[5 : len(raw)-4]
+	lines := strings.Split(inner, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return "<!--- --->"
+	}
+	if len(lines) == 1 {
+		return "<!--- " + strings.TrimSpace(lines[0]) + " --->"
+	}
+	// Multi-line: strip common leading whitespace
+	minIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent > 0 {
+		for i, line := range lines {
+			if len(line) >= minIndent {
+				lines[i] = line[minIndent:]
+			}
+		}
+	}
+	baseIndent := f.opts.indent(f.level)
+	var sb strings.Builder
+	sb.WriteString("<!---\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString(baseIndent + f.opts.indent(1) + line + "\n")
+		}
+	}
+	sb.WriteString(baseIndent + "--->")
+	return sb.String()
 }

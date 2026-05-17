@@ -190,7 +190,11 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	// ── literals ──────────────────────────────────────────────────────────
 	case "identifier", "property_identifier", "shorthand_property_identifier",
 		"number", "true", "false", "null", "undefined", "this", "super":
-		return f.text(n)
+		text := f.text(n)
+		if n.Kind() == "identifier" || n.Kind() == "property_identifier" {
+			text = f.applyScopeCase(text)
+		}
+		return text
 
 	case "string", "template_string":
 		return f.exprString(n)
@@ -289,13 +293,36 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 {
 			f.level++
 			var parts []string
+			var isComment []bool
 			for i := uint(0); i < args.NamedChildCount(); i++ {
-				parts = append(parts, f.expr(args.NamedChild(i)))
+				c := args.NamedChild(i)
+				parts = append(parts, f.expr(c))
+				isComment = append(isComment, c.Kind() == "cf_comment")
 			}
 			indent := f.opts.indent(f.level)
 			f.level--
 			outerIndent := f.opts.indent(f.level)
-			argsStr = "(\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ")"
+			var sb strings.Builder
+			sb.WriteString("(\n")
+			for i, p := range parts {
+				sb.WriteString(indent)
+				sb.WriteString(p)
+				if !isComment[i] {
+					hasMore := false
+					for j := i + 1; j < len(parts); j++ {
+						if !isComment[j] {
+							hasMore = true
+							break
+						}
+					}
+					if hasMore {
+						sb.WriteString(",")
+					}
+				}
+				sb.WriteString("\n")
+			}
+			sb.WriteString(outerIndent + ")")
+			argsStr = sb.String()
 		}
 		if chainBroken {
 			f.level--
@@ -441,8 +468,11 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		return "()"
 	}
 	var parts []string
+	var isComment []bool
 	for i := uint(0); i < args.NamedChildCount(); i++ {
-		parts = append(parts, f.expr(args.NamedChild(i)))
+		c := args.NamedChild(i)
+		parts = append(parts, f.expr(c))
+		isComment = append(isComment, c.Kind() == "cf_comment")
 	}
 	inline := "(" + strings.Join(parts, ", ") + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
@@ -458,7 +488,28 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		indent := f.opts.indent(f.level)
 		f.level--
 		outerIndent := f.opts.indent(f.level)
-		return "(\n" + indent + strings.Join(parts, ",\n"+indent) + "\n" + outerIndent + ")"
+		var sb strings.Builder
+		sb.WriteString("(\n")
+		for i, p := range parts {
+			sb.WriteString(indent)
+			sb.WriteString(p)
+			if !isComment[i] {
+				// Add comma unless next non-comment part doesn't exist
+				hasMore := false
+				for j := i + 1; j < len(parts); j++ {
+					if !isComment[j] {
+						hasMore = true
+						break
+					}
+				}
+				if hasMore {
+					sb.WriteString(",")
+				}
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString(outerIndent + ")")
+		return sb.String()
 	}
 	return inline
 }

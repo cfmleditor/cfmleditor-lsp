@@ -157,7 +157,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 		}
 		s.resolveCache[cacheKey] = cfcPath
 		s.mu.Unlock()
-		s.logger.Info("definition: resolve cache miss", zap.String("component", component), zap.String("path", cfcPath), zap.Duration("dur", time.Since(t0)))
+		s.logger.Debug("definition: resolve cache miss", zap.String("component", component), zap.String("path", cfcPath), zap.Duration("dur", time.Since(t0)))
 	}
 
 	if cfcPath == "" {

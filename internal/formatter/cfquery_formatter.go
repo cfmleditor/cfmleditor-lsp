@@ -12,8 +12,7 @@ import (
 // on their own line.
 var sqlClauseKeywords = map[string]bool{
 	"SELECT": true, "FROM": true, "WHERE": true,
-	"INNER": true, "LEFT": true, "RIGHT": true, "OUTER": true, "CROSS": true,
-	"JOIN": true, "ON": true,
+	"JOIN": true,
 	"ORDER": true, "GROUP": true, "HAVING": true,
 	"INSERT": true, "UPDATE": true, "DELETE": true,
 	"SET": true, "VALUES": true, "INTO": true,
@@ -22,9 +21,14 @@ var sqlClauseKeywords = map[string]bool{
 	"LIMIT": true, "OFFSET": true,
 }
 
+// sqlJoinModifiers are keywords that precede JOIN and should be kept on the same line.
+var sqlJoinModifiers = map[string]bool{
+	"INNER": true, "LEFT": true, "RIGHT": true, "OUTER": true, "CROSS": true,
+}
+
 // sqlKeywords are SQL keywords that should be uppercased but do not start a new line.
 var sqlKeywords = map[string]bool{
-	"AS": true,
+	"AS": true, "ON": true,
 }
 
 // formatCFQuery pretty-prints a <cfquery>…</cfquery> block by re-parsing
@@ -44,6 +48,9 @@ func (f *Formatter) formatCFQuery(n *sitter.Node) {
 			if f.opts.ParseQuery != nil {
 				tree := f.opts.ParseQuery(querySrc)
 				if tree != nil {
+					if tree.RootNode().HasError() {
+						f.recordParseError("cfquery", tree.RootNode(), querySrc, c.StartPosition().Row)
+					}
 					origSrc := f.src
 					f.src = querySrc
 					f.formatQueryChildren(tree.RootNode())
@@ -88,21 +95,65 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 	case "query_keyword":
 		text := f.text(n)
 		upper := strings.ToUpper(text)
-		if sqlClauseKeywords[upper] {
+		out := upper
+		if !f.opts.UppercaseSQLKeywords {
+			out = text
+		}
+		switch {
+		case sqlClauseKeywords[upper]:
+			// JOIN stays on the same line if preceded by a join modifier
+			prevIsJoinMod := false
+			if upper == "JOIN" {
+				if prev := n.PrevSibling(); prev != nil {
+					prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+					prevIsJoinMod = sqlJoinModifiers[prevText]
+				}
+			}
+			if prevIsJoinMod {
+				f.write(" " + out)
+			} else {
+				if !*first {
+					f.write("\n")
+				}
+				f.writeIndent()
+				f.write(out)
+			}
+			*first = false
+		case sqlJoinModifiers[upper]:
+			// Stay on same line if preceded by another join modifier (e.g. LEFT OUTER)
+			prevIsJoinMod := false
+			if prev := n.PrevSibling(); prev != nil {
+				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+				prevIsJoinMod = sqlJoinModifiers[prevText]
+			}
+			if prevIsJoinMod {
+				f.write(" " + out)
+			} else {
+				if !*first {
+					f.write("\n")
+				}
+				f.writeIndent()
+				f.write(out)
+			}
+			*first = false
+		case upper == "ON":
+			// ON indents one level deeper than the JOIN
 			if !*first {
 				f.write("\n")
 			}
+			f.level++
 			f.writeIndent()
-			f.write(upper)
+			f.write(out)
+			f.level--
 			*first = false
-		} else {
+		default:
 			if *first {
 				f.writeIndent()
 				*first = false
 			} else {
 				f.write(" ")
 			}
-			f.write(upper)
+			f.write(out)
 		}
 
 	case "query_identifier":
@@ -110,11 +161,67 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		upper := strings.ToUpper(text)
 		switch {
 		case sqlClauseKeywords[upper]:
+			prevIsJoinMod := false
+			if upper == "JOIN" {
+				if prev := n.PrevSibling(); prev != nil {
+					prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+					prevIsJoinMod = sqlJoinModifiers[prevText]
+				}
+			}
+			if prevIsJoinMod {
+				if f.opts.UppercaseSQLKeywords {
+					f.write(" " + upper)
+				} else {
+					f.write(" " + text)
+				}
+			} else {
+				if !*first {
+					f.write("\n")
+				}
+				f.writeIndent()
+				if f.opts.UppercaseSQLKeywords {
+					f.write(upper)
+				} else {
+					f.write(text)
+				}
+			}
+			*first = false
+		case sqlJoinModifiers[upper]:
+			prevIsJoinMod := false
+			if prev := n.PrevSibling(); prev != nil {
+				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+				prevIsJoinMod = sqlJoinModifiers[prevText]
+			}
+			if prevIsJoinMod {
+				if f.opts.UppercaseSQLKeywords {
+					f.write(" " + upper)
+				} else {
+					f.write(" " + text)
+				}
+			} else {
+				if !*first {
+					f.write("\n")
+				}
+				f.writeIndent()
+				if f.opts.UppercaseSQLKeywords {
+					f.write(upper)
+				} else {
+					f.write(text)
+				}
+			}
+			*first = false
+		case upper == "ON":
 			if !*first {
 				f.write("\n")
 			}
+			f.level++
 			f.writeIndent()
-			f.write(upper)
+			if f.opts.UppercaseSQLKeywords {
+				f.write(upper)
+			} else {
+				f.write(text)
+			}
+			f.level--
 			*first = false
 		case sqlKeywords[upper]:
 			if *first {
@@ -123,7 +230,11 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 			} else {
 				f.write(" ")
 			}
-			f.write(upper)
+			if f.opts.UppercaseSQLKeywords {
+				f.write(upper)
+			} else {
+				f.write(text)
+			}
 		default:
 			if *first {
 				f.writeIndent()
@@ -133,6 +244,15 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 			}
 			f.write(strings.ToLower(text))
 		}
+
+	case "query_function_name":
+		if *first {
+			f.writeIndent()
+			*first = false
+		} else {
+			f.write(" ")
+		}
+		f.write(strings.ToLower(f.text(n)))
 
 	case "query_function":
 		// Handles both SQL functions (COUNT, UPPER) and table(columns), VALUES(...)
@@ -145,10 +265,14 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		if nameNode != nil {
 			switch nameNode.Kind() {
 			case "query_keyword":
-				nameText = strings.ToUpper(f.text(nameNode))
-				isClauseKW = sqlClauseKeywords[nameText]
+				if f.opts.UppercaseSQLKeywords {
+					nameText = strings.ToUpper(f.text(nameNode))
+				} else {
+					nameText = f.text(nameNode)
+				}
+				isClauseKW = sqlClauseKeywords[strings.ToUpper(f.text(nameNode))]
 			case "query_function_name":
-				nameText = f.text(nameNode)
+				nameText = strings.ToLower(f.text(nameNode))
 			default:
 				// Adjacent name( = function call (preserve case), name ( = table (lowercase)
 				if argsNode != nil && nameNode.EndByte() == argsNode.StartByte() {
@@ -201,7 +325,17 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		if op != nil {
 			f.write(" " + f.text(op) + " ")
 		}
-		f.formatQueryNodeInline(right)
+		f.emitQueryExtrasAndRight(n, right, first)
+
+	case "query_comparison_expression":
+		left := n.ChildByFieldName("left")
+		op := n.ChildByFieldName("operator")
+		right := n.ChildByFieldName("right")
+		f.formatQueryNode(left, first)
+		if op != nil {
+			f.write(" " + f.text(op) + " ")
+		}
+		f.emitQueryExtrasAndRight(n, right, first)
 
 	case "query_comma":
 		if *first {
@@ -243,13 +377,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		right := n.ChildByFieldName("right")
 		f.formatQueryNode(left, first)
 		f.write(" = ")
-		// Right side: emit inline without leading space
-		f.formatQueryNodeInline(right)
-		// If right side is a self-closing tag, push next content to new line
-		if right != nil && right.Kind() == "cf_selfclose_tag" {
-			f.write("\n")
-			*first = true
-		}
+		f.emitQueryExtrasAndRight(n, right, first)
 
 	case "query_alias":
 		// e.g. u.name or table alias
@@ -273,6 +401,15 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 
 	case "parenthesized_query_node":
 		f.formatQueryParenthesized(n, first)
+
+	case "cf_comment":
+		if !f.lastNL {
+			f.write("\n")
+		}
+		f.writeIndent()
+		f.write(strings.TrimSpace(f.text(n)))
+		f.write("\n")
+		*first = true
 
 	default:
 		// Other nodes: emit text inline
@@ -566,20 +703,30 @@ func (f *Formatter) formatQueryNodeInline(n *sitter.Node) {
 	}
 	switch n.Kind() {
 	case "query_keyword":
-		f.write(strings.ToUpper(f.text(n)))
+		if f.opts.UppercaseSQLKeywords {
+			f.write(strings.ToUpper(f.text(n)))
+		} else {
+			f.write(f.text(n))
+		}
 	case "query_identifier":
 		text := f.text(n)
 		upper := strings.ToUpper(text)
 		if sqlClauseKeywords[upper] || sqlKeywords[upper] {
-			f.write(upper)
+			if f.opts.UppercaseSQLKeywords {
+				f.write(upper)
+			} else {
+				f.write(text)
+			}
 		} else {
 			f.write(strings.ToLower(text))
 		}
+	case "query_function_name":
+		f.write(strings.ToLower(f.text(n)))
 	case "query_function":
 		nameNode := n.ChildByFieldName("name")
 		argsNode := n.ChildByFieldName("arguments")
 		if nameNode != nil {
-			f.write(strings.ToUpper(f.text(nameNode)))
+			f.write(strings.ToLower(f.text(nameNode)))
 		}
 		if argsNode != nil {
 			f.write("(")
@@ -602,6 +749,15 @@ func (f *Formatter) formatQueryNodeInline(n *sitter.Node) {
 			f.write(")")
 		}
 	case "query_math_expression":
+		left := n.ChildByFieldName("left")
+		op := n.ChildByFieldName("operator")
+		right := n.ChildByFieldName("right")
+		f.formatQueryNodeInline(left)
+		if op != nil {
+			f.write(" " + f.text(op) + " ")
+		}
+		f.formatQueryNodeInline(right)
+	case "query_comparison_expression":
 		left := n.ChildByFieldName("left")
 		op := n.ChildByFieldName("operator")
 		right := n.ChildByFieldName("right")
@@ -638,6 +794,37 @@ func (f *Formatter) writeQuerySelfCloseTag(n *sitter.Node) {
 	name := f.tagName(n)
 	attrs := f.collectAttrs(n)
 	f.write("<" + name + f.renderAttrs(name, attrs) + " />")
+}
+
+// emitQueryExtrasAndRight emits any cf_comment extras in a node, then the
+// right-hand field node. If comments are present, the right node is emitted
+// on a new indented line; otherwise it's emitted inline.
+func (f *Formatter) emitQueryExtrasAndRight(n *sitter.Node, right *sitter.Node, first *bool) {
+	hasComment := false
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() == "cf_comment" {
+			if !f.lastNL {
+				f.write("\n")
+			}
+			f.level++
+			f.writeIndent()
+			f.write(f.normalizeCFComment(strings.TrimSpace(f.text(c))))
+			f.write("\n")
+			f.level--
+			hasComment = true
+		}
+	}
+	if hasComment {
+		*first = true
+		f.formatQueryNode(right, first)
+	} else {
+		f.formatQueryNodeInline(right)
+	}
+	if right != nil && right.Kind() == "cf_selfclose_tag" {
+		f.write("\n")
+		*first = true
+	}
 }
 
 // queryNodeHasTag checks recursively if a node contains any CF tags.

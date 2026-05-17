@@ -66,10 +66,16 @@ Format usage:
 
 func runServer() {
 	fmt.Fprintf(os.Stderr, "cfmleditor-lsp %s\n", version)
-	logger, _ := zap.NewProduction()
-	defer func() { _ = logger.Sync() }()
 	cwd, _ := os.Getwd()
 	cfg, _ := daemon.FindConfig(cwd)
+
+	var logger *zap.Logger
+	if cfg != nil && cfg.Debug() {
+		logger, _ = zap.NewDevelopment()
+	} else {
+		logger, _ = zap.NewProduction()
+	}
+	defer func() { _ = logger.Sync() }()
 
 	if cfg != nil {
 		sock := cfg.SocketPath()
@@ -92,7 +98,21 @@ func runServer() {
 		resolverPairs := cfg.ComponentResolvers()
 
 		// Serve the socket listener in the background
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, cfg.FormattingEnabled()) }()
+		fmtCfg := server.FormattingConfig{
+			Enabled:               cfg.FormattingEnabled(),
+			Debug:                 cfg.FormattingDebug(),
+			SelfCloseTags:         cfg.FormattingSelfCloseTags(),
+			WhitespaceOnly:        cfg.FormattingWhitespaceOnly(),
+			LowercaseTags:         cfg.FormattingLowercaseTags(),
+			LowercaseAttributes:   cfg.FormattingLowercaseAttributes(),
+			DoubleQuoteAttributes: cfg.FormattingDoubleQuoteAttributes(),
+			UppercaseSQLKeywords:  cfg.FormattingUppercaseSQLKeywords(),
+			ScopeCase:             cfg.FormattingScopeCase(),
+			LineWidth:             cfg.FormattingLineWidth(),
+			AttrBreakThreshold:    cfg.FormattingAttrBreakThreshold(),
+			IndentWidth:           cfg.FormattingIndentWidth(),
+		}
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, fmtCfg) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -106,7 +126,7 @@ func runServer() {
 		for _, p := range resolverPairs {
 			srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
 		}
-		srv.Formatting.Enabled = cfg.FormattingEnabled()
+		srv.Formatting = fmtCfg
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			<-conn.Done()
@@ -256,7 +276,7 @@ func cmdFormat(args []string) {
 			}
 			fmt.Fprintf(os.Stderr, "formatted %s\n", f)
 		} else {
-			os.Stdout.Write(out)
+			_, _ = os.Stdout.Write(out)
 		}
 	}
 }

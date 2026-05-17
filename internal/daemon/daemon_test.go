@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"go.lsp.dev/jsonrpc2"
 	"go.uber.org/zap"
 )
@@ -55,7 +56,7 @@ func TestServeMultipleClients(t *testing.T) {
 	// Simulate the stdio client that main.go adds before Serve starts
 	ct.Add()
 
-	go func() { _ = Serve(ctx, sock, logger, idx, ct, nil, nil, nil, nil, false) }()
+	go func() { _ = Serve(ctx, sock, logger, idx, ct, nil, nil, nil, nil, server.FormattingConfig{}) }()
 	waitForSocket(t, sock)
 
 	// Connect 6 socket clients
@@ -110,7 +111,7 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	idx := index.New()
 
 	// No ConnTracker — we just verify the RPC layer works
-	go func(){ _ = Serve(ctx, sock, logger, idx, nil, nil, nil, nil, nil, false) }()
+	go func(){ _ = Serve(ctx, sock, logger, idx, nil, nil, nil, nil, nil, server.FormattingConfig{}) }()
 	waitForSocket(t, sock)
 
 	conn, err := net.Dial("unix", sock)
@@ -144,7 +145,7 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add() // stdio slot
 
-	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, false) }()
+	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, server.FormattingConfig{}) }()
 	waitForSocket(t, sock)
 
 	// Client 1 opens a CFC file — this indexes it into the shared index

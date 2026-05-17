@@ -31,18 +31,40 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	start := time.Now()
-	formatted, err := formatDocument(content, params.Options)
+	formatted, err := formatDocument(content, params.Options, s.Formatting)
 	elapsed := time.Since(start)
 	if err != nil {
 		s.logger.Warn("formatting failed", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed), zap.Error(err))
+		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeWarning,
+			Message: "Formatting failed: " + err.Error(),
+		})
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 	if formatted == content {
-		s.logger.Info("formatting complete (no changes)", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
+		s.logger.Debug("formatting complete (no changes)", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	s.logger.Info("formatting complete", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
+	s.logger.Debug("formatting complete", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
+
+	// Idempotency check: format again and verify the result is stable.
+	if s.Formatting.Debug {
+		formatted2, err2 := formatDocument(formatted, params.Options, s.Formatting)
+		if err2 != nil {
+			s.logger.Warn("formatting idempotency check failed", zap.String("uri", string(params.TextDocument.URI)), zap.Error(err2))
+			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+				Type:    protocol.MessageTypeWarning,
+				Message: "Formatting is not idempotent: second pass failed: " + err2.Error(),
+			})
+		} else if formatted2 != formatted {
+			s.logger.Warn("formatting is not idempotent", zap.String("uri", string(params.TextDocument.URI)))
+			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+				Type:    protocol.MessageTypeWarning,
+				Message: "Formatting is not idempotent: second pass produced different output",
+			})
+		}
+	}
 
 	lines := countNewlines(content)
 	edits := []protocol.TextEdit{{
@@ -55,7 +77,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	return reply(ctx, edits, nil)
 }
 
-func formatDocument(content string, opts protocol.FormattingOptions) (string, error) {
+func formatDocument(content string, opts protocol.FormattingOptions, cfg FormattingConfig) (string, error) {
 	src := []byte(content)
 	tree := language.Parse(language.CFML, src, nil)
 
@@ -73,11 +95,25 @@ func formatDocument(content string, opts protocol.FormattingOptions) (string, er
 	}
 
 	fmtOpts := formatter.DefaultOptions()
-	if !opts.InsertSpaces {
-		fmtOpts.UseTabs = true
-	}
+	fmtOpts.UseTabs = !opts.InsertSpaces
 	if opts.TabSize > 0 {
 		fmtOpts.IndentWidth = int(opts.TabSize)
+	}
+	fmtOpts.SelfCloseTags = cfg.SelfCloseTags
+	fmtOpts.WhitespaceOnly = cfg.WhitespaceOnly
+	fmtOpts.LowercaseTags = cfg.LowercaseTags
+	fmtOpts.LowercaseAttributes = cfg.LowercaseAttributes
+	fmtOpts.DoubleQuoteAttributes = cfg.DoubleQuoteAttributes
+	fmtOpts.UppercaseSQLKeywords = cfg.UppercaseSQLKeywords
+	fmtOpts.ScopeCase = cfg.ScopeCase
+	if cfg.LineWidth > 0 {
+		fmtOpts.LineWidth = cfg.LineWidth
+	}
+	if cfg.AttrBreakThreshold > 0 {
+		fmtOpts.AttrBreakThreshold = cfg.AttrBreakThreshold
+	}
+	if cfg.IndentWidth > 0 {
+		fmtOpts.IndentWidth = cfg.IndentWidth
 	}
 	fmtOpts.ParseScript = func(s []byte) *sitter.Tree {
 		return language.Parse(language.CFScript, s, nil)
