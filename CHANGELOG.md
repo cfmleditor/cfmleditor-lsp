@@ -2,10 +2,8 @@
 
 ## [Unreleased]
 
-## [0.1.14]
-
 - Fix CGO compile ( for mac ) for tree-sitter-cfml grammar
-- 
+
 ## [0.1.12]
 
 - Fix CGO compile for tree-sitter-cfml grammar
