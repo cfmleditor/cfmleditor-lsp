@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip cfmleditor-lsp.exe
+            7z a cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip cfmleditor-lsp.exe
           else
             tar czf cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz cfmleditor-lsp
           fi
