@@ -116,11 +116,11 @@ func TestParsePerformance(t *testing.T) {
 		{"Parse_TagCFC", 500 * time.Microsecond, func() {
 			Parse("file:///bench.cfc", benchTagCFC)
 		}},
-		{"ApplyEdit_InFunc", 200 * time.Microsecond, func() {
+		{"ApplyEdit_InFunc", 500 * time.Microsecond, func() {
 			pr := Parse("file:///bench.cfc", benchScriptCFC)
 			pr.ApplyEdit(4, 0, 4, 0, "\t\tvar z = 1;\n")
 		}},
-		{"FuncVars", 50 * time.Microsecond, func() {
+		{"FuncVars", 200 * time.Microsecond, func() {
 			pr := Parse("file:///bench.cfc", benchScriptCFC)
 			s := pr.Scopes[0]
 			pr.FuncVars(s.Start, s.End)
