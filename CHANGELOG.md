@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fix CGO compile for tree-sitter-cfml grammar
+
 ## [0.1.11]
 
 ### Added

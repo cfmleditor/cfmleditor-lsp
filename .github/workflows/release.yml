@@ -16,22 +16,30 @@ jobs:
         include:
           - goos: darwin
             goarch: arm64
+            zig_target: aarch64-macos
           - goos: darwin
             goarch: amd64
+            zig_target: x86_64-macos
           - goos: linux
             goarch: arm64
+            zig_target: aarch64-linux-gnu
           - goos: linux
             goarch: amd64
+            zig_target: x86_64-linux-gnu
           - goos: windows
             goarch: arm64
+            zig_target: aarch64-windows-gnu
           - goos: windows
             goarch: amd64
+            zig_target: x86_64-windows-gnu
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - uses: mlugg/setup-zig@v2
 
       - name: Fetch cfdocs
         run: ./scripts/fetch-docs-cfdocs.sh
@@ -43,7 +51,9 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
+          CC: zig cc -target ${{ matrix.zig_target }}
+          CXX: zig c++ -target ${{ matrix.zig_target }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ext=""
