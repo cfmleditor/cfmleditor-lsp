@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.15]
+
 - Fix zip in github workflow, use 7z instead
 
 ## [0.1.14]
