@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.11]
+
 ### Added
 
 - `queryFormat` config option to control whether `<cfquery>` content is formatted (default `false`).
