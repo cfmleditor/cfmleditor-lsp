@@ -343,10 +343,14 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		}
 		nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
 		if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
-			f.write("\n")
-			f.writeIndent()
-			f.write(",")
-			*first = false
+			if f.opts.sqlCommaLeading() {
+				f.write("\n")
+				f.writeIndent()
+				f.write(",")
+			} else {
+				f.write(",\n")
+				*first = true
+			}
 		} else {
 			f.write(",")
 			*first = false
@@ -378,6 +382,15 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 		f.formatQueryNode(left, first)
 		f.write(" = ")
 		f.emitQueryExtrasAndRight(n, right, first)
+
+	case "query_operator":
+		if *first {
+			f.writeIndent()
+			*first = false
+		} else {
+			f.write(" ")
+		}
+		f.write(f.text(n))
 
 	case "query_alias":
 		// e.g. u.name or table alias
@@ -638,9 +651,14 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) {
 					continue
 				case "query_comma":
 					if f.lineLen > f.opts.QueryLineWidth {
-						f.write("\n")
-						f.writeIndent()
-						f.write(",")
+						if f.opts.sqlCommaLeading() {
+							f.write("\n")
+							f.writeIndent()
+							f.write(",")
+						} else {
+							f.write(",\n")
+							f.writeIndent()
+						}
 					} else {
 						f.write(",")
 					}
@@ -778,6 +796,8 @@ func (f *Formatter) formatQueryNodeInline(n *sitter.Node) {
 		f.formatQueryNodeInline(left)
 		f.write(" = ")
 		f.formatQueryNodeInline(right)
+	case "query_operator":
+		f.write(" " + f.text(n))
 	case "cf_selfclose_tag":
 		f.writeQuerySelfCloseTag(n)
 	case "parenthesized_query_node":

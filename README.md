@@ -99,6 +99,8 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
   "doubleQuoteAttributes": true,
   "uppercaseSqlKeywords": true,
   "scopeCase": "leave",
+  "commaPosition": "after",
+  "commaPositionSQL": "before",
   "lineWidth": 100,
   "attrBreakThreshold": 4,
   "indentWidth": 4
@@ -115,6 +117,8 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `doubleQuoteAttributes` | `true` | Normalize attribute values to double quotes. |
 | `uppercaseSqlKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
 | `scopeCase` | `"leave"` | Case for CFML scope names. Values: `"upper"`, `"lower"`, `"leave"`. |
+| `commaPosition` | `"after"` | Comma placement in multi-line argument lists. Values: `"after"` (trailing), `"before"` (leading). |
+| `commaPositionSQL` | *commaPosition* | Comma placement in SQL SELECT lists. Values: `"after"` (trailing), `"before"` (leading). Defaults to `commaPosition` value. |
 | `lineWidth` | `100` | Soft column limit — attributes expand to separate lines when a tag exceeds this width. |
 | `attrBreakThreshold` | `4` | Number of attributes above which they are always expanded onto separate lines. |
 | `indentWidth` | `4` | Spaces per indentation level. Overridden by editor `tabSize` when provided. |

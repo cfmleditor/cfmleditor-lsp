@@ -39,6 +39,8 @@ type formattingConfig struct {
 	DoubleQuoteAttributes *bool  `json:"doubleQuoteAttributes"`
 	UppercaseSQLKeywords  *bool  `json:"uppercaseSqlKeywords"`
 	ScopeCase             string `json:"scopeCase"`
+	CommaPosition         string `json:"commaPosition"`
+	CommaPositionSQL      string `json:"commaPositionSQL"`
 	LineWidth             *int   `json:"lineWidth"`
 	AttrBreakThreshold    *int   `json:"attrBreakThreshold"`
 	IndentWidth           *int   `json:"indentWidth"`
@@ -210,6 +212,24 @@ func (c *Config) FormattingScopeCase() string {
 		return "leave"
 	}
 	return raw.Formatting.ScopeCase
+}
+
+// FormattingCommaPosition returns the comma position setting ("before" or "after"). Default "after".
+func (c *Config) FormattingCommaPosition() string {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.CommaPosition == "" {
+		return "after"
+	}
+	return raw.Formatting.CommaPosition
+}
+
+// FormattingCommaPositionSQL returns the SQL comma position setting. Defaults to commaPosition value.
+func (c *Config) FormattingCommaPositionSQL() string {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.CommaPositionSQL == "" {
+		return ""
+	}
+	return raw.Formatting.CommaPositionSQL
 }
 
 // FormattingLineWidth returns the configured line width, or 0 if not set.

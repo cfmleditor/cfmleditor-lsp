@@ -49,6 +49,12 @@ type Options struct {
 	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
 	// Valid values: "upper", "lower", "leave" (default "leave").
 	ScopeCase string
+	// CommaPosition controls where commas appear in multi-line argument lists.
+	// Valid values: "after" (trailing, default), "before" (leading).
+	CommaPosition string
+	// CommaPositionSQL controls where commas appear in SQL SELECT lists.
+	// Defaults to the value of CommaPosition if empty.
+	CommaPositionSQL string
 	// ParseScript re-parses cfscript content. If nil, script blocks are
 	// emitted verbatim.
 	ParseScript ParseFunc
@@ -75,6 +81,13 @@ func (o Options) indent(level int) string {
 		w = 4
 	}
 	return strings.Repeat(" ", w*level)
+}
+
+func (o Options) sqlCommaLeading() bool {
+	if o.CommaPositionSQL != "" {
+		return o.CommaPositionSQL == "before"
+	}
+	return o.CommaPosition == "before"
 }
 
 // DefaultOptions returns Options with sensible defaults (4-space indent, 120 col width).
@@ -166,12 +179,8 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	i, j := 0, 0
 	for {
-		for i < len(a) && isWS(a[i]) {
-			i++
-		}
-		for j < len(b) && isWS(b[j]) {
-			j++
-		}
+		i = skipWSAndComments(a, i)
+		j = skipWSAndComments(b, j)
 		if i == len(a) && j == len(b) {
 			return nil
 		}
@@ -240,6 +249,31 @@ func snippetAt(src []byte, offset int) string {
 
 func isWS(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// skipWSAndComments advances past whitespace and CFML comments (<!--- ... --->).
+func skipWSAndComments(src []byte, pos int) int {
+	for {
+		for pos < len(src) && isWS(src[pos]) {
+			pos++
+		}
+		if pos+4 < len(src) && src[pos] == '<' && src[pos+1] == '!' && src[pos+2] == '-' && src[pos+3] == '-' && src[pos+4] == '-' {
+			end := pos + 5
+			for end+2 < len(src) {
+				if src[end] == '-' && src[end+1] == '-' && src[end+2] == '-' && end+3 < len(src) && src[end+3] == '>' {
+					pos = end + 4
+					break
+				}
+				end++
+			}
+			if end+2 >= len(src) {
+				break
+			}
+			continue
+		}
+		break
+	}
+	return pos
 }
 
 func toLower(c byte) byte {

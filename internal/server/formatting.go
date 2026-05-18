@@ -106,6 +106,8 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg Formatt
 	fmtOpts.DoubleQuoteAttributes = cfg.DoubleQuoteAttributes
 	fmtOpts.UppercaseSQLKeywords = cfg.UppercaseSQLKeywords
 	fmtOpts.ScopeCase = cfg.ScopeCase
+	fmtOpts.CommaPosition = cfg.CommaPosition
+	fmtOpts.CommaPositionSQL = cfg.CommaPositionSQL
 	if cfg.LineWidth > 0 {
 		fmtOpts.LineWidth = cfg.LineWidth
 	}

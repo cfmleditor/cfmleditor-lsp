@@ -304,19 +304,43 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			outerIndent := f.opts.indent(f.level)
 			var sb strings.Builder
 			sb.WriteString("(\n")
+			leading := f.opts.CommaPosition == "before"
 			for i, p := range parts {
-				sb.WriteString(indent)
-				sb.WriteString(p)
-				if !isComment[i] {
-					hasMore := false
-					for j := i + 1; j < len(parts); j++ {
-						if !isComment[j] {
-							hasMore = true
-							break
+				if leading {
+					if !isComment[i] && i > 0 {
+						hasPrev := false
+						for j := i - 1; j >= 0; j-- {
+							if !isComment[j] {
+								hasPrev = true
+								break
+							}
 						}
+						if hasPrev {
+							sb.WriteString(indent)
+							sb.WriteString(", ")
+							sb.WriteString(p)
+						} else {
+							sb.WriteString(indent)
+							sb.WriteString(p)
+						}
+					} else {
+						sb.WriteString(indent)
+						sb.WriteString(p)
 					}
-					if hasMore {
-						sb.WriteString(",")
+				} else {
+					sb.WriteString(indent)
+					sb.WriteString(p)
+					if !isComment[i] {
+						hasMore := false
+						for j := i + 1; j < len(parts); j++ {
+							if !isComment[j] {
+								hasMore = true
+								break
+							}
+						}
+						if hasMore {
+							sb.WriteString(",")
+						}
 					}
 				}
 				sb.WriteString("\n")
@@ -490,20 +514,43 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		outerIndent := f.opts.indent(f.level)
 		var sb strings.Builder
 		sb.WriteString("(\n")
+		leading := f.opts.CommaPosition == "before"
 		for i, p := range parts {
-			sb.WriteString(indent)
-			sb.WriteString(p)
-			if !isComment[i] {
-				// Add comma unless next non-comment part doesn't exist
-				hasMore := false
-				for j := i + 1; j < len(parts); j++ {
-					if !isComment[j] {
-						hasMore = true
-						break
+			if leading {
+				if !isComment[i] && i > 0 {
+					hasPrev := false
+					for j := i - 1; j >= 0; j-- {
+						if !isComment[j] {
+							hasPrev = true
+							break
+						}
 					}
+					if hasPrev {
+						sb.WriteString(indent)
+						sb.WriteString(", ")
+						sb.WriteString(p)
+					} else {
+						sb.WriteString(indent)
+						sb.WriteString(p)
+					}
+				} else {
+					sb.WriteString(indent)
+					sb.WriteString(p)
 				}
-				if hasMore {
-					sb.WriteString(",")
+			} else {
+				sb.WriteString(indent)
+				sb.WriteString(p)
+				if !isComment[i] {
+					hasMore := false
+					for j := i + 1; j < len(parts); j++ {
+						if !isComment[j] {
+							hasMore = true
+							break
+						}
+					}
+					if hasMore {
+						sb.WriteString(",")
+					}
 				}
 			}
 			sb.WriteString("\n")
@@ -655,11 +702,23 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	indent := f.opts.indent(f.level + 1)
 	var sb strings.Builder
 	sb.WriteString("(\n")
+	leading := f.opts.CommaPosition == "before"
 	for i, p := range parts {
-		sb.WriteString(indent)
-		sb.WriteString(p)
-		if i < len(parts)-1 {
-			sb.WriteString(",")
+		if leading {
+			if i > 0 {
+				sb.WriteString(indent)
+				sb.WriteString(", ")
+				sb.WriteString(p)
+			} else {
+				sb.WriteString(indent)
+				sb.WriteString(p)
+			}
+		} else {
+			sb.WriteString(indent)
+			sb.WriteString(p)
+			if i < len(parts)-1 {
+				sb.WriteString(",")
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -1072,7 +1131,7 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 				f.level++
 				for j := uint(0); j < clause.NamedChildCount(); j++ {
 					child := clause.NamedChild(j)
-					if child == val2 {
+					if val2 != nil && child.StartByte() == val2.StartByte() && child.EndByte() == val2.EndByte() {
 						continue
 					}
 					f.formatScriptNode(child)

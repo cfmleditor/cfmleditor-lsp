@@ -109,6 +109,8 @@ func runServer() {
 			DoubleQuoteAttributes: cfg.FormattingDoubleQuoteAttributes(),
 			UppercaseSQLKeywords:  cfg.FormattingUppercaseSQLKeywords(),
 			ScopeCase:             cfg.FormattingScopeCase(),
+			CommaPosition:         cfg.FormattingCommaPosition(),
+			CommaPositionSQL:      cfg.FormattingCommaPositionSQL(),
 			LineWidth:             cfg.FormattingLineWidth(),
 			AttrBreakThreshold:    cfg.FormattingAttrBreakThreshold(),
 			IndentWidth:           cfg.FormattingIndentWidth(),

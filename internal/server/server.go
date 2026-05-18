@@ -202,6 +202,8 @@ type FormattingConfig struct {
 	DoubleQuoteAttributes bool
 	UppercaseSQLKeywords  bool
 	ScopeCase             string
+	CommaPosition         string
+	CommaPositionSQL      string
 	LineWidth             int
 	AttrBreakThreshold    int
 	IndentWidth           int
