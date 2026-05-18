@@ -1,5 +1,5 @@
-github.com/cfmleditor/tree-sitter-cfml v0.26.16 h1:GtoVTCuj1K3qTMEWEaDRUfiU9NQ68pUUMJyxW3i4hKs=
-github.com/cfmleditor/tree-sitter-cfml v0.26.16/go.mod h1:FVkHOYoHBpLeoueIUVK9jnOy5nrI0rQpGNzn2PLisTg=
+github.com/cfmleditor/tree-sitter-cfml v0.26.17 h1:DKQxZBM8VylM3KcyPUpTb1s/vS67nOg5C+voBq6gxqU=
+github.com/cfmleditor/tree-sitter-cfml v0.26.17/go.mod h1:FVkHOYoHBpLeoueIUVK9jnOy5nrI0rQpGNzn2PLisTg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.4.0/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=

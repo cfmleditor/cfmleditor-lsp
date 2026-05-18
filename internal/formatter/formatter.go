@@ -44,17 +44,20 @@ type Options struct {
 	LowercaseAttributes bool
 	// DoubleQuoteAttributes normalizes attribute values to double quotes (default true).
 	DoubleQuoteAttributes bool
-	// UppercaseSQLKeywords uppercases SQL keywords in cfquery (default true).
-	UppercaseSQLKeywords bool
+	// QueryUppercaseKeywords uppercases SQL keywords in cfquery (default true).
+	QueryUppercaseKeywords bool
+	// QueryFormat controls whether cfquery content is formatted.
+	// When false, query content is emitted verbatim. Default false.
+	QueryFormat bool
 	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
 	// Valid values: "upper", "lower", "leave" (default "leave").
 	ScopeCase string
 	// CommaPosition controls where commas appear in multi-line argument lists.
 	// Valid values: "after" (trailing, default), "before" (leading).
 	CommaPosition string
-	// CommaPositionSQL controls where commas appear in SQL SELECT lists.
+	// QueryCommaPosition controls where commas appear in SQL SELECT lists.
 	// Defaults to the value of CommaPosition if empty.
-	CommaPositionSQL string
+	QueryCommaPosition string
 	// ParseScript re-parses cfscript content. If nil, script blocks are
 	// emitted verbatim.
 	ParseScript ParseFunc
@@ -83,26 +86,31 @@ func (o Options) indent(level int) string {
 	return strings.Repeat(" ", w*level)
 }
 
-func (o Options) sqlCommaLeading() bool {
-	if o.CommaPositionSQL != "" {
-		return o.CommaPositionSQL == "before"
+func (o Options) queryCommaLeading() bool {
+	return o.QueryCommaPosition == "before"
+}
+
+func (o Options) queryCommaPreserve() bool {
+	if o.QueryCommaPosition != "" {
+		return o.QueryCommaPosition == "preserve"
 	}
-	return o.CommaPosition == "before"
+	return true // default: preserve comma placement in SQL
 }
 
 // DefaultOptions returns Options with sensible defaults (4-space indent, 120 col width).
 func DefaultOptions() Options {
 	return Options{
-		IndentWidth:           4,
-		LineWidth:             100,
-		QueryLineWidth:        70,
-		AttrBreakThreshold:    4,
-		UseTabs:              true,
-		LowercaseTags:        true,
-		LowercaseAttributes:  true,
-		DoubleQuoteAttributes: true,
-		UppercaseSQLKeywords:  true,
-		SelfCloseTags:        true,
+		IndentWidth:            4,
+		LineWidth:              100,
+		QueryLineWidth:         70,
+		AttrBreakThreshold:     4,
+		UseTabs:                true,
+		LowercaseTags:          true,
+		LowercaseAttributes:    true,
+		DoubleQuoteAttributes:  true,
+		QueryUppercaseKeywords: true,
+		QueryFormat:            false,
+		SelfCloseTags:          true,
 	}
 }
 
@@ -122,12 +130,13 @@ type Formatter struct {
 	opts             Options
 	src              []byte
 	out              bytes.Buffer
-	level            int  // current indentation level
-	atBOL            bool // at beginning of line
-	lastNL           bool // last written byte was a newline
-	lineLen          int  // approximate current line length
-	lastTagMultiLine bool // last emitted tag had expanded (multi-line) attributes
+	level            int   // current indentation level
+	atBOL            bool  // at beginning of line
+	lastNL           bool  // last written byte was a newline
+	lineLen          int   // approximate current line length
+	lastTagMultiLine bool  // last emitted tag had expanded (multi-line) attributes
 	parseErr         error // first sub-parse error encountered
+	pendingComma     bool  // deferred trailing comma to emit after next query item
 }
 
 // New creates a Formatter with the given options.
@@ -386,6 +395,39 @@ func (f *Formatter) nl() {
 		f.write("\n")
 	}
 }
+
+// appendTrailingComma inserts a comma before the trailing newline(s) in the
+// output buffer. Used in trailing-comma mode when a source comma appears at
+// the start of a new line — it gets moved to the end of the previous line.
+// Returns true if the comma was successfully appended.
+func (f *Formatter) appendTrailingComma() bool {
+	b := f.out.Bytes()
+	// Walk backwards past trailing whitespace/newlines to find the last content line
+	i := len(b) - 1
+	for i >= 0 && (b[i] == '\n' || b[i] == '\r' || b[i] == ' ' || b[i] == '\t') {
+		i--
+	}
+	if i < 0 {
+		return false
+	}
+	// Insert comma after position i (after the last non-whitespace char)
+	insertPos := i + 1
+	f.out.Reset()
+	f.out.Write(b[:insertPos])
+	f.out.WriteByte(',')
+	f.out.Write(b[insertPos:])
+	return true
+}
+
+// flushPendingComma appends a deferred trailing comma after the last emitted
+// content. Called after an item has been fully emitted.
+// func (f *Formatter) flushPendingComma() {
+// 	if !f.pendingComma {
+// 		return
+// 	}
+// 	f.pendingComma = false
+// 	f.appendTrailingComma()
+// }
 
 func (f *Formatter) indented() string {
 	return f.opts.indent(f.level)

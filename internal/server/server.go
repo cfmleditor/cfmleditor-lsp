@@ -196,17 +196,18 @@ type FormattingConfig struct {
 	Enabled               bool
 	Debug                 bool
 	SelfCloseTags         bool
-	WhitespaceOnly        bool
-	LowercaseTags         bool
-	LowercaseAttributes   bool
-	DoubleQuoteAttributes bool
-	UppercaseSQLKeywords  bool
-	ScopeCase             string
-	CommaPosition         string
-	CommaPositionSQL      string
-	LineWidth             int
-	AttrBreakThreshold    int
-	IndentWidth           int
+	WhitespaceOnly         bool
+	QueryFormat            bool
+	LowercaseTags          bool
+	LowercaseAttributes    bool
+	DoubleQuoteAttributes  bool
+	QueryUppercaseKeywords bool
+	ScopeCase              string
+	CommaPosition          string
+	QueryCommaPosition     string
+	LineWidth              int
+	AttrBreakThreshold     int
+	IndentWidth            int
 }
 
 // ComponentResolver maps a method call pattern to a component path.

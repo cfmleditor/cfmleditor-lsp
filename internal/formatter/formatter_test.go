@@ -17,6 +17,7 @@ func parse(t *testing.T, src string) *sitter.Tree {
 func testOpts() Options {
 	opts := DefaultOptions()
 	opts.UseTabs = false
+	opts.QueryFormat = true
 	opts.ParseScript = func(src []byte) *sitter.Tree {
 		return language.Parse(language.CFScript, src, nil)
 	}

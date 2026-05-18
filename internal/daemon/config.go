@@ -30,20 +30,21 @@ type componentResolver struct {
 }
 
 type formattingConfig struct {
-	Enabled               bool   `json:"enabled"`
-	Debug                 bool   `json:"debug"`
-	SelfCloseTags         *bool  `json:"selfCloseTags"`
-	WhitespaceOnly        *bool  `json:"whitespaceOnly"`
-	LowercaseTags         *bool  `json:"lowercaseTags"`
-	LowercaseAttributes   *bool  `json:"lowercaseAttributes"`
-	DoubleQuoteAttributes *bool  `json:"doubleQuoteAttributes"`
-	UppercaseSQLKeywords  *bool  `json:"uppercaseSqlKeywords"`
-	ScopeCase             string `json:"scopeCase"`
-	CommaPosition         string `json:"commaPosition"`
-	CommaPositionSQL      string `json:"commaPositionSQL"`
-	LineWidth             *int   `json:"lineWidth"`
-	AttrBreakThreshold    *int   `json:"attrBreakThreshold"`
-	IndentWidth           *int   `json:"indentWidth"`
+	Enabled                bool   `json:"enabled"`
+	Debug                  bool   `json:"debug"`
+	SelfCloseTags          *bool  `json:"selfCloseTags"`
+	WhitespaceOnly         *bool  `json:"whitespaceOnly"`
+	QueryFormat            *bool  `json:"queryFormat"`
+	LowercaseTags          *bool  `json:"lowercaseTags"`
+	LowercaseAttributes    *bool  `json:"lowercaseAttributes"`
+	DoubleQuoteAttributes  *bool  `json:"doubleQuoteAttributes"`
+	QueryUppercaseKeywords *bool  `json:"queryUppercaseKeywords"`
+	ScopeCase              string `json:"scopeCase"`
+	CommaPosition          string `json:"commaPosition"`
+	QueryCommaPosition     string `json:"queryCommaPosition"`
+	LineWidth              *int   `json:"lineWidth"`
+	AttrBreakThreshold     *int   `json:"attrBreakThreshold"`
+	IndentWidth            *int   `json:"indentWidth"`
 }
 
 // Config represents a .cfmleditor.json file.
@@ -169,6 +170,15 @@ func (c *Config) FormattingWhitespaceOnly() bool {
 	return *raw.Formatting.WhitespaceOnly
 }
 
+// FormattingQueryFormat returns whether cfquery content should be formatted. Default false.
+func (c *Config) FormattingQueryFormat() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryFormat == nil {
+		return false
+	}
+	return *raw.Formatting.QueryFormat
+}
+
 // FormattingLowercaseTags returns whether CF tag names should be lowercased. Default true.
 func (c *Config) FormattingLowercaseTags() bool {
 	raw := c.raw()
@@ -196,13 +206,13 @@ func (c *Config) FormattingDoubleQuoteAttributes() bool {
 	return *raw.Formatting.DoubleQuoteAttributes
 }
 
-// FormattingUppercaseSQLKeywords returns whether SQL keywords should be uppercased. Default true.
-func (c *Config) FormattingUppercaseSQLKeywords() bool {
+// FormattingQueryUppercaseKeywords returns whether SQL keywords should be uppercased. Default true.
+func (c *Config) FormattingQueryUppercaseKeywords() bool {
 	raw := c.raw()
-	if raw == nil || raw.Formatting == nil || raw.Formatting.UppercaseSQLKeywords == nil {
+	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryUppercaseKeywords == nil {
 		return true
 	}
-	return *raw.Formatting.UppercaseSQLKeywords
+	return *raw.Formatting.QueryUppercaseKeywords
 }
 
 // FormattingScopeCase returns the scope case setting ("upper", "lower", or "leave"). Default "leave".
@@ -223,13 +233,13 @@ func (c *Config) FormattingCommaPosition() string {
 	return raw.Formatting.CommaPosition
 }
 
-// FormattingCommaPositionSQL returns the SQL comma position setting. Defaults to commaPosition value.
-func (c *Config) FormattingCommaPositionSQL() string {
+// FormattingQueryCommaPosition returns the SQL comma position setting. Defaults to commaPosition value.
+func (c *Config) FormattingQueryCommaPosition() string {
 	raw := c.raw()
-	if raw == nil || raw.Formatting == nil || raw.Formatting.CommaPositionSQL == "" {
+	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryCommaPosition == "" {
 		return ""
 	}
-	return raw.Formatting.CommaPositionSQL
+	return raw.Formatting.QueryCommaPosition
 }
 
 // FormattingLineWidth returns the configured line width, or 0 if not set.

@@ -7,7 +7,13 @@ Uses [tree-sitter-cfml](https://github.com/cfmleditor/tree-sitter-cfml).
 ## Build
 
 ```sh
-go build -o cfmleditor-lsp .
+make build
+```
+
+Or manually:
+
+```sh
+go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
 ```
 
 ## Run
@@ -94,13 +100,14 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
   "enabled": true,
   "selfCloseTags": true,
   "whitespaceOnly": true,
+  "queryFormat": false,
   "lowercaseTags": true,
   "lowercaseAttributes": true,
   "doubleQuoteAttributes": true,
-  "uppercaseSqlKeywords": true,
+  "queryUppercaseKeywords": true,
   "scopeCase": "leave",
   "commaPosition": "after",
-  "commaPositionSQL": "before",
+  "queryCommaPosition": "preserve",
   "lineWidth": 100,
   "attrBreakThreshold": 4,
   "indentWidth": 4
@@ -112,13 +119,14 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `enabled` | `false` | Enable the formatter. When false, formatting requests are ignored. |
 | `selfCloseTags` | `true` | Convert void/implicit-end HTML tags to self-closing form (e.g. `<br>` → `<br />`). |
 | `whitespaceOnly` | `true` | Reject formatting results that change non-whitespace content (safety guard). |
+| `queryFormat` | `false` | Format `<cfquery>` content (SQL re-indentation, keyword casing). When false, query content is emitted verbatim. |
 | `lowercaseTags` | `true` | Lowercase CF tag names (e.g. `<CFOUTPUT>` → `<cfoutput>`). |
 | `lowercaseAttributes` | `true` | Lowercase attribute names. |
 | `doubleQuoteAttributes` | `true` | Normalize attribute values to double quotes. |
-| `uppercaseSqlKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
+| `queryUppercaseKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
 | `scopeCase` | `"leave"` | Case for CFML scope names. Values: `"upper"`, `"lower"`, `"leave"`. |
 | `commaPosition` | `"after"` | Comma placement in multi-line argument lists. Values: `"after"` (trailing), `"before"` (leading). |
-| `commaPositionSQL` | *commaPosition* | Comma placement in SQL SELECT lists. Values: `"after"` (trailing), `"before"` (leading). Defaults to `commaPosition` value. |
+| `queryCommaPosition` | `"preserve"` | Comma placement in SQL SELECT lists. Values: `"preserve"` (keep original position), `"after"` (trailing), `"before"` (leading). |
 | `lineWidth` | `100` | Soft column limit — attributes expand to separate lines when a tag exceeds this width. |
 | `attrBreakThreshold` | `4` | Number of attributes above which they are always expanded onto separate lines. |
 | `indentWidth` | `4` | Spaces per indentation level. Overridden by editor `tabSize` when provided. |
@@ -157,3 +165,16 @@ Add cfmleditor-lsp to your path
 ```bash
 sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /usr/local/bin/cfmleditor-lsp
 ```
+
+### Make commands
+
+| Command | Description |
+|---|---|
+| `make build` | Update grammar, generate docs, and build the binary. |
+| `make test` | Run all tests. |
+| `make lint` | Run golangci-lint. |
+| `make lint-fix` | Run golangci-lint with auto-fix. |
+| `make update-grammar` | Regenerate docs and tree-sitter grammar, clear Go build cache. |
+| `make release <version>` | Full release: validate, build, test, lint, update changelog, commit, tag, push. |
+| `make install` | Build and copy binary to `$GOPATH/bin`. |
+| `make clean` | Remove build artifacts. |

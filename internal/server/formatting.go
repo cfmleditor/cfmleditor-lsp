@@ -101,13 +101,14 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg Formatt
 	}
 	fmtOpts.SelfCloseTags = cfg.SelfCloseTags
 	fmtOpts.WhitespaceOnly = cfg.WhitespaceOnly
+	fmtOpts.QueryFormat = cfg.QueryFormat
 	fmtOpts.LowercaseTags = cfg.LowercaseTags
 	fmtOpts.LowercaseAttributes = cfg.LowercaseAttributes
 	fmtOpts.DoubleQuoteAttributes = cfg.DoubleQuoteAttributes
-	fmtOpts.UppercaseSQLKeywords = cfg.UppercaseSQLKeywords
+	fmtOpts.QueryUppercaseKeywords = cfg.QueryUppercaseKeywords
 	fmtOpts.ScopeCase = cfg.ScopeCase
 	fmtOpts.CommaPosition = cfg.CommaPosition
-	fmtOpts.CommaPositionSQL = cfg.CommaPositionSQL
+	fmtOpts.QueryCommaPosition = cfg.QueryCommaPosition
 	if cfg.LineWidth > 0 {
 		fmtOpts.LineWidth = cfg.LineWidth
 	}

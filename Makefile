@@ -2,7 +2,7 @@ BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 
-.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build
+.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release
 
 docs: docs-cfdocs
 
@@ -15,7 +15,11 @@ docs-lucee:
 generate: docs
 	go run scripts/generate_docs.go
 
-build: generate
+update-grammar: generate
+	$(MAKE) -C ../tree-sitter-cfml generate
+	go clean -cache
+
+build: update-grammar generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp
 
@@ -30,7 +34,7 @@ lint:
 
 lint-fix:
 		golangci-lint run --enable bodyclose,gocritic --fix ./...
-		
+
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)
 
@@ -43,6 +47,9 @@ cfparse: cfparse-build
 
 %:
 	@:
+
+release:
+	@go run scripts/release.go $(filter-out $@,$(MAKECMDGOALS))
 
 clean:
 	rm -rf target
