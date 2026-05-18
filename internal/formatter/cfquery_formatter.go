@@ -12,7 +12,7 @@ import (
 // on their own line.
 var sqlClauseKeywords = map[string]bool{
 	"SELECT": true, "FROM": true, "WHERE": true,
-	"JOIN": true,
+	"JOIN":  true,
 	"ORDER": true, "GROUP": true, "HAVING": true,
 	"INSERT": true, "UPDATE": true, "DELETE": true,
 	"SET": true, "VALUES": true, "INTO": true,
@@ -251,8 +251,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 			if *first {
 				f.writeIndent()
 				*first = false
-			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() {
-				// No whitespace between nodes — keep adjacent
+			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() { //nolint:revive // intentionally empty — keep adjacent
 			} else {
 				f.write(" ")
 			}
@@ -501,8 +500,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 			if *first {
 				f.writeIndent()
 				*first = false
-			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() {
-				// No whitespace between nodes — keep adjacent
+			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() { //nolint:revive // intentionally empty — keep adjacent
 			} else {
 				f.write(" ")
 			}
