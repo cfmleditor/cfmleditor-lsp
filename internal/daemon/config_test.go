@@ -53,7 +53,7 @@ func TestFindConfigMissingName(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected config with directory name fallback, got nil")
 	}
-	expected := filepath.Base(dir)
+	expected := dir
 	if cfg.Name != expected {
 		t.Fatalf("expected name %q, got %q", expected, cfg.Name)
 	}

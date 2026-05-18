@@ -72,6 +72,7 @@ func runServer() {
 	var logger *zap.Logger
 	if cfg != nil && cfg.Debug() {
 		logger, _ = zap.NewDevelopment()
+		logger.Info("debug mode enabled")
 	} else {
 		logger, _ = zap.NewProduction()
 	}

@@ -34,6 +34,24 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	docURI := uri.URI(params.TextDocument.URI)
+	s.logger.Debug("definition: request", zap.String("word", word), zap.Int("line", line), zap.Int("char", char))
+
+	// Check if cursor is on a component dot-path (new, createObject, extends, etc.)
+	if comp := componentPathAtCursor(content, line, char); comp != "" {
+		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
+			s.logger.Debug("definition: component path resolved", zap.String("path", comp), zap.String("target", string(loc.URI)))
+			return reply(ctx, *loc, nil)
+		}
+		s.logger.Debug("definition: component path not resolved", zap.String("path", comp))
+	}
+
+	// Check if cursor is on a file path (cfinclude, cfmodule template)
+	if filePath := filePathAtCursor(content, line, char); filePath != "" {
+		if loc := s.resolveFilePathDef(filePath, docURI); loc != nil {
+			s.logger.Debug("definition: file path resolved", zap.String("path", filePath), zap.String("target", string(loc.URI)))
+			return reply(ctx, *loc, nil)
+		}
+	}
 
 	// Check if cursor is inside a <cfinvoke> method attribute
 	if comp := cfInvokeComponentAtCursor(content, line, char); comp != "" {
@@ -143,6 +161,11 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 	if !cached {
 		t0 := time.Now()
 		cfcPath = cfpath.ResolvePath(component, baseDir, s.Mappings)
+		if cfcPath == "" {
+			if appDir := findApplicationRoot(baseDir); appDir != "" {
+				cfcPath = cfpath.ResolvePath(component, appDir, s.Mappings)
+			}
+		}
 		if cfcPath == "" {
 			for _, root := range s.WorkspaceFolders {
 				cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
@@ -398,4 +421,222 @@ func lineAtOffset(content string, line int) string {
 		return content[offset:]
 	}
 	return content[offset : offset+end]
+}
+
+// componentPathAtCursor checks if the cursor is on a component dot-path in a
+// recognized context (new, createObject, extends, implements, type, returntype,
+// component attribute, import). Returns the full dot-path or empty string.
+func componentPathAtCursor(content string, line, char int) string {
+	lineText := lineAtOffset(content, line)
+	if lineText == "" {
+		return ""
+	}
+
+	// Extract the full dot-path at cursor (word chars + dots)
+	pos := min(char, len(lineText))
+	start := pos
+	for start > 0 && (isWordChar(lineText[start-1]) || lineText[start-1] == '.') {
+		start--
+	}
+	end := pos
+	for end < len(lineText) && (isWordChar(lineText[end]) || lineText[end] == '.') {
+		end++
+	}
+	if start == end {
+		return ""
+	}
+	dotPath := lineText[start:end]
+	// Must contain at least one dot or be in a quoted context to be a component path
+	hasDot := strings.ContainsRune(dotPath, '.')
+
+	// Check context before the dot-path
+	before := strings.TrimRight(lineText[:start], " \t")
+	lowerBefore := strings.ToLower(before)
+
+	// new keyword: "new models.Widget"
+	if strings.HasSuffix(lowerBefore, "new") {
+		return dotPath
+	}
+
+	// Check if inside a quoted string in a recognized context
+	if start > 0 && (lineText[start-1] == '"' || lineText[start-1] == '\'') {
+		// Look for createObject("component", "path") or createObject("path")
+		if strings.Contains(lowerBefore, "createobject(") {
+			return dotPath
+		}
+		// isInstanceOf(obj, "path")
+		if strings.Contains(lowerBefore, "isinstanceof(") {
+			return dotPath
+		}
+		// import "path"
+		if strings.HasSuffix(strings.TrimRight(lowerBefore, " \t\"'"), "import") {
+			return dotPath
+		}
+	}
+
+	// Attribute contexts: extends="path", implements="path", type="path",
+	// returntype="path", component="path"
+	attrPrefixes := []string{"extends=", "implements=", "type=", "returntype=", "component="}
+	for _, prefix := range attrPrefixes {
+		if idx := strings.LastIndex(lowerBefore, prefix); idx >= 0 {
+			afterAttr := before[idx+len(prefix):]
+			trimmed := strings.TrimLeft(afterAttr, " \t\"'")
+			if trimmed == "" {
+				return dotPath
+			}
+		}
+	}
+
+	// CFScript function return type: "models.Widget function" or argument type: "(models.Widget arg)"
+	after := strings.TrimLeft(lineText[end:], " \t")
+	lowerAfter := strings.ToLower(after)
+	if hasDot && (strings.HasPrefix(lowerAfter, "function") || strings.HasPrefix(lowerAfter, "function ")) {
+		return dotPath
+	}
+	// Argument type: check if followed by an identifier (the arg name)
+	if hasDot && len(after) > 0 && isWordChar(after[0]) {
+		// Verify we're inside a function signature (after a '(' or ',')
+		beforeTrimmed := strings.TrimRight(lineText[:start], " \t")
+		if len(beforeTrimmed) > 0 {
+			lastCh := beforeTrimmed[len(beforeTrimmed)-1]
+			if lastCh == '(' || lastCh == ',' {
+				return dotPath
+			}
+			// Could also be "required type name" — check if preceded by "required"
+			if strings.HasSuffix(strings.ToLower(beforeTrimmed), "required") {
+				return dotPath
+			}
+		}
+	}
+
+	return ""
+}
+
+// resolveComponentFileDef resolves a component dot-path to a file location (line 0).
+func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *protocol.Location {
+	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	baseDir := filepath.Dir(currentPath)
+
+	cfcPath := cfpath.ResolvePath(component, baseDir, s.Mappings)
+	if cfcPath == "" {
+		if appDir := findApplicationRoot(baseDir); appDir != "" {
+			cfcPath = cfpath.ResolvePath(component, appDir, s.Mappings)
+		}
+	}
+	if cfcPath == "" {
+		for _, root := range s.WorkspaceFolders {
+			cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
+			if cfcPath != "" {
+				break
+			}
+		}
+	}
+	if cfcPath == "" {
+		return nil
+	}
+	return &protocol.Location{
+		URI:   protocol.DocumentURI(uri.URI("file://" + cfcPath)),
+		Range: protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
+	}
+}
+
+// findApplicationRoot walks up from dir looking for Application.cfc or Application.cfm.
+// Returns the directory containing it, or empty string if not found.
+func findApplicationRoot(dir string) string {
+	d := dir
+	for {
+		for _, name := range []string{"Application.cfc", "Application.cfm"} {
+			if _, err := os.Stat(filepath.Join(d, name)); err == nil {
+				return d
+			}
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return ""
+		}
+		d = parent
+	}
+}
+
+// filePathAtCursor checks if the cursor is inside a file path attribute value
+// (cfinclude template, cfmodule template, include). Returns the path or empty string.
+func filePathAtCursor(content string, line, char int) string {
+	lineText := lineAtOffset(content, line)
+	if lineText == "" {
+		return ""
+	}
+	pos := min(char, len(lineText))
+
+	// Find enclosing quotes
+	// Search backward for opening quote
+	qStart := -1
+	var quote byte
+	for i := pos - 1; i >= 0; i-- {
+		if lineText[i] == '"' || lineText[i] == '\'' {
+			qStart = i
+			quote = lineText[i]
+			break
+		}
+	}
+	if qStart < 0 {
+		return ""
+	}
+	// Search forward for closing quote
+	qEnd := -1
+	for i := qStart + 1; i < len(lineText); i++ {
+		if lineText[i] == quote {
+			qEnd = i
+			break
+		}
+	}
+	if qEnd < 0 || pos <= qStart || pos > qEnd {
+		return ""
+	}
+	value := lineText[qStart+1 : qEnd]
+
+	// Check if preceded by a recognized attribute
+	before := strings.ToLower(strings.TrimRight(lineText[:qStart], " \t"))
+	if strings.HasSuffix(before, "template=") || strings.HasSuffix(before, "include") ||
+		strings.HasSuffix(before, "href=") || strings.HasSuffix(before, "action=") {
+		return value
+	}
+	return ""
+}
+
+// resolveFilePathDef resolves a file path (from cfinclude etc.) to a location.
+func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.Location {
+	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	baseDir := filepath.Dir(currentPath)
+
+	// Try relative to current file
+	candidate := filepath.Join(baseDir, filePath)
+	if _, err := os.Stat(candidate); err == nil {
+		return &protocol.Location{
+			URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+			Range: protocol.Range{},
+		}
+	}
+
+	// Try relative to Application.cfc root
+	if appDir := findApplicationRoot(baseDir); appDir != "" {
+		candidate = filepath.Join(appDir, filePath)
+		if _, err := os.Stat(candidate); err == nil {
+			return &protocol.Location{
+				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+				Range: protocol.Range{},
+			}
+		}
+	}
+
+	// Try relative to workspace folders
+	for _, root := range s.WorkspaceFolders {
+		candidate = filepath.Join(root, filePath)
+		if _, err := os.Stat(candidate); err == nil {
+			return &protocol.Location{
+				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+				Range: protocol.Range{},
+			}
+		}
+	}
+	return nil
 }

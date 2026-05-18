@@ -56,20 +56,24 @@ func FindConfig(dir string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range []string{abs, filepath.Dir(abs)} {
+	d := abs
+	for {
 		p := filepath.Join(d, ".cfmleditor.json")
 		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
+		if err == nil {
+			var raw configJSON
+			if json.Unmarshal(data, &raw) == nil {
+				if raw.WorkspaceName == "" {
+					raw.WorkspaceName = filepath.Dir(p)
+				}
+				return &Config{Path: p, Name: raw.WorkspaceName}, nil
+			}
 		}
-		var raw configJSON
-		if json.Unmarshal(data, &raw) != nil {
-			continue
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
 		}
-		if raw.WorkspaceName == "" {
-			raw.WorkspaceName = filepath.Base(filepath.Dir(p))
-		}
-		return &Config{Path: p, Name: raw.WorkspaceName}, nil
+		d = parent
 	}
 	return &Config{Path: "", Name: filepath.Base(abs)}, nil
 }

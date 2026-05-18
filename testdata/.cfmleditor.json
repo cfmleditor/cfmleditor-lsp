@@ -1,0 +1,17 @@
+{
+  "workspaceName": "testdata",
+  "workspacePaths": ["."],
+  "componentResolvers": [
+    {
+      "match": "getService(\"$1\")",
+      "resolve": "services.$1",
+      "prefix": "getService"
+    },
+    {
+      "match": "_parent",
+      "resolve": "models.Base",
+      "prefix": "_parent"
+    }
+  ],
+  "debug": true
+}

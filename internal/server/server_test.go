@@ -1532,6 +1532,449 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 	}
 }
 
+func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "Widget.cfc"), []byte("component {\nfunction render() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfc"))
+	docContent := "widget = new Widget()\nwidget.render()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 8}, // on "render"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "Widget.cfc") {
+		t.Errorf("expected Widget.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), []byte("component {\nfunction getName() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfc"))
+	docContent := "user = new models.User()\nuser.getName()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "User.cfc") {
+		t.Errorf("expected User.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "Widget.cfc"), []byte("<cfcomponent>\n<cffunction name=\"render\">\n</cffunction>\n</cfcomponent>"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfm"))
+	docContent := `<cfinvoke component="Widget" method="render">`
+	srv.setDocument(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 39}, // on "render" in method attr
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "Widget.cfc") {
+		t.Errorf("expected Widget.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionMethodWithinSameComponent(t *testing.T) {
+	srv := newTestServer()
+	cfcContent := `component {
+function init() {
+	var id = generateID();
+}
+function generateID() {
+	return createUUID();
+}
+}`
+	cfcURI := uri.URI("file:///app/Widget.cfc")
+	srv.setDocument(cfcURI, cfcContent)
+	srv.index.IndexFile(cfcURI, cfcContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
+			Position:     protocol.Position{Line: 2, Character: 12}, // on "generateID"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.URI != protocol.DocumentURI(cfcURI) {
+		t.Errorf("expected same file URI, got %s", loc.URI)
+	}
+	if loc.Range.Start.Line != 4 {
+		t.Errorf("expected line 4, got %d", loc.Range.Start.Line)
+	}
+}
+
+func TestDefinitionComponentResolver(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "timetable"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "timetable", "service.cfc"), []byte("component {\nfunction getSchedule() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+	srv.WorkspaceFolders = []string{dir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfc"))
+	docContent := "svc = getService(\"timetable\")\nsvc.getSchedule()"
+	srv.setDocument(docURI, docContent)
+	pr := cfparser.Parse(docURI, docContent, srv.cfResolvers())
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 5}, // on "getSchedule"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "service.cfc") {
+		t.Errorf("expected service.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
+	srv := newTestServer()
+	cfc1 := uri.URI("file:///app/Service1.cfc")
+	cfc2 := uri.URI("file:///app/Service2.cfc")
+	srv.index.IndexFile(cfc1, "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
+	srv.index.IndexFile(cfc2, "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
+
+	callerURI := uri.URI("file:///app/caller.cfm")
+	srv.setDocument(callerURI, "<cfset doWork()>")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
+			Position:     protocol.Position{Line: 0, Character: 8}, // on "doWork"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	locs, ok := (*result).([]protocol.Location)
+	if !ok {
+		t.Fatalf("expected []Location for multiple matches, got %T", *result)
+	}
+	if len(locs) != 2 {
+		t.Errorf("expected 2 locations, got %d", len(locs))
+	}
+}
+
+func TestDefinitionPrefersCurrentFile(t *testing.T) {
+	srv := newTestServer()
+	otherURI := uri.URI("file:///app/Other.cfc")
+	srv.index.IndexFile(otherURI, "component {\nfunction helper() {}\n}")
+
+	currentURI := uri.URI("file:///app/Current.cfc")
+	currentContent := "component {\nfunction helper() {}\nfunction caller() { helper(); }\n}"
+	srv.setDocument(currentURI, currentContent)
+	srv.index.IndexFile(currentURI, currentContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(currentURI)},
+			Position:     protocol.Position{Line: 2, Character: 22}, // on "helper" in caller()
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.URI != protocol.DocumentURI(currentURI) {
+		t.Errorf("expected current file, got %s", loc.URI)
+	}
+	if loc.Range.Start.Line != 1 {
+		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
+	}
+}
+
+func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "Helper.cfc"), []byte("component {\nfunction doStuff() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfc"))
+	// helper is assigned via createObject, then we call helper.doStuff()
+	docContent := "helper = createObject(\"component\",\"Helper\")\nhelper.doStuff()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+	// Also index a doStuff in the current file to verify it's excluded for qualified calls
+	srv.index.IndexFile(uri.URI("file://"+filepath.Join(dir, "caller.cfc")), docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 9}, // on "doStuff"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "Helper.cfc") {
+		t.Errorf("expected Helper.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Widget.cfc"), []byte("<cfcomponent>\n<cffunction name=\"render\">\n</cffunction>\n</cfcomponent>"), 0o644)
+
+	srv := newTestServer()
+	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfm"))
+	docContent := `<cfinvoke component="models.Widget" method="render">`
+	srv.setDocument(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 46}, // on "render" in method attr
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "Widget.cfc") {
+		t.Errorf("expected Widget.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionTagFunctionLookup(t *testing.T) {
+	srv := newTestServer()
+	cfcContent := `<cfcomponent>
+<cffunction name="getUser">
+	<cfreturn "user">
+</cffunction>
+<cffunction name="listUsers">
+	<cfreturn getUser()>
+</cffunction>
+</cfcomponent>`
+	cfcURI := uri.URI("file:///app/UserService.cfc")
+	srv.setDocument(cfcURI, cfcContent)
+	srv.index.IndexFile(cfcURI, cfcContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
+			Position:     protocol.Position{Line: 5, Character: 12}, // on "getUser" in listUsers
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.Range.Start.Line != 1 {
+		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
+	}
+}
+
+func TestDefinitionMappingResolution(t *testing.T) {
+	dir := t.TempDir()
+	modelsDir := filepath.Join(dir, "src", "models")
+	_ = os.MkdirAll(modelsDir, 0o755)
+	_ = os.WriteFile(filepath.Join(modelsDir, "User.cfc"), []byte("component {\nfunction getName() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.Mappings = map[string]string{"models": modelsDir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "app", "caller.cfc"))
+	docContent := "user = new models.User()\nuser.getName()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "User.cfc") {
+		t.Errorf("expected User.cfc, got %s", loc.URI)
+	}
+}
+
+func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
+	srv := newTestServer()
+	cfcURI := uri.URI("file:///app/Service.cfc")
+	srv.index.IndexFile(cfcURI, "component {\nfunction getUser() {}\n}")
+
+	callerURI := uri.URI("file:///app/caller.cfm")
+	srv.setDocument(callerURI, "<cfset result = GETUSER()>")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
+			Position:     protocol.Position{Line: 0, Character: 18}, // on "GETUSER"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition result, got nil")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.URI != protocol.DocumentURI(cfcURI) {
+		t.Errorf("expected Service.cfc, got %s", loc.URI)
+	}
+}
+
 func TestCompletionDotInvokedTrigger(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), nil, 0o644)
