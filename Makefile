@@ -17,6 +17,8 @@ generate: docs
 
 update-grammar: generate
 	$(MAKE) -C ../tree-sitter-cfml generate
+	go get github.com/cfmleditor/tree-sitter-cfml@latest
+	go mod tidy
 	go clean -cache
 
 build: update-grammar generate
