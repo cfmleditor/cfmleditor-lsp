@@ -2,7 +2,7 @@ BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 
-.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release
+.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release release-dry
 
 docs: docs-cfdocs
 
@@ -50,6 +50,9 @@ cfparse: cfparse-build
 
 release:
 	@go run scripts/release.go $(filter-out $@,$(MAKECMDGOALS))
+
+release-dry:
+	@go run scripts/release.go --dry-run $(filter-out $@,$(MAKECMDGOALS))
 
 clean:
 	rm -rf target

@@ -12,9 +12,19 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fatal("Usage: go run scripts/release.go <version>\n  e.g. go run scripts/release.go 0.1.11")
+		fatal("Usage: go run scripts/release.go [--dry-run] <version>\n  e.g. go run scripts/release.go 0.1.11")
 	}
-	version := os.Args[1]
+
+	dryRun := false
+	args := os.Args[1:]
+	if args[0] == "--dry-run" {
+		dryRun = true
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		fatal("Usage: go run scripts/release.go [--dry-run] <version>")
+	}
+	version := args[0]
 	validateVersion(version)
 
 	// Check for uncommitted changes
@@ -60,6 +70,27 @@ func main() {
 	if strings.TrimSpace(content) == "" {
 		fatal("CHANGELOG.md has no content under ## [Unreleased]")
 	}
+
+	if dryRun {
+		fmt.Println("\n[dry-run] All checks passed. Would:")
+		fmt.Printf("  - Update CHANGELOG.md: move unreleased to [%s]\n", version)
+		fmt.Printf("  - Update VERSION to %s\n", version)
+		fmt.Println("  - Run: make build")
+		fmt.Println("  - Run: go test ./...")
+		fmt.Println("  - Run: make lint")
+		fmt.Printf("  - Commit, tag %s, push\n", tag)
+		return
+	}
+
+	fmt.Printf("\nAbout to release %s. This will commit, tag, and push to origin.\n", tag)
+	fmt.Print("Continue? [y/N] ")
+	var answer string
+	fmt.Scanln(&answer)
+	if answer != "y" && answer != "Y" {
+		fmt.Println("Aborted.")
+		os.Exit(0)
+	}
+
 	newChangelog := strings.Replace(changelog, unreleased, unreleased+"\n\n## ["+version+"]", 1)
 	writeFile("CHANGELOG.md", newChangelog)
 	fmt.Printf("Updated CHANGELOG.md: moved unreleased to [%s]\n", version)
