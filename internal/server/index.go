@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
@@ -63,12 +63,11 @@ func (s *Server) indexWorkspace() {
 			continue
 		}
 		content := string(data)
-		if len(s.ComponentResolvers) > 0 {
-			pr := cfparser.Parse(fileURI, content, s.cfResolvers())
-			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
-			s.index.SetThisVars(fileURI, pr.ThisVars())
-		} else {
-			s.index.IndexFile(fileURI, content)
+		pr := s.parseContent(fileURI, content)
+		s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
+		s.index.SetThisVars(fileURI, pr.ThisVars())
+		if pr.Persistent && s.isOrmPath(f) {
+			s.index.SetEntity(cfcNameFromURI(fileURI), fileURI)
 		}
 
 		if s.conn != nil && total > 0 {
@@ -88,6 +87,67 @@ func (s *Server) indexWorkspace() {
 		})
 	}
 	s.logger.Info("indexing complete", zap.Int("files", total), zap.Duration("dur", time.Since(indexStart)))
+
+	// Build bean map: merge config bean paths with all Application.cfc bean paths in workspace
+	allBeanPaths := make(map[string]string)
+	// Discover Application.cfc bean paths from each workspace folder
+	for _, root := range s.WorkspaceFolders {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			if strings.EqualFold(info.Name(), "Application.cfc") || strings.EqualFold(info.Name(), "Application.cfm") {
+				appDir := filepath.Dir(path)
+				for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
+					if _, exists := allBeanPaths[ns]; !exists {
+						allBeanPaths[ns] = dir
+					}
+				}
+			}
+			return nil
+		})
+	}
+	// Config bean paths take precedence
+	for ns, dir := range s.BeanPaths {
+		allBeanPaths[ns] = dir
+	}
+	if len(allBeanPaths) > 0 {
+		beans := buildBeanMap(allBeanPaths)
+		s.index.SetBeans(beans)
+		s.logger.Info("bean map built", zap.Int("beans", len(beans)))
+	}
+}
+
+// cfcNameFromURI extracts the CFC filename without extension from a URI.
+func cfcNameFromURI(fileURI uri.URI) string {
+	path := strings.TrimPrefix(string(fileURI), "file://")
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// isOrmPath returns true if the file path is within the ORM entity scope.
+// If cfcLocation is defined in Application.cfc, the file must be under one of those dirs.
+// Otherwise, the file must be under the Application.cfc directory.
+func (s *Server) isOrmPath(filePath string) bool {
+	dir := filepath.Dir(filePath)
+	appDir := findApplicationRoot(dir)
+	if appDir == "" {
+		return false
+	}
+	ormDirs := cfpath.LoadOrmLocations(appDir)
+	if len(ormDirs) > 0 {
+		for _, ormDir := range ormDirs {
+			if strings.HasPrefix(filePath, ormDir+string(filepath.Separator)) || strings.HasPrefix(filePath, ormDir) {
+				return true
+			}
+		}
+		return false
+	}
+	// No cfcLocation — allow anything under the Application.cfc root
+	return strings.HasPrefix(filePath, appDir)
 }
 
 // collectCFCFiles walks root and returns all .cfc file paths.
@@ -166,12 +226,11 @@ func (s *Server) indexRoot(root string) {
 				return err
 			}
 			content := string(data)
-			if len(s.ComponentResolvers) > 0 {
-				pr := cfparser.Parse(fileURI, content, s.cfResolvers())
-				s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
-				s.index.SetThisVars(fileURI, pr.ThisVars())
-			} else {
-				s.index.IndexFile(fileURI, content)
+			pr := s.parseContent(fileURI, content)
+			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
+			s.index.SetThisVars(fileURI, pr.ThisVars())
+			if pr.Persistent && s.isOrmPath(path) {
+				s.index.SetEntity(cfcNameFromURI(fileURI), fileURI)
 			}
 		}
 		return nil

@@ -24,9 +24,13 @@ type ParseResult struct {
 	Funcs   []FunctionDef
 	Refs    []ComponentRef
 	Scopes  []FuncScope
-	Extends   string // dot-path of parent component (from extends attribute)
-	Log       Logger // optional logger for timing and errors
-	Resolvers []Resolver // optional component resolvers for RHS matching
+	Extends    string        // dot-path of parent component (from extends attribute)
+	Persistent bool          // true if component has persistent="true" (ORM entity)
+	Properties []propertyDef // parsed property declarations
+	Log        Logger        // optional logger for timing and errors
+	Resolvers         []Resolver         // optional component resolvers for RHS matching
+	PropertyResolvers []PropertyResolver // optional property-to-component resolvers
+	BeanLookup        func(string) string // optional bean name → dot-path lookup
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -42,6 +46,13 @@ type ParseResult struct {
 	funcVars   map[string][]string
 }
 
+// ParseOptions configures optional parse behaviour.
+type ParseOptions struct {
+	Resolvers         []Resolver
+	PropertyResolvers []PropertyResolver
+	BeanLookup        func(name string) string // optional: resolve bean name → dot-path
+}
+
 // Parse performs a full file parse: extracts function signatures, component refs,
 // and function scopes. Function bodies are NOT parsed for variables until requested.
 func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResult {
@@ -52,6 +63,23 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 	}
 	if len(resolvers) > 0 {
 		pr.Resolvers = resolvers[0]
+	}
+	start := time.Now()
+	pr.Regions = ClassifyRegions(content)
+	pr.extractSignatures()
+	pr.logInfo("parse complete", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
+	return pr
+}
+
+// ParseWithOptions performs a full file parse with extended options.
+func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *ParseResult {
+	pr := &ParseResult{
+		URI:               fileURI,
+		Content:           content,
+		funcVars:          make(map[string][]string),
+		Resolvers:         opts.Resolvers,
+		PropertyResolvers: opts.PropertyResolvers,
+		BeanLookup:        opts.BeanLookup,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
@@ -74,8 +102,12 @@ func (pr *ParseResult) extractSignatures() {
 			pr.Funcs = append(pr.Funcs, sp.funcs...)
 			pr.Refs = append(pr.Refs, sp.refs...)
 			pr.Scopes = append(pr.Scopes, sp.scopes...)
+			pr.Properties = append(pr.Properties, sp.properties...)
 			if sp.extends != "" {
 				pr.Extends = sp.extends
+			}
+			if sp.persistent {
+				pr.Persistent = true
 			}
 		} else {
 			tp := newTagParser(r.Text, string(pr.URI))
@@ -86,19 +118,134 @@ func (pr *ParseResult) extractSignatures() {
 			for i := range tp.refs {
 				tp.refs[i].Line += uint32(r.StartLine)
 			}
+			for i := range tp.properties {
+				tp.properties[i].line += uint32(r.StartLine)
+			}
 			pr.Funcs = append(pr.Funcs, tp.funcs...)
 			pr.Refs = append(pr.Refs, tp.refs...)
+			pr.Properties = append(pr.Properties, tp.properties...)
 			scopes := findTagFuncScopes(r.Text, r.StartLine)
 			pr.Scopes = append(pr.Scopes, scopes...)
 			if tp.extends != "" {
 				pr.Extends = tp.extends
 			}
+			if tp.persistent {
+				pr.Persistent = true
+			}
 		}
 	}
+	// Generate synthetic accessor functions for properties (skip if explicit function exists).
+	pr.generatePropertyAccessors()
 	// Extract component refs from init() body since the shallow parse skips function bodies.
 	pr.appendInitRefs()
 	// Extract refs from resolver-matched assignments.
 	pr.appendResolverRefs()
+}
+
+// extractBeanName strips framework namespace prefixes from an inject value.
+// Handles: "model:UserService" → "UserService", "UserDAO@model" → "UserDAO",
+// "coldbox:setting:appName" → "appName", "userService" → "userService".
+func extractBeanName(inject string) string {
+	inject = strings.TrimSpace(inject)
+	// WireBox @-style: "BeanName@namespace"
+	if at := strings.IndexByte(inject, '@'); at > 0 {
+		return inject[:at]
+	}
+	// Colon-namespaced: take the last segment after ':'
+	if colon := strings.LastIndexByte(inject, ':'); colon >= 0 {
+		return inject[colon+1:]
+	}
+	return inject
+}
+
+// normalizeBeanKey converts an inject value to the bean map key format.
+// "UserDAO@model" → "userdao@model", "model:UserService" → "userservice@model",
+// "userService" → "userservice".
+func normalizeBeanKey(inject string) string {
+	inject = strings.TrimSpace(inject)
+	// Already in @-style: "BeanName@namespace"
+	if at := strings.IndexByte(inject, '@'); at > 0 {
+		return strings.ToLower(inject[:at]) + "@" + strings.ToLower(inject[at+1:])
+	}
+	// Colon-namespaced: "namespace:BeanName" → "beanname@namespace"
+	if colon := strings.LastIndexByte(inject, ':'); colon >= 0 {
+		ns := inject[:colon]
+		name := inject[colon+1:]
+		// If namespace itself has colons (e.g. "coldbox:setting"), use last segment as ns
+		if innerColon := strings.LastIndexByte(ns, ':'); innerColon >= 0 {
+			ns = ns[innerColon+1:]
+		}
+		return strings.ToLower(name) + "@" + strings.ToLower(ns)
+	}
+	return strings.ToLower(inject)
+}
+
+// ucFirst capitalizes the first character of a string.
+func ucFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
+}
+
+// generatePropertyAccessors creates synthetic get/set FunctionDefs and ComponentRefs
+// for properties, skipping any where an explicit or already-generated function exists.
+func (pr *ParseResult) generatePropertyAccessors() {
+	if len(pr.Properties) == 0 {
+		return
+	}
+	// Build set of existing function names (explicit + previously generated)
+	existing := make(map[string]bool, len(pr.Funcs)+len(pr.Properties)*2)
+	for _, f := range pr.Funcs {
+		existing[strings.ToLower(f.Name)] = true
+	}
+	u := pr.URI
+	for _, prop := range pr.Properties {
+		capName := ucFirst(prop.name)
+		getter := "get" + strings.ToLower(prop.name)
+		if !existing[getter] {
+			existing[getter] = true
+			pr.Funcs = append(pr.Funcs, FunctionDef{
+				Name: "get" + capName, URI: u, Line: prop.line,
+			})
+		}
+		setter := "set" + strings.ToLower(prop.name)
+		if !existing[setter] {
+			existing[setter] = true
+			pr.Funcs = append(pr.Funcs, FunctionDef{
+				Name: "set" + capName, URI: u, Line: prop.line,
+				Arguments: []Argument{{Name: prop.name, Type: prop.typeName}},
+			})
+		}
+		// Resolve component path: try property resolvers first, then type, then bean map
+		comp := ""
+		if len(pr.PropertyResolvers) > 0 && len(prop.attrs) > 0 {
+			comp = ResolveProperty(prop.attrs, pr.PropertyResolvers)
+		}
+		if comp == "" && prop.typeName != "" && looksLikeCFCType(prop.typeName) {
+			comp = prop.typeName
+		}
+		if comp == "" && pr.BeanLookup != nil {
+			// Try inject attribute: full value (for namespace-qualified), then stripped name
+			if inject := prop.attrs["inject"]; inject != "" {
+				comp = pr.BeanLookup(normalizeBeanKey(inject))
+				if comp == "" {
+					comp = pr.BeanLookup(extractBeanName(inject))
+				}
+			}
+			if comp == "" {
+				comp = pr.BeanLookup(prop.name)
+			}
+		}
+		if comp != "" {
+			pr.Refs = append(pr.Refs, ComponentRef{
+				Variable: prop.name, Component: comp, URI: u, Line: prop.line,
+			})
+		}
+	}
 }
 
 // GlobalVars returns this.x and variables.x names declared outside any function.
@@ -204,6 +351,16 @@ func (pr *ParseResult) computeGlobalVars() []string {
 func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 	seen := make(map[string]bool)
 	var names []string
+
+	// Properties default to variables scope
+	if scope == ScopeVariables {
+		for _, prop := range pr.Properties {
+			if !seen[prop.name] {
+				seen[prop.name] = true
+				names = append(names, prop.name)
+			}
+		}
+	}
 
 	for _, r := range pr.Regions {
 		var regionVars []VarDef
@@ -386,9 +543,9 @@ func (pr *ParseResult) appendResolverRefs() {
 		lhs := strings.TrimSpace(line[:eqIdx])
 		varName := lhs
 		if dotIdx := strings.LastIndexByte(lhs, '.'); dotIdx >= 0 {
-			varName = lhs[dotIdx+1:]
+			varName = strings.TrimSpace(lhs[dotIdx+1:])
 		} else if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
-			varName = lhs[spIdx+1:]
+			varName = strings.TrimSpace(lhs[spIdx+1:])
 		}
 		if varName != "" {
 			// Replace existing ref or append

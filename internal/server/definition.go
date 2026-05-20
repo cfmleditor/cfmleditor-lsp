@@ -36,6 +36,14 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	docURI := uri.URI(params.TextDocument.URI)
 	s.logger.Debug("definition: request", zap.String("word", word), zap.Int("line", line), zap.Int("char", char))
 
+	// Check if cursor is inside a resolver-matched call (e.g. getService("UserService"))
+	if comp := s.resolverArgAtCursor(content, line, char); comp != "" {
+		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
+			s.logger.Debug("definition: resolver arg resolved", zap.String("component", comp))
+			return reply(ctx, *loc, nil)
+		}
+	}
+
 	// Check if cursor is on a component dot-path (new, createObject, extends, etc.)
 	if comp := componentPathAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
@@ -51,6 +59,8 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			s.logger.Debug("definition: file path resolved", zap.String("path", filePath), zap.String("target", string(loc.URI)))
 			return reply(ctx, *loc, nil)
 		}
+		// Cursor is inside a file path — don't fall through to word-based lookup
+		return reply(ctx, nil, nil)
 	}
 
 	// Check if cursor is inside a <cfinvoke> method attribute
@@ -62,10 +72,12 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 	// Check if there's a dot qualifier (e.g. persist.templateFunction)
 	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+		s.logger.Debug("definition: qualifier found", zap.String("qualifier", qualifier), zap.String("word", word))
 		if strings.HasPrefix(qualifier, "~?") { //nolint:gocritic // if-else is clearer than switch for prefix checks
 			// Call expression — try component resolvers
 			callExpr := qualifier[2:]
 			comp := resolveComponentFromCall(callExpr, s.ComponentResolvers)
+			s.logger.Debug("definition: call expression resolver", zap.String("expr", callExpr), zap.String("resolved", comp))
 			if comp != "" {
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
@@ -74,6 +86,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		} else if strings.HasPrefix(qualifier, "~") {
 			// Direct component path from createObject/new expression
 			comp := qualifier[1:]
+			s.logger.Debug("definition: direct component path", zap.String("component", comp))
 			if comp != "" {
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
@@ -81,11 +94,19 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		} else {
 			// Resolve via component ref
-			if loc := s.resolveQualifiedDef(qualifier, word, docURI, uint32(line)); loc != nil {
-				return reply(ctx, *loc, nil)
+			ref := s.index.LookupComponentRefInFile(qualifier, docURI, uint32(line))
+			if ref != nil {
+				s.logger.Debug("definition: component ref found", zap.String("variable", qualifier), zap.String("component", ref.Component))
+				if loc := s.resolveComponentDef(ref.Component, word, docURI); loc != nil {
+					return reply(ctx, *loc, nil)
+				}
+				s.logger.Debug("definition: component ref resolve failed", zap.String("component", ref.Component), zap.String("func", word))
+			} else {
+				s.logger.Debug("definition: no component ref for qualifier", zap.String("variable", qualifier))
 			}
 			// Try component resolvers for the qualifier itself (e.g. _parent → a CFC)
 			if comp := resolveComponentFromCall(qualifier, s.ComponentResolvers); comp != "" {
+				s.logger.Debug("definition: qualifier matched resolver", zap.String("qualifier", qualifier), zap.String("resolved", comp))
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
 				}
@@ -94,6 +115,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		// Qualified call that can't be resolved — fall through to all matches
 		// but exclude current file (a qualified call is never local)
 		defs := s.index.Lookup(word)
+		s.logger.Debug("definition: qualified fallback to global lookup", zap.String("word", word), zap.Int("matches", len(defs)))
 		var locations []protocol.Location
 		for _, d := range defs {
 			if d.URI != docURI {
@@ -140,13 +162,13 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	return reply(ctx, locations, nil)
 }
 
-func (s *Server) resolveQualifiedDef(qualifier, funcName string, docURI uri.URI, line uint32) *protocol.Location {
-	ref := s.index.LookupComponentRefInFile(qualifier, docURI, line)
-	if ref == nil {
-		return nil
-	}
-	return s.resolveComponentDef(ref.Component, funcName, docURI)
-}
+// func (s *Server) resolveQualifiedDef(qualifier, funcName string, docURI uri.URI, line uint32) *protocol.Location {
+// 	ref := s.index.LookupComponentRefInFile(qualifier, docURI, line)
+// 	if ref == nil {
+// 		return nil
+// 	}
+// 	return s.resolveComponentDef(ref.Component, funcName, docURI)
+// }
 
 func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI) *protocol.Location {
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
@@ -160,17 +182,44 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 
 	if !cached {
 		t0 := time.Now()
-		cfcPath = cfpath.ResolvePath(component, baseDir, s.Mappings)
-		if cfcPath == "" {
-			if appDir := findApplicationRoot(baseDir); appDir != "" {
-				cfcPath = cfpath.ResolvePath(component, appDir, s.Mappings)
+		// If component is already an absolute file path, use it directly
+		if filepath.IsAbs(component) {
+			if _, err := os.Stat(component); err == nil {
+				cfcPath = component
 			}
 		}
 		if cfcPath == "" {
-			for _, root := range s.WorkspaceFolders {
-				cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
-				if cfcPath != "" {
-					break
+			mappings := s.effectiveMappings(baseDir)
+			cfcPath = cfpath.ResolvePath(component, baseDir, mappings)
+			if cfcPath == "" {
+				if appDir := findApplicationRoot(baseDir); appDir != "" {
+					cfcPath = cfpath.ResolvePath(component, appDir, mappings)
+				}
+			}
+			if cfcPath == "" {
+				for _, root := range s.WorkspaceFolders {
+					cfcPath = cfpath.ResolvePath(component, root, mappings)
+					if cfcPath != "" {
+						break
+					}
+				}
+			}
+			// Try ORM cfcLocation directories for bare entity names
+			if cfcPath == "" && !strings.Contains(component, ".") {
+				// Check entity index first
+				if entityURI := s.index.LookupEntity(component); entityURI != "" {
+					cfcPath = strings.TrimPrefix(string(entityURI), "file://")
+				}
+				// Fall back to ORM cfcLocation directories
+				if cfcPath == "" {
+					if appDir := findApplicationRoot(baseDir); appDir != "" {
+						for _, ormDir := range cfpath.LoadOrmLocations(appDir) {
+							cfcPath = cfpath.ResolvePath(component, ormDir, nil)
+							if cfcPath != "" {
+								break
+							}
+						}
+					}
 				}
 			}
 		}
@@ -184,6 +233,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 	}
 
 	if cfcPath == "" {
+		s.logger.Debug("definition: component path not resolved to file", zap.String("component", component))
 		return nil
 	}
 	cfcURI := uri.URI("file://" + cfcPath)
@@ -194,12 +244,14 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 	}
 	for _, d := range s.index.FunctionsForFile(cfcURI) {
 		if strings.EqualFold(d.Name, funcName) {
+			s.logger.Debug("definition: resolved method", zap.String("component", component), zap.String("func", funcName), zap.String("file", cfcPath), zap.Uint32("line", d.Line))
 			return &protocol.Location{
 				URI:   protocol.DocumentURI(d.URI),
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 			}
 		}
 	}
+	s.logger.Debug("definition: method not found in component", zap.String("component", component), zap.String("func", funcName), zap.String("file", cfcPath))
 	return nil
 }
 
@@ -517,16 +569,25 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
 
-	cfcPath := cfpath.ResolvePath(component, baseDir, s.Mappings)
+	mappings := s.effectiveMappings(baseDir)
+	s.logger.Debug("definition: resolveComponentFileDef", zap.String("component", component), zap.String("baseDir", baseDir), zap.Any("mappings", mappings))
+	cfcPath := cfpath.ResolvePath(component, baseDir, mappings)
+	if cfcPath != "" {
+		s.logger.Debug("definition: resolved via baseDir", zap.String("path", cfcPath))
+	}
 	if cfcPath == "" {
 		if appDir := findApplicationRoot(baseDir); appDir != "" {
-			cfcPath = cfpath.ResolvePath(component, appDir, s.Mappings)
+			cfcPath = cfpath.ResolvePath(component, appDir, mappings)
+			if cfcPath != "" {
+				s.logger.Debug("definition: resolved via appDir", zap.String("path", cfcPath), zap.String("appDir", appDir))
+			}
 		}
 	}
 	if cfcPath == "" {
 		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
+			cfcPath = cfpath.ResolvePath(component, root, mappings)
 			if cfcPath != "" {
+				s.logger.Debug("definition: resolved via workspace", zap.String("path", cfcPath), zap.String("root", root))
 				break
 			}
 		}
@@ -628,6 +689,25 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		}
 	}
 
+	// Try mappings — match the first path segment against mapping keys
+	mappings := s.effectiveMappings(baseDir)
+	if len(mappings) > 0 {
+		clean := strings.TrimPrefix(filePath, "/")
+		if seg, rest, _ := strings.Cut(clean, "/"); seg != "" {
+			for key, dir := range mappings {
+				if strings.EqualFold(seg, key) {
+					candidate = filepath.Join(dir, rest)
+					if _, err := os.Stat(candidate); err == nil {
+						return &protocol.Location{
+							URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+							Range: protocol.Range{},
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Try relative to workspace folders
 	for _, root := range s.WorkspaceFolders {
 		candidate = filepath.Join(root, filePath)
@@ -639,4 +719,65 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		}
 	}
 	return nil
+}
+
+// resolverArgAtCursor checks if the cursor is inside a string argument of a
+// resolver-matched call (e.g. getService("UserService")). Returns the resolved
+// component dot-path or empty string.
+func (s *Server) resolverArgAtCursor(content string, line, char int) string {
+	if len(s.ComponentResolvers) == 0 {
+		return ""
+	}
+	lineText := lineAtOffset(content, line)
+	if lineText == "" {
+		return ""
+	}
+	// Find enclosing quotes around cursor
+	pos := min(char, len(lineText))
+	qStart := -1
+	var quote byte
+	for i := pos - 1; i >= 0; i-- {
+		if lineText[i] == '"' || lineText[i] == '\'' {
+			qStart = i
+			quote = lineText[i]
+			break
+		}
+	}
+	if qStart < 0 {
+		return ""
+	}
+	qEnd := -1
+	for i := qStart + 1; i < len(lineText); i++ {
+		if lineText[i] == quote {
+			qEnd = i
+			break
+		}
+	}
+	if qEnd < 0 || pos <= qStart || pos > qEnd {
+		return ""
+	}
+	// Extract the call expression surrounding the string: find opening paren before quote
+	parenIdx := -1
+	for i := qStart - 1; i >= 0; i-- {
+		if lineText[i] == '(' {
+			parenIdx = i
+			break
+		}
+	}
+	if parenIdx < 0 {
+		return ""
+	}
+	// Get the function name before the paren
+	funcEnd := parenIdx
+	funcStart := funcEnd
+	for funcStart > 0 && isWordChar(lineText[funcStart-1]) {
+		funcStart--
+	}
+	if funcStart == funcEnd {
+		return ""
+	}
+	// Build the call expression with the string value for resolver matching
+	value := lineText[qStart+1 : qEnd]
+	callExpr := lineText[funcStart:funcEnd] + "(\"" + value + "\")"
+	return resolveComponentFromCall(callExpr, s.ComponentResolvers)
 }

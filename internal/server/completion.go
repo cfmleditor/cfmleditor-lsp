@@ -796,7 +796,7 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 	if !ok {
 		return
 	}
-	newPR := cfparser.Parse(docURI, content, s.cfResolvers())
+	newPR := s.parseContent(docURI, content)
 	newPR.Log = &zapAdapter{s.logger}
 	s.mu.Lock()
 	s.parseResults[docURI] = newPR
@@ -916,10 +916,11 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	cfcPath := cfpath.ResolvePath(pr.Extends, baseDir, s.Mappings)
+	mappings := s.effectiveMappings(baseDir)
+	cfcPath := cfpath.ResolvePath(pr.Extends, baseDir, mappings)
 	if cfcPath == "" {
 		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(pr.Extends, root, s.Mappings)
+			cfcPath = cfpath.ResolvePath(pr.Extends, root, mappings)
 			if cfcPath != "" {
 				break
 			}
@@ -998,13 +999,22 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	// Resolve the dot-path to a CFC file relative to the current file's directory
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	cfcPath := cfpath.ResolvePath(component, baseDir, s.Mappings)
+	var cfcPath string
+	if filepath.IsAbs(component) {
+		if _, err := os.Stat(component); err == nil {
+			cfcPath = component
+		}
+	}
 	if cfcPath == "" {
-		// Try workspace folders
-		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(component, root, s.Mappings)
-			if cfcPath != "" {
-				break
+		mappings := s.effectiveMappings(baseDir)
+		cfcPath = cfpath.ResolvePath(component, baseDir, mappings)
+		if cfcPath == "" {
+			// Try workspace folders
+			for _, root := range s.WorkspaceFolders {
+				cfcPath = cfpath.ResolvePath(component, root, mappings)
+				if cfcPath != "" {
+					break
+				}
 			}
 		}
 	}

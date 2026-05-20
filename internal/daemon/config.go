@@ -19,6 +19,8 @@ type configJSON struct {
 	WorkspaceIndexGlobs []string            `json:"workspaceIndexGlobs"`
 	Mappings            map[string]string   `json:"mappings"`
 	ComponentResolvers  []componentResolver `json:"componentResolvers"`
+	PropertyResolvers   []propertyResolver  `json:"propertyResolvers"`
+	BeanPaths           map[string]string   `json:"beanPaths"`
 	Formatting          *formattingConfig   `json:"formatting"`
 	Debug               bool                `json:"debug"`
 }
@@ -27,6 +29,12 @@ type componentResolver struct {
 	Match   string `json:"match"`
 	Resolve string `json:"resolve"`
 	Prefix  string `json:"prefix"`
+}
+
+type propertyResolver struct {
+	Match     string `json:"match"`
+	Resolve   string `json:"resolve"`
+	Attribute string `json:"attribute"`
 }
 
 type formattingConfig struct {
@@ -279,6 +287,39 @@ func (c *Config) ComponentResolvers() [][3]string {
 	for _, r := range raw.ComponentResolvers {
 		if r.Match != "" && r.Resolve != "" {
 			out = append(out, [3]string{r.Match, r.Resolve, r.Prefix})
+		}
+	}
+	return out
+}
+
+// PropertyResolvers returns the configured property resolver patterns as [match, resolve, attribute] triples.
+func (c *Config) PropertyResolvers() [][3]string {
+	raw := c.raw()
+	if raw == nil || len(raw.PropertyResolvers) == 0 {
+		return nil
+	}
+	out := make([][3]string, 0, len(raw.PropertyResolvers))
+	for _, r := range raw.PropertyResolvers {
+		if r.Match != "" && r.Resolve != "" && r.Attribute != "" {
+			out = append(out, [3]string{r.Match, r.Resolve, r.Attribute})
+		}
+	}
+	return out
+}
+
+// BeanPaths returns the resolved bean namespace → absolute directory path mapping.
+func (c *Config) BeanPaths() map[string]string {
+	raw := c.raw()
+	if raw == nil || len(raw.BeanPaths) == 0 {
+		return nil
+	}
+	dir := filepath.Dir(c.Path)
+	out := make(map[string]string, len(raw.BeanPaths))
+	for ns, p := range raw.BeanPaths {
+		if filepath.IsAbs(p) {
+			out[ns] = p
+		} else {
+			out[ns] = filepath.Join(dir, p)
 		}
 	}
 	return out

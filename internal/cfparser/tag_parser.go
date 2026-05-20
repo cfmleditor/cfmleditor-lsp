@@ -6,13 +6,15 @@ import (
 
 // tagParser extracts definitions from CFML tag-based source.
 type tagParser struct {
-	src       string
-	fileURI   string
-	funcs     []FunctionDef
-	vars      []VarDef
-	refs      []ComponentRef
-	extends   string
-	lineIndex []int // byte offset of each line start
+	src        string
+	fileURI    string
+	funcs      []FunctionDef
+	vars       []VarDef
+	refs       []ComponentRef
+	properties []propertyDef
+	extends    string
+	persistent bool
+	lineIndex  []int // byte offset of each line start
 }
 
 func newTagParser(src, fileURI string) *tagParser {
@@ -100,10 +102,15 @@ func (p *tagParser) parse() {
 			switch {
 			case len(tag) > 12 && strings.EqualFold(tag[:13], "<cfcomponent "):
 				p.extends = getAttr(tag, "extends")
+				if isTruthy(getAttr(tag, "persistent")) {
+					p.persistent = true
+				}
 			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cffunction "):
 				p.parseCFFunction(tag, idx, tagEnd, line)
 				pos = tagEnd
 				continue
+			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cfproperty "):
+				p.parseCFProperty(tag, line)
 			case len(tag) > 5 && strings.EqualFold(tag[:6], "<cfset"):
 				p.parseCFSet(tag, line)
 			case len(tag) > 8 && strings.EqualFold(tag[:9], "<cfobject"):
@@ -258,6 +265,17 @@ func (p *tagParser) parseCFInvoke(tag string, line int) {
 	}
 }
 
+// parseCFProperty handles <cfproperty name="x" type="y" />
+func (p *tagParser) parseCFProperty(tag string, line int) {
+	name := getAttr(tag, "name")
+	if name == "" {
+		return
+	}
+	typeName := getAttr(tag, "type")
+	attrs := extractAllAttrs(tag)
+	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: uint32(line), attrs: attrs})
+}
+
 func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 	// Find = and check what's after it
 	if i := strings.IndexByte(rest, '='); i >= 0 {
@@ -286,6 +304,14 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
+		if comp != "" {
+			p.refs = append(p.refs, ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(line),
+			})
+		}
+	case hasPrefixFold(rhs, "entityload("):
+		comp := extractEntityNewArg(rhs[11:])
 		if comp != "" {
 			p.refs = append(p.refs, ComponentRef{
 				Variable: varName, Component: comp,
@@ -339,6 +365,58 @@ func extractIdent(s string) string {
 		return ""
 	}
 	return s[:i]
+}
+
+// extractAllAttrs extracts all attribute key=value pairs from a tag string.
+// Keys are lowercased.
+func extractAllAttrs(tag string) map[string]string {
+	attrs := make(map[string]string)
+	// Skip tag name
+	i := 1 // past '<'
+	for i < len(tag) && tag[i] != ' ' && tag[i] != '\t' && tag[i] != '>' {
+		i++
+	}
+	for i < len(tag) {
+		// Skip whitespace
+		for i < len(tag) && (tag[i] == ' ' || tag[i] == '\t' || tag[i] == '\n' || tag[i] == '\r') {
+			i++
+		}
+		if i >= len(tag) || tag[i] == '>' || tag[i] == '/' {
+			break
+		}
+		// Read attribute name
+		start := i
+		for i < len(tag) && tag[i] != '=' && tag[i] != ' ' && tag[i] != '>' && tag[i] != '/' {
+			i++
+		}
+		key := strings.ToLower(tag[start:i])
+		if i >= len(tag) || tag[i] != '=' {
+			continue
+		}
+		i++ // past '='
+		if i >= len(tag) {
+			break
+		}
+		if tag[i] == '"' || tag[i] == '\'' {
+			q := tag[i]
+			i++
+			valStart := i
+			for i < len(tag) && tag[i] != q {
+				i++
+			}
+			attrs[key] = tag[valStart:i]
+			if i < len(tag) {
+				i++ // past closing quote
+			}
+		} else {
+			valStart := i
+			for i < len(tag) && tag[i] != ' ' && tag[i] != '>' {
+				i++
+			}
+			attrs[key] = tag[valStart:i]
+		}
+	}
+	return attrs
 }
 
 func splitAssign(s string) (name, rhs string) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -88,6 +89,11 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 	go s.indexWorkspace()
 	go s.initLinter()
 
+	// In standalone mode, load config from workspace roots if not already configured
+	if len(s.ComponentResolvers) == 0 {
+		s.loadConfigFromRoots()
+	}
+
 	s.logger.Info("CFML LSP initialized", zap.Strings("workspaceRoots", s.workspaceRoots))
 
 	return reply(ctx, protocol.InitializeResult{
@@ -108,8 +114,16 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
 
-	pr := cfparser.Parse(docURI, params.TextDocument.Text, s.cfResolvers())
+	pr := s.parseContent(docURI, params.TextDocument.Text)
 	pr.Log = &zapAdapter{s.logger}
+	s.logger.Debug("document opened: parse result",
+		zap.String("uri", string(docURI)),
+		zap.Int("funcs", len(pr.Funcs)),
+		zap.Int("refs", len(pr.Refs)),
+		zap.Int("resolvers", len(pr.Resolvers)))
+	for _, ref := range pr.Refs {
+		s.logger.Debug("document opened: ref", zap.String("var", ref.Variable), zap.String("component", ref.Component))
+	}
 	s.mu.Lock()
 	s.parseResults[docURI] = pr
 	s.funcRanges[docURI] = scopesToFuncRanges(pr)
@@ -229,7 +243,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	if pr == nil {
 		// No cached parse result — fall back to full parse
-		pr = cfparser.Parse(docURI, content, s.cfResolvers())
+		pr = s.parseContent(docURI, content)
 		pr.Log = &zapAdapter{s.logger}
 		s.mu.Lock()
 		s.parseResults[docURI] = pr
@@ -338,6 +352,14 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.invalidateResolveCache()
+
+	// Invalidate Application.cfc mappings cache if an Application file was saved
+	filePath := strings.TrimPrefix(string(docURI), "file://")
+	baseName := filepath.Base(filePath)
+	if strings.EqualFold(baseName, "Application.cfc") || strings.EqualFold(baseName, "Application.cfm") {
+		cfpath.InvalidateAppMappingsCache()
+	}
+
 	go s.runDiagnostics(ctx, docURI)
 	go s.rebuildFileCompletionCache(docURI)
 
@@ -424,11 +446,15 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult
 	if !isCFML {
 		return
 	}
-	if isCFC && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
-		return
-	}
 	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 	s.index.SetThisVars(docURI, pr.ThisVars())
+	// Only register as entity if within ORM scope and workspace
+	if isCFC && pr.Persistent {
+		filePath := strings.TrimPrefix(string(docURI), "file://")
+		if s.isOrmPath(filePath) {
+			s.index.SetEntity(cfcNameFromURI(docURI), docURI)
+		}
+	}
 }
 
 // resolverRefs scans content for assignments whose RHS matches a component resolver.

@@ -2,16 +2,26 @@ package cfparser
 
 import "strings"
 
+// propertyDef holds parsed property metadata.
+type propertyDef struct {
+	name     string
+	typeName string
+	line     uint32
+	attrs    map[string]string // all attribute key=value pairs (lowercase keys)
+}
+
 // shallowScriptParser extracts function signatures and component refs
 // without parsing function bodies for variables.
 type shallowScriptParser struct {
-	sc       *Scanner
-	funcs    []FunctionDef
-	refs     []ComponentRef
-	scopes   []FuncScope
-	extends  string
-	fileURI  string
-	baseLine int
+	sc         *Scanner
+	funcs      []FunctionDef
+	refs       []ComponentRef
+	scopes     []FuncScope
+	properties []propertyDef
+	extends    string
+	persistent bool
+	fileURI    string
+	baseLine   int
 }
 
 func newShallowScriptParser(src, fileURI string, baseLine int) *shallowScriptParser {
@@ -39,11 +49,70 @@ func (p *shallowScriptParser) parse() {
 			p.parseAccessModified(tok)
 		case "component":
 			p.parseComponentAttrs()
+		case "property":
+			p.parseProperty(tok)
 		default:
 			// Check for component refs in assignments: ident = new/createObject/entityNew
 			p.checkAssignRef(tok)
 		}
 	}
+}
+
+// parseProperty handles script-style property declarations:
+//   property name="person" type="models.Person";
+//   property string name;
+//   property name;
+func (p *shallowScriptParser) parseProperty(startTok Token) {
+	line := uint32(p.baseLine + startTok.Line)
+	var name, typeName string
+	attrs := make(map[string]string)
+
+	// Collect tokens until semicolon or EOF
+	var tokens []Token
+	for {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF || tok.Kind == TokSemicolon {
+			break
+		}
+		tokens = append(tokens, tok)
+	}
+
+	// Check for attribute-style: property name="x" type="y" inject="z";
+	for i, tok := range tokens {
+		if tok.Kind == TokIdent && i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+			if i+2 < len(tokens) && tokens[i+2].Kind == TokString {
+				val := unquote(tokens[i+2].Value)
+				attrs[strings.ToLower(tok.Value)] = val
+			}
+		}
+	}
+	name = attrs["name"]
+	typeName = attrs["type"]
+
+	// If no name= attribute, try positional: property [type] name;
+	if name == "" {
+		idents := make([]string, 0, 2)
+		for _, tok := range tokens {
+			if tok.Kind == TokIdent {
+				idents = append(idents, tok.Value)
+			} else {
+				break
+			}
+		}
+		switch len(idents) {
+		case 1:
+			name = idents[0]
+		case 2:
+			typeName = idents[0]
+			name = idents[1]
+		}
+	}
+
+	if name == "" {
+		return
+	}
+
+	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: line, attrs: attrs})
 }
 
 func (p *shallowScriptParser) parseComponentAttrs() {
@@ -53,13 +122,26 @@ func (p *shallowScriptParser) parseComponentAttrs() {
 			return
 		}
 		p.sc.NextSkipComments()
-		if tok.Kind == TokIdent && strings.EqualFold(tok.Value, "extends") {
-			eq := p.sc.PeekSkipComments()
-			if eq.Kind == TokEquals {
-				p.sc.NextSkipComments()
-				val := p.sc.NextSkipComments()
-				if val.Kind == TokString {
-					p.extends = unquote(val.Value)
+		if tok.Kind == TokIdent {
+			if strings.EqualFold(tok.Value, "extends") {
+				eq := p.sc.PeekSkipComments()
+				if eq.Kind == TokEquals {
+					p.sc.NextSkipComments()
+					val := p.sc.NextSkipComments()
+					if val.Kind == TokString {
+						p.extends = unquote(val.Value)
+					}
+				}
+			} else if strings.EqualFold(tok.Value, "persistent") {
+				eq := p.sc.PeekSkipComments()
+				if eq.Kind == TokEquals {
+					p.sc.NextSkipComments()
+					val := p.sc.NextSkipComments()
+					if val.Kind == TokString && isTruthy(unquote(val.Value)) {
+						p.persistent = true
+					} else if val.Kind == TokIdent && isTruthy(val.Value) {
+						p.persistent = true
+					}
 				}
 			}
 		}
@@ -232,6 +314,9 @@ func (p *shallowScriptParser) checkAssignRef(tok Token) {
 		p.sc.NextSkipComments()
 		p.parseCreateObjectRef(tok.Value, tok.Line)
 	case "entitynew":
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(tok.Value, tok.Line)
+	case "entityload":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(tok.Value, tok.Line)
 	}
@@ -423,4 +508,22 @@ func (p *globalScriptParser) parsePlain(tok Token) {
 		Name: tok.Value, Scope: ScopeVariables,
 		Line: uint32(p.baseLine + tok.Line),
 	})
+}
+
+func isTruthy(s string) bool {
+	return strings.EqualFold(s, "true") || strings.EqualFold(s, "yes")
+}
+
+// looksLikeCFCType returns true if a property type looks like a CFC reference
+// (dotted path or non-primitive name).
+func looksLikeCFCType(t string) bool {
+	if strings.Contains(t, ".") {
+		return true
+	}
+	switch strings.ToLower(t) {
+	case "string", "numeric", "boolean", "date", "struct", "array", "query",
+		"binary", "guid", "uuid", "void", "any", "xml", "function":
+		return false
+	}
+	return true
 }

@@ -615,8 +615,11 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 
 	case "cf_output_tag",
 		"cf_function_tag",
-		"cf_xml_tag", "cf_savecontent_tag":
+		"cf_xml_tag":
 		f.formatCFBlockTag(n)
+
+	case "cf_savecontent_tag":
+		f.formatCFSavecontent(n)
 
 	case "cf_query_tag":
 		f.formatCFQuery(n)
@@ -971,6 +974,27 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	f.writeIndent()
 	f.write("</" + name + ">")
 	f.write("\n")
+}
+
+// formatCFSavecontent emits the opening tag with proper indentation
+// but preserves everything between (and including) the closing tag verbatim.
+func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
+	name := f.tagName(n)
+	attrs := f.collectAttrs(n)
+
+	f.nl()
+	f.writeIndent()
+	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
+
+	// Emit everything after the opening ">" verbatim (body + closing tag)
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() == ">" {
+			f.write(string(f.src[c.EndByte():n.EndByte()]))
+			f.write("\n")
+			return
+		}
+	}
 }
 
 // normalizeCond collapses internal newlines and leading whitespace in a

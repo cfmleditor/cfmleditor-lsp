@@ -97,6 +97,8 @@ func runServer() {
 		globs := cfg.IndexGlobs()
 		mappings := cfg.Mappings()
 		resolverPairs := cfg.ComponentResolvers()
+		propResolverPairs := cfg.PropertyResolvers()
+		beanPaths := cfg.BeanPaths()
 
 		// Serve the socket listener in the background
 		fmtCfg := server.FormattingConfig{
@@ -116,7 +118,7 @@ func runServer() {
 			AttrBreakThreshold:    cfg.FormattingAttrBreakThreshold(),
 			IndentWidth:           cfg.FormattingIndentWidth(),
 		}
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, fmtCfg) }()
+		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, propResolverPairs, beanPaths, fmtCfg) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
@@ -130,6 +132,10 @@ func runServer() {
 		for _, p := range resolverPairs {
 			srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
 		}
+		for _, p := range propResolverPairs {
+			srv.PropertyResolvers = append(srv.PropertyResolvers, server.PropertyResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+		}
+		srv.BeanPaths = beanPaths
 		srv.Formatting = fmtCfg
 		conn.Go(ctx, srv.Handler())
 		go func() {

@@ -78,6 +78,55 @@ type Resolver struct {
 	Prefix  string
 }
 
+// PropertyResolver maps a property attribute value to a component path.
+type PropertyResolver struct {
+	Match     string // pattern to match against the attribute value, $1 is capture placeholder
+	Resolve   string // component dot-path template, $1 replaced with captured value
+	Attribute string // property attribute to inspect (e.g. "inject")
+}
+
+// ResolveProperty matches a property's attributes against property resolvers
+// and returns the resolved component dot-path, or empty string.
+func ResolveProperty(attrs map[string]string, resolvers []PropertyResolver) string {
+	for _, r := range resolvers {
+		val, ok := attrs[strings.ToLower(r.Attribute)]
+		if !ok || val == "" {
+			continue
+		}
+		if resolved := matchPropertyPattern(val, r.Match, r.Resolve); resolved != "" {
+			return resolved
+		}
+	}
+	return ""
+}
+
+func matchPropertyPattern(value, pattern, resolve string) string {
+	idx := strings.Index(pattern, "$1")
+	if idx < 0 {
+		// Exact match
+		if strings.EqualFold(value, pattern) {
+			return resolve
+		}
+		return ""
+	}
+	prefix := pattern[:idx]
+	suffix := pattern[idx+2:]
+	if len(value) < len(prefix)+len(suffix) {
+		return ""
+	}
+	if !strings.EqualFold(value[:len(prefix)], prefix) {
+		return ""
+	}
+	if !strings.EqualFold(value[len(value)-len(suffix):], suffix) {
+		return ""
+	}
+	captured := value[len(prefix) : len(value)-len(suffix)]
+	resolved := strings.ReplaceAll(resolve, "$1", captured)
+	resolved = strings.TrimSuffix(resolved, ".cfc")
+	resolved = strings.ReplaceAll(resolved, "/", ".")
+	return resolved
+}
+
 // ResolveFromCall matches an expression against resolvers and returns the component dot-path.
 func ResolveFromCall(expr string, resolvers []Resolver) string {
 	expr = strings.TrimSpace(expr)

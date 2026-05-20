@@ -385,6 +385,9 @@ func (p *scriptParser) scanRHSForRefs(varName string, line int) {
 	case "entitynew":
 		p.sc.NextSkipComments() // consume "entityNew"
 		p.parseEntityNew(varName, line)
+	case "entityload":
+		p.sc.NextSkipComments() // consume "entityLoad"
+		p.parseEntityNew(varName, line)
 	}
 }
 

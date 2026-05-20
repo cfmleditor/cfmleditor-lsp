@@ -15,6 +15,8 @@ type Index struct {
 	funcs    map[string][]*cfparser.FunctionDef    // lowercase name -> definitions
 	comprefs map[string][]*cfparser.ComponentRef   // lowercase variable -> refs
 	thisVars map[uri.URI][]string                  // file URI -> this-scoped var names
+	beans    map[string]string                     // lowercase bean name -> dot-path
+	entities map[string]uri.URI                    // lowercase entity name -> file URI
 }
 
 // New creates an empty Index.
@@ -23,6 +25,8 @@ func New() *Index {
 		funcs:    make(map[string][]*cfparser.FunctionDef),
 		comprefs: make(map[string][]*cfparser.ComponentRef),
 		thisVars: make(map[uri.URI][]string),
+		beans:    make(map[string]string),
+		entities: make(map[string]uri.URI),
 	}
 }
 
@@ -223,4 +227,32 @@ func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, lin
 		}
 	}
 	return best
+}
+
+// SetBeans replaces the bean map with the given name→dot-path mapping.
+func (idx *Index) SetBeans(beans map[string]string) {
+	idx.mu.Lock()
+	idx.beans = beans
+	idx.mu.Unlock()
+}
+
+// LookupBean returns the component dot-path for a bean name (case-insensitive).
+func (idx *Index) LookupBean(name string) string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.beans[strings.ToLower(name)]
+}
+
+// SetEntity registers a persistent CFC as an ORM entity by name.
+func (idx *Index) SetEntity(name string, fileURI uri.URI) {
+	idx.mu.Lock()
+	idx.entities[strings.ToLower(name)] = fileURI
+	idx.mu.Unlock()
+}
+
+// LookupEntity returns the file URI for an ORM entity name (case-insensitive).
+func (idx *Index) LookupEntity(name string) uri.URI {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.entities[strings.ToLower(name)]
 }

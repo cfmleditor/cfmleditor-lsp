@@ -33,6 +33,8 @@ type Server struct {
 	IndexGlobs       []string // optional glob filters (absolute paths)
 	Mappings           map[string]string      // component path mappings (key -> abs path)
 	ComponentResolvers []ComponentResolver    // custom method-to-component resolvers
+	PropertyResolvers  []PropertyResolver     // custom property-to-component resolvers
+	BeanPaths          map[string]string    // namespace → abs directory path for bean scanning
 	Formatting         FormattingConfig       // formatting settings
 	changeCount        map[uri.URI]int        // rapid change counter per file
 	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
@@ -191,6 +193,26 @@ func (s *Server) cfResolvers() []cfparser.Resolver {
 	return r
 }
 
+func (s *Server) cfPropertyResolvers() []cfparser.PropertyResolver {
+	if len(s.PropertyResolvers) == 0 {
+		return nil
+	}
+	r := make([]cfparser.PropertyResolver, len(s.PropertyResolvers))
+	for i, pr := range s.PropertyResolvers {
+		r[i] = cfparser.PropertyResolver{Match: pr.Match, Resolve: pr.Resolve, Attribute: pr.Attribute}
+	}
+	return r
+}
+
+// parseContent parses CFC content with all configured resolvers.
+func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseResult {
+	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
+		Resolvers:         s.cfResolvers(),
+		PropertyResolvers: s.cfPropertyResolvers(),
+		BeanLookup:        s.index.LookupBean,
+	})
+}
+
 // FormattingConfig holds formatting settings from .cfmleditor.json.
 type FormattingConfig struct {
 	Enabled               bool
@@ -217,6 +239,14 @@ type ComponentResolver struct {
 	Match   string
 	Resolve string
 	Prefix  string
+}
+
+// PropertyResolver resolves a property declaration to a component path based on
+// an attribute value (e.g. inject="model.UserDAO" → models.UserDAO).
+type PropertyResolver struct {
+	Match     string // pattern to match against the attribute value, $1 is capture placeholder
+	Resolve   string // component dot-path template, $1 replaced with captured value
+	Attribute string // property attribute to inspect (e.g. "inject")
 }
 
 // resolveComponentFromCall matches a call expression against configured resolvers.

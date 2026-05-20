@@ -21,7 +21,7 @@ update-grammar: generate
 	go mod tidy
 	go clean -cache
 
-build: update-grammar generate
+build: generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp
 
@@ -35,7 +35,7 @@ lint:
 	golangci-lint run --enable bodyclose,gocritic ./...
 
 lint-fix:
-		golangci-lint run --enable bodyclose,gocritic --fix ./...
+	golangci-lint run --enable bodyclose,gocritic --fix ./...
 
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)
