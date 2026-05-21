@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.16]
+
 - Prevent processing of non CFML files, only process `.cfc`, `.cfm`, `.cfml`, and `.cfs` files
 
 ## [0.1.15]
