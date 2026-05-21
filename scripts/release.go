@@ -127,8 +127,11 @@ func main() {
 	gitExec("tag", tag)
 
 	fmt.Println("Pushing...")
-	run("git", "-c", "credential.helper=!gh auth git-credential", "push")
-	run("git", "-c", "credential.helper=!gh auth git-credential", "push", "origin", tag)
+	// Get remote URL and rewrite to use gh token for auth
+	remote := strings.TrimSpace(git("remote", "get-url", "origin"))
+	pushURL := ghAuthURL(remote)
+	run("git", "push", pushURL, "HEAD")
+	run("git", "push", pushURL, tag)
 
 	fmt.Printf("\nReleased %s\n", tag)
 }
@@ -165,6 +168,80 @@ func git(args ...string) string {
 	cmd := exec.Command("git", args...)
 	out, _ := cmd.Output()
 	return string(out)
+}
+
+func ghAuthURL(remote string) string {
+	// Determine repo owner/name from remote
+	remote = strings.TrimSpace(remote)
+	var repoPath string
+	if strings.HasPrefix(remote, "git@github.com:") {
+		repoPath = strings.TrimPrefix(remote, "git@github.com:")
+	} else {
+		// https://[user@]github.com/owner/repo.git
+		idx := strings.Index(remote, "github.com/")
+		if idx >= 0 {
+			repoPath = remote[idx+len("github.com/"):]
+		}
+	}
+	repoPath = strings.TrimSuffix(repoPath, ".git")
+
+	// Try current gh account first; if it can't access the repo, try switching
+	if repoPath != "" {
+		cmd := exec.Command("gh", "api", "repos/"+repoPath, "--jq", ".permissions.push")
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != "true" {
+			// Try to find an account with push access
+			switchAccount(repoPath)
+		}
+	}
+
+	cmd := exec.Command("gh", "auth", "token")
+	out, err := cmd.Output()
+	if err != nil {
+		fatal("failed to get gh auth token: %v", err)
+	}
+	token := strings.TrimSpace(string(out))
+
+	if strings.HasPrefix(remote, "git@github.com:") {
+		path := strings.TrimPrefix(remote, "git@github.com:")
+		return "https://" + token + "@github.com/" + path
+	}
+	r := strings.TrimPrefix(remote, "https://")
+	if idx := strings.IndexByte(r, '@'); idx >= 0 {
+		r = r[idx+1:]
+	}
+	return "https://" + token + "@" + r
+}
+
+func switchAccount(repoPath string) {
+	// List gh accounts and try each until one has push access
+	cmd := exec.Command("gh", "auth", "status")
+	out, _ := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "Logged in to github.com account") {
+			// Extract username
+			parts := strings.Fields(line)
+			for i, p := range parts {
+				if p == "account" && i+1 < len(parts) {
+					user := strings.TrimRight(parts[i+1], " (")
+					// Try switching to this account
+					sw := exec.Command("gh", "auth", "switch", "--user", user)
+					if sw.Run() != nil {
+						continue
+					}
+					// Check if this account has push access
+					check := exec.Command("gh", "api", "repos/"+repoPath, "--jq", ".permissions.push")
+					result, err := check.Output()
+					if err == nil && strings.TrimSpace(string(result)) == "true" {
+						fmt.Printf("Switched to gh account: %s\n", user)
+						return
+					}
+				}
+			}
+		}
+	}
+	fmt.Printf("No gh account with push access to %s. Logging in...\n", repoPath)
+	run("gh", "auth", "login")
 }
 
 func gitExec(args ...string) {
