@@ -22,7 +22,7 @@ func (s *Server) indexWorkspace() {
 		if len(s.IndexGlobs) > 0 {
 			for _, g := range s.IndexGlobs {
 				for _, f := range expandGlob(g) {
-					if strings.ToLower(filepath.Ext(f)) == ".cfc" {
+					if isCFCFile(f) {
 						files = append(files, f)
 					}
 				}
@@ -160,7 +160,7 @@ func collectCFCFiles(root string) []string {
 		if info.IsDir() {
 			return nil
 		}
-		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
+		if isCFCFile(path) {
 			files = append(files, path)
 		}
 		return nil
@@ -214,7 +214,7 @@ func (s *Server) indexRoot(root string) {
 		if info.IsDir() {
 			return nil
 		}
-		if strings.ToLower(filepath.Ext(path)) == ".cfc" {
+		if isCFCFile(path) {
 			fileURI := uri.File(path)
 			// Skip files already open in the editor — their buffer
 			// content was indexed via didOpen and may be newer than disk.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Prevent processing of non CFML files, only process `.cfc`, `.cfm`, `.cfml`, and `.cfs` files
+
 ## [0.1.15]
 
 - Fix zip in github workflow, use 7z instead

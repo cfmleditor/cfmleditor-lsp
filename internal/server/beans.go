@@ -29,7 +29,7 @@ func buildBeanMap(beanPaths map[string]string) map[string]string {
 			if info.IsDir() {
 				return nil
 			}
-			if !strings.EqualFold(filepath.Ext(path), ".cfc") {
+			if !isCFCFile(path) {
 				return nil
 			}
 			name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))

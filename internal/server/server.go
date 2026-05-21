@@ -70,6 +70,34 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 	}
 }
 
+// isCFMLFile returns true if the path/URI refers to a CFML file (.cfc, .cfm, .cfml, .cfs).
+func isCFMLFile(path string) bool {
+	if len(path) < 4 {
+		return false
+	}
+	// Check last char first as a fast reject
+	end := path[len(path)-1]
+	switch end | 0x20 {
+	case 'c': // .cfc
+		return len(path) > 4 && (path[len(path)-4] == '.' || path[len(path)-4] == '/') &&
+			path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	case 'm': // .cfm
+		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	case 'l': // .cfml
+		return len(path) > 5 && path[len(path)-5] == '.' && (path[len(path)-4]|0x20) == 'c' &&
+			(path[len(path)-3]|0x20) == 'f' && (path[len(path)-2]|0x20) == 'm'
+	case 's': // .cfs
+		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	}
+	return false
+}
+
+// isCFCFile returns true if the path/URI refers to a CFC file.
+func isCFCFile(path string) bool {
+	return len(path) > 4 && path[len(path)-4] == '.' &&
+		(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f' && (path[len(path)-1]|0x20) == 'c'
+}
+
 func (s *Server) capabilities() protocol.ServerCapabilities {
 	return protocol.ServerCapabilities{
 		TextDocumentSync: protocol.TextDocumentSyncOptions{

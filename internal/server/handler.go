@@ -114,6 +114,10 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	docURI := uri.URI(params.TextDocument.URI)
 	s.setDocument(docURI, params.TextDocument.Text)
 
+	if !isCFMLFile(string(docURI)) {
+		return reply(ctx, nil, nil)
+	}
+
 	pr := s.parseContent(docURI, params.TextDocument.Text)
 	pr.Log = &zapAdapter{s.logger}
 	s.logger.Debug("document opened: parse result",
@@ -145,6 +149,10 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	docURI := uri.URI(params.TextDocument.URI)
 	if len(params.ContentChanges) == 0 {
+		return reply(ctx, nil, nil)
+	}
+
+	if !isCFMLFile(string(docURI)) {
 		return reply(ctx, nil, nil)
 	}
 
@@ -360,8 +368,10 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 		cfpath.InvalidateAppMappingsCache()
 	}
 
-	go s.runDiagnostics(ctx, docURI)
-	go s.rebuildFileCompletionCache(docURI)
+	if isCFMLFile(filePath) {
+		go s.runDiagnostics(ctx, docURI)
+		go s.rebuildFileCompletionCache(docURI)
+	}
 
 	return reply(ctx, nil, nil)
 }
@@ -426,13 +436,10 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
-	lower := strings.ToLower(string(docURI))
-	isCFC := strings.HasSuffix(lower, ".cfc")
-	isCFML := isCFC || strings.HasSuffix(lower, ".cfm") || strings.HasSuffix(lower, ".cfml") || strings.HasSuffix(lower, ".cfs")
-	if !isCFML {
+	if !isCFMLFile(string(docURI)) {
 		return
 	}
-	if isCFC && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
+	if isCFCFile(string(docURI)) && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
 		return
 	}
 	s.index.IndexFile(docURI, content)
@@ -440,16 +447,13 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 
 // reindexFromParseResult updates the index using an existing ParseResult.
 func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult) {
-	lower := strings.ToLower(string(docURI))
-	isCFC := strings.HasSuffix(lower, ".cfc")
-	isCFML := isCFC || strings.HasSuffix(lower, ".cfm") || strings.HasSuffix(lower, ".cfml") || strings.HasSuffix(lower, ".cfs")
-	if !isCFML {
+	if !isCFMLFile(string(docURI)) {
 		return
 	}
 	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 	s.index.SetThisVars(docURI, pr.ThisVars())
 	// Only register as entity if within ORM scope and workspace
-	if isCFC && pr.Persistent {
+	if isCFCFile(string(docURI)) && pr.Persistent {
 		filePath := strings.TrimPrefix(string(docURI), "file://")
 		if s.isOrmPath(filePath) {
 			s.index.SetEntity(cfcNameFromURI(docURI), docURI)
