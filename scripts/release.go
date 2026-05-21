@@ -33,6 +33,15 @@ func main() {
 		fatal("working directory has uncommitted changes")
 	}
 
+	// Check gh CLI is authenticated
+	cmd := exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		fmt.Println("Not authenticated with GitHub. Running gh auth login...")
+		run("gh", "auth", "login")
+	}
+	// Ensure git uses gh credentials
+	run("gh", "auth", "setup-git")
+
 	// Check tag doesn't exist
 	tag := "v" + version
 	out = git("tag", "-l", tag)
