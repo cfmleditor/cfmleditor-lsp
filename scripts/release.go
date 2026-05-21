@@ -39,8 +39,6 @@ func main() {
 		fmt.Println("Not authenticated with GitHub. Running gh auth login...")
 		run("gh", "auth", "login")
 	}
-	// Ensure git uses gh credentials
-	run("gh", "auth", "setup-git")
 
 	// Check tag doesn't exist
 	tag := "v" + version
@@ -129,8 +127,8 @@ func main() {
 	gitExec("tag", tag)
 
 	fmt.Println("Pushing...")
-	gitExec("push")
-	gitExec("push", "origin", tag)
+	run("git", "-c", "credential.helper=!gh auth git-credential", "push")
+	run("git", "-c", "credential.helper=!gh auth git-credential", "push", "origin", tag)
 
 	fmt.Printf("\nReleased %s\n", tag)
 }
