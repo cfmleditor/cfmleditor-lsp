@@ -15,7 +15,9 @@ func Proxy(sockPath string) error {
 		return err
 	}
 
-	defer func() { _ = conn.Close() }()
+	var once sync.Once
+	closeConn := func() { once.Do(func() { _ = conn.Close() }) }
+	defer closeConn()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -24,16 +26,15 @@ func Proxy(sockPath string) error {
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(conn, os.Stdin)
-		// Editor closed stdin; signal the socket we're done writing
-		if uc, ok := conn.(*net.UnixConn); ok {
-			_ = uc.CloseWrite()
-		}
+		closeConn()
 	}()
 
 	// socket → stdout
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(os.Stdout, conn)
+		// Daemon closed the socket; close stdin to unblock the other goroutine
+		_ = os.Stdin.Close()
 	}()
 
 	wg.Wait()

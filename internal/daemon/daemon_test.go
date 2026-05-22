@@ -136,6 +136,63 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	}
 }
 
+func TestDaemonSurvivesAbruptClientDisconnect(t *testing.T) {
+	sock := shortSock(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	idx := index.New()
+	ct := NewConnTracker()
+	ct.Add() // stdio slot
+
+	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, nil, nil, server.FormattingConfig{}) }()
+	waitForSocket(t, sock)
+
+	// Connect a client and immediately close the raw connection (simulates crash)
+	c, _ := net.Dial("unix", sock)
+	_ = c.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Daemon must still be alive — stdio slot is still connected
+	select {
+	case <-ct.Done():
+		t.Fatal("daemon shut down after abrupt client disconnect")
+	default:
+	}
+
+	// A new client can still connect and make calls
+	_, rpc := dialRPC(t, ctx, sock)
+	callRPC(t, ctx, rpc, "initialize", `{"capabilities":{}}`)
+}
+
+func TestDaemonShutdownClosesSocketClients(t *testing.T) {
+	sock := shortSock(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	idx := index.New()
+	ct := NewConnTracker()
+	ct.Add() // stdio slot
+
+	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, nil, nil, server.FormattingConfig{}) }()
+	waitForSocket(t, sock)
+
+	// Connect a client
+	_, rpc := dialRPC(t, ctx, sock)
+	callRPC(t, ctx, rpc, "initialize", `{"capabilities":{}}`)
+
+	// Cancel context (simulates daemon shutdown)
+	cancel()
+
+	// The client's connection should close within a reasonable time
+	select {
+	case <-rpc.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("socket client connection did not close after daemon shutdown")
+	}
+}
+
 func TestMultipleConnectionsShareIndex(t *testing.T) {
 	sock := shortSock(t)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -139,7 +139,12 @@ func runServer() {
 		srv.Formatting = fmtCfg
 		conn.Go(ctx, srv.Handler())
 		go func() {
-			<-conn.Done()
+			select {
+			case <-conn.Done():
+			case <-ctx.Done():
+				_ = os.Stdin.Close()
+				<-conn.Done()
+			}
 			ct.Remove()
 		}()
 
@@ -168,8 +173,8 @@ func (s stdio) Read(p []byte) (int, error) { return os.Stdin.Read(p) }
 // Write writes to stdout.
 func (s stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
 
-// Close is a no-op.
-func (s stdio) Close() error { return nil }
+// Close closes stdin to unblock pending reads.
+func (s stdio) Close() error { return os.Stdin.Close() }
 
 func cmdParse(args []string) {
 	if len(args) == 0 {

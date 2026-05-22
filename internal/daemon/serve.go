@@ -73,7 +73,12 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 			srv.BeanPaths = beanPaths
 			srv.Formatting = fmtCfg
 			conn.Go(ctx, srv.Handler())
-			<-conn.Done()
+			select {
+			case <-conn.Done():
+			case <-ctx.Done():
+				_ = c.Close()
+				<-conn.Done()
+			}
 		}()
 	}
 }
