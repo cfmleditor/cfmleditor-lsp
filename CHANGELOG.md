@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.20]
+
 - Extra fixes and tests to avoid LSP daemon panics
 
 ## [0.1.19]
