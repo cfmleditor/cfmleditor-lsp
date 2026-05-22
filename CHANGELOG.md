@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.19]
+
 - Fix panic crashing the server
 - Fix `.cfc` path check
 
