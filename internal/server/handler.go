@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,7 +25,13 @@ func (z *zapAdapter) Warn(msg string, kv ...interface{}) { z.l.Sugar().Warnw(msg
 
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
-	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("handler panic", zap.String("method", req.Method()), zap.Any("panic", r))
+				err = reply(ctx, nil, fmt.Errorf("internal error: %v", r))
+			}
+		}()
 		switch req.Method() {
 		case protocol.MethodInitialize:
 			return s.handleInitialize(ctx, reply, req)
@@ -86,8 +93,8 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://")) //nolint:all // this is for compatibility
 	}
 
-	go s.indexWorkspace()
-	go s.initLinter()
+	s.safeGo("indexWorkspace", s.indexWorkspace)
+	s.safeGo("initLinter", s.initLinter)
 
 	// In standalone mode, load config from workspace roots if not already configured
 	if len(s.ComponentResolvers) == 0 {
@@ -112,11 +119,12 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	}
 
 	docURI := uri.URI(params.TextDocument.URI)
-	s.setDocument(docURI, params.TextDocument.Text)
 
 	if !isCFMLFile(string(docURI)) {
 		return reply(ctx, nil, nil)
 	}
+
+	s.setDocument(docURI, params.TextDocument.Text)
 
 	pr := s.parseContent(docURI, params.TextDocument.Text)
 	pr.Log = &zapAdapter{s.logger}
@@ -135,7 +143,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	s.reindexFromParseResult(docURI, pr)
 
-	go s.rebuildFileCompletionCacheFromPR(docURI, pr)
+	s.safeGo("rebuildFileCompletionCacheFromPR", func() { s.rebuildFileCompletionCacheFromPR(docURI, pr) })
 	s.logger.Debug("document opened", zap.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
@@ -205,6 +213,11 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			timer.Stop()
 		}
 		s.cacheTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("goroutine panic", zap.String("label", "rapidChangeTimer"), zap.Any("panic", r))
+				}
+			}()
 			s.mu.Lock()
 			delete(s.changeCount, docURI)
 			delete(s.changeWindowStart, docURI)
@@ -297,6 +310,11 @@ func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine i
 		t.Stop()
 	}
 	s.cacheTimers[docURI] = time.AfterFunc(cacheRebuildDelay, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("goroutine panic", zap.String("label", "cacheRebuild"), zap.Any("panic", r))
+			}
+		}()
 		s.rebuildCompletionCache(docURI, content, editLine)
 	})
 	s.mu.Unlock()
@@ -369,8 +387,8 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 	}
 
 	if isCFMLFile(filePath) {
-		go s.runDiagnostics(ctx, docURI)
-		go s.rebuildFileCompletionCache(docURI)
+		s.safeGo("runDiagnostics", func() { s.runDiagnostics(ctx, docURI) })
+		s.safeGo("rebuildFileCompletionCache", func() { s.rebuildFileCompletionCache(docURI) })
 	}
 
 	return reply(ctx, nil, nil)
@@ -514,4 +532,16 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 	}
 
 	return reply(ctx, nil, nil)
+}
+
+// safeGo runs fn in a goroutine with panic recovery.
+func (s *Server) safeGo(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error("goroutine panic", zap.String("label", label), zap.Any("panic", r))
+			}
+		}()
+		fn()
+	}()
 }

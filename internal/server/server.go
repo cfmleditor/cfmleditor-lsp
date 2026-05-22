@@ -79,8 +79,8 @@ func isCFMLFile(path string) bool {
 	end := path[len(path)-1]
 	switch end | 0x20 {
 	case 'c': // .cfc
-		return len(path) > 4 && (path[len(path)-4] == '.' || path[len(path)-4] == '/') &&
-			path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+		return len(path) > 4 && path[len(path)-4] == '.' &&
+			(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
 	case 'm': // .cfm
 		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
 	case 'l': // .cfml
