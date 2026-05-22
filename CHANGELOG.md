@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Extra fixes and tests to avoid LSP daemon panics
+
 ## [0.1.19]
 
 - Fix panic crashing the server
