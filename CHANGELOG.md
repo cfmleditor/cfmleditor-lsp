@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Fix panic crashing the server
+- Fix `.cfc` path check
+
 ## [0.1.18]
 
 - Prevent processing of non CFML files, only process `.cfc`, `.cfm`, `.cfml`, and `.cfs` files
