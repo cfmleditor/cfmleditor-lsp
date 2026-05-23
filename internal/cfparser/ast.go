@@ -1,6 +1,8 @@
 package cfparser
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 
 	"go.lsp.dev/uri"
@@ -131,48 +133,105 @@ func matchPropertyPattern(value, pattern, resolve string) string {
 func ResolveFromCall(expr string, resolvers []Resolver) string {
 	expr = strings.TrimSpace(expr)
 	for _, r := range resolvers {
-		if r.Prefix != "" && !containsFold(expr, r.Prefix) {
+		if r.Prefix == "" {
 			continue
 		}
-		if val := matchResolverPattern(expr, r.Match); val != "" {
-			resolved := strings.ReplaceAll(r.Resolve, "$1", val)
-			resolved = strings.TrimSuffix(resolved, ".cfc")
-			resolved = strings.ReplaceAll(resolved, "/", ".")
+		// Find prefix position and only match from there, limited forward
+		idx := indexFold(expr, r.Prefix)
+		if idx < 0 {
+			continue
+		}
+		sub := expr[idx:]
+		if len(sub) > 200 {
+			sub = sub[:200]
+		}
+		if resolved := matchResolverPattern(sub, r.Match, r.Resolve); resolved != "" {
 			return resolved
 		}
 	}
 	return ""
 }
 
-func matchResolverPattern(expr, pattern string) string {
-	idx := strings.Index(pattern, "$1")
-	if idx < 0 {
-		if strings.EqualFold(expr, pattern) {
-			return "1"
-		}
-		return ""
-	}
-	prefix := pattern[:idx]
-	suffix := pattern[idx+2:]
-	// Find the prefix within the expression (may be preceded by qualifier like VARIABLES._parent.)
-	start := -1
-	for i := 0; i <= len(expr)-len(prefix); i++ {
-		if strings.EqualFold(expr[i:i+len(prefix)], prefix) {
-			start = i
-			break
+func indexFold(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if strings.EqualFold(s[i:i+len(substr)], substr) {
+			return i
 		}
 	}
-	if start < 0 {
-		return ""
-	}
-	rest := expr[start+len(prefix):]
-	if len(suffix) > 0 {
-		if !strings.EqualFold(rest[len(rest)-len(suffix):], suffix) {
+	return -1
+}
+
+// placeholderRe matches $1, $2, etc. in patterns.
+var placeholderRe = regexp.MustCompile(`\$(\d+)`)
+
+func matchResolverPattern(expr, pattern, resolve string) string {
+	// Build regex from pattern: replace $N placeholders with capture groups
+	if !placeholderRe.MatchString(pattern) {
+		// No $N in pattern — use pattern as regex directly
+		re, err := regexp.Compile("(?i)" + pattern)
+		if err != nil {
+			if strings.EqualFold(expr, pattern) {
+				return resolve
+			}
 			return ""
 		}
-		rest = rest[:len(rest)-len(suffix)]
+		m := re.FindStringSubmatch(expr)
+		if m == nil {
+			return ""
+		}
+		// Substitute any capture groups into resolve template
+		result := resolve
+		for i := 1; i < len(m); i++ {
+			result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), m[i])
+		}
+		if result == resolve && len(m) == 1 {
+			return resolve
+		}
+		result = strings.TrimSuffix(result, ".cfc")
+		result = strings.ReplaceAll(result, "/", ".")
+		return result
 	}
-	return strings.Trim(rest, "\"'")
+
+	// Replace $N with capture groups in the pattern.
+	// If the pattern contains backslash sequences (regex escapes), use it as raw regex
+	// where capture groups are already defined in the pattern itself.
+	// Otherwise, escape literal parts around the placeholders and insert capture groups.
+	isRawRegex := strings.Contains(pattern, `\`)
+	var reStr string
+	if isRawRegex {
+		// Raw regex: remove $N references (they refer to existing capture groups)
+		reStr = "(?i)" + placeholderRe.ReplaceAllString(pattern, "")
+	} else {
+		parts := placeholderRe.Split(pattern, -1)
+		var b strings.Builder
+		b.WriteString("(?i)")
+		for i, part := range parts {
+			b.WriteString(regexp.QuoteMeta(part))
+			if i < len(parts)-1 {
+				b.WriteString(`(.+?)`)
+			}
+		}
+		reStr = b.String()
+	}
+
+	re, err := regexp.Compile(reStr)
+	if err != nil {
+		return ""
+	}
+	m := re.FindStringSubmatch(expr)
+	if m == nil {
+		return ""
+	}
+
+	// Replace $N in resolve template with captured groups
+	result := resolve
+	for i := 1; i < len(m); i++ {
+		captured := strings.Trim(m[i], "\"'")
+		result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), captured)
+	}
+	result = strings.TrimSuffix(result, ".cfc")
+	result = strings.ReplaceAll(result, "/", ".")
+	return result
 }
 
 func containsFold(s, substr string) bool {

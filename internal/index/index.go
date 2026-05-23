@@ -11,22 +11,26 @@ import (
 
 // Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
-	mu       sync.RWMutex
-	funcs    map[string][]*cfparser.FunctionDef    // lowercase name -> definitions
-	comprefs map[string][]*cfparser.ComponentRef   // lowercase variable -> refs
-	thisVars map[uri.URI][]string                  // file URI -> this-scoped var names
-	beans    map[string]string                     // lowercase bean name -> dot-path
-	entities map[string]uri.URI                    // lowercase entity name -> file URI
+	mu        sync.RWMutex
+	funcs     map[string][]*cfparser.FunctionDef    // lowercase name -> definitions
+	fileFuncs map[string][]*cfparser.FunctionDef    // lowercase URI -> definitions in that file
+	comprefs  map[string][]*cfparser.ComponentRef   // lowercase variable -> refs
+	fileRefs  map[string][]*cfparser.ComponentRef   // lowercase URI -> refs in that file
+	thisVars  map[string][]string                   // lowercase URI -> this-scoped var names
+	beans     map[string]string                     // lowercase bean name -> dot-path
+	entities  map[string]uri.URI                    // lowercase entity name -> file URI
 }
 
 // New creates an empty Index.
 func New() *Index {
 	return &Index{
-		funcs:    make(map[string][]*cfparser.FunctionDef),
-		comprefs: make(map[string][]*cfparser.ComponentRef),
-		thisVars: make(map[uri.URI][]string),
-		beans:    make(map[string]string),
-		entities: make(map[string]uri.URI),
+		funcs:     make(map[string][]*cfparser.FunctionDef),
+		fileFuncs: make(map[string][]*cfparser.FunctionDef),
+		comprefs:  make(map[string][]*cfparser.ComponentRef),
+		fileRefs:  make(map[string][]*cfparser.ComponentRef),
+		thisVars:  make(map[string][]string),
+		beans:     make(map[string]string),
+		entities:  make(map[string]uri.URI),
 	}
 }
 
@@ -48,35 +52,33 @@ func (idx *Index) AllFunctions() []*cfparser.FunctionDef {
 	return all
 }
 
+// uriKey returns a lowercase URI for case-insensitive comparison on case-insensitive filesystems.
+func uriKey(u uri.URI) string {
+	return strings.ToLower(string(u))
+}
+
 // FunctionsForFile returns all indexed function definitions for a specific file.
 func (idx *Index) FunctionsForFile(fileURI uri.URI) []*cfparser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	var out []*cfparser.FunctionDef
-	for _, defs := range idx.funcs {
-		for _, d := range defs {
-			if d.URI == fileURI {
-				out = append(out, d)
-			}
-		}
-	}
-	return out
+	return idx.fileFuncs[uriKey(fileURI)]
 }
 
 // ShiftLines adjusts line numbers for all entries in a file where Line > afterLine.
 func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	key := uriKey(fileURI)
 	for _, defs := range idx.funcs {
 		for _, d := range defs {
-			if d.URI == fileURI && int(d.Line) > afterLine {
+			if uriKey(d.URI) == key && int(d.Line) > afterLine {
 				d.Line = uint32(int(d.Line) + delta)
 			}
 		}
 	}
 	for _, refs := range idx.comprefs {
 		for _, r := range refs {
-			if r.URI == fileURI && int(r.Line) > afterLine {
+			if uriKey(r.URI) == key && int(r.Line) > afterLine {
 				r.Line = uint32(int(r.Line) + delta)
 			}
 		}
@@ -91,16 +93,24 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
-	idx.thisVars[fileURI] = pr.ThisVars()
+	fk := uriKey(fileURI)
+	idx.thisVars[fk] = pr.ThisVars()
 
+	var fileDefs []*cfparser.FunctionDef
 	for i := range pr.Funcs {
 		key := strings.ToLower(pr.Funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &pr.Funcs[i])
+		fileDefs = append(fileDefs, &pr.Funcs[i])
 	}
+	idx.fileFuncs[fk] = fileDefs
+
+	var fileRefsList []*cfparser.ComponentRef
 	for i := range pr.Refs {
 		key := strings.ToLower(pr.Refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &pr.Refs[i])
+		fileRefsList = append(fileRefsList, &pr.Refs[i])
 	}
+	idx.fileRefs[fk] = fileRefsList
 }
 
 // IndexFileFromResult updates the index using pre-parsed function defs and refs.
@@ -109,15 +119,23 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []cfparser.Function
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
+	fk := uriKey(fileURI)
 
+	var fileDefs []*cfparser.FunctionDef
 	for i := range funcs {
 		key := strings.ToLower(funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &funcs[i])
+		fileDefs = append(fileDefs, &funcs[i])
 	}
+	idx.fileFuncs[fk] = fileDefs
+
+	var fileRefsList []*cfparser.ComponentRef
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
+		fileRefsList = append(fileRefsList, &refs[i])
 	}
+	idx.fileRefs[fk] = fileRefsList
 }
 
 // RemoveFilesUnder removes all indexed entries whose URI starts with prefix.
@@ -153,31 +171,34 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 }
 
 func (idx *Index) removeFileEntries(fileURI uri.URI) {
-	delete(idx.thisVars, fileURI)
-	for key, entries := range idx.funcs {
+	key := uriKey(fileURI)
+	delete(idx.thisVars, key)
+	delete(idx.fileFuncs, key)
+	delete(idx.fileRefs, key)
+	for k, entries := range idx.funcs {
 		filtered := entries[:0]
 		for _, e := range entries {
-			if e.URI != fileURI {
+			if uriKey(e.URI) != key {
 				filtered = append(filtered, e)
 			}
 		}
 		if len(filtered) == 0 {
-			delete(idx.funcs, key)
+			delete(idx.funcs, k)
 		} else {
-			idx.funcs[key] = filtered
+			idx.funcs[k] = filtered
 		}
 	}
-	for key, entries := range idx.comprefs {
+	for k, entries := range idx.comprefs {
 		filtered := entries[:0]
 		for _, e := range entries {
-			if e.URI != fileURI {
+			if uriKey(e.URI) != key {
 				filtered = append(filtered, e)
 			}
 		}
 		if len(filtered) == 0 {
-			delete(idx.comprefs, key)
+			delete(idx.comprefs, k)
 		} else {
-			idx.comprefs[key] = filtered
+			idx.comprefs[k] = filtered
 		}
 	}
 }
@@ -193,28 +214,20 @@ func (idx *Index) LookupComponentRef(variable string) []*cfparser.ComponentRef {
 func (idx *Index) RefsForFile(fileURI uri.URI) []*cfparser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	var out []*cfparser.ComponentRef
-	for _, refs := range idx.comprefs {
-		for _, r := range refs {
-			if r.URI == fileURI {
-				out = append(out, r)
-			}
-		}
-	}
-	return out
+	return idx.fileRefs[uriKey(fileURI)]
 }
 
 // ThisVarsForFile returns the this-scoped variable names for a file.
 func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	return idx.thisVars[fileURI]
+	return idx.thisVars[uriKey(fileURI)]
 }
 
 // SetThisVars stores this-scoped variable names for a file.
 func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 	idx.mu.Lock()
-	idx.thisVars[fileURI] = vars
+	idx.thisVars[uriKey(fileURI)] = vars
 	idx.mu.Unlock()
 }
 
@@ -225,6 +238,8 @@ func (idx *Index) AddRefs(refs []cfparser.ComponentRef) {
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
+		fk := uriKey(refs[i].URI)
+		idx.fileRefs[fk] = append(idx.fileRefs[fk], &refs[i])
 	}
 }
 
@@ -233,9 +248,10 @@ func (idx *Index) AddRefs(refs []cfparser.ComponentRef) {
 func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, line uint32) *cfparser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+	key := uriKey(fileURI)
 	var best *cfparser.ComponentRef
 	for _, ref := range idx.comprefs[strings.ToLower(variable)] {
-		if ref.URI == fileURI && ref.Line <= line {
+		if uriKey(ref.URI) == key && ref.Line <= line {
 			if best == nil || ref.Line > best.Line {
 				best = ref
 			}

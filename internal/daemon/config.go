@@ -310,9 +310,9 @@ func (c *Config) BeanPaths() map[string]string {
 
 // IndexGlobs returns absolute glob patterns for workspace indexing,
 // replacing the leading folder name with the corresponding resolved workspace
-// folder path. For example, if workspacePaths contains "../tassweb" and
-// workspaceIndexGlobs contains "tassweb/**/*.cfc", the result is
-// "/abs/path/to/tassweb/**/*.cfc".
+// folder path. For example, if workspacePaths contains "../shared-lib" and
+// workspaceIndexGlobs contains "shared-lib/**/*.cfc", the result is
+// "/abs/path/to/shared-lib/**/*.cfc".
 func (c *Config) IndexGlobs() []string {
 	raw := c.raw()
 	if raw == nil || len(raw.WorkspaceIndexGlobs) == 0 {

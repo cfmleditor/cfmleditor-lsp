@@ -83,19 +83,19 @@ func TestSocketPathDerivedFromName(t *testing.T) {
 
 func TestWorkspaceFolders(t *testing.T) {
 	root := t.TempDir()
-	tassweb := filepath.Join(root, "tassweb")
-	_ = os.MkdirAll(tassweb, 0o755)
+	sharedLib := filepath.Join(root, "shared-lib")
+	_ = os.MkdirAll(sharedLib, 0o755)
 
 	dir := filepath.Join(root, "project")
-	writeConfig(t, dir, `{"workspaceName":"proj","workspacePaths":["../tassweb","."]}`)
+	writeConfig(t, dir, `{"workspaceName":"proj","workspacePaths":["../shared-lib","."]}`)
 	cfg := &Config{Path: filepath.Join(dir, ".cfmleditor.json"), Name: "proj"}
 	folders := cfg.WorkspaceFolders()
 
 	if len(folders) != 2 {
 		t.Fatalf("expected 2 folders, got %d: %v", len(folders), folders)
 	}
-	if folders[0] != tassweb {
-		t.Fatalf("got %q, want %q", folders[0], tassweb)
+	if folders[0] != sharedLib {
+		t.Fatalf("got %q, want %q", folders[0], sharedLib)
 	}
 	if folders[1] != dir {
 		t.Fatalf("got %q, want %q", folders[1], dir)
@@ -104,14 +104,14 @@ func TestWorkspaceFolders(t *testing.T) {
 
 func TestIndexGlobsResolvesBaseName(t *testing.T) {
 	root := t.TempDir()
-	tassweb := filepath.Join(root, "tassweb")
-	_ = os.MkdirAll(tassweb, 0o755)
+	sharedLib := filepath.Join(root, "shared-lib")
+	_ = os.MkdirAll(sharedLib, 0o755)
 
 	dir := filepath.Join(root, "project")
 	writeConfig(t, dir, `{
 		"workspaceName":"proj",
-		"workspacePaths":["../tassweb"],
-		"workspaceIndexGlobs":["tassweb/**/*.cfc"]
+		"workspacePaths":["../shared-lib"],
+		"workspaceIndexGlobs":["shared-lib/**/*.cfc"]
 	}`)
 	cfg := &Config{Path: filepath.Join(dir, ".cfmleditor.json"), Name: "proj"}
 	globs := cfg.IndexGlobs()
@@ -119,7 +119,7 @@ func TestIndexGlobsResolvesBaseName(t *testing.T) {
 	if len(globs) != 1 {
 		t.Fatalf("expected 1 glob, got %d: %v", len(globs), globs)
 	}
-	expected := tassweb + "/**/*.cfc"
+	expected := sharedLib + "/**/*.cfc"
 	if globs[0] != expected {
 		t.Fatalf("got %q, want %q", globs[0], expected)
 	}
@@ -153,12 +153,12 @@ func TestExpandGlobDoubleStar(t *testing.T) {
 
 func TestExpandGlobParentRefDoubleStar(t *testing.T) {
 	root := t.TempDir()
-	tassweb := filepath.Join(root, "tassweb", "sub")
-	_ = os.MkdirAll(tassweb, 0o755)
-	_ = os.WriteFile(filepath.Join(root, "tassweb", "Root.cfc"), []byte(""), 0o644)
-	_ = os.WriteFile(filepath.Join(tassweb, "Nested.cfc"), []byte(""), 0o644)
+	subDir := filepath.Join(root, "shared-lib", "sub")
+	_ = os.MkdirAll(subDir, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "shared-lib", "Root.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(subDir, "Nested.cfc"), []byte(""), 0o644)
 
-	pattern := filepath.Join(root, "tassweb") + "/**/*.cfc"
+	pattern := filepath.Join(root, "shared-lib") + "/**/*.cfc"
 	matches := expandGlob(pattern)
 
 	if len(matches) != 2 {

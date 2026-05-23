@@ -224,7 +224,8 @@ func TestParseResult_InitVarsNoDuplicates(t *testing.T) {
 func TestResolveFromCall(t *testing.T) {
 	resolvers := []Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
-		{Match: "_parent", Resolve: "packages.tass.core.kernel2", Prefix: "_parent"},
+		{Match: "_parent", Resolve: "packages.core.base.kernel2", Prefix: "_parent"},
+		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "app.packages.services.$1", Prefix: "kernel.get"},
 	}
 
 	tests := []struct {
@@ -234,8 +235,10 @@ func TestResolveFromCall(t *testing.T) {
 		{`getService("timetable")`, "packages.timetable.service"},
 		{`_parent.getService("general")`, "packages.general.service"},
 		{`VARIABLES._parent.getService("general")`, "packages.general.service"},
-		{`_parent`, "packages.tass.core.kernel2"},
+		{`_parent`, "packages.core.base.kernel2"},
 		{`somethingElse()`, ""},
+		{`SERVER.kernel.GetFinance()`, "app.packages.services.Finance"},
+		{`kernel.getUser()`, "app.packages.services.User"},
 	}
 
 	for _, tt := range tests {

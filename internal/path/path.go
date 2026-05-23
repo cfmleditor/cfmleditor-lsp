@@ -140,16 +140,34 @@ func ResolvePath(dotPath string, baseDir string, mappings map[string]string) str
 			}
 			abs := filepath.Join(mapped, rel)
 			if _, err := os.Stat(abs); err == nil {
-				return abs
+				return realPath(abs)
 			}
 		}
 	}
 	rel := strings.ReplaceAll(dotPath, ".", string(filepath.Separator)) + ".cfc"
 	abs := filepath.Join(baseDir, rel)
 	if _, err := os.Stat(abs); err == nil {
-		return abs
+		return realPath(abs)
 	}
 	return ""
+}
+
+// realPath returns the actual case-correct path from the filesystem.
+func realPath(path string) string {
+	// On case-insensitive filesystems, the constructed path may have wrong case.
+	// Read the directory to find the actual filename.
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return path
+	}
+	for _, e := range entries {
+		if strings.EqualFold(e.Name(), base) {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return path
 }
 
 // ResolveMappings resolves relative paths in a map to absolute using baseDir.
