@@ -189,21 +189,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 			}
 		}
 		if cfcPath == "" {
-			mappings := s.effectiveMappings(baseDir)
-			cfcPath = cfpath.ResolvePath(component, baseDir, mappings)
-			if cfcPath == "" {
-				if appDir := findApplicationRoot(baseDir); appDir != "" {
-					cfcPath = cfpath.ResolvePath(component, appDir, mappings)
-				}
-			}
-			if cfcPath == "" {
-				for _, root := range s.WorkspaceFolders {
-					cfcPath = cfpath.ResolvePath(component, root, mappings)
-					if cfcPath != "" {
-						break
-					}
-				}
-			}
+			cfcPath = s.resolveComponentPath(component, baseDir)
 			// Try ORM cfcLocation directories for bare entity names
 			if cfcPath == "" && !strings.Contains(component, ".") {
 				// Check entity index first
@@ -236,13 +222,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 		s.logger.Debug("definition: component path not resolved to file", zap.String("component", component))
 		return nil
 	}
-	cfcURI := uri.URI("file://" + cfcPath)
-	if s.index.FunctionsForFile(cfcURI) == nil {
-		if data, err := os.ReadFile(cfcPath); err == nil {
-			s.index.IndexFile(cfcURI, string(data))
-		}
-	}
-	for _, d := range s.index.FunctionsForFile(cfcURI) {
+	for _, d := range s.ensureIndexed(cfcPath) {
 		if strings.EqualFold(d.Name, funcName) {
 			s.logger.Debug("definition: resolved method", zap.String("component", component), zap.String("func", funcName), zap.String("file", cfcPath), zap.Uint32("line", d.Line))
 			return &protocol.Location{
@@ -569,29 +549,8 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
 
-	mappings := s.effectiveMappings(baseDir)
-	s.logger.Debug("definition: resolveComponentFileDef", zap.String("component", component), zap.String("baseDir", baseDir), zap.Any("mappings", mappings))
-	cfcPath := cfpath.ResolvePath(component, baseDir, mappings)
-	if cfcPath != "" {
-		s.logger.Debug("definition: resolved via baseDir", zap.String("path", cfcPath))
-	}
-	if cfcPath == "" {
-		if appDir := findApplicationRoot(baseDir); appDir != "" {
-			cfcPath = cfpath.ResolvePath(component, appDir, mappings)
-			if cfcPath != "" {
-				s.logger.Debug("definition: resolved via appDir", zap.String("path", cfcPath), zap.String("appDir", appDir))
-			}
-		}
-	}
-	if cfcPath == "" {
-		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(component, root, mappings)
-			if cfcPath != "" {
-				s.logger.Debug("definition: resolved via workspace", zap.String("path", cfcPath), zap.String("root", root))
-				break
-			}
-		}
-	}
+	s.logger.Debug("definition: resolveComponentFileDef", zap.String("component", component), zap.String("baseDir", baseDir))
+	cfcPath := s.resolveComponentPath(component, baseDir)
 	if cfcPath == "" {
 		return nil
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -916,30 +915,12 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	mappings := s.effectiveMappings(baseDir)
-	cfcPath := cfpath.ResolvePath(pr.Extends, baseDir, mappings)
-	if cfcPath == "" {
-		for _, root := range s.WorkspaceFolders {
-			cfcPath = cfpath.ResolvePath(pr.Extends, root, mappings)
-			if cfcPath != "" {
-				break
-			}
-		}
-	}
+	cfcPath := s.resolveComponentPath(pr.Extends, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
 
-	cfcURI := uri.URI("file://" + cfcPath)
-	defs := s.index.FunctionsForFile(cfcURI)
-	if len(defs) == 0 {
-		data, err := os.ReadFile(cfcPath)
-		if err != nil {
-			return nil
-		}
-		s.index.IndexFile(cfcURI, string(data))
-		defs = s.index.FunctionsForFile(cfcURI)
-	}
+	defs := s.ensureIndexed(cfcPath)
 
 	items := make([]protocol.CompletionItem, 0, len(defs))
 	for _, d := range defs {
@@ -1006,17 +987,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		}
 	}
 	if cfcPath == "" {
-		mappings := s.effectiveMappings(baseDir)
-		cfcPath = cfpath.ResolvePath(component, baseDir, mappings)
-		if cfcPath == "" {
-			// Try workspace folders
-			for _, root := range s.WorkspaceFolders {
-				cfcPath = cfpath.ResolvePath(component, root, mappings)
-				if cfcPath != "" {
-					break
-				}
-			}
-		}
+		cfcPath = s.resolveComponentPath(component, baseDir)
 	}
 	if cfcPath == "" {
 		return nil
@@ -1024,19 +995,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	// Get function defs from the index (already cached), fall back to parsing
 	cfcURI := uri.URI("file://" + cfcPath)
-	defs := s.index.FunctionsForFile(cfcURI)
-	if len(defs) == 0 {
-		cfcContent, ok := s.getDocument(cfcURI)
-		if !ok {
-			data, err := os.ReadFile(cfcPath)
-			if err != nil {
-				return nil
-			}
-			cfcContent = string(data)
-		}
-		s.index.IndexFile(cfcURI, cfcContent)
-		defs = s.index.FunctionsForFile(cfcURI)
-	}
+	defs := s.ensureIndexed(cfcPath)
 
 	thisVars := s.index.ThisVarsForFile(cfcURI)
 

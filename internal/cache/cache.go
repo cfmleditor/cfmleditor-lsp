@@ -113,6 +113,13 @@ func (c *Cache) Invalidate(fileURI uri.URI) {
 	delete(c.files, fileURI)
 }
 
+// InvalidateAll removes all cached entries.
+func (c *Cache) InvalidateAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.files = make(map[uri.URI]*FileCache)
+}
+
 // HashScope computes a fast hash of content lines [startLine, endLine].
 func HashScope(content string, startLine, endLine int) uint64 {
 	h := fnv.New64a()

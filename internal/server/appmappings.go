@@ -31,3 +31,23 @@ func (s *Server) effectiveMappings(baseDir string) map[string]string {
 	}
 	return merged
 }
+
+// resolveComponentPath resolves a component dot-path to an absolute .cfc file path
+// using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
+func (s *Server) resolveComponentPath(component, baseDir string) string {
+	mappings := s.effectiveMappings(baseDir)
+	if p := cfpath.ResolvePath(component, baseDir, mappings); p != "" {
+		return p
+	}
+	if appDir := findApplicationRoot(baseDir); appDir != "" {
+		if p := cfpath.ResolvePath(component, appDir, mappings); p != "" {
+			return p
+		}
+	}
+	for _, root := range s.WorkspaceFolders {
+		if p := cfpath.ResolvePath(component, root, mappings); p != "" {
+			return p
+		}
+	}
+	return ""
+}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.uber.org/zap"
 )
 
@@ -40,14 +41,7 @@ func (s *Server) loadConfigFromRoots() {
 		s.logger.Info("loaded config from workspace", zap.String("path", p))
 		dir := filepath.Dir(p)
 		if len(cfg.Mappings) > 0 && len(s.Mappings) == 0 {
-			s.Mappings = make(map[string]string, len(cfg.Mappings))
-			for k, v := range cfg.Mappings {
-				if filepath.IsAbs(v) {
-					s.Mappings[k] = v
-				} else {
-					s.Mappings[k] = filepath.Join(dir, v)
-				}
-			}
+			s.Mappings = cfpath.ResolveMappings(cfg.Mappings, dir)
 		}
 		for _, r := range cfg.ComponentResolvers {
 			if r.Match != "" && r.Resolve != "" {
@@ -60,14 +54,7 @@ func (s *Server) loadConfigFromRoots() {
 			}
 		}
 		if len(cfg.BeanPaths) > 0 && len(s.BeanPaths) == 0 {
-			s.BeanPaths = make(map[string]string, len(cfg.BeanPaths))
-			for k, v := range cfg.BeanPaths {
-				if filepath.IsAbs(v) {
-					s.BeanPaths[k] = v
-				} else {
-					s.BeanPaths[k] = filepath.Join(dir, v)
-				}
-			}
+			s.BeanPaths = cfpath.ResolveMappings(cfg.BeanPaths, dir)
 		}
 		return // use first config found
 	}

@@ -65,6 +65,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleHover(ctx, reply, req)
 		case protocol.MethodWorkspaceDidChangeWorkspaceFolders:
 			return s.handleDidChangeWorkspaceFolders(ctx, reply, req)
+		case protocol.MethodWorkspaceExecuteCommand:
+			return s.handleExecuteCommand(ctx, reply, req)
 		default:
 			return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
 		}
@@ -535,6 +537,168 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 }
 
 // safeGo runs fn in a goroutine with panic recovery.
+func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.ExecuteCommandParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, err)
+	}
+
+	switch params.Command {
+	case "cfmleditor.reindex":
+		s.invalidateResolveCache()
+		cfpath.InvalidateAppMappingsCache()
+		s.safeGo("reindex", s.indexWorkspace)
+		s.logger.Info("reindex triggered via command")
+		return reply(ctx, nil, nil)
+	case "cfmleditor.format":
+		if len(params.Arguments) == 0 {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.format requires a document URI argument"))
+		}
+		docURI, _ := params.Arguments[0].(string)
+		if docURI == "" {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.format: invalid URI argument"))
+		}
+		content, ok := s.getDocument(uri.URI(docURI))
+		if !ok {
+			return reply(ctx, nil, nil)
+		}
+		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(s.Formatting.IndentWidth)}, s.Formatting)
+		if err != nil {
+			return reply(ctx, nil, err)
+		}
+		if formatted == content {
+			return reply(ctx, nil, nil)
+		}
+		lines := countNewlines(content)
+		_, _ = s.conn.Call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
+			Label: "Format document",
+			Edit: protocol.WorkspaceEdit{
+				Changes: map[uri.URI][]protocol.TextEdit{
+					uri.URI(docURI): {{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: 0, Character: 0},
+							End:   protocol.Position{Line: uint32(lines + 1), Character: 0},
+						},
+						NewText: formatted,
+					}},
+				},
+			},
+		}, nil)
+		return reply(ctx, nil, nil)
+	case "cfmleditor.showComponentPath":
+		if len(params.Arguments) == 0 {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.showComponentPath requires a dot-path argument"))
+		}
+		dotPath, _ := params.Arguments[0].(string)
+		if dotPath == "" {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.showComponentPath: invalid argument"))
+		}
+		var baseDir string
+		if len(params.Arguments) > 1 {
+			if docURI, ok := params.Arguments[1].(string); ok {
+				baseDir = filepath.Dir(strings.TrimPrefix(docURI, "file://"))
+			}
+		}
+		if baseDir == "" && len(s.WorkspaceFolders) > 0 {
+			baseDir = s.WorkspaceFolders[0]
+		}
+		resolved := s.resolveComponentPath(dotPath, baseDir)
+		if resolved == "" {
+			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+				Type:    protocol.MessageTypeInfo,
+				Message: fmt.Sprintf("Cannot resolve: %s", dotPath),
+			})
+		} else {
+			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+				Type:    protocol.MessageTypeInfo,
+				Message: fmt.Sprintf("%s → %s", dotPath, resolved),
+			})
+		}
+		return reply(ctx, resolved, nil)
+	case "cfmleditor.restartDaemon":
+		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: "Restarting daemon: clearing all caches and re-indexing",
+		})
+		s.invalidateResolveCache()
+		cfpath.InvalidateAppMappingsCache()
+		s.mu.Lock()
+		s.parseResults = make(map[uri.URI]*cfparser.ParseResult)
+		s.funcRanges = make(map[uri.URI][]cache.FuncRange)
+		s.mu.Unlock()
+		s.compCache.InvalidateAll()
+		s.safeGo("reindex", s.indexWorkspace)
+		s.logger.Info("daemon restart triggered via command")
+		return reply(ctx, nil, nil)
+	case "cfmleditor.showResolvers":
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Workspace folders: %v", s.WorkspaceFolders))
+		if len(s.Mappings) > 0 {
+			lines = append(lines, "Mappings:")
+			for k, v := range s.Mappings {
+				lines = append(lines, fmt.Sprintf("  %s → %s", k, v))
+			}
+		}
+		if len(s.ComponentResolvers) > 0 {
+			lines = append(lines, "Component resolvers:")
+			for _, r := range s.ComponentResolvers {
+				lines = append(lines, fmt.Sprintf("  match=%q resolve=%q prefix=%q", r.Match, r.Resolve, r.Prefix))
+			}
+		}
+		if len(s.PropertyResolvers) > 0 {
+			lines = append(lines, "Property resolvers:")
+			for _, r := range s.PropertyResolvers {
+				lines = append(lines, fmt.Sprintf("  match=%q resolve=%q attr=%q", r.Match, r.Resolve, r.Attribute))
+			}
+		}
+		msg := strings.Join(lines, "\n")
+		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: msg,
+		})
+		return reply(ctx, msg, nil)
+	case "cfmleditor.showFileIndex":
+		if len(params.Arguments) == 0 {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.showFileIndex requires a document URI argument"))
+		}
+		docURI, _ := params.Arguments[0].(string)
+		if docURI == "" {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.showFileIndex: invalid argument"))
+		}
+		fileURI := uri.URI(docURI)
+		funcs := s.index.FunctionsForFile(fileURI)
+		refs := s.index.RefsForFile(fileURI)
+		var lines []string
+		lines = append(lines, fmt.Sprintf("File: %s", docURI))
+		lines = append(lines, fmt.Sprintf("Functions (%d):", len(funcs)))
+		for _, f := range funcs {
+			lines = append(lines, fmt.Sprintf("  %s (line %d)", f.Name, f.Line))
+		}
+		lines = append(lines, fmt.Sprintf("Component refs (%d):", len(refs)))
+		for _, r := range refs {
+			lines = append(lines, fmt.Sprintf("  %s → %s (line %d)", r.Variable, r.Component, r.Line))
+		}
+		msg := strings.Join(lines, "\n")
+		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: msg,
+		})
+		return reply(ctx, msg, nil)
+	case "cfmleditor.showConnections":
+		s.mu.RLock()
+		openDocs := len(s.documents)
+		s.mu.RUnlock()
+		msg := fmt.Sprintf("Open documents: %d\nWorkspace folders: %d\nIndex globs: %d", openDocs, len(s.WorkspaceFolders), len(s.IndexGlobs))
+		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: msg,
+		})
+		return reply(ctx, msg, nil)
+	default:
+		return reply(ctx, nil, fmt.Errorf("unknown command: %s", params.Command))
+	}
+}
+
 func (s *Server) safeGo(label string, fn func()) {
 	go func() {
 		defer func() {

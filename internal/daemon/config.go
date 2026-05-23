@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // configJSON is the on-disk shape of .cfmleditor.json.
@@ -128,16 +129,7 @@ func (c *Config) Mappings() map[string]string {
 	if raw == nil || len(raw.Mappings) == 0 {
 		return nil
 	}
-	dir := filepath.Dir(c.Path)
-	out := make(map[string]string, len(raw.Mappings))
-	for key, val := range raw.Mappings {
-		if filepath.IsAbs(val) {
-			out[key] = val
-		} else {
-			out[key] = filepath.Join(dir, val)
-		}
-	}
-	return out
+	return cfpath.ResolveMappings(raw.Mappings, filepath.Dir(c.Path))
 }
 
 // Debug returns whether debug logging is enabled in config.
@@ -313,16 +305,7 @@ func (c *Config) BeanPaths() map[string]string {
 	if raw == nil || len(raw.BeanPaths) == 0 {
 		return nil
 	}
-	dir := filepath.Dir(c.Path)
-	out := make(map[string]string, len(raw.BeanPaths))
-	for ns, p := range raw.BeanPaths {
-		if filepath.IsAbs(p) {
-			out[ns] = p
-		} else {
-			out[ns] = filepath.Join(dir, p)
-		}
-	}
-	return out
+	return cfpath.ResolveMappings(raw.BeanPaths, filepath.Dir(c.Path))
 }
 
 // IndexGlobs returns absolute glob patterns for workspace indexing,
@@ -360,41 +343,7 @@ func (c *Config) IndexGlobs() []string {
 
 // expandGlob expands a glob pattern, handling ** for recursive directory matching.
 func expandGlob(pattern string) []string {
-	if !strings.Contains(pattern, "**") {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			return nil
-		}
-		return matches
-	}
-	idx := strings.Index(pattern, "**")
-	base := filepath.Clean(pattern[:idx])
-	suffix := pattern[idx+2:]
-	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
-
-	var out []string
-	err := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if suffix == "" {
-			out = append(out, path)
-			return nil
-		}
-		if matched, _ := filepath.Match(suffix, filepath.Base(path)); matched {
-			out = append(out, path)
-		}
-		return nil
-	})
-
-	if err != nil {
-		// Handle error (e.g., log it or return it)
-		log.Fatalf("failed to write file: %s", err)
-	}
-	return out
+	return cfpath.ExpandGlob(pattern)
 }
 
 func socketDir() string {

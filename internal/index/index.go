@@ -189,6 +189,21 @@ func (idx *Index) LookupComponentRef(variable string) []*cfparser.ComponentRef {
 	return idx.comprefs[strings.ToLower(variable)]
 }
 
+// RefsForFile returns all component references indexed for a specific file.
+func (idx *Index) RefsForFile(fileURI uri.URI) []*cfparser.ComponentRef {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	var out []*cfparser.ComponentRef
+	for _, refs := range idx.comprefs {
+		for _, r := range refs {
+			if r.URI == fileURI {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
 // ThisVarsForFile returns the this-scoped variable names for a file.
 func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
 	idx.mu.RLock()

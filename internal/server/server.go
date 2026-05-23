@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -116,6 +117,9 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentSymbolProvider:  true,
 		WorkspaceSymbolProvider: true,
 		HoverProvider:           true,
+		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections"},
+		},
 		Workspace: &protocol.ServerCapabilitiesWorkspace{
 			WorkspaceFolders: &protocol.ServerCapabilitiesWorkspaceFolders{
 				Supported:           true,
@@ -278,6 +282,26 @@ type PropertyResolver struct {
 }
 
 // resolveComponentFromCall matches a call expression against configured resolvers.
+// ensureIndexed ensures a CFC file is indexed, loading from disk if needed.
+// Returns the functions defined in the file.
+func (s *Server) ensureIndexed(cfcPath string) []*cfparser.FunctionDef {
+	cfcURI := uri.URI("file://" + cfcPath)
+	defs := s.index.FunctionsForFile(cfcURI)
+	if len(defs) == 0 {
+		content, ok := s.getDocument(cfcURI)
+		if !ok {
+			data, err := os.ReadFile(cfcPath)
+			if err != nil {
+				return nil
+			}
+			content = string(data)
+		}
+		s.index.IndexFile(cfcURI, content)
+		defs = s.index.FunctionsForFile(cfcURI)
+	}
+	return defs
+}
+
 func resolveComponentFromCall(expr string, resolvers []ComponentResolver) string {
 	if len(resolvers) == 0 {
 		return ""
