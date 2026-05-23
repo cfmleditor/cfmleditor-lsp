@@ -10,6 +10,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -2964,5 +2965,195 @@ func TestWordAtPositionEdgeCases(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("wordAtPosition(%q, %d, %d) = %q, want %q", tt.content, tt.line, tt.char, got, tt.want)
 		}
+	}
+}
+
+func TestSignatureHelpAfterSecondComma(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, `<cfset x = ListAppend(list, val, `)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 33},
+		},
+	})
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	help := (*result).(*protocol.SignatureHelp)
+	if help == nil || help.ActiveParameter != 2 {
+		t.Errorf("expected activeParam=2, got %v", help)
+	}
+}
+
+func TestCompletionDotAfterCreateObject(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Order.cfc"), []byte("component {\nfunction getTotal() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "obj = createObject('component','models.Order')\nobj."
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	found := false
+	for _, item := range list.Items {
+		if item.Label == "getTotal" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected getTotal after createObject dot completion")
+	}
+}
+
+func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	otherURI := uri.URI("file:///other.cfc")
+	srv.setDocument(docURI, "myFunc()")
+	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+		{Name: "myFunc", URI: otherURI, Line: 10},
+	}, nil)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 3},
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.URI != protocol.DocumentURI(otherURI) {
+		t.Errorf("expected URI %s, got %s", otherURI, loc.URI)
+	}
+	if loc.Range.Start.Line != 10 {
+		t.Errorf("expected line 10, got %d", loc.Range.Start.Line)
+	}
+}
+
+func TestDocumentLinkInsideFunction(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction render() {\n<cfinclude template=\"partial.cfm\">\n}\n}"
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) == 0 {
+		t.Error("expected link inside function body via FuncRefs")
+	}
+}
+
+func TestEnsureIndexedLoadsFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Item.cfc"), []byte("component {\nfunction getPrice() {}\nfunction getName() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	cfcPath := filepath.Join(dir, "models", "Item.cfc")
+	defs := srv.ensureIndexed(cfcPath)
+	if len(defs) != 2 {
+		t.Errorf("expected 2 functions from disk, got %d", len(defs))
+	}
+
+	// Second call should use cache
+	defs2 := srv.ensureIndexed(cfcPath)
+	if len(defs2) != 2 {
+		t.Errorf("expected 2 functions from cache, got %d", len(defs2))
+	}
+}
+
+func TestResolveComponentPathWithMappings(t *testing.T) {
+	dir := t.TempDir()
+	libDir := filepath.Join(dir, "lib")
+	_ = os.MkdirAll(libDir, 0o755)
+	_ = os.WriteFile(filepath.Join(libDir, "Utils.cfc"), []byte("component {}"), 0o644)
+
+	srv := newTestServer()
+	srv.Mappings = map[string]string{"mylib": libDir}
+
+	result := srv.resolveComponentPath("mylib.Utils", dir)
+	if result == "" {
+		t.Fatal("expected to resolve mylib.Utils via mapping")
+	}
+	if !strings.HasSuffix(result, "Utils.cfc") {
+		t.Errorf("expected path ending in Utils.cfc, got %s", result)
+	}
+}
+
+func TestHandleDidOpenNonCFML(t *testing.T) {
+	srv := newTestServer()
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        "file:///test.js",
+			LanguageID: "javascript",
+			Version:    1,
+			Text:       "const x = 1;",
+		},
+	})
+	if err := srv.handleDidOpen(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	// Should not be stored
+	if _, ok := srv.getDocument(uri.URI("file:///test.js")); ok {
+		t.Error("non-CFML file should not be stored in documents")
+	}
+}
+
+func TestResolveMappings(t *testing.T) {
+	result := cfpath.ResolveMappings(map[string]string{
+		"models": "./src/models",
+		"lib":    "/absolute/lib",
+	}, "/project")
+
+	if result["models"] != "/project/src/models" {
+		t.Errorf("models: got %q, want /project/src/models", result["models"])
+	}
+	if result["lib"] != "/absolute/lib" {
+		t.Errorf("lib: got %q, want /absolute/lib", result["lib"])
 	}
 }

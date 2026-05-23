@@ -107,8 +107,8 @@ func (r *Resolver) compiledRe() *regexp.Regexp {
 		case !hasPlaceholder && !isRegexPattern(pattern):
 			// No placeholders, no regex chars — simple exact match
 			r.simple = true
-		case hasPlaceholder && !isRegexPattern(pattern):
-			// Has $N but no regex chars — simple prefix/suffix match
+		case hasPlaceholder && !isRegexPattern(pattern) && !strings.Contains(pattern, "$2"):
+			// Has $1 only, no regex chars — simple prefix/suffix match
 			r.simple = true
 		case !hasPlaceholder:
 			re, err := regexp.Compile("(?i)" + pattern)
