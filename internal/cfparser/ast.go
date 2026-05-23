@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"go.lsp.dev/uri"
 )
@@ -78,6 +79,57 @@ type Resolver struct {
 	Match   string
 	Resolve string
 	Prefix  string
+	re      *regexp.Regexp // compiled regex, lazily initialized
+	simple  bool           // true if pattern is a plain string (no regex, no $N)
+	reOnce  sync.Once
+}
+
+// isRegexPattern returns true if the pattern contains backslash escapes (definitive regex indicator).
+func isRegexPattern(s string) bool {
+	return strings.Contains(s, `\`)
+}
+
+// compiledRe returns the compiled regex for this resolver, caching it.
+// Sets r.simple=true if the pattern needs no regex.
+func (r *Resolver) compiledRe() *regexp.Regexp {
+	r.reOnce.Do(func() {
+		pattern := r.Match
+		hasPlaceholder := placeholderRe.MatchString(pattern)
+		switch {
+		case !hasPlaceholder && !isRegexPattern(pattern):
+			// No placeholders, no regex chars — simple exact match
+			r.simple = true
+		case hasPlaceholder && !isRegexPattern(pattern):
+			// Has $N but no regex chars — simple prefix/suffix match
+			r.simple = true
+		case !hasPlaceholder:
+			re, err := regexp.Compile("(?i)" + pattern)
+			if err == nil {
+				r.re = re
+			}
+		case strings.Contains(pattern, `\`):
+			reStr := "(?i)" + placeholderRe.ReplaceAllString(pattern, "")
+			re, err := regexp.Compile(reStr)
+			if err == nil {
+				r.re = re
+			}
+		default:
+			parts := placeholderRe.Split(pattern, -1)
+			var b strings.Builder
+			b.WriteString("(?i)")
+			for i, part := range parts {
+				b.WriteString(regexp.QuoteMeta(part))
+				if i < len(parts)-1 {
+					b.WriteString(`(.+?)`)
+				}
+			}
+			re, err := regexp.Compile(b.String())
+			if err == nil {
+				r.re = re
+			}
+		}
+	})
+	return r.re
 }
 
 // PropertyResolver maps a property attribute value to a component path.
@@ -132,7 +184,8 @@ func matchPropertyPattern(value, pattern, resolve string) string {
 // ResolveFromCall matches an expression against resolvers and returns the component dot-path.
 func ResolveFromCall(expr string, resolvers []Resolver) string {
 	expr = strings.TrimSpace(expr)
-	for _, r := range resolvers {
+	for i := range resolvers {
+		r := &resolvers[i]
 		if r.Prefix == "" {
 			continue
 		}
@@ -145,7 +198,7 @@ func ResolveFromCall(expr string, resolvers []Resolver) string {
 		if len(sub) > 200 {
 			sub = sub[:200]
 		}
-		if resolved := matchResolverPattern(sub, r.Match, r.Resolve); resolved != "" {
+		if resolved := matchResolverWithCache(sub, r); resolved != "" {
 			return resolved
 		}
 	}
@@ -164,75 +217,76 @@ func indexFold(s, substr string) int {
 // placeholderRe matches $1, $2, etc. in patterns.
 var placeholderRe = regexp.MustCompile(`\$(\d+)`)
 
-func matchResolverPattern(expr, pattern, resolve string) string {
-	// Build regex from pattern: replace $N placeholders with capture groups
-	if !placeholderRe.MatchString(pattern) {
-		// No $N in pattern — use pattern as regex directly
-		re, err := regexp.Compile("(?i)" + pattern)
-		if err != nil {
-			if strings.EqualFold(expr, pattern) {
-				return resolve
-			}
-			return ""
-		}
-		m := re.FindStringSubmatch(expr)
-		if m == nil {
-			return ""
-		}
-		// Substitute any capture groups into resolve template
-		result := resolve
-		for i := 1; i < len(m); i++ {
-			result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), m[i])
-		}
-		if result == resolve && len(m) == 1 {
-			return resolve
-		}
-		result = strings.TrimSuffix(result, ".cfc")
-		result = strings.ReplaceAll(result, "/", ".")
-		return result
+func matchResolverWithCache(expr string, r *Resolver) string {
+	r.compiledRe() // ensure reOnce has run
+	if r.simple {
+		return simpleMatch(expr, r.Match, r.Resolve)
 	}
-
-	// Replace $N with capture groups in the pattern.
-	// If the pattern contains backslash sequences (regex escapes), use it as raw regex
-	// where capture groups are already defined in the pattern itself.
-	// Otherwise, escape literal parts around the placeholders and insert capture groups.
-	isRawRegex := strings.Contains(pattern, `\`)
-	var reStr string
-	if isRawRegex {
-		// Raw regex: remove $N references (they refer to existing capture groups)
-		reStr = "(?i)" + placeholderRe.ReplaceAllString(pattern, "")
-	} else {
-		parts := placeholderRe.Split(pattern, -1)
-		var b strings.Builder
-		b.WriteString("(?i)")
-		for i, part := range parts {
-			b.WriteString(regexp.QuoteMeta(part))
-			if i < len(parts)-1 {
-				b.WriteString(`(.+?)`)
-			}
-		}
-		reStr = b.String()
-	}
-
-	re, err := regexp.Compile(reStr)
-	if err != nil {
+	if r.re == nil {
 		return ""
 	}
-	m := re.FindStringSubmatch(expr)
+	m := r.re.FindStringSubmatch(expr)
 	if m == nil {
 		return ""
 	}
-
-	// Replace $N in resolve template with captured groups
-	result := resolve
+	result := r.Resolve
 	for i := 1; i < len(m); i++ {
 		captured := strings.Trim(m[i], "\"'")
 		result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), captured)
+	}
+	if result == r.Resolve && len(m) == 1 {
+		return result
 	}
 	result = strings.TrimSuffix(result, ".cfc")
 	result = strings.ReplaceAll(result, "/", ".")
 	return result
 }
+
+// simpleMatch handles patterns with $1 placeholder or exact match using string ops only.
+// Quote characters (" and ') in the pattern match either quote type in the expression.
+func simpleMatch(expr, pattern, resolve string) string {
+	idx := strings.Index(pattern, "$1")
+	if idx < 0 {
+		// Exact match
+		if strings.EqualFold(expr, pattern) {
+			return resolve
+		}
+		return ""
+	}
+	prefix := pattern[:idx]
+	suffix := pattern[idx+2:]
+
+	// Normalize quotes in prefix/suffix for matching: replace " with ' in both
+	normPrefix := strings.ReplaceAll(prefix, `"`, `'`)
+	normSuffix := strings.ReplaceAll(suffix, `"`, `'`)
+
+	if len(expr) < len(prefix)+len(suffix) {
+		return ""
+	}
+
+	exprPrefix := strings.ReplaceAll(expr[:len(prefix)], `"`, `'`)
+	if !strings.EqualFold(exprPrefix, normPrefix) {
+		return ""
+	}
+
+	if normSuffix != "" {
+		exprSuffix := strings.ReplaceAll(expr[len(expr)-len(suffix):], `"`, `'`)
+		if !strings.EqualFold(exprSuffix, normSuffix) {
+			return ""
+		}
+	}
+
+	captured := expr[len(prefix):]
+	if suffix != "" {
+		captured = captured[:len(captured)-len(suffix)]
+	}
+	captured = strings.Trim(captured, "\"'")
+	result := strings.ReplaceAll(resolve, "$1", captured)
+	result = strings.TrimSuffix(result, ".cfc")
+	result = strings.ReplaceAll(result, "/", ".")
+	return result
+}
+
 
 func containsFold(s, substr string) bool {
 	if len(substr) == 0 {

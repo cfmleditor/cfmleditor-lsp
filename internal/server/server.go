@@ -296,7 +296,9 @@ func (s *Server) ensureIndexed(cfcPath string) []*cfparser.FunctionDef {
 			}
 			content = string(data)
 		}
-		s.index.IndexFile(cfcURI, content)
+		pr := s.parseContent(cfcURI, content)
+		s.index.IndexFileFromResult(cfcURI, pr.Funcs, pr.Refs)
+		s.index.SetThisVars(cfcURI, pr.ThisVars())
 		defs = s.index.FunctionsForFile(cfcURI)
 	}
 	return defs

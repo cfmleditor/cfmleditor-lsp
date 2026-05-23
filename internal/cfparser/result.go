@@ -491,8 +491,8 @@ func (pr *ParseResult) appendResolverRefs() {
 		return
 	}
 	prefixes := make([]string, len(pr.Resolvers))
-	for i, r := range pr.Resolvers {
-		prefixes[i] = r.Prefix
+	for i := range pr.Resolvers {
+		prefixes[i] = pr.Resolvers[i].Prefix
 	}
 
 	content := pr.Content
@@ -548,18 +548,7 @@ func (pr *ParseResult) appendResolverRefs() {
 			varName = strings.TrimSpace(lhs[spIdx+1:])
 		}
 		if varName != "" {
-			// Replace existing ref or append
-			replaced := false
-			for i := range pr.Refs {
-				if strings.EqualFold(pr.Refs[i].Variable, varName) && pr.Refs[i].URI == pr.URI {
-					pr.Refs[i] = ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)}
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
-			}
+			pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
 		}
 		lineNum++
 	}

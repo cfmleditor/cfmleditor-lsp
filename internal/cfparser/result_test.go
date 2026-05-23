@@ -233,7 +233,9 @@ func TestResolveFromCall(t *testing.T) {
 		want string
 	}{
 		{`getService("timetable")`, "packages.timetable.service"},
+		{`getService('teacher')`, "packages.teacher.service"},
 		{`_parent.getService("general")`, "packages.general.service"},
+		{`_parent.getService('general')`, "packages.general.service"},
 		{`VARIABLES._parent.getService("general")`, "packages.general.service"},
 		{`_parent`, "packages.core.base.kernel2"},
 		{`somethingElse()`, ""},
