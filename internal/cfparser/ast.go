@@ -58,6 +58,14 @@ type ComponentRef struct {
 	Line      uint32
 }
 
+// DocumentLink represents a file path reference in source (cfinclude, href, etc.).
+type DocumentLink struct {
+	Path  string // the raw path string
+	Line  uint32
+	Start uint32 // character offset of path start
+	End   uint32 // character offset of path end
+}
+
 // RegionKind classifies a span of CFC content.
 type RegionKind int
 

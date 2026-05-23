@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
 // buildBeanMap scans configured bean directories and builds a lookup map.
@@ -11,7 +13,7 @@ import (
 // in that directory (recursively) are registered under "name@namespace".
 // CFCs with unique names across ALL namespaces also get a bare "name" entry.
 // Values are absolute file paths.
-func buildBeanMap(beanPaths map[string]string) map[string]string {
+func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 	type beanEntry struct {
 		absPath string
 		ns      string
@@ -22,7 +24,7 @@ func buildBeanMap(beanPaths map[string]string) map[string]string {
 	bareCount := make(map[string]int)
 
 	for ns, root := range beanPaths {
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		_ = fsys.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}

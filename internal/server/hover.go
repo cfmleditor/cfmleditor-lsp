@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -22,11 +25,14 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, nil)
 	}
 
-	word := wordAtPosition(content, int(params.Position.Line), int(params.Position.Character))
+	line := int(params.Position.Line)
+	char := int(params.Position.Character)
+	word := wordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
 
+	// Builtin function
 	if e, ok := docs.LookupFunction(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
@@ -36,6 +42,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}, nil)
 	}
 
+	// Builtin tag
 	if e, ok := docs.LookupTag(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
@@ -45,5 +52,92 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}, nil)
 	}
 
+	// User-defined function via qualifier (e.g. service.getMethod)
+	docURI := uri.URI(params.TextDocument.URI)
+	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+			return reply(ctx, &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: formatFuncHover(def),
+				},
+			}, nil)
+		}
+	}
+
+	// User-defined function in current file or index (unqualified)
+	defs := s.index.Lookup(word)
+	if len(defs) > 0 {
+		def := defs[0]
+		for _, d := range defs {
+			if d.URI == docURI {
+				def = d
+				break
+			}
+		}
+		return reply(ctx, &protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.Markdown,
+				Value: formatFuncHover(def),
+			},
+		}, nil)
+	}
+
 	return reply(ctx, nil, nil)
+}
+
+func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *cfparser.FunctionDef {
+	var comp string
+	switch {
+	case strings.HasPrefix(qualifier, "~?"):
+		comp = resolveComponentFromCall(qualifier[2:], s.ComponentResolvers)
+	case strings.HasPrefix(qualifier, "~"):
+		comp = qualifier[1:]
+	default:
+		ref := s.index.LookupComponentRefInFile(qualifier, docURI, line)
+		if ref != nil {
+			comp = ref.Component
+		} else {
+			comp = resolveComponentFromCall(qualifier, s.ComponentResolvers)
+		}
+	}
+	if comp == "" {
+		return nil
+	}
+	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	baseDir := filepath.Dir(currentPath)
+	cfcPath := s.resolveComponentPath(comp, baseDir)
+	if cfcPath == "" {
+		return nil
+	}
+	for _, d := range s.ensureIndexed(cfcPath) {
+		if strings.EqualFold(d.Name, funcName) {
+			return d
+		}
+	}
+	return nil
+}
+
+func formatFuncHover(def *cfparser.FunctionDef) string {
+	var b strings.Builder
+	b.WriteString("**")
+	b.WriteString(def.Name)
+	b.WriteString("**\n\n```cfml\n")
+	b.WriteString(def.Name)
+	b.WriteString("(")
+	for i, arg := range def.Arguments {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		if arg.Required {
+			b.WriteString("required ")
+		}
+		if arg.Type != "" {
+			b.WriteString(arg.Type)
+			b.WriteString(" ")
+		}
+		b.WriteString(arg.Name)
+	}
+	b.WriteString(")\n```")
+	return b.String()
 }

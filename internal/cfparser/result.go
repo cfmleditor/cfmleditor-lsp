@@ -27,10 +27,12 @@ type ParseResult struct {
 	Extends    string        // dot-path of parent component (from extends attribute)
 	Persistent bool          // true if component has persistent="true" (ORM entity)
 	Properties []propertyDef // parsed property declarations
+	Links      []DocumentLink // file path references extracted during shallow scan
 	Log        Logger        // optional logger for timing and errors
 	Resolvers         []Resolver         // optional component resolvers for RHS matching
 	PropertyResolvers []PropertyResolver // optional property-to-component resolvers
 	BeanLookup        func(string) string // optional bean name → dot-path lookup
+	extractLinks      bool               // whether to extract links during global scan
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -51,6 +53,7 @@ type ParseOptions struct {
 	Resolvers         []Resolver
 	PropertyResolvers []PropertyResolver
 	BeanLookup        func(name string) string // optional: resolve bean name → dot-path
+	ExtractLinks      bool                     // extract document links during global scan
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -80,6 +83,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		Resolvers:         opts.Resolvers,
 		PropertyResolvers: opts.PropertyResolvers,
 		BeanLookup:        opts.BeanLookup,
+		extractLinks:      opts.ExtractLinks,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
@@ -487,15 +491,139 @@ func (pr *ParseResult) appendInitRefs() {
 // appendResolverRefs scans content for assignments matching configured resolvers.
 // Only considers global scope and init() body, same as other ref extraction.
 func (pr *ParseResult) appendResolverRefs() {
-	if len(pr.Resolvers) == 0 {
-		return
-	}
-	prefixes := make([]string, len(pr.Resolvers))
-	for i := range pr.Resolvers {
-		prefixes[i] = pr.Resolvers[i].Prefix
+	var prefixes []string
+	if len(pr.Resolvers) > 0 {
+		prefixes = make([]string, len(pr.Resolvers))
+		for i := range pr.Resolvers {
+			prefixes[i] = pr.Resolvers[i].Prefix
+		}
 	}
 
 	content := pr.Content
+	lineNum := 0
+	scopeIdx := 0
+	for len(content) > 0 {
+		nl := strings.IndexByte(content, '\n')
+		var line string
+		if nl < 0 {
+			line = content
+			content = ""
+		} else {
+			line = content[:nl]
+			content = content[nl+1:]
+		}
+
+		// Skip lines inside non-init function bodies
+		if scopeIdx < len(pr.Scopes) && lineNum > pr.Scopes[scopeIdx].Start {
+			if lineNum < pr.Scopes[scopeIdx].End {
+				isInit := false
+				for _, f := range pr.Funcs {
+					if int(f.Line) == pr.Scopes[scopeIdx].Start && strings.EqualFold(f.Name, "init") {
+						isInit = true
+						break
+					}
+				}
+				if !isInit {
+					lineNum++
+					continue
+				}
+			} else {
+				scopeIdx++
+			}
+		}
+
+		// Extract document links from this line
+		if pr.extractLinks {
+			extractLinksFromLine(line, lineNum, &pr.Links)
+		}
+
+		// Resolver ref extraction (only if resolvers configured)
+		if len(prefixes) > 0 {
+			hasPrefix := false
+			for _, p := range prefixes {
+				if p == "" || containsFold(line, p) {
+					hasPrefix = true
+					break
+				}
+			}
+			if hasPrefix {
+				eqIdx := strings.IndexByte(line, '=')
+				if eqIdx >= 0 && (eqIdx+1 >= len(line) || line[eqIdx+1] != '=') {
+					rhs := strings.TrimSpace(line[eqIdx+1:])
+					rhs = strings.TrimSuffix(strings.TrimRight(rhs, " \t"), "/>")
+					rhs = strings.TrimSuffix(rhs, ">")
+					rhs = strings.TrimSuffix(rhs, ";")
+					rhs = strings.TrimSpace(rhs)
+					if rhs != "" {
+						if comp := ResolveFromCall(rhs, pr.Resolvers); comp != "" {
+							lhs := strings.TrimSpace(line[:eqIdx])
+							varName := lhs
+							if dotIdx := strings.LastIndexByte(lhs, '.'); dotIdx >= 0 {
+								varName = strings.TrimSpace(lhs[dotIdx+1:])
+							} else if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
+								varName = strings.TrimSpace(lhs[spIdx+1:])
+							}
+							if varName != "" {
+								pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
+							}
+						}
+					}
+				}
+			}
+		}
+
+		lineNum++
+	}
+}
+
+// extractLinksFromLine extracts file path references from a single line.
+func extractLinksFromLine(line string, lineNum int, links *[]DocumentLink) {
+	lower := strings.ToLower(line)
+	for _, attr := range linkAttrs {
+		idx := 0
+		for {
+			pos := strings.Index(lower[idx:], attr)
+			if pos < 0 {
+				break
+			}
+			pos += idx + len(attr)
+			for pos < len(line) && (line[pos] == ' ' || line[pos] == '\t') {
+				pos++
+			}
+			if pos >= len(line) {
+				break
+			}
+			q := line[pos]
+			if q != '"' && q != '\'' {
+				idx = pos
+				continue
+			}
+			start := pos + 1
+			end := strings.IndexByte(line[start:], q)
+			if end < 0 {
+				break
+			}
+			end += start
+			path := line[start:end]
+			if path != "" && !strings.Contains(path, "#") && !strings.Contains(path, "://") {
+				*links = append(*links, DocumentLink{
+					Path:  path,
+					Line:  uint32(lineNum),
+					Start: uint32(start),
+					End:   uint32(end),
+				})
+			}
+			idx = end + 1
+		}
+	}
+}
+
+// linkAttrs are the attribute names that contain file paths.
+var linkAttrs = []string{"template=", "include ", "href=", "action="}
+
+// ExtractLinks scans content for file path references (cfinclude, href, etc.).
+func ExtractLinks(content string) []DocumentLink {
+	var links []DocumentLink
 	lineNum := 0
 	for len(content) > 0 {
 		nl := strings.IndexByte(content, '\n')
@@ -508,50 +636,102 @@ func (pr *ParseResult) appendResolverRefs() {
 			content = content[nl+1:]
 		}
 
-		// Quick prefix check
-		hasPrefix := false
-		for _, p := range prefixes {
-			if p == "" || containsFold(line, p) {
-				hasPrefix = true
-				break
+		lower := strings.ToLower(line)
+		for _, attr := range linkAttrs {
+			idx := 0
+			for {
+				pos := strings.Index(lower[idx:], attr)
+				if pos < 0 {
+					break
+				}
+				pos += idx + len(attr)
+				// Skip whitespace and find opening quote
+				for pos < len(line) && (line[pos] == ' ' || line[pos] == '\t') {
+					pos++
+				}
+				if pos >= len(line) {
+					break
+				}
+				q := line[pos]
+				if q != '"' && q != '\'' {
+					idx = pos
+					continue
+				}
+				start := pos + 1
+				end := strings.IndexByte(line[start:], q)
+				if end < 0 {
+					break
+				}
+				end += start
+				path := line[start:end]
+				if path != "" && !strings.Contains(path, "#") && !strings.Contains(path, "://") {
+					links = append(links, DocumentLink{
+						Path:  path,
+						Line:  uint32(lineNum),
+						Start: uint32(start),
+						End:   uint32(end),
+					})
+				}
+				idx = end + 1
 			}
-		}
-		if !hasPrefix {
-			lineNum++
-			continue
-		}
-
-		eqIdx := strings.IndexByte(line, '=')
-		if eqIdx < 0 || (eqIdx+1 < len(line) && line[eqIdx+1] == '=') {
-			lineNum++
-			continue
-		}
-		rhs := strings.TrimSpace(line[eqIdx+1:])
-		rhs = strings.TrimSuffix(strings.TrimRight(rhs, " \t"), "/>")
-		rhs = strings.TrimSuffix(rhs, ">")
-		rhs = strings.TrimSuffix(rhs, ";")
-		rhs = strings.TrimSpace(rhs)
-		if rhs == "" {
-			lineNum++
-			continue
-		}
-		comp := ResolveFromCall(rhs, pr.Resolvers)
-		if comp == "" {
-			lineNum++
-			continue
-		}
-		lhs := strings.TrimSpace(line[:eqIdx])
-		varName := lhs
-		if dotIdx := strings.LastIndexByte(lhs, '.'); dotIdx >= 0 {
-			varName = strings.TrimSpace(lhs[dotIdx+1:])
-		} else if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
-			varName = strings.TrimSpace(lhs[spIdx+1:])
-		}
-		if varName != "" {
-			pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
 		}
 		lineNum++
 	}
+	return links
+}
+
+// FuncRefs extracts resolver refs and document links from a function body (lazy, on demand).
+func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
+	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	if start < 0 {
+		return nil, nil
+	}
+	body := pr.Content[start:end]
+	var refs []ComponentRef
+	var links []DocumentLink
+	lineNum := funcStart + 1
+	for len(body) > 0 {
+		nl := strings.IndexByte(body, '\n')
+		var line string
+		if nl < 0 {
+			line = body
+			body = ""
+		} else {
+			line = body[:nl]
+			body = body[nl+1:]
+		}
+
+		// Extract links from this line
+		extractLinksFromLine(line, lineNum, &links)
+
+		// Extract resolver refs
+		if len(pr.Resolvers) > 0 {
+			eqIdx := strings.IndexByte(line, '=')
+			if eqIdx >= 0 && (eqIdx+1 >= len(line) || line[eqIdx+1] != '=') {
+				rhs := strings.TrimSpace(line[eqIdx+1:])
+				rhs = strings.TrimSuffix(strings.TrimRight(rhs, " \t"), "/>")
+				rhs = strings.TrimSuffix(rhs, ">")
+				rhs = strings.TrimSuffix(rhs, ";")
+				rhs = strings.TrimSpace(rhs)
+				if rhs != "" {
+					if comp := ResolveFromCall(rhs, pr.Resolvers); comp != "" {
+						lhs := strings.TrimSpace(line[:eqIdx])
+						varName := lhs
+						if dotIdx := strings.LastIndexByte(lhs, '.'); dotIdx >= 0 {
+							varName = strings.TrimSpace(lhs[dotIdx+1:])
+						} else if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
+							varName = strings.TrimSpace(lhs[spIdx+1:])
+						}
+						if varName != "" {
+							refs = append(refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
+						}
+					}
+				}
+			}
+		}
+		lineNum++
+	}
+	return refs, links
 }
 
 func funcKey(start, end int) string {

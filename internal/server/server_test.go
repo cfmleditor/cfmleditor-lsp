@@ -2012,3 +2012,957 @@ func TestCompletionDotInvokedTrigger(t *testing.T) {
 		t.Errorf("expected [getName], got %v", labels)
 	}
 }
+
+func TestCompletionDotAfterCallExpression(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "tours"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "tours", "service.cfc"), []byte("component {\nfunction getToursAndExcursions() {}\nfunction getParameters() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := `<cfset result = getService("tours").`
+	srv.setDocument(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 36},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	found := false
+	for _, item := range list.Items {
+		if item.Label == "getToursAndExcursions" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected completion for getToursAndExcursions after getService(\"tours\").")
+	}
+}
+
+func TestSignatureHelpQualifiedCall(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "tours"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "tours", "service.cfc"), []byte("component {\nfunction getParameters(required string companyCode, string year) {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := `<cfset var svc = getService("tours")>` + "\n" + `<cfset result = svc.getParameters(`
+	srv.setDocument(docURI, docContent)
+
+	pr := cfparser.ParseWithOptions(docURI, string(docContent), cfparser.ParseOptions{
+		Resolvers: []cfparser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
+	})
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 35},
+		},
+	})
+
+	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	help, ok := (*result).(*protocol.SignatureHelp)
+	if !ok || help == nil {
+		t.Fatalf("expected *SignatureHelp, got %T", *result)
+	}
+	if len(help.Signatures) == 0 {
+		t.Fatal("expected at least one signature")
+	}
+	if !strings.Contains(help.Signatures[0].Label, "companyCode") {
+		t.Errorf("expected signature to contain 'companyCode', got %s", help.Signatures[0].Label)
+	}
+}
+
+func TestHoverUserDefinedFunction(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), []byte("component {\nfunction getName(required string id) {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "myObj = new models.User()\nmyObj.getName()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 8},
+		},
+	})
+
+	if err := srv.handleHover(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatalf("expected *Hover, got %T", *result)
+	}
+	if !strings.Contains(hover.Contents.Value, "getName") {
+		t.Errorf("expected hover to contain 'getName', got %s", hover.Contents.Value)
+	}
+	if !strings.Contains(hover.Contents.Value, "id") {
+		t.Errorf("expected hover to contain parameter 'id', got %s", hover.Contents.Value)
+	}
+}
+
+func TestSignatureHelpInlineCallExpression(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "tours"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "tours", "service.cfc"), []byte("component {\nfunction getParameters(required string companyCode) {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := `<cfset result = getService("tours").getParameters(`
+	srv.setDocument(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: uint32(len(docContent))},
+		},
+	})
+
+	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	help, ok := (*result).(*protocol.SignatureHelp)
+	if !ok || help == nil {
+		t.Fatalf("expected *SignatureHelp, got %T", *result)
+	}
+	if len(help.Signatures) == 0 {
+		t.Fatal("expected at least one signature")
+	}
+	if !strings.Contains(help.Signatures[0].Label, "companyCode") {
+		t.Errorf("expected signature to contain 'companyCode', got %s", help.Signatures[0].Label)
+	}
+}
+
+func TestSignatureHelpBuiltinFunction(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, ")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 28},
+		},
+	})
+
+	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	help, ok := (*result).(*protocol.SignatureHelp)
+	if !ok || help == nil {
+		t.Fatalf("expected *SignatureHelp, got %T", *result)
+	}
+	if len(help.Signatures) == 0 {
+		t.Fatal("expected signature for ArrayAppend")
+	}
+	if !strings.Contains(strings.ToLower(help.Signatures[0].Label), "arrayappend") {
+		t.Errorf("expected label to contain arrayAppend, got %s", help.Signatures[0].Label)
+	}
+	if help.ActiveParameter != 1 {
+		t.Errorf("expected activeParam=1 (after comma), got %d", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpNoContext(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = 123>")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 12},
+		},
+	})
+
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	if *result != nil {
+		t.Errorf("expected nil result outside function call, got %T", *result)
+	}
+}
+
+func TestHoverQualifiedCallExpression(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "general"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "general", "service.cfc"), []byte("component {\nfunction getYearGroups(required string companyCode) {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "<cfset var svc = getService(\"general\")>\n<cfset result = svc.getYearGroups()>"
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 22},
+		},
+	})
+
+	if err := srv.handleHover(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatalf("expected *Hover, got %T", *result)
+	}
+	if !strings.Contains(hover.Contents.Value, "getYearGroups") {
+		t.Errorf("expected hover to contain 'getYearGroups', got %s", hover.Contents.Value)
+	}
+	if !strings.Contains(hover.Contents.Value, "companyCode") {
+		t.Errorf("expected hover to contain 'companyCode', got %s", hover.Contents.Value)
+	}
+}
+
+func TestDocumentLinkResolve(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "header.cfm"), []byte("header"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	srv.setDocument(docURI, `<cfinclude template="header.cfm">`)
+
+	// Test documentLink request
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+
+	if err := srv.handleDocumentLink(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	links, ok := (*result).([]protocol.DocumentLink)
+	if !ok || len(links) == 0 {
+		t.Fatal("expected at least one document link")
+	}
+	if links[0].Tooltip != "header.cfm" {
+		t.Errorf("expected tooltip 'header.cfm', got %q", links[0].Tooltip)
+	}
+
+	// Test resolve
+	reply2, result2, replyErr2 := captureReply(t)
+	resolveReq := makeCall(t, protocol.MethodDocumentLinkResolve, links[0])
+	if err := srv.handleDocumentLinkResolve(context.Background(), reply2, resolveReq); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr2 != nil {
+		t.Fatal(*replyErr2)
+	}
+
+	resolved, ok := (*result2).(protocol.DocumentLink)
+	if !ok {
+		t.Fatalf("expected DocumentLink, got %T", *result2)
+	}
+	if resolved.Target == "" {
+		t.Error("expected resolved target to be non-empty")
+	}
+	if !strings.Contains(string(resolved.Target), "header.cfm") {
+		t.Errorf("expected target to contain 'header.cfm', got %s", resolved.Target)
+	}
+}
+
+func TestResolveComponentPathCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "user.cfc"), []byte("component {}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// Request with uppercase User — should still resolve to lowercase user.cfc
+	cfcPath := srv.resolveComponentPath("models.User", dir)
+	if cfcPath == "" {
+		t.Fatal("expected to resolve models.User")
+	}
+	if !strings.HasSuffix(cfcPath, "user.cfc") {
+		t.Errorf("expected path to end with 'user.cfc', got %s", cfcPath)
+	}
+}
+
+func TestSignatureHelpActiveParamMultiple(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = Replace(str, find, repl, ")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 36},
+		},
+	})
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	help := (*result).(*protocol.SignatureHelp)
+	if help.ActiveParameter != 3 {
+		t.Errorf("expected activeParam=3, got %d", help.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpNestedCall(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	// Cursor inside Len( — should show Len signature, not ArrayAppend
+	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, Len(")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 32},
+		},
+	})
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	help := (*result).(*protocol.SignatureHelp)
+	if help == nil || len(help.Signatures) == 0 {
+		t.Fatal("expected signature")
+	}
+	if !strings.Contains(strings.ToLower(help.Signatures[0].Label), "len") {
+		t.Errorf("expected Len signature, got %s", help.Signatures[0].Label)
+	}
+}
+
+func TestCompletionDotAfterVariableRef(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "general"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "general", "service.cfc"), []byte("component {\nfunction getYearGroups() {}\nfunction getCompanies() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "svc = getService(\"general\")\nsvc."
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Label)
+	}
+	if !strings.Contains(strings.Join(names, ","), "getYearGroups") {
+		t.Errorf("expected getYearGroups in completions, got %v", names)
+	}
+	if !strings.Contains(strings.Join(names, ","), "getCompanies") {
+		t.Errorf("expected getCompanies in completions, got %v", names)
+	}
+}
+
+func TestDocumentLinkSkipsHashExpressions(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, `<cfinclude template="#dynamicPath#">`)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) != 0 {
+		t.Errorf("expected no links for hash expression, got %d", len(links))
+	}
+}
+
+func TestDocumentLinkSkipsURLs(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, `<a href="https://example.com">link</a>`)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) != 0 {
+		t.Errorf("expected no links for URL, got %d", len(links))
+	}
+}
+
+func TestResolverSingleQuotesMatch(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "teacher"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "teacher", "service.cfc"), []byte("component {\nfunction getTeachers() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	// Single quotes in source, double quotes in resolver pattern
+	docContent := "svc = getService('teacher')\nsvc."
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	found := false
+	for _, item := range list.Items {
+		if item.Label == "getTeachers" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected getTeachers in completions — single quotes should match double-quote pattern")
+	}
+}
+
+func TestExecuteCommandReindex(t *testing.T) {
+	srv := newTestServer()
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command: "cfmleditor.reindex",
+	})
+	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+}
+
+func TestExecuteCommandCopyPackage(t *testing.T) {
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{"/project"}
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command:   "cfmleditor.copyPackage",
+		Arguments: []interface{}{"file:///project/models/User.cfc"},
+	})
+	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	dotPath, _ := (*result).(string)
+	if dotPath != "models.User" {
+		t.Errorf("expected 'models.User', got %q", dotPath)
+	}
+}
+
+func TestHoverBuiltinCaseInsensitive(t *testing.T) {
+	srv := newTestServer()
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = ARRAYAPPEND(arr, val)>")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 15},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatal("expected hover for uppercase ARRAYAPPEND")
+	}
+	if !strings.Contains(strings.ToLower(hover.Contents.Value), "arrayappend") {
+		t.Errorf("expected arrayappend in hover, got %s", hover.Contents.Value)
+	}
+}
+
+func TestDefinitionViaRegexResolver(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "finance"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "finance", "service.cfc"), []byte("component {\nfunction getReport() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1.service", Prefix: "kernel.get"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "svc = SERVER.kernel.getFinance()\nsvc.getReport()"
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	// Check that svc resolved to finance
+	ref := srv.index.LookupComponentRefInFile("svc", docURI, 1)
+	if ref == nil {
+		t.Fatal("expected component ref for svc")
+	}
+	if !strings.Contains(strings.ToLower(ref.Component), "finance") {
+		t.Errorf("expected component to contain 'finance', got %s", ref.Component)
+	}
+}
+
+func TestCompletionDotOnThis(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction init() {}\nfunction getData() {}\n}\nthis."
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.SetThisVars(docURI, pr.ThisVars())
+
+	// Rebuild completion cache
+	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 4, Character: 5},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+
+	list := completionListFromResult(t, *result)
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Label)
+	}
+	joined := strings.Join(names, ",")
+	if !strings.Contains(joined, "init") || !strings.Contains(joined, "getData") {
+		t.Errorf("expected this. to show init and getData, got %v", names)
+	}
+}
+
+func TestDocumentLinkMultipleOnSameLine(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, `<cfinclude template="a.cfm"><cfinclude template="b.cfm">`)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) != 2 {
+		t.Errorf("expected 2 links, got %d", len(links))
+	}
+}
+
+func TestFuncRefsLazyExtraction(t *testing.T) {
+	content := `<cfcomponent>
+	<cffunction name="init">
+		<cfset VARIABLES.svc = getService("general") />
+	</cffunction>
+	<cffunction name="doWork">
+		<cfset var helper = getService("helper") />
+	</cffunction>
+</cfcomponent>`
+
+	resolvers := []cfparser.Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+	pr := cfparser.ParseWithOptions(uri.URI("file:///test.cfc"), content, cfparser.ParseOptions{
+		Resolvers: resolvers,
+	})
+
+	// init refs should be in pr.Refs (eagerly scanned)
+	found := false
+	for _, ref := range pr.Refs {
+		if ref.Variable == "svc" && strings.Contains(ref.Component, "general") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected eager ref for svc in init()")
+	}
+
+	// doWork refs should NOT be in pr.Refs (lazy)
+	for _, ref := range pr.Refs {
+		if ref.Variable == "helper" {
+			t.Error("did not expect eager ref for helper in doWork() — should be lazy")
+		}
+	}
+
+	// But FuncRefs should find it
+	for _, sc := range pr.Scopes {
+		for _, f := range pr.Funcs {
+			if f.Name == "doWork" && int(f.Line) == sc.Start {
+				refs, _ := pr.FuncRefs(sc.Start, sc.End)
+				found = false
+				for _, ref := range refs {
+					if ref.Variable == "helper" && strings.Contains(ref.Component, "helper") {
+						found = true
+					}
+				}
+				if !found {
+					t.Error("expected lazy ref for helper via FuncRefs")
+				}
+			}
+		}
+	}
+}
+
+func TestExtractLinksFromContent(t *testing.T) {
+	content := `<cfinclude template="header.cfm">
+<a href="page.html">link</a>
+<cfmodule template="mod.cfm">
+<cfinclude template="#dynamic#">`
+
+	links := cfparser.ExtractLinks(content)
+	if len(links) != 3 {
+		t.Errorf("expected 3 links (header, page, mod), got %d", len(links))
+		for _, l := range links {
+			t.Logf("  %s line=%d", l.Path, l.Line)
+		}
+	}
+}
+
+func TestExecuteCommandUnknown(t *testing.T) {
+	srv := newTestServer()
+	reply, _, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command: "cfmleditor.nonexistent",
+	})
+	_ = srv.handleExecuteCommand(context.Background(), reply, req)
+	if *replyErr == nil {
+		t.Error("expected error for unknown command")
+	}
+}
+
+func TestInvalidateAllCache(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	srv.compCache.PutFile(docURI, []protocol.CompletionItem{{Label: "test"}})
+
+	items := srv.compCache.GetFile(docURI)
+	if len(items) == 0 {
+		t.Fatal("expected cached items")
+	}
+
+	srv.compCache.InvalidateAll()
+	items = srv.compCache.GetFile(docURI)
+	if len(items) != 0 {
+		t.Errorf("expected empty after InvalidateAll, got %d", len(items))
+	}
+}
+
+func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction myHelper(required string name, numeric age) {}\nfunction init() {\nmyHelper(\n}\n}"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 9},
+		},
+	})
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	help, ok := (*result).(*protocol.SignatureHelp)
+	if !ok || help == nil || len(help.Signatures) == 0 {
+		t.Fatal("expected signature for myHelper")
+	}
+	if !strings.Contains(help.Signatures[0].Label, "name") {
+		t.Errorf("expected 'name' param, got %s", help.Signatures[0].Label)
+	}
+	if len(help.Signatures[0].Parameters) != 2 {
+		t.Errorf("expected 2 parameters, got %d", len(help.Signatures[0].Parameters))
+	}
+}
+
+func TestHoverNoResultForUnknownWord(t *testing.T) {
+	srv := newTestServer()
+	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset xyz123 = 1>")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 8},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	if *result != nil {
+		t.Errorf("expected nil hover for unknown word, got %T", *result)
+	}
+}
+
+func TestCompletionDotAfterNewExpression(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "User.cfc"), []byte("component {\nfunction getName() {}\nfunction getAge() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "obj = new models.User()\nobj."
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+		Context: &protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: ".",
+		},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Label)
+	}
+	if !strings.Contains(strings.Join(names, ","), "getName") {
+		t.Errorf("expected getName after new models.User(), got %v", names)
+	}
+}
+
+func TestDocumentLinkHrefAndAction(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, `<a href="about.cfm">About</a>
+<form action="submit.cfm">`)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) != 2 {
+		t.Errorf("expected 2 links (href + action), got %d", len(links))
+	}
+	paths := make(map[string]bool)
+	for _, l := range links {
+		paths[l.Tooltip] = true
+	}
+	if !paths["about.cfm"] {
+		t.Error("expected link for about.cfm")
+	}
+	if !paths["submit.cfm"] {
+		t.Error("expected link for submit.cfm")
+	}
+}
+
+func TestResolverMultipleCaptures(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "admin", "dao"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "admin", "dao", "UserDAO.cfc"), []byte("component {\nfunction findAll() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getBean("$1", "$2")`, Resolve: "packages.$2.dao.$1", Prefix: "getBean"},
+	}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "dao = getBean(\"UserDAO\", \"admin\")\ndao."
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	ref := srv.index.LookupComponentRefInFile("dao", docURI, 1)
+	if ref == nil {
+		t.Fatal("expected ref for dao")
+	}
+	if ref.Component != "packages.admin.dao.UserDAO" {
+		t.Errorf("expected packages.admin.dao.UserDAO, got %s", ref.Component)
+	}
+}
+
+func TestFindCallContextNoParens(t *testing.T) {
+	content := "<cfset x = someVar>"
+	name, qual, _ := findCallContext(content, 0, 15)
+	if name != "" || qual != "" {
+		t.Errorf("expected empty outside parens, got name=%q qual=%q", name, qual)
+	}
+}
+
+func TestWordAtPositionEdgeCases(t *testing.T) {
+	tests := []struct {
+		content string
+		line    int
+		char    int
+		want    string
+	}{
+		{"hello world", 0, 0, "hello"},
+		{"hello world", 0, 5, "hello"},
+		{"hello world", 0, 6, "world"},
+		{"", 0, 0, ""},
+		{"a", 0, 1, "a"},
+		{"foo.bar", 0, 1, "foo"},
+	}
+	for _, tt := range tests {
+		got := wordAtPosition(tt.content, tt.line, tt.char)
+		if got != tt.want {
+			t.Errorf("wordAtPosition(%q, %d, %d) = %q, want %q", tt.content, tt.line, tt.char, got, tt.want)
+		}
+	}
+}

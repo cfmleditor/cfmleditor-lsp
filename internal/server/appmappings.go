@@ -7,7 +7,7 @@ import (
 // effectiveMappings returns config mappings merged with Application.cfc mappings.
 // Config mappings take precedence over Application.cfc mappings.
 func (s *Server) effectiveMappings(baseDir string) map[string]string {
-	appDir := findApplicationRoot(baseDir)
+	appDir := s.findApplicationRoot(baseDir)
 	if appDir == "" {
 		return s.Mappings
 	}
@@ -39,7 +39,7 @@ func (s *Server) resolveComponentPath(component, baseDir string) string {
 	if p := cfpath.ResolvePath(component, baseDir, mappings); p != "" {
 		return p
 	}
-	if appDir := findApplicationRoot(baseDir); appDir != "" {
+	if appDir := s.findApplicationRoot(baseDir); appDir != "" {
 		if p := cfpath.ResolvePath(component, appDir, mappings); p != "" {
 			return p
 		}

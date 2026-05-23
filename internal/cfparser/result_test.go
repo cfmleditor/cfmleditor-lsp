@@ -266,7 +266,7 @@ func TestParseResult_ResolverRefs(t *testing.T) {
 </cfcomponent>`
 	pr := Parse(testURI, content, resolvers)
 
-	// temp2 should resolve via resolver (inside init)
+	// temp2 should resolve via resolver (inside init — init is always scanned)
 	var found bool
 	for _, ref := range pr.Refs {
 		if ref.Variable == "temp2" && ref.Component == "packages.general.service" {
@@ -278,15 +278,24 @@ func TestParseResult_ResolverRefs(t *testing.T) {
 		t.Error("expected resolver ref for temp2 -> packages.general.service")
 	}
 
-	// svc inside other() should also be indexed (resolvers work in all scopes)
+	// svc inside other() is extracted lazily via FuncRefs
+	var otherScope FuncScope
+	for _, sc := range pr.Scopes {
+		for _, f := range pr.Funcs {
+			if int(f.Line) == sc.Start && f.Name == "other" {
+				otherScope = sc
+			}
+		}
+	}
+	funcRefs, _ := pr.FuncRefs(otherScope.Start, otherScope.End)
 	found = false
-	for _, ref := range pr.Refs {
+	for _, ref := range funcRefs {
 		if ref.Variable == "svc" && ref.Component == "packages.timetable.service" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected resolver ref for svc -> packages.timetable.service")
+		t.Error("expected lazy resolver ref for svc -> packages.timetable.service")
 	}
 }

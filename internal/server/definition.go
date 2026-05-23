@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -184,7 +183,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 		t0 := time.Now()
 		// If component is already an absolute file path, use it directly
 		if filepath.IsAbs(component) {
-			if _, err := os.Stat(component); err == nil {
+			if _, err := s.FS.Stat(component); err == nil {
 				cfcPath = component
 			}
 		}
@@ -198,7 +197,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 				}
 				// Fall back to ORM cfcLocation directories
 				if cfcPath == "" {
-					if appDir := findApplicationRoot(baseDir); appDir != "" {
+					if appDir := s.findApplicationRoot(baseDir); appDir != "" {
 						for _, ormDir := range cfpath.LoadOrmLocations(appDir) {
 							cfcPath = cfpath.ResolvePath(component, ormDir, nil)
 							if cfcPath != "" {
@@ -562,11 +561,11 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 
 // findApplicationRoot walks up from dir looking for Application.cfc or Application.cfm.
 // Returns the directory containing it, or empty string if not found.
-func findApplicationRoot(dir string) string {
+func (s *Server) findApplicationRoot(dir string) string {
 	d := dir
 	for {
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
-			if _, err := os.Stat(filepath.Join(d, name)); err == nil {
+			if _, err := s.FS.Stat(filepath.Join(d, name)); err == nil {
 				return d
 			}
 		}
@@ -630,7 +629,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 
 	// Try relative to current file
 	candidate := filepath.Join(baseDir, filePath)
-	if _, err := os.Stat(candidate); err == nil {
+	if _, err := s.FS.Stat(candidate); err == nil {
 		return &protocol.Location{
 			URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
 			Range: protocol.Range{},
@@ -638,9 +637,9 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	}
 
 	// Try relative to Application.cfc root
-	if appDir := findApplicationRoot(baseDir); appDir != "" {
+	if appDir := s.findApplicationRoot(baseDir); appDir != "" {
 		candidate = filepath.Join(appDir, filePath)
-		if _, err := os.Stat(candidate); err == nil {
+		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
 				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
 				Range: protocol.Range{},
@@ -656,7 +655,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 			for key, dir := range mappings {
 				if strings.EqualFold(seg, key) {
 					candidate = filepath.Join(dir, rest)
-					if _, err := os.Stat(candidate); err == nil {
+					if _, err := s.FS.Stat(candidate); err == nil {
 						return &protocol.Location{
 							URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
 							Range: protocol.Range{},
@@ -670,7 +669,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	// Try relative to workspace folders
 	for _, root := range s.WorkspaceFolders {
 		candidate = filepath.Join(root, filePath)
-		if _, err := os.Stat(candidate); err == nil {
+		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
 				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
 				Range: protocol.Range{},

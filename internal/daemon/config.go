@@ -2,12 +2,9 @@
 package daemon
 
 import (
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -90,12 +87,6 @@ func FindConfig(dir string) (*Config, error) {
 	return &Config{Path: "", Name: filepath.Base(abs)}, nil
 }
 
-// SocketPath returns a deterministic Unix socket path derived from the project name.
-func (c *Config) SocketPath() string {
-	h := sha256.Sum256([]byte(c.Name))
-	name := fmt.Sprintf("cfmleditor-%x.sock", h[:8])
-	return filepath.Join(socketDir(), name)
-}
 
 func (c *Config) raw() *configJSON {
 	data, err := os.ReadFile(c.Path)
@@ -344,21 +335,4 @@ func (c *Config) IndexGlobs() []string {
 // expandGlob expands a glob pattern, handling ** for recursive directory matching.
 func expandGlob(pattern string) []string {
 	return cfpath.ExpandGlob(pattern)
-}
-
-func socketDir() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
-	case "windows":
-		if d := os.Getenv("LOCALAPPDATA"); d != "" {
-			return filepath.Join(d, "cfmleditor-lsp")
-		}
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
-	default:
-		if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-			return filepath.Join(d, "cfmleditor-lsp")
-		}
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
-	}
 }

@@ -1,8 +1,9 @@
 BINARY := cfmleditor-lsp
 OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
+WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release release-dry
+.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release release-dry
 
 docs: docs-cfdocs
 
@@ -24,6 +25,11 @@ update-grammar: generate
 build: generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp
+
+build-wasm: generate
+	@mkdir -p target/release
+	CC=$(WASI_SDK)/bin/clang CGO_ENABLED=1 GOOS=wasip1 GOARCH=wasm \
+		go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o target/release/$(BINARY).wasm ./cmd/cfmleditor-lsp
 
 test:
 	go test ./...

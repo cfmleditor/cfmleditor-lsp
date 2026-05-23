@@ -8,7 +8,11 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
+
+// DefaultFS is the filesystem used by this package. Override for testing or WASM.
+var DefaultFS vfs.FS = vfs.OS{}
 
 var (
 	appMappingsCache   = make(map[string]map[string]string)
@@ -23,7 +27,7 @@ func ParseApplicationMappings(content string, appDir string) map[string]string {
 // readApplicationFile reads Application.cfc or Application.cfm from appDir.
 func readApplicationFile(appDir string) []byte {
 	for _, name := range []string{"Application.cfc", "Application.cfm"} {
-		data, err := os.ReadFile(filepath.Join(appDir, name))
+		data, err := DefaultFS.ReadFile(filepath.Join(appDir, name))
 		if err == nil {
 			return data
 		}
@@ -139,14 +143,14 @@ func ResolvePath(dotPath string, baseDir string, mappings map[string]string) str
 				rel = parts[0] + ".cfc"
 			}
 			abs := filepath.Join(mapped, rel)
-			if _, err := os.Stat(abs); err == nil {
+			if _, err := DefaultFS.Stat(abs); err == nil {
 				return realPath(abs)
 			}
 		}
 	}
 	rel := strings.ReplaceAll(dotPath, ".", string(filepath.Separator)) + ".cfc"
 	abs := filepath.Join(baseDir, rel)
-	if _, err := os.Stat(abs); err == nil {
+	if _, err := DefaultFS.Stat(abs); err == nil {
 		return realPath(abs)
 	}
 	return ""
@@ -154,11 +158,9 @@ func ResolvePath(dotPath string, baseDir string, mappings map[string]string) str
 
 // realPath returns the actual case-correct path from the filesystem.
 func realPath(path string) string {
-	// On case-insensitive filesystems, the constructed path may have wrong case.
-	// Read the directory to find the actual filename.
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
-	entries, err := os.ReadDir(dir)
+	entries, err := DefaultFS.ReadDir(dir)
 	if err != nil {
 		return path
 	}
@@ -201,7 +203,7 @@ func ExpandGlob(pattern string) []string {
 	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
 
 	var out []string
-	_ = filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+	_ = DefaultFS.Walk(base, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

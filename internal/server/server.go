@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -26,6 +26,7 @@ type Server struct {
 	logger      *zap.Logger
 	initialized bool
 	Version     string
+	FS          vfs.FS // filesystem abstraction for portability
 
 	mu               sync.RWMutex
 	documents        map[uri.URI]string
@@ -59,6 +60,7 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 	return &Server{
 		conn:          conn,
 		logger:        logger,
+		FS:            vfs.OS{},
 		documents:     make(map[uri.URI]string),
 		index:         idx,
 		lintCancels:   make(map[uri.URI]context.CancelFunc),
@@ -114,11 +116,15 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			FirstTriggerCharacter: ">",
 		},
 		DefinitionProvider:         true,
+		SignatureHelpProvider: &protocol.SignatureHelpOptions{
+			TriggerCharacters: []string{"(", ","},
+		},
 		DocumentSymbolProvider:  true,
 		WorkspaceSymbolProvider: true,
 		HoverProvider:           true,
+		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: true},
 		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage"},
 		},
 		Workspace: &protocol.ServerCapabilitiesWorkspace{
 			WorkspaceFolders: &protocol.ServerCapabilitiesWorkspaceFolders{
@@ -236,8 +242,18 @@ func (s *Server) cfPropertyResolvers() []cfparser.PropertyResolver {
 	return r
 }
 
-// parseContent parses CFC content with all configured resolvers.
+// parseContent parses CFC content with all configured resolvers and link extraction.
 func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseResult {
+	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
+		Resolvers:         s.cfResolvers(),
+		PropertyResolvers: s.cfPropertyResolvers(),
+		BeanLookup:        s.index.LookupBean,
+		ExtractLinks:      true,
+	})
+}
+
+// parseContentForIndex parses CFC content for indexing (no link extraction).
+func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser.ParseResult {
 	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
@@ -290,7 +306,7 @@ func (s *Server) ensureIndexed(cfcPath string) []*cfparser.FunctionDef {
 	if len(defs) == 0 {
 		content, ok := s.getDocument(cfcURI)
 		if !ok {
-			data, err := os.ReadFile(cfcPath)
+			data, err := s.FS.ReadFile(cfcPath)
 			if err != nil {
 				return nil
 			}

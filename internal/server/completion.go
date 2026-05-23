@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -950,7 +949,43 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem {
 	// Extract variable name before the dot
 	varName := wordBeforeDot(content, line, char)
+
+	// If no simple word, check for call expression before dot: e.g. getService("tours").
 	if varName == "" {
+		lineText := lineAtOffset(content, line)
+		dotPos := char - 1
+		if dotPos > 0 && dotPos < len(lineText) && lineText[dotPos] == '.' && lineText[dotPos-1] == ')' {
+			// Find matching open paren
+			depth := 0
+			i := dotPos - 1
+			for i >= 0 {
+				if lineText[i] == ')' {
+					depth++
+				} else if lineText[i] == '(' {
+					depth--
+					if depth == 0 {
+						// Find function name start
+						fnStart := i - 1
+						for fnStart >= 0 && isWordChar(lineText[fnStart]) {
+							fnStart--
+						}
+						fnStart++
+						callExpr := lineText[fnStart:dotPos]
+						comp := resolveComponentFromCall(callExpr, s.ComponentResolvers)
+						if comp != "" {
+							currentPath := strings.TrimPrefix(string(docURI), "file://")
+							baseDir := filepath.Dir(currentPath)
+							cfcPath := s.resolveComponentPath(comp, baseDir)
+							if cfcPath != "" {
+								return s.methodCompletionItems(cfcPath)
+							}
+						}
+						break
+					}
+				}
+				i--
+			}
+		}
 		return nil
 	}
 
@@ -982,7 +1017,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	baseDir := filepath.Dir(currentPath)
 	var cfcPath string
 	if filepath.IsAbs(component) {
-		if _, err := os.Stat(component); err == nil {
+		if _, err := s.FS.Stat(component); err == nil {
 			cfcPath = component
 		}
 	}
@@ -1010,6 +1045,31 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 			Kind:  protocol.CompletionItemKindProperty,
 		})
 	}
+	for _, d := range defs {
+		detail := d.Name + "("
+		for i, arg := range d.Arguments {
+			if i > 0 {
+				detail += ", "
+			}
+			if arg.Type != "" {
+				detail += arg.Type + " "
+			}
+			detail += arg.Name
+		}
+		detail += ")"
+		items = append(items, protocol.CompletionItem{
+			Label:  d.Name,
+			Kind:   protocol.CompletionItemKindMethod,
+			Detail: detail,
+		})
+	}
+	return items
+}
+
+// methodCompletionItems returns completion items for all functions in a CFC file.
+func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem {
+	defs := s.ensureIndexed(cfcPath)
+	items := make([]protocol.CompletionItem, 0, len(defs))
 	for _, d := range defs {
 		detail := d.Name + "("
 		for i, arg := range d.Arguments {

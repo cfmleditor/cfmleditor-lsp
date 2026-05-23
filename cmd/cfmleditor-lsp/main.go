@@ -15,6 +15,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/uri"
@@ -122,7 +123,7 @@ func runServer() {
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
-		stream := jsonrpc2.NewStream(newStdio())
+		stream := jsonrpc2.NewStream(vfs.Stdio())
 		conn := jsonrpc2.NewConn(stream)
 		srv := server.NewServer(conn, logger, sharedIndex)
 		srv.Version = version
@@ -155,26 +156,13 @@ func runServer() {
 	}
 
 	// No config found — standalone mode
-	stream := jsonrpc2.NewStream(newStdio())
+	stream := jsonrpc2.NewStream(vfs.Stdio())
 	conn := jsonrpc2.NewConn(stream)
 	srv := server.NewServer(conn, logger)
 	srv.Version = version
 	conn.Go(context.Background(), srv.Handler())
 	<-conn.Done()
 }
-
-type stdio struct{}
-
-func newStdio() stdio { return stdio{} }
-
-// Read reads from stdin.
-func (s stdio) Read(p []byte) (int, error) { return os.Stdin.Read(p) }
-
-// Write writes to stdout.
-func (s stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
-
-// Close closes stdin to unblock pending reads.
-func (s stdio) Close() error { return os.Stdin.Close() }
 
 func cmdParse(args []string) {
 	if len(args) == 0 {

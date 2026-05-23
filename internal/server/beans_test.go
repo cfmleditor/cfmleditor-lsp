@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
 func beansTestdataDir() string {
@@ -18,7 +20,7 @@ func TestBuildBeanMap_Namespaces(t *testing.T) {
 		"dao":      filepath.Join(dir, "dao"),
 		"services": filepath.Join(dir, "services"),
 	}
-	beans := buildBeanMap(beanPaths)
+	beans := buildBeanMap(beanPaths, vfs.OS{})
 
 	// Namespace-qualified entries should be absolute paths
 	tests := []struct {
@@ -52,7 +54,7 @@ func TestBuildBeanMap_DuplicateBareNames(t *testing.T) {
 		"":    dir,
 		"dao": filepath.Join(dir, "dao"),
 	}
-	beans := buildBeanMap(beanPaths)
+	beans := buildBeanMap(beanPaths, vfs.OS{})
 
 	// Namespace-qualified should always work
 	if !strings.HasSuffix(beans["userdao@dao"], "dao/UserDAO.cfc") {
@@ -61,11 +63,11 @@ func TestBuildBeanMap_DuplicateBareNames(t *testing.T) {
 }
 
 func TestBuildBeanMap_EmptyPaths(t *testing.T) {
-	beans := buildBeanMap(nil)
+	beans := buildBeanMap(nil, vfs.OS{})
 	if len(beans) != 0 {
 		t.Errorf("expected empty map, got %d entries", len(beans))
 	}
-	beans = buildBeanMap(map[string]string{})
+	beans = buildBeanMap(map[string]string{}, vfs.OS{})
 	if len(beans) != 0 {
 		t.Errorf("expected empty map, got %d entries", len(beans))
 	}
@@ -76,7 +78,7 @@ func TestBuildBeanMap_SingleNamespace(t *testing.T) {
 	beanPaths := map[string]string{
 		"": filepath.Join(dir, "dao"),
 	}
-	beans := buildBeanMap(beanPaths)
+	beans := buildBeanMap(beanPaths, vfs.OS{})
 
 	// With empty namespace, no @-qualified entries
 	if _, ok := beans["userdao@"]; ok {

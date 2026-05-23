@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -30,7 +29,7 @@ type standaloneConfig struct {
 func (s *Server) loadConfigFromRoots() {
 	for _, root := range s.workspaceRoots {
 		p := filepath.Join(root, ".cfmleditor.json")
-		data, err := os.ReadFile(p)
+		data, err := s.FS.ReadFile(p)
 		if err != nil {
 			continue
 		}

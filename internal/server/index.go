@@ -29,12 +29,12 @@ func (s *Server) indexWorkspace() {
 			}
 		} else {
 			for _, folder := range s.WorkspaceFolders {
-				files = append(files, collectCFCFiles(folder)...)
+				files = append(files, s.collectCFCFiles(folder)...)
 			}
 		}
 	} else {
 		for _, root := range s.workspaceRoots {
-			files = append(files, collectCFCFiles(root)...)
+			files = append(files, s.collectCFCFiles(root)...)
 		}
 	}
 
@@ -58,12 +58,12 @@ func (s *Server) indexWorkspace() {
 		if _, open := s.getDocument(fileURI); open {
 			continue
 		}
-		data, err := os.ReadFile(f)
+		data, err := s.FS.ReadFile(f)
 		if err != nil {
 			continue
 		}
 		content := string(data)
-		pr := s.parseContent(fileURI, content)
+		pr := s.parseContentForIndex(fileURI, content)
 		s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
 		s.index.SetThisVars(fileURI, pr.ThisVars())
 		if pr.Persistent && s.isOrmPath(f) {
@@ -92,7 +92,7 @@ func (s *Server) indexWorkspace() {
 	allBeanPaths := make(map[string]string)
 	// Discover Application.cfc bean paths from each workspace folder
 	for _, root := range s.WorkspaceFolders {
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		_ = s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -115,7 +115,7 @@ func (s *Server) indexWorkspace() {
 		allBeanPaths[ns] = dir
 	}
 	if len(allBeanPaths) > 0 {
-		beans := buildBeanMap(allBeanPaths)
+		beans := buildBeanMap(allBeanPaths, s.FS)
 		s.index.SetBeans(beans)
 		s.logger.Info("bean map built", zap.Int("beans", len(beans)))
 	}
@@ -133,7 +133,7 @@ func cfcNameFromURI(fileURI uri.URI) string {
 // Otherwise, the file must be under the Application.cfc directory.
 func (s *Server) isOrmPath(filePath string) bool {
 	dir := filepath.Dir(filePath)
-	appDir := findApplicationRoot(dir)
+	appDir := s.findApplicationRoot(dir)
 	if appDir == "" {
 		return false
 	}
@@ -151,9 +151,9 @@ func (s *Server) isOrmPath(filePath string) bool {
 }
 
 // collectCFCFiles walks root and returns all .cfc file paths.
-func collectCFCFiles(root string) []string {
+func (s *Server) collectCFCFiles(root string) []string {
 	var files []string
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	_ = s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func expandGlob(pattern string) []string {
 
 func (s *Server) indexRoot(root string) {
 	s.logger.Info("indexing workspace", zap.String("root", root))
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -188,12 +188,12 @@ func (s *Server) indexRoot(root string) {
 			if _, open := s.getDocument(fileURI); open {
 				return nil
 			}
-			data, err := os.ReadFile(path)
+			data, err := s.FS.ReadFile(path)
 			if err != nil {
 				return err
 			}
 			content := string(data)
-			pr := s.parseContent(fileURI, content)
+			pr := s.parseContentForIndex(fileURI, content)
 			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
 			s.index.SetThisVars(fileURI, pr.ThisVars())
 			if pr.Persistent && s.isOrmPath(path) {
