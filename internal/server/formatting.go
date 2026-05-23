@@ -35,7 +35,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	elapsed := time.Since(start)
 	if err != nil {
 		s.logger.Warn("formatting failed", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed), zap.Error(err))
-		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeWarning,
 			Message: "Formatting failed: " + err.Error(),
 		})
@@ -53,13 +53,13 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		formatted2, err2 := formatDocument(formatted, params.Options, s.Formatting)
 		if err2 != nil {
 			s.logger.Warn("formatting idempotency check failed", zap.String("uri", string(params.TextDocument.URI)), zap.Error(err2))
-			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeWarning,
 				Message: "Formatting is not idempotent: second pass failed: " + err2.Error(),
 			})
 		} else if formatted2 != formatted {
 			s.logger.Warn("formatting is not idempotent", zap.String("uri", string(params.TextDocument.URI)))
-			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeWarning,
 				Message: "Formatting is not idempotent: second pass produced different output",
 			})

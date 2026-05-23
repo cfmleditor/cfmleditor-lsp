@@ -147,6 +147,18 @@ func (s *Server) initLinter() {
 	s.logger.Info("cflint ready")
 }
 
+func (s *Server) notify(ctx context.Context, method string, params interface{}) {
+	if s.conn != nil {
+		_ = s.conn.Notify(ctx, method, params)
+	}
+}
+
+func (s *Server) call(ctx context.Context, method string, params, result interface{}) {
+	if s.conn != nil {
+		_, _ = s.conn.Call(ctx, method, params, result)
+	}
+}
+
 func (s *Server) getDocument(docURI uri.URI) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

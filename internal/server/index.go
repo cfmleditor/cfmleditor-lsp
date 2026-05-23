@@ -47,7 +47,7 @@ func (s *Server) indexWorkspace() {
 
 	// Send progress begin.
 	if s.conn != nil && total > 0 {
-		_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+		s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
 			"token": token,
 			"value": map[string]interface{}{"kind": "begin", "title": "Indexing", "message": fmt.Sprintf("0/%d files", total), "percentage": 0},
 		})
@@ -72,7 +72,7 @@ func (s *Server) indexWorkspace() {
 
 		if s.conn != nil && total > 0 {
 			pct := ((i + 1) * 100) / total
-			_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+			s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
 				"token": token,
 				"value": map[string]interface{}{"kind": "report", "message": fmt.Sprintf("%d/%d files", i+1, total), "percentage": pct},
 			})
@@ -81,7 +81,7 @@ func (s *Server) indexWorkspace() {
 
 	// Send progress end.
 	if s.conn != nil && total > 0 {
-		_ = s.conn.Notify(ctx, protocol.MethodProgress, map[string]interface{}{
+		s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
 			"token": token,
 			"value": map[string]interface{}{"kind": "end", "message": fmt.Sprintf("Indexed %d files", total)},
 		})

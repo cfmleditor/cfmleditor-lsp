@@ -3157,3 +3157,355 @@ func TestResolveMappings(t *testing.T) {
 		t.Errorf("lib: got %q, want /absolute/lib", result["lib"])
 	}
 }
+
+func TestHoverUnqualifiedUserFunction(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction doStuff(required string id, boolean flag) {}\n}\ndoStuff()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 3},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatal("expected hover for unqualified user function")
+	}
+	if !strings.Contains(hover.Contents.Value, "flag") {
+		t.Errorf("expected 'flag' param in hover, got %s", hover.Contents.Value)
+	}
+}
+
+func TestCompletionClosingTagSlash(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfoutput></")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 12},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "/"},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	found := false
+	for _, item := range list.Items {
+		if strings.Contains(item.Label, "cfoutput") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected closing tag completion for cfoutput")
+	}
+}
+
+func TestDefinitionPrefersSameFile(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///main.cfc")
+	otherURI := uri.URI("file:///other.cfc")
+	srv.setDocument(docURI, "component {\nfunction helper() {}\n}\nhelper()")
+	srv.index.IndexFileFromResult(docURI, []cfparser.FunctionDef{
+		{Name: "helper", URI: docURI, Line: 1},
+	}, nil)
+	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+		{Name: "helper", URI: otherURI, Line: 50},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 3},
+		},
+	})
+	_ = srv.handleDefinition(context.Background(), reply, req)
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if loc.URI != protocol.DocumentURI(docURI) {
+		t.Error("expected definition to prefer same file")
+	}
+}
+
+func TestDocumentSymbolBasic(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction init() {}\nfunction getData() {}\n}"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentSymbol, protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	symbols, ok := (*result).([]protocol.DocumentSymbol)
+	if !ok {
+		// Might be SymbolInformation
+		syms, ok2 := (*result).([]protocol.SymbolInformation)
+		if !ok2 || len(syms) < 2 {
+			t.Fatalf("expected at least 2 symbols, got %T", *result)
+		}
+		return
+	}
+	if len(symbols) < 2 {
+		t.Errorf("expected at least 2 symbols, got %d", len(symbols))
+	}
+}
+
+func TestWorkspaceSymbolQuery(t *testing.T) {
+	srv := newTestServer()
+	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []cfparser.FunctionDef{
+		{Name: "getUserById", URI: "file:///a.cfc", Line: 5},
+		{Name: "deleteUser", URI: "file:///a.cfc", Line: 20},
+	}, nil)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "getUser"})
+	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	symbols, ok := (*result).([]protocol.SymbolInformation)
+	if !ok || len(symbols) == 0 {
+		t.Fatal("expected at least one workspace symbol")
+	}
+	if symbols[0].Name != "getUserById" {
+		t.Errorf("expected getUserById, got %s", symbols[0].Name)
+	}
+}
+
+func TestIsCFMLFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"file:///test.cfc", true},
+		{"file:///test.cfm", true},
+		{"file:///test.cfml", true},
+		{"file:///test.cfs", true},
+		{"file:///test.CFC", true},
+		{"file:///test.js", false},
+		{"file:///test.go", false},
+		{"abc", false},
+	}
+	for _, tt := range tests {
+		if got := isCFMLFile(tt.path); got != tt.want {
+			t.Errorf("isCFMLFile(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestIsCFCFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"file:///test.cfc", true},
+		{"file:///test.CFC", true},
+		{"file:///test.cfm", false},
+		{"file:///test.js", false},
+	}
+	for _, tt := range tests {
+		if got := isCFCFile(tt.path); got != tt.want {
+			t.Errorf("isCFCFile(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestResolveComponentPathNotFound(t *testing.T) {
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{"/nonexistent"}
+	result := srv.resolveComponentPath("no.Such.Component", "/tmp")
+	if result != "" {
+		t.Errorf("expected empty for nonexistent component, got %s", result)
+	}
+}
+
+func TestDocumentLinkEmptyDocument(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///empty.cfm")
+	srv.setDocument(docURI, "")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	links, _ := (*result).([]protocol.DocumentLink)
+	if len(links) != 0 {
+		t.Errorf("expected no links for empty doc, got %d", len(links))
+	}
+}
+
+func TestSignatureHelpEmptyDocument(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///empty.cfm")
+	srv.setDocument(docURI, "")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 0},
+		},
+	})
+	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	if *result != nil {
+		t.Errorf("expected nil for empty doc, got %T", *result)
+	}
+}
+
+func TestHoverEmptyDocument(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///empty.cfm")
+	srv.setDocument(docURI, "")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 0},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	if *result != nil {
+		t.Errorf("expected nil for empty doc, got %T", *result)
+	}
+}
+
+func TestDefinitionEmptyWord(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "   ")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 1},
+		},
+	})
+	_ = srv.handleDefinition(context.Background(), reply, req)
+	if *result != nil {
+		t.Errorf("expected nil for whitespace, got %T", *result)
+	}
+}
+
+func TestExecuteCommandShowResolvers(t *testing.T) {
+	srv := newTestServer()
+	srv.Mappings = map[string]string{"models": "/app/models"}
+	srv.ComponentResolvers = []ComponentResolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command: "cfmleditor.showResolvers",
+	})
+	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	msg, _ := (*result).(string)
+	if !strings.Contains(msg, "models") {
+		t.Errorf("expected mappings in output, got %s", msg)
+	}
+	if !strings.Contains(msg, "getService") {
+		t.Errorf("expected resolver in output, got %s", msg)
+	}
+}
+
+func TestExecuteCommandShowFileIndex(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	srv.index.IndexFileFromResult(docURI, []cfparser.FunctionDef{
+		{Name: "init", URI: docURI, Line: 1},
+		{Name: "getData", URI: docURI, Line: 5},
+	}, nil)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command:   "cfmleditor.showFileIndex",
+		Arguments: []interface{}{"file:///test.cfc"},
+	})
+	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	msg, _ := (*result).(string)
+	if !strings.Contains(msg, "init") || !strings.Contains(msg, "getData") {
+		t.Errorf("expected function names in output, got %s", msg)
+	}
+}
+
+func TestSimpleMatchExactNoPlaceholder(t *testing.T) {
+	resolvers := []cfparser.Resolver{
+		{Match: "_parent", Resolve: "packages.core.kernel", Prefix: "_parent"},
+	}
+	got := cfparser.ResolveFromCall("_parent", resolvers)
+	if got != "packages.core.kernel" {
+		t.Errorf("expected packages.core.kernel, got %q", got)
+	}
+}
+
+func TestSimpleMatchNoMatch(t *testing.T) {
+	resolvers := []cfparser.Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+	got := cfparser.ResolveFromCall("somethingElse()", resolvers)
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestExpandGlobSimplePattern(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "a.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "b.txt"), []byte(""), 0o644)
+
+	matches := cfpath.ExpandGlob(filepath.Join(dir, "*.cfc"))
+	if len(matches) != 1 {
+		t.Errorf("expected 1 match, got %d: %v", len(matches), matches)
+	}
+}
+
+func TestExpandGlobDoubleStarPattern(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	_ = os.MkdirAll(sub, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "top.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "deep.cfc"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "skip.txt"), []byte(""), 0o644)
+
+	matches := cfpath.ExpandGlob(dir + "/**/*.cfc")
+	if len(matches) != 2 {
+		t.Errorf("expected 2 matches, got %d: %v", len(matches), matches)
+	}
+}

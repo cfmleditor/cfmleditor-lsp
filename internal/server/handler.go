@@ -369,7 +369,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 
 	// Clear diagnostics on close
 	if s.conn != nil {
-		_ = s.conn.Notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
+		s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
 			URI:         protocol.DocumentURI(docURI),
 			Diagnostics: []protocol.Diagnostic{},
 		})
@@ -427,14 +427,14 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	s.logger.Debug("cflint scan starting", zap.String("file", filePath))
 
 	// Show progress
-	_ = s.conn.Notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+	s.notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
 		"token": "cflint",
 		"value": map[string]interface{}{"kind": "begin", "title": "CFLint", "message": filepath.Base(filePath)},
 	})
 
 	diags, err := s.linter.Scan(scanCtx, filePath)
 
-	_ = s.conn.Notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+	s.notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
 		"token": "cflint",
 		"value": map[string]interface{}{"kind": "end"},
 	})
@@ -455,7 +455,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 
 	s.logger.Debug("cflint scan complete", zap.String("file", filePath), zap.Int("issues", len(diags)))
 
-	_ = s.conn.Notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
+	s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentURI(docURI),
 		Diagnostics: diags,
 	})
@@ -576,7 +576,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			return reply(ctx, nil, nil)
 		}
 		lines := countNewlines(content)
-		_, _ = s.conn.Call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
+		s.call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
 			Label: "Format document",
 			Edit: protocol.WorkspaceEdit{
 				Changes: map[uri.URI][]protocol.TextEdit{
@@ -610,19 +610,19 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 		resolved := s.resolveComponentPath(dotPath, baseDir)
 		if resolved == "" {
-			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
 				Message: fmt.Sprintf("Cannot resolve: %s", dotPath),
 			})
 		} else {
-			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
 				Message: fmt.Sprintf("%s → %s", dotPath, resolved),
 			})
 		}
 		return reply(ctx, resolved, nil)
 	case "cfmleditor.restartDaemon":
-		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: "Restarting daemon: clearing all caches and re-indexing",
 		})
@@ -658,7 +658,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			}
 		}
 		msg := strings.Join(lines, "\n")
-		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: msg,
 		})
@@ -685,7 +685,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			lines = append(lines, fmt.Sprintf("  %s → %s (line %d)", r.Variable, r.Component, r.Line))
 		}
 		msg := strings.Join(lines, "\n")
-		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: msg,
 		})
@@ -695,7 +695,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		openDocs := len(s.documents)
 		s.mu.RUnlock()
 		msg := fmt.Sprintf("Open documents: %d\nWorkspace folders: %d\nIndex globs: %d", openDocs, len(s.WorkspaceFolders), len(s.IndexGlobs))
-		_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: msg,
 		})
@@ -711,7 +711,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
 		appDir := s.findApplicationRoot(baseDir)
 		if appDir == "" {
-			_ = s.conn.Notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
 				Message: "No Application.cfc found",
 			})
@@ -721,7 +721,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
 			if _, err := s.FS.Stat(filepath.Join(appDir, name)); err == nil {
 				target := "file://" + filepath.Join(appDir, name)
-				_, _ = s.conn.Call(ctx, "window/showDocument", map[string]interface{}{
+				s.call(ctx, "window/showDocument", map[string]interface{}{
 					"uri":       target,
 					"takeFocus": true,
 				}, nil)
