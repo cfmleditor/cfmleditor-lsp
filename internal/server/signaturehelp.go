@@ -11,6 +11,7 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+	"go.uber.org/zap"
 )
 
 func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -18,6 +19,11 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, err)
 	}
+
+	s.logger.Debug("signatureHelp: request",
+		zap.String("uri", string(params.TextDocument.URI)),
+		zap.Uint32("line", params.Position.Line),
+		zap.Uint32("char", params.Position.Character))
 
 	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
 	if !ok {

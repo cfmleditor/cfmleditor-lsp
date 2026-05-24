@@ -12,6 +12,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
@@ -33,11 +34,12 @@ type Server struct {
 	workspaceRoots   []string
 	WorkspaceFolders []string // project folders from config
 	IndexGlobs       []string // optional glob filters (absolute paths)
-	Mappings           map[string]string      // component path mappings (key -> abs path)
-	ComponentResolvers []ComponentResolver    // custom method-to-component resolvers
-	PropertyResolvers  []PropertyResolver     // custom property-to-component resolvers
-	BeanPaths          map[string]string    // namespace → abs directory path for bean scanning
-	Formatting         FormattingConfig       // formatting settings
+	Mappings           map[string]string          // component path mappings (key -> abs path)
+	ComponentResolvers []config.Resolver          // custom method-to-component resolvers
+	PropertyResolvers  []config.PropResolver      // custom property-to-component resolvers
+	BeanPaths          map[string]string          // namespace → abs directory path for bean scanning
+	Formatting         config.ResolvedFormatting  // formatting settings
+	Linting            bool                       // enable cflint diagnostics
 	changeCount        map[uri.URI]int        // rapid change counter per file
 	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
 	resolveCache       map[string]string      // cached component path resolutions
@@ -136,6 +138,9 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 }
 
 func (s *Server) initLinter() {
+	if !s.Linting {
+		return
+	}
 	runner, err := cflint.NewRunner()
 	if err != nil {
 		s.logger.Warn("cflint unavailable", zap.Error(err))
@@ -273,42 +278,6 @@ func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser
 	})
 }
 
-// FormattingConfig holds formatting settings from .cfmleditor.json.
-type FormattingConfig struct {
-	Enabled               bool
-	Debug                 bool
-	SelfCloseTags         bool
-	WhitespaceOnly         bool
-	QueryFormat            bool
-	LowercaseTags          bool
-	LowercaseAttributes    bool
-	DoubleQuoteAttributes  bool
-	QueryUppercaseKeywords bool
-	ScopeCase              string
-	CommaPosition          string
-	QueryCommaPosition     string
-	LineWidth              int
-	AttrBreakThreshold     int
-	IndentWidth            int
-}
-
-// ComponentResolver maps a method call pattern to a component path.
-// Match is a pattern like getService("$1") and Resolve is a path template like packages/$1/service.cfc.
-// Prefix is a fast-check string that must appear in a line before attempting the full match.
-type ComponentResolver struct {
-	Match   string
-	Resolve string
-	Prefix  string
-}
-
-// PropertyResolver resolves a property declaration to a component path based on
-// an attribute value (e.g. inject="model.UserDAO" → models.UserDAO).
-type PropertyResolver struct {
-	Match     string // pattern to match against the attribute value, $1 is capture placeholder
-	Resolve   string // component dot-path template, $1 replaced with captured value
-	Attribute string // property attribute to inspect (e.g. "inject")
-}
-
 // resolveComponentFromCall matches a call expression against configured resolvers.
 // ensureIndexed ensures a CFC file is indexed, loading from disk if needed.
 // Returns the functions defined in the file.
@@ -332,7 +301,7 @@ func (s *Server) ensureIndexed(cfcPath string) []*cfparser.FunctionDef {
 	return defs
 }
 
-func resolveComponentFromCall(expr string, resolvers []ComponentResolver) string {
+func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
 	if len(resolvers) == 0 {
 		return ""
 	}

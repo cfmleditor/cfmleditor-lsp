@@ -10,6 +10,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"go.lsp.dev/protocol"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/uri"
 )
 
@@ -28,7 +29,7 @@ func newTestdataServer() *Server {
 		"models":   filepath.Join(dir, "models"),
 		"services": filepath.Join(dir, "services"),
 	}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "services.$1", Prefix: "getService"},
 		{Match: "_parent", Resolve: "models.Base", Prefix: "_parent"},
 	}

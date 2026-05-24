@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
@@ -1686,7 +1689,7 @@ func TestDefinitionComponentResolver(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "packages", "timetable", "service.cfc"), []byte("component {\nfunction getSchedule() {}\n}"), 0o644)
 
 	srv := newTestServer()
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 	srv.WorkspaceFolders = []string{dir}
@@ -2021,7 +2024,7 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2068,7 +2071,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2158,7 +2161,7 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2254,7 +2257,7 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2415,7 +2418,7 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2502,7 +2505,7 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -2612,7 +2615,7 @@ func TestDefinitionViaRegexResolver(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1.service", Prefix: "kernel.get"},
 	}
 
@@ -2915,7 +2918,7 @@ func TestResolverMultipleCaptures(t *testing.T) {
 
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getBean("$1", "$2")`, Resolve: "packages.$2.dao.$1", Prefix: "getBean"},
 	}
 
@@ -3417,7 +3420,7 @@ func TestDefinitionEmptyWord(t *testing.T) {
 func TestExecuteCommandShowResolvers(t *testing.T) {
 	srv := newTestServer()
 	srv.Mappings = map[string]string{"models": "/app/models"}
-	srv.ComponentResolvers = []ComponentResolver{
+	srv.ComponentResolvers = []config.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
@@ -3507,5 +3510,422 @@ func TestExpandGlobDoubleStarPattern(t *testing.T) {
 	matches := cfpath.ExpandGlob(dir + "/**/*.cfc")
 	if len(matches) != 2 {
 		t.Errorf("expected 2 matches, got %d: %v", len(matches), matches)
+	}
+}
+
+func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
+	// "len" is a builtin, but widget.len() should show the user-defined function
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Widget.cfc"), []byte("component {\nfunction len(required string input) {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "widget = new models.Widget()\nwidget.len()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 8},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatal("expected hover result")
+	}
+	// Should show user-defined len with "input" param, not the builtin Len
+	if !strings.Contains(hover.Contents.Value, "input") {
+		t.Errorf("expected user-defined len(input), got builtin: %s", hover.Contents.Value)
+	}
+}
+
+func TestHoverUnqualifiedShowsBuiltin(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = Len(y)>")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     protocol.Position{Line: 0, Character: 12},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatal("expected hover for builtin Len")
+	}
+	// Should show builtin, not a user function
+	if !strings.Contains(strings.ToLower(hover.Contents.Value), "len") {
+		t.Errorf("expected builtin len hover, got %s", hover.Contents.Value)
+	}
+	// Should NOT contain user-defined params
+	if strings.Contains(hover.Contents.Value, "input") {
+		t.Error("should show builtin, not user-defined")
+	}
+}
+
+func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
+	// Same function name in two files, no qualifier — should NOT show hover (ambiguous)
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "getData()")
+	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []cfparser.FunctionDef{
+		{Name: "getData", URI: "file:///a.cfc", Line: 1},
+	}, nil)
+	srv.index.IndexFileFromResult(uri.URI("file:///b.cfc"), []cfparser.FunctionDef{
+		{Name: "getData", URI: "file:///b.cfc", Line: 5},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 3},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	if *result != nil {
+		t.Error("expected nil hover for ambiguous unqualified function")
+	}
+}
+
+func TestHoverSingleGlobalMatch(t *testing.T) {
+	// Only one match globally — should show hover even without qualifier
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "uniqueFunc()")
+	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []cfparser.FunctionDef{
+		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []cfparser.Argument{{Name: "x", Type: "string"}}},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 5},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	hover, ok := (*result).(*protocol.Hover)
+	if !ok || hover == nil {
+		t.Fatal("expected hover for globally unique function")
+	}
+	if !strings.Contains(hover.Contents.Value, "uniqueFunc") {
+		t.Errorf("expected uniqueFunc in hover, got %s", hover.Contents.Value)
+	}
+}
+
+func TestArgumentCompletionBuiltin(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = ArrayAppend(")
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 23},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	// Should have named argument items with = suffix
+	foundArg := false
+	for _, item := range list.Items {
+		if strings.HasSuffix(item.Label, "=") && item.Kind == protocol.CompletionItemKindField {
+			foundArg = true
+			break
+		}
+	}
+	if !foundArg {
+		t.Error("expected named argument completions inside ArrayAppend(")
+	}
+}
+
+func TestArgumentCompletionUserFunction(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction save(required string name, numeric age) {}\n}\nsave("
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 5},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	var argNames []string
+	for _, item := range list.Items {
+		if item.Kind == protocol.CompletionItemKindField {
+			argNames = append(argNames, item.Label)
+		}
+	}
+	if !strings.Contains(strings.Join(argNames, ","), "name=") {
+		t.Errorf("expected name= in argument completions, got %v", argNames)
+	}
+	if !strings.Contains(strings.Join(argNames, ","), "age=") {
+		t.Errorf("expected age= in argument completions, got %v", argNames)
+	}
+}
+
+func TestArgumentCompletionSortOrder(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = Len(")
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 15},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+	})
+	_ = srv.handleCompletion(context.Background(), reply, req)
+	list := completionListFromResult(t, *result)
+
+	// First items should be argument completions (sort with !)
+	if len(list.Items) > 0 && list.Items[0].Kind == protocol.CompletionItemKindField {
+		if !strings.HasPrefix(list.Items[0].SortText, SortFuncArguments) {
+			t.Errorf("expected argument items to sort first with SortFuncArguments, got sortText=%q", list.Items[0].SortText)
+		}
+	}
+}
+
+func TestCompletionSnippetFormat(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction myFunc(required string name, numeric count) {}\n}"
+	srv.setDocument(docURI, docContent)
+
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
+
+	items := srv.completionFromCache(docURI, 5)
+	var found *protocol.CompletionItem
+	for i := range items {
+		if items[i].Label == "myFunc" {
+			found = &items[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected myFunc in completions")
+	}
+	if found.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Error("expected snippet format")
+	}
+	if !strings.Contains(found.InsertText, "${1:name}") {
+		t.Errorf("expected ${1:name} placeholder, got %s", found.InsertText)
+	}
+	if !strings.Contains(found.InsertText, "${2:count}") {
+		t.Errorf("expected ${2:count} placeholder, got %s", found.InsertText)
+	}
+}
+
+func TestScopeSortOrder(t *testing.T) {
+	items := getBuiltinFuncItems()
+	var scopeItems []protocol.CompletionItem
+	for _, item := range items {
+		if item.Kind == protocol.CompletionItemKindKeyword {
+			scopeItems = append(scopeItems, item)
+		}
+	}
+	if len(scopeItems) == 0 {
+		t.Fatal("expected scope items")
+	}
+	// All scopes should have ~ prefix in SortText
+	for _, item := range scopeItems {
+		if !strings.HasPrefix(item.SortText, SortScopes) {
+			t.Errorf("scope %q should have SortScopes prefix, got %q", item.Label, item.SortText)
+		}
+	}
+	// VARIABLES should sort before SESSION
+	var varIdx, sessIdx int
+	for i, item := range scopeItems {
+		if item.Label == "VARIABLES" {
+			varIdx = i
+		}
+		if item.Label == "SESSION" {
+			sessIdx = i
+		}
+	}
+	if varIdx >= sessIdx {
+		t.Error("VARIABLES should appear before SESSION")
+	}
+}
+
+func TestCompletionResponseTime(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction init() {}\nfunction getData() {}\n}\n"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+	pr := srv.parseContent(docURI, docContent)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
+
+	reply, _, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 4, Character: 0},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+	})
+
+	start := time.Now()
+	for i := 0; i < 100; i++ {
+		_ = srv.handleCompletion(context.Background(), reply, req)
+	}
+	elapsed := time.Since(start)
+	avg := elapsed / 100
+	if avg > 5*time.Millisecond {
+		t.Errorf("completion too slow: avg %v per request (threshold 5ms)", avg)
+	}
+}
+
+func TestHoverResponseTime(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, val)>")
+
+	reply, _, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 15},
+		},
+	})
+
+	start := time.Now()
+	for i := 0; i < 100; i++ {
+		_ = srv.handleHover(context.Background(), reply, req)
+	}
+	elapsed := time.Since(start)
+	avg := elapsed / 100
+	if avg > 2*time.Millisecond {
+		t.Errorf("hover too slow: avg %v per request (threshold 2ms)", avg)
+	}
+}
+
+func TestDefinitionResponseTime(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfc")
+	docContent := "component {\nfunction myFunc() {}\n}\nmyFunc()"
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, _, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 3, Character: 3},
+		},
+	})
+
+	start := time.Now()
+	for i := 0; i < 100; i++ {
+		_ = srv.handleDefinition(context.Background(), reply, req)
+	}
+	elapsed := time.Since(start)
+	avg := elapsed / 100
+	if avg > 2*time.Millisecond {
+		t.Errorf("definition too slow: avg %v per request (threshold 2ms)", avg)
+	}
+}
+
+func TestDocumentLinkResponseTime(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///test.cfm")
+	// Generate a large document with many includes
+	var lines []string
+	for i := 0; i < 500; i++ {
+		lines = append(lines, fmt.Sprintf(`<cfinclude template="file%d.cfm">`, i))
+	}
+	srv.setDocument(docURI, strings.Join(lines, "\n"))
+
+	pr := srv.parseContent(docURI, strings.Join(lines, "\n"))
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
+
+	reply, _, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+	})
+
+	start := time.Now()
+	for i := 0; i < 10; i++ {
+		_ = srv.handleDocumentLink(context.Background(), reply, req)
+	}
+	elapsed := time.Since(start)
+	avg := elapsed / 10
+	if avg > 50*time.Millisecond {
+		t.Errorf("documentLink too slow for 500-line doc: avg %v (threshold 50ms)", avg)
+	}
+}
+
+func TestIndexingDoesNotExtractLinks(t *testing.T) {
+	srv := newTestServer()
+	docURI := uri.URI("file:///indexed.cfc")
+	content := "component {\n<cfinclude template=\"header.cfm\">\nfunction init() {}\n}"
+
+	pr := srv.parseContentForIndex(docURI, content)
+	if len(pr.Links) != 0 {
+		t.Errorf("parseContentForIndex should not extract links, got %d", len(pr.Links))
+	}
+
+	pr2 := srv.parseContent(docURI, content)
+	if len(pr2.Links) == 0 {
+		t.Error("parseContent should extract links")
+	}
+}
+
+func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
+	resolvers := []cfparser.Resolver{
+		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1", Prefix: "kernel.get"},
+	}
+
+	// First call compiles the regex
+	cfparser.ResolveFromCall("kernel.getFoo()", resolvers)
+
+	// Subsequent calls should be fast (cached regex)
+	start := time.Now()
+	for i := 0; i < 10000; i++ {
+		cfparser.ResolveFromCall("kernel.getBar()", resolvers)
+	}
+	elapsed := time.Since(start)
+	avg := elapsed / 10000
+	if avg > 10*time.Microsecond {
+		t.Errorf("resolver too slow (regex not cached?): avg %v per call (threshold 10µs)", avg)
 	}
 }

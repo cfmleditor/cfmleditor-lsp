@@ -438,6 +438,14 @@ func (p *globalScriptParser) parse() {
 			p.parseDot(tok, ScopeVariables)
 		case "function", "public", "private", "remote", "package":
 			// skip function declarations
+		case "property":
+			// skip property declaration tokens until semicolon
+			for {
+				t := p.sc.NextSkipComments()
+				if t.Kind == TokEOF || t.Kind == TokSemicolon {
+					break
+				}
+			}
 		default:
 			p.parsePlain(tok)
 		}

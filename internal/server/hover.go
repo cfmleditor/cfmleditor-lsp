@@ -33,6 +33,20 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	}
 
 	// Builtin function
+	// User-defined function via qualifier (e.g. service.getMethod) — check first
+	docURI := uri.URI(params.TextDocument.URI)
+	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+			return reply(ctx, &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: formatFuncHover(def),
+				},
+			}, nil)
+		}
+	}
+
+	// Builtin function
 	if e, ok := docs.LookupFunction(word); ok {
 		return reply(ctx, &protocol.Hover{
 			Contents: protocol.MarkupContent{
@@ -52,10 +66,21 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}, nil)
 	}
 
-	// User-defined function via qualifier (e.g. service.getMethod)
-	docURI := uri.URI(params.TextDocument.URI)
-	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
-		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+	// User-defined function in current file or index (unqualified)
+	defs := s.index.Lookup(word)
+	if len(defs) > 0 {
+		// Only show if in current file or exactly one match
+		var def *cfparser.FunctionDef
+		for _, d := range defs {
+			if d.URI == docURI {
+				def = d
+				break
+			}
+		}
+		if def == nil && len(defs) == 1 {
+			def = defs[0]
+		}
+		if def != nil {
 			return reply(ctx, &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -63,24 +88,6 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				},
 			}, nil)
 		}
-	}
-
-	// User-defined function in current file or index (unqualified)
-	defs := s.index.Lookup(word)
-	if len(defs) > 0 {
-		def := defs[0]
-		for _, d := range defs {
-			if d.URI == docURI {
-				def = d
-				break
-			}
-		}
-		return reply(ctx, &protocol.Hover{
-			Contents: protocol.MarkupContent{
-				Kind:  protocol.Markdown,
-				Value: formatFuncHover(def),
-			},
-		}, nil)
 	}
 
 	return reply(ctx, nil, nil)

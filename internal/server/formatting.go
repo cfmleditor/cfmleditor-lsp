@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -77,7 +78,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	return reply(ctx, edits, nil)
 }
 
-func formatDocument(content string, opts protocol.FormattingOptions, cfg FormattingConfig) (string, error) {
+func formatDocument(content string, opts protocol.FormattingOptions, cfg config.ResolvedFormatting) (string, error) {
 	src := []byte(content)
 	tree := language.Parse(language.CFML, src, nil)
 

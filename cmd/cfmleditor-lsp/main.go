@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
@@ -102,7 +103,7 @@ func runServer() {
 		beanPaths := cfg.BeanPaths()
 
 		// Serve the socket listener in the background
-		fmtCfg := server.FormattingConfig{
+		fmtCfg := config.ResolvedFormatting{
 			Enabled:               cfg.FormattingEnabled(),
 			Debug:                 cfg.FormattingDebug(),
 			SelfCloseTags:         cfg.FormattingSelfCloseTags(),
@@ -131,13 +132,14 @@ func runServer() {
 		srv.IndexGlobs = globs
 		srv.Mappings = mappings
 		for _, p := range resolverPairs {
-			srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
+			srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
 		}
 		for _, p := range propResolverPairs {
-			srv.PropertyResolvers = append(srv.PropertyResolvers, server.PropertyResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+			srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
 		}
 		srv.BeanPaths = beanPaths
 		srv.Formatting = fmtCfg
+		srv.Linting = cfg.Linting()
 		conn.Go(ctx, srv.Handler())
 		go func() {
 			select {

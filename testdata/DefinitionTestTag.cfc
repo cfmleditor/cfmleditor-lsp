@@ -22,7 +22,7 @@
         <cfset var name = variables.widget.getName()>
 
         <!--- Definition: method via resolver --->
-        <cfset var user = variables.userService.getUser(1)>
+        <cfset var user = variables.userService.getUser()>
 
         <!--- Definition: unqualified function call --->
         <cfset var helper = helperMethod()>

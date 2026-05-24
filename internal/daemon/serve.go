@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"go.lsp.dev/jsonrpc2"
@@ -18,7 +19,7 @@ import (
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string, propResolvers [][3]string, beanPaths map[string]string, fmtCfg server.FormattingConfig) error {
+func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string, propResolvers [][3]string, beanPaths map[string]string, fmtCfg config.ResolvedFormatting) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
@@ -67,10 +68,10 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 			srv.IndexGlobs = globs
 			srv.Mappings = mappings
 			for _, r := range resolvers {
-				srv.ComponentResolvers = append(srv.ComponentResolvers, server.ComponentResolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
+				srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
 			}
 			for _, r := range propResolvers {
-				srv.PropertyResolvers = append(srv.PropertyResolvers, server.PropertyResolver{Match: r[0], Resolve: r[1], Attribute: r[2]})
+				srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: r[0], Resolve: r[1], Attribute: r[2]})
 			}
 			srv.BeanPaths = beanPaths
 			srv.Formatting = fmtCfg

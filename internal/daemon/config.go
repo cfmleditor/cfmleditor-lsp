@@ -7,51 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // configJSON is the on-disk shape of .cfmleditor.json.
-type configJSON struct {
-	WorkspaceName       string              `json:"workspaceName"`
-	WorkspacePaths      []string            `json:"workspacePaths"`
-	WorkspaceIndexGlobs []string            `json:"workspaceIndexGlobs"`
-	Mappings            map[string]string   `json:"mappings"`
-	ComponentResolvers  []componentResolver `json:"componentResolvers"`
-	PropertyResolvers   []propertyResolver  `json:"propertyResolvers"`
-	BeanPaths           map[string]string   `json:"beanPaths"`
-	Formatting          *formattingConfig   `json:"formatting"`
-	Debug               bool                `json:"debug"`
-}
-
-type componentResolver struct {
-	Match   string `json:"match"`
-	Resolve string `json:"resolve"`
-	Prefix  string `json:"prefix"`
-}
-
-type propertyResolver struct {
-	Match     string `json:"match"`
-	Resolve   string `json:"resolve"`
-	Attribute string `json:"attribute"`
-}
-
-type formattingConfig struct {
-	Enabled                bool   `json:"enabled"`
-	Debug                  bool   `json:"debug"`
-	SelfCloseTags          *bool  `json:"selfCloseTags"`
-	WhitespaceOnly         *bool  `json:"whitespaceOnly"`
-	QueryFormat            *bool  `json:"queryFormat"`
-	LowercaseTags          *bool  `json:"lowercaseTags"`
-	LowercaseAttributes    *bool  `json:"lowercaseAttributes"`
-	DoubleQuoteAttributes  *bool  `json:"doubleQuoteAttributes"`
-	QueryUppercaseKeywords *bool  `json:"queryUppercaseKeywords"`
-	ScopeCase              string `json:"scopeCase"`
-	CommaPosition          string `json:"commaPosition"`
-	QueryCommaPosition     string `json:"queryCommaPosition"`
-	LineWidth              *int   `json:"lineWidth"`
-	AttrBreakThreshold     *int   `json:"attrBreakThreshold"`
-	IndentWidth            *int   `json:"indentWidth"`
-}
+type configJSON = config.JSON
 
 // Config represents a .cfmleditor.json file.
 type Config struct {
@@ -127,6 +88,12 @@ func (c *Config) Mappings() map[string]string {
 func (c *Config) Debug() bool {
 	raw := c.raw()
 	return raw != nil && raw.Debug
+}
+
+// Linting returns whether linting (cflint) is enabled in config.
+func (c *Config) Linting() bool {
+	raw := c.raw()
+	return raw != nil && raw.Linting != nil && raw.Linting.Enabled
 }
 
 // FormattingEnabled returns whether formatting is enabled in config.

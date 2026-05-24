@@ -26,10 +26,14 @@ func (z *zapAdapter) Warn(msg string, kv ...interface{}) { z.l.Sugar().Warnw(msg
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
 	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
+		start := time.Now()
 		defer func() {
 			if r := recover(); r != nil {
 				s.logger.Error("handler panic", zap.String("method", req.Method()), zap.Any("panic", r))
 				err = reply(ctx, nil, fmt.Errorf("internal error: %v", r))
+			}
+			if dur := time.Since(start); dur > 100*time.Millisecond {
+				s.logger.Warn("slow request", zap.String("method", req.Method()), zap.Duration("dur", dur))
 			}
 		}()
 		switch req.Method() {
