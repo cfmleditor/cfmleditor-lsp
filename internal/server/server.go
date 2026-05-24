@@ -40,6 +40,8 @@ type Server struct {
 	BeanPaths          map[string]string          // namespace → abs directory path for bean scanning
 	Formatting         config.ResolvedFormatting  // formatting settings
 	Linting            bool                       // enable cflint diagnostics
+	TagSnippets        bool                       // insert snippets for tags
+	FunctionSnippets   bool                       // insert snippets for functions
 	changeCount        map[uri.URI]int        // rapid change counter per file
 	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
 	resolveCache       map[string]string      // cached component path resolutions

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -300,18 +300,20 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			t1 := time.Now()
 			for _, tag := range docs.AllTags() {
 				items = append(items, protocol.CompletionItem{
-					Label:  tag.Name,
-SortText: SortTags + tag.Name,
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: tag.Description,
+					Label:            tag.Name,
+					SortText:         SortTags + tag.Name,
+					Kind:             protocol.CompletionItemKindKeyword,
+					Detail:           tag.Description,
+					InsertText:       buildTagSnippet(tag),
+					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
 			for _, tag := range docs.HTMLTags() {
 				items = append(items, protocol.CompletionItem{
-					Label:  tag.Name,
-SortText: SortTags + tag.Name,
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: tag.Description,
+					Label:    tag.Name,
+					SortText: SortTags + tag.Name,
+					Kind:     protocol.CompletionItemKindKeyword,
+					Detail:   tag.Description,
 				})
 			}
 			s.logger.Debug("completion: tags", zap.Duration("dur", time.Since(t1)))
@@ -320,18 +322,20 @@ SortText: SortTags + tag.Name,
 		if CompletionTags {
 			for _, tag := range docs.AllTags() {
 				items = append(items, protocol.CompletionItem{
-					Label:  tag.Name,
-SortText: SortTags + tag.Name,
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: tag.Description,
+					Label:            tag.Name,
+					SortText:         SortTags + tag.Name,
+					Kind:             protocol.CompletionItemKindKeyword,
+					Detail:           tag.Description,
+					InsertText:       buildTagSnippet(tag),
+					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
 			for _, tag := range docs.HTMLTags() {
 				items = append(items, protocol.CompletionItem{
-					Label:  tag.Name,
-SortText: SortTags + tag.Name,
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: tag.Description,
+					Label:    tag.Name,
+					SortText: SortTags + tag.Name,
+					Kind:     protocol.CompletionItemKindKeyword,
+					Detail:   tag.Description,
 				})
 			}
 		}
@@ -361,6 +365,20 @@ SortText: SortTags + tag.Name,
 		zap.Duration("total", time.Since(totalStart)),
 		zap.Int("items", len(items)),
 	)
+
+	if !s.TagSnippets || !s.FunctionSnippets {
+		for i := range items {
+			if items[i].InsertTextFormat != protocol.InsertTextFormatSnippet {
+				continue
+			}
+			isTag := items[i].Kind == protocol.CompletionItemKindKeyword
+			isFunc := items[i].Kind == protocol.CompletionItemKindFunction || items[i].Kind == protocol.CompletionItemKindMethod
+			if (isTag && !s.TagSnippets) || (isFunc && !s.FunctionSnippets) {
+				items[i].InsertText = ""
+				items[i].InsertTextFormat = protocol.InsertTextFormatPlainText
+			}
+		}
+	}
 
 	return reply(ctx, &protocol.CompletionList{
 		IsIncomplete: false,
@@ -676,7 +694,7 @@ func duplicateGtCompletion(content string, line, char int) (protocol.CompletionI
 		Label:      ">",
 		Kind:       protocol.CompletionItemKindKeyword,
 		Detail:     "Remove duplicate >",
-SortText:   SortCloseTags,
+		SortText:   SortCloseTags,
 		FilterText: ">",
 		TextEdit: &protocol.TextEdit{
 			Range: protocol.Range{
@@ -735,7 +753,7 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 		Label:            ">",
 		Kind:             protocol.CompletionItemKindKeyword,
 		Detail:           "Close tag",
-SortText:         SortCloseTags,
+		SortText:         SortCloseTags,
 		FilterText:       ">",
 		InsertTextFormat: protocol.InsertTextFormatSnippet,
 		TextEdit: &protocol.TextEdit{
@@ -854,9 +872,9 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 	for _, v := range globals {
 		scoped := varPrefix + "." + v
 		items = append(items, protocol.CompletionItem{
-			Label:      scoped,
-			Kind:       protocol.CompletionItemKindVariable,
-			SortText:   SortGlobalVariables + v,
+			Label:    scoped,
+			Kind:     protocol.CompletionItemKindVariable,
+			SortText: SortGlobalVariables + v,
 		})
 		items = append(items, protocol.CompletionItem{
 			Label:      v,
@@ -869,9 +887,9 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 	for _, v := range thisVarNames {
 		scoped := thisPrefix + "." + v
 		items = append(items, protocol.CompletionItem{
-			Label:      scoped,
-			Kind:       protocol.CompletionItemKindProperty,
-			SortText:   SortGlobalVariables + v,
+			Label:    scoped,
+			Kind:     protocol.CompletionItemKindProperty,
+			SortText: SortGlobalVariables + v,
 		})
 		items = append(items, protocol.CompletionItem{
 			Label:      v,
@@ -898,12 +916,12 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 		detail += ")"
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
-			Label:           f.Name,
-			Kind:            protocol.CompletionItemKindFunction,
-			Detail:          detail,
-			InsertText:      insertText,
+			Label:            f.Name,
+			Kind:             protocol.CompletionItemKindFunction,
+			Detail:           detail,
+			InsertText:       insertText,
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
-			SortText:        SortUserFunctions + f.Name,
+			SortText:         SortUserFunctions + f.Name,
 		})
 	}
 	s.compCache.PutFile(docURI, items)
@@ -1120,9 +1138,9 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	items := make([]protocol.CompletionItem, 0, len(defs)+len(thisVars))
 	for _, v := range thisVars {
 		items = append(items, protocol.CompletionItem{
-			Label: v,
-			Kind:  protocol.CompletionItemKindProperty,
-SortText: SortLocalVariables + v,
+			Label:    v,
+			Kind:     protocol.CompletionItemKindProperty,
+			SortText: SortLocalVariables + v,
 		})
 	}
 	for _, d := range defs {
@@ -1138,8 +1156,8 @@ SortText: SortLocalVariables + v,
 		}
 		detail += ")"
 		items = append(items, protocol.CompletionItem{
-			Label:  d.Name,
-			Kind:   protocol.CompletionItemKindMethod,
+			Label:    d.Name,
+			Kind:     protocol.CompletionItemKindMethod,
 			Detail:   detail,
 			SortText: SortUserFunctions + d.Name,
 		})
@@ -1161,12 +1179,12 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 		var items []protocol.CompletionItem
 		for _, p := range e.Params {
 			items = append(items, protocol.CompletionItem{
-				Label:           p.Name + "=",
-				Kind:            protocol.CompletionItemKindField,
-				Detail:          p.Type,
-				InsertText:      p.Name + "=",
+				Label:            p.Name + "=",
+				Kind:             protocol.CompletionItemKindField,
+				Detail:           p.Type,
+				InsertText:       p.Name + "=",
 				InsertTextFormat: protocol.InsertTextFormatPlainText,
-				SortText:        SortFuncArguments + p.Name,
+				SortText:         SortFuncArguments + p.Name,
 			})
 		}
 		return items
@@ -1196,12 +1214,12 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 	var items []protocol.CompletionItem
 	for _, arg := range def.Arguments {
 		items = append(items, protocol.CompletionItem{
-			Label:           arg.Name + "=",
-			Kind:            protocol.CompletionItemKindField,
-			Detail:          arg.Type,
-			InsertText:      arg.Name + "=",
+			Label:            arg.Name + "=",
+			Kind:             protocol.CompletionItemKindField,
+			Detail:           arg.Type,
+			InsertText:       arg.Name + "=",
 			InsertTextFormat: protocol.InsertTextFormatPlainText,
-			SortText:        SortFuncArguments + arg.Name,
+			SortText:         SortFuncArguments + arg.Name,
 		})
 	}
 	return items
@@ -1228,12 +1246,12 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 		detail += ")"
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
-			Label:           d.Name,
-			Kind:            protocol.CompletionItemKindMethod,
-			Detail:          detail,
-			InsertText:      insertText,
+			Label:            d.Name,
+			Kind:             protocol.CompletionItemKindMethod,
+			Detail:           detail,
+			InsertText:       insertText,
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
-SortText:        SortUserFunctions + d.Name,
+			SortText:         SortUserFunctions + d.Name,
 		})
 	}
 	return items
@@ -1241,6 +1259,22 @@ SortText:        SortUserFunctions + d.Name,
 
 // wordBeforeDot extracts the identifier immediately before the dot at the cursor.
 // scopePrefix returns a scope name with the configured case applied.
+// buildTagSnippet creates a snippet for a CF tag with required attributes as tab stops.
+func buildTagSnippet(tag *docs.Entry) string {
+	params := tag.Params
+	var b strings.Builder
+	b.WriteString(tag.Name)
+	tabIdx := 1
+	for _, p := range params {
+		if p.Required {
+			fmt.Fprintf(&b, ` %s="${%d:%s}"`, p.Name, tabIdx, p.Name)
+			tabIdx++
+		}
+	}
+	b.WriteString(">")
+	return b.String()
+}
+
 func (s *Server) scopePrefix(scope string) string {
 	switch s.Formatting.ScopeCase {
 	case "upper":

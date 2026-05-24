@@ -37,5 +37,7 @@ func (s *Server) applyConfig(r *config.Resolved) {
 		s.BeanPaths = r.BeanPaths
 	}
 	s.Linting = r.Linting
+	s.TagSnippets = r.TagSnippets
+	s.FunctionSnippets = r.FunctionSnippets
 	s.Formatting = r.Formatting
 }

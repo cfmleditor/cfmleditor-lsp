@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Config refactor
+- Completion ordering refactor
+- Fix completions and help for scoped functions
+- Allow for function snippets for completion
+
 ## [0.1.20]
 
 - Extra fixes and tests to avoid LSP daemon panics

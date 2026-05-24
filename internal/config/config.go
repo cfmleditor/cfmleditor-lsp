@@ -14,6 +14,7 @@ type JSON struct {
 	BeanPaths           map[string]string `json:"beanPaths"`
 	Formatting          *Formatting       `json:"formatting"`
 	Linting             *Linting          `json:"linting"`
+	Completions         *Completions      `json:"completions"`
 	Debug               bool              `json:"debug"`
 }
 
@@ -34,6 +35,12 @@ type PropResolver struct {
 // Linting holds linting configuration.
 type Linting struct {
 	Enabled bool `json:"enabled"`
+}
+
+// Completions holds completion configuration.
+type Completions struct {
+	TagSnippets      bool `json:"tagSnippets"`
+	FunctionSnippets bool `json:"functionSnippets"`
 }
 
 // Formatting holds formatter configuration.
@@ -79,6 +86,8 @@ type Resolved struct {
 	BeanPaths          map[string]string
 	Formatting         ResolvedFormatting
 	Linting            bool
+	TagSnippets        bool
+	FunctionSnippets   bool
 }
 
 // ResolvedFormatting holds formatting settings with defaults applied.
@@ -121,6 +130,13 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	}
 	if cfg.Linting != nil {
 		r.Linting = cfg.Linting.Enabled
+	}
+	if cfg.Completions != nil {
+		r.TagSnippets = cfg.Completions.TagSnippets
+		r.FunctionSnippets = cfg.Completions.FunctionSnippets
+	} else {
+		r.TagSnippets = true
+		r.FunctionSnippets = true
 	}
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{
