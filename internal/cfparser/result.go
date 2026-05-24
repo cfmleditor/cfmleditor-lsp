@@ -36,6 +36,7 @@ type ParseResult struct {
 	extractLinks      bool               // whether to extract links during global scan
 	findCalls         []string           // function names to scan for
 	scanAllScopes     bool               // scan all lines including function bodies
+	skipRefs          bool               // skip component ref extraction
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -59,6 +60,7 @@ type ParseOptions struct {
 	ExtractLinks      bool                     // extract document links during global scan
 	FindCalls         []string                 // function names to find call sites for
 	ScanAllScopes     bool                     // scan all lines including function bodies (for refs/deps)
+	SkipRefs          bool                     // skip component ref extraction (for fast indexing)
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -91,6 +93,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		extractLinks:      opts.ExtractLinks,
 		findCalls:         opts.FindCalls,
 		scanAllScopes:     opts.ScanAllScopes,
+		skipRefs:          opts.SkipRefs,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
@@ -146,9 +149,11 @@ func (pr *ParseResult) extractSignatures() {
 		}
 	}
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
-	pr.generatePropertyAccessors()
-	// Extract component refs from init() body since the shallow parse skips function bodies.
-	pr.appendInitRefs()
+	if !pr.skipRefs {
+		pr.generatePropertyAccessors()
+		// Extract component refs from init() body since the shallow parse skips function bodies.
+		pr.appendInitRefs()
+	}
 	// Extract refs from resolver-matched assignments.
 	pr.appendResolverRefs()
 }
@@ -498,6 +503,9 @@ func (pr *ParseResult) appendInitRefs() {
 // appendResolverRefs scans content for assignments matching configured resolvers.
 // Only considers global scope and init() body, same as other ref extraction.
 func (pr *ParseResult) appendResolverRefs() {
+	if len(pr.Resolvers) == 0 && !pr.extractLinks && len(pr.findCalls) == 0 {
+		return
+	}
 	var prefixes []string
 	if len(pr.Resolvers) > 0 {
 		prefixes = make([]string, len(pr.Resolvers))
@@ -509,6 +517,7 @@ func (pr *ParseResult) appendResolverRefs() {
 	content := pr.Content
 	lineNum := 0
 	scopeIdx := 0
+	currentFunc := ""
 	for len(content) > 0 {
 		nl := strings.IndexByte(content, '\n')
 		var line string
@@ -520,22 +529,24 @@ func (pr *ParseResult) appendResolverRefs() {
 			content = content[nl+1:]
 		}
 
+		// Track current function scope
+		if scopeIdx < len(pr.Scopes) {
+			if lineNum > pr.Scopes[scopeIdx].End {
+				scopeIdx++
+				currentFunc = ""
+			}
+			if scopeIdx < len(pr.Scopes) && lineNum == pr.Scopes[scopeIdx].Start+1 {
+				currentFunc = pr.Scopes[scopeIdx].Name
+			}
+		}
+
 		// Skip lines inside non-init function bodies (unless scanning all scopes)
 		if !pr.scanAllScopes && scopeIdx < len(pr.Scopes) && lineNum > pr.Scopes[scopeIdx].Start {
 			if lineNum < pr.Scopes[scopeIdx].End {
-				isInit := false
-				for _, f := range pr.Funcs {
-					if int(f.Line) == pr.Scopes[scopeIdx].Start && strings.EqualFold(f.Name, "init") {
-						isInit = true
-						break
-					}
-				}
-				if !isInit {
+				if !strings.EqualFold(currentFunc, "init") {
 					lineNum++
 					continue
 				}
-			} else {
-				scopeIdx++
 			}
 		}
 
@@ -546,7 +557,7 @@ func (pr *ParseResult) appendResolverRefs() {
 
 		// Scan for function calls
 		if len(pr.findCalls) > 0 {
-			pr.scanLineForCalls(line, lineNum, "")
+			pr.scanLineForCalls(line, lineNum, currentFunc)
 		}
 
 		// Resolver ref extraction (only if resolvers configured)
@@ -718,7 +729,7 @@ func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []Docum
 
 		// Scan for function calls
 		if len(pr.findCalls) > 0 {
-			pr.scanLineForCalls(line, lineNum, "")
+			pr.scanLineForCalls(line, lineNum, pr.callerAtLine(lineNum))
 		}
 
 		// Extract resolver refs
@@ -749,6 +760,16 @@ func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []Docum
 		lineNum++
 	}
 	return refs, links
+}
+
+// callerAtLine returns the enclosing function name for a given line number.
+func (pr *ParseResult) callerAtLine(lineNum int) string {
+	for _, sc := range pr.Scopes {
+		if lineNum > sc.Start && lineNum < sc.End {
+			return sc.Name
+		}
+	}
+	return ""
 }
 
 // scanLineForCalls checks a line for calls to any of pr.findCalls targets.

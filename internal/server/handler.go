@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -815,52 +816,83 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			lines = append(lines, fmt.Sprintf("  %s:%d%s  %s", rel, e.Line+1, marker, e.Call))
 		}
 		msg := strings.Join(lines, "\n")
-		// Build Mermaid diagram
+		// Build Mermaid diagram as a call tree
 		var mermaid []string
-		mermaid = append(mermaid, "graph LR")
-		targetNode := strings.ReplaceAll(funcName, ".", "_")
-		mermaid = append(mermaid, fmt.Sprintf("    %s[%s]", targetNode, funcName))
+		mermaid = append(mermaid, "graph TD")
+		sourceRel := strings.TrimPrefix(sourceURI, "file://")
+		for _, root := range s.WorkspaceFolders {
+			if r, err := filepath.Rel(root, sourceRel); err == nil && len(r) < len(sourceRel) {
+				sourceRel = r
+			}
+		}
+		mermaid = append(mermaid, fmt.Sprintf("    source[\"%s::%s\"]", sourceRel, funcName))
+		sourceBase := strings.ToLower(strings.TrimSuffix(filepath.Base(sourceRel), filepath.Ext(sourceRel)))
+
+		type node struct {
+			id, label, fileBase string
+		}
+		var nodes []node
 		seen := make(map[string]bool)
-		for i, e := range entries {
+		for _, e := range entries {
 			rel := e.File
 			for _, root := range s.WorkspaceFolders {
 				if r, err := filepath.Rel(root, e.File); err == nil && len(r) < len(rel) {
 					rel = r
 				}
 			}
-			label := rel
+			label := fmt.Sprintf("%s:%d", rel, e.Line+1)
 			if e.Function != "" {
 				label += "::" + e.Function
 			}
-			key := label
-			if seen[key] {
+			if seen[label] {
 				continue
 			}
-			seen[key] = true
-			nodeID := fmt.Sprintf("ref%d", i)
+			seen[label] = true
+			fileBase := strings.ToLower(strings.TrimSuffix(filepath.Base(e.File), filepath.Ext(e.File)))
+			nodes = append(nodes, node{id: fmt.Sprintf("n%d", len(nodes)), label: label, fileBase: fileBase})
+		}
+
+		for i, e := range entries {
+			if i >= len(nodes) {
+				break
+			}
+			n := nodes[i]
+			parent := "source"
 			style := "-->"
 			if !e.Resolved {
 				style = "-.->"
 			}
-			mermaid = append(mermaid, fmt.Sprintf("    %s[%s] %s %s", nodeID, label, style, targetNode))
+			if e.Component != "" {
+				compBase := strings.ToLower(filepath.Base(e.Component))
+				compBase = strings.TrimSuffix(compBase, ".cfc")
+				if !strings.EqualFold(compBase, sourceBase) {
+					for j, other := range nodes {
+						if j == i {
+							continue
+						}
+						if strings.EqualFold(compBase, other.fileBase) {
+							parent = other.id
+							style = "-->"
+							break
+						}
+					}
+				}
+			}
+			mermaid = append(mermaid, fmt.Sprintf("    %s %s %s[\"%s\"]", parent, style, n.id, n.label))
 		}
-		diagram := strings.Join(mermaid, "\n")
-		output := msg + "\n\n" + diagram
+		diagram := "```mermaid\n" + strings.Join(mermaid, "\n") + "\n```"
+output := msg + "\n\n" + diagram
+		// Write to file in same directory as source
+		outDir := filepath.Dir(strings.TrimPrefix(sourceURI, "file://"))
+		if outDir == "" || outDir == "." {
+			outDir = os.TempDir()
+		}
+		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
+		_ = os.WriteFile(outFile, []byte(output), 0o644)
 		s.call(ctx, "window/showDocument", map[string]interface{}{
-			"uri":       "untitled:refs-" + funcName,
+			"uri":       "file://" + outFile,
 			"external":  false,
 			"takeFocus": true,
-		}, nil)
-		s.call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
-			Label: "Find all calls to " + funcName,
-			Edit: protocol.WorkspaceEdit{
-				DocumentChanges: []protocol.TextDocumentEdit{{
-					TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI("untitled:refs-" + funcName)},
-					},
-					Edits: []protocol.TextEdit{{Range: protocol.Range{}, NewText: output}},
-				}},
-			},
 		}, nil)
 		return reply(ctx, msg, nil)
 	case "cfmleditor.exportDeps":

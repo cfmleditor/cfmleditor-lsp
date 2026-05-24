@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
@@ -53,31 +56,67 @@ func (s *Server) indexWorkspace() {
 		})
 	}
 
-	for i, f := range files {
-		fileURI := uri.File(f)
-		if _, open := s.getDocument(fileURI); open {
-			continue
-		}
-		data, err := s.FS.ReadFile(f)
-		if err != nil {
-			continue
-		}
-		content := string(data)
-		pr := s.parseContentForIndex(fileURI, content)
-		s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
-		s.index.SetThisVars(fileURI, pr.ThisVars())
-		if pr.Persistent && s.isOrmPath(f) {
-			s.index.SetEntity(cfcNameFromURI(fileURI), fileURI)
-		}
-
-		if s.conn != nil && total > 0 {
-			pct := ((i + 1) * 100) / total
-			s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
-				"token": token,
-				"value": map[string]interface{}{"kind": "report", "message": fmt.Sprintf("%d/%d files", i+1, total), "percentage": pct},
-			})
-		}
+	type parseResult struct {
+		fileURI    uri.URI
+		pr         *cfparser.ParseResult
+		file       string
+		persistent bool
 	}
+	results := make(chan parseResult, 64)
+
+	// Start consumer first (prevents deadlock when channel fills)
+	var indexWg sync.WaitGroup
+	indexWg.Add(1)
+	indexed := 0
+	go func() {
+		defer indexWg.Done()
+		for r := range results {
+			s.index.IndexFileFromResult(r.fileURI, r.pr.Funcs, r.pr.Refs)
+			s.index.SetThisVars(r.fileURI, r.pr.ThisVars())
+			if r.persistent && s.isOrmPath(r.file) {
+				s.index.SetEntity(cfcNameFromURI(r.fileURI), r.fileURI)
+			}
+			indexed++
+			if s.conn != nil && total > 0 && indexed%100 == 0 {
+				pct := (indexed * 100) / total
+				s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
+					"token": token,
+					"value": map[string]interface{}{"kind": "report", "message": fmt.Sprintf("%d/%d files", indexed, total), "percentage": pct},
+				})
+			}
+		}
+	}()
+
+	// Parallel read + parse
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for _, f := range files {
+		f := f
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("panic during indexing", zap.String("file", f), zap.Any("panic", r))
+				}
+			}()
+			fileURI := uri.File(f)
+			if _, open := s.getDocument(fileURI); open {
+				return
+			}
+			data, err := s.FS.ReadFile(f)
+			if err != nil {
+				return
+			}
+			pr := s.parseContentForIndex(uri.File(f), string(data))
+			results <- parseResult{fileURI: uri.File(f), pr: pr, file: f, persistent: pr.Persistent}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	indexWg.Wait()
 
 	// Send progress end.
 	if s.conn != nil && total > 0 {
@@ -86,39 +125,7 @@ func (s *Server) indexWorkspace() {
 			"value": map[string]interface{}{"kind": "end", "message": fmt.Sprintf("Indexed %d files", total)},
 		})
 	}
-	s.logger.Info("indexing complete", zap.Int("files", total), zap.Duration("dur", time.Since(indexStart)))
-
-	// Build bean map: merge config bean paths with all Application.cfc bean paths in workspace
-	allBeanPaths := make(map[string]string)
-	// Discover Application.cfc bean paths from each workspace folder
-	for _, root := range s.WorkspaceFolders {
-		_ = s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-			if strings.EqualFold(info.Name(), "Application.cfc") || strings.EqualFold(info.Name(), "Application.cfm") {
-				appDir := filepath.Dir(path)
-				for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
-					if _, exists := allBeanPaths[ns]; !exists {
-						allBeanPaths[ns] = dir
-					}
-				}
-			}
-			return nil
-		})
-	}
-	// Config bean paths take precedence
-	for ns, dir := range s.BeanPaths {
-		allBeanPaths[ns] = dir
-	}
-	if len(allBeanPaths) > 0 {
-		beans := buildBeanMap(allBeanPaths, s.FS)
-		s.index.SetBeans(beans)
-		s.logger.Info("bean map built", zap.Int("beans", len(beans)))
-	}
+	s.logger.Info("indexing complete", zap.Int("files", indexed), zap.Int("total", total), zap.Duration("dur", time.Since(indexStart)))
 }
 
 // cfcNameFromURI extracts the CFC filename without extension from a URI.

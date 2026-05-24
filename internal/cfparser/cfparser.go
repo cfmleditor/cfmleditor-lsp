@@ -227,7 +227,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 		brace := sc.PeekSkipComments()
 		if brace.Kind == TokSemicolon {
 			sc.NextSkipComments()
-			scopes = append(scopes, FuncScope{Start: startLine, End: baseLine + brace.Line})
+			scopes = append(scopes, FuncScope{Name: nameTok.Value, Start: startLine, End: baseLine + brace.Line})
 			continue
 		}
 		if brace.Kind != TokLBrace {
@@ -249,7 +249,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 			}
 		}
 		endLine := baseLine + lastTok.Line
-		scopes = append(scopes, FuncScope{Start: startLine, End: endLine})
+		scopes = append(scopes, FuncScope{Name: nameTok.Value, Start: startLine, End: endLine})
 	}
 	return scopes
 }
@@ -267,10 +267,14 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 		}
 		i += pos
 		startLine := baseLine + lineAtOffset(idx, i)
+		end := i + 200; if end > len(src) { end = len(src) }
+		funcName := getAttr(src[i:end], "name")
+		funcAccess := getAttr(src[i:end], "access")
+		funcReturn := getAttr(src[i:end], "returntype")
 
 		closeIdx := indexCFTag(src[i+11:], "/cffunction")
 		if closeIdx < 0 {
-			scopes = append(scopes, FuncScope{Start: startLine, End: baseLine + len(idx) - 1})
+			scopes = append(scopes, FuncScope{Name: funcName, Access: funcAccess, ReturnType: funcReturn, Start: startLine, End: baseLine + len(idx) - 1})
 			break
 		}
 		closeEnd := i + 11 + closeIdx
@@ -279,7 +283,7 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 			closeEnd += gt + 1
 		}
 		endLine := baseLine + lineAtOffset(idx, closeEnd)
-		scopes = append(scopes, FuncScope{Start: startLine, End: endLine})
+		scopes = append(scopes, FuncScope{Name: funcName, Access: funcAccess, ReturnType: funcReturn, Start: startLine, End: endLine})
 		pos = closeEnd
 	}
 	return scopes

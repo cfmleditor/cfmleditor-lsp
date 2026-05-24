@@ -170,7 +170,7 @@ func (p *shallowScriptParser) parseAccessModified(accessTok Token) {
 	}
 }
 
-func (p *shallowScriptParser) parseFunction(startTok Token, _ string, _ string) {
+func (p *shallowScriptParser) parseFunction(startTok Token, access string, returnType string) {
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind != TokIdent {
 		return
@@ -191,7 +191,7 @@ func (p *shallowScriptParser) parseFunction(startTok Token, _ string, _ string) 
 
 	// Record scope and skip body
 	endLine := p.skipBody()
-	p.scopes = append(p.scopes, FuncScope{Start: funcLine, End: p.baseLine + endLine})
+	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Access: access, ReturnType: returnType, Start: funcLine, End: p.baseLine + endLine})
 }
 
 func (p *shallowScriptParser) parseArgList() []Argument {

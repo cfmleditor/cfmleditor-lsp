@@ -46,8 +46,11 @@ type VarDef struct {
 
 // FuncScope represents a function's line range.
 type FuncScope struct {
-	Start int
-	End   int
+	Name       string
+	Access     string
+	ReturnType string
+	Start      int
+	End        int
 }
 
 // ComponentRef represents a reference to a component instance.

@@ -14,6 +14,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
@@ -47,6 +48,7 @@ type Server struct {
 	changeCount        map[uri.URI]int        // rapid change counter per file
 	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
 	resolveCache       map[string]string      // cached component path resolutions
+	beansLoaded        bool                   // whether bean map has been built
 	index            *index.Index
 	resolver         *resolve.Resolver
 	linter           *cflint.Runner
@@ -197,6 +199,43 @@ func (s *Server) invalidateResolver() {
 	s.resolver = nil
 }
 
+// ensureBeansLoaded lazily builds the bean map on first access.
+func (s *Server) ensureBeansLoaded() {
+	s.mu.RLock()
+	if s.beansLoaded {
+		s.mu.RUnlock()
+		return
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	if s.beansLoaded {
+		s.mu.Unlock()
+		return
+	}
+	allBeanPaths := make(map[string]string)
+	for _, root := range s.WorkspaceFolders {
+		appDir := s.getResolver().FindApplicationRoot(root)
+		if appDir != "" {
+			for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
+				if _, exists := allBeanPaths[ns]; !exists {
+					allBeanPaths[ns] = dir
+				}
+			}
+		}
+	}
+	for ns, dir := range s.BeanPaths {
+		allBeanPaths[ns] = dir
+	}
+	if len(allBeanPaths) > 0 {
+		beans := buildBeanMap(allBeanPaths, s.FS)
+		s.index.SetBeans(beans)
+		s.logger.Info("bean map built (lazy)", zap.Int("beans", len(beans)))
+	}
+	s.beansLoaded = true
+	s.mu.Unlock()
+}
+
 func (s *Server) notify(ctx context.Context, method string, params interface{}) {	if s.conn != nil {
 		_ = s.conn.Notify(ctx, method, params)
 	}
@@ -305,6 +344,7 @@ func (s *Server) cfPropertyResolvers() []cfparser.PropertyResolver {
 
 // parseContent parses CFC content with all configured resolvers and link extraction.
 func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseResult {
+	s.ensureBeansLoaded()
 	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
@@ -313,13 +353,9 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseRe
 	})
 }
 
-// parseContentForIndex parses CFC content for indexing (no link extraction).
+// parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser.ParseResult {
-	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
-		Resolvers:         s.cfResolvers(),
-		PropertyResolvers: s.cfPropertyResolvers(),
-		BeanLookup:        s.index.LookupBean,
-	})
+	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{SkipRefs: true})
 }
 
 

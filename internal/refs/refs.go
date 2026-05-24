@@ -15,12 +15,13 @@ import (
 
 // Entry represents a single reference found.
 type Entry struct {
-	File     string `json:"file"`
-	Function string `json:"function,omitempty"`
-	Variable string `json:"variable,omitempty"`
-	Call     string `json:"call,omitempty"`
-	Line     uint32 `json:"line"`
-	Resolved bool   `json:"resolved"`
+	File      string `json:"file"`
+	Function  string `json:"function,omitempty"`
+	Variable  string `json:"variable,omitempty"`
+	Call      string `json:"call,omitempty"`
+	Component string `json:"component,omitempty"`
+	Line      uint32 `json:"line"`
+	Resolved  bool   `json:"resolved"`
 }
 
 // Options configures what to search for.
@@ -134,6 +135,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 					}
 					entries = append(entries, Entry{
 						File: f, Function: call.Caller, Call: call.Text,
+						Component: call.Component,
 						Line: call.Line, Resolved: call.Resolved,
 					})
 				}
@@ -150,17 +152,30 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 	return results
 }
 
+// beanLookupCache caches bean maps per Application.cfc directory.
+var (
+	beanLookupCache   = make(map[string]map[string]string)
+	beanLookupCacheMu sync.Mutex
+)
+
 // fileBeanLookup creates a BeanLookup function that resolves from the nearest Application.cfc.
 func fileBeanLookup(fsys vfs.FS, dir string) func(string) string {
 	appDir := findAppRoot(fsys, dir)
 	if appDir == "" {
 		return nil
 	}
+
+	beanLookupCacheMu.Lock()
+	if beans, ok := beanLookupCache[appDir]; ok {
+		beanLookupCacheMu.Unlock()
+		return func(name string) string { return beans[strings.ToLower(name)] }
+	}
+	beanLookupCacheMu.Unlock()
+
 	beanPaths := cfpath.LoadAppBeanPaths(appDir)
 	if len(beanPaths) == 0 {
 		return nil
 	}
-	// Build bean map from paths
 	beans := make(map[string]string)
 	for _, root := range beanPaths {
 		_ = fsys.Walk(root, func(path string, info os.FileInfo, _ error) error {
@@ -175,6 +190,9 @@ func fileBeanLookup(fsys vfs.FS, dir string) func(string) string {
 			return nil
 		})
 	}
+	beanLookupCacheMu.Lock()
+	beanLookupCache[appDir] = beans
+	beanLookupCacheMu.Unlock()
 	return func(name string) string {
 		return beans[strings.ToLower(name)]
 	}
