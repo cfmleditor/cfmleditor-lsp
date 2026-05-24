@@ -90,7 +90,7 @@ func (s *Server) resolveLink(filePath, baseDir string) string {
 	if _, err := s.FS.Stat(candidate); err == nil {
 		return candidate
 	}
-	if appDir := s.findApplicationRoot(baseDir); appDir != "" {
+	if appDir := s.getResolver().FindApplicationRoot(baseDir); appDir != "" {
 		candidate = filepath.Join(appDir, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return candidate

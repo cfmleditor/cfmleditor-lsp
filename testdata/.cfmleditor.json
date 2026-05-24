@@ -13,5 +13,8 @@
       "prefix": "_parent"
     }
   ],
+  "completions": {
+    "globalFunctionResolution": false
+  },
   "debug": true
 }

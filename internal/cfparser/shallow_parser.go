@@ -89,11 +89,15 @@ func (p *shallowScriptParser) parseProperty(startTok Token) {
 	name = attrs["name"]
 	typeName = attrs["type"]
 
-	// If no name= attribute, try positional: property [type] name;
+	// If no name= attribute, try positional: property [type] name [attrs...];
 	if name == "" {
 		idents := make([]string, 0, 2)
-		for _, tok := range tokens {
+		for i, tok := range tokens {
 			if tok.Kind == TokIdent {
+				// Stop if this ident is followed by = (it's an attribute, not positional)
+				if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+					break
+				}
 				idents = append(idents, tok.Value)
 			} else {
 				break

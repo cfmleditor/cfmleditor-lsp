@@ -14,6 +14,8 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -648,25 +650,29 @@ func TestParseFunctionDefs(t *testing.T) {
 }
 
 func TestDefinitionLookup(t *testing.T) {
+	dir := t.TempDir()
 	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
 
 	cfcContent := `<cfcomponent>
 <cffunction name="getUser">
 	<cfreturn "user">
 </cffunction>
 </cfcomponent>`
-	cfcURI := uri.URI("file:///app/User.cfc")
+	_ = os.WriteFile(filepath.Join(dir, "User.cfc"), []byte(cfcContent), 0o644)
+	cfcURI := uri.URI("file://" + filepath.Join(dir, "User.cfc"))
 	srv.index.IndexFile(cfcURI, cfcContent)
 
-	callerContent := `<cfset result = getUser()>`
-	callerURI := uri.URI("file:///app/index.cfm")
+	callerContent := `<cfset userObj = new User()><cfset result = userObj.getUser()>`
+	callerURI := uri.URI("file://" + filepath.Join(dir, "index.cfm"))
 	srv.setDocument(callerURI, callerContent)
+	srv.index.IndexFile(callerURI, callerContent)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
-			Position:     protocol.Position{Line: 0, Character: 18},
+			Position:     protocol.Position{Line: 0, Character: 55},
 		},
 	})
 
@@ -681,8 +687,8 @@ func TestDefinitionLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(cfcURI) {
-		t.Errorf("expected URI %s, got %s", cfcURI, loc.URI)
+	if !strings.Contains(string(loc.URI), "User.cfc") {
+		t.Errorf("expected User.cfc, got %s", loc.URI)
 	}
 	if loc.Range.Start.Line != 1 {
 		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
@@ -1726,20 +1732,27 @@ func TestDefinitionComponentResolver(t *testing.T) {
 }
 
 func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
+	dir := t.TempDir()
 	srv := newTestServer()
-	cfc1 := uri.URI("file:///app/Service1.cfc")
-	cfc2 := uri.URI("file:///app/Service2.cfc")
-	srv.index.IndexFile(cfc1, "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
-	srv.index.IndexFile(cfc2, "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
+	srv.WorkspaceFolders = []string{dir}
 
-	callerURI := uri.URI("file:///app/caller.cfm")
-	srv.setDocument(callerURI, "<cfset doWork()>")
+	// Two CFCs with same function name
+	_ = os.WriteFile(filepath.Join(dir, "Service1.cfc"), []byte("<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "Service2.cfc"), []byte("<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>"), 0o644)
+	srv.index.IndexFile(uri.URI("file://"+filepath.Join(dir, "Service1.cfc")), "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
+	srv.index.IndexFile(uri.URI("file://"+filepath.Join(dir, "Service2.cfc")), "<cfcomponent>\n<cffunction name=\"doWork\">\n</cffunction>\n</cfcomponent>")
+
+	// Caller assigns svc via new Service1, so it resolves to Service1
+	callerURI := uri.URI("file://" + filepath.Join(dir, "caller.cfm"))
+	callerContent := "<cfset svc = new Service1()>\n<cfset result = svc.doWork()>"
+	srv.setDocument(callerURI, callerContent)
+	srv.index.IndexFile(callerURI, callerContent)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
-			Position:     protocol.Position{Line: 0, Character: 8}, // on "doWork"
+			Position:     protocol.Position{Line: 1, Character: 22}, // on "doWork"
 		},
 	})
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
@@ -1751,12 +1764,13 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
-	locs, ok := (*result).([]protocol.Location)
+	// Should resolve to Service1 specifically
+	loc, ok := (*result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected []Location for multiple matches, got %T", *result)
+		t.Fatalf("expected Location (resolved to specific CFC), got %T", *result)
 	}
-	if len(locs) != 2 {
-		t.Errorf("expected 2 locations, got %d", len(locs))
+	if !strings.Contains(string(loc.URI), "Service1.cfc") {
+		t.Errorf("expected Service1.cfc, got %s", loc.URI)
 	}
 }
 
@@ -1947,18 +1961,24 @@ func TestDefinitionMappingResolution(t *testing.T) {
 }
 
 func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
+	dir := t.TempDir()
 	srv := newTestServer()
-	cfcURI := uri.URI("file:///app/Service.cfc")
+	srv.WorkspaceFolders = []string{dir}
+
+	_ = os.WriteFile(filepath.Join(dir, "Service.cfc"), []byte("component {\nfunction getUser() {}\n}"), 0o644)
+	cfcURI := uri.URI("file://" + filepath.Join(dir, "Service.cfc"))
 	srv.index.IndexFile(cfcURI, "component {\nfunction getUser() {}\n}")
 
-	callerURI := uri.URI("file:///app/caller.cfm")
-	srv.setDocument(callerURI, "<cfset result = GETUSER()>")
+	callerURI := uri.URI("file://" + filepath.Join(dir, "caller.cfm"))
+	callerContent := "<cfset svc = new Service()>\n<cfset result = svc.GETUSER()>"
+	srv.setDocument(callerURI, callerContent)
+	srv.index.IndexFile(callerURI, callerContent)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
-			Position:     protocol.Position{Line: 0, Character: 18}, // on "GETUSER"
+			Position:     protocol.Position{Line: 1, Character: 20}, // on "GETUSER"
 		},
 	})
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
@@ -2360,7 +2380,7 @@ func TestResolveComponentPathCaseInsensitive(t *testing.T) {
 	srv.WorkspaceFolders = []string{dir}
 
 	// Request with uppercase User — should still resolve to lowercase user.cfc
-	cfcPath := srv.resolveComponentPath("models.User", dir)
+	cfcPath := srv.getResolver().ComponentPath("models.User", dir)
 	if cfcPath == "" {
 		t.Fatal("expected to resolve models.User")
 	}
@@ -3030,9 +3050,13 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 
 func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	srv := newTestServer()
+srv.GlobalFunctionResolution = true
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
-	srv.setDocument(docURI, "myFunc()")
+	// svc has no resolved ref — qualified fallback finds myFunc globally
+	callerContent := "<cfset result = svc.myFunc()>"
+	srv.setDocument(docURI, callerContent)
+	srv.index.IndexFile(docURI, callerContent)
 	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
@@ -3041,7 +3065,7 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
-			Position:     protocol.Position{Line: 0, Character: 3},
+			Position:     protocol.Position{Line: 0, Character: 22},
 		},
 	})
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
@@ -3094,13 +3118,13 @@ func TestEnsureIndexedLoadsFromDisk(t *testing.T) {
 	srv.WorkspaceFolders = []string{dir}
 
 	cfcPath := filepath.Join(dir, "models", "Item.cfc")
-	defs := srv.ensureIndexed(cfcPath)
+	defs := srv.getResolver().EnsureIndexed(cfcPath)
 	if len(defs) != 2 {
 		t.Errorf("expected 2 functions from disk, got %d", len(defs))
 	}
 
 	// Second call should use cache
-	defs2 := srv.ensureIndexed(cfcPath)
+	defs2 := srv.getResolver().EnsureIndexed(cfcPath)
 	if len(defs2) != 2 {
 		t.Errorf("expected 2 functions from cache, got %d", len(defs2))
 	}
@@ -3115,7 +3139,7 @@ func TestResolveComponentPathWithMappings(t *testing.T) {
 	srv := newTestServer()
 	srv.Mappings = map[string]string{"mylib": libDir}
 
-	result := srv.resolveComponentPath("mylib.Utils", dir)
+	result := srv.getResolver().ComponentPath("mylib.Utils", dir)
 	if result == "" {
 		t.Fatal("expected to resolve mylib.Utils via mapping")
 	}
@@ -3341,7 +3365,7 @@ func TestIsCFCFile(t *testing.T) {
 func TestResolveComponentPathNotFound(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/nonexistent"}
-	result := srv.resolveComponentPath("no.Such.Component", "/tmp")
+	result := srv.getResolver().ComponentPath("no.Such.Component", "/tmp")
 	if result != "" {
 		t.Errorf("expected empty for nonexistent component, got %s", result)
 	}
@@ -3599,6 +3623,7 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 func TestHoverSingleGlobalMatch(t *testing.T) {
 	// Only one match globally — should show hover even without qualifier
 	srv := newTestServer()
+	srv.GlobalFunctionResolution = true
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "uniqueFunc()")
 	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []cfparser.FunctionDef{
@@ -3927,5 +3952,486 @@ func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
 	avg := elapsed / 10000
 	if avg > 10*time.Microsecond {
 		t.Errorf("resolver too slow (regex not cached?): avg %v per call (threshold 10µs)", avg)
+	}
+}
+
+func TestDefinitionNoGlobalResolution(t *testing.T) {
+	srv := newTestServer()
+	srv.GlobalFunctionResolution = false
+	docURI := uri.URI("file:///test.cfm")
+	otherURI := uri.URI("file:///other.cfc")
+	srv.setDocument(docURI, "myFunc()")
+	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+		{Name: "myFunc", URI: otherURI, Line: 10},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 3},
+		},
+	})
+	_ = srv.handleDefinition(context.Background(), reply, req)
+	// With global resolution disabled, should NOT resolve to other file
+	if *result != nil {
+		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", *result)
+	}
+}
+
+func TestHoverNoGlobalResolution(t *testing.T) {
+	srv := newTestServer()
+	srv.GlobalFunctionResolution = false
+	docURI := uri.URI("file:///test.cfm")
+	srv.setDocument(docURI, "uniqueFunc()")
+	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []cfparser.FunctionDef{
+		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []cfparser.Argument{{Name: "x"}}},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 5},
+		},
+	})
+	_ = srv.handleHover(context.Background(), reply, req)
+	// With global resolution disabled, should NOT show hover from other file
+	if *result != nil {
+		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", *result)
+	}
+}
+
+func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
+	srv := newTestServer()
+	srv.GlobalFunctionResolution = true
+	docURI := uri.URI("file:///test.cfm")
+	otherURI := uri.URI("file:///other.cfc")
+	srv.setDocument(docURI, "myFunc()")
+	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+		{Name: "myFunc", URI: otherURI, Line: 10},
+	}, nil)
+
+	reply, result, _ := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 0, Character: 3},
+		},
+	})
+	_ = srv.handleDefinition(context.Background(), reply, req)
+	// With global resolution enabled, should resolve
+	if *result == nil {
+		t.Error("expected definition with GlobalFunctionResolution enabled")
+	}
+}
+
+func TestDefinitionViaCreateObject(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Order.cfc"), []byte("component {\nfunction getTotal() {}\nfunction getItems() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := `<cfset obj = createObject("component","models.Order")>
+<cfset total = obj.getTotal()>`
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 20}, // on "getTotal"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition for obj.getTotal() via createObject")
+	}
+}
+
+func TestCompletionViaCreateObject(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "models"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "models", "Order.cfc"), []byte("component {\nfunction getTotal() {}\nfunction getItems() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	docURI := uri.URI("file://" + filepath.Join(dir, "test.cfm"))
+	docContent := "<cfset obj = createObject(\"component\",\"models.Order\")>\n<cfset x = obj."
+	srv.setDocument(docURI, docContent)
+	srv.index.IndexFile(docURI, docContent)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 1, Character: 15},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Label)
+	}
+	if !strings.Contains(strings.Join(names, ","), "getTotal") {
+		t.Errorf("expected getTotal in completions via createObject, got %v", names)
+	}
+}
+
+func TestDefinitionViaBeanProperty(t *testing.T) {
+	dir := t.TempDir()
+	// Create bean directory with a CFC
+	_ = os.MkdirAll(filepath.Join(dir, "dao"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "dao", "UserDAO.cfc"), []byte("component {\nfunction getById(required numeric id) {}\nfunction getAll() {}\n}"), 0o644)
+
+	// Create Application.cfc with beanPaths
+	_ = os.WriteFile(filepath.Join(dir, "Application.cfc"), []byte(`component {
+	this.beanPaths["dao"] = expandPath("./dao");
+}`), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// CFC with property that resolves via bean lookup
+	cfcContent := `component {
+	property name="userDAO" inject="UserDAO@dao";
+
+	function listUsers() {
+		return variables.userDAO.getAll();
+	}
+}`
+	docURI := uri.URI("file://" + filepath.Join(dir, "Service.cfc"))
+	srv.setDocument(docURI, cfcContent)
+
+	// Parse with bean lookup from Application.cfc
+	pr := cfparser.ParseWithOptions(docURI, cfcContent, cfparser.ParseOptions{
+		BeanLookup: func(name string) string {
+			// Simulate bean resolution: UserDAO@dao -> dao/UserDAO.cfc
+			lower := strings.ToLower(name)
+			if lower == "userdao" {
+				return filepath.Join(dir, "dao", "UserDAO.cfc")
+			}
+			return ""
+		},
+	})
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 4, Character: 28}, // on "getAll"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition for variables.userDAO.getAll() via bean property")
+	}
+}
+
+func TestCompletionViaBeanProperty(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "dao"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "dao", "UserDAO.cfc"), []byte("component {\nfunction getById() {}\nfunction getAll() {}\n}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	cfcContent := `component {
+	property name="userDAO" inject="UserDAO@dao";
+
+	function doStuff() {
+		variables.userDAO.
+	}
+}`
+	docURI := uri.URI("file://" + filepath.Join(dir, "Service.cfc"))
+	srv.setDocument(docURI, cfcContent)
+
+	pr := cfparser.ParseWithOptions(docURI, cfcContent, cfparser.ParseOptions{
+		BeanLookup: func(name string) string {
+			if strings.EqualFold(name, "userdao") {
+				return filepath.Join(dir, "dao", "UserDAO.cfc")
+			}
+			return ""
+		},
+	})
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			Position:     protocol.Position{Line: 4, Character: 20},
+		},
+		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+	})
+	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	list := completionListFromResult(t, *result)
+	var names []string
+	for _, item := range list.Items {
+		names = append(names, item.Label)
+	}
+	joined := strings.Join(names, ",")
+	if !strings.Contains(joined, "getById") || !strings.Contains(joined, "getAll") {
+		t.Errorf("expected getById and getAll via bean property, got %v", names)
+	}
+}
+
+func TestBeansTestdata_InjectResolution(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// Build bean map from Application.cfc (simulates workspace indexing)
+	beanPaths := cfpath.LoadAppBeanPaths(dir)
+	if len(beanPaths) == 0 {
+		t.Fatal("expected bean paths from Application.cfc")
+	}
+	beans := buildBeanMap(beanPaths, srv.FS)
+	srv.index.SetBeans(beans)
+
+	// Parse PropertyTest.cfc with bean lookup
+	ptPath := filepath.Join(dir, "PropertyTest.cfc")
+	ptContent, _ := os.ReadFile(ptPath)
+	ptURI := uri.URI("file://" + ptPath)
+	pr := cfparser.ParseWithOptions(ptURI, string(ptContent), cfparser.ParseOptions{
+		BeanLookup: srv.index.LookupBean,
+	})
+	srv.index.IndexFileFromResult(ptURI, pr.Funcs, pr.Refs)
+	srv.setDocument(ptURI, string(ptContent))
+
+	// Index UserDAO.cfc
+	daoPath := filepath.Join(dir, "dao", "UserDAO.cfc")
+	daoContent, _ := os.ReadFile(daoPath)
+	daoURI := uri.URI("file://" + daoPath)
+	srv.index.IndexFile(daoURI, string(daoContent))
+
+	// Test: variables.userDAO.getById should resolve to UserDAO.cfc
+	reply, result, replyErr := captureReply(t)
+	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(ptURI)},
+			Position:     protocol.Position{Line: 13, Character: 38}, // on "getById"
+		},
+	})
+	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if *replyErr != nil {
+		t.Fatal(*replyErr)
+	}
+	if *result == nil {
+		t.Fatal("expected definition for variables.userDAO.getById via inject bean")
+	}
+	loc, ok := (*result).(protocol.Location)
+	if !ok {
+		t.Fatalf("expected Location, got %T", *result)
+	}
+	if !strings.Contains(string(loc.URI), "UserDAO.cfc") {
+		t.Errorf("expected UserDAO.cfc, got %s", loc.URI)
+	}
+}
+
+func TestBeansTestdata_PositionalTypeResolution(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// Build bean map
+	beanPaths := cfpath.LoadAppBeanPaths(dir)
+	beans := buildBeanMap(beanPaths, srv.FS)
+	srv.index.SetBeans(beans)
+
+	// Parse PositionalProps.cfc — has "property UserDAO userDAO;"
+	ppPath := filepath.Join(dir, "PositionalProps.cfc")
+	ppContent, _ := os.ReadFile(ppPath)
+	ppURI := uri.URI("file://" + ppPath)
+	pr := cfparser.ParseWithOptions(ppURI, string(ppContent), cfparser.ParseOptions{
+		BeanLookup: srv.index.LookupBean,
+	})
+	srv.index.IndexFileFromResult(ppURI, pr.Funcs, pr.Refs)
+	srv.setDocument(ppURI, string(ppContent))
+
+	// Check that userDAO ref was created
+	ref := srv.index.LookupComponentRefInFile("userDAO", ppURI, 100)
+	if ref == nil {
+		t.Fatal("expected component ref for userDAO from positional property type")
+	}
+	t.Logf("userDAO resolved to: %s", ref.Component)
+}
+
+func TestBeansTestdata_ServiceInjectResolution(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// Build bean map
+	beanPaths := cfpath.LoadAppBeanPaths(dir)
+	beans := buildBeanMap(beanPaths, srv.FS)
+	srv.index.SetBeans(beans)
+
+	// Parse BeanUserService.cfc
+	svcPath := filepath.Join(dir, "services", "BeanUserService.cfc")
+	svcContent, _ := os.ReadFile(svcPath)
+	svcURI := uri.URI("file://" + svcPath)
+	pr := cfparser.ParseWithOptions(svcURI, string(svcContent), cfparser.ParseOptions{
+		BeanLookup: srv.index.LookupBean,
+	})
+	srv.index.IndexFileFromResult(svcURI, pr.Funcs, pr.Refs)
+
+	// Check that userDAO ref was created from inject="UserDAO@dao"
+	ref := srv.index.LookupComponentRefInFile("userDAO", svcURI, 100)
+	if ref == nil {
+		t.Fatal("expected component ref for userDAO in BeanUserService via inject")
+	}
+	if !strings.Contains(strings.ToLower(ref.Component), "userdao") {
+		t.Errorf("expected component containing 'userdao', got %s", ref.Component)
+	}
+}
+
+func TestFindAllCalls_GetById(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+	beanPaths := cfpath.LoadAppBeanPaths(dir)
+	beans := buildBeanMap(beanPaths, vfs.OS{})
+
+	// Build a bean lookup function
+	beanLookup := func(name string) string {
+		return beans[strings.ToLower(name)]
+	}
+
+	// Build resolvers (none for this test)
+	var resolvers []cfparser.Resolver
+
+	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+		FuncName:          "getById",
+		Resolvers:         resolvers,
+		BeanLookup:        beanLookup,
+	})
+
+	if len(entries) == 0 {
+		t.Fatal("expected at least one call to getById")
+	}
+
+	// Should find calls in PropertyTest.cfc and BeanUserService.cfc
+	var files []string
+	for _, e := range entries {
+		files = append(files, filepath.Base(e.File))
+	}
+	joined := strings.Join(files, ",")
+	if !strings.Contains(joined, "PropertyTest.cfc") {
+		t.Errorf("expected PropertyTest.cfc in results, got %v", files)
+	}
+	if !strings.Contains(joined, "BeanUserService.cfc") {
+		t.Errorf("expected BeanUserService.cfc in results, got %v", files)
+	}
+}
+
+func TestFindAllCalls_GetAll(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+
+	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+		FuncName: "getAll",
+	})
+
+	if len(entries) == 0 {
+		t.Fatal("expected at least one call to getAll")
+	}
+
+	// Should find call in BeanUserService.cfc (variables.userDAO.getAll())
+	found := false
+	for _, e := range entries {
+		if strings.Contains(filepath.Base(e.File), "BeanUserService.cfc") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected getAll call in BeanUserService.cfc")
+	}
+}
+
+func TestFindAllCalls_Resolved(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+
+	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+		FuncName: "getById",
+	})
+
+	// Calls via variables.userDAO.getById should be resolved (qualified)
+	hasResolved := false
+	for _, e := range entries {
+		if e.Resolved {
+			hasResolved = true
+			break
+		}
+	}
+	if !hasResolved {
+		t.Error("expected at least one resolved (qualified) call to getById")
+	}
+}
+
+func TestFindAllCalls_NoResults(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+
+	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+		FuncName: "nonExistentFunction",
+	})
+
+	if len(entries) != 0 {
+		t.Errorf("expected no results for nonExistentFunction, got %d", len(entries))
+	}
+}
+
+func TestFindComponentRefs_UserDAO(t *testing.T) {
+	dir := filepath.Join(testdataDir(), "beans")
+	beanPaths := cfpath.LoadAppBeanPaths(dir)
+	beans := buildBeanMap(beanPaths, vfs.OS{})
+	daoPath := beans["userdao@dao"]
+
+	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+		Component: daoPath,
+		BeanLookup: func(name string) string {
+			return beans[strings.ToLower(name)]
+		},
+	})
+
+	if len(entries) == 0 {
+		t.Fatal("expected at least one reference to UserDAO component")
+	}
+
+	var files []string
+	for _, e := range entries {
+		files = append(files, filepath.Base(e.File))
+	}
+	joined := strings.Join(files, ",")
+	if !strings.Contains(joined, "PropertyTest.cfc") {
+		t.Errorf("expected PropertyTest.cfc to reference UserDAO, got %v", files)
 	}
 }

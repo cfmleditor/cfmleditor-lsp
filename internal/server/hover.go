@@ -69,7 +69,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	// User-defined function in current file or index (unqualified)
 	defs := s.index.Lookup(word)
 	if len(defs) > 0 {
-		// Only show if in current file or exactly one match
+		// Only show if in current file or (global resolution enabled + exactly one match)
 		var def *cfparser.FunctionDef
 		for _, d := range defs {
 			if d.URI == docURI {
@@ -77,7 +77,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				break
 			}
 		}
-		if def == nil && len(defs) == 1 {
+		if def == nil && s.GlobalFunctionResolution && len(defs) == 1 {
 			def = defs[0]
 		}
 		if def != nil {
@@ -102,6 +102,10 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 		comp = qualifier[1:]
 	default:
 		ref := s.index.LookupComponentRefInFile(qualifier, docURI, line)
+		if ref == nil {
+			s.ensureFuncRefsIndexed(docURI, int(line))
+			ref = s.index.LookupComponentRefInFile(qualifier, docURI, line)
+		}
 		if ref != nil {
 			comp = ref.Component
 		} else {
@@ -113,11 +117,11 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 	}
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	cfcPath := s.resolveComponentPath(comp, baseDir)
+	cfcPath := s.getResolver().ComponentPath(comp, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
-	for _, d := range s.ensureIndexed(cfcPath) {
+	for _, d := range s.getResolver().EnsureIndexed(cfcPath) {
 		if strings.EqualFold(d.Name, funcName) {
 			return d
 		}

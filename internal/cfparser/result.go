@@ -28,11 +28,14 @@ type ParseResult struct {
 	Persistent bool          // true if component has persistent="true" (ORM entity)
 	Properties []propertyDef // parsed property declarations
 	Links      []DocumentLink // file path references extracted during shallow scan
+	Calls      []CallSite    // function call sites (when FindCalls is set)
 	Log        Logger        // optional logger for timing and errors
 	Resolvers         []Resolver         // optional component resolvers for RHS matching
 	PropertyResolvers []PropertyResolver // optional property-to-component resolvers
 	BeanLookup        func(string) string // optional bean name → dot-path lookup
 	extractLinks      bool               // whether to extract links during global scan
+	findCalls         []string           // function names to scan for
+	scanAllScopes     bool               // scan all lines including function bodies
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -54,6 +57,8 @@ type ParseOptions struct {
 	PropertyResolvers []PropertyResolver
 	BeanLookup        func(name string) string // optional: resolve bean name → dot-path
 	ExtractLinks      bool                     // extract document links during global scan
+	FindCalls         []string                 // function names to find call sites for
+	ScanAllScopes     bool                     // scan all lines including function bodies (for refs/deps)
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -84,6 +89,8 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		PropertyResolvers: opts.PropertyResolvers,
 		BeanLookup:        opts.BeanLookup,
 		extractLinks:      opts.ExtractLinks,
+		findCalls:         opts.FindCalls,
+		scanAllScopes:     opts.ScanAllScopes,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
@@ -513,8 +520,8 @@ func (pr *ParseResult) appendResolverRefs() {
 			content = content[nl+1:]
 		}
 
-		// Skip lines inside non-init function bodies
-		if scopeIdx < len(pr.Scopes) && lineNum > pr.Scopes[scopeIdx].Start {
+		// Skip lines inside non-init function bodies (unless scanning all scopes)
+		if !pr.scanAllScopes && scopeIdx < len(pr.Scopes) && lineNum > pr.Scopes[scopeIdx].Start {
 			if lineNum < pr.Scopes[scopeIdx].End {
 				isInit := false
 				for _, f := range pr.Funcs {
@@ -535,6 +542,11 @@ func (pr *ParseResult) appendResolverRefs() {
 		// Extract document links from this line
 		if pr.extractLinks {
 			extractLinksFromLine(line, lineNum, &pr.Links)
+		}
+
+		// Scan for function calls
+		if len(pr.findCalls) > 0 {
+			pr.scanLineForCalls(line, lineNum, "")
 		}
 
 		// Resolver ref extraction (only if resolvers configured)
@@ -704,6 +716,11 @@ func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []Docum
 		// Extract links from this line
 		extractLinksFromLine(line, lineNum, &links)
 
+		// Scan for function calls
+		if len(pr.findCalls) > 0 {
+			pr.scanLineForCalls(line, lineNum, "")
+		}
+
 		// Extract resolver refs
 		if len(pr.Resolvers) > 0 {
 			eqIdx := strings.IndexByte(line, '=')
@@ -732,6 +749,55 @@ func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []Docum
 		lineNum++
 	}
 	return refs, links
+}
+
+// scanLineForCalls checks a line for calls to any of pr.findCalls targets.
+func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string) {
+	lower := strings.ToLower(line)
+	trimmed := strings.TrimSpace(lower)
+	// Skip function definition lines
+	if strings.HasPrefix(trimmed, "function ") || strings.Contains(trimmed, " function ") ||
+		strings.HasPrefix(trimmed, "<cffunction") {
+		return
+	}
+	for _, target := range pr.findCalls {
+		t := strings.ToLower(target)
+		if idx := strings.Index(lower, "."+t+"("); idx >= 0 {
+			// Extract variable name before the dot
+			varEnd := idx
+			varStart := varEnd - 1
+			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_') {
+				varStart--
+			}
+			varStart++
+			varName := line[varStart:varEnd]
+			comp := pr.resolveVarComponent(varName, uint32(lineNum))
+			pr.Calls = append(pr.Calls, CallSite{
+				FuncName: target, Component: comp, Line: uint32(lineNum), Caller: caller,
+				Resolved: comp != "", Text: strings.TrimSpace(line),
+			})
+		} else if strings.Contains(lower, " "+t+"(") || strings.Contains(lower, "="+t+"(") || strings.HasPrefix(lower, t+"(") {
+			pr.Calls = append(pr.Calls, CallSite{
+				FuncName: target, Line: uint32(lineNum), Caller: caller,
+				Resolved: false, Text: strings.TrimSpace(line),
+			})
+		}
+	}
+}
+
+// resolveVarComponent finds the component a variable resolves to from pr.Refs.
+func (pr *ParseResult) resolveVarComponent(varName string, line uint32) string {
+	var best string
+	var bestLine uint32
+	for _, ref := range pr.Refs {
+		if strings.EqualFold(ref.Variable, varName) && ref.Line <= line {
+			if ref.Line >= bestLine {
+				best = ref.Component
+				bestLine = ref.Line
+			}
+		}
+	}
+	return best
 }
 
 func funcKey(start, end int) string {

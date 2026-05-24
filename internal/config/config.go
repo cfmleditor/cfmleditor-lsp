@@ -39,8 +39,9 @@ type Linting struct {
 
 // Completions holds completion configuration.
 type Completions struct {
-	TagSnippets      bool `json:"tagSnippets"`
-	FunctionSnippets bool `json:"functionSnippets"`
+	TagSnippets              bool `json:"tagSnippets"`
+	FunctionSnippets         bool `json:"functionSnippets"`
+	GlobalFunctionResolution bool `json:"globalFunctionResolution"`
 }
 
 // Formatting holds formatter configuration.
@@ -84,10 +85,11 @@ type Resolved struct {
 	ComponentResolvers []Resolver
 	PropertyResolvers  []PropResolver
 	BeanPaths          map[string]string
-	Formatting         ResolvedFormatting
-	Linting            bool
-	TagSnippets        bool
-	FunctionSnippets   bool
+	Formatting               ResolvedFormatting
+	Linting                  bool
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
 }
 
 // ResolvedFormatting holds formatting settings with defaults applied.
@@ -134,9 +136,11 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if cfg.Completions != nil {
 		r.TagSnippets = cfg.Completions.TagSnippets
 		r.FunctionSnippets = cfg.Completions.FunctionSnippets
+		r.GlobalFunctionResolution = cfg.Completions.GlobalFunctionResolution
 	} else {
 		r.TagSnippets = true
 		r.FunctionSnippets = true
+		r.GlobalFunctionResolution = true
 	}
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{

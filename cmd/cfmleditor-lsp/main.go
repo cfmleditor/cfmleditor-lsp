@@ -35,6 +35,12 @@ func main() {
 		case "format":
 			cmdFormat(os.Args[2:])
 			return
+		case "deps":
+			cmdDeps(os.Args[2:])
+			return
+		case "refs":
+			cmdRefs(os.Args[2:])
+			return
 		case "version":
 			fmt.Printf("cfmleditor-lsp %s\n", version)
 			return

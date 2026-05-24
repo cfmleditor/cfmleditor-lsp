@@ -11,6 +11,10 @@ component extends="models.Base" {
         return this;
     }
 
+    function render() {
+        return "<div class=""widget #variables.color#"">#variables.name#</div>";
+    }
+
     function getDisplayName() {
         return variables.username & " <" & variables.email & ">";
     }

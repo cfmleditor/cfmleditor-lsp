@@ -28,6 +28,7 @@ func (s *Server) loadConfigFromRoots() {
 }
 
 func (s *Server) applyConfig(r *config.Resolved) {
+	s.invalidateResolver()
 	if len(r.Mappings) > 0 && len(s.Mappings) == 0 {
 		s.Mappings = r.Mappings
 	}
@@ -39,5 +40,6 @@ func (s *Server) applyConfig(r *config.Resolved) {
 	s.Linting = r.Linting
 	s.TagSnippets = r.TagSnippets
 	s.FunctionSnippets = r.FunctionSnippets
+	s.GlobalFunctionResolution = r.GlobalFunctionResolution
 	s.Formatting = r.Formatting
 }

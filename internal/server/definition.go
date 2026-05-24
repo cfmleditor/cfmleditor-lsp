@@ -94,6 +94,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		} else {
 			// Resolve via component ref
 			ref := s.index.LookupComponentRefInFile(qualifier, docURI, uint32(line))
+			if ref == nil {
+				// Lazily index function body refs
+				s.ensureFuncRefsIndexed(docURI, line)
+				ref = s.index.LookupComponentRefInFile(qualifier, docURI, uint32(line))
+			}
 			if ref != nil {
 				s.logger.Debug("definition: component ref found", zap.String("variable", qualifier), zap.String("component", ref.Component))
 				if loc := s.resolveComponentDef(ref.Component, word, docURI); loc != nil {
@@ -113,6 +118,9 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 		// Qualified call that can't be resolved — fall through to all matches
 		// but exclude current file (a qualified call is never local)
+		if !s.GlobalFunctionResolution {
+			return reply(ctx, nil, nil)
+		}
 		defs := s.index.Lookup(word)
 		s.logger.Debug("definition: qualified fallback to global lookup", zap.String("word", word), zap.Int("matches", len(defs)))
 		var locations []protocol.Location
@@ -147,7 +155,10 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 	}
 
-	// Not in current file — return all matches
+	// Not in current file — only return if global resolution is enabled
+	if !s.GlobalFunctionResolution {
+		return reply(ctx, nil, nil)
+	}
 	var locations []protocol.Location
 	for _, d := range defs {
 		locations = append(locations, protocol.Location{
@@ -188,7 +199,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 			}
 		}
 		if cfcPath == "" {
-			cfcPath = s.resolveComponentPath(component, baseDir)
+			cfcPath = s.getResolver().ComponentPath(component, baseDir)
 			// Try ORM cfcLocation directories for bare entity names
 			if cfcPath == "" && !strings.Contains(component, ".") {
 				// Check entity index first
@@ -197,7 +208,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 				}
 				// Fall back to ORM cfcLocation directories
 				if cfcPath == "" {
-					if appDir := s.findApplicationRoot(baseDir); appDir != "" {
+					if appDir := s.getResolver().FindApplicationRoot(baseDir); appDir != "" {
 						for _, ormDir := range cfpath.LoadOrmLocations(appDir) {
 							cfcPath = cfpath.ResolvePath(component, ormDir, nil)
 							if cfcPath != "" {
@@ -221,7 +232,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 		s.logger.Debug("definition: component path not resolved to file", zap.String("component", component))
 		return nil
 	}
-	for _, d := range s.ensureIndexed(cfcPath) {
+	for _, d := range s.getResolver().EnsureIndexed(cfcPath) {
 		if strings.EqualFold(d.Name, funcName) {
 			s.logger.Debug("definition: resolved method", zap.String("component", component), zap.String("func", funcName), zap.String("file", cfcPath), zap.Uint32("line", d.Line))
 			return &protocol.Location{
@@ -270,8 +281,10 @@ func qualifierBeforeWord(content string, line, char int) string {
 			// Try new
 			if idx := strings.LastIndex(lowerPrefix, "new "); idx >= 0 {
 				rest := strings.TrimSpace(prefix[idx+4:])
-				rest = strings.TrimSuffix(rest, "(")
-				rest = strings.TrimSuffix(rest, ")")
+				// Strip constructor arguments: new models.Widget("x") → models.Widget
+				if parenIdx := strings.IndexByte(rest, '('); parenIdx >= 0 {
+					rest = rest[:parenIdx]
+				}
 				rest = strings.Trim(rest, "\"'")
 				if rest != "" {
 					return "~" + rest
@@ -549,31 +562,13 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 	baseDir := filepath.Dir(currentPath)
 
 	s.logger.Debug("definition: resolveComponentFileDef", zap.String("component", component), zap.String("baseDir", baseDir))
-	cfcPath := s.resolveComponentPath(component, baseDir)
+	cfcPath := s.getResolver().ComponentPath(component, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
 	return &protocol.Location{
 		URI:   protocol.DocumentURI(uri.URI("file://" + cfcPath)),
 		Range: protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
-	}
-}
-
-// findApplicationRoot walks up from dir looking for Application.cfc or Application.cfm.
-// Returns the directory containing it, or empty string if not found.
-func (s *Server) findApplicationRoot(dir string) string {
-	d := dir
-	for {
-		for _, name := range []string{"Application.cfc", "Application.cfm"} {
-			if _, err := s.FS.Stat(filepath.Join(d, name)); err == nil {
-				return d
-			}
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			return ""
-		}
-		d = parent
 	}
 }
 
@@ -637,7 +632,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	}
 
 	// Try relative to Application.cfc root
-	if appDir := s.findApplicationRoot(baseDir); appDir != "" {
+	if appDir := s.getResolver().FindApplicationRoot(baseDir); appDir != "" {
 		candidate = filepath.Join(appDir, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
@@ -648,7 +643,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	}
 
 	// Try mappings — match the first path segment against mapping keys
-	mappings := s.effectiveMappings(baseDir)
+	mappings := s.getResolver().EffectiveMappings(baseDir)
 	if len(mappings) > 0 {
 		clean := strings.TrimPrefix(filePath, "/")
 		if seg, rest, _ := strings.Cut(clean, "/"); seg != "" {

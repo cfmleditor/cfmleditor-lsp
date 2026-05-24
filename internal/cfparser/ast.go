@@ -66,6 +66,16 @@ type DocumentLink struct {
 	End   uint32 // character offset of path end
 }
 
+// CallSite represents a location where a function is called.
+type CallSite struct {
+	FuncName  string // the function being called
+	Component string // resolved component (from variable ref), empty if unresolved
+	Line      uint32
+	Caller    string // enclosing function name (empty if global)
+	Resolved  bool   // true if qualified (obj.func), false if bare call
+	Text      string // the trimmed line text
+}
+
 // RegionKind classifies a span of CFC content.
 type RegionKind int
 

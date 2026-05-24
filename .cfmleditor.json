@@ -14,7 +14,7 @@
     }
   ],
   "completions": {
-    "snippets": false
+    "globalFunctionResolution": false
   },
   "debug": true
 }

@@ -133,7 +133,7 @@ func cfcNameFromURI(fileURI uri.URI) string {
 // Otherwise, the file must be under the Application.cfc directory.
 func (s *Server) isOrmPath(filePath string) bool {
 	dir := filepath.Dir(filePath)
-	appDir := s.findApplicationRoot(dir)
+	appDir := s.getResolver().FindApplicationRoot(dir)
 	if appDir == "" {
 		return false
 	}

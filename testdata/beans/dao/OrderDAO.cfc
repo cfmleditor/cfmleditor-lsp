@@ -4,4 +4,8 @@ component {
         return queryExecute("SELECT * FROM orders WHERE user_id = :uid", {uid: arguments.userId});
     }
 
+    function getAll() {
+        return []
+    }
+
 }

@@ -1010,12 +1010,12 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
-	cfcPath := s.resolveComponentPath(pr.Extends, baseDir)
+	cfcPath := s.getResolver().ComponentPath(pr.Extends, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
 
-	defs := s.ensureIndexed(cfcPath)
+	defs := s.getResolver().EnsureIndexed(cfcPath)
 
 	items := make([]protocol.CompletionItem, 0, len(defs))
 	for _, d := range defs {
@@ -1072,7 +1072,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 						if comp != "" {
 							currentPath := strings.TrimPrefix(string(docURI), "file://")
 							baseDir := filepath.Dir(currentPath)
-							cfcPath := s.resolveComponentPath(comp, baseDir)
+							cfcPath := s.getResolver().ComponentPath(comp, baseDir)
 							if cfcPath != "" {
 								return s.methodCompletionItems(cfcPath)
 							}
@@ -1119,7 +1119,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		}
 	}
 	if cfcPath == "" {
-		cfcPath = s.resolveComponentPath(component, baseDir)
+		cfcPath = s.getResolver().ComponentPath(component, baseDir)
 	}
 	if cfcPath == "" {
 		return nil
@@ -1127,7 +1127,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	// Get function defs from the index (already cached), fall back to parsing
 	cfcURI := uri.URI("file://" + cfcPath)
-	defs := s.ensureIndexed(cfcPath)
+	defs := s.getResolver().EnsureIndexed(cfcPath)
 
 	thisVars := s.index.ThisVarsForFile(cfcURI)
 
@@ -1227,7 +1227,7 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 
 // methodCompletionItems returns completion items for all functions in a CFC file.
 func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem {
-	defs := s.ensureIndexed(cfcPath)
+	defs := s.getResolver().EnsureIndexed(cfcPath)
 	items := make([]protocol.CompletionItem, 0, len(defs))
 	for _, d := range defs {
 		detail := d.Name + "("

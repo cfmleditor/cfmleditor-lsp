@@ -11,6 +11,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -73,6 +74,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleDocumentLink(ctx, reply, req)
 		case protocol.MethodDocumentLinkResolve:
 			return s.handleDocumentLinkResolve(ctx, reply, req)
+		case protocol.MethodTextDocumentCodeAction:
+			return s.handleCodeAction(ctx, reply, req)
 		case protocol.MethodWorkspaceDidChangeWorkspaceFolders:
 			return s.handleDidChangeWorkspaceFolders(ctx, reply, req)
 		case protocol.MethodWorkspaceExecuteCommand:
@@ -612,7 +615,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		if baseDir == "" && len(s.WorkspaceFolders) > 0 {
 			baseDir = s.WorkspaceFolders[0]
 		}
-		resolved := s.resolveComponentPath(dotPath, baseDir)
+		resolved := s.getResolver().ComponentPath(dotPath, baseDir)
 		if resolved == "" {
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
@@ -713,7 +716,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			return reply(ctx, nil, nil)
 		}
 		baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
-		appDir := s.findApplicationRoot(baseDir)
+		appDir := s.getResolver().FindApplicationRoot(baseDir)
 		if appDir == "" {
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
@@ -770,6 +773,127 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		filePath := strings.TrimPrefix(docURI, "file://")
 		dotPath := s.fileToPackage(filePath)
 		return reply(ctx, dotPath, nil)
+	case "cfmleditor.findRefs":
+		if len(params.Arguments) == 0 {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.findRefs requires a function name argument"))
+		}
+		funcName, _ := params.Arguments[0].(string)
+		if funcName == "" {
+			return reply(ctx, nil, nil)
+		}
+		sourceURI := ""
+		if len(params.Arguments) > 1 {
+			sourceURI, _ = params.Arguments[1].(string)
+		}
+		s.logger.Debug("findRefs: searching", zap.String("funcName", funcName), zap.String("source", sourceURI), zap.Strings("roots", s.WorkspaceFolders))
+		r := s.getResolver()
+		entries := refs.Find(s.FS, s.WorkspaceFolders, refs.Options{
+			FuncName:          funcName,
+			Resolvers:         s.cfResolvers(),
+			PropertyResolvers: s.cfPropertyResolvers(),
+			VerifyCall: func(component, fn, fileDir string) bool {
+				return r.HasFunction(component, fn, fileDir)
+			},
+		})
+		s.logger.Debug("findRefs: complete", zap.String("funcName", funcName), zap.Int("results", len(entries)))
+		for _, e := range entries {
+			s.logger.Debug("findRefs: match", zap.String("file", e.File), zap.Uint32("line", e.Line), zap.Bool("resolved", e.Resolved), zap.String("call", e.Call))
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Calls to '%s': %d match(es)", funcName, len(entries)))
+		for _, e := range entries {
+			rel := e.File
+			for _, root := range s.WorkspaceFolders {
+				if r, err := filepath.Rel(root, e.File); err == nil && len(r) < len(rel) {
+					rel = r
+				}
+			}
+			marker := ""
+			if !e.Resolved {
+				marker = " [unresolved]"
+			}
+			lines = append(lines, fmt.Sprintf("  %s:%d%s  %s", rel, e.Line+1, marker, e.Call))
+		}
+		msg := strings.Join(lines, "\n")
+		// Build Mermaid diagram
+		var mermaid []string
+		mermaid = append(mermaid, "graph LR")
+		targetNode := strings.ReplaceAll(funcName, ".", "_")
+		mermaid = append(mermaid, fmt.Sprintf("    %s[%s]", targetNode, funcName))
+		seen := make(map[string]bool)
+		for i, e := range entries {
+			rel := e.File
+			for _, root := range s.WorkspaceFolders {
+				if r, err := filepath.Rel(root, e.File); err == nil && len(r) < len(rel) {
+					rel = r
+				}
+			}
+			label := rel
+			if e.Function != "" {
+				label += "::" + e.Function
+			}
+			key := label
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			nodeID := fmt.Sprintf("ref%d", i)
+			style := "-->"
+			if !e.Resolved {
+				style = "-.->"
+			}
+			mermaid = append(mermaid, fmt.Sprintf("    %s[%s] %s %s", nodeID, label, style, targetNode))
+		}
+		diagram := strings.Join(mermaid, "\n")
+		output := msg + "\n\n" + diagram
+		s.call(ctx, "window/showDocument", map[string]interface{}{
+			"uri":       "untitled:refs-" + funcName,
+			"external":  false,
+			"takeFocus": true,
+		}, nil)
+		s.call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
+			Label: "Find all calls to " + funcName,
+			Edit: protocol.WorkspaceEdit{
+				DocumentChanges: []protocol.TextDocumentEdit{{
+					TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI("untitled:refs-" + funcName)},
+					},
+					Edits: []protocol.TextEdit{{Range: protocol.Range{}, NewText: output}},
+				}},
+			},
+		}, nil)
+		return reply(ctx, msg, nil)
+	case "cfmleditor.exportDeps":
+		if len(params.Arguments) == 0 {
+			return reply(ctx, nil, fmt.Errorf("cfmleditor.exportDeps requires a document URI"))
+		}
+		docURI, _ := params.Arguments[0].(string)
+		if docURI == "" {
+			return reply(ctx, nil, nil)
+		}
+		fileURI := uri.URI(docURI)
+		funcs := s.index.FunctionsForFile(fileURI)
+		refs := s.index.RefsForFile(fileURI)
+		var lines []string
+		lines = append(lines, "graph LR")
+		fileName := filepath.Base(strings.TrimPrefix(docURI, "file://"))
+		fileNode := strings.ReplaceAll(fileName, ".", "_")
+		lines = append(lines, fmt.Sprintf("    %s[%s]", fileNode, fileName))
+		seen := make(map[string]bool)
+		for _, ref := range refs {
+			if seen[ref.Component] {
+				continue
+			}
+			seen[ref.Component] = true
+			compNode := strings.ReplaceAll(ref.Component, ".", "_")
+			lines = append(lines, fmt.Sprintf("    %s --> %s[%s]", fileNode, compNode, ref.Component))
+		}
+		_ = funcs // available for future use
+		msg := strings.Join(lines, "\n")
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type: protocol.MessageTypeInfo, Message: msg,
+		})
+		return reply(ctx, msg, nil)
 	default:
 		return reply(ctx, nil, fmt.Errorf("unknown command: %s", params.Command))
 	}

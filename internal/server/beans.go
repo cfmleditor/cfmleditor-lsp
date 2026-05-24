@@ -50,8 +50,11 @@ func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 			beans[key+"@"+strings.ToLower(b.ns)] = b.absPath
 		}
 
-		// Bare name entry only if unique across all namespaces
-		if bareCount[key] == 1 {
+		// Bare name entry — prefer namespaced over root namespace
+		if _, exists := beans[key]; !exists {
+			beans[key] = b.absPath
+		} else if b.ns != "" {
+			// Namespaced entry overrides root namespace entry
 			beans[key] = b.absPath
 		}
 	}

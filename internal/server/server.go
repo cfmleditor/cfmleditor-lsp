@@ -14,6 +14,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -42,10 +43,12 @@ type Server struct {
 	Linting            bool                       // enable cflint diagnostics
 	TagSnippets        bool                       // insert snippets for tags
 	FunctionSnippets   bool                       // insert snippets for functions
+	GlobalFunctionResolution bool                 // resolve unqualified functions via global index
 	changeCount        map[uri.URI]int        // rapid change counter per file
 	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
 	resolveCache       map[string]string      // cached component path resolutions
 	index            *index.Index
+	resolver         *resolve.Resolver
 	linter           *cflint.Runner
 	lintCancels      map[uri.URI]context.CancelFunc
 	compCache        *cache.Cache
@@ -127,8 +130,9 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		WorkspaceSymbolProvider: true,
 		HoverProvider:           true,
 		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: true},
+		CodeActionProvider:      true,
 		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps"},
 		},
 		Workspace: &protocol.ServerCapabilitiesWorkspace{
 			WorkspaceFolders: &protocol.ServerCapabilitiesWorkspaceFolders{
@@ -154,8 +158,46 @@ func (s *Server) initLinter() {
 	s.logger.Info("cflint ready")
 }
 
-func (s *Server) notify(ctx context.Context, method string, params interface{}) {
-	if s.conn != nil {
+// getResolver returns the shared resolver, creating it if needed.
+// ensureFuncRefsIndexed lazily indexes resolver refs for the function enclosing the given line.
+// Called when LookupComponentRefInFile returns nil and the cursor is inside a function.
+func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
+	s.mu.RLock()
+	pr := s.parseResults[docURI]
+	s.mu.RUnlock()
+	if pr == nil {
+		return
+	}
+	for _, sc := range pr.Scopes {
+		if line > sc.Start && line < sc.End {
+			refs, _ := pr.FuncRefs(sc.Start, sc.End)
+			if len(refs) > 0 {
+				s.index.AddRefs(refs)
+			}
+			return
+		}
+	}
+}
+
+// Call invalidateResolver() when config changes.
+func (s *Server) getResolver() *resolve.Resolver {
+	if s.resolver == nil {
+		s.resolver = &resolve.Resolver{
+			FS:               s.FS,
+			WorkspaceFolders: s.WorkspaceFolders,
+			Mappings:         s.Mappings,
+			Index:            s.index,
+			Resolvers:        s.cfResolvers(),
+		}
+	}
+	return s.resolver
+}
+
+func (s *Server) invalidateResolver() {
+	s.resolver = nil
+}
+
+func (s *Server) notify(ctx context.Context, method string, params interface{}) {	if s.conn != nil {
 		_ = s.conn.Notify(ctx, method, params)
 	}
 }
@@ -280,28 +322,6 @@ func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser
 	})
 }
 
-// resolveComponentFromCall matches a call expression against configured resolvers.
-// ensureIndexed ensures a CFC file is indexed, loading from disk if needed.
-// Returns the functions defined in the file.
-func (s *Server) ensureIndexed(cfcPath string) []*cfparser.FunctionDef {
-	cfcURI := uri.URI("file://" + cfcPath)
-	defs := s.index.FunctionsForFile(cfcURI)
-	if len(defs) == 0 {
-		content, ok := s.getDocument(cfcURI)
-		if !ok {
-			data, err := s.FS.ReadFile(cfcPath)
-			if err != nil {
-				return nil
-			}
-			content = string(data)
-		}
-		pr := s.parseContent(cfcURI, content)
-		s.index.IndexFileFromResult(cfcURI, pr.Funcs, pr.Refs)
-		s.index.SetThisVars(cfcURI, pr.ThisVars())
-		defs = s.index.FunctionsForFile(cfcURI)
-	}
-	return defs
-}
 
 func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
 	if len(resolvers) == 0 {
