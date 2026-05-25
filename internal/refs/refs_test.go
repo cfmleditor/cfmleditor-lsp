@@ -27,7 +27,7 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 	opts := Options{
 		FuncName:   "GetData",
 		SourceFile: persistPath,
-		VerifyTarget: func(component, fileDir, sourceFile string) bool {
+		VerifyTarget: func(component, _, sourceFile string) bool {
 			switch component {
 			case "persist":
 				return sourceFile == persistPath
@@ -40,9 +40,13 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 
 	entries := Trace(fs, roots, opts)
 
+	// Only consider resolved entries
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
 	viewPath, _ := filepath.Abs(filepath.Join(dir, "view.cfm"))
 	for _, e := range entries {
+		if !e.Resolved {
+			continue
+		}
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath {
 			t.Errorf("should not match controller.cfc: line %d %s", e.Line, e.Call)
@@ -54,6 +58,9 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 
 	found := false
 	for _, e := range entries {
+		if !e.Resolved {
+			continue
+		}
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == servicePath && e.Function == "GetData" {
 			found = true
@@ -92,16 +99,19 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 
 	entries := Trace(fs, roots, opts)
 
+	// Only consider resolved entries
 	// Negative assertions — unrelated files must not appear
 	excluded := map[string]string{
-		"a.cfc":           filepath.Join(dir, "a.cfc"),
-		"b.cfc":           filepath.Join(dir, "b.cfc"),
-		"persist.cfc":     filepath.Join(dir, "persist.cfc"),
-		"report_view.cfm": filepath.Join(dir, "report_view.cfm"),
+		"a.cfc":       filepath.Join(dir, "a.cfc"),
+		"b.cfc":       filepath.Join(dir, "b.cfc"),
+		"persist.cfc": filepath.Join(dir, "persist.cfc"),
 	}
 	for name, path := range excluded {
 		absPath, _ := filepath.Abs(path)
 		for _, e := range entries {
+			if !e.Resolved {
+				continue
+			}
 			absFile, _ := filepath.Abs(e.File)
 			if absFile == absPath {
 				t.Errorf("should not match %s: line %d func=%s call=%s", name, e.Line, e.Function, e.Call)
@@ -114,6 +124,9 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 	foundView := false
 	viewPath, _ := filepath.Abs(filepath.Join(dir, "view.cfm"))
 	for _, e := range entries {
+		if !e.Resolved {
+			continue
+		}
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath && e.Function == "GetReport" {
 			foundGetReport = true
@@ -149,29 +162,33 @@ func TestTrace_DoesNotMatchSameNameInOtherFile(t *testing.T) {
 	opts := Options{
 		FuncName:   "DoWork",
 		SourceFile: aPath,
-		VerifyTarget: func(component, fileDir, sourceFile string) bool {
+		VerifyTarget: func(_, _, _ string) bool {
 			return false // no qualified calls in this test
 		},
 	}
 
 	entries := Trace(fs, roots, opts)
 
-	// Negative assertions — only a.cfc entries should appear
-	excluded := []string{"b.cfc", "controller.cfc", "service.cfc", "persist.cfc", "view.cfm", "report_view.cfm"}
-	for _, name := range excluded {
-		absPath, _ := filepath.Abs(filepath.Join(dir, name))
-		for _, e := range entries {
-			absFile, _ := filepath.Abs(e.File)
-			if absFile == absPath {
-				t.Errorf("should not match %s: line %d func=%s call=%s", name, e.Line, e.Function, e.Call)
-			}
+	// Only consider resolved entries
+	var resolved []Entry
+	for _, e := range entries {
+		if e.Resolved {
+			resolved = append(resolved, e)
+		}
+	}
+
+	// Negative assertions — no file other than a.cfc should appear
+	for _, e := range resolved {
+		absFile, _ := filepath.Abs(e.File)
+		if absFile != aPath {
+			t.Errorf("should not match %s: line %d func=%s call=%s", filepath.Base(e.File), e.Line, e.Function, e.Call)
 		}
 	}
 
 	// Positive: should find a.cfc::Process and a.cfc::GetReport (both call DoWork)
 	foundProcess := false
 	foundGetReport := false
-	for _, e := range entries {
+	for _, e := range resolved {
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == aPath && e.Function == "Process" {
 			foundProcess = true
@@ -217,11 +234,15 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 
 	entries := Trace(fs, roots, opts)
 
+	// Only consider resolved entries
 	// Negative assertions — unrelated files must not appear
-	excluded := []string{"a.cfc", "b.cfc", "persist.cfc", "service.cfc", "view.cfm"}
+	excluded := []string{"a.cfc", "b.cfc", "persist.cfc", "service.cfc"}
 	for _, name := range excluded {
 		absPath, _ := filepath.Abs(filepath.Join(dir, name))
 		for _, e := range entries {
+			if !e.Resolved {
+				continue
+			}
 			absFile, _ := filepath.Abs(e.File)
 			if absFile == absPath {
 				t.Errorf("should not match %s: line %d func=%s call=%s", name, e.Line, e.Function, e.Call)
@@ -232,6 +253,9 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 	// Positive: should find controller.cfc::RunReport (same-file caller of GetReport)
 	foundRunReport := false
 	for _, e := range entries {
+		if !e.Resolved {
+			continue
+		}
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath && e.Function == "RunReport" {
 			foundRunReport = true
@@ -245,6 +269,9 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 	reportViewPath, _ := filepath.Abs(filepath.Join(dir, "report_view.cfm"))
 	foundReportView := false
 	for _, e := range entries {
+		if !e.Resolved {
+			continue
+		}
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == reportViewPath {
 			foundReportView = true

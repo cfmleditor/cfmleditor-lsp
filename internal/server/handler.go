@@ -807,6 +807,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
 		_ = os.WriteFile(outFile, []byte(output), 0o644)
+		_ = os.WriteFile(filepath.Join(outDir, "refs-"+funcName+".dot"), []byte(result.Graph.DOT()), 0o644)
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: "Wrote " + outFile,
@@ -825,9 +826,48 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			funcName, _ = params.Arguments[1].(string)
 		}
 
+		fileURI := uri.URI(docURI)
+		var depsCalls []cfparser.CallSite
+
+		s.mu.RLock()
+		pr := s.parseResults[fileURI]
+		s.mu.RUnlock()
+		if pr != nil {
+			if funcName != "" {
+				// Function-level: FuncCalls for the specific function
+				for _, sc := range pr.Scopes {
+					for _, f := range pr.Funcs {
+						if strings.EqualFold(f.Name, funcName) && int(f.Line) == sc.Start {
+							depsCalls = pr.FuncCalls(sc.Start, sc.End)
+							break
+						}
+					}
+					if len(depsCalls) > 0 {
+						break
+					}
+				}
+			} else {
+				// File-level: FuncCalls for all functions
+				for _, sc := range pr.Scopes {
+					depsCalls = append(depsCalls, pr.FuncCalls(sc.Start, sc.End)...)
+				}
+			}
+		}
+
+		var depsRefs []cfparser.ComponentRef
+		if len(depsCalls) == 0 {
+			// Fallback to component refs from index
+			ptrs := s.index.RefsForFile(fileURI)
+			for _, p := range ptrs {
+				depsRefs = append(depsRefs, *p)
+			}
+		}
+
 		result := deps.Build(deps.Options{
 			DocURI:   docURI,
 			FuncName: funcName,
+			Calls:    depsCalls,
+			Refs:     depsRefs,
 			Index:    s.index,
 			Resolver: s.getResolver(),
 			MaxDepth: 10,
@@ -841,6 +881,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		mermaid := result.Graph.Mermaid()
 		outFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".md")
 		_ = os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".dot"), []byte(result.Graph.DOT()), 0o644)
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
 			Message: "Wrote " + outFile,

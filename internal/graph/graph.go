@@ -43,6 +43,32 @@ func (g *Graph) Mermaid() string {
 	return strings.Join(lines, "\n")
 }
 
+// DOT renders the graph in Graphviz DOT format.
+func (g *Graph) DOT() string {
+	dir := "LR"
+	if g.Direction == "TD" || g.Direction == "TB" {
+		dir = "TB"
+	}
+	var lines []string
+	lines = append(lines, "digraph {")
+	lines = append(lines, fmt.Sprintf("    rankdir=%s;", dir))
+	seen := make(map[string]bool)
+	for _, e := range g.Edges {
+		key := e.From + "|" + e.To
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		style := ""
+		if e.Dashed {
+			style = " [style=dashed]"
+		}
+		lines = append(lines, fmt.Sprintf("    \"%s\" -> \"%s\"%s;", e.From, e.To, style))
+	}
+	lines = append(lines, "}")
+	return strings.Join(lines, "\n")
+}
+
 func nodeID(name string) string {
 	r := strings.NewReplacer(".", "_", "/", "_", ":", "_", " ", "_", "-", "_")
 	return r.Replace(name)

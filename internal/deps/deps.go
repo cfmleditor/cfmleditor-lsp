@@ -2,6 +2,7 @@
 package deps
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -24,7 +25,9 @@ type Resolver interface {
 // Options configures the dependency graph generation.
 type Options struct {
 	DocURI   string
-	FuncName string // optional: scope to a specific function
+	FuncName string                  // optional: scope to a specific function
+	Calls    []cfparser.CallSite     // function-level calls (from FuncCalls)
+	Refs     []cfparser.ComponentRef // file-level refs (fallback when Calls is empty)
 	Index    Index
 	Resolver Resolver
 	MaxDepth int
@@ -36,6 +39,8 @@ type Result struct {
 }
 
 // Build generates a transitive dependency graph.
+// If Calls is provided, traces function-level dependencies.
+// Otherwise falls back to component-level refs.
 func Build(opts Options) Result {
 	filePath := strings.TrimPrefix(opts.DocURI, "file://")
 	baseDir := filepath.Dir(filePath)
@@ -44,75 +49,127 @@ func Build(opts Options) Result {
 		maxDepth = 10
 	}
 
-	type node struct {
-		uri      string
-		funcName string
+	startLabel := filepath.Base(filePath)
+	if opts.FuncName != "" {
+		startLabel += "::" + opts.FuncName
 	}
+
 	var edges []graph.Edge
 	seen := make(map[string]bool)
+	seen[opts.DocURI+"::"+opts.FuncName] = true
 
-	startKey := opts.DocURI + "::" + opts.FuncName
-	seen[startKey] = true
-	queue := []node{{uri: opts.DocURI, funcName: opts.FuncName}}
-
-	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
-		var next []node
-		for _, current := range queue {
-			currentLabel := filepath.Base(strings.TrimPrefix(current.uri, "file://"))
-			if current.funcName != "" {
-				currentLabel += "::" + current.funcName
-			}
-			refs := refsForScope(opts.Index, uri.URI(current.uri), current.funcName)
-			for _, ref := range refs {
-				if ref.Component == "" {
-					continue
-				}
-				edges = append(edges, graph.Edge{From: currentLabel, To: ref.Component})
-				resolved := opts.Resolver.ComponentPath(ref.Component, baseDir)
-				if resolved != "" {
-					targetURI := "file://" + resolved
-					targetKey := targetURI + "::"
-					if !seen[targetKey] {
-						seen[targetKey] = true
-						next = append(next, node{uri: targetURI})
-					}
-				}
-			}
-		}
-		queue = next
+	if len(opts.Calls) > 0 {
+		edges = buildFromCalls(opts, startLabel, baseDir, maxDepth, seen)
+	} else {
+		edges = buildFromRefs(opts, startLabel, baseDir, maxDepth, seen)
 	}
 
 	return Result{Graph: graph.Graph{Direction: "LR", Edges: edges}}
 }
 
-// refsForScope returns component refs, optionally filtered to a function scope.
-func refsForScope(idx Index, fileURI uri.URI, funcName string) []*cfparser.ComponentRef {
-	allRefs := idx.RefsForFile(fileURI)
-	if funcName == "" {
-		return allRefs
+// buildFromCalls traces function-level dependencies using CallSite data.
+func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+	type node struct {
+		label string
+		calls []cfparser.CallSite
 	}
-	funcs := idx.FunctionsForFile(fileURI)
-	var startLine, endLine uint32
-	for _, f := range funcs {
-		if strings.EqualFold(f.Name, funcName) {
-			startLine = f.Line
-			endLine = startLine + 500
-			break
+	var edges []graph.Edge
+	queue := []node{{label: startLabel, calls: opts.Calls}}
+
+	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
+		var next []node
+		for _, current := range queue {
+			for _, call := range current.calls {
+				if call.Component == "" {
+					continue
+				}
+				resolved := opts.Resolver.ComponentPath(call.Component, baseDir)
+				toLabel := call.Component + "." + call.FuncName
+				if resolved != "" {
+					toLabel = filepath.Base(resolved) + "::" + call.FuncName
+				}
+				edges = append(edges, graph.Edge{
+					From:   current.label,
+					To:     fmt.Sprintf("%s (line %d)", toLabel, call.Line),
+					Dashed: resolved == "",
+				})
+
+				if resolved == "" {
+					continue
+				}
+				targetKey := resolved + "::" + call.FuncName
+				if seen[targetKey] {
+					continue
+				}
+				seen[targetKey] = true
+
+				// Get calls for the target function from the index
+				targetURI := uri.URI("file://" + resolved)
+				targetCalls := getFuncCalls(opts.Index, targetURI, call.FuncName)
+				if len(targetCalls) > 0 {
+					next = append(next, node{label: toLabel, calls: targetCalls})
+				}
+			}
 		}
+		queue = next
 	}
-	if startLine == 0 && endLine == 0 {
-		return allRefs
+	return edges
+}
+
+// buildFromRefs traces component-level dependencies using ComponentRef data.
+func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+	type node struct {
+		label string
+		refs  []cfparser.ComponentRef
 	}
-	for _, f := range funcs {
-		if f.Line > startLine && f.Line < endLine {
-			endLine = f.Line
+	var edges []graph.Edge
+	queue := []node{{label: startLabel, refs: opts.Refs}}
+
+	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
+		var next []node
+		for _, current := range queue {
+			for _, ref := range current.refs {
+				if ref.Component == "" {
+					continue
+				}
+				resolved := opts.Resolver.ComponentPath(ref.Component, baseDir)
+				toLabel := ref.Component
+				if resolved != "" {
+					toLabel = filepath.Base(resolved)
+				}
+				edges = append(edges, graph.Edge{
+					From: current.label,
+					To:   fmt.Sprintf("%s (line %d)", toLabel, ref.Line),
+				})
+				if resolved == "" {
+					continue
+				}
+				targetURI := "file://" + resolved
+				if seen[targetURI] {
+					continue
+				}
+				seen[targetURI] = true
+				ptrs := opts.Index.RefsForFile(uri.URI(targetURI))
+				var nextRefs []cfparser.ComponentRef
+				for _, p := range ptrs {
+					nextRefs = append(nextRefs, *p)
+				}
+				next = append(next, node{
+					label: filepath.Base(resolved),
+					refs:  nextRefs,
+				})
+			}
 		}
+		queue = next
 	}
-	var scoped []*cfparser.ComponentRef
-	for _, ref := range allRefs {
-		if ref.Line >= startLine && ref.Line < endLine {
-			scoped = append(scoped, ref)
-		}
-	}
-	return scoped
+	return edges
+}
+
+// getFuncCalls retrieves CallSite data for a function. This requires the file
+// to be parsed — we check if the index has the function, then return empty
+// (the caller should provide parsed data for deeper tracing).
+func getFuncCalls(_ Index, _ uri.URI, _ string) []cfparser.CallSite {
+	// TODO: For deeper recursive tracing, the handler should provide a callback
+	// or pre-parse target files. For now, we stop at one level of call resolution.
+	return nil
 }

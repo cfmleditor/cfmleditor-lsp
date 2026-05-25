@@ -760,6 +760,101 @@ func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []Docum
 	return refs, links
 }
 
+// FuncCalls scans a function body and returns all variable.method() calls
+// with resolved components. Used for downstream dependency tracing.
+func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
+	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	if start < 0 {
+		return nil
+	}
+	body := pr.Content[start:end]
+	var calls []CallSite
+	seen := make(map[string]bool)
+	lineNum := funcStart + 1
+
+	// Find the caller name for this scope
+	caller := ""
+	for _, f := range pr.Funcs {
+		if int(f.Line) == funcStart {
+			caller = f.Name
+			break
+		}
+	}
+
+	for len(body) > 0 {
+		nl := strings.IndexByte(body, '\n')
+		var line string
+		if nl < 0 {
+			line = body
+			body = ""
+		} else {
+			line = body[:nl]
+			body = body[nl+1:]
+		}
+
+		// Find all variable.method( patterns in this line
+		lower := strings.ToLower(line)
+		for i := 0; i < len(lower); i++ {
+			if lower[i] != '(' {
+				continue
+			}
+			// Walk back to find method name
+			methEnd := i
+			methStart := methEnd - 1
+			for methStart >= 0 && (lower[methStart] >= 'a' && lower[methStart] <= 'z' || lower[methStart] >= '0' && lower[methStart] <= '9' || lower[methStart] == '_') {
+				methStart--
+			}
+			methStart++
+			if methStart == methEnd {
+				continue
+			}
+			// Check for dot before method
+			if methStart == 0 || line[methStart-1] != '.' {
+				continue
+			}
+			methodName := line[methStart:methEnd]
+
+			// Walk back to find variable name
+			varEnd := methStart - 1
+			varStart := varEnd - 1
+			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_' || line[varStart] == '.') {
+				varStart--
+			}
+			varStart++
+			if varStart == varEnd {
+				continue
+			}
+			varName := line[varStart:varEnd]
+
+			// Strip scope prefix for resolution (VARIABLES.service -> service)
+			resolveVar := varName
+			if dotIdx := strings.LastIndexByte(resolveVar, '.'); dotIdx >= 0 {
+				resolveVar = resolveVar[dotIdx+1:]
+			}
+
+			comp := pr.resolveVarComponent(resolveVar, uint32(lineNum))
+			key := strings.ToLower(comp + "." + methodName)
+			if seen[key] {
+				lineNum++
+				continue
+			}
+			seen[key] = true
+
+			calls = append(calls, CallSite{
+				FuncName:  methodName,
+				Component: comp,
+				Variable:  varName,
+				Line:      uint32(lineNum),
+				Caller:    caller,
+				Resolved:  comp != "",
+				Text:      strings.TrimSpace(line),
+			})
+		}
+		lineNum++
+	}
+	return calls
+}
+
 // callerAtLine returns the enclosing function name for a given line number.
 func (pr *ParseResult) callerAtLine(lineNum int) string {
 	for _, sc := range pr.Scopes {
@@ -816,7 +911,7 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 				}
 			}
 			pr.Calls = append(pr.Calls, CallSite{
-				FuncName: target, Component: comp, Line: uint32(lineNum), Caller: caller,
+				FuncName: target, Component: comp, Variable: varName, Line: uint32(lineNum), Caller: caller,
 				Resolved: comp != "", Text: strings.TrimSpace(line),
 			})
 		} else if strings.Contains(lower, " "+t+"(") || strings.Contains(lower, "="+t+"(") || strings.HasPrefix(lower, t+"(") {

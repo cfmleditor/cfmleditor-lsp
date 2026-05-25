@@ -73,6 +73,7 @@ type DocumentLink struct {
 type CallSite struct {
 	FuncName  string // the function being called
 	Component string // resolved component (from variable ref), empty if unresolved
+	Variable  string // the variable/qualifier before the dot (empty if bare call)
 	Line      uint32
 	Caller    string // enclosing function name (empty if global)
 	Resolved  bool   // true if qualified (obj.func), false if bare call

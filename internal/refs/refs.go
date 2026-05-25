@@ -156,9 +156,8 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 								continue
 							}
 							resolved = true
-						} else if opts.VerifyTarget != nil {
-							// Unqualified call, function not in this file, and we have
-							// target verification — skip (can't confirm it reaches source)
+						} else if call.Variable == "" {
+							// Truly unqualified, function not in this file — skip
 							continue
 						}
 					}
