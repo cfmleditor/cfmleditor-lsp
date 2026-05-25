@@ -92,6 +92,11 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 				return
 			}
 
+			// Quick check: skip files that don't contain the function name
+			if funcTarget != "" && !containsFold(data, funcTarget) {
+				return
+			}
+
 			content := string(data)
 			absPath, _ := filepath.Abs(f)
 			fileURI := uri.URI("file://" + absPath)
@@ -240,4 +245,27 @@ func findAppRoot(fsys vfs.FS, dir string) string {
 		}
 		d = parent
 	}
+}
+
+// containsFold reports whether data contains target (case-insensitive, ASCII only).
+// Does not allocate.
+func containsFold(data []byte, target string) bool {
+	tLen := len(target)
+	if tLen == 0 {
+		return true
+	}
+	end := len(data) - tLen
+	for i := 0; i <= end; i++ {
+		match := true
+		for j := 0; j < tLen; j++ {
+			if data[i+j]|0x20 != target[j]|0x20 {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

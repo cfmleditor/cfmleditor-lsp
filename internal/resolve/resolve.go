@@ -19,11 +19,28 @@ type Resolver struct {
 	Mappings         map[string]string
 	Index            *index.Index
 	Resolvers        []cfparser.Resolver
+	appRootCache     map[string]string // dir → Application.cfc root
+	resolveCache     map[string]string // component+"\t"+baseDir → file path
 }
 
 // ComponentPath resolves a component dot-path to an absolute .cfc file path
 // using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
 func (r *Resolver) ComponentPath(component, baseDir string) string {
+	key := component + "\t" + baseDir
+	if r.resolveCache != nil {
+		if p, ok := r.resolveCache[key]; ok {
+			return p
+		}
+	}
+	result := r.componentPathUncached(component, baseDir)
+	if r.resolveCache == nil {
+		r.resolveCache = make(map[string]string)
+	}
+	r.resolveCache[key] = result
+	return result
+}
+
+func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	mappings := r.effectiveMappings(baseDir)
 	if p := cfpath.ResolvePath(component, baseDir, mappings); p != "" {
 		return p
@@ -72,6 +89,20 @@ func (r *Resolver) HasFunction(component, funcName, baseDir string) bool {
 
 // FindApplicationRoot walks up from dir looking for Application.cfc or Application.cfm.
 func (r *Resolver) FindApplicationRoot(dir string) string {
+	if r.appRootCache != nil {
+		if v, ok := r.appRootCache[dir]; ok {
+			return v
+		}
+	}
+	result := r.findApplicationRootUncached(dir)
+	if r.appRootCache == nil {
+		r.appRootCache = make(map[string]string)
+	}
+	r.appRootCache[dir] = result
+	return result
+}
+
+func (r *Resolver) findApplicationRootUncached(dir string) string {
 	d := dir
 	for {
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {

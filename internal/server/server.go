@@ -319,6 +319,7 @@ func (s *Server) invalidateResolveCache() {
 	s.mu.Lock()
 	s.resolveCache = nil
 	s.mu.Unlock()
+	s.invalidateResolver()
 }
 
 func (s *Server) cfResolvers() []cfparser.Resolver {
