@@ -61,7 +61,7 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 	symbols := []protocol.SymbolInformation{}
 
 	for _, d := range s.index.AllFunctions() {
-		if query != "" && !strings.Contains(strings.ToLower(d.Name), query) {
+		if query != "" && !containsFoldStr(d.Name, query) {
 			continue
 		}
 		symbols = append(symbols, protocol.SymbolInformation{
@@ -78,4 +78,27 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 	}
 
 	return reply(ctx, symbols, nil)
+}
+
+// containsFoldStr reports whether s contains substr (case-insensitive, ASCII).
+// substr must already be lowercase.
+func containsFoldStr(s, substr string) bool {
+	n := len(substr)
+	if n == 0 {
+		return true
+	}
+	end := len(s) - n
+	for i := 0; i <= end; i++ {
+		match := true
+		for j := 0; j < n; j++ {
+			if s[i+j]|0x20 != substr[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

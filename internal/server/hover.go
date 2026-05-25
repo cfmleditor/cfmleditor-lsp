@@ -27,7 +27,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
-	word := wordAtPosition(content, line, char)
+	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
@@ -35,7 +35,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	// Builtin function
 	// User-defined function via qualifier (e.g. service.getMethod) — check first
 	docURI := uri.URI(params.TextDocument.URI)
-	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
 			return reply(ctx, &protocol.Hover{
 				Contents: protocol.MarkupContent{

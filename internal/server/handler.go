@@ -577,7 +577,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		if formatted == content {
 			return reply(ctx, nil, nil)
 		}
-		lines := countNewlines(content)
+		lines := parser.CountNewlines(content)
 		s.call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
 			Label: "Format document",
 			Edit: protocol.WorkspaceEdit{

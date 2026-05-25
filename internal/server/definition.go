@@ -9,6 +9,7 @@ import (
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -27,7 +28,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
-	word := wordAtPosition(content, line, char)
+	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
@@ -44,7 +45,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Check if cursor is on a component dot-path (new, createObject, extends, etc.)
-	if comp := componentPathAtCursor(content, line, char); comp != "" {
+	if comp := parser.ComponentPathAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
 			s.log.Debug("definition: component path resolved", cflog.String("path", comp), cflog.String("target", string(loc.URI)))
 			return reply(ctx, *loc, nil)
@@ -53,7 +54,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Check if cursor is on a file path (cfinclude, cfmodule template)
-	if filePath := filePathAtCursor(content, line, char); filePath != "" {
+	if filePath := parser.FilePathAtCursor(content, line, char); filePath != "" {
 		if loc := s.resolveFilePathDef(filePath, docURI); loc != nil {
 			s.log.Debug("definition: file path resolved", cflog.String("path", filePath), cflog.String("target", string(loc.URI)))
 			return reply(ctx, *loc, nil)
@@ -63,14 +64,14 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Check if cursor is inside a <cfinvoke> method attribute
-	if comp := cfInvokeComponentAtCursor(content, line, char); comp != "" {
+	if comp := parser.CfInvokeComponentAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 			return reply(ctx, *loc, nil)
 		}
 	}
 
 	// Check if there's a dot qualifier (e.g. persist.templateFunction)
-	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
 		if strings.HasPrefix(qualifier, "~?") { //nolint:gocritic // if-else is clearer than switch for prefix checks
 			// Call expression — try component resolvers
@@ -247,316 +248,6 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 
 // qualifierBeforeWord returns the identifier before the dot preceding the word at cursor.
 // Also handles createObject('component','path').init() by returning the component path prefixed with "~".
-func qualifierBeforeWord(content string, line, char int) string {
-	lineText := lineAtOffset(content, line)
-	if lineText == "" {
-		return ""
-	}
-	start := min(char, len(lineText))
-	for start > 0 && isWordChar(lineText[start-1]) {
-		start--
-	}
-	if start < 1 || lineText[start-1] != '.' {
-		return ""
-	}
-	// Check if before the dot is ')' or ']' — could be createObject(...).func() or [].func()
-	dotPos := start - 1
-	if dotPos > 0 && (lineText[dotPos-1] == ')' || lineText[dotPos-1] == ']') {
-		if lineText[dotPos-1] == ')' {
-			prefix := lineText[:dotPos]
-			lowerPrefix := strings.ToLower(prefix)
-			// Try createObject
-			if idx := strings.LastIndex(lowerPrefix, "createobject("); idx >= 0 {
-				args := prefix[idx+13:]
-				args = strings.TrimSuffix(args, ")")
-				parts := strings.SplitN(args, ",", 2)
-				if len(parts) == 2 {
-					comp := strings.TrimSpace(parts[1])
-					comp = strings.Trim(comp, "\"'")
-					if comp != "" {
-						return "~" + comp
-					}
-				}
-			}
-			// Try new
-			if idx := strings.LastIndex(lowerPrefix, "new "); idx >= 0 {
-				rest := strings.TrimSpace(prefix[idx+4:])
-				// Strip constructor arguments: new models.Widget("x") → models.Widget
-				if parenIdx := strings.IndexByte(rest, '('); parenIdx >= 0 {
-					rest = rest[:parenIdx]
-				}
-				rest = strings.Trim(rest, "\"'")
-				if rest != "" {
-					return "~" + rest
-				}
-			}
-			// Extract the call expression (e.g. getService("timetable"))
-			// Find the matching open paren
-			depth := 0
-			i := dotPos - 1 // at ')'
-			for i >= 0 {
-				if lineText[i] == ')' {
-					depth++
-				} else if lineText[i] == '(' {
-					depth--
-					if depth == 0 {
-						break
-					}
-				}
-				i--
-			}
-			if i > 0 {
-				// Find the function name before the '('
-				fnEnd := i
-				fnStart := fnEnd - 1
-				for fnStart >= 0 && isWordChar(lineText[fnStart]) {
-					fnStart--
-				}
-				fnStart++
-				if fnStart < fnEnd {
-					// Return the call as ~?funcName(args)
-					return "~?" + lineText[fnStart:dotPos]
-				}
-			}
-		}
-		// Unresolvable qualifier — still a qualified call
-		return "~"
-	}
-	// Normal identifier before dot
-	end := dotPos
-	s := end - 1
-	for s >= 0 && isWordChar(lineText[s]) {
-		s--
-	}
-	s++
-	if s == end {
-		return ""
-	}
-	return lineText[s:end]
-}
-
-func wordAtPosition(content string, line, char int) string {
-	lineText := lineAtOffset(content, line)
-	if lineText == "" && line > 0 {
-		return ""
-	}
-	char = min(char, len(lineText))
-
-	start := char
-	for start > 0 && isWordChar(lineText[start-1]) {
-		start--
-	}
-	end := char
-	for end < len(lineText) && isWordChar(lineText[end]) {
-		end++
-	}
-	if start == end {
-		return ""
-	}
-	return lineText[start:end]
-}
-
-// cfInvokeComponentAtCursor returns the component path if the cursor is inside
-// a <cfinvoke> tag's method attribute value.
-func cfInvokeComponentAtCursor(content string, line, char int) string {
-	tag, cursorInTag := enclosingTagAt(content, line, char)
-	if tag == "" || cursorInTag < 0 {
-		return ""
-	}
-	lower := strings.ToLower(tag)
-	if !strings.HasPrefix(lower, "<cfinvoke") {
-		return ""
-	}
-
-	// Check cursor is inside method="..."
-	methodIdx := strings.Index(lower, "method=")
-	if methodIdx < 0 {
-		return ""
-	}
-	valStart := methodIdx + 7
-	if valStart >= len(tag) {
-		return ""
-	}
-	q := tag[valStart]
-	if q != '"' && q != '\'' {
-		return ""
-	}
-	closeQ := strings.IndexByte(tag[valStart+1:], q)
-	if closeQ < 0 {
-		return ""
-	}
-	if cursorInTag <= valStart || cursorInTag > valStart+1+closeQ {
-		return ""
-	}
-
-	// Extract component attribute
-	compIdx := strings.Index(lower, "component=")
-	if compIdx < 0 {
-		return ""
-	}
-	cs := compIdx + 10
-	if cs >= len(tag) {
-		return ""
-	}
-	cq := tag[cs]
-	if cq != '"' && cq != '\'' {
-		return ""
-	}
-	closeC := strings.IndexByte(tag[cs+1:], cq)
-	if closeC < 0 {
-		return ""
-	}
-	return tag[cs+1 : cs+1+closeC]
-}
-
-// enclosingTagAt returns the full tag text and cursor position within it
-// for the tag enclosing the given line/char. Returns ("", -1) if not inside a tag.
-func enclosingTagAt(content string, line, char int) (tag string, cursorOffset int) {
-	// Find cursor byte offset
-	offset := 0
-	for l := 0; l < line; l++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return "", -1
-		}
-		offset += idx + 1
-	}
-	offset += char
-	if offset > len(content) {
-		offset = len(content)
-	}
-
-	// Scan backwards for '<'
-	tagStart := strings.LastIndex(content[:offset], "<")
-	if tagStart < 0 {
-		return "", -1
-	}
-
-	// Find tag end '>'
-	tagEnd := strings.IndexByte(content[tagStart:], '>')
-	if tagEnd < 0 {
-		// Tag not yet closed — use content up to offset
-		return content[tagStart:offset], offset - tagStart
-	}
-	tagEnd += tagStart + 1
-	if offset > tagEnd {
-		// Cursor is past the tag close
-		return "", -1
-	}
-	return content[tagStart:tagEnd], offset - tagStart
-}
-
-func isWordChar(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
-}
-
-// lineAtOffset returns the text of the given 0-based line without splitting the whole content.
-func lineAtOffset(content string, line int) string {
-	offset := 0
-	for l := 0; l < line; l++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return ""
-		}
-		offset += idx + 1
-	}
-	end := strings.IndexByte(content[offset:], '\n')
-	if end < 0 {
-		return content[offset:]
-	}
-	return content[offset : offset+end]
-}
-
-// componentPathAtCursor checks if the cursor is on a component dot-path in a
-// recognized context (new, createObject, extends, implements, type, returntype,
-// component attribute, import). Returns the full dot-path or empty string.
-func componentPathAtCursor(content string, line, char int) string {
-	lineText := lineAtOffset(content, line)
-	if lineText == "" {
-		return ""
-	}
-
-	// Extract the full dot-path at cursor (word chars + dots)
-	pos := min(char, len(lineText))
-	start := pos
-	for start > 0 && (isWordChar(lineText[start-1]) || lineText[start-1] == '.') {
-		start--
-	}
-	end := pos
-	for end < len(lineText) && (isWordChar(lineText[end]) || lineText[end] == '.') {
-		end++
-	}
-	if start == end {
-		return ""
-	}
-	dotPath := lineText[start:end]
-	// Must contain at least one dot or be in a quoted context to be a component path
-	hasDot := strings.ContainsRune(dotPath, '.')
-
-	// Check context before the dot-path
-	before := strings.TrimRight(lineText[:start], " \t")
-	lowerBefore := strings.ToLower(before)
-
-	// new keyword: "new models.Widget"
-	if strings.HasSuffix(lowerBefore, "new") {
-		return dotPath
-	}
-
-	// Check if inside a quoted string in a recognized context
-	if start > 0 && (lineText[start-1] == '"' || lineText[start-1] == '\'') {
-		// Look for createObject("component", "path") or createObject("path")
-		if strings.Contains(lowerBefore, "createobject(") {
-			return dotPath
-		}
-		// isInstanceOf(obj, "path")
-		if strings.Contains(lowerBefore, "isinstanceof(") {
-			return dotPath
-		}
-		// import "path"
-		if strings.HasSuffix(strings.TrimRight(lowerBefore, " \t\"'"), "import") {
-			return dotPath
-		}
-	}
-
-	// Attribute contexts: extends="path", implements="path", type="path",
-	// returntype="path", component="path"
-	attrPrefixes := []string{"extends=", "implements=", "type=", "returntype=", "component="}
-	for _, prefix := range attrPrefixes {
-		if idx := strings.LastIndex(lowerBefore, prefix); idx >= 0 {
-			afterAttr := before[idx+len(prefix):]
-			trimmed := strings.TrimLeft(afterAttr, " \t\"'")
-			if trimmed == "" {
-				return dotPath
-			}
-		}
-	}
-
-	// CFScript function return type: "models.Widget function" or argument type: "(models.Widget arg)"
-	after := strings.TrimLeft(lineText[end:], " \t")
-	lowerAfter := strings.ToLower(after)
-	if hasDot && (strings.HasPrefix(lowerAfter, "function") || strings.HasPrefix(lowerAfter, "function ")) {
-		return dotPath
-	}
-	// Argument type: check if followed by an identifier (the arg name)
-	if hasDot && len(after) > 0 && isWordChar(after[0]) {
-		// Verify we're inside a function signature (after a '(' or ',')
-		beforeTrimmed := strings.TrimRight(lineText[:start], " \t")
-		if len(beforeTrimmed) > 0 {
-			lastCh := beforeTrimmed[len(beforeTrimmed)-1]
-			if lastCh == '(' || lastCh == ',' {
-				return dotPath
-			}
-			// Could also be "required type name" — check if preceded by "required"
-			if strings.HasSuffix(strings.ToLower(beforeTrimmed), "required") {
-				return dotPath
-			}
-		}
-	}
-
-	return ""
-}
-
-// resolveComponentFileDef resolves a component dot-path to a file location (line 0).
 func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *protocol.Location {
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
@@ -574,49 +265,6 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 
 // filePathAtCursor checks if the cursor is inside a file path attribute value
 // (cfinclude template, cfmodule template, include). Returns the path or empty string.
-func filePathAtCursor(content string, line, char int) string {
-	lineText := lineAtOffset(content, line)
-	if lineText == "" {
-		return ""
-	}
-	pos := min(char, len(lineText))
-
-	// Find enclosing quotes
-	// Search backward for opening quote
-	qStart := -1
-	var quote byte
-	for i := pos - 1; i >= 0; i-- {
-		if lineText[i] == '"' || lineText[i] == '\'' {
-			qStart = i
-			quote = lineText[i]
-			break
-		}
-	}
-	if qStart < 0 {
-		return ""
-	}
-	// Search forward for closing quote
-	qEnd := -1
-	for i := qStart + 1; i < len(lineText); i++ {
-		if lineText[i] == quote {
-			qEnd = i
-			break
-		}
-	}
-	if qEnd < 0 || pos <= qStart || pos > qEnd {
-		return ""
-	}
-	value := lineText[qStart+1 : qEnd]
-
-	// Check if preceded by a recognized attribute
-	before := strings.ToLower(strings.TrimRight(lineText[:qStart], " \t"))
-	if strings.HasSuffix(before, "template=") || strings.HasSuffix(before, "include") ||
-		strings.HasSuffix(before, "href=") || strings.HasSuffix(before, "action=") {
-		return value
-	}
-	return ""
-}
-
 // resolveFilePathDef resolves a file path (from cfinclude etc.) to a location.
 func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.Location {
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
@@ -681,7 +329,7 @@ func (s *Server) resolverArgAtCursor(content string, line, char int) string {
 	if len(s.ComponentResolvers) == 0 {
 		return ""
 	}
-	lineText := lineAtOffset(content, line)
+	lineText := parser.LineTextAt(content, line)
 	if lineText == "" {
 		return ""
 	}
@@ -723,7 +371,7 @@ func (s *Server) resolverArgAtCursor(content string, line, char int) string {
 	// Get the function name before the paren
 	funcEnd := parenIdx
 	funcStart := funcEnd
-	for funcStart > 0 && isWordChar(lineText[funcStart-1]) {
+	for funcStart > 0 && parser.IsWordChar(lineText[funcStart-1]) {
 		funcStart--
 	}
 	if funcStart == funcEnd {

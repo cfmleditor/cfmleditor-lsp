@@ -579,7 +579,7 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 			if end == -1 {
 				break
 			}
-			closeName := strings.ToLower(text[i : i+end])
+			closeName := toLowerASCII(text[i : i+end])
 			// Pop matching tag from stack
 			for j := len(stack) - 1; j >= 0; j-- {
 				if stack[j] == closeName {
@@ -594,7 +594,7 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 			if end == -1 {
 				break
 			}
-			name := strings.ToLower(text[i : i+end])
+			name := toLowerASCII(text[i : i+end])
 			if name == "" || name[0] == '!' || name == "cfset" || isSubordinateTag(name) || isVoidTag(name) {
 				i += end
 				continue
@@ -1048,7 +1048,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	// If no simple word, check for call expression before dot: e.g. getService("tours").
 	if varName == "" {
-		lineText := lineAtOffset(content, line)
+		lineText := parser.LineTextAt(content, line)
 		dotPos := char - 1
 		if dotPos > 0 && dotPos < len(lineText) && lineText[dotPos] == '.' && lineText[dotPos-1] == ')' {
 			// Find matching open paren
@@ -1062,7 +1062,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 					if depth == 0 {
 						// Find function name start
 						fnStart := i - 1
-						for fnStart >= 0 && isWordChar(lineText[fnStart]) {
+						for fnStart >= 0 && parser.IsWordChar(lineText[fnStart]) {
 							fnStart--
 						}
 						fnStart++
@@ -1166,7 +1166,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 // argumentCompletion returns named argument completions when cursor is inside function parens.
 func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char int) []protocol.CompletionItem {
-	funcName, qualifier, _ := findCallContext(content, line, char)
+	funcName, qualifier, _ := parser.FindCallContext(content, line, char)
 	if funcName == "" {
 		return nil
 	}
@@ -1286,7 +1286,7 @@ func (s *Server) scopePrefix(scope string) string {
 }
 
 func wordBeforeDot(content string, line, char int) string {
-	lineText := lineAtOffset(content, line)
+	lineText := parser.LineTextAt(content, line)
 	if lineText == "" && line > 0 {
 		return ""
 	}
@@ -1297,7 +1297,7 @@ func wordBeforeDot(content string, line, char int) string {
 	}
 	end := dotPos
 	start := end - 1
-	for start >= 0 && isWordChar(lineText[start]) {
+	for start >= 0 && parser.IsWordChar(lineText[start]) {
 		start--
 	}
 	start++
@@ -1305,4 +1305,23 @@ func wordBeforeDot(content string, line, char int) string {
 		return ""
 	}
 	return lineText[start:end]
+}
+
+// toLowerASCII lowercases an ASCII string using a stack buffer for short strings.
+func toLowerASCII(s string) string {
+	var buf [32]byte
+	var b []byte
+	if len(s) <= len(buf) {
+		b = buf[:len(s)]
+	} else {
+		b = make([]byte, len(s))
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 0x20
+		}
+		b[i] = c
+	}
+	return string(b)
 }

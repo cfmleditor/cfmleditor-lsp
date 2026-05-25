@@ -733,9 +733,9 @@ func TestWordAtPosition(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := wordAtPosition(tt.content, tt.line, tt.char)
+			got := parser.WordAtPosition(tt.content, tt.line, tt.char)
 			if got != tt.want {
-				t.Errorf("wordAtPosition() = %q, want %q", got, tt.want)
+				t.Errorf("parser.WordAtPosition() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -2963,7 +2963,7 @@ func TestResolverMultipleCaptures(t *testing.T) {
 
 func TestFindCallContextNoParens(t *testing.T) {
 	content := "<cfset x = someVar>"
-	name, qual, _ := findCallContext(content, 0, 15)
+	name, qual, _ := parser.FindCallContext(content, 0, 15)
 	if name != "" || qual != "" {
 		t.Errorf("expected empty outside parens, got name=%q qual=%q", name, qual)
 	}
@@ -2984,9 +2984,9 @@ func TestWordAtPositionEdgeCases(t *testing.T) {
 		{"foo.bar", 0, 1, "foo"},
 	}
 	for _, tt := range tests {
-		got := wordAtPosition(tt.content, tt.line, tt.char)
+		got := parser.WordAtPosition(tt.content, tt.line, tt.char)
 		if got != tt.want {
-			t.Errorf("wordAtPosition(%q, %d, %d) = %q, want %q", tt.content, tt.line, tt.char, got, tt.want)
+			t.Errorf("parser.WordAtPosition(%q, %d, %d) = %q, want %q", tt.content, tt.line, tt.char, got, tt.want)
 		}
 	}
 }

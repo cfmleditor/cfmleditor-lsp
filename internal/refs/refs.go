@@ -98,7 +98,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 			}
 
 			content := string(data)
-			absPath, _ := filepath.Abs(f)
+			absPath := f
 			fileURI := uri.URI("file://" + absPath)
 
 			// Parse once with resolvers and call scanning — scan all scopes

@@ -33,7 +33,7 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
 
-	funcName, qualifier, activeParam := findCallContext(content, line, char)
+	funcName, qualifier, activeParam := parser.FindCallContext(content, line, char)
 	if funcName == "" {
 		return reply(ctx, nil, nil)
 	}

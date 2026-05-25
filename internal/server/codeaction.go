@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -22,7 +23,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 
 	line := int(params.Range.Start.Line)
 	char := int(params.Range.Start.Character)
-	word := wordAtPosition(content, line, char)
+	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
@@ -31,7 +32,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 	var actions []protocol.CodeAction
 
 	// If on a function name with a qualifier, offer component-level actions
-	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
+	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		actions = append(actions, protocol.CodeAction{
 			Title: "Find all references to " + word,
 

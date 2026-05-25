@@ -10,6 +10,7 @@ import (
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -67,7 +68,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 	}
 
-	lines := countNewlines(content)
+	lines := parser.CountNewlines(content)
 	edits := []protocol.TextEdit{{
 		Range: protocol.Range{
 			Start: protocol.Position{Line: 0, Character: 0},
@@ -135,16 +136,6 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	}
 	result := string(out)
 	return result, nil
-}
-
-func countNewlines(s string) int {
-	n := 0
-	for _, c := range s {
-		if c == '\n' {
-			n++
-		}
-	}
-	return n
 }
 
 func findErrorNode(n *sitter.Node) *sitter.Node {
