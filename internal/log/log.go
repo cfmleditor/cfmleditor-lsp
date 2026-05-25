@@ -2,6 +2,8 @@
 package log
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,8 +41,15 @@ func Err(err error) zap.Field { return zap.Error(err) }
 // Uint32 constructs an unsigned 32-bit integer field.
 func Uint32(key string, val uint32) zap.Field { return zap.Uint32(key, val) }
 
-// NewLogger creates a Logger from a *zap.Logger.
-func NewLogger(l *zap.Logger) Logger {
+// NewLogger creates a Logger. When debug is true, logs at Debug level with
+// human-readable output; otherwise logs at Info level with JSON output.
+func NewLogger(debug bool) Logger {
+	var l *zap.Logger
+	if debug {
+		l, _ = zap.NewDevelopment()
+	} else {
+		l, _ = zap.NewProduction()
+	}
 	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar()}
 }
 
@@ -50,3 +59,9 @@ func (z *zapLogger) Debug(msg string, kv ...interface{}) { z.l.Debugw(msg, kv...
 func (z *zapLogger) Info(msg string, kv ...interface{})  { z.l.Infow(msg, kv...) }
 func (z *zapLogger) Warn(msg string, kv ...interface{})  { z.l.Warnw(msg, kv...) }
 func (z *zapLogger) Error(msg string, kv ...interface{}) { z.l.Errorw(msg, kv...) }
+
+// Fatalf logs a message to stderr and exits the process.
+func Fatalf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}

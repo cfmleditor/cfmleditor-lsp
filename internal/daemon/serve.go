@@ -11,15 +11,15 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"go.lsp.dev/jsonrpc2"
-	"go.uber.org/zap"
 )
 
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string, propResolvers [][3]string, beanPaths map[string]string, fmtCfg config.ResolvedFormatting) error {
+func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string, propResolvers [][3]string, beanPaths map[string]string, fmtCfg config.ResolvedFormatting) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 		_ = os.Remove(sockPath)
 	}()
 
-	logger.Info("daemon listening", zap.String("socket", sockPath))
+	log.Info("daemon listening", cflog.String("socket", sockPath))
 
 	var wg sync.WaitGroup
 	go func() {
@@ -63,7 +63,7 @@ func Serve(ctx context.Context, sockPath string, logger *zap.Logger, idx *index.
 			}
 			stream := jsonrpc2.NewStream(c)
 			conn := jsonrpc2.NewConn(stream)
-			srv := server.NewServer(conn, logger, idx)
+			srv := server.NewServer(conn, log, idx)
 			srv.WorkspaceFolders = folders
 			srv.IndexGlobs = globs
 			srv.Mappings = mappings

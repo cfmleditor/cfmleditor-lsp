@@ -15,12 +15,12 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 var version = "dev"
@@ -77,14 +77,11 @@ func runServer() {
 	cwd, _ := os.Getwd()
 	cfg, _ := daemon.FindConfig(cwd)
 
-	var logger *zap.Logger
-	if cfg != nil && cfg.Debug() {
-		logger, _ = zap.NewDevelopment()
-		logger.Info("debug mode enabled")
-	} else {
-		logger, _ = zap.NewProduction()
+	debug := cfg != nil && cfg.Debug()
+	log := cflog.NewLogger(debug)
+	if debug {
+		log.Info("debug mode enabled")
 	}
-	defer func() { _ = logger.Sync() }()
 
 	if cfg != nil {
 		sock := cfg.SocketPath()
@@ -95,7 +92,7 @@ func runServer() {
 		}
 
 		// No daemon running — become the daemon and serve this client over stdio
-		logger.Info("starting daemon mode", zap.String("socket", sock))
+		log.Info("starting daemon mode", cflog.String("socket", sock))
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -126,13 +123,13 @@ func runServer() {
 			AttrBreakThreshold:    cfg.FormattingAttrBreakThreshold(),
 			IndentWidth:           cfg.FormattingIndentWidth(),
 		}
-		go func() { _ = daemon.Serve(ctx, sock, logger, sharedIndex, ct, folders, globs, mappings, resolverPairs, propResolverPairs, beanPaths, fmtCfg) }()
+		go func() { _ = daemon.Serve(ctx, sock, log, sharedIndex, ct, folders, globs, mappings, resolverPairs, propResolverPairs, beanPaths, fmtCfg) }()
 
 		// Serve this editor session over stdio with the shared index
 		ct.Add()
 		stream := jsonrpc2.NewStream(vfs.Stdio())
 		conn := jsonrpc2.NewConn(stream)
-		srv := server.NewServer(conn, logger, sharedIndex)
+		srv := server.NewServer(conn, log, sharedIndex)
 		srv.Version = version
 		srv.WorkspaceFolders = folders
 		srv.IndexGlobs = globs
@@ -166,7 +163,7 @@ func runServer() {
 	// No config found — standalone mode
 	stream := jsonrpc2.NewStream(vfs.Stdio())
 	conn := jsonrpc2.NewConn(stream)
-	srv := server.NewServer(conn, logger)
+	srv := server.NewServer(conn, log)
 	srv.Version = version
 	conn.Go(context.Background(), srv.Handler())
 	<-conn.Done()

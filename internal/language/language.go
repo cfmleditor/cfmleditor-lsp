@@ -2,7 +2,7 @@
 package language
 
 import (
-	"log"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 
 	tree_sitter_cfml "github.com/cfmleditor/tree-sitter-cfml/bindings/go"
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -38,7 +38,7 @@ func NewParser(g Grammar) *sitter.Parser {
 	p := sitter.NewParser()
 	err := p.SetLanguage(Language(g))
 	if err != nil {
-		log.Fatalf("Couldnt set parser language: %s", err)
+		cflog.Fatalf("Couldnt set parser language: %s", err)
 	}
 	return p
 }

@@ -21,7 +21,6 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 // Server implements the CFML Language Server Protocol handler.
@@ -62,14 +61,14 @@ type Server struct {
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
 // instead of creating a private index, allowing multiple sessions to share one.
-func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Index) *Server {
+func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index) *Server {
 	idx := index.New()
 	if len(sharedIndex) > 0 && sharedIndex[0] != nil {
 		idx = sharedIndex[0]
 	}
 	return &Server{
 		conn:              conn,
-		log:               cflog.NewLogger(logger),
+		log:               log,
 		FS:                vfs.OS{},
 		documents:         make(map[uri.URI]string),
 		index:             idx,

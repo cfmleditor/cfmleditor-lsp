@@ -13,17 +13,17 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 func newTestServer() *Server {
-	return NewServer(nil, zap.NewNop())
+	return NewServer(nil, cflog.NewLogger(false))
 }
 
 func makeCall(t *testing.T, method string, params interface{}) jsonrpc2.Request {

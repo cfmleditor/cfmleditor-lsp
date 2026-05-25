@@ -13,8 +13,8 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"go.lsp.dev/jsonrpc2"
-	"go.uber.org/zap"
 )
 
 func TestConnTrackerShutdownOnLastDisconnect(t *testing.T) {
@@ -51,14 +51,14 @@ func TestServeMultipleClients(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := zap.NewNop()
+	log := cflog.NewLogger(false)
 	idx := index.New()
 	ct := NewConnTracker()
 
 	// Simulate the stdio client that main.go adds before Serve starts
 	ct.Add()
 
-	go func() { _ = Serve(ctx, sock, logger, idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
+	go func() { _ = Serve(ctx, sock, log, idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
 	waitForSocket(t, sock)
 
 	// Connect 6 socket clients
@@ -109,11 +109,11 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := zap.NewNop()
+	log := cflog.NewLogger(false)
 	idx := index.New()
 
 	// No ConnTracker — we just verify the RPC layer works
-	go func(){ _ = Serve(ctx, sock, logger, idx, nil, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
+	go func(){ _ = Serve(ctx, sock, log, idx, nil, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
 	waitForSocket(t, sock)
 
 	conn, err := net.Dial("unix", sock)
@@ -147,7 +147,7 @@ func TestDaemonSurvivesAbruptClientDisconnect(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add() // stdio slot
 
-	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
+	go func() { _ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
 	waitForSocket(t, sock)
 
 	// Connect a client and immediately close the raw connection (simulates crash)
@@ -177,7 +177,7 @@ func TestDaemonShutdownClosesSocketClients(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add() // stdio slot
 
-	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
+	go func() { _ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
 	waitForSocket(t, sock)
 
 	// Connect a client
@@ -204,7 +204,7 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 	ct := NewConnTracker()
 	ct.Add() // stdio slot
 
-	go func() { _ = Serve(ctx, sock, zap.NewNop(), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
+	go func() { _ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, nil, nil, nil, nil, nil, nil, config.ResolvedFormatting{}) }()
 	waitForSocket(t, sock)
 
 	// Client 1 opens a CFC file — this indexes it into the shared index

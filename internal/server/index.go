@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,6 +184,6 @@ func (s *Server) indexRoot(root string) {
 		return nil
 	})
 	if err != nil {
-		log.Fatalf("failed to walk directory: %s", err)
+		s.log.Error("failed to walk directory", cflog.String("root", root), cflog.Err(err))
 	}
 }
