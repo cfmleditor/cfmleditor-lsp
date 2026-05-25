@@ -10,20 +10,14 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
-
-// zapAdapter adapts *zap.Logger to cfparser.Logger.
-type zapAdapter struct{ l *zap.Logger }
-
-func (z *zapAdapter) Info(msg string, kv ...interface{}) { z.l.Sugar().Infow(msg, kv...) }
-func (z *zapAdapter) Warn(msg string, kv ...interface{}) { z.l.Sugar().Warnw(msg, kv...) }
 
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
@@ -31,11 +25,11 @@ func (s *Server) Handler() jsonrpc2.Handler {
 		start := time.Now()
 		defer func() {
 			if r := recover(); r != nil {
-				s.logger.Error("handler panic", zap.String("method", req.Method()), zap.Any("panic", r))
+				s.log.Error("handler panic", cflog.String("method", req.Method()), cflog.Any("panic", r))
 				err = reply(ctx, nil, fmt.Errorf("internal error: %v", r))
 			}
 			if dur := time.Since(start); dur > 100*time.Millisecond {
-				s.logger.Warn("slow request", zap.String("method", req.Method()), zap.Duration("dur", dur))
+				s.log.Warn("slow request", cflog.String("method", req.Method()), cflog.Duration("dur", dur))
 			}
 		}()
 		switch req.Method() {
@@ -95,9 +89,9 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	s.initialized = true
 
-	s.logger.Debug("initialize params workspace folders", zap.Int("count", len(params.WorkspaceFolders)))
+	s.log.Debug("initialize params workspace folders", cflog.Int("count", len(params.WorkspaceFolders)))
 	for i, folder := range params.WorkspaceFolders {
-		s.logger.Debug("workspace folder", zap.Int("index", i), zap.String("name", folder.Name), zap.String("uri", string(folder.URI)))
+		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", string(folder.URI)))
 	}
 
 	for _, folder := range params.WorkspaceFolders {
@@ -117,7 +111,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		s.loadConfigFromRoots()
 	}
 
-	s.logger.Info("CFML LSP initialized", zap.Strings("workspaceRoots", s.workspaceRoots))
+	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.workspaceRoots))
 
 	return reply(ctx, protocol.InitializeResult{
 		Capabilities: s.capabilities(),
@@ -143,14 +137,13 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.setDocument(docURI, params.TextDocument.Text)
 
 	pr := s.parseContent(docURI, params.TextDocument.Text)
-	pr.Log = &zapAdapter{s.logger}
-	s.logger.Debug("document opened: parse result",
-		zap.String("uri", string(docURI)),
-		zap.Int("funcs", len(pr.Funcs)),
-		zap.Int("refs", len(pr.Refs)),
-		zap.Int("resolvers", len(pr.Resolvers)))
+	s.log.Debug("document opened: parse result",
+		cflog.String("uri", string(docURI)),
+		cflog.Int("funcs", len(pr.Funcs)),
+		cflog.Int("refs", len(pr.Refs)),
+		cflog.Int("resolvers", len(pr.Resolvers)))
 	for _, ref := range pr.Refs {
-		s.logger.Debug("document opened: ref", zap.String("var", ref.Variable), zap.String("component", ref.Component))
+		s.log.Debug("document opened: ref", cflog.String("var", ref.Variable), cflog.String("component", ref.Component))
 	}
 	s.mu.Lock()
 	s.parseResults[docURI] = pr
@@ -160,7 +153,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.reindexFromParseResult(docURI, pr)
 
 	s.safeGo("rebuildFileCompletionCacheFromPR", func() { s.rebuildFileCompletionCacheFromPR(docURI, pr) })
-	s.logger.Debug("document opened", zap.String("uri", string(docURI)))
+	s.log.Debug("document opened", cflog.String("uri", string(docURI)))
 
 	return reply(ctx, nil, nil)
 }
@@ -204,11 +197,11 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	for _, c := range params.ContentChanges {
 		totalBytes += len(c.Text)
 	}
-	s.logger.Debug("didChange",
-		zap.String("uri", string(docURI)),
-		zap.Int("changeCount", s.changeCount[docURI]),
-		zap.Int("edits", len(params.ContentChanges)),
-		zap.Int("bytes", totalBytes),
+	s.log.Debug("didChange",
+		cflog.String("uri", string(docURI)),
+		cflog.Int("changeCount", s.changeCount[docURI]),
+		cflog.Int("edits", len(params.ContentChanges)),
+		cflog.Int("bytes", totalBytes),
 	)
 
 	var editLine int
@@ -231,7 +224,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.cacheTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
 			defer func() {
 				if r := recover(); r != nil {
-					s.logger.Error("goroutine panic", zap.String("label", "rapidChangeTimer"), zap.Any("panic", r))
+					s.log.Error("goroutine panic", cflog.String("label", "rapidChangeTimer"), cflog.Any("panic", r))
 				}
 			}()
 			s.mu.Lock()
@@ -281,7 +274,6 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	if pr == nil {
 		// No cached parse result — fall back to full parse
 		pr = s.parseContent(docURI, content)
-		pr.Log = &zapAdapter{s.logger}
 		s.mu.Lock()
 		s.parseResults[docURI] = pr
 		s.funcRanges[docURI] = scopesToFuncRanges(pr)
@@ -328,7 +320,7 @@ func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine i
 	s.cacheTimers[docURI] = time.AfterFunc(cacheRebuildDelay, func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.logger.Error("goroutine panic", zap.String("label", "cacheRebuild"), zap.Any("panic", r))
+				s.log.Error("goroutine panic", cflog.String("label", "cacheRebuild"), cflog.Any("panic", r))
 			}
 		}()
 		s.rebuildCompletionCache(docURI, content, editLine)
@@ -373,7 +365,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	s.mu.Lock()
 	delete(s.parseResults, docURI)
 	s.mu.Unlock()
-	s.logger.Debug("document closed", zap.String("uri", string(docURI)))
+	s.log.Debug("document closed", cflog.String("uri", string(docURI)))
 
 	// Clear diagnostics on close
 	if s.conn != nil {
@@ -432,7 +424,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	}()
 
 	filePath := strings.TrimPrefix(string(docURI), "file://")
-	s.logger.Debug("cflint scan starting", zap.String("file", filePath))
+	s.log.Debug("cflint scan starting", cflog.String("file", filePath))
 
 	// Show progress
 	s.notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
@@ -448,12 +440,12 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	})
 
 	if scanCtx.Err() != nil {
-		s.logger.Debug("cflint scan cancelled", zap.String("file", filePath))
+		s.log.Debug("cflint scan cancelled", cflog.String("file", filePath))
 		return
 	}
 
 	if err != nil {
-		s.logger.Warn("cflint scan failed", zap.String("file", filePath), zap.Error(err))
+		s.log.Warn("cflint scan failed", cflog.String("file", filePath), cflog.Err(err))
 		return
 	}
 
@@ -461,7 +453,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 		diags = []protocol.Diagnostic{}
 	}
 
-	s.logger.Debug("cflint scan complete", zap.String("file", filePath), zap.Int("issues", len(diags)))
+	s.log.Debug("cflint scan complete", cflog.String("file", filePath), cflog.Int("issues", len(diags)))
 
 	s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentURI(docURI),
@@ -535,7 +527,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 			}
 		}
 		s.mu.Unlock()
-		s.logger.Info("workspace folder removed", zap.String("uri", removed.URI))
+		s.log.Info("workspace folder removed", cflog.String("uri", removed.URI))
 	}
 
 	for _, added := range params.Event.Added {
@@ -544,7 +536,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 		s.workspaceRoots = append(s.workspaceRoots, root)
 		s.mu.Unlock()
 		s.indexRoot(root)
-		s.logger.Info("workspace folder added", zap.String("uri", added.URI))
+		s.log.Info("workspace folder added", cflog.String("uri", added.URI))
 	}
 
 	return reply(ctx, nil, nil)
@@ -562,7 +554,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		s.invalidateResolveCache()
 		cfpath.InvalidateAppMappingsCache()
 		s.safeGo("reindex", s.indexWorkspace)
-		s.logger.Info("reindex triggered via command")
+		s.log.Info("reindex triggered via command")
 		return reply(ctx, nil, nil)
 	case "cfmleditor.format":
 		if len(params.Arguments) == 0 {
@@ -642,7 +634,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		s.mu.Unlock()
 		s.compCache.InvalidateAll()
 		s.safeGo("reindex", s.indexWorkspace)
-		s.logger.Info("daemon restart triggered via command")
+		s.log.Info("daemon restart triggered via command")
 		return reply(ctx, nil, nil)
 	case "cfmleditor.showResolvers":
 		var lines []string
@@ -786,19 +778,42 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		if len(params.Arguments) > 1 {
 			sourceURI, _ = params.Arguments[1].(string)
 		}
-		s.logger.Debug("findRefs: searching", zap.String("funcName", funcName), zap.String("source", sourceURI), zap.Strings("roots", s.WorkspaceFolders))
+		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.String("source", sourceURI), cflog.Strings("roots", s.WorkspaceFolders))
 		r := s.getResolver()
-		entries := refs.Find(s.FS, s.WorkspaceFolders, refs.Options{
+		findOpts := refs.Options{
 			FuncName:          funcName,
 			Resolvers:         s.cfResolvers(),
 			PropertyResolvers: s.cfPropertyResolvers(),
 			VerifyCall: func(component, fn, fileDir string) bool {
 				return r.HasFunction(component, fn, fileDir)
 			},
-		})
-		s.logger.Debug("findRefs: complete", zap.String("funcName", funcName), zap.Int("results", len(entries)))
+		}
+		entries := refs.Find(s.FS, s.WorkspaceFolders, findOpts)
+
+		// Recursive: find callers of wrapper functions (no level limit, loop prevention via seen set)
+		tracedFuncs := make(map[string]bool)
+		tracedFuncs[funcName] = true
+		for {
+			var newFuncs []string
+			for _, e := range entries {
+				if e.Function != "" && !tracedFuncs[e.Function] {
+					tracedFuncs[e.Function] = true
+					newFuncs = append(newFuncs, e.Function)
+				}
+			}
+			if len(newFuncs) == 0 {
+				break
+			}
+			for _, fn := range newFuncs {
+				findOpts.FuncName = fn
+				extra := refs.Find(s.FS, s.WorkspaceFolders, findOpts)
+				entries = append(entries, extra...)
+			}
+		}
+
+		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
 		for _, e := range entries {
-			s.logger.Debug("findRefs: match", zap.String("file", e.File), zap.Uint32("line", e.Line), zap.Bool("resolved", e.Resolved), zap.String("call", e.Call))
+			s.log.Debug("findRefs: match", cflog.String("file", e.File), cflog.Uint32("line", e.Line), cflog.Bool("resolved", e.Resolved), cflog.String("call", e.Call))
 		}
 		var lines []string
 		lines = append(lines, fmt.Sprintf("Calls to '%s': %d match(es)", funcName, len(entries)))
@@ -863,7 +878,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 				style = "-.->"
 			}
 			if e.Component != "" {
-				compBase := strings.ToLower(filepath.Base(e.Component))
+				compBase := strings.ToLower(e.Component)
+				if dotIdx := strings.LastIndexByte(compBase, '.'); dotIdx >= 0 {
+					compBase = compBase[dotIdx+1:]
+				}
 				compBase = strings.TrimSuffix(compBase, ".cfc")
 				if !strings.EqualFold(compBase, sourceBase) {
 					for j, other := range nodes {
@@ -881,7 +899,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			mermaid = append(mermaid, fmt.Sprintf("    %s %s %s[\"%s\"]", parent, style, n.id, n.label))
 		}
 		diagram := "```mermaid\n" + strings.Join(mermaid, "\n") + "\n```"
-output := msg + "\n\n" + diagram
+		output := msg + "\n\n" + diagram
 		// Write to file in same directory as source
 		outDir := filepath.Dir(strings.TrimPrefix(sourceURI, "file://"))
 		if outDir == "" || outDir == "." {
@@ -935,7 +953,7 @@ func (s *Server) safeGo(label string, fn func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.logger.Error("goroutine panic", zap.String("label", label), zap.Any("panic", r))
+				s.log.Error("goroutine panic", cflog.String("label", label), cflog.Any("panic", r))
 			}
 		}()
 		fn()

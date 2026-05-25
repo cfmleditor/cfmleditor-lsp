@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"go.uber.org/zap"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 )
 
 // loadConfigFromRoots searches workspace roots for .cfmleditor.json and loads
@@ -21,7 +21,7 @@ func (s *Server) loadConfigFromRoots() {
 		if json.Unmarshal(data, &cfg) != nil {
 			continue
 		}
-		s.logger.Info("loaded config from workspace", zap.String("path", p))
+		s.log.Info("loaded config from workspace", cflog.String("path", p))
 		s.applyConfig(config.Resolve(&cfg, filepath.Dir(p)))
 		return
 	}

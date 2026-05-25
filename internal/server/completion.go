@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 // Completion feature flags — set to false to disable specific providers.
@@ -161,14 +161,14 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			triggerKind = "incomplete"
 		}
 	}
-	s.logger.Debug("completion: request",
-		zap.String("trigger", triggerKind),
-		zap.Bool("triggeredByDot", triggeredByDot),
-		zap.Bool("inHashExpr", inHashExpr),
-		zap.Bool("inAttrValue", inAttrValue),
-		zap.String("tagName", tagName),
-		zap.Uint32("line", params.Position.Line),
-		zap.Uint32("char", params.Position.Character),
+	s.log.Debug("completion: request",
+		cflog.String("trigger", triggerKind),
+		cflog.Bool("triggeredByDot", triggeredByDot),
+		cflog.Bool("inHashExpr", inHashExpr),
+		cflog.Bool("inAttrValue", inAttrValue),
+		cflog.String("tagName", tagName),
+		cflog.Uint32("line", params.Position.Line),
+		cflog.Uint32("char", params.Position.Character),
 	)
 
 	switch {
@@ -260,7 +260,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					tags[tag] = len(items)
 				}
 			}
-			s.logger.Debug("completion: closeTags", zap.Duration("dur", time.Since(t1)))
+			s.log.Debug("completion: closeTags", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName != "" && !isSpecialTag(tagName):
 		if CompletionAttributes {
@@ -278,7 +278,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
-			s.logger.Debug("completion: attributes", zap.Duration("dur", time.Since(t1)))
+			s.log.Debug("completion: attributes", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName == "cfelse":
 		items = append(items, protocol.CompletionItem{SortText: SortProperties,
@@ -316,7 +316,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					Detail:   tag.Description,
 				})
 			}
-			s.logger.Debug("completion: tags", zap.Duration("dur", time.Since(t1)))
+			s.log.Debug("completion: tags", cflog.Duration("dur", time.Since(t1)))
 		}
 	case typingTag:
 		if CompletionTags {
@@ -344,10 +344,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			t1 := time.Now()
 			if methods := s.dotCompletionMethods(content, uri.URI(params.TextDocument.URI), int(params.Position.Line), int(params.Position.Character)); len(methods) > 0 {
 				items = append(items, methods...)
-				s.logger.Debug("completion: dotMethods", zap.Duration("dur", time.Since(t1)))
+				s.log.Debug("completion: dotMethods", cflog.Duration("dur", time.Since(t1)))
 			} else if CompletionMemberFunctions {
 				items = append(items, getMemberFuncItems()...)
-				s.logger.Debug("completion: memberFunctions", zap.Duration("dur", time.Since(t1)))
+				s.log.Debug("completion: memberFunctions", cflog.Duration("dur", time.Since(t1)))
 			}
 		}
 	default:
@@ -360,10 +360,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		items = append(items, s.completionFromCache(uri.URI(params.TextDocument.URI), int(params.Position.Line))...)
 	}
 
-	s.logger.Debug("completion: total",
-		zap.Duration("context", contextDur),
-		zap.Duration("total", time.Since(totalStart)),
-		zap.Int("items", len(items)),
+	s.log.Debug("completion: total",
+		cflog.Duration("context", contextDur),
+		cflog.Duration("total", time.Since(totalStart)),
+		cflog.Int("items", len(items)),
 	)
 
 	if !s.TagSnippets || !s.FunctionSnippets {
@@ -825,11 +825,11 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable, SortText: SortLocalVariables + v})
 				}
 				s.compCache.PutFunc(docURI, f.Name, hash, items)
-				s.logger.Debug("completion: func vars rebuilt",
-					zap.String("uri", string(docURI)),
-					zap.String("func", f.Name),
-					zap.Int("vars", len(vars)),
-					zap.Duration("dur", time.Since(start)),
+				s.log.Debug("completion: func vars rebuilt",
+					cflog.String("uri", string(docURI)),
+					cflog.String("func", f.Name),
+					cflog.Int("vars", len(vars)),
+					cflog.Duration("dur", time.Since(start)),
 				)
 			}
 		}
@@ -852,7 +852,6 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 		return
 	}
 	newPR := s.parseContent(docURI, content)
-	newPR.Log = &zapAdapter{s.logger}
 	s.mu.Lock()
 	s.parseResults[docURI] = newPR
 	s.mu.Unlock()
@@ -956,10 +955,10 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.P
 		})
 	}
 	s.compCache.PutFunc(docURI, "__this__", 0, thisItems)
-	s.logger.Debug("completion: file globals rebuilt",
-		zap.String("uri", string(docURI)),
-		zap.Int("globals", len(globals)),
-		zap.Duration("dur", time.Since(start)),
+	s.log.Debug("completion: file globals rebuilt",
+		cflog.String("uri", string(docURI)),
+		cflog.Int("globals", len(globals)),
+		cflog.Duration("dur", time.Since(start)),
 	)
 }
 

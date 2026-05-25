@@ -46,13 +46,13 @@ func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, new
 		pr.shiftAfter(startLine, delta)
 		pr.InvalidateFunc(pr.Scopes[funcIdx].Start, pr.Scopes[funcIdx].End)
 		pr.resetGlobalCaches()
-		pr.logInfo("applyEdit", "uri", string(pr.URI), "kind", "inFunc", "line", startLine, "funcStart", pr.Scopes[funcIdx].Start, "funcEnd", pr.Scopes[funcIdx].End, "dur", time.Since(start))
+		pr.logDebug("applyEdit", "uri", string(pr.URI), "kind", "inFunc", "line", startLine, "funcStart", pr.Scopes[funcIdx].Start, "funcEnd", pr.Scopes[funcIdx].End, "dur", time.Since(start))
 		return EditInFunc
 	}
 
 	// Edit is in global scope — need to re-parse signatures
 	pr.reparseShallow()
-	pr.logInfo("applyEdit", "uri", string(pr.URI), "kind", "global", "dur", time.Since(start))
+	pr.logDebug("applyEdit", "uri", string(pr.URI), "kind", "global", "dur", time.Since(start))
 	return EditGlobal
 }
 
@@ -146,7 +146,7 @@ func (pr *ParseResult) reparseShallow() {
 	pr.funcVarsMu.Lock()
 	pr.funcVars = make(map[string][]string)
 	pr.funcVarsMu.Unlock()
-	pr.logInfo("reparseShallow", "uri", string(pr.URI), "funcs", len(pr.Funcs), "dur", time.Since(start))
+	pr.logDebug("reparseShallow", "uri", string(pr.URI), "funcs", len(pr.Funcs), "dur", time.Since(start))
 }
 
 // resetGlobalCaches resets the lazily-computed global/variables/this var caches.

@@ -1,8 +1,6 @@
 package server
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,11 +9,9 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
-
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 func (s *Server) indexWorkspace() {
@@ -42,19 +38,8 @@ func (s *Server) indexWorkspace() {
 	}
 
 	total := len(files)
-	s.logger.Info("indexing workspace", zap.Int("totalFiles", total))
+	s.log.Info("indexing workspace", cflog.Int("totalFiles", total))
 	indexStart := time.Now()
-
-	ctx := context.Background()
-	token := "indexing"
-
-	// Send progress begin.
-	if s.conn != nil && total > 0 {
-		s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
-			"token": token,
-			"value": map[string]interface{}{"kind": "begin", "title": "Indexing", "message": fmt.Sprintf("0/%d files", total), "percentage": 0},
-		})
-	}
 
 	type parseResult struct {
 		fileURI    uri.URI
@@ -77,13 +62,6 @@ func (s *Server) indexWorkspace() {
 				s.index.SetEntity(cfcNameFromURI(r.fileURI), r.fileURI)
 			}
 			indexed++
-			if s.conn != nil && total > 0 && indexed%100 == 0 {
-				pct := (indexed * 100) / total
-				s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
-					"token": token,
-					"value": map[string]interface{}{"kind": "report", "message": fmt.Sprintf("%d/%d files", indexed, total), "percentage": pct},
-				})
-			}
 		}
 	}()
 
@@ -99,7 +77,7 @@ func (s *Server) indexWorkspace() {
 			defer func() { <-sem }()
 			defer func() {
 				if r := recover(); r != nil {
-					s.logger.Error("panic during indexing", zap.String("file", f), zap.Any("panic", r))
+					s.log.Error("panic during indexing", cflog.String("file", f), cflog.Any("panic", r))
 				}
 			}()
 			fileURI := uri.File(f)
@@ -118,14 +96,7 @@ func (s *Server) indexWorkspace() {
 	close(results)
 	indexWg.Wait()
 
-	// Send progress end.
-	if s.conn != nil && total > 0 {
-		s.notify(ctx, protocol.MethodProgress, map[string]interface{}{
-			"token": token,
-			"value": map[string]interface{}{"kind": "end", "message": fmt.Sprintf("Indexed %d files", total)},
-		})
-	}
-	s.logger.Info("indexing complete", zap.Int("files", indexed), zap.Int("total", total), zap.Duration("dur", time.Since(indexStart)))
+	s.log.Info("indexing complete", cflog.Int("files", indexed), cflog.Int("total", total), cflog.Duration("dur", time.Since(indexStart)))
 }
 
 // cfcNameFromURI extracts the CFC filename without extension from a URI.
@@ -165,6 +136,10 @@ func (s *Server) collectCFCFiles(root string) []string {
 			return err
 		}
 		if info.IsDir() {
+			name := info.Name()
+			if name == ".git" || name == "node_modules" || name == ".svn" || name == "target" || name == "vendor" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if isCFCFile(path) {
@@ -180,7 +155,7 @@ func expandGlob(pattern string) []string {
 }
 
 func (s *Server) indexRoot(root string) {
-	s.logger.Info("indexing workspace", zap.String("root", root))
+	s.log.Info("indexing workspace", cflog.String("root", root))
 	err := s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

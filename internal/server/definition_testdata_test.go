@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
-	"go.lsp.dev/protocol"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 

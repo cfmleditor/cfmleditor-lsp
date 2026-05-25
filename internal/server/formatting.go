@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
-	"go.uber.org/zap"
 )
 
 func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -35,7 +35,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	formatted, err := formatDocument(content, params.Options, s.Formatting)
 	elapsed := time.Since(start)
 	if err != nil {
-		s.logger.Warn("formatting failed", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed), zap.Error(err))
+		s.log.Warn("formatting failed", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed), cflog.Err(err))
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeWarning,
 			Message: "Formatting failed: " + err.Error(),
@@ -43,23 +43,23 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 	if formatted == content {
-		s.logger.Debug("formatting complete (no changes)", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
+		s.log.Debug("formatting complete (no changes)", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	s.logger.Debug("formatting complete", zap.String("uri", string(params.TextDocument.URI)), zap.Duration("elapsed", elapsed))
+	s.log.Debug("formatting complete", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
 
 	// Idempotency check: format again and verify the result is stable.
 	if s.Formatting.Debug {
 		formatted2, err2 := formatDocument(formatted, params.Options, s.Formatting)
 		if err2 != nil {
-			s.logger.Warn("formatting idempotency check failed", zap.String("uri", string(params.TextDocument.URI)), zap.Error(err2))
+			s.log.Warn("formatting idempotency check failed", cflog.String("uri", string(params.TextDocument.URI)), cflog.Err(err2))
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeWarning,
 				Message: "Formatting is not idempotent: second pass failed: " + err2.Error(),
 			})
 		} else if formatted2 != formatted {
-			s.logger.Warn("formatting is not idempotent", zap.String("uri", string(params.TextDocument.URI)))
+			s.log.Warn("formatting is not idempotent", cflog.String("uri", string(params.TextDocument.URI)))
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeWarning,
 				Message: "Formatting is not idempotent: second pass produced different output",
@@ -158,4 +158,3 @@ func findErrorNode(n *sitter.Node) *sitter.Node {
 	}
 	return nil
 }
-

@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -26,37 +27,37 @@ import (
 // Server implements the CFML Language Server Protocol handler.
 type Server struct {
 	conn        jsonrpc2.Conn
-	logger      *zap.Logger
+	log         cflog.Logger
 	initialized bool
 	Version     string
 	FS          vfs.FS // filesystem abstraction for portability
 
-	mu               sync.RWMutex
-	documents        map[uri.URI]string
-	workspaceRoots   []string
-	WorkspaceFolders []string // project folders from config
-	IndexGlobs       []string // optional glob filters (absolute paths)
-	Mappings           map[string]string          // component path mappings (key -> abs path)
-	ComponentResolvers []config.Resolver          // custom method-to-component resolvers
-	PropertyResolvers  []config.PropResolver      // custom property-to-component resolvers
-	BeanPaths          map[string]string          // namespace → abs directory path for bean scanning
-	Formatting         config.ResolvedFormatting  // formatting settings
-	Linting            bool                       // enable cflint diagnostics
-	TagSnippets        bool                       // insert snippets for tags
-	FunctionSnippets   bool                       // insert snippets for functions
-	GlobalFunctionResolution bool                 // resolve unqualified functions via global index
-	changeCount        map[uri.URI]int        // rapid change counter per file
-	changeWindowStart  map[uri.URI]time.Time  // start of current rapid-change window
-	resolveCache       map[string]string      // cached component path resolutions
-	beansLoaded        bool                   // whether bean map has been built
-	index            *index.Index
-	resolver         *resolve.Resolver
-	linter           *cflint.Runner
-	lintCancels      map[uri.URI]context.CancelFunc
-	compCache        *cache.Cache
-	funcRanges       map[uri.URI][]cache.FuncRange // cached function line ranges per file
-	cacheTimers      map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
-	parseResults     map[uri.URI]*cfparser.ParseResult  // cached parse results per file
+	mu                       sync.RWMutex
+	documents                map[uri.URI]string
+	workspaceRoots           []string
+	WorkspaceFolders         []string                  // project folders from config
+	IndexGlobs               []string                  // optional glob filters (absolute paths)
+	Mappings                 map[string]string         // component path mappings (key -> abs path)
+	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
+	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
+	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
+	Formatting               config.ResolvedFormatting // formatting settings
+	Linting                  bool                      // enable cflint diagnostics
+	TagSnippets              bool                      // insert snippets for tags
+	FunctionSnippets         bool                      // insert snippets for functions
+	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
+	changeCount              map[uri.URI]int           // rapid change counter per file
+	changeWindowStart        map[uri.URI]time.Time     // start of current rapid-change window
+	resolveCache             map[string]string         // cached component path resolutions
+	beansLoaded              bool                      // whether bean map has been built
+	index                    *index.Index
+	resolver                 *resolve.Resolver
+	linter                   *cflint.Runner
+	lintCancels              map[uri.URI]context.CancelFunc
+	compCache                *cache.Cache
+	funcRanges               map[uri.URI][]cache.FuncRange     // cached function line ranges per file
+	cacheTimers              map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
+	parseResults             map[uri.URI]*cfparser.ParseResult // cached parse results per file
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -67,15 +68,15 @@ func NewServer(conn jsonrpc2.Conn, logger *zap.Logger, sharedIndex ...*index.Ind
 		idx = sharedIndex[0]
 	}
 	return &Server{
-		conn:          conn,
-		logger:        logger,
-		FS:            vfs.OS{},
-		documents:     make(map[uri.URI]string),
-		index:         idx,
-		lintCancels:   make(map[uri.URI]context.CancelFunc),
-		compCache:     cache.New(),
-		funcRanges:    make(map[uri.URI][]cache.FuncRange),
-		cacheTimers:   make(map[uri.URI]*time.Timer),
+		conn:              conn,
+		log:               cflog.NewLogger(logger),
+		FS:                vfs.OS{},
+		documents:         make(map[uri.URI]string),
+		index:             idx,
+		lintCancels:       make(map[uri.URI]context.CancelFunc),
+		compCache:         cache.New(),
+		funcRanges:        make(map[uri.URI][]cache.FuncRange),
+		cacheTimers:       make(map[uri.URI]*time.Timer),
 		parseResults:      make(map[uri.URI]*cfparser.ParseResult),
 		changeCount:       make(map[uri.URI]int),
 		changeWindowStart: make(map[uri.URI]time.Time),
@@ -120,11 +121,11 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{"<", "/", ".", ">"},
 		},
-		DocumentFormattingProvider:      true,
+		DocumentFormattingProvider: true,
 		DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
 			FirstTriggerCharacter: ">",
 		},
-		DefinitionProvider:         true,
+		DefinitionProvider: true,
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: []string{"(", ","},
 		},
@@ -151,13 +152,13 @@ func (s *Server) initLinter() {
 	}
 	runner, err := cflint.NewRunner()
 	if err != nil {
-		s.logger.Warn("cflint unavailable", zap.Error(err))
+		s.log.Warn("cflint unavailable", cflog.Err(err))
 		return
 	}
 	s.mu.Lock()
 	s.linter = runner
 	s.mu.Unlock()
-	s.logger.Info("cflint ready")
+	s.log.Info("cflint ready")
 }
 
 // getResolver returns the shared resolver, creating it if needed.
@@ -230,13 +231,14 @@ func (s *Server) ensureBeansLoaded() {
 	if len(allBeanPaths) > 0 {
 		beans := buildBeanMap(allBeanPaths, s.FS)
 		s.index.SetBeans(beans)
-		s.logger.Info("bean map built (lazy)", zap.Int("beans", len(beans)))
+		s.log.Info("bean map built (lazy)", cflog.Int("beans", len(beans)))
 	}
 	s.beansLoaded = true
 	s.mu.Unlock()
 }
 
-func (s *Server) notify(ctx context.Context, method string, params interface{}) {	if s.conn != nil {
+func (s *Server) notify(ctx context.Context, method string, params interface{}) {
+	if s.conn != nil {
 		_ = s.conn.Notify(ctx, method, params)
 	}
 }
@@ -346,6 +348,7 @@ func (s *Server) cfPropertyResolvers() []cfparser.PropertyResolver {
 func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseResult {
 	s.ensureBeansLoaded()
 	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
+		Logger:            s.log,
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
 		BeanLookup:        s.index.LookupBean,
@@ -355,9 +358,8 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseRe
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser.ParseResult {
-	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{SkipRefs: true})
+	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{Shallow: true})
 }
-
 
 func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
 	if len(resolvers) == 0 {

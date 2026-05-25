@@ -6,14 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"go.lsp.dev/uri"
 )
 
 // Logger is an optional interface for parse diagnostics.
-type Logger interface {
-	Info(msg string, keysAndValues ...interface{})
-	Warn(msg string, keysAndValues ...interface{})
-}
+type Logger = log.Logger
 
 // ParseResult caches a single parse of a file. It extracts function signatures
 // and component refs eagerly, but defers function body parsing until requested.
@@ -29,14 +27,14 @@ type ParseResult struct {
 	Properties []propertyDef // parsed property declarations
 	Links      []DocumentLink // file path references extracted during shallow scan
 	Calls      []CallSite    // function call sites (when FindCalls is set)
-	Log        Logger        // optional logger for timing and errors
+	log        Logger        // optional logger for timing and errors
 	Resolvers         []Resolver         // optional component resolvers for RHS matching
 	PropertyResolvers []PropertyResolver // optional property-to-component resolvers
 	BeanLookup        func(string) string // optional bean name → dot-path lookup
 	extractLinks      bool               // whether to extract links during global scan
 	findCalls         []string           // function names to scan for
 	scanAllScopes     bool               // scan all lines including function bodies
-	skipRefs          bool               // skip component ref extraction
+	shallow           bool               // minimal parse mode
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -54,13 +52,14 @@ type ParseResult struct {
 
 // ParseOptions configures optional parse behaviour.
 type ParseOptions struct {
+	Logger            Logger
 	Resolvers         []Resolver
 	PropertyResolvers []PropertyResolver
 	BeanLookup        func(name string) string // optional: resolve bean name → dot-path
 	ExtractLinks      bool                     // extract document links during global scan
 	FindCalls         []string                 // function names to find call sites for
 	ScanAllScopes     bool                     // scan all lines including function bodies (for refs/deps)
-	SkipRefs          bool                     // skip component ref extraction (for fast indexing)
+	Shallow           bool                     // minimal parse: signatures only, no refs/properties/args
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -77,7 +76,7 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
 	pr.extractSignatures()
-	pr.logInfo("parse complete", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
+	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
 	return pr
 }
 
@@ -87,18 +86,19 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		URI:               fileURI,
 		Content:           content,
 		funcVars:          make(map[string][]string),
+		log:               opts.Logger,
 		Resolvers:         opts.Resolvers,
 		PropertyResolvers: opts.PropertyResolvers,
 		BeanLookup:        opts.BeanLookup,
 		extractLinks:      opts.ExtractLinks,
 		findCalls:         opts.FindCalls,
 		scanAllScopes:     opts.ScanAllScopes,
-		skipRefs:          opts.SkipRefs,
+		shallow:           opts.Shallow,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
 	pr.extractSignatures()
-	pr.logInfo("parse complete", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
+	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
 	return pr
 }
 
@@ -149,13 +149,11 @@ func (pr *ParseResult) extractSignatures() {
 		}
 	}
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
-	if !pr.skipRefs {
+	if !pr.shallow {
 		pr.generatePropertyAccessors()
-		// Extract component refs from init() body since the shallow parse skips function bodies.
 		pr.appendInitRefs()
+		pr.appendResolverRefs()
 	}
-	// Extract refs from resolver-matched assignments.
-	pr.appendResolverRefs()
 }
 
 // extractBeanName strips framework namespace prefixes from an inject value.
@@ -351,7 +349,7 @@ func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 			}
 		}
 	}
-	pr.logInfo("parseFuncBody", "uri", string(pr.URI), "funcStart", funcStart, "vars", len(names), "dur", time.Since(t))
+	pr.logDebug("parseFuncBody", "uri", string(pr.URI), "funcStart", funcStart, "vars", len(names), "dur", time.Since(t))
 	return names
 }
 
@@ -793,6 +791,30 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 			varStart++
 			varName := line[varStart:varEnd]
 			comp := pr.resolveVarComponent(varName, uint32(lineNum))
+			// If no variable match, try resolving call expression before the dot
+			if comp == "" && varEnd > 0 && line[varEnd-1] == ')' && len(pr.Resolvers) > 0 {
+				// Find matching open paren
+				depth := 0
+				j := varEnd - 1
+				for j >= 0 {
+					if line[j] == ')' {
+						depth++
+					} else if line[j] == '(' {
+						depth--
+						if depth == 0 {
+							fnStart := j - 1
+							for fnStart >= 0 && (line[fnStart] >= 'a' && line[fnStart] <= 'z' || line[fnStart] >= 'A' && line[fnStart] <= 'Z' || line[fnStart] >= '0' && line[fnStart] <= '9' || line[fnStart] == '_') {
+								fnStart--
+							}
+							fnStart++
+							callExpr := line[fnStart:varEnd]
+							comp = ResolveFromCall(callExpr, pr.Resolvers)
+							break
+						}
+					}
+					j--
+				}
+			}
 			pr.Calls = append(pr.Calls, CallSite{
 				FuncName: target, Component: comp, Line: uint32(lineNum), Caller: caller,
 				Resolved: comp != "", Text: strings.TrimSpace(line),
@@ -871,14 +893,14 @@ func lineOffsets(content string, startLine, endLine int) (int, int) {
 	return start, end
 }
 
-func (pr *ParseResult) logInfo(msg string, keysAndValues ...interface{}) {
-	if pr.Log != nil {
-		pr.Log.Info(msg, keysAndValues...)
+func (pr *ParseResult) logDebug(msg string, keysAndValues ...interface{}) {
+	if pr.log != nil {
+		pr.log.Debug(msg, keysAndValues...)
 	}
 }
 
 func (pr *ParseResult) logWarn(msg string, keysAndValues ...interface{}) {
-	if pr.Log != nil {
-		pr.Log.Warn(msg, keysAndValues...)
+	if pr.log != nil {
+		pr.log.Warn(msg, keysAndValues...)
 	}
 }

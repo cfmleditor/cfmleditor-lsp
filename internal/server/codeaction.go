@@ -34,7 +34,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 	if qualifier := qualifierBeforeWord(content, line, char); qualifier != "" {
 		actions = append(actions, protocol.CodeAction{
 			Title: "Find all references to " + word,
-			
+
 			Command: &protocol.Command{
 				Title:     "Find all references to " + word,
 				Command:   "cfmleditor.findRefs",
@@ -43,7 +43,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		})
 		actions = append(actions, protocol.CodeAction{
 			Title: "Export dependency graph",
-			
+
 			Command: &protocol.Command{
 				Title:     "Export dependency graph",
 				Command:   "cfmleditor.exportDeps",
@@ -54,7 +54,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		// Unqualified — offer function-level actions
 		actions = append(actions, protocol.CodeAction{
 			Title: "Find all calls to " + word,
-			
+
 			Command: &protocol.Command{
 				Title:     "Find all calls to " + word,
 				Command:   "cfmleditor.findRefs",
@@ -63,7 +63,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		})
 		actions = append(actions, protocol.CodeAction{
 			Title: "Show dependencies for this file",
-			
+
 			Command: &protocol.Command{
 				Title:     "Show dependencies for this file",
 				Command:   "cfmleditor.exportDeps",

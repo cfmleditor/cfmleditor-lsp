@@ -3050,7 +3050,7 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 
 func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	srv := newTestServer()
-srv.GlobalFunctionResolution = true
+	srv.GlobalFunctionResolution = true
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
 	// svc has no resolved ref — qualified fallback finds myFunc globally
@@ -4330,9 +4330,9 @@ func TestFindAllCalls_GetById(t *testing.T) {
 	var resolvers []cfparser.Resolver
 
 	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
-		FuncName:          "getById",
-		Resolvers:         resolvers,
-		BeanLookup:        beanLookup,
+		FuncName:   "getById",
+		Resolvers:  resolvers,
+		BeanLookup: beanLookup,
 	})
 
 	if len(entries) == 0 {
