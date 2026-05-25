@@ -85,15 +85,22 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 
 		for _, current := range queue {
 			for _, call := range current.calls {
-				if call.Component == "" {
+				if call.Component == "" && call.Variable == "" {
 					continue
 				}
 
-				resolved := opts.Resolver.ComponentPath(call.Component, baseDir)
-				toLabel := call.Component + "." + call.FuncName
+				resolved := ""
+				toLabel := call.FuncName
 
-				if resolved != "" {
-					toLabel = filepath.Base(resolved) + "::" + call.FuncName
+				if call.Component != "" {
+					resolved = opts.Resolver.ComponentPath(call.Component, baseDir)
+					toLabel = call.Component + "." + call.FuncName
+
+					if resolved != "" {
+						toLabel = filepath.Base(resolved) + "::" + call.FuncName
+					}
+				} else if call.Variable != "" {
+					toLabel = call.Variable + "." + call.FuncName
 				}
 
 				edges = append(edges, graph.Edge{

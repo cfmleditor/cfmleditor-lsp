@@ -37,6 +37,10 @@ test:
 visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
 
+fmt:
+	gofmt -w .
+	golangci-lint run --fix ./...
+
 lint:
 	golangci-lint run ./...
 
