@@ -1,7 +1,7 @@
-// Package cfparser provides a hand-written recursive descent parser for CFML
+// Package parser provides a hand-written recursive descent parser for CFML
 // and CFScript that extracts function definitions, variable declarations, and
 // component references.
-package cfparser
+package parser
 
 import "strings"
 

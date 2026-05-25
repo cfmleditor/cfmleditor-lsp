@@ -1,4 +1,4 @@
-package cfparser
+package parser
 
 import (
 	"fmt"
@@ -835,7 +835,6 @@ func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 			comp := pr.resolveVarComponent(resolveVar, uint32(lineNum))
 			key := strings.ToLower(comp + "." + methodName)
 			if seen[key] {
-				lineNum++
 				continue
 			}
 			seen[key] = true

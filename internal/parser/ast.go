@@ -1,4 +1,4 @@
-package cfparser
+package parser
 
 import (
 	"fmt"

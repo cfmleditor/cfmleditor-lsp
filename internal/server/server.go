@@ -11,7 +11,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
@@ -56,7 +56,7 @@ type Server struct {
 	compCache                *cache.Cache
 	funcRanges               map[uri.URI][]cache.FuncRange     // cached function line ranges per file
 	cacheTimers              map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
-	parseResults             map[uri.URI]*cfparser.ParseResult // cached parse results per file
+	parseResults             map[uri.URI]*parser.ParseResult // cached parse results per file
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -76,7 +76,7 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		compCache:         cache.New(),
 		funcRanges:        make(map[uri.URI][]cache.FuncRange),
 		cacheTimers:       make(map[uri.URI]*time.Timer),
-		parseResults:      make(map[uri.URI]*cfparser.ParseResult),
+		parseResults:      make(map[uri.URI]*parser.ParseResult),
 		changeCount:       make(map[uri.URI]int),
 		changeWindowStart: make(map[uri.URI]time.Time),
 	}
@@ -322,32 +322,32 @@ func (s *Server) invalidateResolveCache() {
 	s.invalidateResolver()
 }
 
-func (s *Server) cfResolvers() []cfparser.Resolver {
+func (s *Server) cfResolvers() []parser.Resolver {
 	if len(s.ComponentResolvers) == 0 {
 		return nil
 	}
-	r := make([]cfparser.Resolver, len(s.ComponentResolvers))
+	r := make([]parser.Resolver, len(s.ComponentResolvers))
 	for i, cr := range s.ComponentResolvers {
-		r[i] = cfparser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
+		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
 	}
 	return r
 }
 
-func (s *Server) cfPropertyResolvers() []cfparser.PropertyResolver {
+func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {
 	if len(s.PropertyResolvers) == 0 {
 		return nil
 	}
-	r := make([]cfparser.PropertyResolver, len(s.PropertyResolvers))
+	r := make([]parser.PropertyResolver, len(s.PropertyResolvers))
 	for i, pr := range s.PropertyResolvers {
-		r[i] = cfparser.PropertyResolver{Match: pr.Match, Resolve: pr.Resolve, Attribute: pr.Attribute}
+		r[i] = parser.PropertyResolver{Match: pr.Match, Resolve: pr.Resolve, Attribute: pr.Attribute}
 	}
 	return r
 }
 
 // parseContent parses CFC content with all configured resolvers and link extraction.
-func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseResult {
+func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResult {
 	s.ensureBeansLoaded()
-	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{
+	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
 		Logger:            s.log,
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
@@ -357,17 +357,17 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *cfparser.ParseRe
 }
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).
-func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *cfparser.ParseResult {
-	return cfparser.ParseWithOptions(fileURI, content, cfparser.ParseOptions{Shallow: true})
+func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.ParseResult {
+	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{Shallow: true})
 }
 
 func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
 	if len(resolvers) == 0 {
 		return ""
 	}
-	cfr := make([]cfparser.Resolver, len(resolvers))
+	cfr := make([]parser.Resolver, len(resolvers))
 	for i, r := range resolvers {
-		cfr[i] = cfparser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix}
+		cfr[i] = parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix}
 	}
-	return cfparser.ResolveFromCall(expr, cfr)
+	return parser.ResolveFromCall(expr, cfr)
 }

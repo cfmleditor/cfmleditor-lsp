@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -47,7 +47,7 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 	docURI := uri.URI("file://" + abs)
 	content := string(data)
 	srv.setDocument(docURI, content)
-	pr := cfparser.Parse(docURI, content, srv.cfResolvers())
+	pr := parser.Parse(docURI, content, srv.cfResolvers())
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 	return docURI
 }

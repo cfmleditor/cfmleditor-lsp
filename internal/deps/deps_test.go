@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"go.lsp.dev/uri"
 )
@@ -19,7 +19,7 @@ func testdataDir() string {
 
 type testResolver struct{ dir string }
 
-func (r *testResolver) ComponentPath(component, baseDir string) string {
+func (r *testResolver) ComponentPath(component, _ string) string {
 	name := component
 	if idx := strings.LastIndex(name, "."); idx >= 0 {
 		name = name[idx+1:]
@@ -28,14 +28,14 @@ func (r *testResolver) ComponentPath(component, baseDir string) string {
 	return abs
 }
 
-func parseFile(t *testing.T, path string) *cfparser.ParseResult {
+func parseFile(t *testing.T, path string) *parser.ParseResult {
 	t.Helper()
 	absPath, _ := filepath.Abs(path)
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	return cfparser.ParseWithOptions(uri.URI("file://"+absPath), string(content), cfparser.ParseOptions{})
+	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), parser.ParseOptions{})
 }
 
 func buildIndex(t *testing.T, dir string) *index.Index {
@@ -57,7 +57,7 @@ func TestBuild_FunctionDeps(t *testing.T) {
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
 	// Get function-level calls using FuncCalls
-	var calls []cfparser.CallSite
+	var calls []parser.CallSite
 	for _, sc := range pr.Scopes {
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, "BuildReport") && int(f.Line) == sc.Start {
@@ -113,10 +113,8 @@ func TestBuild_FileDeps(t *testing.T) {
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
 	// All file-level refs
-	refs := make([]cfparser.ComponentRef, len(pr.Refs))
-	for i, r := range pr.Refs {
-		refs[i] = r
-	}
+	refs := make([]parser.ComponentRef, len(pr.Refs))
+	copy(refs, pr.Refs)
 
 	result := Build(Options{
 		DocURI:   "file://" + controllerPath,
@@ -157,10 +155,8 @@ func TestBuild_CleanupDeps(t *testing.T) {
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
-	refs := make([]cfparser.ComponentRef, len(pr.Refs))
-	for i, r := range pr.Refs {
-		refs[i] = r
-	}
+	refs := make([]parser.ComponentRef, len(pr.Refs))
+	copy(refs, pr.Refs)
 
 	result := Build(Options{
 		DocURI:   "file://" + controllerPath,

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/uri"
 )
 
@@ -86,7 +86,7 @@ func main() {
 
 		fileURI := uri.URI("file://" + f)
 		start := time.Now()
-		pr := cfparser.Parse(fileURI, string(content))
+		pr := parser.Parse(fileURI, string(content))
 		dur := time.Since(start)
 
 		totalDur += dur

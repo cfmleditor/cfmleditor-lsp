@@ -5,17 +5,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/uri"
 )
 
 // Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
 	mu        sync.RWMutex
-	funcs     map[string][]*cfparser.FunctionDef    // lowercase name -> definitions
-	fileFuncs map[string][]*cfparser.FunctionDef    // lowercase URI -> definitions in that file
-	comprefs  map[string][]*cfparser.ComponentRef   // lowercase variable -> refs
-	fileRefs  map[string][]*cfparser.ComponentRef   // lowercase URI -> refs in that file
+	funcs     map[string][]*parser.FunctionDef    // lowercase name -> definitions
+	fileFuncs map[string][]*parser.FunctionDef    // lowercase URI -> definitions in that file
+	comprefs  map[string][]*parser.ComponentRef   // lowercase variable -> refs
+	fileRefs  map[string][]*parser.ComponentRef   // lowercase URI -> refs in that file
 	thisVars  map[string][]string                   // lowercase URI -> this-scoped var names
 	beans     map[string]string                     // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                    // lowercase entity name -> file URI
@@ -24,10 +24,10 @@ type Index struct {
 // New creates an empty Index.
 func New() *Index {
 	return &Index{
-		funcs:     make(map[string][]*cfparser.FunctionDef),
-		fileFuncs: make(map[string][]*cfparser.FunctionDef),
-		comprefs:  make(map[string][]*cfparser.ComponentRef),
-		fileRefs:  make(map[string][]*cfparser.ComponentRef),
+		funcs:     make(map[string][]*parser.FunctionDef),
+		fileFuncs: make(map[string][]*parser.FunctionDef),
+		comprefs:  make(map[string][]*parser.ComponentRef),
+		fileRefs:  make(map[string][]*parser.ComponentRef),
 		thisVars:  make(map[string][]string),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
@@ -35,17 +35,17 @@ func New() *Index {
 }
 
 // Lookup returns all function definitions matching the given name (case-insensitive).
-func (idx *Index) Lookup(name string) []*cfparser.FunctionDef {
+func (idx *Index) Lookup(name string) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.funcs[strings.ToLower(name)]
 }
 
 // AllFunctions returns every indexed function definition.
-func (idx *Index) AllFunctions() []*cfparser.FunctionDef {
+func (idx *Index) AllFunctions() []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
-	var all []*cfparser.FunctionDef
+	var all []*parser.FunctionDef
 	for _, defs := range idx.funcs {
 		all = append(all, defs...)
 	}
@@ -58,7 +58,7 @@ func uriKey(u uri.URI) string {
 }
 
 // FunctionsForFile returns all indexed function definitions for a specific file.
-func (idx *Index) FunctionsForFile(fileURI uri.URI) []*cfparser.FunctionDef {
+func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.fileFuncs[uriKey(fileURI)]
@@ -87,7 +87,7 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 
 // IndexFile parses the given CFC content and updates the index for that file URI.
 func (idx *Index) IndexFile(fileURI uri.URI, content string) {
-	pr := cfparser.Parse(fileURI, content)
+	pr := parser.Parse(fileURI, content)
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -96,7 +96,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fk := uriKey(fileURI)
 	idx.thisVars[fk] = pr.ThisVars()
 
-	var fileDefs []*cfparser.FunctionDef
+	var fileDefs []*parser.FunctionDef
 	for i := range pr.Funcs {
 		key := strings.ToLower(pr.Funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &pr.Funcs[i])
@@ -104,7 +104,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	}
 	idx.fileFuncs[fk] = fileDefs
 
-	var fileRefsList []*cfparser.ComponentRef
+	var fileRefsList []*parser.ComponentRef
 	for i := range pr.Refs {
 		key := strings.ToLower(pr.Refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &pr.Refs[i])
@@ -114,14 +114,14 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 }
 
 // IndexFileFromResult updates the index using pre-parsed function defs and refs.
-func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []cfparser.FunctionDef, refs []cfparser.ComponentRef) {
+func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDef, refs []parser.ComponentRef) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
 	fk := uriKey(fileURI)
 
-	var fileDefs []*cfparser.FunctionDef
+	var fileDefs []*parser.FunctionDef
 	for i := range funcs {
 		key := strings.ToLower(funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &funcs[i])
@@ -129,7 +129,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []cfparser.Function
 	}
 	idx.fileFuncs[fk] = fileDefs
 
-	var fileRefsList []*cfparser.ComponentRef
+	var fileRefsList []*parser.ComponentRef
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
@@ -204,14 +204,14 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 }
 
 // LookupComponentRef returns component references for the given variable name.
-func (idx *Index) LookupComponentRef(variable string) []*cfparser.ComponentRef {
+func (idx *Index) LookupComponentRef(variable string) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.comprefs[strings.ToLower(variable)]
 }
 
 // RefsForFile returns all component references indexed for a specific file.
-func (idx *Index) RefsForFile(fileURI uri.URI) []*cfparser.ComponentRef {
+func (idx *Index) RefsForFile(fileURI uri.URI) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.fileRefs[uriKey(fileURI)]
@@ -232,7 +232,7 @@ func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 }
 
 // AddRefs appends additional component refs to the index.
-func (idx *Index) AddRefs(refs []cfparser.ComponentRef) {
+func (idx *Index) AddRefs(refs []parser.ComponentRef) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	for i := range refs {
@@ -245,11 +245,11 @@ func (idx *Index) AddRefs(refs []cfparser.ComponentRef) {
 
 // LookupComponentRefInFile returns the component ref for a variable in a specific file
 // that is closest to (but not after) the given line.
-func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, line uint32) *cfparser.ComponentRef {
+func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, line uint32) *parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	key := uriKey(fileURI)
-	var best *cfparser.ComponentRef
+	var best *parser.ComponentRef
 	for _, ref := range idx.comprefs[strings.ToLower(variable)] {
 		if uriKey(ref.URI) == key && ref.Line <= line {
 			if best == nil || ref.Line > best.Line {

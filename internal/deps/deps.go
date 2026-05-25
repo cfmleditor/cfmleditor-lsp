@@ -6,15 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
 	"go.lsp.dev/uri"
 )
 
 // Index provides the subset of index operations needed for dependency tracing.
 type Index interface {
-	RefsForFile(fileURI uri.URI) []*cfparser.ComponentRef
-	FunctionsForFile(fileURI uri.URI) []*cfparser.FunctionDef
+	RefsForFile(fileURI uri.URI) []*parser.ComponentRef
+	FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef
 }
 
 // Resolver resolves component dot-paths to file paths.
@@ -26,8 +26,8 @@ type Resolver interface {
 type Options struct {
 	DocURI   string
 	FuncName string                  // optional: scope to a specific function
-	Calls    []cfparser.CallSite     // function-level calls (from FuncCalls)
-	Refs     []cfparser.ComponentRef // file-level refs (fallback when Calls is empty)
+	Calls    []parser.CallSite     // function-level calls (from FuncCalls)
+	Refs     []parser.ComponentRef // file-level refs (fallback when Calls is empty)
 	Index    Index
 	Resolver Resolver
 	MaxDepth int
@@ -71,7 +71,7 @@ func Build(opts Options) Result {
 func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
 	type node struct {
 		label string
-		calls []cfparser.CallSite
+		calls []parser.CallSite
 	}
 	var edges []graph.Edge
 	queue := []node{{label: startLabel, calls: opts.Calls}}
@@ -120,7 +120,7 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
 	type node struct {
 		label string
-		refs  []cfparser.ComponentRef
+		refs  []parser.ComponentRef
 	}
 	var edges []graph.Edge
 	queue := []node{{label: startLabel, refs: opts.Refs}}
@@ -150,7 +150,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 				}
 				seen[targetURI] = true
 				ptrs := opts.Index.RefsForFile(uri.URI(targetURI))
-				var nextRefs []cfparser.ComponentRef
+				var nextRefs []parser.ComponentRef
 				for _, p := range ptrs {
 					nextRefs = append(nextRefs, *p)
 				}
@@ -168,7 +168,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 // getFuncCalls retrieves CallSite data for a function. This requires the file
 // to be parsed — we check if the index has the function, then return empty
 // (the caller should provide parsed data for deeper tracing).
-func getFuncCalls(_ Index, _ uri.URI, _ string) []cfparser.CallSite {
+func getFuncCalls(_ Index, _ uri.URI, _ string) []parser.CallSite {
 	// TODO: For deeper recursive tracing, the handler should provide a callback
 	// or pre-parse target files. For now, we stop at one level of call resolution.
 	return nil

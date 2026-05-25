@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/tags"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -206,7 +207,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	)
 
 	var editLine int
-	var lastKind cfparser.EditKind
+	var lastKind parser.EditKind
 
 	if rapidChanges {
 		// Too many changes in quick succession — just apply text and defer reindex.
@@ -255,7 +256,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			content = change.Text
 			if pr != nil {
 				pr.ApplyFullReplace(content)
-				lastKind = cfparser.EditFull
+				lastKind = parser.EditFull
 			}
 		} else {
 			content = applyEdit(content, change.Range, change.Text)
@@ -285,13 +286,13 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	// Update funcRanges from the parse result
 	switch lastKind {
-	case cfparser.EditGlobal, cfparser.EditFull:
+	case parser.EditGlobal, parser.EditFull:
 		// Signatures changed — update funcRanges and the index
 		s.mu.Lock()
 		s.funcRanges[docURI] = scopesToFuncRanges(pr)
 		s.mu.Unlock()
 		s.reindexFromParseResult(docURI, pr)
-	case cfparser.EditInFunc:
+	case parser.EditInFunc:
 		// Only function body changed — shift index lines and rebuild local vars
 		lineDelta := 0
 		for _, change := range params.ContentChanges {
@@ -473,7 +474,7 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 }
 
 // reindexFromParseResult updates the index using an existing ParseResult.
-func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult) {
+func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) {
 	if !isCFMLFile(string(docURI)) {
 		return
 	}
@@ -490,7 +491,7 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *cfparser.ParseResult
 
 // resolverRefs scans content for assignments whose RHS matches a component resolver.
 // scopesToFuncRanges converts ParseResult scopes to cache.FuncRange slice.
-func scopesToFuncRanges(pr *cfparser.ParseResult) []cache.FuncRange {
+func scopesToFuncRanges(pr *parser.ParseResult) []cache.FuncRange {
 	ranges := make([]cache.FuncRange, 0, len(pr.Scopes))
 	for _, sc := range pr.Scopes {
 		name := ""
@@ -630,7 +631,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		s.invalidateResolveCache()
 		cfpath.InvalidateAppMappingsCache()
 		s.mu.Lock()
-		s.parseResults = make(map[uri.URI]*cfparser.ParseResult)
+		s.parseResults = make(map[uri.URI]*parser.ParseResult)
 		s.funcRanges = make(map[uri.URI][]cache.FuncRange)
 		s.mu.Unlock()
 		s.compCache.InvalidateAll()
@@ -751,7 +752,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 				char = int(v)
 			}
 		}
-		pos := findMatchingTag(content, line, char)
+		pos := tags.FindMatchingTag(content, line, char)
 		if pos == nil {
 			return reply(ctx, nil, nil)
 		}
@@ -827,7 +828,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 
 		fileURI := uri.URI(docURI)
-		var depsCalls []cfparser.CallSite
+		var depsCalls []parser.CallSite
 
 		s.mu.RLock()
 		pr := s.parseResults[fileURI]
@@ -854,7 +855,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			}
 		}
 
-		var depsRefs []cfparser.ComponentRef
+		var depsRefs []parser.ComponentRef
 		if len(depsCalls) == 0 {
 			// Fallback to component refs from index
 			ptrs := s.index.RefsForFile(fileURI)
@@ -901,128 +902,6 @@ func (s *Server) safeGo(label string, fn func()) {
 		}()
 		fn()
 	}()
-}
-
-// findMatchingTag finds the matching open/close tag at the given position.
-func findMatchingTag(content string, line, char int) map[string]interface{} {
-	lineText := lineAtOffset(content, line)
-	if lineText == "" {
-		return nil
-	}
-	pos := min(char, len(lineText))
-
-	tagStart := -1
-	for i := pos; i >= 0; i-- {
-		if i < len(lineText) && lineText[i] == '<' {
-			tagStart = i
-			break
-		}
-	}
-	if tagStart < 0 {
-		return nil
-	}
-
-	isClose := tagStart+1 < len(lineText) && lineText[tagStart+1] == '/'
-	nameStart := tagStart + 1
-	if isClose {
-		nameStart = tagStart + 2
-	}
-	nameEnd := nameStart
-	for nameEnd < len(lineText) && lineText[nameEnd] != ' ' && lineText[nameEnd] != '>' && lineText[nameEnd] != '/' {
-		nameEnd++
-	}
-	if nameStart == nameEnd {
-		return nil
-	}
-	tagName := strings.ToLower(lineText[nameStart:nameEnd])
-
-	offset := 0
-	for l := 0; l < line; l++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return nil
-		}
-		offset += idx + 1
-	}
-	cursorOffset := offset + pos
-
-	if isClose {
-		depth := 0
-		i := cursorOffset - 1
-		for i >= 0 {
-			if i > 0 && content[i-1] == '<' && content[i] == '/' {
-				end := strings.IndexByte(content[i:], '>')
-				if end > 0 {
-					name := strings.ToLower(strings.TrimSpace(content[i+1 : i+end]))
-					if name == tagName {
-						depth++
-					}
-				}
-			} else if content[i] == '<' && (i+1 >= len(content) || content[i+1] != '/') {
-				end := i + 1
-				for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
-					end++
-				}
-				name := strings.ToLower(content[i+1 : end])
-				if name == tagName {
-					if depth == 0 {
-						return offsetToPosition(content, i)
-					}
-					depth--
-				}
-			}
-			i--
-		}
-	} else {
-		searchStart := offset + nameEnd
-		for searchStart < len(content) && content[searchStart] != '>' {
-			searchStart++
-		}
-		searchStart++
-		depth := 0
-		i := searchStart
-		for i < len(content) {
-			if content[i] == '<' {
-				if i+1 < len(content) && content[i+1] == '/' {
-					end := i + 2
-					for end < len(content) && content[end] != '>' && content[end] != ' ' {
-						end++
-					}
-					name := strings.ToLower(content[i+2 : end])
-					if name == tagName {
-						if depth == 0 {
-							return offsetToPosition(content, i)
-						}
-						depth--
-					}
-				} else {
-					end := i + 1
-					for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
-						end++
-					}
-					name := strings.ToLower(content[i+1 : end])
-					if name == tagName {
-						depth++
-					}
-				}
-			}
-			i++
-		}
-	}
-	return nil
-}
-
-func offsetToPosition(content string, offset int) map[string]interface{} {
-	line := 0
-	lastNL := -1
-	for i := 0; i < offset && i < len(content); i++ {
-		if content[i] == '\n' {
-			line++
-			lastNL = i
-		}
-	}
-	char := offset - lastNL - 1
-	return map[string]interface{}{"line": line, "character": char}
 }
 
 // fileToPackage converts a file path to a CFML dot-path relative to workspace.

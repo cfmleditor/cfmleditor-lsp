@@ -12,7 +12,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -818,7 +818,7 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 				if pr != nil {
 					vars = pr.FuncVars(f.Start, f.End)
 				} else {
-					vars = cfparser.VarsInFunc(content, f.Start, f.End)
+					vars = parser.VarsInFunc(content, f.Start, f.End)
 				}
 				items := make([]protocol.CompletionItem, 0, len(vars))
 				for _, v := range vars {
@@ -859,7 +859,7 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 }
 
 // rebuildFileCompletionCacheFromPR rebuilds file-level completion from an existing ParseResult.
-func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *cfparser.ParseResult) {
+func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.ParseResult) {
 	start := time.Now()
 	builtins := getBuiltinFuncItems()
 	globals := pr.VariablesVars()
@@ -1171,7 +1171,7 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 		return nil
 	}
 
-	var def *cfparser.FunctionDef
+	var def *parser.FunctionDef
 
 	// Try builtin
 	if e, ok := docs.LookupFunction(funcName); ok {

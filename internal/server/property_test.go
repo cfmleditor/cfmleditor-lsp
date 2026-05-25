@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/uri"
 )
@@ -30,7 +30,7 @@ func TestPropertyDefinition_BeanLookupViaInject(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := cfparser.ParseWithOptions(docURI, content, cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
@@ -62,7 +62,7 @@ func TestPropertyDefinition_TypeBasedRef(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := cfparser.Parse(docURI, content)
+	pr := parser.Parse(docURI, content)
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 
 	// logger has type="services.BeanUserService" which is a CFC path
@@ -84,7 +84,7 @@ func TestPropertyDefinition_PrimitiveTypeNoRef(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := cfparser.Parse(docURI, content)
+	pr := parser.Parse(docURI, content)
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 
 	// config has type="string" — should NOT create a component ref
@@ -108,7 +108,7 @@ func TestPropertyDefinition_TagCFC(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := cfparser.ParseWithOptions(docURI, content, cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
@@ -141,7 +141,7 @@ func TestPropertyDefinition_AccessorsGenerated(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := cfparser.Parse(docURI, content)
+	pr := parser.Parse(docURI, content)
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 
 	// Check that accessor functions are indexed

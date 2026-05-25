@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/uri"
@@ -29,8 +29,8 @@ type Options struct {
 	FuncName          string                        // function name to find calls to (empty = skip)
 	Component         string                        // component dot-path to find refs to (empty = skip)
 	SourceFile        string                        // absolute path of the source file (same-file calls always match)
-	Resolvers         []cfparser.Resolver           // resolvers for ParseWithOptions
-	PropertyResolvers []cfparser.PropertyResolver   // property resolvers
+	Resolvers         []parser.Resolver           // resolvers for ParseWithOptions
+	PropertyResolvers []parser.PropertyResolver   // property resolvers
 	BeanLookup        func(string) string           // bean name → dot-path lookup
 	VerifyCall        func(component, funcName, fileDir string) bool // optional: verify the component has this function
 	VerifyTarget      func(component, fileDir, sourceFile string) bool // optional: verify the call resolves to the source component
@@ -43,12 +43,12 @@ func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
 }
 
 // FindCalls is a convenience wrapper for finding function calls.
-func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []cfparser.Resolver) []Entry {
+func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []parser.Resolver) []Entry {
 	return Find(fsys, roots, Options{FuncName: funcName, Resolvers: resolvers})
 }
 
 // FindComponentRefs is a convenience wrapper for finding component references.
-func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []cfparser.Resolver) []Entry {
+func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []parser.Resolver) []Entry {
 	return Find(fsys, roots, Options{Component: component, Resolvers: resolvers})
 }
 
@@ -102,7 +102,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 			fileURI := uri.URI("file://" + absPath)
 
 			// Parse once with resolvers and call scanning — scan all scopes
-			parseOpts := cfparser.ParseOptions{
+			parseOpts := parser.ParseOptions{
 				Resolvers:         opts.Resolvers,
 				PropertyResolvers: opts.PropertyResolvers,
 				ScanAllScopes:     true,
@@ -117,7 +117,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 			if funcTarget != "" {
 				parseOpts.FindCalls = []string{opts.FuncName}
 			}
-			pr := cfparser.ParseWithOptions(fileURI, content, parseOpts)
+			pr := parser.ParseWithOptions(fileURI, content, parseOpts)
 
 			var entries []Entry
 

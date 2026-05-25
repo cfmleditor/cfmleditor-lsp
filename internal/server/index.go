@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/uri"
@@ -42,7 +42,7 @@ func (s *Server) indexWorkspace() {
 
 	type parseResult struct {
 		fileURI    uri.URI
-		pr         *cfparser.ParseResult
+		pr         *parser.ParseResult
 		file       string
 		persistent bool
 	}

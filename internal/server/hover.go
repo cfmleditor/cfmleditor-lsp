@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -70,7 +70,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	defs := s.index.Lookup(word)
 	if len(defs) > 0 {
 		// Only show if in current file or (global resolution enabled + exactly one match)
-		var def *cfparser.FunctionDef
+		var def *parser.FunctionDef
 		for _, d := range defs {
 			if d.URI == docURI {
 				def = d
@@ -93,7 +93,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	return reply(ctx, nil, nil)
 }
 
-func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *cfparser.FunctionDef {
+func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *parser.FunctionDef {
 	var comp string
 	switch {
 	case strings.HasPrefix(qualifier, "~?"):
@@ -129,7 +129,7 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 	return nil
 }
 
-func formatFuncHover(def *cfparser.FunctionDef) string {
+func formatFuncHover(def *parser.FunctionDef) string {
 	var b strings.Builder
 	b.WriteString("**")
 	b.WriteString(def.Name)

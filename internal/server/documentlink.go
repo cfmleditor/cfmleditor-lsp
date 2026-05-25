@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -29,7 +29,7 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
 
-	var docLinks []cfparser.DocumentLink
+	var docLinks []parser.DocumentLink
 	if pr != nil {
 		// Global scope links from parse time
 		docLinks = append(docLinks, pr.Links...)
@@ -40,7 +40,7 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 		}
 	} else {
 		// Fallback: full scan
-		docLinks = cfparser.ExtractLinks(content)
+		docLinks = parser.ExtractLinks(content)
 	}
 
 	var links []protocol.DocumentLink

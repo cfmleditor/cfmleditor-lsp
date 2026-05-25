@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -19,9 +19,9 @@ var (
 	appMappingsCacheMu sync.RWMutex
 )
 
-// ParseApplicationMappings delegates to cfparser.ParseApplicationMappings.
+// ParseApplicationMappings delegates to parser.ParseApplicationMappings.
 func ParseApplicationMappings(content string, appDir string) map[string]string {
-	return cfparser.ParseApplicationMappings(content, appDir)
+	return parser.ParseApplicationMappings(content, appDir)
 }
 
 // readApplicationFile reads Application.cfc or Application.cfm from appDir.
@@ -50,7 +50,7 @@ func LoadAppMappings(appDir string) map[string]string {
 		return nil
 	}
 
-	m := cfparser.ParseApplicationMappings(string(content), appDir)
+	m := parser.ParseApplicationMappings(string(content), appDir)
 
 	appMappingsCacheMu.Lock()
 	appMappingsCache[appDir] = m
@@ -65,9 +65,9 @@ func InvalidateAppMappingsCache() {
 	appMappingsCacheMu.Unlock()
 }
 
-// ParseAppBeanPaths delegates to cfparser.ParseAppBeanPaths.
+// ParseAppBeanPaths delegates to parser.ParseAppBeanPaths.
 func ParseAppBeanPaths(content string, appDir string) map[string]string {
-	return cfparser.ParseAppBeanPaths(content, appDir)
+	return parser.ParseAppBeanPaths(content, appDir)
 }
 
 // LoadAppBeanPaths returns cached Application.cfc bean paths for appDir.
@@ -85,7 +85,7 @@ func LoadAppBeanPaths(appDir string) map[string]string {
 		return nil
 	}
 
-	m := cfparser.ParseAppBeanPaths(string(content), appDir)
+	m := parser.ParseAppBeanPaths(string(content), appDir)
 
 	appMappingsCacheMu.Lock()
 	appMappingsCache[key] = m
@@ -93,9 +93,9 @@ func LoadAppBeanPaths(appDir string) map[string]string {
 	return m
 }
 
-// ParseOrmLocations delegates to cfparser.ParseOrmLocations.
+// ParseOrmLocations delegates to parser.ParseOrmLocations.
 func ParseOrmLocations(content string, appDir string) []string {
-	return cfparser.ParseOrmLocations(content, appDir)
+	return parser.ParseOrmLocations(content, appDir)
 }
 
 // LoadOrmLocations returns cached ORM cfcLocation paths for appDir.
@@ -117,7 +117,7 @@ func LoadOrmLocations(appDir string) []string {
 		return nil
 	}
 
-	locs := cfparser.ParseOrmLocations(string(content), appDir)
+	locs := parser.ParseOrmLocations(string(content), appDir)
 
 	m := make(map[string]string, len(locs))
 	for i, l := range locs {

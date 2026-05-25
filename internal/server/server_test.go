@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
@@ -636,7 +636,7 @@ func TestParseFunctionDefs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defs := cfparser.ParseFunctionDefs("file:///test.cfc", tt.content)
+			defs := parser.ParseFunctionDefs("file:///test.cfc", tt.content)
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}
@@ -1703,7 +1703,7 @@ func TestDefinitionComponentResolver(t *testing.T) {
 	docURI := uri.URI("file://" + filepath.Join(dir, "caller.cfc"))
 	docContent := "svc = getService(\"timetable\")\nsvc.getSchedule()"
 	srv.setDocument(docURI, docContent)
-	pr := cfparser.Parse(docURI, docContent, srv.cfResolvers())
+	pr := parser.Parse(docURI, docContent, srv.cfResolvers())
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 
 	reply, result, replyErr := captureReply(t)
@@ -2099,8 +2099,8 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	docContent := `<cfset var svc = getService("tours")>` + "\n" + `<cfset result = svc.getParameters(`
 	srv.setDocument(docURI, docContent)
 
-	pr := cfparser.ParseWithOptions(docURI, string(docContent), cfparser.ParseOptions{
-		Resolvers: []cfparser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
+	pr := parser.ParseWithOptions(docURI, string(docContent), parser.ParseOptions{
+		Resolvers: []parser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
 	})
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
@@ -2732,10 +2732,10 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 	</cffunction>
 </cfcomponent>`
 
-	resolvers := []cfparser.Resolver{
+	resolvers := []parser.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
-	pr := cfparser.ParseWithOptions(uri.URI("file:///test.cfc"), content, cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(uri.URI("file:///test.cfc"), content, parser.ParseOptions{
 		Resolvers: resolvers,
 	})
 
@@ -2782,7 +2782,7 @@ func TestExtractLinksFromContent(t *testing.T) {
 <cfmodule template="mod.cfm">
 <cfinclude template="#dynamic#">`
 
-	links := cfparser.ExtractLinks(content)
+	links := parser.ExtractLinks(content)
 	if len(links) != 3 {
 		t.Errorf("expected 3 links (header, page, mod), got %d", len(links))
 		for _, l := range links {
@@ -3057,7 +3057,7 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	callerContent := "<cfset result = svc.myFunc()>"
 	srv.setDocument(docURI, callerContent)
 	srv.index.IndexFile(docURI, callerContent)
-	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
@@ -3245,10 +3245,10 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	docURI := uri.URI("file:///main.cfc")
 	otherURI := uri.URI("file:///other.cfc")
 	srv.setDocument(docURI, "component {\nfunction helper() {}\n}\nhelper()")
-	srv.index.IndexFileFromResult(docURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(docURI, []parser.FunctionDef{
 		{Name: "helper", URI: docURI, Line: 1},
 	}, nil)
-	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "helper", URI: otherURI, Line: 50},
 	}, nil)
 
@@ -3302,7 +3302,7 @@ func TestDocumentSymbolBasic(t *testing.T) {
 
 func TestWorkspaceSymbolQuery(t *testing.T) {
 	srv := newTestServer()
-	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []parser.FunctionDef{
 		{Name: "getUserById", URI: "file:///a.cfc", Line: 5},
 		{Name: "deleteUser", URI: "file:///a.cfc", Line: 20},
 	}, nil)
@@ -3470,7 +3470,7 @@ func TestExecuteCommandShowResolvers(t *testing.T) {
 func TestExecuteCommandShowFileIndex(t *testing.T) {
 	srv := newTestServer()
 	docURI := uri.URI("file:///test.cfc")
-	srv.index.IndexFileFromResult(docURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(docURI, []parser.FunctionDef{
 		{Name: "init", URI: docURI, Line: 1},
 		{Name: "getData", URI: docURI, Line: 5},
 	}, nil)
@@ -3493,20 +3493,20 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 }
 
 func TestSimpleMatchExactNoPlaceholder(t *testing.T) {
-	resolvers := []cfparser.Resolver{
+	resolvers := []parser.Resolver{
 		{Match: "_parent", Resolve: "packages.core.kernel", Prefix: "_parent"},
 	}
-	got := cfparser.ResolveFromCall("_parent", resolvers)
+	got := parser.ResolveFromCall("_parent", resolvers)
 	if got != "packages.core.kernel" {
 		t.Errorf("expected packages.core.kernel, got %q", got)
 	}
 }
 
 func TestSimpleMatchNoMatch(t *testing.T) {
-	resolvers := []cfparser.Resolver{
+	resolvers := []parser.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
-	got := cfparser.ResolveFromCall("somethingElse()", resolvers)
+	got := parser.ResolveFromCall("somethingElse()", resolvers)
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
@@ -3600,10 +3600,10 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 	srv := newTestServer()
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "getData()")
-	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(uri.URI("file:///a.cfc"), []parser.FunctionDef{
 		{Name: "getData", URI: "file:///a.cfc", Line: 1},
 	}, nil)
-	srv.index.IndexFileFromResult(uri.URI("file:///b.cfc"), []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(uri.URI("file:///b.cfc"), []parser.FunctionDef{
 		{Name: "getData", URI: "file:///b.cfc", Line: 5},
 	}, nil)
 
@@ -3626,8 +3626,8 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 	srv.GlobalFunctionResolution = true
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "uniqueFunc()")
-	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []cfparser.FunctionDef{
-		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []cfparser.Argument{{Name: "x", Type: "string"}}},
+	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []parser.FunctionDef{
+		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []parser.Argument{{Name: "x", Type: "string"}}},
 	}, nil)
 
 	reply, result, _ := captureReply(t)
@@ -3936,17 +3936,17 @@ func TestIndexingDoesNotExtractLinks(t *testing.T) {
 }
 
 func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
-	resolvers := []cfparser.Resolver{
+	resolvers := []parser.Resolver{
 		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1", Prefix: "kernel.get"},
 	}
 
 	// First call compiles the regex
-	cfparser.ResolveFromCall("kernel.getFoo()", resolvers)
+	parser.ResolveFromCall("kernel.getFoo()", resolvers)
 
 	// Subsequent calls should be fast (cached regex)
 	start := time.Now()
 	for i := 0; i < 10000; i++ {
-		cfparser.ResolveFromCall("kernel.getBar()", resolvers)
+		parser.ResolveFromCall("kernel.getBar()", resolvers)
 	}
 	elapsed := time.Since(start)
 	avg := elapsed / 10000
@@ -3961,7 +3961,7 @@ func TestDefinitionNoGlobalResolution(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
 	srv.setDocument(docURI, "myFunc()")
-	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
@@ -3984,8 +3984,8 @@ func TestHoverNoGlobalResolution(t *testing.T) {
 	srv.GlobalFunctionResolution = false
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "uniqueFunc()")
-	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []cfparser.FunctionDef{
-		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []cfparser.Argument{{Name: "x"}}},
+	srv.index.IndexFileFromResult(uri.URI("file:///only.cfc"), []parser.FunctionDef{
+		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []parser.Argument{{Name: "x"}}},
 	}, nil)
 
 	reply, result, _ := captureReply(t)
@@ -4008,7 +4008,7 @@ func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
 	srv.setDocument(docURI, "myFunc()")
-	srv.index.IndexFileFromResult(otherURI, []cfparser.FunctionDef{
+	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
@@ -4121,7 +4121,7 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 	srv.setDocument(docURI, cfcContent)
 
 	// Parse with bean lookup from Application.cfc
-	pr := cfparser.ParseWithOptions(docURI, cfcContent, cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, cfcContent, parser.ParseOptions{
 		BeanLookup: func(name string) string {
 			// Simulate bean resolution: UserDAO@dao -> dao/UserDAO.cfc
 			lower := strings.ToLower(name)
@@ -4169,7 +4169,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 	docURI := uri.URI("file://" + filepath.Join(dir, "Service.cfc"))
 	srv.setDocument(docURI, cfcContent)
 
-	pr := cfparser.ParseWithOptions(docURI, cfcContent, cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, cfcContent, parser.ParseOptions{
 		BeanLookup: func(name string) string {
 			if strings.EqualFold(name, "userdao") {
 				return filepath.Join(dir, "dao", "UserDAO.cfc")
@@ -4221,7 +4221,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	ptPath := filepath.Join(dir, "PropertyTest.cfc")
 	ptContent, _ := os.ReadFile(ptPath)
 	ptURI := uri.URI("file://" + ptPath)
-	pr := cfparser.ParseWithOptions(ptURI, string(ptContent), cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(ptURI, string(ptContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(ptURI, pr.Funcs, pr.Refs)
@@ -4273,7 +4273,7 @@ func TestBeansTestdata_PositionalTypeResolution(t *testing.T) {
 	ppPath := filepath.Join(dir, "PositionalProps.cfc")
 	ppContent, _ := os.ReadFile(ppPath)
 	ppURI := uri.URI("file://" + ppPath)
-	pr := cfparser.ParseWithOptions(ppURI, string(ppContent), cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(ppURI, string(ppContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(ppURI, pr.Funcs, pr.Refs)
@@ -4301,7 +4301,7 @@ func TestBeansTestdata_ServiceInjectResolution(t *testing.T) {
 	svcPath := filepath.Join(dir, "services", "BeanUserService.cfc")
 	svcContent, _ := os.ReadFile(svcPath)
 	svcURI := uri.URI("file://" + svcPath)
-	pr := cfparser.ParseWithOptions(svcURI, string(svcContent), cfparser.ParseOptions{
+	pr := parser.ParseWithOptions(svcURI, string(svcContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(svcURI, pr.Funcs, pr.Refs)
@@ -4327,7 +4327,7 @@ func TestFindAllCalls_GetById(t *testing.T) {
 	}
 
 	// Build resolvers (none for this test)
-	var resolvers []cfparser.Resolver
+	var resolvers []parser.Resolver
 
 	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
 		FuncName:   "getById",

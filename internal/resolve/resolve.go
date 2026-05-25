@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -18,7 +18,7 @@ type Resolver struct {
 	WorkspaceFolders []string
 	Mappings         map[string]string
 	Index            *index.Index
-	Resolvers        []cfparser.Resolver
+	Resolvers        []parser.Resolver
 	appRootCache     map[string]string // dir → Application.cfc root
 	resolveCache     map[string]string // component+"\t"+baseDir → file path
 }
@@ -59,7 +59,7 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 }
 
 // EnsureIndexed ensures a CFC file is indexed, loading from disk if needed.
-func (r *Resolver) EnsureIndexed(cfcPath string) []*cfparser.FunctionDef {
+func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 	cfcURI := uri.URI("file://" + cfcPath)
 	defs := r.Index.FunctionsForFile(cfcURI)
 	if len(defs) == 0 {
@@ -147,5 +147,5 @@ func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 
 // ResolveFromCall resolves a call expression against configured resolvers.
 func (r *Resolver) ResolveFromCall(expr string) string {
-	return cfparser.ResolveFromCall(expr, r.Resolvers)
+	return parser.ResolveFromCall(expr, r.Resolvers)
 }

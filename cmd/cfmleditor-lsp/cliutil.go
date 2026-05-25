@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 )
 
 // loadResolversFromConfig finds .cfmleditor.json in the given paths and returns resolvers.
-func loadResolversFromConfig(paths []string) []cfparser.Resolver {
+func loadResolversFromConfig(paths []string) []parser.Resolver {
 	for _, p := range paths {
 		dir := p
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
@@ -30,10 +30,10 @@ func loadResolversFromConfig(paths []string) []cfparser.Resolver {
 		if json.Unmarshal(data, &cfg) != nil {
 			continue
 		}
-		var resolvers []cfparser.Resolver
+		var resolvers []parser.Resolver
 		for _, r := range cfg.ComponentResolvers {
 			if r.Match != "" && r.Resolve != "" {
-				resolvers = append(resolvers, cfparser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix})
+				resolvers = append(resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix})
 			}
 		}
 		return resolvers

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
@@ -216,7 +216,7 @@ func cmdParse(args []string) {
 		absPath, _ := filepath.Abs(f)
 		fileURI := uri.URI("file://" + absPath)
 		start := time.Now()
-		pr := cfparser.Parse(fileURI, string(content))
+		pr := parser.Parse(fileURI, string(content))
 		dur := time.Since(start)
 
 		totalDur += dur

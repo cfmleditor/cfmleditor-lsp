@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/uri"
 )
 
@@ -94,7 +94,7 @@ func cmdDeps(args []string) {
 				}
 				absPath, _ := filepath.Abs(f)
 				fileURI := uri.URI("file://" + absPath)
-				pr := cfparser.ParseWithOptions(fileURI, string(content), cfparser.ParseOptions{
+				pr := parser.ParseWithOptions(fileURI, string(content), parser.ParseOptions{
 					Resolvers: resolvers,
 				})
 
