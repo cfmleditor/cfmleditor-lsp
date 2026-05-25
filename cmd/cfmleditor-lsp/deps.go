@@ -73,7 +73,7 @@ func cmdDeps(args []string) {
 		os.Exit(1)
 	}
 
-	var edges []DepEdge
+	edges := make([]DepEdge, 0, len(files))
 	resolvers := loadResolversFromConfig(args)
 
 	type fileResult struct {

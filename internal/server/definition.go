@@ -21,7 +21,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, err)
 	}
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
@@ -33,7 +33,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, nil)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	s.log.Debug("definition: request", cflog.String("word", word), cflog.Int("line", line), cflog.Int("char", char))
 
 	// Check if cursor is inside a resolver-matched call (e.g. getService("UserService"))
@@ -128,7 +128,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		for _, d := range defs {
 			if d.URI != docURI {
 				locations = append(locations, protocol.Location{
-					URI:   protocol.DocumentURI(d.URI),
+					URI:   d.URI,
 					Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 				})
 			}
@@ -150,7 +150,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	for _, d := range defs {
 		if d.URI == docURI {
 			return reply(ctx, protocol.Location{
-				URI:   protocol.DocumentURI(d.URI),
+				URI:   d.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 			}, nil)
 		}
@@ -163,7 +163,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	var locations []protocol.Location
 	for _, d := range defs {
 		locations = append(locations, protocol.Location{
-			URI:   protocol.DocumentURI(d.URI),
+			URI:   d.URI,
 			Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 		})
 	}
@@ -237,7 +237,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 		if strings.EqualFold(d.Name, funcName) {
 			s.log.Debug("definition: resolved method", cflog.String("component", component), cflog.String("func", funcName), cflog.String("file", cfcPath), cflog.Uint32("line", d.Line))
 			return &protocol.Location{
-				URI:   protocol.DocumentURI(d.URI),
+				URI:   d.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 			}
 		}
@@ -258,7 +258,7 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 		return nil
 	}
 	return &protocol.Location{
-		URI:   protocol.DocumentURI(uri.URI("file://" + cfcPath)),
+		URI:   uri.URI("file://" + cfcPath),
 		Range: protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
 	}
 }
@@ -274,7 +274,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	candidate := filepath.Join(baseDir, filePath)
 	if _, err := s.FS.Stat(candidate); err == nil {
 		return &protocol.Location{
-			URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+			URI:   uri.URI("file://" + candidate),
 			Range: protocol.Range{},
 		}
 	}
@@ -284,7 +284,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		candidate = filepath.Join(appDir, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
-				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+				URI:   uri.URI("file://" + candidate),
 				Range: protocol.Range{},
 			}
 		}
@@ -300,7 +300,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 					candidate = filepath.Join(dir, rest)
 					if _, err := s.FS.Stat(candidate); err == nil {
 						return &protocol.Location{
-							URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+							URI:   uri.URI("file://" + candidate),
 							Range: protocol.Range{},
 						}
 					}
@@ -314,7 +314,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		candidate = filepath.Join(root, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
-				URI:   protocol.DocumentURI(uri.URI("file://" + candidate)),
+				URI:   uri.URI("file://" + candidate),
 				Range: protocol.Range{},
 			}
 		}

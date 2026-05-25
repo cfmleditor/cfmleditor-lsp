@@ -92,11 +92,11 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	s.log.Debug("initialize params workspace folders", cflog.Int("count", len(params.WorkspaceFolders)))
 	for i, folder := range params.WorkspaceFolders {
-		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", string(folder.URI)))
+		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", folder.URI))
 	}
 
 	for _, folder := range params.WorkspaceFolders {
-		root := strings.TrimPrefix(string(folder.URI), "file://")
+		root := strings.TrimPrefix(folder.URI, "file://")
 		s.workspaceRoots = append(s.workspaceRoots, root)
 	}
 
@@ -129,7 +129,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		return reply(ctx, nil, err)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 
 	if !isCFMLFile(string(docURI)) {
 		return reply(ctx, nil, nil)
@@ -165,7 +165,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, err)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	if len(params.ContentChanges) == 0 {
 		return reply(ctx, nil, nil)
 	}
@@ -361,7 +361,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 		return reply(ctx, nil, err)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	s.removeDocument(docURI)
 	s.mu.Lock()
 	delete(s.parseResults, docURI)
@@ -371,7 +371,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	// Clear diagnostics on close
 	if s.conn != nil {
 		s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
-			URI:         protocol.DocumentURI(docURI),
+			URI:         docURI,
 			Diagnostics: []protocol.Diagnostic{},
 		})
 	}
@@ -385,7 +385,7 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 		return reply(ctx, nil, err)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	s.invalidateResolveCache()
 
 	// Invalidate Application.cfc mappings cache if an Application file was saved
@@ -457,7 +457,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	s.log.Debug("cflint scan complete", cflog.String("file", filePath), cflog.Int("issues", len(diags)))
 
 	s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
-		URI:         protocol.DocumentURI(docURI),
+		URI:         docURI,
 		Diagnostics: diags,
 	})
 }

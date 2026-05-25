@@ -7,7 +7,6 @@ import (
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -20,7 +19,7 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}

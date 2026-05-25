@@ -11,7 +11,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -25,7 +24,7 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 		cflog.Uint32("line", params.Position.Line),
 		cflog.Uint32("char", params.Position.Character))
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
@@ -49,7 +48,7 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 		}, nil)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 
 	// Try resolving via qualifier (e.g. service.method or getService("x").method)
 	if qualifier != "" {
@@ -86,7 +85,7 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 
 func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 	label := def.Name + "("
-	var paramInfos []protocol.ParameterInformation
+	paramInfos := make([]protocol.ParameterInformation, 0, len(def.Arguments))
 	for i, arg := range def.Arguments {
 		if i > 0 {
 			label += ", "
@@ -107,7 +106,7 @@ func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 }
 
 func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
-	var paramInfos []protocol.ParameterInformation
+	paramInfos := make([]protocol.ParameterInformation, 0, len(e.Params))
 	label := e.Name + "("
 	for i, p := range e.Params {
 		if i > 0 {

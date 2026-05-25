@@ -516,6 +516,7 @@ func (pr *ParseResult) appendResolverRefs() {
 	lineNum := 0
 	scopeIdx := 0
 	currentFunc := ""
+	isInitFunc := false
 	for len(content) > 0 {
 		nl := strings.IndexByte(content, '\n')
 		var line string
@@ -532,16 +533,18 @@ func (pr *ParseResult) appendResolverRefs() {
 			if lineNum > pr.Scopes[scopeIdx].End {
 				scopeIdx++
 				currentFunc = ""
+				isInitFunc = false
 			}
 			if scopeIdx < len(pr.Scopes) && lineNum == pr.Scopes[scopeIdx].Start+1 {
 				currentFunc = pr.Scopes[scopeIdx].Name
+				isInitFunc = strings.EqualFold(currentFunc, "init")
 			}
 		}
 
 		// Skip lines inside non-init function bodies (unless scanning all scopes)
 		if !pr.scanAllScopes && scopeIdx < len(pr.Scopes) && lineNum > pr.Scopes[scopeIdx].Start {
 			if lineNum < pr.Scopes[scopeIdx].End {
-				if !strings.EqualFold(currentFunc, "init") {
+				if !isInitFunc {
 					lineNum++
 					continue
 				}

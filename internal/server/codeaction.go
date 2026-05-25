@@ -7,7 +7,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -16,7 +15,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, err)
 	}
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}

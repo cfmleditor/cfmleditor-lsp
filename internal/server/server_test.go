@@ -136,7 +136,7 @@ func TestHandleDidClose(t *testing.T) {
 
 	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
 	})
 
 	if err := srv.handleDidClose(context.Background(), reply, req); err != nil {
@@ -671,7 +671,7 @@ func TestDefinitionLookup(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
 			Position:     protocol.Position{Line: 0, Character: 55},
 		},
 	})
@@ -1375,7 +1375,7 @@ func TestCompletionDotComponentMethods(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
 		},
 		Context: &protocol.CompletionContext{
@@ -1425,7 +1425,7 @@ func TestCompletionDotPositionAware(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 6}, // after "myObj." on line 3
 		},
 		Context: &protocol.CompletionContext{
@@ -1474,7 +1474,7 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 8, Character: 17}, // after "persist."
 		},
 		Context: &protocol.CompletionContext{
@@ -1520,7 +1520,7 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 10}, // on "someMethod"
 		},
 	})
@@ -1555,7 +1555,7 @@ func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8}, // on "render"
 		},
 	})
@@ -1591,7 +1591,7 @@ func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
 		},
 	})
@@ -1625,7 +1625,7 @@ func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 39}, // on "render" in method attr
 		},
 	})
@@ -1664,7 +1664,7 @@ function generateID() {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
 			Position:     protocol.Position{Line: 2, Character: 12}, // on "generateID"
 		},
 	})
@@ -1681,7 +1681,7 @@ function generateID() {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(cfcURI) {
+	if loc.URI != cfcURI {
 		t.Errorf("expected same file URI, got %s", loc.URI)
 	}
 	if loc.Range.Start.Line != 4 {
@@ -1709,7 +1709,7 @@ func TestDefinitionComponentResolver(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 5}, // on "getSchedule"
 		},
 	})
@@ -1751,7 +1751,7 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
 			Position:     protocol.Position{Line: 1, Character: 22}, // on "doWork"
 		},
 	})
@@ -1787,7 +1787,7 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(currentURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: currentURI},
 			Position:     protocol.Position{Line: 2, Character: 22}, // on "helper" in caller()
 		},
 	})
@@ -1801,7 +1801,7 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(currentURI) {
+	if loc.URI != currentURI {
 		t.Errorf("expected current file, got %s", loc.URI)
 	}
 	if loc.Range.Start.Line != 1 {
@@ -1825,7 +1825,7 @@ func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 9}, // on "doStuff"
 		},
 	})
@@ -1860,7 +1860,7 @@ func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 46}, // on "render" in method attr
 		},
 	})
@@ -1899,7 +1899,7 @@ func TestDefinitionTagFunctionLookup(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(cfcURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
 			Position:     protocol.Position{Line: 5, Character: 12}, // on "getUser" in listUsers
 		},
 	})
@@ -1938,7 +1938,7 @@ func TestDefinitionMappingResolution(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
 		},
 	})
@@ -1977,7 +1977,7 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(callerURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
 			Position:     protocol.Position{Line: 1, Character: 20}, // on "GETUSER"
 		},
 	})
@@ -1994,7 +1994,7 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(cfcURI) {
+	if loc.URI != cfcURI {
 		t.Errorf("expected Service.cfc, got %s", loc.URI)
 	}
 }
@@ -2014,7 +2014,7 @@ func TestCompletionDotInvokedTrigger(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
 		},
 		Context: &protocol.CompletionContext{
@@ -2055,7 +2055,7 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 36},
 		},
 		Context: &protocol.CompletionContext{
@@ -2099,7 +2099,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	docContent := `<cfset var svc = getService("tours")>` + "\n" + `<cfset result = svc.getParameters(`
 	srv.setDocument(docURI, docContent)
 
-	pr := parser.ParseWithOptions(docURI, string(docContent), parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, docContent, parser.ParseOptions{
 		Resolvers: []parser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
 	})
 	srv.mu.Lock()
@@ -2110,7 +2110,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 35},
 		},
 	})
@@ -2150,7 +2150,7 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8},
 		},
 	})
@@ -2192,7 +2192,7 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: uint32(len(docContent))},
 		},
 	})
@@ -2224,7 +2224,7 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 28},
 		},
 	})
@@ -2259,7 +2259,7 @@ func TestSignatureHelpNoContext(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
 	})
@@ -2294,7 +2294,7 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 22},
 		},
 	})
@@ -2331,7 +2331,7 @@ func TestDocumentLinkResolve(t *testing.T) {
 	// Test documentLink request
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 
 	if err := srv.handleDocumentLink(context.Background(), reply, req); err != nil {
@@ -2397,7 +2397,7 @@ func TestSignatureHelpActiveParamMultiple(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 36},
 		},
 	})
@@ -2417,7 +2417,7 @@ func TestSignatureHelpNestedCall(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 32},
 		},
 	})
@@ -2455,7 +2455,7 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
 		Context: &protocol.CompletionContext{
@@ -2491,7 +2491,7 @@ func TestDocumentLinkSkipsHashExpressions(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 
@@ -2508,7 +2508,7 @@ func TestDocumentLinkSkipsURLs(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 
@@ -2543,7 +2543,7 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
 		Context: &protocol.CompletionContext{
@@ -2678,7 +2678,7 @@ func TestCompletionDotOnThis(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 5},
 		},
 		Context: &protocol.CompletionContext{
@@ -2712,7 +2712,7 @@ func TestDocumentLinkMultipleOnSameLine(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 
@@ -2830,7 +2830,7 @@ func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 9},
 		},
 	})
@@ -2879,7 +2879,7 @@ func TestCompletionDotAfterNewExpression(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
 		Context: &protocol.CompletionContext{
@@ -2911,7 +2911,7 @@ func TestDocumentLinkHrefAndAction(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 
@@ -2999,7 +2999,7 @@ func TestSignatureHelpAfterSecondComma(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 33},
 		},
 	})
@@ -3025,7 +3025,7 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
@@ -3064,7 +3064,7 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 22},
 		},
 	})
@@ -3078,7 +3078,7 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(otherURI) {
+	if loc.URI != otherURI {
 		t.Errorf("expected URI %s, got %s", otherURI, loc.URI)
 	}
 	if loc.Range.Start.Line != 10 {
@@ -3099,7 +3099,7 @@ func TestDocumentLinkInsideFunction(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 
@@ -3195,7 +3195,7 @@ func TestHoverUnqualifiedUserFunction(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 3},
 		},
 	})
@@ -3217,7 +3217,7 @@ func TestCompletionClosingTagSlash(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "/"},
@@ -3255,7 +3255,7 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 3},
 		},
 	})
@@ -3264,7 +3264,7 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
-	if loc.URI != protocol.DocumentURI(docURI) {
+	if loc.URI != docURI {
 		t.Error("expected definition to prefer same file")
 	}
 }
@@ -3278,7 +3278,7 @@ func TestDocumentSymbolBasic(t *testing.T) {
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentSymbol, protocol.DocumentSymbolParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
@@ -3378,7 +3378,7 @@ func TestDocumentLinkEmptyDocument(t *testing.T) {
 
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
 	links, _ := (*result).([]protocol.DocumentLink)
@@ -3395,7 +3395,7 @@ func TestSignatureHelpEmptyDocument(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 0},
 		},
 	})
@@ -3413,7 +3413,7 @@ func TestHoverEmptyDocument(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 0},
 		},
 	})
@@ -3431,7 +3431,7 @@ func TestDefinitionEmptyWord(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 1},
 		},
 	})
@@ -3553,7 +3553,7 @@ func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8},
 		},
 	})
@@ -3610,7 +3610,7 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
@@ -3633,7 +3633,7 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 5},
 		},
 	})
@@ -3655,7 +3655,7 @@ func TestArgumentCompletionBuiltin(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 23},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
@@ -3690,7 +3690,7 @@ func TestArgumentCompletionUserFunction(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 5},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
@@ -3724,7 +3724,7 @@ func TestArgumentCompletionSortOrder(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 15},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
@@ -3821,7 +3821,7 @@ func TestCompletionResponseTime(t *testing.T) {
 	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 0},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
@@ -3846,7 +3846,7 @@ func TestHoverResponseTime(t *testing.T) {
 	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 15},
 		},
 	})
@@ -3872,7 +3872,7 @@ func TestDefinitionResponseTime(t *testing.T) {
 	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 3},
 		},
 	})
@@ -3905,7 +3905,7 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 
 	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 
 	start := time.Now()
@@ -3968,7 +3968,7 @@ func TestDefinitionNoGlobalResolution(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
@@ -3991,7 +3991,7 @@ func TestHoverNoGlobalResolution(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 5},
 		},
 	})
@@ -4015,7 +4015,7 @@ func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
 	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
@@ -4043,7 +4043,7 @@ func TestDefinitionViaCreateObject(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 20}, // on "getTotal"
 		},
 	})
@@ -4074,7 +4074,7 @@ func TestCompletionViaCreateObject(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 15},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
@@ -4136,7 +4136,7 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 28}, // on "getAll"
 		},
 	})
@@ -4182,7 +4182,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 20},
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
@@ -4237,7 +4237,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(ptURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: ptURI},
 			Position:     protocol.Position{Line: 13, Character: 38}, // on "getById"
 		},
 	})

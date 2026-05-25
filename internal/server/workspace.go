@@ -68,7 +68,6 @@ func (s *Server) indexWorkspace() {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	for _, f := range files {
-		f := f
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {

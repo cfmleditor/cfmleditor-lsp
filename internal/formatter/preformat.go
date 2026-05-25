@@ -88,8 +88,8 @@ func tryConvertToSelfClosing(n *sitter.Node, src []byte, edits *[]preformatEdit)
 	// The replacement for the entire element: self-closing tag + body content after it.
 	body := string(src[bodyStart:bodyEnd])
 	*edits = append(*edits, preformatEdit{
-		start:       uint(n.StartByte()),
-		end:         uint(n.EndByte()),
+		start:       n.StartByte(),
+		end:         n.EndByte(),
 		replacement: selfClosing + body,
 	})
 	return true

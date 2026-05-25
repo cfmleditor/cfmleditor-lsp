@@ -20,7 +20,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, err)
 	}
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
@@ -34,7 +34,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 	// Builtin function
 	// User-defined function via qualifier (e.g. service.getMethod) — check first
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
 			return reply(ctx, &protocol.Hover{

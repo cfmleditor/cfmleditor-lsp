@@ -96,7 +96,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fk := uriKey(fileURI)
 	idx.thisVars[fk] = pr.ThisVars()
 
-	var fileDefs []*parser.FunctionDef
+	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
 	for i := range pr.Funcs {
 		key := strings.ToLower(pr.Funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &pr.Funcs[i])
@@ -104,7 +104,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	}
 	idx.fileFuncs[fk] = fileDefs
 
-	var fileRefsList []*parser.ComponentRef
+	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.Refs))
 	for i := range pr.Refs {
 		key := strings.ToLower(pr.Refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &pr.Refs[i])
@@ -121,7 +121,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	idx.removeFileEntries(fileURI)
 	fk := uriKey(fileURI)
 
-	var fileDefs []*parser.FunctionDef
+	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
 	for i := range funcs {
 		key := strings.ToLower(funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &funcs[i])
@@ -129,7 +129,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	}
 	idx.fileFuncs[fk] = fileDefs
 
-	var fileRefsList []*parser.ComponentRef
+	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])

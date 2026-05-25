@@ -80,7 +80,6 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 	compTarget := strings.ToLower(opts.Component)
 
 	for _, f := range files {
-		f := f
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {

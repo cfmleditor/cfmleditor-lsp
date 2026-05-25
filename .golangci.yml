@@ -11,3 +11,17 @@ linters:
     - revive
     - bodyclose
     - nilerr
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - makezero
+    - prealloc
+    - unconvert
+    - unparam
+    - usestdlibvars
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - prealloc
+          - unparam

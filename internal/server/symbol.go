@@ -8,7 +8,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
@@ -17,7 +16,7 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 		return reply(ctx, nil, err)
 	}
 
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
@@ -68,7 +67,7 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 			Name: d.Name,
 			Kind: protocol.SymbolKindFunction,
 			Location: protocol.Location{
-				URI: protocol.DocumentURI(d.URI),
+				URI: d.URI,
 				Range: protocol.Range{
 					Start: protocol.Position{Line: d.Line, Character: 0},
 					End:   protocol.Position{Line: d.Line, Character: 0},

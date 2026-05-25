@@ -114,7 +114,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 	items := []protocol.CompletionItem(nil)
 
-	content, hasDoc := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, hasDoc := s.getDocument(params.TextDocument.URI)
 
 	t0 := time.Now()
 	tagName := ""
@@ -173,7 +173,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 	switch {
 	case inHashExpr:
-		items = s.completionFromCache(uri.URI(params.TextDocument.URI), int(params.Position.Line))
+		items = s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))
 	case inAttrValue:
 		if CompletionAttributes {
 			attrName := findCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
@@ -236,7 +236,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 			tags := make(map[string]int)
-			for i, tag := range s.findUnclosedTagsScoped(content, uri.URI(params.TextDocument.URI), int(params.Position.Line), int(params.Position.Character)) {
+			for i, tag := range s.findUnclosedTagsScoped(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)) {
 				_, ok := tags[tag]
 				if !ok {
 					item := protocol.CompletionItem{
@@ -342,7 +342,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	case triggeredByDot && hasDoc:
 		if CompletionDotMethods {
 			t1 := time.Now()
-			if methods := s.dotCompletionMethods(content, uri.URI(params.TextDocument.URI), int(params.Position.Line), int(params.Position.Character)); len(methods) > 0 {
+			if methods := s.dotCompletionMethods(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)); len(methods) > 0 {
 				items = append(items, methods...)
 				s.log.Debug("completion: dotMethods", cflog.Duration("dur", time.Since(t1)))
 			} else if CompletionMemberFunctions {
@@ -353,11 +353,11 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	default:
 		// Check if inside a function call — offer named argument completions first
 		if hasDoc {
-			if argItems := s.argumentCompletion(content, uri.URI(params.TextDocument.URI), int(params.Position.Line), int(params.Position.Character)); len(argItems) > 0 {
+			if argItems := s.argumentCompletion(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)); len(argItems) > 0 {
 				items = append(items, argItems...)
 			}
 		}
-		items = append(items, s.completionFromCache(uri.URI(params.TextDocument.URI), int(params.Position.Line))...)
+		items = append(items, s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))...)
 	}
 
 	s.log.Debug("completion: total",
@@ -925,7 +925,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	}
 	s.compCache.PutFile(docURI, items)
 
-	varsItems := make([]protocol.CompletionItem, 0)
+	varsItems := make([]protocol.CompletionItem, 0, len(pr.VariablesVars()))
 	for _, v := range pr.VariablesVars() {
 		varsItems = append(varsItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable, SortText: SortLocalVariables + v})
 	}

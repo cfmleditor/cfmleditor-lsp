@@ -18,13 +18,13 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 		return reply(ctx, nil, err)
 	}
 
-	content, ok := s.getDocument(uri.URI(params.TextDocument.URI))
+	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
 
 	// Use cached parse result for global-scope links; scan function bodies on demand
-	docURI := uri.URI(params.TextDocument.URI)
+	docURI := params.TextDocument.URI
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
@@ -80,7 +80,7 @@ func (s *Server) handleDocumentLinkResolve(ctx context.Context, reply jsonrpc2.R
 	baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
 	target := s.resolveLink(filePath, baseDir)
 	if target != "" {
-		link.Target = protocol.DocumentURI(uri.URI("file://" + target))
+		link.Target = uri.URI("file://" + target)
 	}
 	return reply(ctx, link, nil)
 }

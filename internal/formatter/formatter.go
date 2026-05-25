@@ -400,7 +400,7 @@ func (f *Formatter) nl() {
 // output buffer. Used in trailing-comma mode when a source comma appears at
 // the start of a new line — it gets moved to the end of the previous line.
 // Returns true if the comma was successfully appended.
-func (f *Formatter) appendTrailingComma() bool {
+func (f *Formatter) appendTrailingComma() bool { //nolint:unparam // return used for future callers
 	b := f.out.Bytes()
 	// Walk backwards past trailing whitespace/newlines to find the last content line
 	i := len(b) - 1

@@ -58,7 +58,7 @@ func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(docURI)},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: line, Character: char},
 		},
 	})

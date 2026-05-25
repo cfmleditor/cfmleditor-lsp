@@ -55,7 +55,7 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 // FormatResult builds a summary and graph from trace entries.
 func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult {
 	// Summary
-	var lines []string
+	lines := make([]string, 0, 1+len(entries))
 	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)
 	lines = append(lines, fmt.Sprintf("Calls to '%s' (%s): %d match(es)", funcName, sourceRel, len(entries)))
 	for _, e := range entries {
