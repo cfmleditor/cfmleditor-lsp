@@ -18,26 +18,34 @@ type TraceResult struct {
 
 // Trace finds all callers of funcName, then recursively traces callers of
 // wrapper functions up to maxDepth levels.
-func Trace(fsys vfs.FS, roots []string, opts Options, maxDepth int) []Entry {
+func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 	entries := Find(fsys, roots, opts)
-	funcName := opts.FuncName
 
+	// Recursively trace callers that are inside a named function
+	// Each recursive level verifies calls resolve to the file containing the wrapper
+	recurseOpts := opts
+	type funcRef struct {
+		name string
+		file string
+	}
 	tracedFuncs := make(map[string]bool)
-	tracedFuncs[funcName] = true
-	for depth := 0; depth < maxDepth; depth++ {
-		var newFuncs []string
+	tracedFuncs[opts.SourceFile+"\t"+strings.ToLower(opts.FuncName)] = true
+	for depth := 0; depth < 10; depth++ {
+		var newFuncs []funcRef
 		for _, e := range entries {
-			if e.Function != "" && !tracedFuncs[e.Function] {
-				tracedFuncs[e.Function] = true
-				newFuncs = append(newFuncs, e.Function)
+			key := e.File + "\t" + strings.ToLower(e.Function)
+			if e.Function != "" && !tracedFuncs[key] {
+				tracedFuncs[key] = true
+				newFuncs = append(newFuncs, funcRef{name: e.Function, file: e.File})
 			}
 		}
 		if len(newFuncs) == 0 {
 			break
 		}
-		for _, fn := range newFuncs {
-			opts.FuncName = fn
-			extra := Find(fsys, roots, opts)
+		for _, fr := range newFuncs {
+			recurseOpts.FuncName = fr.name
+			recurseOpts.SourceFile = fr.file
+			extra := Find(fsys, roots, recurseOpts)
 			entries = append(entries, extra...)
 		}
 	}
@@ -48,7 +56,8 @@ func Trace(fsys vfs.FS, roots []string, opts Options, maxDepth int) []Entry {
 func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult {
 	// Summary
 	var lines []string
-	lines = append(lines, fmt.Sprintf("Calls to '%s': %d match(es)", funcName, len(entries)))
+	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)
+	lines = append(lines, fmt.Sprintf("Calls to '%s' (%s): %d match(es)", funcName, sourceRel, len(entries)))
 	for _, e := range entries {
 		rel := relativePath(e.File, roots)
 		marker := ""
@@ -59,7 +68,6 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 	}
 
 	// Build graph edges
-	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)
 	sourceLabel := sourceRel + "::" + funcName
 	sourceBase := strings.ToLower(strings.TrimSuffix(filepath.Base(sourceRel), filepath.Ext(sourceRel)))
 

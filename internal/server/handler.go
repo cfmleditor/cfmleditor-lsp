@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -781,6 +781,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
 		r := s.getResolver()
+		sourceFile := strings.TrimPrefix(sourceURI, "file://")
 		findOpts := refs.Options{
 			FuncName:          funcName,
 			Resolvers:         s.cfResolvers(),
@@ -788,8 +789,13 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			VerifyCall: func(component, fn, fileDir string) bool {
 				return r.HasFunction(component, fn, fileDir)
 			},
+			VerifyTarget: func(component, fileDir, sourceFile string) bool {
+				resolved := r.ComponentPath(component, fileDir)
+				return resolved == sourceFile
+			},
+			SourceFile: sourceFile,
 		}
-		entries := refs.Trace(s.FS, s.WorkspaceFolders, findOpts, 10)
+		entries := refs.Trace(s.FS, s.WorkspaceFolders, findOpts)
 		result := refs.FormatResult(entries, funcName, sourceURI, s.WorkspaceFolders)
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))

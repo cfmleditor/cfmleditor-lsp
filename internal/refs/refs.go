@@ -28,10 +28,12 @@ type Entry struct {
 type Options struct {
 	FuncName          string                        // function name to find calls to (empty = skip)
 	Component         string                        // component dot-path to find refs to (empty = skip)
+	SourceFile        string                        // absolute path of the source file (same-file calls always match)
 	Resolvers         []cfparser.Resolver           // resolvers for ParseWithOptions
 	PropertyResolvers []cfparser.PropertyResolver   // property resolvers
 	BeanLookup        func(string) string           // bean name → dot-path lookup
 	VerifyCall        func(component, funcName, fileDir string) bool // optional: verify the component has this function
+	VerifyTarget      func(component, fileDir, sourceFile string) bool // optional: verify the call resolves to the source component
 }
 
 // Find scans all CFML files under roots and returns matching references.
@@ -133,14 +135,31 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 							continue
 						}
 					}
+					if opts.VerifyTarget != nil && call.Component != "" {
+						if !opts.VerifyTarget(call.Component, filepath.Dir(absPath), opts.SourceFile) {
+							continue
+						}
+					}
 					resolved := call.Resolved
 					if !resolved && call.Component == "" {
 						// Check if the function exists in the same file
+						sameFile := false
 						for _, fn := range pr.Funcs {
 							if strings.EqualFold(fn.Name, call.FuncName) {
-								resolved = true
+								sameFile = true
 								break
 							}
+						}
+						if sameFile {
+							// Same-file call — only a match if this IS the source file
+							if absPath != opts.SourceFile {
+								continue
+							}
+							resolved = true
+						} else if opts.VerifyTarget != nil {
+							// Unqualified call, function not in this file, and we have
+							// target verification — skip (can't confirm it reaches source)
+							continue
 						}
 					}
 					entries = append(entries, Entry{
