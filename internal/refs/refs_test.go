@@ -10,6 +10,7 @@ import (
 
 func testdataDir() string {
 	_, f, _, _ := runtime.Caller(0)
+
 	return filepath.Join(filepath.Dir(f), "..", "..", "testdata", "refs")
 }
 
@@ -34,6 +35,7 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 			case "service":
 				return sourceFile == servicePath
 			}
+
 			return false
 		},
 	}
@@ -43,31 +45,38 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 	// Only consider resolved entries
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
 	viewPath, _ := filepath.Abs(filepath.Join(dir, "view.cfm"))
+
 	for _, e := range entries {
 		if !e.Resolved {
 			continue
 		}
+
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath {
 			t.Errorf("should not match controller.cfc: line %d %s", e.Line, e.Call)
 		}
+
 		if absFile == viewPath {
 			t.Errorf("should not match view.cfm: line %d %s", e.Line, e.Call)
 		}
 	}
 
 	found := false
+
 	for _, e := range entries {
 		if !e.Resolved {
 			continue
 		}
+
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == servicePath && e.Function == "GetData" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Errorf("expected call in service.cfc::GetData, got %d entries", len(entries))
+
 		for _, e := range entries {
 			t.Logf("  %s:%d func=%s call=%s", e.File, e.Line, e.Function, e.Call)
 		}
@@ -91,8 +100,10 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 		VerifyTarget: func(component, fileDir, sourceFile string) bool {
 			if component == "controller" {
 				resolved, _ := filepath.Abs(filepath.Join(fileDir, "controller.cfc"))
+
 				return resolved == sourceFile
 			}
+
 			return false
 		},
 	}
@@ -108,10 +119,12 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 	}
 	for name, path := range excluded {
 		absPath, _ := filepath.Abs(path)
+
 		for _, e := range entries {
 			if !e.Resolved {
 				continue
 			}
+
 			absFile, _ := filepath.Abs(e.File)
 			if absFile == absPath {
 				t.Errorf("should not match %s: line %d func=%s call=%s", name, e.Line, e.Function, e.Call)
@@ -123,26 +136,33 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 	foundGetReport := false
 	foundView := false
 	viewPath, _ := filepath.Abs(filepath.Join(dir, "view.cfm"))
+
 	for _, e := range entries {
 		if !e.Resolved {
 			continue
 		}
+
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath && e.Function == "GetReport" {
 			foundGetReport = true
 		}
+
 		if absFile == viewPath {
 			foundView = true
 		}
 	}
+
 	if !foundGetReport {
 		t.Errorf("expected same-file caller GetReport")
+
 		for _, e := range entries {
 			t.Logf("  %s:%d func=%s call=%s", e.File, e.Line, e.Function, e.Call)
 		}
 	}
+
 	if !foundView {
 		t.Errorf("expected view.cfm calling GetReport (recursive)")
+
 		for _, e := range entries {
 			t.Logf("  %s:%d func=%s call=%s", e.File, e.Line, e.Function, e.Call)
 		}
@@ -171,6 +191,7 @@ func TestTrace_DoesNotMatchSameNameInOtherFile(t *testing.T) {
 
 	// Only consider resolved entries
 	var resolved []Entry
+
 	for _, e := range entries {
 		if e.Resolved {
 			resolved = append(resolved, e)
@@ -188,21 +209,26 @@ func TestTrace_DoesNotMatchSameNameInOtherFile(t *testing.T) {
 	// Positive: should find a.cfc::Process and a.cfc::GetReport (both call DoWork)
 	foundProcess := false
 	foundGetReport := false
+
 	for _, e := range resolved {
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == aPath && e.Function == "Process" {
 			foundProcess = true
 		}
+
 		if absFile == aPath && e.Function == "GetReport" {
 			foundGetReport = true
 		}
 	}
+
 	if !foundProcess {
 		t.Errorf("expected a.cfc::Process")
 	}
+
 	if !foundGetReport {
 		t.Errorf("expected a.cfc::GetReport")
 	}
+
 	if t.Failed() {
 		for _, e := range entries {
 			t.Logf("  %s:%d func=%s call=%s", e.File, e.Line, e.Function, e.Call)
@@ -226,8 +252,10 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 		VerifyTarget: func(component, fileDir, sourceFile string) bool {
 			if component == "controller" {
 				resolved, _ := filepath.Abs(filepath.Join(fileDir, "controller.cfc"))
+
 				return resolved == sourceFile
 			}
+
 			return false
 		},
 	}
@@ -239,10 +267,12 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 	excluded := []string{"a.cfc", "b.cfc", "persist.cfc", "service.cfc"}
 	for _, name := range excluded {
 		absPath, _ := filepath.Abs(filepath.Join(dir, name))
+
 		for _, e := range entries {
 			if !e.Resolved {
 				continue
 			}
+
 			absFile, _ := filepath.Abs(e.File)
 			if absFile == absPath {
 				t.Errorf("should not match %s: line %d func=%s call=%s", name, e.Line, e.Function, e.Call)
@@ -252,15 +282,18 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 
 	// Positive: should find controller.cfc::RunReport (same-file caller of GetReport)
 	foundRunReport := false
+
 	for _, e := range entries {
 		if !e.Resolved {
 			continue
 		}
+
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == controllerPath && e.Function == "RunReport" {
 			foundRunReport = true
 		}
 	}
+
 	if !foundRunReport {
 		t.Errorf("expected controller.cfc::RunReport")
 	}
@@ -268,15 +301,18 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 	// Positive: should find report_view.cfm calling RunReport (recursive)
 	reportViewPath, _ := filepath.Abs(filepath.Join(dir, "report_view.cfm"))
 	foundReportView := false
+
 	for _, e := range entries {
 		if !e.Resolved {
 			continue
 		}
+
 		absFile, _ := filepath.Abs(e.File)
 		if absFile == reportViewPath {
 			foundReportView = true
 		}
 	}
+
 	if !foundReportView {
 		t.Errorf("expected report_view.cfm calling RunReport (recursive)")
 	}

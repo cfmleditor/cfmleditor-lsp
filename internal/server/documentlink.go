@@ -25,6 +25,7 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 
 	// Use cached parse result for global-scope links; scan function bodies on demand
 	docURI := params.TextDocument.URI
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
@@ -71,17 +72,21 @@ func (s *Server) handleDocumentLinkResolve(ctx context.Context, reply jsonrpc2.R
 	if data == nil {
 		return reply(ctx, link, nil)
 	}
+
 	filePath, _ := data["path"].(string)
 	docURI, _ := data["uri"].(string)
+
 	if filePath == "" || docURI == "" {
 		return reply(ctx, link, nil)
 	}
 
 	baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
+
 	target := s.resolveLink(filePath, baseDir)
 	if target != "" {
 		link.Target = uri.URI("file://" + target)
 	}
+
 	return reply(ctx, link, nil)
 }
 
@@ -90,17 +95,20 @@ func (s *Server) resolveLink(filePath, baseDir string) string {
 	if _, err := s.FS.Stat(candidate); err == nil {
 		return candidate
 	}
+
 	if appDir := s.getResolver().FindApplicationRoot(baseDir); appDir != "" {
 		candidate = filepath.Join(appDir, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
+
 	for _, root := range s.WorkspaceFolders {
 		candidate = filepath.Join(root, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
+
 	return ""
 }

@@ -19,6 +19,7 @@ func TestPropertyAccessors_Script(t *testing.T) {
 	for _, f := range pr.Funcs {
 		funcNames[f.Name] = true
 	}
+
 	for _, expected := range []string{"getPerson", "setPerson", "getAge", "setAge", "init"} {
 		if !funcNames[expected] {
 			t.Errorf("expected function %s, not found", expected)
@@ -38,6 +39,7 @@ func TestPropertyAccessors_Tag(t *testing.T) {
 	for _, f := range pr.Funcs {
 		funcNames[f.Name] = true
 	}
+
 	for _, expected := range []string{"getUserDAO", "setUserDAO", "getDsn", "setDsn", "init"} {
 		if !funcNames[expected] {
 			t.Errorf("expected function %s, not found", expected)
@@ -57,6 +59,7 @@ func TestPropertyAccessors_PositionalSyntax(t *testing.T) {
 	for _, f := range pr.Funcs {
 		funcNames[f.Name] = true
 	}
+
 	for _, expected := range []string{"getName", "setName", "getAge", "setAge", "getUserDAO", "setUserDAO"} {
 		if !funcNames[expected] {
 			t.Errorf("expected function %s, not found", expected)
@@ -64,12 +67,15 @@ func TestPropertyAccessors_PositionalSyntax(t *testing.T) {
 	}
 	// UserDAO type should generate a component ref
 	found := false
+
 	for _, ref := range pr.Refs {
 		if ref.Variable == "userDAO" && ref.Component == "UserDAO" {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected ComponentRef for userDAO → UserDAO")
 	}
@@ -84,24 +90,29 @@ func TestPropertyAccessors_NoOverrideExplicit(t *testing.T) {
 
 	// getName should appear only once (the explicit one at line 2)
 	count := 0
+
 	for _, f := range pr.Funcs {
 		if f.Name == "getName" {
 			count++
+
 			if f.Line != 2 {
 				t.Errorf("getName should be at line 2 (explicit), got %d", f.Line)
 			}
 		}
 	}
+
 	if count != 1 {
 		t.Errorf("expected 1 getName, got %d", count)
 	}
 	// setName should still be generated
 	found := false
+
 	for _, f := range pr.Funcs {
 		if f.Name == "setName" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Error("expected synthetic setName to be generated")
 	}
@@ -115,11 +126,13 @@ func TestPropertyAccessors_NoDuplicates(t *testing.T) {
 	pr := Parse(uri.URI("file:///test.cfc"), content)
 
 	count := 0
+
 	for _, f := range pr.Funcs {
 		if f.Name == "getX" {
 			count++
 		}
 	}
+
 	if count != 1 {
 		t.Errorf("expected 1 getX (no duplicates), got %d", count)
 	}
@@ -137,15 +150,19 @@ func TestPropertyAccessors_TypeComponentRef(t *testing.T) {
 	for _, ref := range pr.Refs {
 		refs = append(refs, ref.Variable+"→"+ref.Component)
 	}
+
 	found := false
+
 	for _, ref := range pr.Refs {
 		if ref.Variable == "userService" && ref.Component == "services.UserService" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Errorf("expected ref userService→services.UserService, got %v", refs)
 	}
+
 	for _, ref := range pr.Refs {
 		if ref.Variable == "count" {
 			t.Error("numeric property should not generate a component ref")
@@ -162,12 +179,15 @@ func TestPropertyAccessors_VariablesScope(t *testing.T) {
 
 	vars := pr.VariablesVars()
 	varMap := make(map[string]bool)
+
 	for _, v := range vars {
 		varMap[v] = true
 	}
+
 	if !varMap["userDAO"] {
 		t.Error("expected userDAO in variables scope")
 	}
+
 	if !varMap["logger"] {
 		t.Error("expected logger in variables scope")
 	}
@@ -191,9 +211,9 @@ func TestPropertyAccessors_InjectAttr(t *testing.T) {
 
 func TestPropertyAccessors_BeanLookup(t *testing.T) {
 	beans := map[string]string{
-		"userdao":          "dao.UserDAO",
-		"userdao@dao":      "dao.UserDAO",
-		"orderdao":         "dao.OrderDAO",
+		"userdao":              "dao.UserDAO",
+		"userdao@dao":          "dao.UserDAO",
+		"orderdao":             "dao.OrderDAO",
 		"userservice@services": "services.UserService",
 	}
 	lookup := func(name string) string {
@@ -213,12 +233,15 @@ func TestPropertyAccessors_BeanLookup(t *testing.T) {
 	for _, ref := range pr.Refs {
 		refMap[ref.Variable] = ref.Component
 	}
+
 	if refMap["userDAO"] != "dao.UserDAO" {
 		t.Errorf("userDAO: expected dao.UserDAO, got %q", refMap["userDAO"])
 	}
+
 	if refMap["orderDAO"] != "dao.OrderDAO" {
 		t.Errorf("orderDAO: expected dao.OrderDAO, got %q", refMap["orderDAO"])
 	}
+
 	if _, ok := refMap["missing"]; ok {
 		t.Error("missing should not have a ref")
 	}
@@ -241,9 +264,11 @@ func TestPropertyResolvers(t *testing.T) {
 	for _, ref := range pr.Refs {
 		refMap[ref.Variable] = ref.Component
 	}
+
 	if refMap["userDAO"] != "models.UserDAO" {
 		t.Errorf("userDAO: expected models.UserDAO, got %q", refMap["userDAO"])
 	}
+
 	if refMap["logger"] != "coldbox.system.logger" {
 		t.Errorf("logger: expected coldbox.system.logger, got %q", refMap["logger"])
 	}

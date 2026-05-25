@@ -50,6 +50,7 @@ func NewLogger(debug bool) Logger {
 	} else {
 		l, _ = zap.NewProduction()
 	}
+
 	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar()}
 }
 

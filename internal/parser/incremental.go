@@ -11,9 +11,9 @@ type EditKind int
 
 // EditKind classifies where an edit occurred.
 const (
-	EditInFunc  EditKind = iota // Edit was inside a function body
-	EditGlobal                  // Edit was outside all function bodies (requires re-parse of signatures)
-	EditFull                    // Full document replacement
+	EditInFunc EditKind = iota // Edit was inside a function body
+	EditGlobal                 // Edit was outside all function bodies (requires re-parse of signatures)
+	EditFull                   // Full document replacement
 )
 
 // ApplyEdit updates the ParseResult incrementally after a text edit.
@@ -24,9 +24,11 @@ func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, new
 		if r := recover(); r != nil {
 			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r))
 			pr.reparseShallow()
+
 			kind = EditGlobal
 		}
 	}()
+
 	start := time.Now()
 
 	oldLines := endLine - startLine
@@ -47,12 +49,14 @@ func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, new
 		pr.InvalidateFunc(pr.Scopes[funcIdx].Start, pr.Scopes[funcIdx].End)
 		pr.resetGlobalCaches()
 		pr.logDebug("applyEdit", "uri", string(pr.URI), "kind", "inFunc", "line", startLine, "funcStart", pr.Scopes[funcIdx].Start, "funcEnd", pr.Scopes[funcIdx].End, "dur", time.Since(start))
+
 		return EditInFunc
 	}
 
 	// Edit is in global scope — need to re-parse signatures
 	pr.reparseShallow()
 	pr.logDebug("applyEdit", "uri", string(pr.URI), "kind", "global", "dur", time.Since(start))
+
 	return EditGlobal
 }
 
@@ -77,6 +81,7 @@ func (pr *ParseResult) funcContaining(startLine, endLine, startChar int) int {
 			}
 		}
 	}
+
 	return -1
 }
 
@@ -89,12 +94,15 @@ func (pr *ParseResult) closingTokenCol(line int) int {
 		if idx < 0 {
 			return -1
 		}
+
 		lineStart += idx + 1
 	}
+
 	lineEnd := strings.IndexByte(pr.Content[lineStart:], '\n')
 	if lineEnd < 0 {
 		lineEnd = len(pr.Content) - lineStart
 	}
+
 	lineText := pr.Content[lineStart : lineStart+lineEnd]
 
 	// Check for </cffunction (tag-based)
@@ -105,6 +113,7 @@ func (pr *ParseResult) closingTokenCol(line int) int {
 	if idx := strings.LastIndex(lineText, "}"); idx >= 0 {
 		return idx
 	}
+
 	return -1
 }
 
@@ -113,6 +122,7 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 	if delta == 0 {
 		return
 	}
+
 	for i := range pr.Scopes {
 		if pr.Scopes[i].Start > editLine {
 			pr.Scopes[i].Start += delta
@@ -121,11 +131,13 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 			pr.Scopes[i].End += delta
 		}
 	}
+
 	for i := range pr.Funcs {
 		if int(pr.Funcs[i].Line) > editLine {
 			pr.Funcs[i].Line = uint32(int(pr.Funcs[i].Line) + delta)
 		}
 	}
+
 	for i := range pr.Refs {
 		if int(pr.Refs[i].Line) > editLine {
 			pr.Refs[i].Line = uint32(int(pr.Refs[i].Line) + delta)
@@ -169,11 +181,14 @@ func posOffset(content string, line, char int) int {
 		if idx < 0 {
 			return len(content)
 		}
+
 		off += idx + 1
 	}
+
 	off += char
 	if off > len(content) {
 		off = len(content)
 	}
+
 	return off
 }

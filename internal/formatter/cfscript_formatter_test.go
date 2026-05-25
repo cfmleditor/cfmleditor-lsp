@@ -1,4 +1,3 @@
-
 package formatter
 
 // cfscript_formatter_test.go — tests for the recursive CFScript sub-formatter.
@@ -20,6 +19,7 @@ func wrap(code string) string {
 // checked independently.
 func allIn(t *testing.T, got string, wants ...string) {
 	t.Helper()
+
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
 			t.Errorf("expected output to contain %q\ngot:\n%s", w, got)
@@ -68,6 +68,7 @@ var y = 2;
 return x + y;
 }`)
 	got := format(t, src)
+
 	lines := strings.Split(got, "\n")
 	for _, l := range lines {
 		if strings.Contains(l, "var x") || strings.Contains(l, "var y") || strings.Contains(l, "return x") {
@@ -214,6 +215,7 @@ var x = 1;`)
 	// Comment should appear before the var declaration.
 	commentIdx := strings.Index(got, "// this")
 	varIdx := strings.Index(got, "var x")
+
 	if commentIdx > varIdx {
 		t.Errorf("comment should appear before var declaration")
 	}
@@ -239,6 +241,7 @@ var y = 2;`)
 	xIdx := strings.Index(got, "var x")
 	yIdx := strings.Index(got, "var y")
 	between := got[xIdx:yIdx]
+
 	blankLines := strings.Count(between, "\n\n")
 	if blankLines == 0 {
 		t.Errorf("expected blank line to be preserved between var declarations\ngot:\n%s", got)
@@ -251,6 +254,7 @@ func TestConsecutiveBlankLinesCapped(t *testing.T) {
 
 
 var y = 2;`)
+
 	got := format(t, src)
 	if strings.Contains(got, "\n\n\n") {
 		t.Errorf("consecutive blank lines should be capped at 1\ngot:\n%s", got)
@@ -279,10 +283,12 @@ func TestScriptIdempotency(t *testing.T) {
 }`)
 	got1 := format(t, src)
 	tree2 := parse(t, got1)
+
 	got2, err := Format([]byte(got1), tree2, testOpts())
 	if err != nil {
 		t.Fatalf("second format error: %v", err)
 	}
+
 	if got1 != string(got2) {
 		t.Errorf("formatter is not idempotent.\nFirst pass:\n%s\nSecond pass:\n%s", got1, string(got2))
 	}

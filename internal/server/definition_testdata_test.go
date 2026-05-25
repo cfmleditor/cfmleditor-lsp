@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -17,6 +17,7 @@ import (
 // testdataDir returns the absolute path to the testdata directory.
 func testdataDir() string {
 	_, file, _, _ := runtime.Caller(0)
+
 	return filepath.Join(filepath.Dir(file), "..", "..", "testdata")
 }
 
@@ -33,22 +34,27 @@ func newTestdataServer() *Server {
 		{Match: `getService("$1")`, Resolve: "services.$1", Prefix: "getService"},
 		{Match: "_parent", Resolve: "models.Base", Prefix: "_parent"},
 	}
+
 	return srv
 }
 
 // openTestdataFile reads a file from testdata, sets it as an open document, and indexes it.
 func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 	t.Helper()
+
 	abs := filepath.Join(testdataDir(), relPath)
+
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", relPath, err)
 	}
+
 	docURI := uri.URI("file://" + abs)
 	content := string(data)
 	srv.setDocument(docURI, content)
 	pr := parser.Parse(docURI, content, srv.cfResolvers())
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+
 	return docURI
 }
 
@@ -62,27 +68,34 @@ func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) 
 			Position:     protocol.Position{Line: line, Character: char},
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	return *result
 }
 
 func assertLocationFile(t *testing.T, result interface{}, expectedFile string) protocol.Location {
 	t.Helper()
+
 	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
+
 	if !strings.Contains(string(loc.URI), expectedFile) {
 		t.Errorf("expected %s, got %s", expectedFile, loc.URI)
 	}
+
 	return loc
 }
 

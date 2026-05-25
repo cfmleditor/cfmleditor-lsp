@@ -23,12 +23,14 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
+
 	_ = os.Remove(sockPath)
 
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		_ = ln.Close()
 		_ = os.Remove(sockPath)
@@ -37,8 +39,10 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 	log.Info("daemon listening", cflog.String("socket", sockPath))
 
 	var wg sync.WaitGroup
+
 	go func() {
 		<-ctx.Done()
+
 		_ = ln.Close()
 	}()
 
@@ -48,38 +52,48 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 			select {
 			case <-ctx.Done():
 				wg.Wait()
+
 				return nil
 			default:
 				return err
 			}
 		}
+
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
 			defer func() { _ = c.Close() }()
+
 			if ct != nil {
 				ct.Add()
 				defer ct.Remove()
 			}
+
 			stream := jsonrpc2.NewStream(c)
 			conn := jsonrpc2.NewConn(stream)
 			srv := server.NewServer(conn, log, idx)
 			srv.WorkspaceFolders = folders
 			srv.IndexGlobs = globs
 			srv.Mappings = mappings
+
 			for _, r := range resolvers {
 				srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
 			}
+
 			for _, r := range propResolvers {
 				srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: r[0], Resolve: r[1], Attribute: r[2]})
 			}
+
 			srv.BeanPaths = beanPaths
 			srv.Formatting = fmtCfg
 			conn.Go(ctx, srv.Handler())
+
 			select {
 			case <-conn.Done():
 			case <-ctx.Done():
 				_ = c.Close()
+
 				<-conn.Done()
 			}
 		}()

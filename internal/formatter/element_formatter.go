@@ -21,7 +21,9 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 	// If the element has structured children (start_tag, content, end_tag),
 	// recurse into them for proper indentation of nested CF tags.
 	var startTag, endTag *sitter.Node
+
 	var bodyNodes []*sitter.Node
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -38,6 +40,7 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 	if startTag == nil || (endTag == nil && len(bodyNodes) == 0) || f.isVoidElement(startTag) {
 		f.nl()
 		f.writeWrapped(collapseWhitespace(strings.TrimSpace(f.text(n))))
+
 		return
 	}
 
@@ -54,6 +57,7 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 	} else {
 		f.formatBodyRuns(bodyNodes)
 	}
+
 	f.level--
 
 	// Emit end tag
@@ -70,12 +74,14 @@ func (f *Formatter) isVoidElement(startTag *sitter.Node) bool {
 	if startTag == nil {
 		return false
 	}
+
 	for i := uint(0); i < startTag.ChildCount(); i++ {
 		c := startTag.Child(i)
 		if c.Kind() == "tag_name" {
 			return htmlVoidElements[strings.ToLower(f.text(c))]
 		}
 	}
+
 	return false
 }
 
@@ -90,10 +96,12 @@ func (f *Formatter) allSingleLine(nodes []*sitter.Node) bool {
 	for _, n := range nodes {
 		combined += f.text(n)
 	}
+
 	trimmed := strings.TrimSpace(combined)
 	if trimmed == "" {
 		return false
 	}
+
 	return !strings.Contains(trimmed, "\n")
 }
 
@@ -103,8 +111,10 @@ func (f *Formatter) fitsOnLine(nodes []*sitter.Node) bool {
 	for _, n := range nodes {
 		combined += f.text(n)
 	}
+
 	collapsed := collapseWhitespace(strings.TrimSpace(combined))
 	indent := len(f.opts.indent(f.level))
+
 	return indent+len(collapsed) <= f.opts.LineWidth
 }
 
@@ -115,6 +125,7 @@ func (f *Formatter) hasBlockChild(nodes []*sitter.Node) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -125,10 +136,12 @@ func (f *Formatter) formatInlineRun(nodes []*sitter.Node) {
 	for _, n := range nodes {
 		combined += f.text(n)
 	}
+
 	trimmed := strings.TrimSpace(combined)
 	if trimmed == "" {
 		return
 	}
+
 	f.writeWrapped(collapseWhitespace(trimmed))
 }
 
@@ -142,14 +155,18 @@ func (f *Formatter) formatBodyRuns(nodes []*sitter.Node) {
 			// Collect consecutive inline nodes into a run.
 			run := []*sitter.Node{c}
 			j := i + 1
+
 			for j < len(nodes) && f.isInlineNode(nodes[j]) {
 				run = append(run, nodes[j])
 				j++
 			}
+
 			f.formatTextRun(run)
+
 			i = j
 		} else {
 			f.formatNode(c)
+
 			i++
 		}
 	}
@@ -162,6 +179,7 @@ func (f *Formatter) isInlineNode(n *sitter.Node) bool {
 	case "html_text", "text", "hash_expression", "hash_single", "implicit_end_tag":
 		return true
 	}
+
 	return false
 }
 
@@ -172,29 +190,37 @@ func (f *Formatter) formatTextRun(nodes []*sitter.Node) {
 	for _, n := range nodes {
 		combined += f.text(n)
 	}
+
 	trimmed := strings.TrimSpace(combined)
 	if trimmed == "" {
 		return
 	}
+
 	f.writeWrapped(collapseWhitespace(trimmed))
 }
 
 // collapseWhitespace replaces runs of whitespace with a single space.
 func collapseWhitespace(s string) string {
 	var b strings.Builder
+
 	b.Grow(len(s))
+
 	inWS := false
+
 	for _, r := range s {
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
 			if !inWS {
 				b.WriteByte(' ')
+
 				inWS = true
 			}
 		} else {
 			b.WriteRune(r)
+
 			inWS = false
 		}
 	}
+
 	return b.String()
 }
 
@@ -202,18 +228,22 @@ func collapseWhitespace(s string) string {
 // Each line is indented at the current level.
 func (f *Formatter) writeWrapped(text string) {
 	indent := f.opts.indent(f.level)
+
 	maxContent := f.opts.LineWidth - len(indent)
 	if maxContent <= 0 || len(text) <= maxContent {
 		f.writeIndent()
 		f.write(text)
 		f.write("\n")
+
 		return
 	}
+
 	for len(text) > 0 {
 		if len(text) <= maxContent {
 			f.writeIndent()
 			f.write(text)
 			f.write("\n")
+
 			break
 		}
 		// Find last space at or before maxContent.
@@ -225,13 +255,17 @@ func (f *Formatter) writeWrapped(text string) {
 				f.writeIndent()
 				f.write(text)
 				f.write("\n")
+
 				break
 			}
+
 			cut += maxContent
 		}
+
 		f.writeIndent()
 		f.write(text[:cut])
 		f.write("\n")
+
 		text = text[cut+1:]
 	}
 }

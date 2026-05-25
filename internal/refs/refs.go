@@ -26,19 +26,20 @@ type Entry struct {
 
 // Options configures what to search for.
 type Options struct {
-	FuncName          string                        // function name to find calls to (empty = skip)
-	Component         string                        // component dot-path to find refs to (empty = skip)
-	SourceFile        string                        // absolute path of the source file (same-file calls always match)
-	Resolvers         []parser.Resolver           // resolvers for ParseWithOptions
-	PropertyResolvers []parser.PropertyResolver   // property resolvers
-	BeanLookup        func(string) string           // bean name → dot-path lookup
-	VerifyCall        func(component, funcName, fileDir string) bool // optional: verify the component has this function
+	FuncName          string                                           // function name to find calls to (empty = skip)
+	Component         string                                           // component dot-path to find refs to (empty = skip)
+	SourceFile        string                                           // absolute path of the source file (same-file calls always match)
+	Resolvers         []parser.Resolver                                // resolvers for ParseWithOptions
+	PropertyResolvers []parser.PropertyResolver                        // property resolvers
+	BeanLookup        func(string) string                              // bean name → dot-path lookup
+	VerifyCall        func(component, funcName, fileDir string) bool   // optional: verify the component has this function
 	VerifyTarget      func(component, fileDir, sourceFile string) bool // optional: verify the call resolves to the source component
 }
 
 // Find scans all CFML files under roots and returns matching references.
 func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
 	files := collectFiles(fsys, roots)
+
 	return findInFiles(fsys, files, opts)
 }
 
@@ -54,26 +55,32 @@ func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers 
 
 func collectFiles(fsys vfs.FS, roots []string) []string {
 	var files []string
+
 	for _, root := range roots {
 		_ = fsys.Walk(root, func(path string, info os.FileInfo, _ error) error {
 			if info.IsDir() {
 				return nil
 			}
+
 			ext := strings.ToLower(filepath.Ext(path))
 			if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
 				files = append(files, path)
 			}
+
 			return nil
 		})
 	}
+
 	return files
 }
 
 func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 	var mu sync.Mutex
+
 	var results []Entry
 
 	var wg sync.WaitGroup
+
 	sem := make(chan struct{}, 8)
 
 	funcTarget := strings.ToLower(opts.FuncName)
@@ -81,7 +88,9 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 	for _, f := range files {
 		wg.Add(1)
+
 		sem <- struct{}{}
+
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -113,9 +122,11 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 				fileDir := filepath.Dir(absPath)
 				parseOpts.BeanLookup = fileBeanLookup(fsys, fileDir)
 			}
+
 			if funcTarget != "" {
 				parseOpts.FindCalls = []string{opts.FuncName}
 			}
+
 			pr := parser.ParseWithOptions(fileURI, content, parseOpts)
 
 			var entries []Entry
@@ -139,48 +150,58 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 							continue
 						}
 					}
+
 					if opts.VerifyTarget != nil && call.Component != "" {
 						if !opts.VerifyTarget(call.Component, filepath.Dir(absPath), opts.SourceFile) {
 							continue
 						}
 					}
+
 					resolved := call.Resolved
 					if !resolved && call.Component == "" {
 						// Check if the function exists in the same file
 						sameFile := false
+
 						for _, fn := range pr.Funcs {
 							if strings.EqualFold(fn.Name, call.FuncName) {
 								sameFile = true
+
 								break
 							}
 						}
+
 						if sameFile {
 							// Same-file call — only a match if this IS the source file
 							if absPath != opts.SourceFile {
 								continue
 							}
+
 							resolved = true
 						} else if call.Variable == "" {
 							// Truly unqualified, function not in this file — skip
 							continue
 						}
 					}
+
 					entries = append(entries, Entry{
 						File: f, Function: call.Caller, Call: call.Text,
 						Component: call.Component,
-						Line: call.Line, Resolved: resolved,
+						Line:      call.Line, Resolved: resolved,
 					})
 				}
 			}
 
 			if len(entries) > 0 {
 				mu.Lock()
+
 				results = append(results, entries...)
 				mu.Unlock()
 			}
 		}()
 	}
+
 	wg.Wait()
+
 	return results
 }
 
@@ -200,6 +221,7 @@ func fileBeanLookup(fsys vfs.FS, dir string) func(string) string {
 	beanLookupCacheMu.Lock()
 	if beans, ok := beanLookupCache[appDir]; ok {
 		beanLookupCacheMu.Unlock()
+
 		return func(name string) string { return beans[strings.ToLower(name)] }
 	}
 	beanLookupCacheMu.Unlock()
@@ -208,23 +230,30 @@ func fileBeanLookup(fsys vfs.FS, dir string) func(string) string {
 	if len(beanPaths) == 0 {
 		return nil
 	}
+
 	beans := make(map[string]string)
+
 	for _, root := range beanPaths {
 		_ = fsys.Walk(root, func(path string, info os.FileInfo, _ error) error {
 			if info.IsDir() {
 				return nil
 			}
+
 			if !strings.HasSuffix(strings.ToLower(path), ".cfc") {
 				return nil
 			}
+
 			name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 			beans[strings.ToLower(name)] = path
+
 			return nil
 		})
 	}
+
 	beanLookupCacheMu.Lock()
 	beanLookupCache[appDir] = beans
 	beanLookupCacheMu.Unlock()
+
 	return func(name string) string {
 		return beans[strings.ToLower(name)]
 	}
@@ -232,16 +261,19 @@ func fileBeanLookup(fsys vfs.FS, dir string) func(string) string {
 
 func findAppRoot(fsys vfs.FS, dir string) string {
 	d := dir
+
 	for {
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
 			if _, err := fsys.Stat(filepath.Join(d, name)); err == nil {
 				return d
 			}
 		}
+
 		parent := filepath.Dir(d)
 		if parent == d {
 			return ""
 		}
+
 		d = parent
 	}
 }
@@ -253,18 +285,23 @@ func containsFold(data []byte, target string) bool {
 	if tLen == 0 {
 		return true
 	}
+
 	end := len(data) - tLen
 	for i := 0; i <= end; i++ {
 		match := true
+
 		for j := 0; j < tLen; j++ {
 			if data[i+j]|0x20 != target[j]|0x20 {
 				match = false
+
 				break
 			}
 		}
+
 		if match {
 			return true
 		}
 	}
+
 	return false
 }

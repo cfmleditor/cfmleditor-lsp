@@ -28,7 +28,9 @@ type DepResult struct {
 
 func cmdDeps(args []string) {
 	format := "json"
+
 	var filteredArgs []string
+
 	for _, a := range args {
 		switch a {
 		case "--mermaid":
@@ -37,6 +39,7 @@ func cmdDeps(args []string) {
 			filteredArgs = append(filteredArgs, a)
 		}
 	}
+
 	args = filteredArgs
 
 	if len(args) == 0 {
@@ -46,21 +49,25 @@ func cmdDeps(args []string) {
 
 	// Collect all CFML files
 	var files []string
+
 	for _, arg := range args {
 		info, err := os.Stat(arg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", arg, err)
 			os.Exit(1)
 		}
+
 		if info.IsDir() {
 			_ = filepath.Walk(arg, func(path string, fi os.FileInfo, _ error) error {
 				if fi.IsDir() {
 					return nil
 				}
+
 				ext := strings.ToLower(filepath.Ext(path))
 				if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
 					files = append(files, path)
 				}
+
 				return nil
 			})
 		} else {
@@ -90,8 +97,10 @@ func cmdDeps(args []string) {
 				content, err := os.ReadFile(f)
 				if err != nil {
 					resultCh <- fileResult{}
+
 					continue
 				}
+
 				absPath, _ := filepath.Abs(f)
 				fileURI := uri.URI("file://" + absPath)
 				pr := parser.ParseWithOptions(fileURI, string(content), parser.ParseOptions{
@@ -108,12 +117,15 @@ func cmdDeps(args []string) {
 
 				for _, sc := range pr.Scopes {
 					funcName := ""
+
 					for _, fn := range pr.Funcs {
 						if int(fn.Line) == sc.Start {
 							funcName = fn.Name
+
 							break
 						}
 					}
+
 					refs, _ := pr.FuncRefs(sc.Start, sc.End)
 					for _, ref := range refs {
 						entries = append(entries, DepEdge{
@@ -130,6 +142,7 @@ func cmdDeps(args []string) {
 	for _, f := range files {
 		fileCh <- f
 	}
+
 	close(fileCh)
 
 	for range files {
@@ -154,17 +167,22 @@ func cmdDeps(args []string) {
 
 func printMermaidDeps(result DepResult) {
 	fmt.Println("graph LR")
+
 	seen := make(map[string]bool)
+
 	for _, e := range result.Edges {
 		from := filepath.Base(e.FromFile)
 		if e.FromFunction != "" {
 			from += "::" + e.FromFunction
 		}
+
 		to := e.ToComponent
+
 		key := from + "|" + to
 		if seen[key] {
 			continue
 		}
+
 		seen[key] = true
 		fromID := strings.ReplaceAll(strings.ReplaceAll(from, ".", "_"), ":", "_")
 		toID := strings.ReplaceAll(to, ".", "_")

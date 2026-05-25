@@ -21,8 +21,10 @@ func TestLanguageLoads(t *testing.T) {
 
 func TestParseCFML(t *testing.T) {
 	src := []byte(`component { public void function hello() { return; } }`)
+
 	tree := Parse(CFML, src, nil)
 	defer tree.Close()
+
 	if tree.RootNode().ChildCount() == 0 {
 		t.Fatal("expected children in CFML parse tree")
 	}
@@ -30,8 +32,10 @@ func TestParseCFML(t *testing.T) {
 
 func TestParseCFScript(t *testing.T) {
 	src := []byte(`function greet(name) { return "Hello " & name; }`)
+
 	tree := Parse(CFScript, src, nil)
 	defer tree.Close()
+
 	if tree.RootNode().ChildCount() == 0 {
 		t.Fatal("expected children in CFScript parse tree")
 	}
@@ -39,8 +43,10 @@ func TestParseCFScript(t *testing.T) {
 
 func TestParseCFQuery(t *testing.T) {
 	src := []byte(`SELECT id, name FROM users WHERE active = 1`)
+
 	tree := Parse(CFQuery, src, nil)
 	defer tree.Close()
+
 	if tree.RootNode().ChildCount() == 0 {
 		t.Fatal("expected children in CFQuery parse tree")
 	}

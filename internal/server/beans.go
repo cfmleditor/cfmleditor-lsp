@@ -21,6 +21,7 @@ func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 	}
 
 	var all []beanEntry
+
 	bareCount := make(map[string]int)
 
 	for ns, root := range beanPaths {
@@ -28,20 +29,25 @@ func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 			if err != nil {
 				return err
 			}
+
 			if info.IsDir() {
 				return nil
 			}
+
 			if !isCFCFile(path) {
 				return nil
 			}
+
 			name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 			all = append(all, beanEntry{absPath: path, ns: ns, name: name})
 			bareCount[strings.ToLower(name)]++
+
 			return nil
 		})
 	}
 
 	beans := make(map[string]string, len(all))
+
 	for _, b := range all {
 		key := strings.ToLower(b.name)
 
@@ -58,5 +64,6 @@ func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 			beans[key] = b.absPath
 		}
 	}
+
 	return beans
 }

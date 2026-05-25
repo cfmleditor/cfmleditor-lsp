@@ -30,10 +30,12 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 		if !ok {
 			return reply(ctx, nil, nil)
 		}
+
 		defs = parser.ParseFunctionDefs(docURI, content)
 	}
 
 	symbols := make([]protocol.DocumentSymbol, 0, len(defs))
+
 	for _, d := range defs {
 		r := protocol.Range{
 			Start: protocol.Position{Line: d.Line, Character: 0},
@@ -63,6 +65,7 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 		if query != "" && !containsFoldStr(d.Name, query) {
 			continue
 		}
+
 		symbols = append(symbols, protocol.SymbolInformation{
 			Name: d.Name,
 			Kind: protocol.SymbolKindFunction,
@@ -86,18 +89,23 @@ func containsFoldStr(s, substr string) bool {
 	if n == 0 {
 		return true
 	}
+
 	end := len(s) - n
 	for i := 0; i <= end; i++ {
 		match := true
+
 		for j := 0; j < n; j++ {
 			if s[i+j]|0x20 != substr[j] {
 				match = false
+
 				break
 			}
 		}
+
 		if match {
 			return true
 		}
 	}
+
 	return false
 }

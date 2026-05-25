@@ -63,7 +63,9 @@ func BenchmarkParse_TagCFC(b *testing.B) {
 func BenchmarkApplyEdit_InFunc(b *testing.B) {
 	for b.Loop() {
 		b.StopTimer()
+
 		pr := Parse("file:///bench.cfc", benchScriptCFC)
+
 		b.StartTimer()
 		pr.ApplyEdit(4, 0, 4, 0, "\t\tvar z = 1;\n")
 	}
@@ -72,7 +74,9 @@ func BenchmarkApplyEdit_InFunc(b *testing.B) {
 func BenchmarkApplyEdit_Global(b *testing.B) {
 	for b.Loop() {
 		b.StopTimer()
+
 		pr := Parse("file:///bench.cfc", benchScriptCFC)
+
 		b.StartTimer()
 		pr.ApplyEdit(0, 0, 0, 0, "// comment\n")
 	}
@@ -83,6 +87,7 @@ func BenchmarkFuncVars(b *testing.B) {
 	if len(pr.Scopes) == 0 {
 		b.Fatal("no scopes")
 	}
+
 	s := pr.Scopes[0]
 	for b.Loop() {
 		pr.InvalidateFunc(s.Start, s.End)
@@ -106,9 +111,9 @@ func TestParsePerformance(t *testing.T) {
 	const iterations = 100
 
 	tests := []struct {
-		name      string
-		maxPerOp  time.Duration
-		fn        func()
+		name     string
+		maxPerOp time.Duration
+		fn       func()
 	}{
 		{"Parse_ScriptCFC", 200 * time.Microsecond, func() {
 			Parse("file:///bench.cfc", benchScriptCFC)
@@ -133,11 +138,15 @@ func TestParsePerformance(t *testing.T) {
 			for range 10 {
 				tt.fn()
 			}
+
 			start := time.Now()
+
 			for range iterations {
 				tt.fn()
 			}
+
 			elapsed := time.Since(start)
+
 			perOp := elapsed / iterations
 			if perOp > tt.maxPerOp {
 				t.Errorf("performance regression: %v/op exceeds threshold %v/op", perOp, tt.maxPerOp)

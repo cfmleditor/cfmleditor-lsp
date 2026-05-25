@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -28,18 +28,21 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
+
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
 
 	docURI := params.TextDocument.URI
+
 	s.log.Debug("definition: request", cflog.String("word", word), cflog.Int("line", line), cflog.Int("char", char))
 
 	// Check if cursor is inside a resolver-matched call (e.g. getService("UserService"))
 	if comp := s.resolverArgAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
 			s.log.Debug("definition: resolver arg resolved", cflog.String("component", comp))
+
 			return reply(ctx, *loc, nil)
 		}
 	}
@@ -48,8 +51,10 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if comp := parser.ComponentPathAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
 			s.log.Debug("definition: component path resolved", cflog.String("path", comp), cflog.String("target", string(loc.URI)))
+
 			return reply(ctx, *loc, nil)
 		}
+
 		s.log.Debug("definition: component path not resolved", cflog.String("path", comp))
 	}
 
@@ -57,6 +62,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if filePath := parser.FilePathAtCursor(content, line, char); filePath != "" {
 		if loc := s.resolveFilePathDef(filePath, docURI); loc != nil {
 			s.log.Debug("definition: file path resolved", cflog.String("path", filePath), cflog.String("target", string(loc.URI)))
+
 			return reply(ctx, *loc, nil)
 		}
 		// Cursor is inside a file path — don't fall through to word-based lookup
@@ -73,11 +79,13 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	// Check if there's a dot qualifier (e.g. persist.templateFunction)
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
+
 		if strings.HasPrefix(qualifier, "~?") { //nolint:gocritic // if-else is clearer than switch for prefix checks
 			// Call expression — try component resolvers
 			callExpr := qualifier[2:]
 			comp := resolveComponentFromCall(callExpr, s.ComponentResolvers)
 			s.log.Debug("definition: call expression resolver", cflog.String("expr", callExpr), cflog.String("resolved", comp))
+
 			if comp != "" {
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
@@ -87,6 +95,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			// Direct component path from createObject/new expression
 			comp := qualifier[1:]
 			s.log.Debug("definition: direct component path", cflog.String("component", comp))
+
 			if comp != "" {
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
@@ -100,11 +109,14 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				s.ensureFuncRefsIndexed(docURI, line)
 				ref = s.index.LookupComponentRefInFile(qualifier, docURI, uint32(line))
 			}
+
 			if ref != nil {
 				s.log.Debug("definition: component ref found", cflog.String("variable", qualifier), cflog.String("component", ref.Component))
+
 				if loc := s.resolveComponentDef(ref.Component, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
 				}
+
 				s.log.Debug("definition: component ref resolve failed", cflog.String("component", ref.Component), cflog.String("func", word))
 			} else {
 				s.log.Debug("definition: no component ref for qualifier", cflog.String("variable", qualifier))
@@ -112,6 +124,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			// Try component resolvers for the qualifier itself (e.g. _parent → a CFC)
 			if comp := resolveComponentFromCall(qualifier, s.ComponentResolvers); comp != "" {
 				s.log.Debug("definition: qualifier matched resolver", cflog.String("qualifier", qualifier), cflog.String("resolved", comp))
+
 				if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
 					return reply(ctx, *loc, nil)
 				}
@@ -122,9 +135,12 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if !s.GlobalFunctionResolution {
 			return reply(ctx, nil, nil)
 		}
+
 		defs := s.index.Lookup(word)
 		s.log.Debug("definition: qualified fallback to global lookup", cflog.String("word", word), cflog.Int("matches", len(defs)))
+
 		var locations []protocol.Location
+
 		for _, d := range defs {
 			if d.URI != docURI {
 				locations = append(locations, protocol.Location{
@@ -133,12 +149,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				})
 			}
 		}
+
 		if len(locations) == 1 {
 			return reply(ctx, locations[0], nil)
 		}
+
 		if len(locations) > 1 {
 			return reply(ctx, locations, nil)
 		}
+
 		return reply(ctx, nil, nil)
 	}
 
@@ -147,6 +166,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if len(defs) == 0 {
 		return reply(ctx, nil, nil)
 	}
+
 	for _, d := range defs {
 		if d.URI == docURI {
 			return reply(ctx, protocol.Location{
@@ -160,6 +180,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if !s.GlobalFunctionResolution {
 		return reply(ctx, nil, nil)
 	}
+
 	var locations []protocol.Location
 	for _, d := range defs {
 		locations = append(locations, protocol.Location{
@@ -167,9 +188,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 		})
 	}
+
 	if len(locations) == 1 {
 		return reply(ctx, locations[0], nil)
 	}
+
 	return reply(ctx, locations, nil)
 }
 
@@ -187,6 +210,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 
 	// Check cache
 	cacheKey := component + "|" + baseDir
+
 	s.mu.RLock()
 	cfcPath, cached := s.resolveCache[cacheKey]
 	s.mu.RUnlock()
@@ -199,6 +223,7 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 				cfcPath = component
 			}
 		}
+
 		if cfcPath == "" {
 			cfcPath = s.getResolver().ComponentPath(component, baseDir)
 			// Try ORM cfcLocation directories for bare entity names
@@ -220,10 +245,12 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 				}
 			}
 		}
+
 		s.mu.Lock()
 		if s.resolveCache == nil {
 			s.resolveCache = make(map[string]string)
 		}
+
 		s.resolveCache[cacheKey] = cfcPath
 		s.mu.Unlock()
 		s.log.Debug("definition: resolve cache miss", cflog.String("component", component), cflog.String("path", cfcPath), cflog.Duration("dur", time.Since(t0)))
@@ -231,18 +258,23 @@ func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI)
 
 	if cfcPath == "" {
 		s.log.Debug("definition: component path not resolved to file", cflog.String("component", component))
+
 		return nil
 	}
+
 	for _, d := range s.getResolver().EnsureIndexed(cfcPath) {
 		if strings.EqualFold(d.Name, funcName) {
 			s.log.Debug("definition: resolved method", cflog.String("component", component), cflog.String("func", funcName), cflog.String("file", cfcPath), cflog.Uint32("line", d.Line))
+
 			return &protocol.Location{
 				URI:   d.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 			}
 		}
 	}
+
 	s.log.Debug("definition: method not found in component", cflog.String("component", component), cflog.String("func", funcName), cflog.String("file", cfcPath))
+
 	return nil
 }
 
@@ -253,10 +285,12 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 	baseDir := filepath.Dir(currentPath)
 
 	s.log.Debug("definition: resolveComponentFileDef", cflog.String("component", component), cflog.String("baseDir", baseDir))
+
 	cfcPath := s.getResolver().ComponentPath(component, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
+
 	return &protocol.Location{
 		URI:   uri.URI("file://" + cfcPath),
 		Range: protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
@@ -319,6 +353,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -329,6 +364,7 @@ func (s *Server) resolverArgAtCursor(content string, line, char int) string {
 	if len(s.ComponentResolvers) == 0 {
 		return ""
 	}
+
 	lineText := parser.LineTextAt(content, line)
 	if lineText == "" {
 		return ""
@@ -336,49 +372,63 @@ func (s *Server) resolverArgAtCursor(content string, line, char int) string {
 	// Find enclosing quotes around cursor
 	pos := min(char, len(lineText))
 	qStart := -1
+
 	var quote byte
+
 	for i := pos - 1; i >= 0; i-- {
 		if lineText[i] == '"' || lineText[i] == '\'' {
 			qStart = i
 			quote = lineText[i]
+
 			break
 		}
 	}
+
 	if qStart < 0 {
 		return ""
 	}
+
 	qEnd := -1
+
 	for i := qStart + 1; i < len(lineText); i++ {
 		if lineText[i] == quote {
 			qEnd = i
+
 			break
 		}
 	}
+
 	if qEnd < 0 || pos <= qStart || pos > qEnd {
 		return ""
 	}
 	// Extract the call expression surrounding the string: find opening paren before quote
 	parenIdx := -1
+
 	for i := qStart - 1; i >= 0; i-- {
 		if lineText[i] == '(' {
 			parenIdx = i
+
 			break
 		}
 	}
+
 	if parenIdx < 0 {
 		return ""
 	}
 	// Get the function name before the paren
 	funcEnd := parenIdx
+
 	funcStart := funcEnd
 	for funcStart > 0 && parser.IsWordChar(lineText[funcStart-1]) {
 		funcStart--
 	}
+
 	if funcStart == funcEnd {
 		return ""
 	}
 	// Build the call expression with the string value for resolver matching
 	value := lineText[qStart+1 : qEnd]
 	callExpr := lineText[funcStart:funcEnd] + "(\"" + value + "\")"
+
 	return resolveComponentFromCall(callExpr, s.ComponentResolvers)
 }

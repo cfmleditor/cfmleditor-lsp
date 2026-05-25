@@ -4,7 +4,7 @@ import "sync"
 
 // ConnTracker tracks active connections and signals when all have disconnected.
 type ConnTracker struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	count int
 	done  chan struct{}
 }
@@ -24,6 +24,7 @@ func (ct *ConnTracker) Add() {
 // Remove decrements the count and closes Done() when it reaches zero.
 func (ct *ConnTracker) Remove() {
 	ct.mu.Lock()
+
 	ct.count--
 	if ct.count == 0 {
 		select {

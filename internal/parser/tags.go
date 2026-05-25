@@ -9,31 +9,39 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 	if lineText == "" {
 		return nil
 	}
+
 	pos := min(char, len(lineText))
 
 	tagStart := -1
+
 	for i := pos; i >= 0; i-- {
 		if i < len(lineText) && lineText[i] == '<' {
 			tagStart = i
+
 			break
 		}
 	}
+
 	if tagStart < 0 {
 		return nil
 	}
 
 	isClose := tagStart+1 < len(lineText) && lineText[tagStart+1] == '/'
 	nameStart := tagStart + 1
+
 	if isClose {
 		nameStart = tagStart + 2
 	}
+
 	nameEnd := nameStart
 	for nameEnd < len(lineText) && lineText[nameEnd] != ' ' && lineText[nameEnd] != '>' && lineText[nameEnd] != '/' {
 		nameEnd++
 	}
+
 	if nameStart == nameEnd {
 		return nil
 	}
+
 	tagName := strings.ToLower(lineText[nameStart:nameEnd])
 
 	offset := 0
@@ -42,12 +50,15 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 		if idx < 0 {
 			return nil
 		}
+
 		offset += idx + 1
 	}
+
 	cursorOffset := offset + pos
 
 	if isClose {
 		depth := 0
+
 		i := cursorOffset - 1
 		for i >= 0 {
 			if i > 0 && content[i-1] == '<' && content[i] == '/' {
@@ -63,14 +74,17 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 				for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
 					end++
 				}
+
 				name := strings.ToLower(content[i+1 : end])
 				if name == tagName {
 					if depth == 0 {
 						return offsetToPosition(content, i)
 					}
+
 					depth--
 				}
 			}
+
 			i--
 		}
 	} else {
@@ -78,8 +92,10 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 		for searchStart < len(content) && content[searchStart] != '>' {
 			searchStart++
 		}
+
 		searchStart++
 		depth := 0
+
 		i := searchStart
 		for i < len(content) {
 			if content[i] == '<' {
@@ -88,11 +104,13 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 					for end < len(content) && content[end] != '>' && content[end] != ' ' {
 						end++
 					}
+
 					name := strings.ToLower(content[i+2 : end])
 					if name == tagName {
 						if depth == 0 {
 							return offsetToPosition(content, i)
 						}
+
 						depth--
 					}
 				} else {
@@ -100,27 +118,33 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 					for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
 						end++
 					}
+
 					name := strings.ToLower(content[i+1 : end])
 					if name == tagName {
 						depth++
 					}
 				}
 			}
+
 			i++
 		}
 	}
+
 	return nil
 }
 
 func offsetToPosition(content string, offset int) map[string]interface{} {
 	line := 0
 	lastNL := -1
+
 	for i := 0; i < offset && i < len(content); i++ {
 		if content[i] == '\n' {
 			line++
 			lastNL = i
 		}
 	}
+
 	char := offset - lastNL - 1
+
 	return map[string]interface{}{"line": line, "character": char}
 }

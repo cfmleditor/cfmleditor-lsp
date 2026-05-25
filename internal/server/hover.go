@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -27,6 +27,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
+
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
@@ -71,15 +72,19 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	if len(defs) > 0 {
 		// Only show if in current file or (global resolution enabled + exactly one match)
 		var def *parser.FunctionDef
+
 		for _, d := range defs {
 			if d.URI == docURI {
 				def = d
+
 				break
 			}
 		}
+
 		if def == nil && s.GlobalFunctionResolution && len(defs) == 1 {
 			def = defs[0]
 		}
+
 		if def != nil {
 			return reply(ctx, &protocol.Hover{
 				Contents: protocol.MarkupContent{
@@ -95,6 +100,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *parser.FunctionDef {
 	var comp string
+
 	switch {
 	case strings.HasPrefix(qualifier, "~?"):
 		comp = resolveComponentFromCall(qualifier[2:], s.ComponentResolvers)
@@ -106,49 +112,62 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 			s.ensureFuncRefsIndexed(docURI, int(line))
 			ref = s.index.LookupComponentRefInFile(qualifier, docURI, line)
 		}
+
 		if ref != nil {
 			comp = ref.Component
 		} else {
 			comp = resolveComponentFromCall(qualifier, s.ComponentResolvers)
 		}
 	}
+
 	if comp == "" {
 		return nil
 	}
+
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
+
 	cfcPath := s.getResolver().ComponentPath(comp, baseDir)
 	if cfcPath == "" {
 		return nil
 	}
+
 	for _, d := range s.getResolver().EnsureIndexed(cfcPath) {
 		if strings.EqualFold(d.Name, funcName) {
 			return d
 		}
 	}
+
 	return nil
 }
 
 func formatFuncHover(def *parser.FunctionDef) string {
 	var b strings.Builder
+
 	b.WriteString("**")
 	b.WriteString(def.Name)
 	b.WriteString("**\n\n```cfml\n")
 	b.WriteString(def.Name)
 	b.WriteString("(")
+
 	for i, arg := range def.Arguments {
 		if i > 0 {
 			b.WriteString(", ")
 		}
+
 		if arg.Required {
 			b.WriteString("required ")
 		}
+
 		if arg.Type != "" {
 			b.WriteString(arg.Type)
 			b.WriteString(" ")
 		}
+
 		b.WriteString(arg.Name)
 	}
+
 	b.WriteString(")\n```")
+
 	return b.String()
 }

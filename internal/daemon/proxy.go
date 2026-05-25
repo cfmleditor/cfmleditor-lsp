@@ -18,27 +18,33 @@ func Proxy(sockPath string) error {
 	}
 
 	var once sync.Once
+
 	closeConn := func() { once.Do(func() { _ = conn.Close() }) }
 	defer closeConn()
 
 	var wg sync.WaitGroup
+
 	wg.Add(2)
 
 	// stdin → socket
 	go func() {
 		defer wg.Done()
+
 		_, _ = io.Copy(conn, os.Stdin)
+
 		closeConn()
 	}()
 
 	// socket → stdout
 	go func() {
 		defer wg.Done()
+
 		_, _ = io.Copy(os.Stdout, conn)
 		// Daemon closed the socket; close stdin to unblock the other goroutine
 		_ = os.Stdin.Close()
 	}()
 
 	wg.Wait()
+
 	return nil
 }

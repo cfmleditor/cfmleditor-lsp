@@ -20,7 +20,9 @@ type RefResult struct {
 
 func cmdRefs(args []string) {
 	format := "json"
+
 	var filteredArgs []string
+
 	for _, a := range args {
 		switch a {
 		case "--mermaid":
@@ -29,6 +31,7 @@ func cmdRefs(args []string) {
 			filteredArgs = append(filteredArgs, a)
 		}
 	}
+
 	args = filteredArgs
 
 	if len(args) < 2 {
@@ -44,7 +47,9 @@ func cmdRefs(args []string) {
 	fsys := vfs.OS{}
 
 	isComponentTarget := strings.Contains(target, ".")
+
 	var entries []refs.Entry
+
 	if isComponentTarget {
 		entries = refs.FindComponentRefs(fsys, dirs, target, resolvers)
 	} else {
@@ -68,18 +73,23 @@ func cmdRefs(args []string) {
 
 func printMermaidRefs(target string, entries []refs.Entry) {
 	fmt.Println("graph LR")
+
 	targetNode := strings.ReplaceAll(target, ".", "_")
 	fmt.Printf("    %s[%s]\n", targetNode, target)
+
 	for i, ref := range entries {
 		nodeID := fmt.Sprintf("ref%d", i)
+
 		label := filepath.Base(ref.File)
 		if ref.Function != "" {
 			label += "::" + ref.Function
 		}
+
 		style := "-->"
 		if !ref.Resolved {
 			style = "-.->"
 		}
+
 		fmt.Printf("    %s[%s] %s %s\n", nodeID, label, style, targetNode)
 	}
 }

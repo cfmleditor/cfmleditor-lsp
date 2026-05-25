@@ -57,20 +57,24 @@ func NewRunner() (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &Runner{binPath: binPath}, nil
 }
 
 // Scan runs CFLint on the given file and returns LSP diagnostics.
 func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnostic, error) {
 	cmd := exec.CommandContext(ctx, r.binPath, "-stdin", filepath.Base(filePath), "-json", "-stdout", "-q")
+
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
+
 	cmd.Stdin = strings.NewReader(string(content))
 	cmd.Dir = filepath.Dir(filePath)
 
 	var stderr strings.Builder
+
 	cmd.Stderr = &stderr
 
 	out, err := cmd.Output()
@@ -90,17 +94,21 @@ func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnost
 
 func toDiagnostics(result Result) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
+
 	for _, issue := range result.Issues {
 		sev := mapSeverity(issue.Severity)
+
 		for _, loc := range issue.Locations {
 			line := loc.Line
 			if line > 0 {
 				line--
 			}
+
 			col := loc.Column
 			if col > 0 {
 				col--
 			}
+
 			diags = append(diags, protocol.Diagnostic{
 				Range: protocol.Range{
 					Start: protocol.Position{Line: uint32(line), Character: uint32(col)},
@@ -113,6 +121,7 @@ func toDiagnostics(result Result) []protocol.Diagnostic {
 			})
 		}
 	}
+
 	return diags
 }
 
@@ -132,6 +141,7 @@ func mapSeverity(s string) protocol.DiagnosticSeverity {
 func binaryName() string {
 	os := runtime.GOOS
 	arch := runtime.GOARCH
+
 	switch {
 	case os == "darwin" && arch == "arm64":
 		return "cflint-macos-aarch64"
@@ -151,7 +161,9 @@ func cacheDir(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	p := filepath.Join(dir, "cfmleditor-lsp", "cflint", version)
+
 	return p, os.MkdirAll(p, 0o755)
 }
 
@@ -160,16 +172,21 @@ func latestVersion() string {
 	if err != nil {
 		return fallbackVersion
 	}
+
 	defer func() { _ = resp.Body.Close() }()
+
 	if resp.StatusCode != http.StatusOK {
 		return fallbackVersion
 	}
+
 	var release struct {
 		TagName string `json:"tag_name"`
 	}
+
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil || release.TagName == "" {
 		return fallbackVersion
 	}
+
 	return release.TagName
 }
 
@@ -185,6 +202,7 @@ func ensureBinary() (string, error) {
 	}
 
 	version := latestVersion()
+
 	dir, err := cacheDir(version)
 	if err != nil {
 		return "", err
@@ -196,10 +214,12 @@ func ensureBinary() (string, error) {
 	}
 
 	url := downloadBase + version + "/" + name
+
 	resp, err := http.Get(url) //nolint:gosec // trusted URL
 	if err != nil {
 		return "", fmt.Errorf("downloading cflint: %w", err)
 	}
+
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
@@ -215,6 +235,7 @@ func ensureBinary() (string, error) {
 
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		_ = os.Remove(binPath)
+
 		return "", err
 	}
 

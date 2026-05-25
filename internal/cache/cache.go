@@ -25,8 +25,8 @@ type scopeEntry struct {
 
 // FileCache holds all scoped completion entries for a single file.
 type FileCache struct {
-	funcs    map[string]*scopeEntry // function name -> entry
-	fileScope *scopeEntry           // file/component level
+	funcs     map[string]*scopeEntry // function name -> entry
+	fileScope *scopeEntry            // file/component level
 }
 
 // Cache stores per-file completion caches.
@@ -46,6 +46,7 @@ func (c *Cache) getOrCreateFile(fileURI uri.URI) *FileCache {
 		fc = &FileCache{funcs: make(map[string]*scopeEntry)}
 		c.files[fileURI] = fc
 	}
+
 	return fc
 }
 
@@ -53,14 +54,17 @@ func (c *Cache) getOrCreateFile(fileURI uri.URI) *FileCache {
 func (c *Cache) GetFunc(fileURI uri.URI, funcName string, hash uint64) []protocol.CompletionItem {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	fc := c.files[fileURI]
 	if fc == nil {
 		return nil
 	}
+
 	e := fc.funcs[funcName]
 	if e != nil && e.Hash == hash {
 		return e.Items
 	}
+
 	return nil
 }
 
@@ -68,14 +72,17 @@ func (c *Cache) GetFunc(fileURI uri.URI, funcName string, hash uint64) []protoco
 func (c *Cache) GetFuncStale(fileURI uri.URI, funcName string) []protocol.CompletionItem {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	fc := c.files[fileURI]
 	if fc == nil {
 		return nil
 	}
+
 	e := fc.funcs[funcName]
 	if e != nil {
 		return e.Items
 	}
+
 	return nil
 }
 
@@ -83,6 +90,7 @@ func (c *Cache) GetFuncStale(fileURI uri.URI, funcName string) []protocol.Comple
 func (c *Cache) PutFunc(fileURI uri.URI, funcName string, hash uint64, items []protocol.CompletionItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	fc := c.getOrCreateFile(fileURI)
 	fc.funcs[funcName] = &scopeEntry{Items: items, Hash: hash}
 }
@@ -91,10 +99,12 @@ func (c *Cache) PutFunc(fileURI uri.URI, funcName string, hash uint64, items []p
 func (c *Cache) GetFile(fileURI uri.URI) []protocol.CompletionItem {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	fc := c.files[fileURI]
 	if fc == nil || fc.fileScope == nil {
 		return nil
 	}
+
 	return fc.fileScope.Items
 }
 
@@ -102,6 +112,7 @@ func (c *Cache) GetFile(fileURI uri.URI) []protocol.CompletionItem {
 func (c *Cache) PutFile(fileURI uri.URI, items []protocol.CompletionItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	fc := c.getOrCreateFile(fileURI)
 	fc.fileScope = &scopeEntry{Items: items}
 }
@@ -110,6 +121,7 @@ func (c *Cache) PutFile(fileURI uri.URI, items []protocol.CompletionItem) {
 func (c *Cache) Invalidate(fileURI uri.URI) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	delete(c.files, fileURI)
 }
 
@@ -117,6 +129,7 @@ func (c *Cache) Invalidate(fileURI uri.URI) {
 func (c *Cache) InvalidateAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.files = make(map[uri.URI]*FileCache)
 }
 
@@ -131,6 +144,7 @@ func HashScope(content string, startLine, endLine int) uint64 {
 		if idx < 0 {
 			return h.Sum64()
 		}
+
 		i += idx + 1
 		line++
 	}
@@ -139,11 +153,14 @@ func HashScope(content string, startLine, endLine int) uint64 {
 		idx := strings.IndexByte(content[i:], '\n')
 		if idx < 0 {
 			h.Write([]byte(content[i:]))
+
 			break
 		}
+
 		h.Write([]byte(content[i : i+idx+1]))
 		i += idx + 1
 		line++
 	}
+
 	return h.Sum64()
 }

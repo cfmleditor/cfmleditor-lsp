@@ -14,6 +14,7 @@ import (
 func (c *Config) SocketPath() string {
 	h := sha256.Sum256([]byte(c.Name))
 	name := fmt.Sprintf("cfmleditor-%x.sock", h[:8])
+
 	return filepath.Join(socketDir(), name)
 }
 
@@ -25,11 +26,13 @@ func socketDir() string {
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "cfmleditor-lsp")
 		}
+
 		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
 	default:
 		if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
 			return filepath.Join(d, "cfmleditor-lsp")
 		}
+
 		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
 	}
 }

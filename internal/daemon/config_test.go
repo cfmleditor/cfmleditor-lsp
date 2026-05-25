@@ -9,9 +9,11 @@ import (
 
 func writeConfig(t *testing.T, dir, content string) {
 	t.Helper()
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +27,7 @@ func TestFindConfigInDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg == nil || cfg.Name != "myproject" {
 		t.Fatalf("expected myproject, got %+v", cfg)
 	}
@@ -34,12 +37,14 @@ func TestFindConfigInParent(t *testing.T) {
 	parent := t.TempDir()
 	child := filepath.Join(parent, "sub")
 	_ = os.MkdirAll(child, 0o755)
+
 	writeConfig(t, parent, `{"workspaceName":"parentproj"}`)
 
 	cfg, err := FindConfig(child)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg == nil || cfg.Name != "parentproj" {
 		t.Fatalf("expected parentproj, got %+v", cfg)
 	}
@@ -53,6 +58,7 @@ func TestFindConfigMissingName(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected config with directory name fallback, got nil")
 	}
+
 	expected := dir
 	if cfg.Name != expected {
 		t.Fatalf("expected name %q, got %q", expected, cfg.Name)
@@ -61,10 +67,12 @@ func TestFindConfigMissingName(t *testing.T) {
 
 func TestFindConfigNoFile(t *testing.T) {
 	dir := t.TempDir()
+
 	cfg, _ := FindConfig(dir)
 	if cfg == nil {
 		t.Fatal("expected fallback config, got nil")
 	}
+
 	if cfg.Name != filepath.Base(dir) {
 		t.Fatalf("expected name %q, got %q", filepath.Base(dir), cfg.Name)
 	}
@@ -73,9 +81,11 @@ func TestFindConfigNoFile(t *testing.T) {
 func TestSocketPathDerivedFromName(t *testing.T) {
 	a := &Config{Name: "alpha"}
 	b := &Config{Name: "beta"}
+
 	if a.SocketPath() == b.SocketPath() {
 		t.Fatal("different names should produce different socket paths")
 	}
+
 	if a.SocketPath() != (&Config{Name: "alpha"}).SocketPath() {
 		t.Fatal("same name should produce same socket path")
 	}
@@ -94,9 +104,11 @@ func TestWorkspaceFolders(t *testing.T) {
 	if len(folders) != 2 {
 		t.Fatalf("expected 2 folders, got %d: %v", len(folders), folders)
 	}
+
 	if folders[0] != sharedLib {
 		t.Fatalf("got %q, want %q", folders[0], sharedLib)
 	}
+
 	if folders[1] != dir {
 		t.Fatalf("got %q, want %q", folders[1], dir)
 	}
@@ -113,12 +125,14 @@ func TestIndexGlobsResolvesBaseName(t *testing.T) {
 		"workspacePaths":["../shared-lib"],
 		"workspaceIndexGlobs":["shared-lib/**/*.cfc"]
 	}`)
+
 	cfg := &Config{Path: filepath.Join(dir, ".cfmleditor.json"), Name: "proj"}
 	globs := cfg.IndexGlobs()
 
 	if len(globs) != 1 {
 		t.Fatalf("expected 1 glob, got %d: %v", len(globs), globs)
 	}
+
 	expected := sharedLib + "/**/*.cfc"
 	if globs[0] != expected {
 		t.Fatalf("got %q, want %q", globs[0], expected)

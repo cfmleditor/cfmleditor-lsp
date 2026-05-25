@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -58,14 +58,18 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 		fns := docs.AllFunctions()
 		scopes := []string{"VARIABLES", "ARGUMENTS", "THIS", "SERVER", "APPLICATION", "REQUEST", "SESSION"}
 		builtinFuncItems = make([]protocol.CompletionItem, 0, len(fns)+len(scopes))
+
 		for _, fn := range fns {
 			insertText := fn.Name + "("
+
 			for i, p := range fn.Params {
 				if i > 0 {
 					insertText += ", "
 				}
+
 				insertText += fmt.Sprintf("${%d:%s}", i+1, p.Name)
 			}
+
 			insertText += ")"
 			builtinFuncItems = append(builtinFuncItems, protocol.CompletionItem{
 				Label:            fn.Name,
@@ -77,6 +81,7 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 				SortText:         SortBuiltinFuncs + fn.Name,
 			})
 		}
+
 		for i, s := range scopes {
 			builtinFuncItems = append(builtinFuncItems, protocol.CompletionItem{
 				Label:    s,
@@ -85,6 +90,7 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 			})
 		}
 	})
+
 	return builtinFuncItems
 }
 
@@ -92,6 +98,7 @@ func getMemberFuncItems() []protocol.CompletionItem {
 	memberFuncItemsOnce.Do(func() {
 		mfs := docs.AllMemberFunctions()
 		memberFuncItems = make([]protocol.CompletionItem, 0, len(mfs))
+
 		for _, mf := range mfs {
 			memberFuncItems = append(memberFuncItems, protocol.CompletionItem{
 				Label:         mf.Name,
@@ -102,11 +109,13 @@ func getMemberFuncItems() []protocol.CompletionItem {
 			})
 		}
 	})
+
 	return memberFuncItems
 }
 
 func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	totalStart := time.Now()
+
 	var params protocol.CompletionParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, err)
@@ -117,6 +126,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	content, hasDoc := s.getDocument(params.TextDocument.URI)
 
 	t0 := time.Now()
+
 	tagName := ""
 	if hasDoc {
 		tagName = findEnclosingTag(content, int(params.Position.Line), int(params.Position.Character))
@@ -140,17 +150,21 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	typingTag := false
 	inHashExpr := false
 	inAttrValue := false
+
 	if hasDoc {
 		closing = isClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
 		if !closing && tagName == "" {
 			typingTag = isTypingTagName(content, int(params.Position.Line), int(params.Position.Character))
 		}
+
 		inHashExpr = isInsideHashExpr(content, int(params.Position.Line), int(params.Position.Character))
 		inAttrValue = isInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
 	}
+
 	contextDur := time.Since(t0)
 
 	triggerKind := ""
+
 	if params.Context != nil {
 		switch params.Context.TriggerKind {
 		case protocol.CompletionTriggerKindInvoked:
@@ -161,6 +175,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			triggerKind = "incomplete"
 		}
 	}
+
 	s.log.Debug("completion: request",
 		cflog.String("trigger", triggerKind),
 		cflog.Bool("triggeredByDot", triggeredByDot),
@@ -182,6 +197,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				if attrs == nil {
 					attrs = docs.HTMLTagParams(tagName)
 				}
+
 				for i := range attrs {
 					if strings.ToLower(attrs[i].Name) == attrName {
 						for _, v := range attrs[i].ParamValues() {
@@ -191,11 +207,13 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 								Detail: attrName + " value",
 							})
 						}
+
 						break
 					}
 				}
 			}
 		}
+
 		if CompletionBuiltinFunctions {
 			items = append(items, getBuiltinFuncItems()...)
 		}
@@ -204,6 +222,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			if item, ok := duplicateGtCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
 				items = append(items, item)
 			}
+
 			if item, ok := closeTagCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
 				items = append(items, item)
 			}
@@ -212,22 +231,28 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if CompletionCloseTags {
 			t1 := time.Now()
 			trailingGt := -1
+
 			if hasDoc {
 				lineStart := 0
 				for i := 0; i < int(params.Position.Line); i++ {
 					idx := strings.IndexByte(content[lineStart:], '\n')
 					if idx < 0 {
 						lineStart = len(content)
+
 						break
 					}
+
 					lineStart += idx + 1
 				}
+
 				lineEnd := strings.IndexByte(content[lineStart:], '\n')
 				if lineEnd < 0 {
 					lineEnd = len(content) - lineStart
 				}
+
 				lineText := content[lineStart : lineStart+lineEnd]
 				charPos := int(params.Position.Character)
+
 				if charPos < len(lineText) {
 					after := lineText[charPos:]
 					if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
@@ -235,6 +260,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 				}
 			}
+
 			tags := make(map[string]int)
 			for i, tag := range s.findUnclosedTagsScoped(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)) {
 				_, ok := tags[tag]
@@ -256,19 +282,23 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					} else {
 						item.InsertText = tag + ">"
 					}
+
 					items = append(items, item)
 					tags[tag] = len(items)
 				}
 			}
+
 			s.log.Debug("completion: closeTags", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName != "" && !isSpecialTag(tagName):
 		if CompletionAttributes {
 			t1 := time.Now()
+
 			attrs := docs.TagParams(tagName)
 			if attrs == nil {
 				attrs = docs.HTMLTagParams(tagName)
 			}
+
 			for _, p := range attrs {
 				items = append(items, protocol.CompletionItem{SortText: SortProperties,
 					Label:            p.Name,
@@ -278,6 +308,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
+
 			s.log.Debug("completion: attributes", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName == "cfelse":
@@ -298,6 +329,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	case triggeredByTag:
 		if CompletionTags {
 			t1 := time.Now()
+
 			for _, tag := range docs.AllTags() {
 				items = append(items, protocol.CompletionItem{
 					Label:            tag.Name,
@@ -308,6 +340,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
+
 			for _, tag := range docs.HTMLTags() {
 				items = append(items, protocol.CompletionItem{
 					Label:    tag.Name,
@@ -316,6 +349,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					Detail:   tag.Description,
 				})
 			}
+
 			s.log.Debug("completion: tags", cflog.Duration("dur", time.Since(t1)))
 		}
 	case typingTag:
@@ -330,6 +364,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					InsertTextFormat: protocol.InsertTextFormatSnippet,
 				})
 			}
+
 			for _, tag := range docs.HTMLTags() {
 				items = append(items, protocol.CompletionItem{
 					Label:    tag.Name,
@@ -342,11 +377,14 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	case triggeredByDot && hasDoc:
 		if CompletionDotMethods {
 			t1 := time.Now()
+
 			if methods := s.dotCompletionMethods(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)); len(methods) > 0 {
 				items = append(items, methods...)
+
 				s.log.Debug("completion: dotMethods", cflog.Duration("dur", time.Since(t1)))
 			} else if CompletionMemberFunctions {
 				items = append(items, getMemberFuncItems()...)
+
 				s.log.Debug("completion: memberFunctions", cflog.Duration("dur", time.Since(t1)))
 			}
 		}
@@ -357,6 +395,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				items = append(items, argItems...)
 			}
 		}
+
 		items = append(items, s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))...)
 	}
 
@@ -371,8 +410,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			if items[i].InsertTextFormat != protocol.InsertTextFormatSnippet {
 				continue
 			}
+
 			isTag := items[i].Kind == protocol.CompletionItemKindKeyword
 			isFunc := items[i].Kind == protocol.CompletionItemKindFunction || items[i].Kind == protocol.CompletionItemKindMethod
+
 			if (isTag && !s.TagSnippets) || (isFunc && !s.FunctionSnippets) {
 				items[i].InsertText = ""
 				items[i].InsertTextFormat = protocol.InsertTextFormatPlainText
@@ -389,6 +430,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 // isClosingTagContext returns true if the cursor is right after "</".
 func isClosingTagContext(content string, line, char int) bool {
 	textBefore := textBeforeCursor(content, line, char)
+
 	return strings.HasSuffix(textBefore, "</")
 }
 
@@ -398,10 +440,12 @@ func isInsideHashExpr(content string, line, char int) bool {
 	// Find the relevant context boundary — last tag close or line start
 	boundary := strings.LastIndex(textBefore, ">")
 	lastOpen := strings.LastIndex(textBefore, "<")
+
 	if lastOpen > boundary {
 		// Inside an unclosed tag — count from tag open
 		boundary = lastOpen
 	}
+
 	if boundary == -1 {
 		boundary = 0
 	}
@@ -410,6 +454,7 @@ func isInsideHashExpr(content string, line, char int) bool {
 	if lastNL > boundary {
 		boundary = lastNL
 	}
+
 	return strings.Count(textBefore[boundary:], "#")%2 == 1
 }
 
@@ -421,6 +466,7 @@ func isInsideAttrValue(content string, line, char int) bool {
 	if lastOpen == -1 {
 		return false
 	}
+
 	afterOpen := textBefore[lastOpen:]
 	if strings.Contains(afterOpen, ">") {
 		return false
@@ -428,6 +474,7 @@ func isInsideAttrValue(content string, line, char int) bool {
 	// Count quotes after the tag open to determine if we're inside a string
 	inSingle := false
 	inDouble := false
+
 	for _, ch := range afterOpen {
 		switch {
 		case ch == '"' && !inSingle:
@@ -436,21 +483,25 @@ func isInsideAttrValue(content string, line, char int) bool {
 			inSingle = !inSingle
 		}
 	}
+
 	return inSingle || inDouble
 }
 
 // findCurrentAttr returns the attribute name whose value the cursor is inside.
 func findCurrentAttr(content string, line, char int) string {
 	textBefore := textBeforeCursor(content, line, char)
+
 	lastOpen := strings.LastIndex(textBefore, "<")
 	if lastOpen == -1 {
 		return ""
 	}
+
 	afterOpen := textBefore[lastOpen:]
 	// Find the last '=' before an open quote that isn't closed
 	inSingle := false
 	inDouble := false
 	lastEq := -1
+
 	for i, ch := range afterOpen {
 		switch {
 		case ch == '=' && !inSingle && !inDouble:
@@ -461,33 +512,40 @@ func findCurrentAttr(content string, line, char int) string {
 			inSingle = !inSingle
 		}
 	}
+
 	if lastEq == -1 {
 		return ""
 	}
 	// Extract attribute name before the '='
 	before := strings.TrimRight(afterOpen[:lastEq], " \t")
 	start := strings.LastIndexAny(before, " \t\r\n") + 1
+
 	return strings.ToLower(before[start:])
 }
 
 // isTypingTagName returns true if the cursor is inside an incomplete tag name (e.g. "<cfif").
 func isTypingTagName(content string, line, char int) bool {
 	textBefore := textBeforeCursor(content, line, char)
+
 	lastOpen := strings.LastIndex(textBefore, "<")
 	if lastOpen == -1 {
 		return false
 	}
+
 	after := textBefore[lastOpen:]
 	if strings.Contains(after, ">") {
 		return false
 	}
+
 	rest := after[1:]
 	if len(rest) == 0 || rest[0] == '/' || rest[0] == '!' {
 		return false
 	}
+
 	if strings.ContainsAny(rest, " \t\r\n/>") {
 		return false
 	}
+
 	return true
 }
 
@@ -504,6 +562,7 @@ func isVoidTag(name string) bool {
 		"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr":
 		return true
 	}
+
 	return false
 }
 
@@ -512,6 +571,7 @@ func isSpecialTag(name string) bool {
 	case "cfset", "cfif", "cfelse", "cfelseif":
 		return true
 	}
+
 	return false
 }
 
@@ -522,6 +582,7 @@ func isSubordinateTag(name string) bool {
 	case "cfelse", "cfelseif":
 		return true
 	}
+
 	return false
 }
 
@@ -536,9 +597,11 @@ func (s *Server) findUnclosedTagsScoped(content string, docURI uri.URI, line, ch
 	idx := sort.Search(len(funcs), func(i int) bool {
 		return funcs[i].End >= line
 	})
+
 	if idx < len(funcs) && line >= funcs[idx].Start {
 		startLine = funcs[idx].Start
 	}
+
 	return findUnclosedTags(content, startLine, line, char)
 }
 
@@ -553,20 +616,25 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 			idx := strings.IndexByte(text[offset:], '\n')
 			if idx < 0 {
 				offset = len(text)
+
 				break
 			}
+
 			offset += idx + 1
 		}
+
 		text = text[offset:]
 	}
 
 	var stack []string
+
 	i := 0
 	for i < len(text) {
 		idx := strings.Index(text[i:], "<")
 		if idx == -1 {
 			break
 		}
+
 		i += idx + 1
 		if i >= len(text) {
 			break
@@ -575,18 +643,22 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 		if text[i] == '/' {
 			// Closing tag
 			i++
+
 			end := strings.IndexAny(text[i:], "> \t\r\n")
 			if end == -1 {
 				break
 			}
+
 			closeName := toLowerASCII(text[i : i+end])
 			// Pop matching tag from stack
 			for j := len(stack) - 1; j >= 0; j-- {
 				if stack[j] == closeName {
 					stack = append(stack[:j], stack[j+1:]...)
+
 					break
 				}
 			}
+
 			i += end
 		} else {
 			// Opening tag
@@ -594,9 +666,11 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 			if end == -1 {
 				break
 			}
+
 			name := toLowerASCII(text[i : i+end])
 			if name == "" || name[0] == '!' || name == "cfset" || isSubordinateTag(name) || isVoidTag(name) {
 				i += end
+
 				continue
 			}
 
@@ -604,10 +678,12 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 			closeIdx := strings.Index(text[i:], ">")
 			if closeIdx != -1 && closeIdx > 0 && text[i+closeIdx-1] == '/' {
 				i += closeIdx + 1
+
 				continue
 			}
 
 			stack = append(stack, name)
+
 			if closeIdx != -1 {
 				i += closeIdx + 1
 			} else {
@@ -620,6 +696,7 @@ func findUnclosedTags(content string, startLine, line, char int) []string {
 	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
 		stack[i], stack[j] = stack[j], stack[i]
 	}
+
 	return stack
 }
 
@@ -630,12 +707,15 @@ func textBeforeCursor(content string, line, char int) string {
 		if idx < 0 {
 			return content
 		}
+
 		offset += idx + 1
 	}
+
 	end := offset + char
 	if end > len(content) {
 		end = len(content)
 	}
+
 	return content[:end]
 }
 
@@ -650,6 +730,7 @@ func findEnclosingTag(content string, line, char int) string {
 	if lastOpen == -1 {
 		return ""
 	}
+
 	afterOpen := textBefore[lastOpen:]
 	if strings.Contains(afterOpen, ">") {
 		return ""
@@ -657,6 +738,7 @@ func findEnclosingTag(content string, line, char int) string {
 
 	// Extract tag name: first word after '<'
 	rest := strings.TrimLeft(afterOpen[1:], " \t")
+
 	tagEnd := strings.IndexAny(rest, " \t\r\n/>")
 	if tagEnd == -1 {
 		return "" // still typing the tag name
@@ -677,19 +759,23 @@ func duplicateGtCompletion(content string, line, char int) (protocol.CompletionI
 	if line >= len(lines) || char < 2 {
 		return protocol.CompletionItem{}, false
 	}
+
 	lineText := lines[line]
 	if char > len(lineText) || lineText[char-2] != '>' {
 		return protocol.CompletionItem{}, false
 	}
 	// Verify the previous '>' closes a tag.
 	before := lineText[:char-1]
+
 	openIdx := strings.LastIndexByte(before, '<')
 	if openIdx == -1 {
 		return protocol.CompletionItem{}, false
 	}
+
 	if strings.ContainsRune(before[openIdx:len(before)-1], '>') {
 		return protocol.CompletionItem{}, false
 	}
+
 	return protocol.CompletionItem{
 		Label:      ">",
 		Kind:       protocol.CompletionItemKindKeyword,
@@ -714,6 +800,7 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 	if line >= len(lines) {
 		return protocol.CompletionItem{}, false
 	}
+
 	lineText := lines[line]
 	if char >= len(lineText) {
 		return protocol.CompletionItem{}, false
@@ -721,6 +808,7 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 
 	// Find next '>' after cursor.
 	rest := lineText[char:]
+
 	idx := strings.IndexByte(rest, '>')
 	if idx == -1 {
 		return protocol.CompletionItem{}, false
@@ -740,15 +828,18 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 
 	// Verify we're inside a tag.
 	before := lineText[:char]
+
 	openIdx := strings.LastIndexByte(before, '<')
 	if openIdx == -1 {
 		return protocol.CompletionItem{}, false
 	}
+
 	if strings.ContainsRune(lineText[openIdx:char-1], '>') {
 		return protocol.CompletionItem{}, false
 	}
 
 	endChar := char + idx + 1
+
 	return protocol.CompletionItem{
 		Label:            ">",
 		Kind:             protocol.CompletionItemKindKeyword,
@@ -786,9 +877,11 @@ func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.Comple
 		if len(funcItems) == 0 {
 			return fileItems
 		}
+
 		items := make([]protocol.CompletionItem, 0, len(fileItems)+len(funcItems))
 		items = append(items, fileItems...)
 		items = append(items, funcItems...)
+
 		return items
 	}
 
@@ -800,6 +893,7 @@ func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.Comple
 // has its local vars scanned. Pass -1 to skip function scanning (file-level only).
 func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine int) {
 	start := time.Now()
+
 	s.mu.RLock()
 	funcs := s.funcRanges[docURI]
 	pr := s.parseResults[docURI]
@@ -813,6 +907,7 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 		if idx < len(funcs) && editLine >= funcs[idx].Start {
 			f := funcs[idx]
 			hash := cache.HashScope(content, f.Start, f.End)
+
 			if s.compCache.GetFunc(docURI, f.Name, hash) == nil {
 				var vars []string
 				if pr != nil {
@@ -820,10 +915,12 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 				} else {
 					vars = parser.VarsInFunc(content, f.Start, f.End)
 				}
+
 				items := make([]protocol.CompletionItem, 0, len(vars))
 				for _, v := range vars {
 					items = append(items, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable, SortText: SortLocalVariables + v})
 				}
+
 				s.compCache.PutFunc(docURI, f.Name, hash, items)
 				s.log.Debug("completion: func vars rebuilt",
 					cflog.String("uri", string(docURI)),
@@ -843,14 +940,18 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
+
 	if pr != nil {
 		s.rebuildFileCompletionCacheFromPR(docURI, pr)
+
 		return
 	}
+
 	content, ok := s.getDocument(docURI)
 	if !ok {
 		return
 	}
+
 	newPR := s.parseContent(docURI, content)
 	s.mu.Lock()
 	s.parseResults[docURI] = newPR
@@ -868,6 +969,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	items = append(items, builtins...)
 	varPrefix := s.scopePrefix("variables")
 	thisPrefix := s.scopePrefix("this")
+
 	for _, v := range globals {
 		scoped := varPrefix + "." + v
 		items = append(items, protocol.CompletionItem{
@@ -883,6 +985,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			SortText:   SortGlobalVariables + v,
 		})
 	}
+
 	for _, v := range thisVarNames {
 		scoped := thisPrefix + "." + v
 		items = append(items, protocol.CompletionItem{
@@ -898,20 +1001,25 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			SortText:   SortGlobalVariables + v,
 		})
 	}
+
 	for _, f := range pr.Funcs {
 		detail := f.Name + "("
 		insertText := f.Name + "("
+
 		for i, arg := range f.Arguments {
 			if i > 0 {
 				detail += ", "
 				insertText += ", "
 			}
+
 			if arg.Type != "" {
 				detail += arg.Type + " "
 			}
+
 			detail += arg.Name
 			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
 		}
+
 		detail += ")"
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
@@ -923,29 +1031,36 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			SortText:         SortUserFunctions + f.Name,
 		})
 	}
+
 	s.compCache.PutFile(docURI, items)
 
 	varsItems := make([]protocol.CompletionItem, 0, len(pr.VariablesVars()))
 	for _, v := range pr.VariablesVars() {
 		varsItems = append(varsItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindVariable, SortText: SortLocalVariables + v})
 	}
+
 	s.compCache.PutFunc(docURI, "__variables__", 0, varsItems)
 
 	thisItems := make([]protocol.CompletionItem, 0, len(pr.Funcs))
 	for _, v := range pr.ThisVars() {
 		thisItems = append(thisItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindProperty, SortText: SortLocalVariables + v})
 	}
+
 	for _, f := range pr.Funcs {
 		detail := f.Name + "("
+
 		for i, arg := range f.Arguments {
 			if i > 0 {
 				detail += ", "
 			}
+
 			if arg.Type != "" {
 				detail += arg.Type + " "
 			}
+
 			detail += arg.Name
 		}
+
 		detail += ")"
 		thisItems = append(thisItems, protocol.CompletionItem{
 			Label:    f.Name,
@@ -954,6 +1069,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			SortText: SortUserFunctions + f.Name,
 		})
 	}
+
 	s.compCache.PutFunc(docURI, "__this__", 0, thisItems)
 	s.log.Debug("completion: file globals rebuilt",
 		cflog.String("uri", string(docURI)),
@@ -974,17 +1090,20 @@ func (s *Server) scopeArgumentsCompletion(docURI uri.URI, line int) []protocol.C
 	if idx >= len(funcs) || line < funcs[idx].Start {
 		return nil
 	}
+
 	funcName := funcs[idx].Name
 
 	defs := s.index.FunctionsForFile(docURI)
 	for _, d := range defs {
 		if strings.EqualFold(d.Name, funcName) {
 			items := make([]protocol.CompletionItem, 0, len(d.Arguments))
+
 			for _, arg := range d.Arguments {
 				detail := arg.Type
 				if arg.Required {
 					detail += " required"
 				}
+
 				items = append(items, protocol.CompletionItem{
 					Label:    arg.Name,
 					Kind:     protocol.CompletionItemKindVariable,
@@ -992,9 +1111,11 @@ func (s *Server) scopeArgumentsCompletion(docURI uri.URI, line int) []protocol.C
 					SortText: SortProperties + arg.Name,
 				})
 			}
+
 			return items
 		}
 	}
+
 	return nil
 }
 
@@ -1003,12 +1124,14 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
+
 	if pr == nil || pr.Extends == "" {
 		return nil
 	}
 
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
+
 	cfcPath := s.getResolver().ComponentPath(pr.Extends, baseDir)
 	if cfcPath == "" {
 		return nil
@@ -1017,17 +1140,22 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 	defs := s.getResolver().EnsureIndexed(cfcPath)
 
 	items := make([]protocol.CompletionItem, 0, len(defs))
+
 	for _, d := range defs {
 		detail := d.Name + "("
+
 		for i, arg := range d.Arguments {
 			if i > 0 {
 				detail += ", "
 			}
+
 			if arg.Type != "" {
 				detail += arg.Type + " "
 			}
+
 			detail += arg.Name
 		}
+
 		detail += ")"
 		items = append(items, protocol.CompletionItem{
 			Label:    d.Name,
@@ -1036,6 +1164,7 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 			SortText: SortUserFunctions + d.Name,
 		})
 	}
+
 	return items
 }
 
@@ -1050,9 +1179,11 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	if varName == "" {
 		lineText := parser.LineTextAt(content, line)
 		dotPos := char - 1
+
 		if dotPos > 0 && dotPos < len(lineText) && lineText[dotPos] == '.' && lineText[dotPos-1] == ')' {
 			// Find matching open paren
 			depth := 0
+
 			i := dotPos - 1
 			for i >= 0 {
 				if lineText[i] == ')' {
@@ -1065,23 +1196,29 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 						for fnStart >= 0 && parser.IsWordChar(lineText[fnStart]) {
 							fnStart--
 						}
+
 						fnStart++
 						callExpr := lineText[fnStart:dotPos]
+
 						comp := resolveComponentFromCall(callExpr, s.ComponentResolvers)
 						if comp != "" {
 							currentPath := strings.TrimPrefix(string(docURI), "file://")
 							baseDir := filepath.Dir(currentPath)
+
 							cfcPath := s.getResolver().ComponentPath(comp, baseDir)
 							if cfcPath != "" {
 								return s.methodCompletionItems(cfcPath)
 							}
 						}
+
 						break
 					}
 				}
+
 				i--
 			}
 		}
+
 		return nil
 	}
 
@@ -1099,7 +1236,9 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	// Look up component ref for this variable in the current file
 	ref := s.index.LookupComponentRefInFile(varName, docURI, uint32(line))
+
 	var component string
+
 	if ref != nil {
 		component = ref.Component
 	} else if comp := resolveComponentFromCall(varName, s.ComponentResolvers); comp != "" {
@@ -1111,15 +1250,19 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	// Resolve the dot-path to a CFC file relative to the current file's directory
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
+
 	var cfcPath string
+
 	if filepath.IsAbs(component) {
 		if _, err := s.FS.Stat(component); err == nil {
 			cfcPath = component
 		}
 	}
+
 	if cfcPath == "" {
 		cfcPath = s.getResolver().ComponentPath(component, baseDir)
 	}
+
 	if cfcPath == "" {
 		return nil
 	}
@@ -1142,17 +1285,22 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 			SortText: SortLocalVariables + v,
 		})
 	}
+
 	for _, d := range defs {
 		detail := d.Name + "("
+
 		for i, arg := range d.Arguments {
 			if i > 0 {
 				detail += ", "
 			}
+
 			if arg.Type != "" {
 				detail += arg.Type + " "
 			}
+
 			detail += arg.Name
 		}
+
 		detail += ")"
 		items = append(items, protocol.CompletionItem{
 			Label:    d.Name,
@@ -1161,6 +1309,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 			SortText: SortUserFunctions + d.Name,
 		})
 	}
+
 	return items
 }
 
@@ -1186,6 +1335,7 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 				SortText:         SortFuncArguments + p.Name,
 			})
 		}
+
 		return items
 	}
 
@@ -1198,14 +1348,17 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 		defs := s.index.Lookup(funcName)
 		if len(defs) > 0 {
 			def = defs[0]
+
 			for _, d := range defs {
 				if d.URI == docURI {
 					def = d
+
 					break
 				}
 			}
 		}
 	}
+
 	if def == nil || len(def.Arguments) == 0 {
 		return nil
 	}
@@ -1221,6 +1374,7 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 			SortText:         SortFuncArguments + arg.Name,
 		})
 	}
+
 	return items
 }
 
@@ -1228,20 +1382,25 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem {
 	defs := s.getResolver().EnsureIndexed(cfcPath)
 	items := make([]protocol.CompletionItem, 0, len(defs))
+
 	for _, d := range defs {
 		detail := d.Name + "("
 		insertText := d.Name + "("
+
 		for i, arg := range d.Arguments {
 			if i > 0 {
 				detail += ", "
 				insertText += ", "
 			}
+
 			if arg.Type != "" {
 				detail += arg.Type + " "
 			}
+
 			detail += arg.Name
 			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
 		}
+
 		detail += ")"
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
@@ -1253,6 +1412,7 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 			SortText:         SortUserFunctions + d.Name,
 		})
 	}
+
 	return items
 }
 
@@ -1261,16 +1421,23 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 // buildTagSnippet creates a snippet for a CF tag with required attributes as tab stops.
 func buildTagSnippet(tag *docs.Entry) string {
 	params := tag.Params
+
 	var b strings.Builder
+
 	b.WriteString(tag.Name)
+
 	tabIdx := 1
+
 	for _, p := range params {
 		if p.Required {
 			fmt.Fprintf(&b, ` %s="${%d:%s}"`, p.Name, tabIdx, p.Name)
+
 			tabIdx++
 		}
 	}
+
 	b.WriteString(">")
+
 	return b.String()
 }
 
@@ -1295,33 +1462,41 @@ func wordBeforeDot(content string, line, char int) string {
 	if dotPos < 1 || dotPos >= len(lineText) || lineText[dotPos] != '.' {
 		return ""
 	}
+
 	end := dotPos
+
 	start := end - 1
 	for start >= 0 && parser.IsWordChar(lineText[start]) {
 		start--
 	}
+
 	start++
 	if start == end {
 		return ""
 	}
+
 	return lineText[start:end]
 }
 
 // toLowerASCII lowercases an ASCII string using a stack buffer for short strings.
 func toLowerASCII(s string) string {
 	var buf [32]byte
+
 	var b []byte
 	if len(s) <= len(buf) {
 		b = buf[:len(s)]
 	} else {
 		b = make([]byte, len(s))
 	}
+
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 0x20
 		}
+
 		b[i] = c
 	}
+
 	return string(b)
 }

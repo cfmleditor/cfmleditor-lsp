@@ -29,24 +29,31 @@ func ParseApplicationMappings(content string, appDir string) map[string]string {
 	if len(matches) == 0 {
 		return nil
 	}
+
 	out := make(map[string]string, len(matches))
+
 	for _, m := range matches {
 		key := strings.TrimPrefix(m[1], "/")
 		if key == "" {
 			continue
 		}
+
 		val := m[2]
 		if val == "" {
 			val = m[3]
 		}
+
 		if !filepath.IsAbs(val) {
 			val = filepath.Join(appDir, val)
 		}
+
 		out[key] = filepath.Clean(val)
 	}
+
 	if len(out) == 0 {
 		return nil
 	}
+
 	return out
 }
 
@@ -59,13 +66,16 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 
 	for _, m := range beanPathRe.FindAllStringSubmatch(content, -1) {
 		ns := m[1]
+
 		val := m[2]
 		if val == "" {
 			val = m[3]
 		}
+
 		if !filepath.IsAbs(val) {
 			val = filepath.Join(appDir, val)
 		}
+
 		out[ns] = filepath.Clean(val)
 	}
 
@@ -76,10 +86,12 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 				if p == "" {
 					continue
 				}
+
 				abs := p
 				if !filepath.IsAbs(p) {
 					abs = filepath.Join(appDir, p)
 				}
+
 				if strings.Contains(m[1], ",") {
 					ns := filepath.Base(abs)
 					out[ns] = filepath.Clean(abs)
@@ -93,6 +105,7 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 	if len(out) == 0 {
 		return nil
 	}
+
 	return out
 }
 
@@ -101,27 +114,35 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 func ParseOrmLocations(content string, appDir string) []string {
 	if m := ormCfcLocationArrayRe.FindStringSubmatch(content); m != nil {
 		var out []string
+
 		for _, part := range strings.Split(m[1], ",") {
 			part = strings.TrimSpace(part)
 			part = strings.Trim(part, `"'`)
+
 			if part == "" {
 				continue
 			}
+
 			if !filepath.IsAbs(part) {
 				part = filepath.Join(appDir, part)
 			}
+
 			out = append(out, filepath.Clean(part))
 		}
+
 		if len(out) > 0 {
 			return out
 		}
 	}
+
 	if m := ormCfcLocationRe.FindStringSubmatch(content); m != nil {
 		p := m[1]
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(appDir, p)
 		}
+
 		return []string{filepath.Clean(p)}
 	}
+
 	return nil
 }

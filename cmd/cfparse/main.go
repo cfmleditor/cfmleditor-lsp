@@ -25,7 +25,9 @@ func main() {
 	}
 
 	args := os.Args[1:]
+
 	var profilePath string
+
 	if len(args) >= 2 && args[0] == "-profile" {
 		profilePath = args[1]
 		args = args[2:]
@@ -37,21 +39,25 @@ func main() {
 	}
 
 	var files []string
+
 	for _, arg := range args {
 		info, err := os.Stat(arg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", arg, err)
 			os.Exit(1)
 		}
+
 		if info.IsDir() {
 			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck
 				if err != nil {
 					return nil //nolint:nilerr
 				}
+
 				ext := strings.ToLower(filepath.Ext(path))
 				if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
 					files = append(files, path)
 				}
+
 				return nil
 			})
 		} else {
@@ -65,6 +71,7 @@ func main() {
 	}
 
 	var totalDur time.Duration
+
 	var totalFuncs, totalRefs, totalFiles int
 
 	if profilePath != "" {
@@ -73,7 +80,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error creating profile: %v\n", err)
 			os.Exit(1)
 		}
+
 		pprof.StartCPUProfile(f) //nolint:errcheck
+
 		defer pprof.StopCPUProfile()
 	}
 
@@ -81,6 +90,7 @@ func main() {
 		content, err := os.ReadFile(f)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", f, err)
+
 			continue
 		}
 

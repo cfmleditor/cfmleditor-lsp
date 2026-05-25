@@ -117,6 +117,7 @@ func (r *Resolver) compiledRe() *regexp.Regexp {
 	r.reOnce.Do(func() {
 		pattern := r.Match
 		hasPlaceholder := placeholderRe.MatchString(pattern)
+
 		switch {
 		case !hasPlaceholder && !isRegexPattern(pattern):
 			// No placeholders, no regex chars — simple exact match
@@ -131,26 +132,33 @@ func (r *Resolver) compiledRe() *regexp.Regexp {
 			}
 		case strings.Contains(pattern, `\`):
 			reStr := "(?i)" + placeholderRe.ReplaceAllString(pattern, "")
+
 			re, err := regexp.Compile(reStr)
 			if err == nil {
 				r.re = re
 			}
 		default:
 			parts := placeholderRe.Split(pattern, -1)
+
 			var b strings.Builder
+
 			b.WriteString("(?i)")
+
 			for i, part := range parts {
 				b.WriteString(regexp.QuoteMeta(part))
+
 				if i < len(parts)-1 {
 					b.WriteString(`(.+?)`)
 				}
 			}
+
 			re, err := regexp.Compile(b.String())
 			if err == nil {
 				r.re = re
 			}
 		}
 	})
+
 	return r.re
 }
 
@@ -169,10 +177,12 @@ func ResolveProperty(attrs map[string]string, resolvers []PropertyResolver) stri
 		if !ok || val == "" {
 			continue
 		}
+
 		if resolved := matchPropertyPattern(val, r.Match, r.Resolve); resolved != "" {
 			return resolved
 		}
 	}
+
 	return ""
 }
 
@@ -183,29 +193,37 @@ func matchPropertyPattern(value, pattern, resolve string) string {
 		if strings.EqualFold(value, pattern) {
 			return resolve
 		}
+
 		return ""
 	}
+
 	prefix := pattern[:idx]
 	suffix := pattern[idx+2:]
+
 	if len(value) < len(prefix)+len(suffix) {
 		return ""
 	}
+
 	if !strings.EqualFold(value[:len(prefix)], prefix) {
 		return ""
 	}
+
 	if !strings.EqualFold(value[len(value)-len(suffix):], suffix) {
 		return ""
 	}
+
 	captured := value[len(prefix) : len(value)-len(suffix)]
 	resolved := strings.ReplaceAll(resolve, "$1", captured)
 	resolved = strings.TrimSuffix(resolved, ".cfc")
 	resolved = strings.ReplaceAll(resolved, "/", ".")
+
 	return resolved
 }
 
 // ResolveFromCall matches an expression against resolvers and returns the component dot-path.
 func ResolveFromCall(expr string, resolvers []Resolver) string {
 	expr = strings.TrimSpace(expr)
+
 	for i := range resolvers {
 		r := &resolvers[i]
 		if r.Prefix == "" {
@@ -216,14 +234,17 @@ func ResolveFromCall(expr string, resolvers []Resolver) string {
 		if idx < 0 {
 			continue
 		}
+
 		sub := expr[idx:]
 		if len(sub) > 200 {
 			sub = sub[:200]
 		}
+
 		if resolved := matchResolverWithCache(sub, r); resolved != "" {
 			return resolved
 		}
 	}
+
 	return ""
 }
 
@@ -233,6 +254,7 @@ func indexFold(s, substr string) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -241,26 +263,34 @@ var placeholderRe = regexp.MustCompile(`\$(\d+)`)
 
 func matchResolverWithCache(expr string, r *Resolver) string {
 	r.compiledRe() // ensure reOnce has run
+
 	if r.simple {
 		return simpleMatch(expr, r.Match, r.Resolve)
 	}
+
 	if r.re == nil {
 		return ""
 	}
+
 	m := r.re.FindStringSubmatch(expr)
 	if m == nil {
 		return ""
 	}
+
 	result := r.Resolve
+
 	for i := 1; i < len(m); i++ {
 		captured := strings.Trim(m[i], "\"'")
 		result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), captured)
 	}
+
 	if result == r.Resolve && len(m) == 1 {
 		return result
 	}
+
 	result = strings.TrimSuffix(result, ".cfc")
 	result = strings.ReplaceAll(result, "/", ".")
+
 	return result
 }
 
@@ -273,8 +303,10 @@ func simpleMatch(expr, pattern, resolve string) string {
 		if strings.EqualFold(expr, pattern) {
 			return resolve
 		}
+
 		return ""
 	}
+
 	prefix := pattern[:idx]
 	suffix := pattern[idx+2:]
 
@@ -302,33 +334,40 @@ func simpleMatch(expr, pattern, resolve string) string {
 	if suffix != "" {
 		captured = captured[:len(captured)-len(suffix)]
 	}
+
 	captured = strings.Trim(captured, "\"'")
 	result := strings.ReplaceAll(resolve, "$1", captured)
 	result = strings.TrimSuffix(result, ".cfc")
 	result = strings.ReplaceAll(result, "/", ".")
+
 	return result
 }
-
 
 func containsFold(s, substr string) bool {
 	n := len(substr)
 	if n == 0 {
 		return true
 	}
+
 	if n > len(s) {
 		return false
 	}
+
 	for i := 0; i <= len(s)-n; i++ {
 		match := true
+
 		for j := 0; j < n; j++ {
 			if s[i+j]|0x20 != substr[j]|0x20 {
 				match = false
+
 				break
 			}
 		}
+
 		if match {
 			return true
 		}
 	}
+
 	return false
 }

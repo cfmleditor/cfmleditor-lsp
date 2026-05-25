@@ -27,10 +27,10 @@ func (p *scriptParser) parse() {
 		if tok.Kind == TokEOF {
 			return
 		}
+
 		if tok.Kind == TokIdent {
 			p.handleIdent(tok)
 		}
-		// Skip everything else (braces, operators, etc.)
 	}
 }
 
@@ -63,17 +63,21 @@ func (p *scriptParser) handleIdent(tok Token) {
 // parseAccessModified handles: access [returntype] function name(...)
 func (p *scriptParser) parseAccessModified(accessTok Token) {
 	access := accessTok.Value
+
 	next := p.sc.PeekSkipComments()
 	if next.Kind != TokIdent {
 		return
 	}
+
 	if identEq(next.Value, "function") {
 		p.sc.NextSkipComments() // consume "function"
 		p.parseFunction(accessTok, access, "")
+
 		return
 	}
 	// Could be returntype before function
 	retType := p.sc.NextSkipComments() // consume returntype
+
 	next2 := p.sc.PeekSkipComments()
 	if next2.Kind == TokIdent && identEq(next2.Value, "function") {
 		p.sc.NextSkipComments() // consume "function"
@@ -112,27 +116,33 @@ func (p *scriptParser) parseFunction(startTok Token, _ string, _ string) {
 // Format: [required] [type] name [= default]
 func (p *scriptParser) parseArgList() []Argument {
 	var args []Argument
+
 	for {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokRParen || tok.Kind == TokEOF {
 			break
 		}
+
 		if tok.Kind == TokComma {
 			continue
 		}
+
 		if tok.Kind != TokIdent {
 			continue
 		}
 
 		var required bool
+
 		var typeName, name string
 
 		// Collect up to 3 identifiers: [required] [type] name
 		idents := []string{tok.Value}
+
 		for {
 			peek := p.sc.PeekSkipComments()
 			if peek.Kind == TokIdent {
 				p.sc.NextSkipComments()
+
 				idents = append(idents, peek.Value)
 				if len(idents) == 3 {
 					break
@@ -168,22 +178,27 @@ func (p *scriptParser) parseArgList() []Argument {
 
 		args = append(args, Argument{Name: name, Type: typeName, Required: required})
 	}
+
 	return args
 }
 
 // skipDefaultValue skips tokens until we hit , or ) at depth 0.
 func (p *scriptParser) skipDefaultValue() {
 	depth := 0
+
 	for {
 		peek := p.sc.PeekSkipComments()
 		if peek.Kind == TokEOF {
 			return
 		}
+
 		if depth == 0 && (peek.Kind == TokComma || peek.Kind == TokRParen) {
 			return
 		}
+
 		p.sc.NextSkipComments()
-		switch peek.Kind {
+
+		switch peek.Kind { //nolint:exhaustive
 		case TokLParen, TokLBrace, TokLBracket:
 			depth++
 		case TokRParen, TokRBrace, TokRBracket:
@@ -197,19 +212,24 @@ func (p *scriptParser) skipToBodyEnd() {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
+
 		return
 	}
+
 	if tok.Kind != TokLBrace {
 		return
 	}
+
 	p.sc.NextSkipComments() // consume {
+
 	depth := 1
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
 		if t.Kind == TokEOF {
 			return
 		}
-		switch t.Kind {
+
+		switch t.Kind { //nolint:exhaustive
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -224,19 +244,24 @@ func (p *scriptParser) parseFuncBody() {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
+
 		return
 	}
+
 	if tok.Kind != TokLBrace {
 		return
 	}
+
 	p.sc.NextSkipComments() // consume {
+
 	depth := 1
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
 		if t.Kind == TokEOF {
 			return
 		}
-		switch t.Kind {
+
+		switch t.Kind { //nolint:exhaustive
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -269,6 +294,7 @@ func (p *scriptParser) handleBodyIdent(tok Token, _ int) {
 		if nameTok.Kind != TokIdent {
 			return
 		}
+
 		lp := p.sc.NextSkipComments()
 		if lp.Kind != TokLParen {
 			return
@@ -280,13 +306,16 @@ func (p *scriptParser) handleBodyIdent(tok Token, _ int) {
 			if t.Kind == TokEOF {
 				return
 			}
+
 			if t.Kind == TokLParen {
 				pd++
 			}
+
 			if t.Kind == TokRParen {
 				pd--
 			}
 		}
+
 		p.skipToBodyEnd()
 	case "new":
 		// skip
@@ -306,6 +335,7 @@ func (p *scriptParser) parseVarDecl(varTok Token) {
 	if peek.Kind != TokEquals {
 		return
 	}
+
 	p.sc.NextSkipComments() // consume =
 
 	p.vars = append(p.vars, VarDef{
@@ -324,6 +354,7 @@ func (p *scriptParser) parseDotAssign(scopeTok Token, scope Scope) {
 	if dot.Kind != TokDot {
 		return
 	}
+
 	p.sc.NextSkipComments() // consume .
 
 	nameTok := p.sc.NextSkipComments()
@@ -335,6 +366,7 @@ func (p *scriptParser) parseDotAssign(scopeTok Token, scope Scope) {
 	if eq.Kind != TokEquals {
 		return
 	}
+
 	p.sc.NextSkipComments() // consume =
 
 	p.vars = append(p.vars, VarDef{
@@ -394,6 +426,7 @@ func (p *scriptParser) scanRHSForRefs(varName string, line int) {
 // parseNewExpr handles: new ["]path.Component["][()]
 func (p *scriptParser) parseNewExpr(varName string, line int) {
 	tok := p.sc.NextSkipComments()
+
 	var component string
 
 	if tok.Kind == TokString { //nolint:gocritic // if-else chain is clearer than switch here
@@ -402,10 +435,12 @@ func (p *scriptParser) parseNewExpr(varName string, line int) {
 	} else if tok.Kind == TokIdent {
 		// Unquoted: new path.Component
 		component = tok.Value
+
 		for {
 			peek := p.sc.PeekSkipComments()
 			if peek.Kind == TokDot {
 				p.sc.NextSkipComments()
+
 				next := p.sc.NextSkipComments()
 				if next.Kind == TokIdent {
 					component += "." + next.Value
@@ -439,14 +474,17 @@ func (p *scriptParser) parseCreateObject(varName string, line int) {
 	if arg1.Kind != TokString || !identEq(unquote(arg1.Value), "component") {
 		return
 	}
+
 	comma := p.sc.NextSkipComments()
 	if comma.Kind != TokComma {
 		return
 	}
+
 	arg2 := p.sc.NextSkipComments()
 	if arg2.Kind != TokString {
 		return
 	}
+
 	component := unquote(arg2.Value)
 	if component != "" {
 		p.refs = append(p.refs, ComponentRef{
@@ -464,10 +502,12 @@ func (p *scriptParser) parseEntityNew(varName string, line int) {
 	if lp.Kind != TokLParen {
 		return
 	}
+
 	arg := p.sc.NextSkipComments()
 	if arg.Kind != TokString {
 		return
 	}
+
 	component := unquote(arg.Value)
 	if component != "" {
 		p.refs = append(p.refs, ComponentRef{
@@ -483,6 +523,7 @@ func unquote(s string) string {
 	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') {
 		return s[1 : len(s)-1]
 	}
+
 	return s
 }
 
@@ -493,5 +534,6 @@ func isKeyword(s string) bool {
 		"component", "interface", "new", "throw", "import", "true", "false":
 		return true
 	}
+
 	return false
 }

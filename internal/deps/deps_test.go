@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/uri"
 )
 
 func testdataDir() string {
 	_, f, _, _ := runtime.Caller(0)
+
 	return filepath.Join(filepath.Dir(f), "..", "..", "testdata", "deps")
 }
 
@@ -24,27 +25,35 @@ func (r *testResolver) ComponentPath(component, _ string) string {
 	if idx := strings.LastIndex(name, "."); idx >= 0 {
 		name = name[idx+1:]
 	}
+
 	abs, _ := filepath.Abs(filepath.Join(r.dir, name+".cfc"))
+
 	return abs
 }
 
 func parseFile(t *testing.T, path string) *parser.ParseResult {
 	t.Helper()
+
 	absPath, _ := filepath.Abs(path)
+
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
+
 	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), parser.ParseOptions{})
 }
 
 func buildIndex(t *testing.T, dir string) *index.Index {
 	t.Helper()
+
 	idx := index.New()
+
 	for _, name := range []string{"controller.cfc", "service.cfc", "persist.cfc"} {
 		pr := parseFile(t, filepath.Join(dir, name))
 		idx.IndexFileFromResult(pr.URI, pr.Funcs, pr.Refs)
 	}
+
 	return idx
 }
 
@@ -58,6 +67,7 @@ func TestBuild_FunctionDeps(t *testing.T) {
 
 	// Get function-level calls using FuncCalls
 	var calls []parser.CallSite
+
 	for _, sc := range pr.Scopes {
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, "BuildReport") && int(f.Line) == sc.Start {
@@ -65,6 +75,7 @@ func TestBuild_FunctionDeps(t *testing.T) {
 			}
 		}
 	}
+
 	if len(calls) == 0 {
 		t.Fatal("FuncCalls returned no calls for BuildReport")
 	}
@@ -81,23 +92,29 @@ func TestBuild_FunctionDeps(t *testing.T) {
 	edges := result.Graph.Edges
 	foundGetData := false
 	foundGetSummary := false
+
 	for _, e := range edges {
 		if strings.Contains(e.To, "GetData") {
 			foundGetData = true
 		}
+
 		if strings.Contains(e.To, "GetSummary") {
 			foundGetSummary = true
 		}
+
 		if strings.Contains(e.To, "PurgeCache") {
 			t.Errorf("BuildReport should not depend on PurgeCache: %s -> %s", e.From, e.To)
 		}
 	}
+
 	if !foundGetData {
 		t.Errorf("expected dependency on service.GetData")
 	}
+
 	if !foundGetSummary {
 		t.Errorf("expected dependency on service.GetSummary")
 	}
+
 	if t.Failed() {
 		for _, e := range edges {
 			t.Logf("  %s -> %s", e.From, e.To)
@@ -127,20 +144,25 @@ func TestBuild_FileDeps(t *testing.T) {
 	edges := result.Graph.Edges
 	foundService := false
 	foundPersist := false
+
 	for _, e := range edges {
 		if strings.Contains(e.To, "service") {
 			foundService = true
 		}
+
 		if strings.Contains(e.To, "persist") {
 			foundPersist = true
 		}
 	}
+
 	if !foundService {
 		t.Errorf("expected direct dependency on service")
 	}
+
 	if !foundPersist {
 		t.Errorf("expected transitive dependency on persist")
 	}
+
 	if t.Failed() {
 		for _, e := range edges {
 			t.Logf("  %s -> %s", e.From, e.To)
@@ -169,13 +191,16 @@ func TestBuild_CleanupDeps(t *testing.T) {
 
 	edges := result.Graph.Edges
 	foundService := false
+
 	for _, e := range edges {
 		if strings.Contains(e.To, "service") {
 			foundService = true
 		}
 	}
+
 	if !foundService {
 		t.Errorf("expected dependency on service")
+
 		for _, e := range edges {
 			t.Logf("  %s -> %s", e.From, e.To)
 		}

@@ -68,6 +68,7 @@ func BoolDefault(p *bool, def bool) bool {
 	if p == nil {
 		return def
 	}
+
 	return *p
 }
 
@@ -76,15 +77,16 @@ func IntDefault(p *int, def int) int {
 	if p == nil {
 		return def
 	}
+
 	return *p
 }
 
 // Resolved holds fully resolved configuration ready for use by the server.
 type Resolved struct {
-	Mappings           map[string]string
-	ComponentResolvers []Resolver
-	PropertyResolvers  []PropResolver
-	BeanPaths          map[string]string
+	Mappings                 map[string]string
+	ComponentResolvers       []Resolver
+	PropertyResolvers        []PropResolver
+	BeanPaths                map[string]string
 	Formatting               ResolvedFormatting
 	Linting                  bool
 	TagSnippets              bool
@@ -94,21 +96,21 @@ type Resolved struct {
 
 // ResolvedFormatting holds formatting settings with defaults applied.
 type ResolvedFormatting struct {
-	Enabled               bool
-	Debug                 bool
-	SelfCloseTags         bool
-	WhitespaceOnly        bool
-	QueryFormat           bool
-	LowercaseTags         bool
-	LowercaseAttributes   bool
-	DoubleQuoteAttributes bool
+	Enabled                bool
+	Debug                  bool
+	SelfCloseTags          bool
+	WhitespaceOnly         bool
+	QueryFormat            bool
+	LowercaseTags          bool
+	LowercaseAttributes    bool
+	DoubleQuoteAttributes  bool
 	QueryUppercaseKeywords bool
-	ScopeCase             string
-	CommaPosition         string
-	QueryCommaPosition    string
-	LineWidth             int
-	AttrBreakThreshold    int
-	IndentWidth           int
+	ScopeCase              string
+	CommaPosition          string
+	QueryCommaPosition     string
+	LineWidth              int
+	AttrBreakThreshold     int
+	IndentWidth            int
 }
 
 // Resolve takes a parsed JSON config and its directory, returning a fully resolved config.
@@ -117,22 +119,27 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if len(cfg.Mappings) > 0 {
 		r.Mappings = ResolvePaths(cfg.Mappings, dir)
 	}
+
 	for _, cr := range cfg.ComponentResolvers {
 		if cr.Match != "" && cr.Resolve != "" {
 			r.ComponentResolvers = append(r.ComponentResolvers, cr)
 		}
 	}
+
 	for _, pr := range cfg.PropertyResolvers {
 		if pr.Match != "" && pr.Resolve != "" && pr.Attribute != "" {
 			r.PropertyResolvers = append(r.PropertyResolvers, pr)
 		}
 	}
+
 	if len(cfg.BeanPaths) > 0 {
 		r.BeanPaths = ResolvePaths(cfg.BeanPaths, dir)
 	}
+
 	if cfg.Linting != nil {
 		r.Linting = cfg.Linting.Enabled
 	}
+
 	if cfg.Completions != nil {
 		r.TagSnippets = cfg.Completions.TagSnippets
 		r.FunctionSnippets = cfg.Completions.FunctionSnippets
@@ -142,6 +149,7 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 		r.FunctionSnippets = true
 		r.GlobalFunctionResolution = true
 	}
+
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{
 			Enabled:                f.Enabled,
@@ -161,6 +169,7 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 			IndentWidth:            IntDefault(f.IndentWidth, 4),
 		}
 	}
+
 	return r
 }
 
@@ -169,7 +178,9 @@ func ResolvePaths(raw map[string]string, baseDir string) map[string]string {
 	if len(raw) == 0 {
 		return nil
 	}
+
 	out := make(map[string]string, len(raw))
+
 	for k, v := range raw {
 		if filepath.IsAbs(v) {
 			out[k] = v
@@ -177,5 +188,6 @@ func ResolvePaths(raw map[string]string, baseDir string) map[string]string {
 			out[k] = filepath.Join(baseDir, v)
 		}
 	}
+
 	return out
 }

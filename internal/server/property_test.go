@@ -47,6 +47,7 @@ func TestPropertyDefinition_BeanLookupViaInject(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for userDAO")
 	}
+
 	if !strings.HasSuffix(ref.Component, "dao/UserDAO.cfc") {
 		t.Errorf("expected path ending in dao/UserDAO.cfc, got %q", ref.Component)
 	}
@@ -70,6 +71,7 @@ func TestPropertyDefinition_TypeBasedRef(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for logger")
 	}
+
 	if ref.Component != "services.BeanUserService" {
 		t.Errorf("expected services.BeanUserService, got %q", ref.Component)
 	}
@@ -118,6 +120,7 @@ func TestPropertyDefinition_TagCFC(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for userDAO in tag CFC")
 	}
+
 	if !strings.HasSuffix(ref.Component, "dao/UserDAO.cfc") {
 		t.Errorf("expected path ending in dao/UserDAO.cfc, got %q", ref.Component)
 	}
@@ -127,6 +130,7 @@ func TestPropertyDefinition_TagCFC(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for helper")
 	}
+
 	if ref.Component != "services.BeanUserService" {
 		t.Errorf("expected services.BeanUserService, got %q", ref.Component)
 	}
@@ -151,12 +155,15 @@ func TestPropertyDefinition_AccessorsGenerated(t *testing.T) {
 	for _, name := range expected {
 		defs := srv.index.Lookup(name)
 		found := false
+
 		for _, d := range defs {
 			if d.URI == docURI {
 				found = true
+
 				break
 			}
 		}
+
 		if !found {
 			t.Errorf("expected indexed function %s for PropertyTest.cfc", name)
 		}
@@ -165,9 +172,11 @@ func TestPropertyDefinition_AccessorsGenerated(t *testing.T) {
 
 func readTestFile(t *testing.T, path string) string {
 	t.Helper()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", path, err)
 	}
+
 	return string(data)
 }

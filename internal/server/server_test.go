@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -28,22 +28,29 @@ func newTestServer() *Server {
 
 func makeCall(t *testing.T, method string, params interface{}) jsonrpc2.Request {
 	t.Helper()
+
 	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), method, params)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return req
 }
 
 func captureReply(t *testing.T) (jsonrpc2.Replier, *interface{}, *error) {
 	t.Helper()
+
 	var result interface{}
+
 	var replyErr error
+
 	replier := func(_ context.Context, res interface{}, err error) error {
 		result = res
 		replyErr = err
+
 		return nil
 	}
+
 	return replier, &result, &replyErr
 }
 
@@ -55,9 +62,11 @@ func TestHandleInitialize(t *testing.T) {
 	if err := srv.handleInitialize(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if !srv.initialized {
 		t.Error("expected server to be initialized")
 	}
@@ -66,9 +75,11 @@ func TestHandleInitialize(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected InitializeResult, got %T", *result)
 	}
+
 	if res.ServerInfo.Name != "cfmleditor-lsp" {
 		t.Errorf("expected server name cfmleditor-lsp, got %s", res.ServerInfo.Name)
 	}
+
 	if res.Capabilities.CompletionProvider == nil {
 		t.Error("expected completion provider to be set")
 	}
@@ -87,6 +98,7 @@ func TestHandleDidOpen(t *testing.T) {
 	if err := srv.handleDidOpen(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -95,6 +107,7 @@ func TestHandleDidOpen(t *testing.T) {
 	if !ok {
 		t.Fatal("document not found")
 	}
+
 	if content != "<cfoutput>hello</cfoutput>" {
 		t.Errorf("unexpected content: %s", content)
 	}
@@ -117,6 +130,7 @@ func TestHandleDidChange(t *testing.T) {
 	if err := srv.handleDidChange(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -142,6 +156,7 @@ func TestHandleDidClose(t *testing.T) {
 	if err := srv.handleDidClose(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -149,6 +164,7 @@ func TestHandleDidClose(t *testing.T) {
 	if _, ok := srv.getDocument(cfcURI); ok {
 		t.Error("document should have been removed from open docs")
 	}
+
 	if defs := srv.index.Lookup("hello"); len(defs) != 1 {
 		t.Error("index entry should be preserved after close")
 	}
@@ -167,6 +183,7 @@ func TestCompletionTriggeredByTag(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -175,20 +192,25 @@ func TestCompletionTriggeredByTag(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatal("expected tag completions")
 	}
+
 	for _, item := range list.Items {
 		if item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("expected Keyword kind for tag %s, got %v", item.Label, item.Kind)
 		}
 	}
+
 	if list.Items[0].Label != "cfoutput" {
 		// Order may vary with Lucee docs; just check cfoutput exists
 		found := false
+
 		for _, item := range list.Items {
 			if strings.ToLower(item.Label) == "cfoutput" {
 				found = true
+
 				break
 			}
 		}
+
 		if !found {
 			t.Error("expected cfoutput in tag completions")
 		}
@@ -213,6 +235,7 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -221,13 +244,17 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatal("expected tag completions when cursor is after < with Invoked trigger")
 	}
+
 	found := false
+
 	for _, item := range list.Items {
 		if strings.ToLower(item.Label) == "cfoutput" {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected cfoutput in tag completions")
 	}
@@ -245,6 +272,7 @@ func TestCompletionTriggeredByTyping(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -253,6 +281,7 @@ func TestCompletionTriggeredByTyping(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatal("expected function completions")
 	}
+
 	for _, item := range list.Items {
 		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("expected Function or Keyword kind for %s, got %v", item.Label, item.Kind)
@@ -268,6 +297,7 @@ func TestCompletionWithNilContext(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -299,6 +329,7 @@ func TestCompletionTagAttributes(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -307,18 +338,23 @@ func TestCompletionTagAttributes(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatal("expected attribute completions for cfquery")
 	}
+
 	for _, item := range list.Items {
 		if item.Kind != protocol.CompletionItemKindProperty {
 			t.Errorf("expected Property kind for attribute %s, got %v", item.Label, item.Kind)
 		}
 	}
+
 	found := false
+
 	for _, item := range list.Items {
 		if strings.EqualFold(item.Label, "datasource") || strings.EqualFold(item.Label, "dataSource") {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected datasource/dataSource attribute in cfquery completions")
 	}
@@ -342,6 +378,7 @@ func TestCompletionTagAttributesMultiline(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -350,6 +387,7 @@ func TestCompletionTagAttributesMultiline(t *testing.T) {
 	if len(list.Items) == 0 {
 		t.Fatal("expected attribute completions for cfloop")
 	}
+
 	if list.Items[0].Kind != protocol.CompletionItemKindProperty {
 		t.Errorf("expected Property kind, got %v", list.Items[0].Kind)
 	}
@@ -380,6 +418,7 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 		if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 			t.Fatalf("%s: %v", tc.doc, err)
 		}
+
 		if *replyErr != nil {
 			t.Fatalf("%s: %v", tc.doc, *replyErr)
 		}
@@ -388,6 +427,7 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 		if len(list.Items) == 0 {
 			t.Fatalf("%s: expected function completions", tc.doc)
 		}
+
 		for _, item := range list.Items {
 			if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 				t.Errorf("%s: expected Function or Keyword kind, got %v for %s", tc.doc, item.Kind, item.Label)
@@ -412,6 +452,7 @@ func TestCompletionCfElseOffersIf(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -420,16 +461,20 @@ func TestCompletionCfElseOffersIf(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
+
 	item := list.Items[0]
 	if item.Label != "if" {
 		t.Errorf("expected label 'if', got %q", item.Label)
 	}
+
 	if item.TextEdit == nil {
 		t.Fatal("expected TextEdit to be set")
 	}
+
 	if item.TextEdit.Range.Start.Character != 0 {
 		t.Errorf("expected start char 0, got %d", item.TextEdit.Range.Start.Character)
 	}
+
 	if item.TextEdit.NewText != "<cfelseif $1" {
 		t.Errorf("expected NewText '<cfelseif $1', got %q", item.TextEdit.NewText)
 	}
@@ -453,6 +498,7 @@ func TestCompletionAfterClosedTag(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -484,6 +530,7 @@ func TestCompletionClosingTag(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -492,9 +539,11 @@ func TestCompletionClosingTag(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 closing tag, got %d", len(list.Items))
 	}
+
 	if list.Items[0].Label != "cfoutput" {
 		t.Errorf("expected cfoutput, got %s", list.Items[0].Label)
 	}
+
 	if list.Items[0].InsertText != "cfoutput>" {
 		t.Errorf("expected insert text 'cfoutput>', got %s", list.Items[0].InsertText)
 	}
@@ -519,6 +568,7 @@ func TestCompletionClosingTagNested(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -527,9 +577,11 @@ func TestCompletionClosingTagNested(t *testing.T) {
 	if len(list.Items) != 2 {
 		t.Fatalf("expected 2 closing tags, got %d", len(list.Items))
 	}
+
 	if list.Items[0].Label != "cfloop" {
 		t.Errorf("expected most recent unclosed tag cfloop first, got %s", list.Items[0].Label)
 	}
+
 	if list.Items[1].Label != "cfoutput" {
 		t.Errorf("expected cfoutput second, got %s", list.Items[1].Label)
 	}
@@ -554,6 +606,7 @@ func TestCompletionClosingTagAlreadyClosed(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -587,6 +640,7 @@ func TestFindUnclosedTags(t *testing.T) {
 			if len(got) != len(tt.want) {
 				t.Fatalf("findUnclosedTags() = %v, want %v", got, tt.want)
 			}
+
 			for i := range got {
 				if got[i] != tt.want[i] {
 					t.Errorf("findUnclosedTags()[%d] = %q, want %q", i, got[i], tt.want[i])
@@ -640,6 +694,7 @@ func TestParseFunctionDefs(t *testing.T) {
 			if len(defs) != len(tt.want) {
 				t.Fatalf("got %d defs, want %d", len(defs), len(tt.want))
 			}
+
 			for i, d := range defs {
 				if d.Name != tt.want[i] {
 					t.Errorf("def[%d].Name = %q, want %q", i, d.Name, tt.want[i])
@@ -679,6 +734,7 @@ func TestDefinitionLookup(t *testing.T) {
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -687,9 +743,11 @@ func TestDefinitionLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "User.cfc") {
 		t.Errorf("expected User.cfc, got %s", loc.URI)
 	}
+
 	if loc.Range.Start.Line != 1 {
 		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
 	}
@@ -710,9 +768,11 @@ func TestDefinitionNotFound(t *testing.T) {
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result != nil {
 		t.Errorf("expected nil result for unknown function, got %v", *result)
 	}
@@ -746,14 +806,17 @@ func TestIndexReindexOnChange(t *testing.T) {
 	cfcURI := uri.URI("file:///app/Service.cfc")
 
 	srv.index.IndexFile(cfcURI, "component {\nfunction oldFunc() {}\n}")
+
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 1 {
 		t.Fatal("expected oldFunc indexed")
 	}
 
 	srv.index.IndexFile(cfcURI, "component {\nfunction newFunc() {}\n}")
+
 	if defs := srv.index.Lookup("oldFunc"); len(defs) != 0 {
 		t.Error("oldFunc should be removed after reindex")
 	}
+
 	if defs := srv.index.Lookup("newFunc"); len(defs) != 1 {
 		t.Error("newFunc should be indexed")
 	}
@@ -779,6 +842,7 @@ function saveUser() {
 	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -787,12 +851,15 @@ function saveUser() {
 	if !ok {
 		t.Fatalf("expected []DocumentSymbol, got %T", *result)
 	}
+
 	if len(symbols) != 2 {
 		t.Fatalf("expected 2 symbols, got %d", len(symbols))
 	}
+
 	if symbols[0].Name != "getUser" {
 		t.Errorf("expected getUser, got %s", symbols[0].Name)
 	}
+
 	if symbols[1].Name != "saveUser" {
 		t.Errorf("expected saveUser, got %s", symbols[1].Name)
 	}
@@ -809,6 +876,7 @@ func TestWorkspaceSymbol(t *testing.T) {
 	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -817,9 +885,11 @@ func TestWorkspaceSymbol(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []SymbolInformation, got %T", *result)
 	}
+
 	if len(symbols) != 2 {
 		t.Fatalf("expected 2 symbols matching 'get', got %d", len(symbols))
 	}
+
 	for _, s := range symbols {
 		if !strings.Contains(strings.ToLower(s.Name), "get") {
 			t.Errorf("symbol %s should contain 'get'", s.Name)
@@ -837,6 +907,7 @@ func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -845,6 +916,7 @@ func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []SymbolInformation, got %T", *result)
 	}
+
 	if len(symbols) != 2 {
 		t.Fatalf("expected all 2 symbols for empty query, got %d", len(symbols))
 	}
@@ -865,6 +937,7 @@ func TestHoverFunction(t *testing.T) {
 	if err := srv.handleHover(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -873,9 +946,11 @@ func TestHoverFunction(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *Hover, got %T", *result)
 	}
+
 	if !strings.Contains(strings.ToLower(hover.Contents.Value), "len") {
 		t.Errorf("expected hover to contain 'len', got %s", hover.Contents.Value)
 	}
+
 	if hover.Contents.Kind != protocol.Markdown {
 		t.Errorf("expected markdown, got %s", hover.Contents.Kind)
 	}
@@ -896,6 +971,7 @@ func TestHoverTag(t *testing.T) {
 	if err := srv.handleHover(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -904,6 +980,7 @@ func TestHoverTag(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *Hover, got %T", *result)
 	}
+
 	if !strings.Contains(hover.Contents.Value, "cfquery") {
 		t.Errorf("expected hover to contain 'cfquery', got %s", hover.Contents.Value)
 	}
@@ -924,9 +1001,11 @@ func TestHoverUnknown(t *testing.T) {
 	if err := srv.handleHover(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result != nil {
 		t.Errorf("expected nil for unknown word, got %v", *result)
 	}
@@ -943,10 +1022,12 @@ func completionListFromResult(t *testing.T, result interface{}) *protocol.Comple
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var list protocol.CompletionList
 	if err := json.Unmarshal(data, &list); err != nil {
 		t.Fatal(err)
 	}
+
 	return &list
 }
 
@@ -978,6 +1059,7 @@ func TestWorkspaceFoldersSkipsWorkspaceRoots(t *testing.T) {
 	if defs := srv.index.Lookup("localFunc"); len(defs) != 0 {
 		t.Errorf("workspace root should be skipped when WorkspaceFolders set, got %d defs", len(defs))
 	}
+
 	if defs := srv.index.Lookup("extraFunc"); len(defs) != 1 {
 		t.Errorf("expected extraFunc indexed, got %d defs", len(defs))
 	}
@@ -996,6 +1078,7 @@ func TestIndexGlobsFilterFiles(t *testing.T) {
 	if defs := srv.index.Lookup("wantedFunc"); len(defs) != 1 {
 		t.Errorf("expected wantedFunc indexed, got %d defs", len(defs))
 	}
+
 	if defs := srv.index.Lookup("unwantedFunc"); len(defs) != 0 {
 		t.Errorf("unwantedFunc should not be indexed, got %d defs", len(defs))
 	}
@@ -1007,16 +1090,19 @@ func TestReindexWithGlobsFilter(t *testing.T) {
 	srv.IndexGlobs = []string{"/project/**/*.cfc"}
 
 	srv.reindexIfCFC("file:///project/Service.cfc", "component {\nfunction allowedFunc() {}\n}")
+
 	if defs := srv.index.Lookup("allowedFunc"); len(defs) != 1 {
 		t.Errorf("expected allowedFunc indexed, got %d defs", len(defs))
 	}
 
 	srv.reindexIfCFC("file:///project/sub/Deep.cfc", "component {\nfunction deepFunc() {}\n}")
+
 	if defs := srv.index.Lookup("deepFunc"); len(defs) != 1 {
 		t.Errorf("expected deepFunc indexed, got %d defs", len(defs))
 	}
 
 	srv.reindexIfCFC("file:///other/Rogue.cfc", "component {\nfunction rogueFunc() {}\n}")
+
 	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
 		t.Errorf("rogueFunc should not be indexed, got %d defs", len(defs))
 	}
@@ -1027,11 +1113,13 @@ func TestReindexFoldersWithoutGlobs(t *testing.T) {
 	srv.WorkspaceFolders = []string{"/project"}
 
 	srv.reindexIfCFC("file:///project/Any.cfc", "component {\nfunction anyFunc() {}\n}")
+
 	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
 		t.Errorf("expected anyFunc indexed under workspace folder, got %d defs", len(defs))
 	}
 
 	srv.reindexIfCFC("file:///outside/Rogue.cfc", "component {\nfunction rogueFunc() {}\n}")
+
 	if defs := srv.index.Lookup("rogueFunc"); len(defs) != 0 {
 		t.Errorf("rogueFunc outside workspace folders should not be indexed, got %d defs", len(defs))
 	}
@@ -1040,6 +1128,7 @@ func TestReindexFoldersWithoutGlobs(t *testing.T) {
 func TestReindexNoFilterWithoutFolders(t *testing.T) {
 	srv := newTestServer()
 	srv.reindexIfCFC("file:///anywhere/Thing.cfc", "component {\nfunction anyFunc() {}\n}")
+
 	if defs := srv.index.Lookup("anyFunc"); len(defs) != 1 {
 		t.Errorf("expected anyFunc indexed without WorkspaceFolders, got %d defs", len(defs))
 	}
@@ -1061,6 +1150,7 @@ func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1086,6 +1176,7 @@ func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1093,9 +1184,11 @@ func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 	if defs := srv.index.Lookup("svcFunc"); len(defs) != 0 {
 		t.Error("svcFunc should have been removed from index")
 	}
+
 	if defs := srv.index.Lookup("otherFunc"); len(defs) != 1 {
 		t.Error("otherFunc should still be in index")
 	}
+
 	if len(srv.workspaceRoots) != 1 || srv.workspaceRoots[0] != "/workspace/B" {
 		t.Errorf("expected workspaceRoots [/workspace/B], got %v", srv.workspaceRoots)
 	}
@@ -1111,6 +1204,7 @@ func TestRemoveFilesUnder(t *testing.T) {
 	if defs := idx.Lookup("oneFunc"); len(defs) != 0 {
 		t.Error("oneFunc should have been removed")
 	}
+
 	if defs := idx.Lookup("twoFunc"); len(defs) != 1 {
 		t.Error("twoFunc should still exist")
 	}
@@ -1136,6 +1230,7 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1143,6 +1238,7 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	if defs := srv.index.Lookup("sharedUtil"); len(defs) != 1 {
 		t.Error("sharedUtil should be preserved (workspace folder)")
 	}
+
 	if defs := srv.index.Lookup("appFunc"); len(defs) != 0 {
 		t.Error("appFunc should have been removed")
 	}
@@ -1163,6 +1259,7 @@ func TestOnTypeFormattingRemovesDuplicateClose(t *testing.T) {
 	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1171,12 +1268,15 @@ func TestOnTypeFormattingRemovesDuplicateClose(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", *result)
 	}
+
 	if len(edits) != 1 {
 		t.Fatalf("expected 1 edit, got %d", len(edits))
 	}
+
 	if edits[0].NewText != ">" {
 		t.Errorf("expected NewText '>', got %q", edits[0].NewText)
 	}
+
 	if edits[0].Range.Start.Character != 21 || edits[0].Range.End.Character != 23 {
 		t.Errorf("expected range [21,23), got [%d,%d)", edits[0].Range.Start.Character, edits[0].Range.End.Character)
 	}
@@ -1197,6 +1297,7 @@ func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
 	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1205,6 +1306,7 @@ func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", *result)
 	}
+
 	if len(edits) != 1 {
 		t.Fatalf("expected 1 edit, got %d", len(edits))
 	}
@@ -1212,6 +1314,7 @@ func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
 	if edits[0].NewText != ">" {
 		t.Errorf("expected NewText '>', got %q", edits[0].NewText)
 	}
+
 	if edits[0].Range.Start.Character != 5 || edits[0].Range.End.Character != 9 {
 		t.Errorf("expected range [5,9), got [%d,%d)", edits[0].Range.Start.Character, edits[0].Range.End.Character)
 	}
@@ -1232,6 +1335,7 @@ func TestOnTypeFormattingNoOpNonWhitespace(t *testing.T) {
 	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1240,6 +1344,7 @@ func TestOnTypeFormattingNoOpNonWhitespace(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", *result)
 	}
+
 	if len(edits) != 0 {
 		t.Errorf("expected no edits, got %d", len(edits))
 	}
@@ -1265,6 +1370,7 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1273,13 +1379,16 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
+
 	item := list.Items[0]
 	if item.Label != ">" {
 		t.Errorf("expected label '>', got %q", item.Label)
 	}
+
 	if item.TextEdit == nil {
 		t.Fatal("expected TextEdit")
 	}
+
 	if item.TextEdit.NewText != " true>" {
 		t.Errorf("expected NewText ' true>', got %q", item.TextEdit.NewText)
 	}
@@ -1305,6 +1414,7 @@ func TestCompletionDuplicateGtAfterTag(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1313,16 +1423,20 @@ func TestCompletionDuplicateGtAfterTag(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
+
 	item := list.Items[0]
 	if item.Detail != "Remove duplicate >" {
 		t.Errorf("expected detail 'Remove duplicate >', got %q", item.Detail)
 	}
+
 	if item.TextEdit == nil {
 		t.Fatal("expected TextEdit")
 	}
+
 	if item.TextEdit.NewText != "" {
 		t.Errorf("expected empty NewText, got %q", item.TextEdit.NewText)
 	}
+
 	if item.TextEdit.Range.Start.Character != 11 || item.TextEdit.Range.End.Character != 12 {
 		t.Errorf("expected range [11,12), got [%d,%d)", item.TextEdit.Range.Start.Character, item.TextEdit.Range.End.Character)
 	}
@@ -1343,6 +1457,7 @@ func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
 	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1351,6 +1466,7 @@ func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", *result)
 	}
+
 	if len(edits) != 0 {
 		t.Errorf("expected no edits, got %d", len(edits))
 	}
@@ -1387,6 +1503,7 @@ func TestCompletionDotComponentMethods(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1399,10 +1516,12 @@ func TestCompletionDotComponentMethods(t *testing.T) {
 	found := map[string]bool{}
 	for _, item := range list.Items {
 		found[item.Label] = true
+
 		if item.Kind != protocol.CompletionItemKindMethod {
 			t.Errorf("expected Method kind for %s, got %v", item.Label, item.Kind)
 		}
 	}
+
 	if !found["getName"] || !found["setName"] {
 		t.Errorf("expected getName and setName, got %v", found)
 	}
@@ -1437,6 +1556,7 @@ func TestCompletionDotPositionAware(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1445,6 +1565,7 @@ func TestCompletionDotPositionAware(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 method (getTotal), got %d: %v", len(list.Items), list.Items)
 	}
+
 	if list.Items[0].Label != "getTotal" {
 		t.Errorf("expected getTotal, got %s", list.Items[0].Label)
 	}
@@ -1486,6 +1607,7 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -1496,12 +1618,15 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 		for i, item := range list.Items {
 			labels[i] = item.Label
 		}
+
 		t.Fatalf("expected 2 completions (templateFunction, otherMethod), got %d: %v", len(list.Items), labels)
 	}
+
 	found := map[string]bool{}
 	for _, item := range list.Items {
 		found[item.Label] = true
 	}
+
 	if !found["templateFunction"] || !found["otherMethod"] {
 		t.Errorf("expected templateFunction and otherMethod, got %v", found)
 	}
@@ -1524,19 +1649,24 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 10}, // on "someMethod"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "persist.cfc") {
 		t.Errorf("expected persist.cfc, got %s", loc.URI)
 	}
@@ -1559,19 +1689,24 @@ func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 8}, // on "render"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
 		t.Errorf("expected Widget.cfc, got %s", loc.URI)
 	}
@@ -1595,19 +1730,24 @@ func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "User.cfc") {
 		t.Errorf("expected User.cfc, got %s", loc.URI)
 	}
@@ -1629,19 +1769,24 @@ func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
 			Position:     protocol.Position{Line: 0, Character: 39}, // on "render" in method attr
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
 		t.Errorf("expected Widget.cfc, got %s", loc.URI)
 	}
@@ -1668,22 +1813,28 @@ function generateID() {
 			Position:     protocol.Position{Line: 2, Character: 12}, // on "generateID"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.URI != cfcURI {
 		t.Errorf("expected same file URI, got %s", loc.URI)
 	}
+
 	if loc.Range.Start.Line != 4 {
 		t.Errorf("expected line 4, got %d", loc.Range.Start.Line)
 	}
@@ -1713,19 +1864,24 @@ func TestDefinitionComponentResolver(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 5}, // on "getSchedule"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "service.cfc") {
 		t.Errorf("expected service.cfc, got %s", loc.URI)
 	}
@@ -1755,12 +1911,15 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 22}, // on "doWork"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
@@ -1769,6 +1928,7 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Location (resolved to specific CFC), got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "Service1.cfc") {
 		t.Errorf("expected Service1.cfc, got %s", loc.URI)
 	}
@@ -1791,19 +1951,24 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 			Position:     protocol.Position{Line: 2, Character: 22}, // on "helper" in caller()
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.URI != currentURI {
 		t.Errorf("expected current file, got %s", loc.URI)
 	}
+
 	if loc.Range.Start.Line != 1 {
 		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
 	}
@@ -1829,19 +1994,24 @@ func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 9}, // on "doStuff"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "Helper.cfc") {
 		t.Errorf("expected Helper.cfc, got %s", loc.URI)
 	}
@@ -1864,19 +2034,24 @@ func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
 			Position:     protocol.Position{Line: 0, Character: 46}, // on "render" in method attr
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
 		t.Errorf("expected Widget.cfc, got %s", loc.URI)
 	}
@@ -1903,19 +2078,24 @@ func TestDefinitionTagFunctionLookup(t *testing.T) {
 			Position:     protocol.Position{Line: 5, Character: 12}, // on "getUser" in listUsers
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.Range.Start.Line != 1 {
 		t.Errorf("expected line 1, got %d", loc.Range.Start.Line)
 	}
@@ -1942,19 +2122,24 @@ func TestDefinitionMappingResolution(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 6}, // on "getName"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "User.cfc") {
 		t.Errorf("expected User.cfc, got %s", loc.URI)
 	}
@@ -1981,19 +2166,24 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 20}, // on "GETUSER"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.URI != cfcURI {
 		t.Errorf("expected Service.cfc, got %s", loc.URI)
 	}
@@ -2021,18 +2211,22 @@ func TestCompletionDotInvokedTrigger(t *testing.T) {
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
 	if len(list.Items) != 1 || list.Items[0].Label != "getName" {
 		labels := make([]string, len(list.Items))
 		for i, item := range list.Items {
 			labels[i] = item.Label
 		}
+
 		t.Errorf("expected [getName], got %v", labels)
 	}
 }
@@ -2067,18 +2261,22 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
 
 	list := completionListFromResult(t, *result)
 	found := false
+
 	for _, item := range list.Items {
 		if item.Label == "getToursAndExcursions" {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected completion for getToursAndExcursions after getService(\"tours\").")
 	}
@@ -2102,6 +2300,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	pr := parser.ParseWithOptions(docURI, docContent, parser.ParseOptions{
 		Resolvers: []parser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
 	})
+
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
@@ -2118,6 +2317,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2126,9 +2326,11 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", *result)
 	}
+
 	if len(help.Signatures) == 0 {
 		t.Fatal("expected at least one signature")
 	}
+
 	if !strings.Contains(help.Signatures[0].Label, "companyCode") {
 		t.Errorf("expected signature to contain 'companyCode', got %s", help.Signatures[0].Label)
 	}
@@ -2158,6 +2360,7 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 	if err := srv.handleHover(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2166,9 +2369,11 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 	if !ok || hover == nil {
 		t.Fatalf("expected *Hover, got %T", *result)
 	}
+
 	if !strings.Contains(hover.Contents.Value, "getName") {
 		t.Errorf("expected hover to contain 'getName', got %s", hover.Contents.Value)
 	}
+
 	if !strings.Contains(hover.Contents.Value, "id") {
 		t.Errorf("expected hover to contain parameter 'id', got %s", hover.Contents.Value)
 	}
@@ -2200,6 +2405,7 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2208,9 +2414,11 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", *result)
 	}
+
 	if len(help.Signatures) == 0 {
 		t.Fatal("expected at least one signature")
 	}
+
 	if !strings.Contains(help.Signatures[0].Label, "companyCode") {
 		t.Errorf("expected signature to contain 'companyCode', got %s", help.Signatures[0].Label)
 	}
@@ -2232,6 +2440,7 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2240,12 +2449,15 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", *result)
 	}
+
 	if len(help.Signatures) == 0 {
 		t.Fatal("expected signature for ArrayAppend")
 	}
+
 	if !strings.Contains(strings.ToLower(help.Signatures[0].Label), "arrayappend") {
 		t.Errorf("expected label to contain arrayAppend, got %s", help.Signatures[0].Label)
 	}
+
 	if help.ActiveParameter != 1 {
 		t.Errorf("expected activeParam=1 (after comma), got %d", help.ActiveParameter)
 	}
@@ -2265,6 +2477,7 @@ func TestSignatureHelpNoContext(t *testing.T) {
 	})
 
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Errorf("expected nil result outside function call, got %T", *result)
 	}
@@ -2302,6 +2515,7 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	if err := srv.handleHover(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2310,9 +2524,11 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	if !ok || hover == nil {
 		t.Fatalf("expected *Hover, got %T", *result)
 	}
+
 	if !strings.Contains(hover.Contents.Value, "getYearGroups") {
 		t.Errorf("expected hover to contain 'getYearGroups', got %s", hover.Contents.Value)
 	}
+
 	if !strings.Contains(hover.Contents.Value, "companyCode") {
 		t.Errorf("expected hover to contain 'companyCode', got %s", hover.Contents.Value)
 	}
@@ -2337,6 +2553,7 @@ func TestDocumentLinkResolve(t *testing.T) {
 	if err := srv.handleDocumentLink(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2345,6 +2562,7 @@ func TestDocumentLinkResolve(t *testing.T) {
 	if !ok || len(links) == 0 {
 		t.Fatal("expected at least one document link")
 	}
+
 	if links[0].Tooltip != "header.cfm" {
 		t.Errorf("expected tooltip 'header.cfm', got %q", links[0].Tooltip)
 	}
@@ -2352,9 +2570,11 @@ func TestDocumentLinkResolve(t *testing.T) {
 	// Test resolve
 	reply2, result2, replyErr2 := captureReply(t)
 	resolveReq := makeCall(t, protocol.MethodDocumentLinkResolve, links[0])
+
 	if err := srv.handleDocumentLinkResolve(context.Background(), reply2, resolveReq); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr2 != nil {
 		t.Fatal(*replyErr2)
 	}
@@ -2363,9 +2583,11 @@ func TestDocumentLinkResolve(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected DocumentLink, got %T", *result2)
 	}
+
 	if resolved.Target == "" {
 		t.Error("expected resolved target to be non-empty")
 	}
+
 	if !strings.Contains(string(resolved.Target), "header.cfm") {
 		t.Errorf("expected target to contain 'header.cfm', got %s", resolved.Target)
 	}
@@ -2384,6 +2606,7 @@ func TestResolveComponentPathCaseInsensitive(t *testing.T) {
 	if cfcPath == "" {
 		t.Fatal("expected to resolve models.User")
 	}
+
 	if !strings.HasSuffix(cfcPath, "user.cfc") {
 		t.Errorf("expected path to end with 'user.cfc', got %s", cfcPath)
 	}
@@ -2402,6 +2625,7 @@ func TestSignatureHelpActiveParamMultiple(t *testing.T) {
 		},
 	})
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	help := (*result).(*protocol.SignatureHelp)
 	if help.ActiveParameter != 3 {
 		t.Errorf("expected activeParam=3, got %d", help.ActiveParameter)
@@ -2422,10 +2646,12 @@ func TestSignatureHelpNestedCall(t *testing.T) {
 		},
 	})
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	help := (*result).(*protocol.SignatureHelp)
 	if help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature")
 	}
+
 	if !strings.Contains(strings.ToLower(help.Signatures[0].Label), "len") {
 		t.Errorf("expected Len signature, got %s", help.Signatures[0].Label)
 	}
@@ -2467,18 +2693,23 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
 
 	list := completionListFromResult(t, *result)
+
 	var names []string
+
 	for _, item := range list.Items {
 		names = append(names, item.Label)
 	}
+
 	if !strings.Contains(strings.Join(names, ","), "getYearGroups") {
 		t.Errorf("expected getYearGroups in completions, got %v", names)
 	}
+
 	if !strings.Contains(strings.Join(names, ","), "getCompanies") {
 		t.Errorf("expected getCompanies in completions, got %v", names)
 	}
@@ -2555,18 +2786,22 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
 
 	list := completionListFromResult(t, *result)
 	found := false
+
 	for _, item := range list.Items {
 		if item.Label == "getTeachers" {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected getTeachers in completions — single quotes should match double-quote pattern")
 	}
@@ -2578,9 +2813,11 @@ func TestExecuteCommandReindex(t *testing.T) {
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.reindex",
 	})
+
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -2595,12 +2832,15 @@ func TestExecuteCommandCopyPackage(t *testing.T) {
 		Command:   "cfmleditor.copyPackage",
 		Arguments: []interface{}{"file:///project/models/User.cfc"},
 	})
+
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	dotPath, _ := (*result).(string)
 	if dotPath != "models.User" {
 		t.Errorf("expected 'models.User', got %q", dotPath)
@@ -2619,10 +2859,12 @@ func TestHoverBuiltinCaseInsensitive(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	hover, ok := (*result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for uppercase ARRAYAPPEND")
 	}
+
 	if !strings.Contains(strings.ToLower(hover.Contents.Value), "arrayappend") {
 		t.Errorf("expected arrayappend in hover, got %s", hover.Contents.Value)
 	}
@@ -2654,6 +2896,7 @@ func TestDefinitionViaRegexResolver(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for svc")
 	}
+
 	if !strings.Contains(strings.ToLower(ref.Component), "finance") {
 		t.Errorf("expected component to contain 'finance', got %s", ref.Component)
 	}
@@ -2690,15 +2933,19 @@ func TestCompletionDotOnThis(t *testing.T) {
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
 
 	list := completionListFromResult(t, *result)
+
 	var names []string
+
 	for _, item := range list.Items {
 		names = append(names, item.Label)
 	}
+
 	joined := strings.Join(names, ",")
 	if !strings.Contains(joined, "init") || !strings.Contains(joined, "getData") {
 		t.Errorf("expected this. to show init and getData, got %v", names)
@@ -2741,11 +2988,13 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 
 	// init refs should be in pr.Refs (eagerly scanned)
 	found := false
+
 	for _, ref := range pr.Refs {
 		if ref.Variable == "svc" && strings.Contains(ref.Component, "general") {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Error("expected eager ref for svc in init()")
 	}
@@ -2763,11 +3012,13 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 			if f.Name == "doWork" && int(f.Line) == sc.Start {
 				refs, _ := pr.FuncRefs(sc.Start, sc.End)
 				found = false
+
 				for _, ref := range refs {
 					if ref.Variable == "helper" && strings.Contains(ref.Component, "helper") {
 						found = true
 					}
 				}
+
 				if !found {
 					t.Error("expected lazy ref for helper via FuncRefs")
 				}
@@ -2785,6 +3036,7 @@ func TestExtractLinksFromContent(t *testing.T) {
 	links := parser.ExtractLinks(content)
 	if len(links) != 3 {
 		t.Errorf("expected 3 links (header, page, mod), got %d", len(links))
+
 		for _, l := range links {
 			t.Logf("  %s line=%d", l.Path, l.Line)
 		}
@@ -2798,6 +3050,7 @@ func TestExecuteCommandUnknown(t *testing.T) {
 		Command: "cfmleditor.nonexistent",
 	})
 	_ = srv.handleExecuteCommand(context.Background(), reply, req)
+
 	if *replyErr == nil {
 		t.Error("expected error for unknown command")
 	}
@@ -2814,6 +3067,7 @@ func TestInvalidateAllCache(t *testing.T) {
 	}
 
 	srv.compCache.InvalidateAll()
+
 	items = srv.compCache.GetFile(docURI)
 	if len(items) != 0 {
 		t.Errorf("expected empty after InvalidateAll, got %d", len(items))
@@ -2835,13 +3089,16 @@ func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
 		},
 	})
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	help, ok := (*result).(*protocol.SignatureHelp)
 	if !ok || help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature for myHelper")
 	}
+
 	if !strings.Contains(help.Signatures[0].Label, "name") {
 		t.Errorf("expected 'name' param, got %s", help.Signatures[0].Label)
 	}
+
 	if len(help.Signatures[0].Parameters) != 2 {
 		t.Errorf("expected 2 parameters, got %d", len(help.Signatures[0].Parameters))
 	}
@@ -2859,6 +3116,7 @@ func TestHoverNoResultForUnknownWord(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Errorf("expected nil hover for unknown word, got %T", *result)
 	}
@@ -2887,17 +3145,23 @@ func TestCompletionDotAfterNewExpression(t *testing.T) {
 			TriggerCharacter: ".",
 		},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
+
 	var names []string
+
 	for _, item := range list.Items {
 		names = append(names, item.Label)
 	}
+
 	if !strings.Contains(strings.Join(names, ","), "getName") {
 		t.Errorf("expected getName after new models.User(), got %v", names)
 	}
@@ -2919,13 +3183,16 @@ func TestDocumentLinkHrefAndAction(t *testing.T) {
 	if len(links) != 2 {
 		t.Errorf("expected 2 links (href + action), got %d", len(links))
 	}
+
 	paths := make(map[string]bool)
 	for _, l := range links {
 		paths[l.Tooltip] = true
 	}
+
 	if !paths["about.cfm"] {
 		t.Error("expected link for about.cfm")
 	}
+
 	if !paths["submit.cfm"] {
 		t.Error("expected link for submit.cfm")
 	}
@@ -2956,6 +3223,7 @@ func TestResolverMultipleCaptures(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected ref for dao")
 	}
+
 	if ref.Component != "packages.admin.dao.UserDAO" {
 		t.Errorf("expected packages.admin.dao.UserDAO, got %s", ref.Component)
 	}
@@ -2963,6 +3231,7 @@ func TestResolverMultipleCaptures(t *testing.T) {
 
 func TestFindCallContextNoParens(t *testing.T) {
 	content := "<cfset x = someVar>"
+
 	name, qual, _ := parser.FindCallContext(content, 0, 15)
 	if name != "" || qual != "" {
 		t.Errorf("expected empty outside parens, got name=%q qual=%q", name, qual)
@@ -3004,6 +3273,7 @@ func TestSignatureHelpAfterSecondComma(t *testing.T) {
 		},
 	})
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	help := (*result).(*protocol.SignatureHelp)
 	if help == nil || help.ActiveParameter != 2 {
 		t.Errorf("expected activeParam=2, got %v", help)
@@ -3030,19 +3300,24 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
 	found := false
+
 	for _, item := range list.Items {
 		if item.Label == "getTotal" {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Error("expected getTotal after createObject dot completion")
 	}
@@ -3068,19 +3343,24 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 			Position:     protocol.Position{Line: 0, Character: 22},
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.URI != otherURI {
 		t.Errorf("expected URI %s, got %s", otherURI, loc.URI)
 	}
+
 	if loc.Range.Start.Line != 10 {
 		t.Errorf("expected line 10, got %d", loc.Range.Start.Line)
 	}
@@ -3118,6 +3398,7 @@ func TestEnsureIndexedLoadsFromDisk(t *testing.T) {
 	srv.WorkspaceFolders = []string{dir}
 
 	cfcPath := filepath.Join(dir, "models", "Item.cfc")
+
 	defs := srv.getResolver().EnsureIndexed(cfcPath)
 	if len(defs) != 2 {
 		t.Errorf("expected 2 functions from disk, got %d", len(defs))
@@ -3143,6 +3424,7 @@ func TestResolveComponentPathWithMappings(t *testing.T) {
 	if result == "" {
 		t.Fatal("expected to resolve mylib.Utils via mapping")
 	}
+
 	if !strings.HasSuffix(result, "Utils.cfc") {
 		t.Errorf("expected path ending in Utils.cfc, got %s", result)
 	}
@@ -3159,9 +3441,11 @@ func TestHandleDidOpenNonCFML(t *testing.T) {
 			Text:       "const x = 1;",
 		},
 	})
+
 	if err := srv.handleDidOpen(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
@@ -3180,6 +3464,7 @@ func TestResolveMappings(t *testing.T) {
 	if result["models"] != "/project/src/models" {
 		t.Errorf("models: got %q, want /project/src/models", result["models"])
 	}
+
 	if result["lib"] != "/absolute/lib" {
 		t.Errorf("lib: got %q, want /absolute/lib", result["lib"])
 	}
@@ -3200,10 +3485,12 @@ func TestHoverUnqualifiedUserFunction(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	hover, ok := (*result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for unqualified user function")
 	}
+
 	if !strings.Contains(hover.Contents.Value, "flag") {
 		t.Errorf("expected 'flag' param in hover, got %s", hover.Contents.Value)
 	}
@@ -3222,19 +3509,24 @@ func TestCompletionClosingTagSlash(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "/"},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
 	found := false
+
 	for _, item := range list.Items {
 		if strings.Contains(item.Label, "cfoutput") {
 			found = true
 		}
 	}
+
 	if !found {
 		t.Error("expected closing tag completion for cfoutput")
 	}
@@ -3244,6 +3536,7 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	srv := newTestServer()
 	docURI := uri.URI("file:///main.cfc")
 	otherURI := uri.URI("file:///other.cfc")
+
 	srv.setDocument(docURI, "component {\nfunction helper() {}\n}\nhelper()")
 	srv.index.IndexFileFromResult(docURI, []parser.FunctionDef{
 		{Name: "helper", URI: docURI, Line: 1},
@@ -3260,10 +3553,12 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 		},
 	})
 	_ = srv.handleDefinition(context.Background(), reply, req)
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if loc.URI != docURI {
 		t.Error("expected definition to prefer same file")
 	}
@@ -3280,12 +3575,15 @@ func TestDocumentSymbolBasic(t *testing.T) {
 	req := makeCall(t, protocol.MethodTextDocumentDocumentSymbol, protocol.DocumentSymbolParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
+
 	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	symbols, ok := (*result).([]protocol.DocumentSymbol)
 	if !ok {
 		// Might be SymbolInformation
@@ -3293,8 +3591,10 @@ func TestDocumentSymbolBasic(t *testing.T) {
 		if !ok2 || len(syms) < 2 {
 			t.Fatalf("expected at least 2 symbols, got %T", *result)
 		}
+
 		return
 	}
+
 	if len(symbols) < 2 {
 		t.Errorf("expected at least 2 symbols, got %d", len(symbols))
 	}
@@ -3309,16 +3609,20 @@ func TestWorkspaceSymbolQuery(t *testing.T) {
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "getUser"})
+
 	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	symbols, ok := (*result).([]protocol.SymbolInformation)
 	if !ok || len(symbols) == 0 {
 		t.Fatal("expected at least one workspace symbol")
 	}
+
 	if symbols[0].Name != "getUserById" {
 		t.Errorf("expected getUserById, got %s", symbols[0].Name)
 	}
@@ -3365,6 +3669,7 @@ func TestIsCFCFile(t *testing.T) {
 func TestResolveComponentPathNotFound(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/nonexistent"}
+
 	result := srv.getResolver().ComponentPath("no.Such.Component", "/tmp")
 	if result != "" {
 		t.Errorf("expected empty for nonexistent component, got %s", result)
@@ -3381,6 +3686,7 @@ func TestDocumentLinkEmptyDocument(t *testing.T) {
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 	_ = srv.handleDocumentLink(context.Background(), reply, req)
+
 	links, _ := (*result).([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for empty doc, got %d", len(links))
@@ -3400,6 +3706,7 @@ func TestSignatureHelpEmptyDocument(t *testing.T) {
 		},
 	})
 	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Errorf("expected nil for empty doc, got %T", *result)
 	}
@@ -3418,6 +3725,7 @@ func TestHoverEmptyDocument(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Errorf("expected nil for empty doc, got %T", *result)
 	}
@@ -3436,6 +3744,7 @@ func TestDefinitionEmptyWord(t *testing.T) {
 		},
 	})
 	_ = srv.handleDefinition(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Errorf("expected nil for whitespace, got %T", *result)
 	}
@@ -3452,16 +3761,20 @@ func TestExecuteCommandShowResolvers(t *testing.T) {
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.showResolvers",
 	})
+
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	msg, _ := (*result).(string)
 	if !strings.Contains(msg, "models") {
 		t.Errorf("expected mappings in output, got %s", msg)
 	}
+
 	if !strings.Contains(msg, "getService") {
 		t.Errorf("expected resolver in output, got %s", msg)
 	}
@@ -3480,12 +3793,15 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 		Command:   "cfmleditor.showFileIndex",
 		Arguments: []interface{}{"file:///test.cfc"},
 	})
+
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	msg, _ := (*result).(string)
 	if !strings.Contains(msg, "init") || !strings.Contains(msg, "getData") {
 		t.Errorf("expected function names in output, got %s", msg)
@@ -3496,6 +3812,7 @@ func TestSimpleMatchExactNoPlaceholder(t *testing.T) {
 	resolvers := []parser.Resolver{
 		{Match: "_parent", Resolve: "packages.core.kernel", Prefix: "_parent"},
 	}
+
 	got := parser.ResolveFromCall("_parent", resolvers)
 	if got != "packages.core.kernel" {
 		t.Errorf("expected packages.core.kernel, got %q", got)
@@ -3506,6 +3823,7 @@ func TestSimpleMatchNoMatch(t *testing.T) {
 	resolvers := []parser.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
+
 	got := parser.ResolveFromCall("somethingElse()", resolvers)
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
@@ -3558,6 +3876,7 @@ func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	hover, ok := (*result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover result")
@@ -3581,6 +3900,7 @@ func TestHoverUnqualifiedShowsBuiltin(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	hover, ok := (*result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for builtin Len")
@@ -3615,6 +3935,7 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	if *result != nil {
 		t.Error("expected nil hover for ambiguous unqualified function")
 	}
@@ -3638,10 +3959,12 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 		},
 	})
 	_ = srv.handleHover(context.Background(), reply, req)
+
 	hover, ok := (*result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for globally unique function")
 	}
+
 	if !strings.Contains(hover.Contents.Value, "uniqueFunc") {
 		t.Errorf("expected uniqueFunc in hover, got %s", hover.Contents.Value)
 	}
@@ -3660,21 +3983,27 @@ func TestArgumentCompletionBuiltin(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
 	// Should have named argument items with = suffix
 	foundArg := false
+
 	for _, item := range list.Items {
 		if strings.HasSuffix(item.Label, "=") && item.Kind == protocol.CompletionItemKindField {
 			foundArg = true
+
 			break
 		}
 	}
+
 	if !foundArg {
 		t.Error("expected named argument completions inside ArrayAppend(")
 	}
@@ -3695,22 +4024,29 @@ func TestArgumentCompletionUserFunction(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
+
 	var argNames []string
+
 	for _, item := range list.Items {
 		if item.Kind == protocol.CompletionItemKindField {
 			argNames = append(argNames, item.Label)
 		}
 	}
+
 	if !strings.Contains(strings.Join(argNames, ","), "name=") {
 		t.Errorf("expected name= in argument completions, got %v", argNames)
 	}
+
 	if !strings.Contains(strings.Join(argNames, ","), "age=") {
 		t.Errorf("expected age= in argument completions, got %v", argNames)
 	}
@@ -3753,22 +4089,29 @@ func TestCompletionSnippetFormat(t *testing.T) {
 	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
 
 	items := srv.completionFromCache(docURI, 5)
+
 	var found *protocol.CompletionItem
+
 	for i := range items {
 		if items[i].Label == "myFunc" {
 			found = &items[i]
+
 			break
 		}
 	}
+
 	if found == nil {
 		t.Fatal("expected myFunc in completions")
 	}
+
 	if found.InsertTextFormat != protocol.InsertTextFormatSnippet {
 		t.Error("expected snippet format")
 	}
+
 	if !strings.Contains(found.InsertText, "${1:name}") {
 		t.Errorf("expected ${1:name} placeholder, got %s", found.InsertText)
 	}
+
 	if !strings.Contains(found.InsertText, "${2:count}") {
 		t.Errorf("expected ${2:count} placeholder, got %s", found.InsertText)
 	}
@@ -3776,12 +4119,15 @@ func TestCompletionSnippetFormat(t *testing.T) {
 
 func TestScopeSortOrder(t *testing.T) {
 	items := getBuiltinFuncItems()
+
 	var scopeItems []protocol.CompletionItem
+
 	for _, item := range items {
 		if item.Kind == protocol.CompletionItemKindKeyword {
 			scopeItems = append(scopeItems, item)
 		}
 	}
+
 	if len(scopeItems) == 0 {
 		t.Fatal("expected scope items")
 	}
@@ -3793,14 +4139,17 @@ func TestScopeSortOrder(t *testing.T) {
 	}
 	// VARIABLES should sort before SESSION
 	var varIdx, sessIdx int
+
 	for i, item := range scopeItems {
 		if item.Label == "VARIABLES" {
 			varIdx = i
 		}
+
 		if item.Label == "SESSION" {
 			sessIdx = i
 		}
 	}
+
 	if varIdx >= sessIdx {
 		t.Error("VARIABLES should appear before SESSION")
 	}
@@ -3828,10 +4177,13 @@ func TestCompletionResponseTime(t *testing.T) {
 	})
 
 	start := time.Now()
+
 	for i := 0; i < 100; i++ {
 		_ = srv.handleCompletion(context.Background(), reply, req)
 	}
+
 	elapsed := time.Since(start)
+
 	avg := elapsed / 100
 	if avg > 5*time.Millisecond {
 		t.Errorf("completion too slow: avg %v per request (threshold 5ms)", avg)
@@ -3852,10 +4204,13 @@ func TestHoverResponseTime(t *testing.T) {
 	})
 
 	start := time.Now()
+
 	for i := 0; i < 100; i++ {
 		_ = srv.handleHover(context.Background(), reply, req)
 	}
+
 	elapsed := time.Since(start)
+
 	avg := elapsed / 100
 	if avg > 2*time.Millisecond {
 		t.Errorf("hover too slow: avg %v per request (threshold 2ms)", avg)
@@ -3878,10 +4233,13 @@ func TestDefinitionResponseTime(t *testing.T) {
 	})
 
 	start := time.Now()
+
 	for i := 0; i < 100; i++ {
 		_ = srv.handleDefinition(context.Background(), reply, req)
 	}
+
 	elapsed := time.Since(start)
+
 	avg := elapsed / 100
 	if avg > 2*time.Millisecond {
 		t.Errorf("definition too slow: avg %v per request (threshold 2ms)", avg)
@@ -3896,6 +4254,7 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		lines = append(lines, fmt.Sprintf(`<cfinclude template="file%d.cfm">`, i))
 	}
+
 	srv.setDocument(docURI, strings.Join(lines, "\n"))
 
 	pr := srv.parseContent(docURI, strings.Join(lines, "\n"))
@@ -3909,10 +4268,13 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 	})
 
 	start := time.Now()
+
 	for i := 0; i < 10; i++ {
 		_ = srv.handleDocumentLink(context.Background(), reply, req)
 	}
+
 	elapsed := time.Since(start)
+
 	avg := elapsed / 10
 	if avg > 50*time.Millisecond {
 		t.Errorf("documentLink too slow for 500-line doc: avg %v (threshold 50ms)", avg)
@@ -3945,10 +4307,13 @@ func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
 
 	// Subsequent calls should be fast (cached regex)
 	start := time.Now()
+
 	for i := 0; i < 10000; i++ {
 		parser.ResolveFromCall("kernel.getBar()", resolvers)
 	}
+
 	elapsed := time.Since(start)
+
 	avg := elapsed / 10000
 	if avg > 10*time.Microsecond {
 		t.Errorf("resolver too slow (regex not cached?): avg %v per call (threshold 10µs)", avg)
@@ -3960,6 +4325,7 @@ func TestDefinitionNoGlobalResolution(t *testing.T) {
 	srv.GlobalFunctionResolution = false
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
+
 	srv.setDocument(docURI, "myFunc()")
 	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
@@ -4007,6 +4373,7 @@ func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
 	srv.GlobalFunctionResolution = true
 	docURI := uri.URI("file:///test.cfm")
 	otherURI := uri.URI("file:///other.cfc")
+
 	srv.setDocument(docURI, "myFunc()")
 	srv.index.IndexFileFromResult(otherURI, []parser.FunctionDef{
 		{Name: "myFunc", URI: otherURI, Line: 10},
@@ -4047,12 +4414,15 @@ func TestDefinitionViaCreateObject(t *testing.T) {
 			Position:     protocol.Position{Line: 1, Character: 20}, // on "getTotal"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition for obj.getTotal() via createObject")
 	}
@@ -4079,17 +4449,23 @@ func TestCompletionViaCreateObject(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
+
 	var names []string
+
 	for _, item := range list.Items {
 		names = append(names, item.Label)
 	}
+
 	if !strings.Contains(strings.Join(names, ","), "getTotal") {
 		t.Errorf("expected getTotal in completions via createObject, got %v", names)
 	}
@@ -4128,6 +4504,7 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 			if lower == "userdao" {
 				return filepath.Join(dir, "dao", "UserDAO.cfc")
 			}
+
 			return ""
 		},
 	})
@@ -4140,12 +4517,15 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 			Position:     protocol.Position{Line: 4, Character: 28}, // on "getAll"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition for variables.userDAO.getAll() via bean property")
 	}
@@ -4174,6 +4554,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 			if strings.EqualFold(name, "userdao") {
 				return filepath.Join(dir, "dao", "UserDAO.cfc")
 			}
+
 			return ""
 		},
 	})
@@ -4187,17 +4568,23 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 		},
 		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
 	})
+
 	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	list := completionListFromResult(t, *result)
+
 	var names []string
+
 	for _, item := range list.Items {
 		names = append(names, item.Label)
 	}
+
 	joined := strings.Join(names, ",")
 	if !strings.Contains(joined, "getById") || !strings.Contains(joined, "getAll") {
 		t.Errorf("expected getById and getAll via bean property, got %v", names)
@@ -4214,6 +4601,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	if len(beanPaths) == 0 {
 		t.Fatal("expected bean paths from Application.cfc")
 	}
+
 	beans := buildBeanMap(beanPaths, srv.FS)
 	srv.index.SetBeans(beans)
 
@@ -4241,19 +4629,24 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 			Position:     protocol.Position{Line: 13, Character: 38}, // on "getById"
 		},
 	})
+
 	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
 		t.Fatal(err)
 	}
+
 	if *replyErr != nil {
 		t.Fatal(*replyErr)
 	}
+
 	if *result == nil {
 		t.Fatal("expected definition for variables.userDAO.getById via inject bean")
 	}
+
 	loc, ok := (*result).(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", *result)
 	}
+
 	if !strings.Contains(string(loc.URI), "UserDAO.cfc") {
 		t.Errorf("expected UserDAO.cfc, got %s", loc.URI)
 	}
@@ -4284,6 +4677,7 @@ func TestBeansTestdata_PositionalTypeResolution(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for userDAO from positional property type")
 	}
+
 	t.Logf("userDAO resolved to: %s", ref.Component)
 }
 
@@ -4311,6 +4705,7 @@ func TestBeansTestdata_ServiceInjectResolution(t *testing.T) {
 	if ref == nil {
 		t.Fatal("expected component ref for userDAO in BeanUserService via inject")
 	}
+
 	if !strings.Contains(strings.ToLower(ref.Component), "userdao") {
 		t.Errorf("expected component containing 'userdao', got %s", ref.Component)
 	}
@@ -4344,10 +4739,12 @@ func TestFindAllCalls_GetById(t *testing.T) {
 	for _, e := range entries {
 		files = append(files, filepath.Base(e.File))
 	}
+
 	joined := strings.Join(files, ",")
 	if !strings.Contains(joined, "PropertyTest.cfc") {
 		t.Errorf("expected PropertyTest.cfc in results, got %v", files)
 	}
+
 	if !strings.Contains(joined, "BeanUserService.cfc") {
 		t.Errorf("expected BeanUserService.cfc in results, got %v", files)
 	}
@@ -4366,12 +4763,15 @@ func TestFindAllCalls_GetAll(t *testing.T) {
 
 	// Should find call in BeanUserService.cfc (variables.userDAO.getAll())
 	found := false
+
 	for _, e := range entries {
 		if strings.Contains(filepath.Base(e.File), "BeanUserService.cfc") {
 			found = true
+
 			break
 		}
 	}
+
 	if !found {
 		t.Error("expected getAll call in BeanUserService.cfc")
 	}
@@ -4386,12 +4786,15 @@ func TestFindAllCalls_Resolved(t *testing.T) {
 
 	// Calls via variables.userDAO.getById should be resolved (qualified)
 	hasResolved := false
+
 	for _, e := range entries {
 		if e.Resolved {
 			hasResolved = true
+
 			break
 		}
 	}
+
 	if !hasResolved {
 		t.Error("expected at least one resolved (qualified) call to getById")
 	}
@@ -4430,6 +4833,7 @@ func TestFindComponentRefs_UserDAO(t *testing.T) {
 	for _, e := range entries {
 		files = append(files, filepath.Base(e.File))
 	}
+
 	joined := strings.Join(files, ",")
 	if !strings.Contains(joined, "PropertyTest.cfc") {
 		t.Errorf("expected PropertyTest.cfc to reference UserDAO, got %v", files)

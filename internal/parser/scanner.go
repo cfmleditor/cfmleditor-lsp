@@ -77,12 +77,14 @@ func (s *Scanner) Peek() Token {
 	pos, line := s.pos, s.line
 	tok := s.Next()
 	s.pos, s.line = pos, line
+
 	return tok
 }
 
 // Next returns the next token and advances the scanner.
 func (s *Scanner) Next() Token {
 	s.skipWhitespaceNoNewline()
+
 	if s.pos >= len(s.src) {
 		return Token{Kind: TokEOF, Offset: s.pos, Line: s.line}
 	}
@@ -95,6 +97,7 @@ func (s *Scanner) Next() Token {
 	case ch == '\n':
 		s.pos++
 		s.line++
+
 		return Token{Kind: TokNewline, Value: "\n", Offset: start, Line: startLine}
 
 	case ch == '<' && s.pos+4 < len(s.src) && s.src[s.pos:s.pos+5] == "<!---":
@@ -118,6 +121,7 @@ func (s *Scanner) Next() Token {
 	default:
 		s.pos++
 		kind := charToKind(ch)
+
 		return Token{Kind: kind, Value: string(ch), Offset: start, Line: startLine}
 	}
 }
@@ -126,7 +130,7 @@ func (s *Scanner) Next() Token {
 func (s *Scanner) NextSkipComments() Token {
 	for {
 		tok := s.Next()
-		switch tok.Kind {
+		switch tok.Kind { //nolint:exhaustive
 		case TokCFComment, TokBlockComment, TokLineComment, TokNewline:
 			continue
 		default:
@@ -140,6 +144,7 @@ func (s *Scanner) PeekSkipComments() Token {
 	pos, line := s.pos, s.line
 	tok := s.NextSkipComments()
 	s.pos, s.line = pos, line
+
 	return tok
 }
 
@@ -157,22 +162,29 @@ func (s *Scanner) skipWhitespaceNoNewline() {
 func (s *Scanner) scanCFComment(start, startLine int) Token {
 	s.pos += 5 // skip <!---
 	depth := 1
+
 	for s.pos < len(s.src) && depth > 0 {
 		if s.pos+4 < len(s.src) && s.src[s.pos:s.pos+5] == "<!---" {
 			depth++
 			s.pos += 5
+
 			continue
 		}
+
 		if s.pos+2 < len(s.src) && s.src[s.pos] == '-' && s.src[s.pos+1] == '-' && s.src[s.pos+2] == '>' {
 			depth--
 			s.pos += 3
+
 			continue
 		}
+
 		if s.src[s.pos] == '\n' {
 			s.line++
 		}
+
 		s.pos++
 	}
+
 	return Token{Kind: TokCFComment, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
@@ -181,13 +193,17 @@ func (s *Scanner) scanBlockComment(start, startLine int) Token {
 	for s.pos < len(s.src) {
 		if s.src[s.pos] == '*' && s.pos+1 < len(s.src) && s.src[s.pos+1] == '/' {
 			s.pos += 2
+
 			break
 		}
+
 		if s.src[s.pos] == '\n' {
 			s.line++
 		}
+
 		s.pos++
 	}
+
 	return Token{Kind: TokBlockComment, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
@@ -196,24 +212,30 @@ func (s *Scanner) scanLineComment(start, startLine int) Token {
 	for s.pos < len(s.src) && s.src[s.pos] != '\n' {
 		s.pos++
 	}
+
 	return Token{Kind: TokLineComment, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
 func (s *Scanner) scanString(start, startLine int) Token {
 	q := s.src[s.pos]
 	s.pos++
+
 	for s.pos < len(s.src) && s.src[s.pos] != q {
 		if s.src[s.pos] == '\\' && s.pos+1 < len(s.src) {
 			s.pos++
 		}
+
 		if s.src[s.pos] == '\n' {
 			s.line++
 		}
+
 		s.pos++
 	}
+
 	if s.pos < len(s.src) {
 		s.pos++ // closing quote
 	}
+
 	return Token{Kind: TokString, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
@@ -221,6 +243,7 @@ func (s *Scanner) scanNumber(start, startLine int) Token {
 	for s.pos < len(s.src) && (isDigit(s.src[s.pos]) || s.src[s.pos] == '.') {
 		s.pos++
 	}
+
 	return Token{Kind: TokNumber, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
@@ -228,6 +251,7 @@ func (s *Scanner) scanIdent(start, startLine int) Token {
 	for s.pos < len(s.src) && isIdentPart(s.src[s.pos]) {
 		s.pos++
 	}
+
 	return Token{Kind: TokIdent, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
@@ -236,12 +260,15 @@ func (s *Scanner) Rest() string {
 	if s.pos >= len(s.src) {
 		return ""
 	}
+
 	return s.src[s.pos:]
 }
 
-func isDigit(ch byte) bool    { return ch >= '0' && ch <= '9' }
-func isIdentStart(ch byte) bool { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' }
-func isIdentPart(ch byte) bool  { return isIdentStart(ch) || isDigit(ch) }
+func isDigit(ch byte) bool { return ch >= '0' && ch <= '9' }
+func isIdentStart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+}
+func isIdentPart(ch byte) bool { return isIdentStart(ch) || isDigit(ch) }
 
 func charToKind(ch byte) TokenKind {
 	switch ch {

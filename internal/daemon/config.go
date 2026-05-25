@@ -26,9 +26,12 @@ func FindConfig(dir string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	d := abs
+
 	for {
 		p := filepath.Join(d, ".cfmleditor.json")
+
 		data, err := os.ReadFile(p)
 		if err == nil {
 			var raw configJSON
@@ -36,28 +39,33 @@ func FindConfig(dir string) (*Config, error) {
 				if raw.WorkspaceName == "" {
 					raw.WorkspaceName = filepath.Dir(p)
 				}
+
 				return &Config{Path: p, Name: raw.WorkspaceName}, nil
 			}
 		}
+
 		parent := filepath.Dir(d)
 		if parent == d {
 			break
 		}
+
 		d = parent
 	}
+
 	return &Config{Path: "", Name: filepath.Base(abs)}, nil
 }
-
 
 func (c *Config) raw() *configJSON {
 	data, err := os.ReadFile(c.Path)
 	if err != nil {
 		return nil
 	}
+
 	var raw configJSON
 	if json.Unmarshal(data, &raw) != nil {
 		return nil
 	}
+
 	return &raw
 }
 
@@ -67,11 +75,14 @@ func (c *Config) WorkspaceFolders() []string {
 	if raw == nil {
 		return nil
 	}
+
 	dir := filepath.Dir(c.Path)
 	out := make([]string, 0, len(raw.WorkspacePaths))
+
 	for _, p := range raw.WorkspacePaths {
 		out = append(out, filepath.Join(dir, p))
 	}
+
 	return out
 }
 
@@ -81,30 +92,35 @@ func (c *Config) Mappings() map[string]string {
 	if raw == nil || len(raw.Mappings) == 0 {
 		return nil
 	}
+
 	return cfpath.ResolveMappings(raw.Mappings, filepath.Dir(c.Path))
 }
 
 // Debug returns whether debug logging is enabled in config.
 func (c *Config) Debug() bool {
 	raw := c.raw()
+
 	return raw != nil && raw.Debug
 }
 
 // Linting returns whether linting (cflint) is enabled in config.
 func (c *Config) Linting() bool {
 	raw := c.raw()
+
 	return raw != nil && raw.Linting != nil && raw.Linting.Enabled
 }
 
 // FormattingEnabled returns whether formatting is enabled in config.
 func (c *Config) FormattingEnabled() bool {
 	raw := c.raw()
+
 	return raw != nil && raw.Formatting != nil && raw.Formatting.Enabled
 }
 
 // FormattingDebug returns whether formatting debug checks are enabled.
 func (c *Config) FormattingDebug() bool {
 	raw := c.raw()
+
 	return raw != nil && raw.Formatting != nil && raw.Formatting.Debug
 }
 
@@ -115,6 +131,7 @@ func (c *Config) FormattingSelfCloseTags() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.SelfCloseTags == nil {
 		return true
 	}
+
 	return *raw.Formatting.SelfCloseTags
 }
 
@@ -125,6 +142,7 @@ func (c *Config) FormattingWhitespaceOnly() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.WhitespaceOnly == nil {
 		return true
 	}
+
 	return *raw.Formatting.WhitespaceOnly
 }
 
@@ -134,6 +152,7 @@ func (c *Config) FormattingQueryFormat() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryFormat == nil {
 		return false
 	}
+
 	return *raw.Formatting.QueryFormat
 }
 
@@ -143,6 +162,7 @@ func (c *Config) FormattingLowercaseTags() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.LowercaseTags == nil {
 		return true
 	}
+
 	return *raw.Formatting.LowercaseTags
 }
 
@@ -152,6 +172,7 @@ func (c *Config) FormattingLowercaseAttributes() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.LowercaseAttributes == nil {
 		return true
 	}
+
 	return *raw.Formatting.LowercaseAttributes
 }
 
@@ -161,6 +182,7 @@ func (c *Config) FormattingDoubleQuoteAttributes() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.DoubleQuoteAttributes == nil {
 		return true
 	}
+
 	return *raw.Formatting.DoubleQuoteAttributes
 }
 
@@ -170,6 +192,7 @@ func (c *Config) FormattingQueryUppercaseKeywords() bool {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryUppercaseKeywords == nil {
 		return true
 	}
+
 	return *raw.Formatting.QueryUppercaseKeywords
 }
 
@@ -179,6 +202,7 @@ func (c *Config) FormattingScopeCase() string {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.ScopeCase == "" {
 		return "leave"
 	}
+
 	return raw.Formatting.ScopeCase
 }
 
@@ -188,6 +212,7 @@ func (c *Config) FormattingCommaPosition() string {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.CommaPosition == "" {
 		return "after"
 	}
+
 	return raw.Formatting.CommaPosition
 }
 
@@ -197,6 +222,7 @@ func (c *Config) FormattingQueryCommaPosition() string {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.QueryCommaPosition == "" {
 		return ""
 	}
+
 	return raw.Formatting.QueryCommaPosition
 }
 
@@ -206,6 +232,7 @@ func (c *Config) FormattingLineWidth() int {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.LineWidth == nil {
 		return 0
 	}
+
 	return *raw.Formatting.LineWidth
 }
 
@@ -215,6 +242,7 @@ func (c *Config) FormattingAttrBreakThreshold() int {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.AttrBreakThreshold == nil {
 		return 0
 	}
+
 	return *raw.Formatting.AttrBreakThreshold
 }
 
@@ -224,6 +252,7 @@ func (c *Config) FormattingIndentWidth() int {
 	if raw == nil || raw.Formatting == nil || raw.Formatting.IndentWidth == nil {
 		return 0
 	}
+
 	return *raw.Formatting.IndentWidth
 }
 
@@ -233,12 +262,15 @@ func (c *Config) ComponentResolvers() [][3]string {
 	if raw == nil || len(raw.ComponentResolvers) == 0 {
 		return nil
 	}
+
 	out := make([][3]string, 0, len(raw.ComponentResolvers))
+
 	for _, r := range raw.ComponentResolvers {
 		if r.Match != "" && r.Resolve != "" {
 			out = append(out, [3]string{r.Match, r.Resolve, r.Prefix})
 		}
 	}
+
 	return out
 }
 
@@ -248,12 +280,15 @@ func (c *Config) PropertyResolvers() [][3]string {
 	if raw == nil || len(raw.PropertyResolvers) == 0 {
 		return nil
 	}
+
 	out := make([][3]string, 0, len(raw.PropertyResolvers))
+
 	for _, r := range raw.PropertyResolvers {
 		if r.Match != "" && r.Resolve != "" && r.Attribute != "" {
 			out = append(out, [3]string{r.Match, r.Resolve, r.Attribute})
 		}
 	}
+
 	return out
 }
 
@@ -263,6 +298,7 @@ func (c *Config) BeanPaths() map[string]string {
 	if raw == nil || len(raw.BeanPaths) == 0 {
 		return nil
 	}
+
 	return cfpath.ResolveMappings(raw.BeanPaths, filepath.Dir(c.Path))
 }
 
@@ -276,15 +312,19 @@ func (c *Config) IndexGlobs() []string {
 	if raw == nil || len(raw.WorkspaceIndexGlobs) == 0 {
 		return nil
 	}
+
 	dir := filepath.Dir(c.Path)
 	// Build map from folder base name to resolved absolute path
 	folderMap := make(map[string]string)
+
 	for _, p := range raw.WorkspacePaths {
 		resolved := filepath.Join(dir, p)
 		base := filepath.Base(resolved)
 		folderMap[base] = resolved
 	}
+
 	out := make([]string, 0, len(raw.WorkspaceIndexGlobs))
+
 	for _, g := range raw.WorkspaceIndexGlobs {
 		// First path component is the folder name
 		parts := strings.SplitN(g, "/", 2)
@@ -296,6 +336,7 @@ func (c *Config) IndexGlobs() []string {
 			}
 		}
 	}
+
 	return out
 }
 

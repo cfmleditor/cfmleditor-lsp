@@ -22,12 +22,14 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 
 	line := int(params.Range.Start.Line)
 	char := int(params.Range.Start.Character)
+
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
 
 	docURI := string(params.TextDocument.URI)
+
 	var actions []protocol.CodeAction
 
 	// If on a function name with a qualifier, offer component-level actions

@@ -10,6 +10,7 @@ import (
 // ParseFunctionDefs extracts function definitions from CFC content.
 func ParseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 	regions := ClassifyRegions(content)
+
 	var defs []FunctionDef
 
 	for _, r := range regions {
@@ -24,15 +25,18 @@ func ParseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 			for i := range tp.funcs {
 				tp.funcs[i].Line += uint32(r.StartLine)
 			}
+
 			defs = append(defs, tp.funcs...)
 		}
 	}
+
 	return defs
 }
 
 // ParseComponentRefs extracts component references from source content.
 func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 	regions := ClassifyRegions(content)
+
 	var refs []ComponentRef
 
 	for _, r := range regions {
@@ -43,14 +47,17 @@ func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 		} else {
 			tp := newTagParser(r.Text, string(fileURI))
 			tp.parse()
+
 			for i := range tp.refs {
 				tp.refs[i].Line += uint32(r.StartLine)
 			}
+
 			refs = append(refs, tp.refs...)
 		}
 	}
 
 	sort.Slice(refs, func(i, j int) bool { return refs[i].Line < refs[j].Line })
+
 	return refs
 }
 
@@ -58,15 +65,19 @@ func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 func ParseVars(content string) []VarDef {
 	regions := ClassifyRegions(content)
 	scopes := FindFuncScopes(content)
+
 	var defs []VarDef
+
 	type key struct {
 		name string
 		line uint32
 	}
+
 	seen := make(map[key]bool)
 
 	for _, r := range regions {
 		var regionVars []VarDef
+
 		if r.Kind == RegionScript {
 			sp := newScriptParser(r.Text, "", r.StartLine)
 			sp.parse()
@@ -74,9 +85,11 @@ func ParseVars(content string) []VarDef {
 		} else {
 			tp := newTagParser(r.Text, "")
 			tp.parse()
+
 			for i := range tp.vars {
 				tp.vars[i].Line += uint32(r.StartLine)
 			}
+
 			regionVars = tp.vars
 		}
 
@@ -85,6 +98,7 @@ func ParseVars(content string) []VarDef {
 			if seen[k] {
 				continue
 			}
+
 			seen[k] = true
 
 			fs := findFuncScope(int(v.Line), scopes)
@@ -92,11 +106,13 @@ func ParseVars(content string) []VarDef {
 			if fs.Start == -1 && v.Scope == ScopeLocal {
 				v.Scope = ScopeVariables
 			}
+
 			v.FuncStart = fs.Start
 			v.FuncEnd = fs.End
 			defs = append(defs, v)
 		}
 	}
+
 	return defs
 }
 
@@ -105,21 +121,26 @@ func GlobalVars(content string) []string {
 	scopes := FindFuncScopes(content)
 	allVars := ParseVars(content)
 	seen := make(map[string]bool)
+
 	var names []string
 
 	for _, v := range allVars {
 		if v.FuncStart != -1 {
 			continue
 		}
+
 		_ = scopes
-		switch v.Scope {
+
+		switch v.Scope { //nolint:exhaustive
 		case ScopeVariables, ScopeThis:
 			if !seen[v.Name] {
 				seen[v.Name] = true
+
 				names = append(names, v.Name)
 			}
 		}
 	}
+
 	return names
 }
 
@@ -127,26 +148,31 @@ func GlobalVars(content string) []string {
 func VarsInFunc(content string, funcStart, funcEnd int) []string {
 	allVars := ParseVars(content)
 	seen := make(map[string]bool)
+
 	var names []string
 
 	for _, v := range allVars {
 		if v.FuncStart != funcStart || v.FuncEnd != funcEnd {
 			continue
 		}
-		switch v.Scope {
+
+		switch v.Scope { //nolint:exhaustive
 		case ScopeLocal, ScopeArguments:
 			if !seen[v.Name] {
 				seen[v.Name] = true
+
 				names = append(names, v.Name)
 			}
 		}
 	}
+
 	return names
 }
 
 // FindFuncScopes returns function line ranges in the content.
 func FindFuncScopes(content string) []FuncScope {
 	regions := ClassifyRegions(content)
+
 	var scopes []FuncScope
 
 	for _, r := range regions {
@@ -156,12 +182,14 @@ func FindFuncScopes(content string) []FuncScope {
 			scopes = append(scopes, findTagFuncScopes(r.Text, r.StartLine)...)
 		}
 	}
+
 	return scopes
 }
 
 // findScriptFuncScopes finds function boundaries in script source.
 func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 	var scopes []FuncScope
+
 	sc := NewScanner(src)
 
 	for {
@@ -169,6 +197,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 		if tok.Kind == TokEOF {
 			break
 		}
+
 		if tok.Kind != TokIdent {
 			continue
 		}
@@ -181,12 +210,15 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 				next := sc.PeekSkipComments()
 				if next.Kind == TokIdent && identEq(next.Value, "function") {
 					sc.NextSkipComments()
+
 					isFuncKeyword = true
 				} else if next.Kind == TokIdent {
 					sc.NextSkipComments() // type
+
 					next2 := sc.PeekSkipComments()
 					if next2.Kind == TokIdent && identEq(next2.Value, "function") {
 						sc.NextSkipComments()
+
 						isFuncKeyword = true
 					}
 				}
@@ -209,15 +241,18 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 		if lp.Kind != TokLParen {
 			continue
 		}
+
 		depth := 1
 		for depth > 0 {
 			t := sc.NextSkipComments()
 			if t.Kind == TokEOF {
 				break
 			}
+
 			if t.Kind == TokLParen {
 				depth++
 			}
+
 			if t.Kind == TokRParen {
 				depth--
 			}
@@ -227,36 +262,48 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 		brace := sc.PeekSkipComments()
 		if brace.Kind == TokSemicolon {
 			sc.NextSkipComments()
+
 			scopes = append(scopes, FuncScope{Name: nameTok.Value, Start: startLine, End: baseLine + brace.Line})
+
 			continue
 		}
+
 		if brace.Kind != TokLBrace {
 			continue
 		}
+
 		sc.NextSkipComments()
+
 		braceDepth := 1
+
 		var lastTok Token
+
 		for braceDepth > 0 {
 			lastTok = sc.NextSkipComments()
 			if lastTok.Kind == TokEOF {
 				break
 			}
+
 			if lastTok.Kind == TokLBrace {
 				braceDepth++
 			}
+
 			if lastTok.Kind == TokRBrace {
 				braceDepth--
 			}
 		}
+
 		endLine := baseLine + lastTok.Line
 		scopes = append(scopes, FuncScope{Name: nameTok.Value, Start: startLine, End: endLine})
 	}
+
 	return scopes
 }
 
 // findTagFuncScopes finds <cffunction>...</cffunction> boundaries.
 func findTagFuncScopes(src string, baseLine int) []FuncScope {
 	var scopes []FuncScope
+
 	idx := buildLineIdx(src)
 	pos := 0
 
@@ -265,9 +312,15 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 		if i < 0 {
 			break
 		}
+
 		i += pos
 		startLine := baseLine + lineAtOffset(idx, i)
-		end := i + 200; if end > len(src) { end = len(src) }
+
+		end := i + 200
+		if end > len(src) {
+			end = len(src)
+		}
+
 		funcName := getAttr(src[i:end], "name")
 		funcAccess := getAttr(src[i:end], "access")
 		funcReturn := getAttr(src[i:end], "returntype")
@@ -275,34 +328,43 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 		closeIdx := indexCFTag(src[i+11:], "/cffunction")
 		if closeIdx < 0 {
 			scopes = append(scopes, FuncScope{Name: funcName, Access: funcAccess, ReturnType: funcReturn, Start: startLine, End: baseLine + len(idx) - 1})
+
 			break
 		}
+
 		closeEnd := i + 11 + closeIdx
 		gt := strings.IndexByte(src[closeEnd:], '>')
+
 		if gt >= 0 {
 			closeEnd += gt + 1
 		}
+
 		endLine := baseLine + lineAtOffset(idx, closeEnd)
 		scopes = append(scopes, FuncScope{Name: funcName, Access: funcAccess, ReturnType: funcReturn, Start: startLine, End: endLine})
 		pos = closeEnd
 	}
+
 	return scopes
 }
 
 // buildLineIdx returns byte offsets of each line start.
 func buildLineIdx(src string) []int {
 	n := 1
+
 	for i := 0; i < len(src); i++ {
 		if src[i] == '\n' {
 			n++
 		}
 	}
+
 	idx := make([]int, 1, n)
+
 	for i := 0; i < len(src); i++ {
 		if src[i] == '\n' {
 			idx = append(idx, i+1)
 		}
 	}
+
 	return idx
 }
 
@@ -317,6 +379,7 @@ func lineAtOffset(idx []int, offset int) int {
 			hi = mid
 		}
 	}
+
 	return lo - 1
 }
 
@@ -325,6 +388,7 @@ func ClassifyRegions(content string) []Region {
 	if isScriptFile(content) {
 		return []Region{{Kind: RegionScript, StartLine: 0, Text: content}}
 	}
+
 	return splitCFScriptBlocks(content)
 }
 
@@ -332,6 +396,7 @@ func ClassifyRegions(content string) []Region {
 // indicates a script-based CFC, or whether the content has no CF tags.
 func isScriptFile(content string) bool {
 	sc := NewScanner(content)
+
 	tok := sc.NextSkipComments()
 	if tok.Kind == TokIdent {
 		lower := strings.ToLower(tok.Value)
@@ -350,13 +415,16 @@ func containsCFTag(s string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 // splitCFScriptBlocks splits tag-based content into tag and script regions.
 func splitCFScriptBlocks(content string) []Region {
 	idx := buildLineIdx(content)
+
 	var regions []Region
+
 	pos := 0
 
 	for {
@@ -364,6 +432,7 @@ func splitCFScriptBlocks(content string) []Region {
 		if openIdx < 0 {
 			break
 		}
+
 		openIdx += pos
 		if openIdx > pos {
 			text := content[pos:openIdx]
@@ -371,29 +440,38 @@ func splitCFScriptBlocks(content string) []Region {
 				regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
 			}
 		}
+
 		bodyStart := openIdx + 10 // len("<cfscript>")
 		closeIdx := indexCFTag(content[bodyStart:], "/cfscript>")
+
 		if closeIdx < 0 {
 			text := content[bodyStart:]
 			if strings.TrimSpace(text) != "" {
 				regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text})
 			}
+
 			pos = len(content)
+
 			break
 		}
+
 		closeIdx += bodyStart
+
 		text := content[bodyStart:closeIdx]
 		if strings.TrimSpace(text) != "" {
 			regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text})
 		}
+
 		pos = closeIdx + 11 // len("</cfscript>")
 	}
+
 	if pos < len(content) {
 		text := content[pos:]
 		if strings.TrimSpace(text) != "" {
 			regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
 		}
 	}
+
 	return regions
 }
 
@@ -405,6 +483,7 @@ func indexCFTag(s, suffix string) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -414,6 +493,7 @@ func findFuncScope(line int, scopes []FuncScope) FuncScope {
 			return s
 		}
 	}
+
 	return FuncScope{Start: -1, End: -1}
 }
 

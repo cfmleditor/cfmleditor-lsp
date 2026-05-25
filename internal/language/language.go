@@ -36,10 +36,12 @@ func Language(g Grammar) *sitter.Language {
 // The caller must call Close() on the returned parser when done.
 func NewParser(g Grammar) *sitter.Parser {
 	p := sitter.NewParser()
+
 	err := p.SetLanguage(Language(g))
 	if err != nil {
 		cflog.Fatalf("Couldnt set parser language: %s", err)
 	}
+
 	return p
 }
 
@@ -48,5 +50,6 @@ func NewParser(g Grammar) *sitter.Parser {
 func Parse(g Grammar, src []byte, oldTree *sitter.Tree) *sitter.Tree {
 	p := NewParser(g)
 	defer p.Close()
+
 	return p.Parse(src, oldTree)
 }

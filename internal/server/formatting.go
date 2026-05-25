@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
@@ -34,16 +34,20 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 	start := time.Now()
 	formatted, err := formatDocument(content, params.Options, s.Formatting)
 	elapsed := time.Since(start)
+
 	if err != nil {
 		s.log.Warn("formatting failed", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed), cflog.Err(err))
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeWarning,
 			Message: "Formatting failed: " + err.Error(),
 		})
+
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
+
 	if formatted == content {
 		s.log.Debug("formatting complete (no changes)", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
+
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
@@ -75,6 +79,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		},
 		NewText: formatted,
 	}}
+
 	return reply(ctx, edits, nil)
 }
 
@@ -86,20 +91,25 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 		errNode := findErrorNode(tree.RootNode())
 		if errNode != nil {
 			pos := errNode.StartPosition()
+
 			snippet := string(src[errNode.StartByte():errNode.EndByte()])
 			if len(snippet) > 50 {
 				snippet = snippet[:50] + "..."
 			}
+
 			return content, fmt.Errorf("parse error at line %d, col %d near %q", pos.Row+1, pos.Column+1, snippet)
 		}
+
 		return content, fmt.Errorf("parse error in document, cannot format")
 	}
 
 	fmtOpts := formatter.DefaultOptions()
 	fmtOpts.UseTabs = !opts.InsertSpaces
+
 	if opts.TabSize > 0 {
 		fmtOpts.IndentWidth = int(opts.TabSize)
 	}
+
 	fmtOpts.SelfCloseTags = cfg.SelfCloseTags
 	fmtOpts.WhitespaceOnly = cfg.WhitespaceOnly
 	fmtOpts.QueryFormat = cfg.QueryFormat
@@ -110,15 +120,19 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	fmtOpts.ScopeCase = cfg.ScopeCase
 	fmtOpts.CommaPosition = cfg.CommaPosition
 	fmtOpts.QueryCommaPosition = cfg.QueryCommaPosition
+
 	if cfg.LineWidth > 0 {
 		fmtOpts.LineWidth = cfg.LineWidth
 	}
+
 	if cfg.AttrBreakThreshold > 0 {
 		fmtOpts.AttrBreakThreshold = cfg.AttrBreakThreshold
 	}
+
 	if cfg.IndentWidth > 0 {
 		fmtOpts.IndentWidth = cfg.IndentWidth
 	}
+
 	fmtOpts.ParseScript = func(s []byte) *sitter.Tree {
 		return language.Parse(language.CFScript, s, nil)
 	}
@@ -133,7 +147,9 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	if err != nil {
 		return content, err
 	}
+
 	result := string(out)
+
 	return result, nil
 }
 
@@ -141,10 +157,12 @@ func findErrorNode(n *sitter.Node) *sitter.Node {
 	if n.IsError() || n.IsMissing() {
 		return n
 	}
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		if found := findErrorNode(n.Child(i)); found != nil {
 			return found
 		}
 	}
+
 	return nil
 }

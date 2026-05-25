@@ -35,6 +35,7 @@ func TestApplyEdit_InsideFunc(t *testing.T) {
 	if !slices.Contains(vars, "x") {
 		t.Errorf("expected x in vars after edit: %v", vars)
 	}
+
 	if !slices.Contains(vars, "z") {
 		t.Errorf("expected z in vars after edit: %v", vars)
 	}
@@ -65,6 +66,7 @@ func TestApplyEdit_GlobalScope(t *testing.T) {
 	if len(pr.Funcs) != 2 {
 		t.Fatalf("expected 2 funcs after edit, got %d", len(pr.Funcs))
 	}
+
 	if pr.Funcs[1].Name != "second" {
 		t.Errorf("second func name = %q", pr.Funcs[1].Name)
 	}
@@ -80,6 +82,7 @@ func TestApplyEdit_FullReplace(t *testing.T) {
 	if len(pr.Funcs) != 1 {
 		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
 	}
+
 	if pr.Funcs[0].Name != "replaced" {
 		t.Errorf("func name = %q, want replaced", pr.Funcs[0].Name)
 	}
@@ -92,6 +95,7 @@ func TestApplyEdit_ShiftsRefs(t *testing.T) {
 	if len(pr.Refs) != 1 {
 		t.Fatalf("expected 1 ref, got %d", len(pr.Refs))
 	}
+
 	origLine := pr.Refs[0].Line
 
 	// Insert a line inside the function
@@ -137,6 +141,7 @@ func TestApplyEdit_TagFunction(t *testing.T) {
 	if len(pr.Funcs) != 1 || pr.Funcs[0].Name != "save" {
 		t.Fatalf("expected func 'save', got %+v", pr.Funcs)
 	}
+
 	if len(pr.Scopes) != 1 {
 		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
 	}
@@ -158,6 +163,7 @@ func TestApplyEdit_TagFunction(t *testing.T) {
 	if !slices.Contains(vars, "localVar") {
 		t.Errorf("expected localVar after edit: %v", vars)
 	}
+
 	if !slices.Contains(vars, "newVar") {
 		t.Errorf("expected newVar after edit: %v", vars)
 	}
@@ -185,6 +191,7 @@ function scriptFunc() {
 	if !slices.Contains(names, "tagFunc") {
 		t.Errorf("expected tagFunc in %v", names)
 	}
+
 	if !slices.Contains(names, "scriptFunc") {
 		t.Errorf("expected scriptFunc in %v", names)
 	}
@@ -202,6 +209,7 @@ function scriptFunc() {
 			if !slices.Contains(vars, "y") {
 				t.Errorf("expected y in scriptFunc vars: %v", vars)
 			}
+
 			if !slices.Contains(vars, "z") {
 				t.Errorf("expected z in scriptFunc vars: %v", vars)
 			}

@@ -73,6 +73,7 @@ func init() {
 		{"video", "Video content"},
 	}
 	htmlTags = make([]Entry, len(names))
+
 	for i, n := range names {
 		htmlTags[i] = Entry{Name: n.name, Description: n.desc, Type: "tag"}
 	}
@@ -87,12 +88,15 @@ func HTMLTags() []Entry {
 func HTMLTagParams(name string) []Param {
 	name = strings.ToLower(name)
 	specific := tagAttrs[name]
+
 	if specific == nil && !isHTMLTag(name) {
 		return nil
 	}
+
 	out := make([]Param, 0, len(specific)+len(globalAttrs))
 	out = append(out, specific...)
 	out = append(out, globalAttrs...)
+
 	return out
 }
 
@@ -102,5 +106,6 @@ func isHTMLTag(name string) bool {
 			return true
 		}
 	}
+
 	return false
 }

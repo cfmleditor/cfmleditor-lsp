@@ -14,6 +14,7 @@ func TestResolvePath_Found(t *testing.T) {
 
 	got := ResolvePath("models.User", dir, nil)
 	want := filepath.Join(sub, "User.cfc")
+
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -35,6 +36,7 @@ func TestResolvePath_Mapping(t *testing.T) {
 	mappings := map[string]string{"mylib": libDir}
 	got := ResolvePath("mylib.Helper", t.TempDir(), mappings)
 	want := filepath.Join(libDir, "Helper.cfc")
+
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -49,6 +51,7 @@ func TestResolvePath_MappingNestedPath(t *testing.T) {
 	mappings := map[string]string{"mylib": filepath.Join(dir, "lib")}
 	got := ResolvePath("mylib.sub.Thing", t.TempDir(), mappings)
 	want := filepath.Join(libDir, "Thing.cfc")
+
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

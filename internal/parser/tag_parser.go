@@ -20,16 +20,19 @@ type tagParser struct {
 func newTagParser(src, fileURI string) *tagParser {
 	p := &tagParser{src: src, fileURI: fileURI}
 	p.buildLineIndex()
+
 	return p
 }
 
 func (p *tagParser) buildLineIndex() {
 	n := 1
+
 	for i := 0; i < len(p.src); i++ {
 		if p.src[i] == '\n' {
 			n++
 		}
 	}
+
 	p.lineIndex = make([]int, 1, n)
 	for i := 0; i < len(p.src); i++ {
 		if p.src[i] == '\n' {
@@ -49,6 +52,7 @@ func (p *tagParser) lineAt(offset int) int {
 			hi = mid
 		}
 	}
+
 	return lo - 1
 }
 
@@ -62,29 +66,35 @@ func (p *tagParser) parse() {
 		if idx < 0 {
 			break
 		}
+
 		idx += pos
 
 		// Check for cfscript block
 		if idx+10 <= len(p.src) && strings.EqualFold(p.src[idx:idx+10], "<cfscript>") {
 			bodyStart := idx + 10
 			closeIdx := indexCFTag(p.src[bodyStart:], "/cfscript>")
+
 			var bodyEnd int
+
 			if closeIdx < 0 {
 				bodyEnd = len(p.src)
 			} else {
 				bodyEnd = bodyStart + closeIdx
 			}
+
 			baseLine := p.lineAt(bodyStart)
 			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine)
 			sp.parse()
 			p.funcs = append(p.funcs, sp.funcs...)
 			p.vars = append(p.vars, sp.vars...)
 			p.refs = append(p.refs, sp.refs...)
+
 			if closeIdx < 0 {
 				pos = len(p.src)
 			} else {
 				pos = bodyEnd + 11 // len("</cfscript>")
 			}
+
 			continue
 		}
 
@@ -93,8 +103,10 @@ func (p *tagParser) parse() {
 			tagEnd := strings.IndexByte(p.src[idx:], '>')
 			if tagEnd < 0 {
 				pos = idx + 1
+
 				continue
 			}
+
 			tagEnd += idx + 1 // past the >
 			tag := p.src[idx:tagEnd]
 			line := p.lineAt(idx)
@@ -108,6 +120,7 @@ func (p *tagParser) parse() {
 			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cffunction "):
 				p.parseCFFunction(tag, idx, tagEnd, line)
 				pos = tagEnd
+
 				continue
 			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cfproperty "):
 				p.parseCFProperty(tag, line)
@@ -118,6 +131,7 @@ func (p *tagParser) parse() {
 			case len(tag) > 8 && strings.EqualFold(tag[:9], "<cfinvoke"):
 				p.parseCFInvoke(tag, line)
 			}
+
 			pos = tagEnd
 		} else {
 			pos = idx + 1
@@ -139,9 +153,11 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 	if ci := indexCFTag(rest, "/cffunction"); ci >= 0 && ci < end {
 		end = ci
 	}
+
 	if ci := indexCFTag(rest, "cffunction"); ci >= 0 && ci < end {
 		end = ci
 	}
+
 	block := rest[:end]
 
 	args := p.parseCFArguments(block)
@@ -157,18 +173,24 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 // parseCFArguments extracts <cfargument> tags from a block of source.
 func (p *tagParser) parseCFArguments(block string) []Argument {
 	var args []Argument
+
 	pos := 0
+
 	for {
 		idx := indexCFTag(block[pos:], "cfargument")
 		if idx < 0 {
 			break
 		}
+
 		idx += pos
+
 		end := strings.IndexByte(block[idx:], '>')
 		if end < 0 {
 			break
 		}
+
 		tag := block[idx : idx+end+1]
+
 		name := getAttr(tag, "name")
 		if name != "" {
 			a := Argument{Name: name}
@@ -177,8 +199,10 @@ func (p *tagParser) parseCFArguments(block string) []Argument {
 			a.Required = strings.EqualFold(req, "true") || strings.EqualFold(req, "yes")
 			args = append(args, a)
 		}
+
 		pos = idx + end + 1
 	}
+
 	return args
 }
 
@@ -189,12 +213,14 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	if i := strings.IndexByte(inner, ' '); i >= 0 {
 		inner = inner[i+1:]
 	}
+
 	inner = strings.TrimSuffix(inner, ">")
 	inner = strings.TrimSpace(inner)
 
 	switch {
 	case hasPrefixFold(inner, "var "):
 		rest := strings.TrimSpace(inner[4:])
+
 		name := extractIdent(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
@@ -202,6 +228,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		}
 	case hasPrefixFold(inner, "local."):
 		rest := inner[6:]
+
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
@@ -209,6 +236,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		}
 	case hasPrefixFold(inner, "arguments."):
 		rest := inner[10:]
+
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeArguments, Line: uint32(line)})
@@ -216,6 +244,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		}
 	case hasPrefixFold(inner, "this."):
 		rest := inner[5:]
+
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: uint32(line)})
@@ -223,6 +252,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		}
 	case hasPrefixFold(inner, "variables."):
 		rest := inner[10:]
+
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
@@ -241,6 +271,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 func (p *tagParser) parseCFObject(tag string, line int) {
 	component := getAttr(tag, "component")
 	name := getAttr(tag, "name")
+
 	if component != "" && name != "" {
 		p.refs = append(p.refs, ComponentRef{
 			Variable:  name,
@@ -255,6 +286,7 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 func (p *tagParser) parseCFInvoke(tag string, line int) {
 	component := getAttr(tag, "component")
 	variable := getAttr(tag, "returnvariable")
+
 	if component != "" && variable != "" {
 		p.refs = append(p.refs, ComponentRef{
 			Variable:  variable,
@@ -271,6 +303,7 @@ func (p *tagParser) parseCFProperty(tag string, line int) {
 	if name == "" {
 		return
 	}
+
 	typeName := getAttr(tag, "type")
 	attrs := extractAllAttrs(tag)
 	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: uint32(line), attrs: attrs})
@@ -285,6 +318,7 @@ func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 
 func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	rhs = strings.TrimSpace(rhs)
+
 	switch {
 	case hasPrefixFold(rhs, "new "):
 		comp := extractComponentPath(rhs[4:])
@@ -326,26 +360,33 @@ func getAttr(tag, attr string) string {
 	lower := strings.ToLower(tag)
 	key := strings.ToLower(attr) + "="
 	idx := strings.Index(lower, key)
+
 	if idx < 0 {
 		// Try with space before
 		key = " " + key
+
 		idx = strings.Index(lower, key)
 		if idx < 0 {
 			return ""
 		}
+
 		idx++ // skip the space
 	}
+
 	valStart := idx + len(attr) + 1 // past =
 	if valStart >= len(tag) {
 		return ""
 	}
+
 	ch := tag[valStart]
 	if ch == '"' || ch == '\'' {
 		valStart++
+
 		end := strings.IndexByte(tag[valStart:], ch)
 		if end < 0 {
 			return ""
 		}
+
 		return tag[valStart : valStart+end]
 	}
 	// Unquoted value — read until space or >
@@ -353,6 +394,7 @@ func getAttr(tag, attr string) string {
 	for end < len(tag) && tag[end] != ' ' && tag[end] != '>' && tag[end] != '\t' {
 		end++
 	}
+
 	return tag[valStart:end]
 }
 
@@ -361,9 +403,11 @@ func extractIdent(s string) string {
 	for i < len(s) && isIdentPart(s[i]) {
 		i++
 	}
+
 	if i == 0 {
 		return ""
 	}
+
 	return s[:i]
 }
 
@@ -376,46 +420,59 @@ func extractAllAttrs(tag string) map[string]string {
 	for i < len(tag) && tag[i] != ' ' && tag[i] != '\t' && tag[i] != '>' {
 		i++
 	}
+
 	for i < len(tag) {
 		// Skip whitespace
 		for i < len(tag) && (tag[i] == ' ' || tag[i] == '\t' || tag[i] == '\n' || tag[i] == '\r') {
 			i++
 		}
+
 		if i >= len(tag) || tag[i] == '>' || tag[i] == '/' {
 			break
 		}
 		// Read attribute name
 		start := i
+
 		for i < len(tag) && tag[i] != '=' && tag[i] != ' ' && tag[i] != '>' && tag[i] != '/' {
 			i++
 		}
+
 		key := strings.ToLower(tag[start:i])
+
 		if i >= len(tag) || tag[i] != '=' {
 			continue
 		}
+
 		i++ // past '='
 		if i >= len(tag) {
 			break
 		}
+
 		if tag[i] == '"' || tag[i] == '\'' {
 			q := tag[i]
 			i++
 			valStart := i
+
 			for i < len(tag) && tag[i] != q {
 				i++
 			}
+
 			attrs[key] = tag[valStart:i]
+
 			if i < len(tag) {
 				i++ // past closing quote
 			}
 		} else {
 			valStart := i
+
 			for i < len(tag) && tag[i] != ' ' && tag[i] != '>' {
 				i++
 			}
+
 			attrs[key] = tag[valStart:i]
 		}
 	}
+
 	return attrs
 }
 
@@ -424,10 +481,12 @@ func splitAssign(s string) (name, rhs string) {
 	if name == "" {
 		return "", ""
 	}
+
 	rest := strings.TrimSpace(s[len(name):])
 	if len(rest) > 0 && rest[0] == '=' {
 		return name, strings.TrimSpace(rest[1:])
 	}
+
 	return name, ""
 }
 
@@ -436,12 +495,15 @@ func extractComponentPath(s string) string {
 	if len(s) == 0 {
 		return ""
 	}
+
 	if s[0] == '"' || s[0] == '\'' {
 		q := s[0]
+
 		end := strings.IndexByte(s[1:], q)
 		if end < 0 {
 			return ""
 		}
+
 		return s[1 : 1+end]
 	}
 	// Unquoted dotted path
@@ -449,6 +511,7 @@ func extractComponentPath(s string) string {
 	for i < len(s) && (isIdentPart(s[i]) || s[i] == '.') {
 		i++
 	}
+
 	return s[:i]
 }
 
@@ -458,29 +521,38 @@ func extractCreateObjectArg(s string) string {
 	if len(s) == 0 || (s[0] != '"' && s[0] != '\'') {
 		return ""
 	}
+
 	q := s[0]
+
 	end := strings.IndexByte(s[1:], q)
 	if end < 0 {
 		return ""
 	}
+
 	first := s[1 : 1+end]
 	if !strings.EqualFold(first, "component") {
 		return ""
 	}
+
 	rest := s[2+end:]
+
 	ci := strings.IndexByte(rest, ',')
 	if ci < 0 {
 		return ""
 	}
+
 	rest = strings.TrimSpace(rest[ci+1:])
 	if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
 		return ""
 	}
+
 	q2 := rest[0]
+
 	end2 := strings.IndexByte(rest[1:], q2)
 	if end2 < 0 {
 		return ""
 	}
+
 	return rest[1 : 1+end2]
 }
 
@@ -490,11 +562,14 @@ func extractEntityNewArg(s string) string {
 	if len(s) == 0 || (s[0] != '"' && s[0] != '\'') {
 		return ""
 	}
+
 	q := s[0]
+
 	end := strings.IndexByte(s[1:], q)
 	if end < 0 {
 		return ""
 	}
+
 	return s[1 : 1+end]
 }
 
@@ -502,6 +577,7 @@ func toLowerByte(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + 32
 	}
+
 	return b
 }
 
@@ -510,5 +586,6 @@ func hasPrefixFold(s, prefix string) bool {
 	if len(s) < len(prefix) {
 		return false
 	}
+
 	return strings.EqualFold(s[:len(prefix)], prefix)
 }

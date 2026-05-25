@@ -11,10 +11,10 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -54,8 +54,8 @@ type Server struct {
 	linter                   *cflint.Runner
 	lintCancels              map[uri.URI]context.CancelFunc
 	compCache                *cache.Cache
-	funcRanges               map[uri.URI][]cache.FuncRange     // cached function line ranges per file
-	cacheTimers              map[uri.URI]*time.Timer           // debounce timers for completion cache rebuild
+	funcRanges               map[uri.URI][]cache.FuncRange   // cached function line ranges per file
+	cacheTimers              map[uri.URI]*time.Timer         // debounce timers for completion cache rebuild
 	parseResults             map[uri.URI]*parser.ParseResult // cached parse results per file
 }
 
@@ -66,6 +66,7 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 	if len(sharedIndex) > 0 && sharedIndex[0] != nil {
 		idx = sharedIndex[0]
 	}
+
 	return &Server{
 		conn:              conn,
 		log:               log,
@@ -101,6 +102,7 @@ func isCFMLFile(path string) bool {
 	case 's': // .cfs
 		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
 	}
+
 	return false
 }
 
@@ -149,11 +151,14 @@ func (s *Server) initLinter() {
 	if !s.Linting {
 		return
 	}
+
 	runner, err := cflint.NewRunner()
 	if err != nil {
 		s.log.Warn("cflint unavailable", cflog.Err(err))
+
 		return
 	}
+
 	s.mu.Lock()
 	s.linter = runner
 	s.mu.Unlock()
@@ -167,15 +172,18 @@ func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
+
 	if pr == nil {
 		return
 	}
+
 	for _, sc := range pr.Scopes {
 		if line > sc.Start && line < sc.End {
 			refs, _ := pr.FuncRefs(sc.Start, sc.End)
 			if len(refs) > 0 {
 				s.index.AddRefs(refs)
 			}
+
 			return
 		}
 	}
@@ -192,6 +200,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			Resolvers:        s.cfResolvers(),
 		}
 	}
+
 	return s.resolver
 }
 
@@ -202,18 +211,24 @@ func (s *Server) invalidateResolver() {
 // ensureBeansLoaded lazily builds the bean map on first access.
 func (s *Server) ensureBeansLoaded() {
 	s.mu.RLock()
+
 	if s.beansLoaded {
 		s.mu.RUnlock()
+
 		return
 	}
+
 	s.mu.RUnlock()
 
 	s.mu.Lock()
 	if s.beansLoaded {
 		s.mu.Unlock()
+
 		return
 	}
+
 	allBeanPaths := make(map[string]string)
+
 	for _, root := range s.WorkspaceFolders {
 		appDir := s.getResolver().FindApplicationRoot(root)
 		if appDir != "" {
@@ -224,14 +239,17 @@ func (s *Server) ensureBeansLoaded() {
 			}
 		}
 	}
+
 	for ns, dir := range s.BeanPaths {
 		allBeanPaths[ns] = dir
 	}
+
 	if len(allBeanPaths) > 0 {
 		beans := buildBeanMap(allBeanPaths, s.FS)
 		s.index.SetBeans(beans)
 		s.log.Info("bean map built (lazy)", cflog.Int("beans", len(beans)))
 	}
+
 	s.beansLoaded = true
 	s.mu.Unlock()
 }
@@ -251,19 +269,23 @@ func (s *Server) call(ctx context.Context, method string, params, result interfa
 func (s *Server) getDocument(docURI uri.URI) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	content, ok := s.documents[docURI]
+
 	return content, ok
 }
 
 func (s *Server) setDocument(docURI uri.URI, content string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.documents[docURI] = content
 }
 
 func (s *Server) removeDocument(docURI uri.URI) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	delete(s.documents, docURI)
 }
 
@@ -284,6 +306,7 @@ func (s *Server) isIncludedPath(rawURI string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -293,25 +316,32 @@ func matchesGlob(filePath string, globs []string) bool {
 			if matched, _ := filepath.Match(g, filePath); matched {
 				return true
 			}
+
 			if strings.HasPrefix(filePath, g+"/") || filePath == g {
 				return true
 			}
+
 			continue
 		}
+
 		idx := strings.Index(g, "**")
 		base := filepath.Clean(g[:idx])
 		suffix := g[idx+2:]
 		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
+
 		if !strings.HasPrefix(filePath, base+"/") && filePath != base {
 			continue
 		}
+
 		if suffix == "" {
 			return true
 		}
+
 		if matched, _ := filepath.Match(suffix, filepath.Base(filePath)); matched {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -326,10 +356,12 @@ func (s *Server) cfResolvers() []parser.Resolver {
 	if len(s.ComponentResolvers) == 0 {
 		return nil
 	}
+
 	r := make([]parser.Resolver, len(s.ComponentResolvers))
 	for i, cr := range s.ComponentResolvers {
 		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
 	}
+
 	return r
 }
 
@@ -337,16 +369,19 @@ func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {
 	if len(s.PropertyResolvers) == 0 {
 		return nil
 	}
+
 	r := make([]parser.PropertyResolver, len(s.PropertyResolvers))
 	for i, pr := range s.PropertyResolvers {
 		r[i] = parser.PropertyResolver{Match: pr.Match, Resolve: pr.Resolve, Attribute: pr.Attribute}
 	}
+
 	return r
 }
 
 // parseContent parses CFC content with all configured resolvers and link extraction.
 func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResult {
 	s.ensureBeansLoaded()
+
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
 		Logger:            s.log,
 		Resolvers:         s.cfResolvers(),
@@ -365,9 +400,11 @@ func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
 	if len(resolvers) == 0 {
 		return ""
 	}
+
 	cfr := make([]parser.Resolver, len(resolvers))
 	for i, r := range resolvers {
 		cfr[i] = parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix}
 	}
+
 	return parser.ResolveFromCall(expr, cfr)
 }

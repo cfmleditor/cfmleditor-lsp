@@ -4,8 +4,8 @@ import "strings"
 
 // MemberFunction represents a function callable via dot notation on a type.
 type MemberFunction struct {
-	Name   string // e.g. "append"
-	Entry  *Entry // the underlying built-in entry (e.g. arrayAppend)
+	Name  string // e.g. "append"
+	Entry *Entry // the underlying built-in entry (e.g. arrayAppend)
 }
 
 // typePrefixes maps CFML type names to their function name prefixes.
@@ -21,11 +21,13 @@ func init() {
 
 func buildMemberFuncs() {
 	memberFuncs = make(map[string][]MemberFunction)
+
 	for i := range entries {
 		e := &entries[i]
 		if e.Type != "function" {
 			continue
 		}
+
 		lower := strings.ToLower(e.Name)
 		for _, prefix := range typePrefixes {
 			if strings.HasPrefix(lower, prefix) && len(lower) > len(prefix) {
@@ -34,6 +36,7 @@ func buildMemberFuncs() {
 					Name:  memberName,
 					Entry: e,
 				})
+
 				break
 			}
 		}
@@ -46,6 +49,7 @@ func AllMemberFunctions() []MemberFunction {
 	for _, mfs := range memberFuncs {
 		out = append(out, mfs...)
 	}
+
 	return out
 }
 

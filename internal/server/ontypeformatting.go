@@ -31,10 +31,12 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 	if line >= len(lines) {
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
+
 	lineText := lines[line]
 
 	// Find the next '>' after the cursor on the same line.
 	rest := lineText[char:]
+
 	idx := strings.IndexByte(rest, '>')
 	if idx == -1 {
 		return reply(ctx, []protocol.TextEdit{}, nil)
@@ -42,10 +44,12 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 
 	// Verify we're inside a tag.
 	before := lineText[:char]
+
 	openIdx := strings.LastIndexByte(before, '<')
 	if openIdx == -1 {
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
+
 	if strings.ContainsRune(lineText[openIdx:char-1], '>') {
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}

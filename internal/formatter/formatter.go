@@ -79,10 +79,12 @@ func (o Options) indent(level int) string {
 	if o.UseTabs {
 		return strings.Repeat("\t", level)
 	}
+
 	w := o.IndentWidth
 	if w == 0 {
 		w = 4
 	}
+
 	return strings.Repeat(" ", w*level)
 }
 
@@ -94,6 +96,7 @@ func (o Options) queryCommaPreserve() bool {
 	if o.QueryCommaPosition != "" {
 		return o.QueryCommaPosition == "preserve"
 	}
+
 	return true // default: preserve comma placement in SQL
 }
 
@@ -144,12 +147,15 @@ func New(opts Options) *Formatter {
 	if opts.IndentWidth == 0 {
 		opts.IndentWidth = 4
 	}
+
 	if opts.LineWidth == 0 {
 		opts.LineWidth = 120
 	}
+
 	if opts.AttrBreakThreshold == 0 {
 		opts.AttrBreakThreshold = 3
 	}
+
 	return &Formatter{opts: opts, atBOL: true, lastNL: true}
 }
 
@@ -162,22 +168,27 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 			err = fmt.Errorf("formatter panic: %v", r)
 		}
 	}()
+
 	if opts.SelfCloseTags && opts.ParseCFML != nil {
 		src, tree = preformat(src, tree, opts.ParseCFML)
 	}
+
 	f := New(opts)
 	f.src = src
 	root := tree.RootNode()
 	f.formatNode(root)
+
 	if f.parseErr != nil {
 		return nil, f.parseErr
 	}
+
 	out = f.out.Bytes()
 	if opts.WhitespaceOnly {
 		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags); err != nil {
 			return nil, err
 		}
 	}
+
 	return out, nil
 }
 
@@ -187,48 +198,66 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 // Returns nil if only whitespace differs, or an error describing the first mismatch.
 func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	i, j := 0, 0
+
 	for {
 		i = skipWSAndComments(a, i)
 		j = skipWSAndComments(b, j)
+
 		if i == len(a) && j == len(b) {
 			return nil
 		}
+
 		if i == len(a) || j == len(b) {
 			line := byteOffsetToLine(a, i)
+
 			return fmt.Errorf("formatter made non-whitespace changes near line %d (content length mismatch)", line)
 		}
+
 		if allowSelfClose {
 			if a[i] == '/' && i+1 < len(a) && a[i+1] == '>' && b[j] == '>' {
 				i++
+
 				continue
 			}
+
 			if b[j] == '/' && j+1 < len(b) && b[j+1] == '>' && a[i] == '>' {
 				j++
+
 				continue
 			}
 			// Allow added/removed quotes around attribute values
 			if a[i] == '"' && b[j] != '"' {
 				i++
+
 				continue
 			}
+
 			if b[j] == '"' && a[i] != '"' {
 				j++
+
 				continue
 			}
+
 			if a[i] == '\'' && b[j] != '\'' {
 				i++
+
 				continue
 			}
+
 			if b[j] == '\'' && a[i] != '\'' {
 				j++
+
 				continue
 			}
 		}
+
 		if toLower(a[i]) != toLower(b[j]) {
 			line := byteOffsetToLine(a, i)
 			ctx := snippetAt(a, i)
+
 			return fmt.Errorf("formatter made non-whitespace changes at line %d near %q", line, ctx)
 		}
+
 		i++
 		j++
 	}
@@ -236,11 +265,13 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 
 func byteOffsetToLine(src []byte, offset int) int {
 	line := 1
+
 	for k := 0; k < offset && k < len(src); k++ {
 		if src[k] == '\n' {
 			line++
 		}
 	}
+
 	return line
 }
 
@@ -249,10 +280,12 @@ func snippetAt(src []byte, offset int) string {
 	if start < 0 {
 		start = 0
 	}
+
 	end := offset + 10
 	if end > len(src) {
 		end = len(src)
 	}
+
 	return string(src[start:end])
 }
 
@@ -266,22 +299,29 @@ func skipWSAndComments(src []byte, pos int) int {
 		for pos < len(src) && isWS(src[pos]) {
 			pos++
 		}
+
 		if pos+4 < len(src) && src[pos] == '<' && src[pos+1] == '!' && src[pos+2] == '-' && src[pos+3] == '-' && src[pos+4] == '-' {
 			end := pos + 5
 			for end+2 < len(src) {
 				if src[end] == '-' && src[end+1] == '-' && src[end+2] == '-' && end+3 < len(src) && src[end+3] == '>' {
 					pos = end + 4
+
 					break
 				}
+
 				end++
 			}
+
 			if end+2 >= len(src) {
 				break
 			}
+
 			continue
 		}
+
 		break
 	}
+
 	return pos
 }
 
@@ -289,6 +329,7 @@ func toLower(c byte) byte {
 	if c >= 'A' && c <= 'Z' {
 		return c + 32
 	}
+
 	return c
 }
 
@@ -315,17 +356,22 @@ func (f *Formatter) recordParseError(context string, root *sitter.Node, src []by
 	if f.parseErr != nil {
 		return
 	}
+
 	errNode := findFirstError(root)
 	if errNode == nil {
 		f.parseErr = fmt.Errorf("parse error in %s block", context)
+
 		return
 	}
+
 	pos := errNode.StartPosition()
 	line := baseRow + pos.Row + 1
+
 	snippet := string(src[errNode.StartByte():errNode.EndByte()])
 	if len(snippet) > 50 {
 		snippet = snippet[:50] + "..."
 	}
+
 	f.parseErr = fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
 }
 
@@ -333,11 +379,13 @@ func findFirstError(n *sitter.Node) *sitter.Node {
 	if n.IsError() || n.IsMissing() {
 		return n
 	}
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		if found := findFirstError(n.Child(i)); found != nil {
 			return found
 		}
 	}
+
 	return nil
 }
 
@@ -346,12 +394,15 @@ func (f *Formatter) applyScopeCase(text string) string {
 	if f.opts.ScopeCase == "" || f.opts.ScopeCase == "leave" {
 		return text
 	}
+
 	if !cfmlScopes[strings.ToLower(text)] {
 		return text
 	}
+
 	if f.opts.ScopeCase == "upper" {
 		return strings.ToUpper(text)
 	}
+
 	return strings.ToLower(text)
 }
 
@@ -377,6 +428,7 @@ func (f *Formatter) write(s string) {
 	if s == "" {
 		return
 	}
+
 	f.out.WriteString(s)
 	// track approximate line length for soft-wrap decisions
 	if idx := strings.LastIndexByte(s, '\n'); idx >= 0 {
@@ -407,15 +459,18 @@ func (f *Formatter) appendTrailingComma() bool { //nolint:unparam // return used
 	for i >= 0 && (b[i] == '\n' || b[i] == '\r' || b[i] == ' ' || b[i] == '\t') {
 		i--
 	}
+
 	if i < 0 {
 		return false
 	}
 	// Insert comma after position i (after the last non-whitespace char)
 	insertPos := i + 1
+
 	f.out.Reset()
 	f.out.Write(b[:insertPos])
 	f.out.WriteByte(',')
 	f.out.Write(b[insertPos:])
+
 	return true
 }
 
@@ -473,7 +528,9 @@ type cfAttr struct {
 // searching through cf_start_tag and cf_tag_attributes.
 func (f *Formatter) collectAttrs(tag *sitter.Node) []cfAttr {
 	var attrs []cfAttr
+
 	f.walkAttrs(tag, &attrs)
+
 	return attrs
 }
 
@@ -485,6 +542,7 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 			f.walkAttrs(c, attrs)
 		case "cf_attribute":
 			attr := cfAttr{}
+
 			for j := uint(0); j < c.ChildCount(); j++ {
 				gc := c.Child(j)
 				switch gc.Kind() {
@@ -493,6 +551,7 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 					if f.opts.LowercaseAttributes {
 						name = strings.ToLower(name)
 					}
+
 					attr.name = name
 				case "quoted_cf_attribute_value":
 					if f.opts.DoubleQuoteAttributes {
@@ -509,6 +568,7 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 					}
 				}
 			}
+
 			*attrs = append(*attrs, attr)
 		}
 	}
@@ -523,9 +583,11 @@ func (f *Formatter) normaliseAttrValue(v string) string {
 			// already quoted — normalise to double quotes
 			inner := v[1 : len(v)-1]
 			inner = strings.ReplaceAll(inner, `"`, `'`)
+
 			return `"` + inner + `"`
 		}
 	}
+
 	return `"` + v + `"`
 }
 
@@ -536,10 +598,12 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 
 	// Inline rendering
 	inline := " "
+
 	for i, a := range attrs {
 		if i > 0 {
 			inline += " "
 		}
+
 		if a.value == "" {
 			inline += a.name
 		} else {
@@ -558,20 +622,24 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 
 	// Multi-line rendering: one attribute per line, indented one level.
 	indent := f.opts.indent(1)
+
 	var sb strings.Builder
 	for i, a := range attrs {
 		sb.WriteString("\n")
 		sb.WriteString(f.indented())
 		sb.WriteString(indent)
+
 		if a.value == "" {
 			sb.WriteString(a.name)
 		} else {
 			sb.WriteString(fmt.Sprintf("%s=%s", a.name, a.value)) //nolint:staticcheck // QF1012: intentional for readability
 		}
+
 		if i < len(attrs)-1 {
 			sb.WriteString(" ")
 		}
 	}
+
 	return sb.String()
 }
 
@@ -670,17 +738,22 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 func (f *Formatter) formatChildren(n *sitter.Node) {
 	prevTagKind := ""
 	prevWasComment := false
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		kind := f.nodeTagKind(c)
+
 		if kind != "" && prevTagKind != "" && !prevWasComment &&
 			(kind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}
+
 		f.formatNode(c)
+
 		if kind != "" && !f.nodeIsComment(c) {
 			prevTagKind = kind
 		}
+
 		prevWasComment = f.nodeIsComment(c)
 	}
 }
@@ -696,6 +769,7 @@ func (f *Formatter) nodeTagKind(n *sitter.Node) string {
 		if strings.Contains(text, " var ") || strings.Contains(text, "\tvar ") {
 			return "cf_set_var_tag"
 		}
+
 		return kind
 	case "cf_return_tag", "cf_selfclose_tag", "cf_tag",
 		"cf_if_tag", "cf_output_tag", "cf_function_tag", "cf_query_tag",
@@ -711,6 +785,7 @@ func (f *Formatter) nodeTagKind(n *sitter.Node) string {
 // updating prevTagKind so comments don't cause blank lines after them).
 func (f *Formatter) nodeIsComment(n *sitter.Node) bool {
 	kind := n.Kind()
+
 	return kind == "comment" || kind == "cf_comment"
 }
 
@@ -729,8 +804,10 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 				return true
 			}
 		}
+
 		return false
 	}
+
 	return false
 }
 
@@ -739,17 +816,21 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		kind := c.Kind()
 		if kind == "<cf" || kind == "</cf" || kind == ">" || kind == "cf_tag_name" ||
 			kind == "cf_tag_attributes" || kind == "cf_end_tag" ||
 			kind == "cf_attribute" || kind == "cf_start_tag" {
 			continue
 		}
+
 		if kind == "cf_selfclose_tag" {
 			return f.tagName(c) == "cfargument"
 		}
+
 		return false
 	}
+
 	return false
 }
 
@@ -767,8 +848,10 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 				if f.opts.LowercaseTags {
 					name = strings.ToLower(name)
 				}
+
 				return "cf" + name
 			}
+
 			if c.Kind() == "cf_start_tag" || c.Kind() == "cf_start_tag_with_selfclose" {
 				return f.tagName(c)
 			}
@@ -782,12 +865,15 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 			rest := raw[3:]
 			end := strings.IndexAny(rest, " \t\r\n/>")
 			name := rest
+
 			if end > 0 {
 				name = rest[:end]
 			}
+
 			if f.opts.LowercaseTags {
 				name = strings.ToLower(name)
 			}
+
 			return "cf" + name
 		}
 	}
@@ -795,6 +881,7 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 	// Specific tags: cf_set_tag → cfset, cf_if_tag → cfif, etc.
 	if strings.HasPrefix(kind, "cf_") && strings.HasSuffix(kind, "_tag") && len(kind) > 7 {
 		inner := kind[3 : len(kind)-4] // strip "cf_" and "_tag"
+
 		return "cf" + strings.ReplaceAll(inner, "_", "")
 	}
 
@@ -808,6 +895,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		if n.Child(i).Kind() == "cf_start_tag_with_selfclose" {
 			f.formatCFSelfCloseAttrTag(n)
+
 			return
 		}
 	}
@@ -828,6 +916,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 
 	prevCFTagKind := ""
 	prevCFTagWasComment := false
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -839,10 +928,13 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 				(tagKind != prevCFTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 				f.write("\n")
 			}
+
 			f.formatNode(c)
+
 			if tagKind != "" && !f.nodeIsComment(c) {
 				prevCFTagKind = tagKind
 			}
+
 			prevCFTagWasComment = f.nodeIsComment(c)
 		}
 	}
@@ -850,6 +942,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	if isBlock {
 		f.level--
 	}
+
 	f.write("\n")
 	f.nl()
 	f.writeIndent()
@@ -864,6 +957,7 @@ func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
 	f.writeIndent()
 	f.write("<cfcomponent" + f.renderAttrs("cfcomponent", attrs) + ">")
 	f.write("\n\n")
+
 	f.level++
 }
 
@@ -901,14 +995,17 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 	// Collect body nodes (skip syntax tokens).
 	var bodyNodes []*sitter.Node
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		kind := c.Kind()
 		if kind == "<cf" || kind == "</cf" || kind == ">" || kind == "cf_tag_name" ||
 			kind == "cf_tag_attributes" || kind == "cf_end_tag" ||
 			kind == "cf_attribute" || kind == "cf_start_tag" {
 			continue
 		}
+
 		bodyNodes = append(bodyNodes, c)
 	}
 
@@ -916,17 +1013,20 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	if f.allSingleLine(bodyNodes) && !f.hasBlockChild(bodyNodes) && f.fitsOnLine(bodyNodes) {
 		// Separate CF tags from inline text — CF tags get formatNode, text stays inline
 		var textRun []*sitter.Node
+
 		for _, c := range bodyNodes {
 			if strings.HasPrefix(c.Kind(), "cf_") {
 				if len(textRun) > 0 {
 					f.formatInlineRun(textRun)
 					textRun = nil
 				}
+
 				f.formatNode(c)
 			} else {
 				textRun = append(textRun, c)
 			}
 		}
+
 		if len(textRun) > 0 {
 			f.formatInlineRun(textRun)
 		}
@@ -939,12 +1039,16 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 				// Collect consecutive inline nodes into a run.
 				run := []*sitter.Node{c}
 				j := i + 1
+
 				for j < len(bodyNodes) && f.isInlineNode(bodyNodes[j]) {
 					run = append(run, bodyNodes[j])
 					j++
 				}
+
 				f.formatTextRun(run)
+
 				i = j
+
 				continue
 			}
 
@@ -954,14 +1058,17 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 				(tagKind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 				f.write("\n")
 			}
+
 			if kind == "comment" { //nolint:gocritic // ifElseChain: intentional for readability
 				f.formatComment(c)
 			} else {
 				f.formatNode(c)
 			}
+
 			if tagKind != "" && kind != "comment" && kind != "cf_comment" {
 				prevTagKind = tagKind
 			}
+
 			prevWasComment = kind == "comment" || kind == "cf_comment"
 			i++
 		}
@@ -970,6 +1077,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	if isBlock {
 		f.level--
 	}
+
 	f.nl()
 	f.writeIndent()
 	f.write("</" + name + ">")
@@ -992,6 +1100,7 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 		if c.Kind() == ">" {
 			f.write(string(f.src[c.EndByte():n.EndByte()]))
 			f.write("\n")
+
 			return
 		}
 	}
@@ -1004,13 +1113,16 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 func (f *Formatter) normalizeCond(raw string) string {
 	// Collapse to single line first.
 	lines := strings.Split(raw, "\n")
+
 	var parts []string
+
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
 		if trimmed != "" {
 			parts = append(parts, trimmed)
 		}
 	}
+
 	single := strings.Join(parts, " ")
 
 	// Check if it fits on one line.
@@ -1021,22 +1133,29 @@ func (f *Formatter) normalizeCond(raw string) string {
 
 	// Break at logical operators, indenting by paren depth.
 	baseIndent := f.indented() + f.opts.indent(1)
+
 	var result strings.Builder
+
 	i := 0
 	for i < len(single) {
 		ch := single[i]
+
 		if i > 0 {
 			for _, op := range condBreakOperators {
 				if matchWord(single, i, op) {
 					result.WriteString("\n")
 					result.WriteString(baseIndent)
+
 					break
 				}
 			}
 		}
+
 		result.WriteByte(ch)
+
 		i++
 	}
+
 	return result.String()
 }
 
@@ -1048,15 +1167,19 @@ func matchWord(s string, pos int, word string) bool {
 	if pos == 0 || s[pos-1] != ' ' {
 		return false
 	}
+
 	if pos+len(word) > len(s) {
 		return false
 	}
+
 	if s[pos:pos+len(word)] != word {
 		return false
 	}
+
 	if pos+len(word) < len(s) && s[pos+len(word)] != ' ' {
 		return false
 	}
+
 	return true
 }
 
@@ -1064,25 +1187,35 @@ func matchWord(s string, pos int, word string) bool {
 func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	// Collect condition expression (named children before ">")
 	var condParts []string
+
 	inBody := false
+
 	var bodyNodes []*sitter.Node
+
 	var altNode *sitter.Node
+
 	var trailingNodes []*sitter.Node
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		kind := c.Kind()
 		if kind == "<cf" || kind == "</cf" {
 			continue
 		}
+
 		if kind == ">" {
 			inBody = true
+
 			continue
 		}
+
 		if kind == "cf_if_alt" {
 			altNode = c
+
 			continue
 		}
+
 		switch {
 		case !inBody:
 			if c.IsNamed() {
@@ -1102,21 +1235,26 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	f.writeIndent()
 	f.write("<cfif " + cond + ">")
 	f.write("\n")
+
 	f.level++
 	f.write("\n")
 
 	prevTagKind2 := ""
 	prevWasComment2 := false
+
 	for _, c := range bodyNodes {
 		tagKind := f.nodeTagKind(c)
 		if tagKind != "" && prevTagKind2 != "" && !prevWasComment2 &&
 			(tagKind != prevTagKind2 || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}
+
 		f.formatNode(c)
+
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevTagKind2 = tagKind
 		}
+
 		prevWasComment2 = f.nodeIsComment(c)
 	}
 
@@ -1133,6 +1271,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		for _, c := range trailingNodes {
 			f.formatNode(c)
 		}
+
 		f.level--
 	}
 
@@ -1149,13 +1288,17 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 	//   OR: <cf (anonymous), cf_else_tag (">"), body nodes...
 	// Body nodes are siblings of cf_elseif_tag/cf_else_tag, not children.
 	var condParts []string
+
 	var bodyNodes []*sitter.Node
+
 	var altNode *sitter.Node
+
 	isElse := false
 	inBody := false
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		kind := c.Kind()
 		switch kind {
 		case "<cf":
@@ -1167,10 +1310,12 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 				if gc.Kind() == ">" {
 					break
 				}
+
 				if gc.IsNamed() {
 					condParts = append(condParts, f.expr(gc))
 				}
 			}
+
 			inBody = true
 		case "cf_else_tag":
 			isElse = true
@@ -1201,20 +1346,26 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 
 	f.level++
 	f.write("\n")
+
 	prevAltTagKind := ""
 	prevAltWasComment := false
+
 	for _, c := range bodyNodes {
 		tagKind := f.nodeTagKind(c)
 		if tagKind != "" && prevAltTagKind != "" && !prevAltWasComment &&
 			(tagKind != prevAltTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}
+
 		f.formatNode(c)
+
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevAltTagKind = tagKind
 		}
+
 		prevAltWasComment = f.nodeIsComment(c)
 	}
+
 	f.level--
 
 	if altNode != nil {
@@ -1255,12 +1406,15 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	// For specific self-closing tags (cf_set_tag, cf_return_tag),
 	// reconstruct from expression children with normalized spacing.
 	var exprParts []string
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		kind := c.Kind()
 		if kind == "<cf" || kind == "cf_selfclose_void_tag_end" || kind == ">" {
 			continue
 		}
+
 		if c.IsNamed() {
 			exprParts = append(exprParts, f.expr(c))
 		}
@@ -1273,31 +1427,40 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	if strings.Contains(body, "\n") {
 		f.lastTagMultiLine = true
 		lines := strings.Split(body, "\n")
+
 		f.nl()
 		f.writeIndent()
 		f.write("<" + name + " " + lines[0])
 		f.write("\n")
+
 		for i, l := range lines[1:] {
 			if strings.TrimSpace(l) == "" {
 				f.write("\n")
+
 				continue
 			}
+
 			f.write(l)
+
 			if i == len(lines)-2 {
 				f.write(" />")
 			}
+
 			f.write("\n")
 		}
+
 		return
 	}
 
 	f.nl()
 	f.writeIndent()
+
 	if body != "" {
 		f.write("<" + name + " " + body + " />")
 	} else {
 		f.write("<" + name + " />")
 	}
+
 	f.write("\n")
 }
 
@@ -1309,18 +1472,21 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 	f.nl()
 	f.writeIndent()
 	f.write("<cfscript>\n")
+
 	f.level++
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		if c.Kind() == "cf_script_content" && f.opts.ParseScript != nil {
 			scriptSrc := f.src[c.StartByte():c.EndByte()]
+
 			tree := f.opts.ParseScript(scriptSrc)
 			if tree != nil {
 				if tree.RootNode().HasError() {
 					f.recordParseError("cfscript", tree.RootNode(), scriptSrc, c.StartPosition().Row)
 				}
 				defer tree.Close()
+
 				origSrc := f.src
 				f.src = scriptSrc
 				f.formatScriptChildren(tree.RootNode())
@@ -1337,12 +1503,15 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 
 func (f *Formatter) formatScriptChildren(n *sitter.Node) {
 	prevEndRow := int(n.StartPosition().Row)
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		startRow := int(c.StartPosition().Row)
 		if startRow-prevEndRow > 1 {
 			f.write("\n")
 		}
+
 		prevEndRow = int(c.EndPosition().Row)
 		f.formatScriptNode(c)
 	}
@@ -1354,6 +1523,7 @@ func (f *Formatter) formatScriptChildren(n *sitter.Node) {
 // The opening # is an external token not exposed as a child node.
 func (f *Formatter) formatHashExpression(n *sitter.Node) {
 	f.write("#")
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		if c.Kind() == "#" {
@@ -1371,19 +1541,23 @@ func (f *Formatter) formatHashExpression(n *sitter.Node) {
 func (f *Formatter) formatComponentContent(n *sitter.Node) {
 	if f.opts.ParseScript != nil {
 		scriptSrc := f.src[n.StartByte():n.EndByte()]
+
 		tree := f.opts.ParseScript(scriptSrc)
 		if tree != nil {
 			if tree.RootNode().HasError() {
 				f.recordParseError("cfscript", tree.RootNode(), scriptSrc, n.StartPosition().Row)
 			}
 			defer tree.Close()
+
 			origSrc := f.src
 			f.src = scriptSrc
 			f.formatScriptChildren(tree.RootNode())
 			f.src = origSrc
+
 			return
 		}
 	}
+
 	f.write(f.text(n))
 }
 
@@ -1404,6 +1578,7 @@ func (f *Formatter) formatComment(n *sitter.Node) {
 	if raw == "" {
 		return
 	}
+
 	f.nl()
 	f.writeIndent()
 	f.write(raw)
@@ -1415,34 +1590,43 @@ func (f *Formatter) normalizeCFComment(raw string) string {
 	if !strings.HasPrefix(raw, "<!---") || !strings.HasSuffix(raw, "--->") {
 		return raw
 	}
+
 	inner := raw[5 : len(raw)-4]
+
 	lines := strings.Split(inner, "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRight(line, " \t")
 	}
+
 	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
 		lines = lines[1:]
 	}
+
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
 	}
+
 	if len(lines) == 0 {
 		return "<!--- --->"
 	}
+
 	if len(lines) == 1 {
 		return "<!--- " + strings.TrimSpace(lines[0]) + " --->"
 	}
 	// Multi-line: strip common leading whitespace
 	minIndent := -1
+
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
 		if minIndent < 0 || indent < minIndent {
 			minIndent = indent
 		}
 	}
+
 	if minIndent > 0 {
 		for i, line := range lines {
 			if len(line) >= minIndent {
@@ -1450,9 +1634,13 @@ func (f *Formatter) normalizeCFComment(raw string) string {
 			}
 		}
 	}
+
 	baseIndent := f.opts.indent(f.level)
+
 	var sb strings.Builder
+
 	sb.WriteString("<!---\n")
+
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			sb.WriteString("\n")
@@ -1460,6 +1648,8 @@ func (f *Formatter) normalizeCFComment(raw string) string {
 			sb.WriteString(baseIndent + f.opts.indent(1) + line + "\n")
 		}
 	}
+
 	sb.WriteString(baseIndent + "--->")
+
 	return sb.String()
 }

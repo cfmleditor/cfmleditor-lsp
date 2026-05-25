@@ -12,13 +12,13 @@ import (
 // Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
 	mu        sync.RWMutex
-	funcs     map[string][]*parser.FunctionDef    // lowercase name -> definitions
-	fileFuncs map[string][]*parser.FunctionDef    // lowercase URI -> definitions in that file
-	comprefs  map[string][]*parser.ComponentRef   // lowercase variable -> refs
-	fileRefs  map[string][]*parser.ComponentRef   // lowercase URI -> refs in that file
-	thisVars  map[string][]string                   // lowercase URI -> this-scoped var names
-	beans     map[string]string                     // lowercase bean name -> dot-path
-	entities  map[string]uri.URI                    // lowercase entity name -> file URI
+	funcs     map[string][]*parser.FunctionDef  // lowercase name -> definitions
+	fileFuncs map[string][]*parser.FunctionDef  // lowercase URI -> definitions in that file
+	comprefs  map[string][]*parser.ComponentRef // lowercase variable -> refs
+	fileRefs  map[string][]*parser.ComponentRef // lowercase URI -> refs in that file
+	thisVars  map[string][]string               // lowercase URI -> this-scoped var names
+	beans     map[string]string                 // lowercase bean name -> dot-path
+	entities  map[string]uri.URI                // lowercase entity name -> file URI
 }
 
 // New creates an empty Index.
@@ -38,6 +38,7 @@ func New() *Index {
 func (idx *Index) Lookup(name string) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.funcs[strings.ToLower(name)]
 }
 
@@ -45,10 +46,12 @@ func (idx *Index) Lookup(name string) []*parser.FunctionDef {
 func (idx *Index) AllFunctions() []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	var all []*parser.FunctionDef
 	for _, defs := range idx.funcs {
 		all = append(all, defs...)
 	}
+
 	return all
 }
 
@@ -61,6 +64,7 @@ func uriKey(u uri.URI) string {
 func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.fileFuncs[uriKey(fileURI)]
 }
 
@@ -68,7 +72,9 @@ func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+
 	key := uriKey(fileURI)
+
 	for _, defs := range idx.funcs {
 		for _, d := range defs {
 			if uriKey(d.URI) == key && int(d.Line) > afterLine {
@@ -76,6 +82,7 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 			}
 		}
 	}
+
 	for _, refs := range idx.comprefs {
 		for _, r := range refs {
 			if uriKey(r.URI) == key && int(r.Line) > afterLine {
@@ -97,19 +104,23 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	idx.thisVars[fk] = pr.ThisVars()
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
+
 	for i := range pr.Funcs {
 		key := strings.ToLower(pr.Funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &pr.Funcs[i])
 		fileDefs = append(fileDefs, &pr.Funcs[i])
 	}
+
 	idx.fileFuncs[fk] = fileDefs
 
 	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.Refs))
+
 	for i := range pr.Refs {
 		key := strings.ToLower(pr.Refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &pr.Refs[i])
 		fileRefsList = append(fileRefsList, &pr.Refs[i])
 	}
+
 	idx.fileRefs[fk] = fileRefsList
 }
 
@@ -122,19 +133,23 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	fk := uriKey(fileURI)
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
+
 	for i := range funcs {
 		key := strings.ToLower(funcs[i].Name)
 		idx.funcs[key] = append(idx.funcs[key], &funcs[i])
 		fileDefs = append(fileDefs, &funcs[i])
 	}
+
 	idx.fileFuncs[fk] = fileDefs
 
 	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
+
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
 		fileRefsList = append(fileRefsList, &refs[i])
 	}
+
 	idx.fileRefs[fk] = fileRefsList
 }
 
@@ -142,26 +157,32 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 func (idx *Index) RemoveFilesUnder(prefix string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+
 	for key, entries := range idx.funcs {
 		filtered := entries[:0]
+
 		for _, e := range entries {
 			if !strings.HasPrefix(string(e.URI), prefix) {
 				filtered = append(filtered, e)
 			}
 		}
+
 		if len(filtered) == 0 {
 			delete(idx.funcs, key)
 		} else {
 			idx.funcs[key] = filtered
 		}
 	}
+
 	for key, entries := range idx.comprefs {
 		filtered := entries[:0]
+
 		for _, e := range entries {
 			if !strings.HasPrefix(string(e.URI), prefix) {
 				filtered = append(filtered, e)
 			}
 		}
+
 		if len(filtered) == 0 {
 			delete(idx.comprefs, key)
 		} else {
@@ -175,26 +196,32 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	delete(idx.thisVars, key)
 	delete(idx.fileFuncs, key)
 	delete(idx.fileRefs, key)
+
 	for k, entries := range idx.funcs {
 		filtered := entries[:0]
+
 		for _, e := range entries {
 			if uriKey(e.URI) != key {
 				filtered = append(filtered, e)
 			}
 		}
+
 		if len(filtered) == 0 {
 			delete(idx.funcs, k)
 		} else {
 			idx.funcs[k] = filtered
 		}
 	}
+
 	for k, entries := range idx.comprefs {
 		filtered := entries[:0]
+
 		for _, e := range entries {
 			if uriKey(e.URI) != key {
 				filtered = append(filtered, e)
 			}
 		}
+
 		if len(filtered) == 0 {
 			delete(idx.comprefs, k)
 		} else {
@@ -207,6 +234,7 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 func (idx *Index) LookupComponentRef(variable string) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.comprefs[strings.ToLower(variable)]
 }
 
@@ -214,6 +242,7 @@ func (idx *Index) LookupComponentRef(variable string) []*parser.ComponentRef {
 func (idx *Index) RefsForFile(fileURI uri.URI) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.fileRefs[uriKey(fileURI)]
 }
 
@@ -221,6 +250,7 @@ func (idx *Index) RefsForFile(fileURI uri.URI) []*parser.ComponentRef {
 func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.thisVars[uriKey(fileURI)]
 }
 
@@ -235,6 +265,7 @@ func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 func (idx *Index) AddRefs(refs []parser.ComponentRef) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
@@ -248,8 +279,11 @@ func (idx *Index) AddRefs(refs []parser.ComponentRef) {
 func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, line uint32) *parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	key := uriKey(fileURI)
+
 	var best *parser.ComponentRef
+
 	for _, ref := range idx.comprefs[strings.ToLower(variable)] {
 		if uriKey(ref.URI) == key && ref.Line <= line {
 			if best == nil || ref.Line > best.Line {
@@ -257,6 +291,7 @@ func (idx *Index) LookupComponentRefInFile(variable string, fileURI uri.URI, lin
 			}
 		}
 	}
+
 	return best
 }
 
@@ -271,6 +306,7 @@ func (idx *Index) SetBeans(beans map[string]string) {
 func (idx *Index) LookupBean(name string) string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.beans[strings.ToLower(name)]
 }
 
@@ -285,5 +321,6 @@ func (idx *Index) SetEntity(name string, fileURI uri.URI) {
 func (idx *Index) LookupEntity(name string) uri.URI {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
+
 	return idx.entities[strings.ToLower(name)]
 }

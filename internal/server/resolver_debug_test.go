@@ -20,8 +20,10 @@ func TestDefinitionTestdata_TagResolverGetUser(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
+
 	if _, ok := result.([]protocol.Location); ok {
 		t.Error("expected single Location from resolver, got multiple results")
 	}
+
 	assertLocationFile(t, result, "services/UserService.cfc")
 }

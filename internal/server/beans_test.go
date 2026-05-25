@@ -11,6 +11,7 @@ import (
 
 func beansTestdataDir() string {
 	_, file, _, _ := runtime.Caller(0)
+
 	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "beans")
 }
 
@@ -42,6 +43,7 @@ func TestBuildBeanMap_Namespaces(t *testing.T) {
 	if !strings.HasSuffix(beans["userdao"], "dao/UserDAO.cfc") {
 		t.Errorf("beans[userdao] = %q, want suffix dao/UserDAO.cfc", beans["userdao"])
 	}
+
 	if !strings.HasSuffix(beans["orderdao"], "dao/OrderDAO.cfc") {
 		t.Errorf("beans[orderdao] = %q, want suffix dao/OrderDAO.cfc", beans["orderdao"])
 	}
@@ -67,6 +69,7 @@ func TestBuildBeanMap_EmptyPaths(t *testing.T) {
 	if len(beans) != 0 {
 		t.Errorf("expected empty map, got %d entries", len(beans))
 	}
+
 	beans = buildBeanMap(map[string]string{}, vfs.OS{})
 	if len(beans) != 0 {
 		t.Errorf("expected empty map, got %d entries", len(beans))
