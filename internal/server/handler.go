@@ -15,7 +15,6 @@ import (
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/tags"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -752,7 +751,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 				char = int(v)
 			}
 		}
-		pos := tags.FindMatchingTag(content, line, char)
+		pos := parser.FindMatchingTag(content, line, char)
 		if pos == nil {
 			return reply(ctx, nil, nil)
 		}

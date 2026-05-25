@@ -1,12 +1,11 @@
-// Package tags provides tag matching utilities for CFML/HTML content.
-package tags
+package parser
 
 import "strings"
 
 // FindMatchingTag finds the matching open/close tag at the given position.
 // Returns a map with "line" and "character" keys, or nil if no match.
 func FindMatchingTag(content string, line, char int) map[string]interface{} {
-	lineText := lineAtOffset(content, line)
+	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return nil
 	}
@@ -124,20 +123,4 @@ func offsetToPosition(content string, offset int) map[string]interface{} {
 	}
 	char := offset - lastNL - 1
 	return map[string]interface{}{"line": line, "character": char}
-}
-
-func lineAtOffset(content string, line int) string {
-	offset := 0
-	for l := 0; l < line; l++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return ""
-		}
-		offset += idx + 1
-	}
-	end := strings.IndexByte(content[offset:], '\n')
-	if end < 0 {
-		return content[offset:]
-	}
-	return content[offset : offset+end]
 }

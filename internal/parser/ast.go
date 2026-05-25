@@ -311,14 +311,22 @@ func simpleMatch(expr, pattern, resolve string) string {
 
 
 func containsFold(s, substr string) bool {
-	if len(substr) == 0 {
+	n := len(substr)
+	if n == 0 {
 		return true
 	}
-	if len(substr) > len(s) {
+	if n > len(s) {
 		return false
 	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if strings.EqualFold(s[i:i+len(substr)], substr) {
+	for i := 0; i <= len(s)-n; i++ {
+		match := true
+		for j := 0; j < n; j++ {
+			if s[i+j]|0x20 != substr[j]|0x20 {
+				match = false
+				break
+			}
+		}
+		if match {
 			return true
 		}
 	}
