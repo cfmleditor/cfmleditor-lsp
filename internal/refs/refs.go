@@ -133,10 +133,20 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 							continue
 						}
 					}
+					resolved := call.Resolved
+					if !resolved && call.Component == "" {
+						// Check if the function exists in the same file
+						for _, fn := range pr.Funcs {
+							if strings.EqualFold(fn.Name, call.FuncName) {
+								resolved = true
+								break
+							}
+						}
+					}
 					entries = append(entries, Entry{
 						File: f, Function: call.Caller, Call: call.Text,
 						Component: call.Component,
-						Line: call.Line, Resolved: call.Resolved,
+						Line: call.Line, Resolved: resolved,
 					})
 				}
 			}

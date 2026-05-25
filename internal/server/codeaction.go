@@ -42,12 +42,12 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
-			Title: "Export dependency graph",
+			Title: "Export dependency graph for " + qualifier + "." + word,
 
 			Command: &protocol.Command{
-				Title:     "Export dependency graph",
+				Title:     "Export dependency graph for " + qualifier + "." + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []interface{}{docURI},
+				Arguments: []interface{}{docURI, word},
 			},
 		})
 	} else {
@@ -62,12 +62,12 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
-			Title: "Show dependencies for this file",
+			Title: "Export dependency graph for " + word,
 
 			Command: &protocol.Command{
-				Title:     "Show dependencies for this file",
+				Title:     "Export dependency graph for " + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []interface{}{docURI},
+				Arguments: []interface{}{docURI, word},
 			},
 		})
 	}

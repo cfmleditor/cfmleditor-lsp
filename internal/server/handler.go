@@ -13,6 +13,7 @@ import (
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cfparser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -778,7 +779,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		if len(params.Arguments) > 1 {
 			sourceURI, _ = params.Arguments[1].(string)
 		}
-		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.String("source", sourceURI), cflog.Strings("roots", s.WorkspaceFolders))
+		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
 		r := s.getResolver()
 		findOpts := refs.Options{
 			FuncName:          funcName,
@@ -788,131 +789,23 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 				return r.HasFunction(component, fn, fileDir)
 			},
 		}
-		entries := refs.Find(s.FS, s.WorkspaceFolders, findOpts)
-
-		// Recursive: find callers of wrapper functions (no level limit, loop prevention via seen set)
-		tracedFuncs := make(map[string]bool)
-		tracedFuncs[funcName] = true
-		for {
-			var newFuncs []string
-			for _, e := range entries {
-				if e.Function != "" && !tracedFuncs[e.Function] {
-					tracedFuncs[e.Function] = true
-					newFuncs = append(newFuncs, e.Function)
-				}
-			}
-			if len(newFuncs) == 0 {
-				break
-			}
-			for _, fn := range newFuncs {
-				findOpts.FuncName = fn
-				extra := refs.Find(s.FS, s.WorkspaceFolders, findOpts)
-				entries = append(entries, extra...)
-			}
-		}
+		entries := refs.Trace(s.FS, s.WorkspaceFolders, findOpts, 10)
+		result := refs.FormatResult(entries, funcName, sourceURI, s.WorkspaceFolders)
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
-		for _, e := range entries {
-			s.log.Debug("findRefs: match", cflog.String("file", e.File), cflog.Uint32("line", e.Line), cflog.Bool("resolved", e.Resolved), cflog.String("call", e.Call))
-		}
-		var lines []string
-		lines = append(lines, fmt.Sprintf("Calls to '%s': %d match(es)", funcName, len(entries)))
-		for _, e := range entries {
-			rel := e.File
-			for _, root := range s.WorkspaceFolders {
-				if r, err := filepath.Rel(root, e.File); err == nil && len(r) < len(rel) {
-					rel = r
-				}
-			}
-			marker := ""
-			if !e.Resolved {
-				marker = " [unresolved]"
-			}
-			lines = append(lines, fmt.Sprintf("  %s:%d%s  %s", rel, e.Line+1, marker, e.Call))
-		}
-		msg := strings.Join(lines, "\n")
-		// Build Mermaid diagram as a call tree
-		var mermaid []string
-		mermaid = append(mermaid, "graph TD")
-		sourceRel := strings.TrimPrefix(sourceURI, "file://")
-		for _, root := range s.WorkspaceFolders {
-			if r, err := filepath.Rel(root, sourceRel); err == nil && len(r) < len(sourceRel) {
-				sourceRel = r
-			}
-		}
-		mermaid = append(mermaid, fmt.Sprintf("    source[\"%s::%s\"]", sourceRel, funcName))
-		sourceBase := strings.ToLower(strings.TrimSuffix(filepath.Base(sourceRel), filepath.Ext(sourceRel)))
 
-		type node struct {
-			id, label, fileBase string
-		}
-		var nodes []node
-		seen := make(map[string]bool)
-		for _, e := range entries {
-			rel := e.File
-			for _, root := range s.WorkspaceFolders {
-				if r, err := filepath.Rel(root, e.File); err == nil && len(r) < len(rel) {
-					rel = r
-				}
-			}
-			label := fmt.Sprintf("%s:%d", rel, e.Line+1)
-			if e.Function != "" {
-				label += "::" + e.Function
-			}
-			if seen[label] {
-				continue
-			}
-			seen[label] = true
-			fileBase := strings.ToLower(strings.TrimSuffix(filepath.Base(e.File), filepath.Ext(e.File)))
-			nodes = append(nodes, node{id: fmt.Sprintf("n%d", len(nodes)), label: label, fileBase: fileBase})
-		}
-
-		for i, e := range entries {
-			if i >= len(nodes) {
-				break
-			}
-			n := nodes[i]
-			parent := "source"
-			style := "-->"
-			if !e.Resolved {
-				style = "-.->"
-			}
-			if e.Component != "" {
-				compBase := strings.ToLower(e.Component)
-				if dotIdx := strings.LastIndexByte(compBase, '.'); dotIdx >= 0 {
-					compBase = compBase[dotIdx+1:]
-				}
-				compBase = strings.TrimSuffix(compBase, ".cfc")
-				if !strings.EqualFold(compBase, sourceBase) {
-					for j, other := range nodes {
-						if j == i {
-							continue
-						}
-						if strings.EqualFold(compBase, other.fileBase) {
-							parent = other.id
-							style = "-->"
-							break
-						}
-					}
-				}
-			}
-			mermaid = append(mermaid, fmt.Sprintf("    %s %s %s[\"%s\"]", parent, style, n.id, n.label))
-		}
-		diagram := "```mermaid\n" + strings.Join(mermaid, "\n") + "\n```"
-		output := msg + "\n\n" + diagram
-		// Write to file in same directory as source
+		output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 		outDir := filepath.Dir(strings.TrimPrefix(sourceURI, "file://"))
 		if outDir == "" || outDir == "." {
 			outDir = os.TempDir()
 		}
 		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
 		_ = os.WriteFile(outFile, []byte(output), 0o644)
-		s.call(ctx, "window/showDocument", map[string]interface{}{
-			"uri":       "file://" + outFile,
-			"external":  false,
-			"takeFocus": true,
-		}, nil)
-		return reply(ctx, msg, nil)
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: "Wrote " + outFile,
+		})
+		return reply(ctx, result.Summary, nil)
 	case "cfmleditor.exportDeps":
 		if len(params.Arguments) == 0 {
 			return reply(ctx, nil, fmt.Errorf("cfmleditor.exportDeps requires a document URI"))
@@ -921,29 +814,32 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		if docURI == "" {
 			return reply(ctx, nil, nil)
 		}
-		fileURI := uri.URI(docURI)
-		funcs := s.index.FunctionsForFile(fileURI)
-		refs := s.index.RefsForFile(fileURI)
-		var lines []string
-		lines = append(lines, "graph LR")
-		fileName := filepath.Base(strings.TrimPrefix(docURI, "file://"))
-		fileNode := strings.ReplaceAll(fileName, ".", "_")
-		lines = append(lines, fmt.Sprintf("    %s[%s]", fileNode, fileName))
-		seen := make(map[string]bool)
-		for _, ref := range refs {
-			if seen[ref.Component] {
-				continue
-			}
-			seen[ref.Component] = true
-			compNode := strings.ReplaceAll(ref.Component, ".", "_")
-			lines = append(lines, fmt.Sprintf("    %s --> %s[%s]", fileNode, compNode, ref.Component))
+		funcName := ""
+		if len(params.Arguments) > 1 {
+			funcName, _ = params.Arguments[1].(string)
 		}
-		_ = funcs // available for future use
-		msg := strings.Join(lines, "\n")
-		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
-			Type: protocol.MessageTypeInfo, Message: msg,
+
+		result := deps.Build(deps.Options{
+			DocURI:   docURI,
+			FuncName: funcName,
+			Index:    s.index,
+			Resolver: s.getResolver(),
+			MaxDepth: 10,
 		})
-		return reply(ctx, msg, nil)
+
+		filePath := strings.TrimPrefix(docURI, "file://")
+		suffix := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		if funcName != "" {
+			suffix += "-" + funcName
+		}
+		mermaid := result.Graph.Mermaid()
+		outFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".md")
+		_ = os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644)
+		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+			Type:    protocol.MessageTypeInfo,
+			Message: "Wrote " + outFile,
+		})
+		return reply(ctx, mermaid, nil)
 	default:
 		return reply(ctx, nil, fmt.Errorf("unknown command: %s", params.Command))
 	}
