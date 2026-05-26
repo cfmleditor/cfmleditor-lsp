@@ -73,7 +73,7 @@ func cmdScan(args []string) {
 			continue
 		}
 
-		printErrors(f, tree.RootNode(), content)
+		printErrors(f, "cfml", tree.RootNode(), content)
 		tree.Close()
 	}
 
@@ -82,11 +82,11 @@ func cmdScan(args []string) {
 	}
 }
 
-func printErrors(file string, n *sitter.Node, src []byte) {
-	printErrorNodes(file, n, src)
+func printErrors(file string, lang string, n *sitter.Node, src []byte) {
+	printErrorNodes(file, lang, n, src)
 }
 
-func printErrorNodes(file string, n *sitter.Node, src []byte) {
+func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) {
 	if n.IsError() || n.IsMissing() {
 		pos := n.StartPosition()
 
@@ -98,15 +98,15 @@ func printErrorNodes(file string, n *sitter.Node, src []byte) {
 		snippet = strings.ReplaceAll(snippet, "\n", "\\n")
 
 		if n.IsMissing() {
-			fmt.Printf("%s:%d:%d: missing %s\n", file, pos.Row+1, pos.Column+1, n.Kind())
+			fmt.Printf("%s:%d:%d: [%s] missing %s\n", file, pos.Row+1, pos.Column+1, lang, n.Kind())
 		} else {
-			fmt.Printf("%s:%d:%d: parse error near %q\n", file, pos.Row+1, pos.Column+1, snippet)
+			fmt.Printf("%s:%d:%d: [%s] parse error near %q\n", file, pos.Row+1, pos.Column+1, lang, snippet)
 		}
 
 		return
 	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
-		printErrorNodes(file, n.Child(i), src)
+		printErrorNodes(file, lang, n.Child(i), src)
 	}
 }

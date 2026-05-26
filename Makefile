@@ -17,7 +17,7 @@ generate: docs
 	go run scripts/generate_docs.go
 
 update-grammar: generate
-	$(MAKE) -C ../tree-sitter-cfml generate
+	npm --prefix ../tree-sitter-cfml run build
 	go get github.com/cfmleditor/tree-sitter-cfml@latest
 	go mod tidy
 	go clean -cache
