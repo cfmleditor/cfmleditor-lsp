@@ -3676,6 +3676,33 @@ func TestResolveComponentPathNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveComponentPathPipeSeparated(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "packages", "admin"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "packages", "admin", "service.cfc"), []byte("component {}"), 0o644)
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	// First alternative doesn't exist, second does
+	result := srv.getResolver().ComponentPath("packages.admin.dao|packages.admin.service", dir)
+	if !strings.HasSuffix(result, "service.cfc") {
+		t.Errorf("expected fallback to second pipe alternative, got %q", result)
+	}
+
+	// First alternative exists — should return it
+	result = srv.getResolver().ComponentPath("packages.admin.service|packages.admin.dao", dir)
+	if !strings.HasSuffix(result, "service.cfc") {
+		t.Errorf("expected first pipe alternative to match, got %q", result)
+	}
+
+	// No alternatives exist
+	result = srv.getResolver().ComponentPath("packages.nope.one|packages.nope.two", dir)
+	if result != "" {
+		t.Errorf("expected empty when no pipe alternatives match, got %q", result)
+	}
+}
+
 func TestDocumentLinkEmptyDocument(t *testing.T) {
 	srv := newTestServer()
 	docURI := uri.URI("file:///empty.cfm")

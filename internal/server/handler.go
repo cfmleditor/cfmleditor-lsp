@@ -979,9 +979,9 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 
 		filePath := strings.TrimPrefix(docURI, "file://")
 
-		suffix := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-		if funcName != "" {
-			suffix += "-" + funcName
+		suffix := funcName
+		if suffix == "" {
+			suffix = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 		}
 
 		mermaid := result.Graph.Mermaid()

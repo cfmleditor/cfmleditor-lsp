@@ -25,6 +25,7 @@ type Resolver struct {
 
 // ComponentPath resolves a component dot-path to an absolute .cfc file path
 // using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
+// If component contains pipe characters, each alternative is tried left-to-right.
 func (r *Resolver) ComponentPath(component, baseDir string) string {
 	key := component + "\t" + baseDir
 	if r.resolveCache != nil {
@@ -33,7 +34,17 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 		}
 	}
 
-	result := r.componentPathUncached(component, baseDir)
+	var result string
+	if strings.Contains(component, "|") {
+		for _, alt := range strings.Split(component, "|") {
+			if p := r.componentPathUncached(alt, baseDir); p != "" {
+				result = p
+				break
+			}
+		}
+	} else {
+		result = r.componentPathUncached(component, baseDir)
+	}
 
 	if r.resolveCache == nil {
 		r.resolveCache = make(map[string]string)
