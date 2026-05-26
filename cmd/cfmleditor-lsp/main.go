@@ -33,6 +33,10 @@ func main() {
 			cmdParse(os.Args[2:])
 
 			return
+		case "scan":
+			cmdScan(os.Args[2:])
+
+			return
 		case "format":
 			cmdFormat(os.Args[2:])
 
@@ -66,12 +70,16 @@ func printHelp() {
 Commands:
   (default)    Run the LSP server over stdio
   parse        Parse CFML files and report timing
+  scan         Scan CFML files and report parse errors
   format       Format CFML files (stdout or in-place with -w)
   version      Print version
   help         Show this help
 
 Parse usage:
   cfmleditor-lsp parse <file-or-dir> [...]
+
+Scan usage:
+  cfmleditor-lsp scan <file-or-dir> [...]
 
 Format usage:
   cfmleditor-lsp format [-w] <file> [...]
@@ -235,6 +243,10 @@ func cmdParse(args []string) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", f, err)
 
+			continue
+		}
+
+		if isBinary(content) {
 			continue
 		}
 

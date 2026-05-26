@@ -102,6 +102,10 @@ func (s *Server) indexWorkspace() {
 				return
 			}
 
+			if IsBinary(data) {
+				return
+			}
+
 			pr := s.parseContentForIndex(uri.File(f), string(data))
 			results <- parseResult{fileURI: uri.File(f), pr: pr, file: f, persistent: pr.Persistent}
 		}()
@@ -202,6 +206,10 @@ func (s *Server) indexRoot(root string) {
 			data, err := s.FS.ReadFile(path)
 			if err != nil {
 				return err
+			}
+
+			if IsBinary(data) {
+				return nil
 			}
 
 			content := string(data)

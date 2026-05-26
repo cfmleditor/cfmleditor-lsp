@@ -106,6 +106,22 @@ func isCFMLFile(path string) bool {
 	return false
 }
 
+// IsBinary returns true if data appears to be binary (contains null bytes in the first 512 bytes).
+func IsBinary(data []byte) bool {
+	n := 512
+	if len(data) < n {
+		n = len(data)
+	}
+
+	for i := 0; i < n; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isCFCFile returns true if the path/URI refers to a CFC file.
 func isCFCFile(path string) bool {
 	return len(path) > 4 && path[len(path)-4] == '.' &&
@@ -136,7 +152,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: true},
 		CodeActionProvider:      true,
 		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace"},
 		},
 		Workspace: &protocol.ServerCapabilitiesWorkspace{
 			WorkspaceFolders: &protocol.ServerCapabilitiesWorkspaceFolders{

@@ -35,10 +35,12 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 	}
 
 	var result string
+
 	if strings.Contains(component, "|") {
 		for _, alt := range strings.Split(component, "|") {
 			if p := r.componentPathUncached(alt, baseDir); p != "" {
 				result = p
+
 				break
 			}
 		}

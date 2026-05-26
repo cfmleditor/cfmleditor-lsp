@@ -995,6 +995,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		})
 
 		return reply(ctx, mermaid, nil)
+	case "cfmleditor.scanWorkspace":
+		s.safeGo("scanWorkspace", func() { s.scanWorkspace(ctx) })
+
+		return reply(ctx, nil, nil)
 	default:
 		return reply(ctx, nil, fmt.Errorf("unknown command: %s", params.Command))
 	}
