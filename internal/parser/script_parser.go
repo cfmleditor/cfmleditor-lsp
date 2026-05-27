@@ -100,6 +100,18 @@ func (p *scriptParser) parseFunction(startTok Token, _ string, _ string) {
 
 	args := p.parseArgList()
 
+	// Create component refs for arguments with component-like types
+	for _, a := range args {
+		if isComponentType(a.Type) {
+			p.refs = append(p.refs, ComponentRef{
+				Variable:  a.Name,
+				Component: a.Type,
+				URI:       uriFromString(p.fileURI),
+				Line:      uint32(p.baseLine + startTok.Line),
+			})
+		}
+	}
+
 	fd := FunctionDef{
 		Name:      nameTok.Value,
 		URI:       uriFromString(p.fileURI),

@@ -1094,16 +1094,23 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 	f.writeIndent()
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 
-	// Emit everything after the opening ">" verbatim (body + closing tag)
+	// Find the body node and emit it verbatim
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
-		if c.Kind() == ">" {
-			f.write(string(f.src[c.EndByte():n.EndByte()]))
-			f.write("\n")
 
-			return
+		kind := c.Kind()
+		switch kind {
+		case "cf_savecontent_body", "cf_savecontent_body_html",
+			"cf_savecontent_body_script", "cf_savecontent_body_css",
+			"cf_savecontent_body_xml", "cf_savecontent_body_sql",
+			"cf_savecontent_body_raw":
+			f.write(string(f.src[c.StartByte():c.EndByte()]))
 		}
 	}
+
+	// Emit closing tag
+	f.write("</" + name + ">")
+	f.write("\n")
 }
 
 // normalizeCond collapses internal newlines and leading whitespace in a

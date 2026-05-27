@@ -203,6 +203,19 @@ func (p *shallowScriptParser) parseFunction(startTok Token, access string, retur
 	args := p.parseArgList()
 
 	funcLine := p.baseLine + startTok.Line
+
+	// Create component refs for arguments with component-like types
+	for _, a := range args {
+		if isComponentType(a.Type) {
+			p.refs = append(p.refs, ComponentRef{
+				Variable:  a.Name,
+				Component: a.Type,
+				URI:       uriFromString(p.fileURI),
+				Line:      uint32(funcLine),
+			})
+		}
+	}
+
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      nameTok.Value,
 		URI:       uriFromString(p.fileURI),
@@ -238,17 +251,28 @@ func (p *shallowScriptParser) parseArgList() []Argument {
 
 		idents := []string{tok.Value}
 
+	loop:
 		for {
 			peek := p.sc.PeekSkipComments()
-			if peek.Kind == TokIdent {
+			switch peek.Kind { //nolint:exhaustive // only care about dot and ident
+			case TokDot:
+				p.sc.NextSkipComments() // consume dot
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					idents[len(idents)-1] += "." + next.Value
+				}
+			case TokIdent:
 				p.sc.NextSkipComments()
 
 				idents = append(idents, peek.Value)
 				if len(idents) == 3 {
-					break
+					break loop
 				}
-			} else {
-				break
+			default:
+				break loop
 			}
 		}
 

@@ -636,7 +636,7 @@ func TestFindUnclosedTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findUnclosedTags(tt.content, 0, tt.line, tt.char)
+			got := parser.FindUnclosedTags(tt.content, 0, tt.line, tt.char)
 			if len(got) != len(tt.want) {
 				t.Fatalf("findUnclosedTags() = %v, want %v", got, tt.want)
 			}
@@ -668,9 +668,9 @@ func TestFindEnclosingTag(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findEnclosingTag(tt.content, tt.line, tt.char)
+			got := parser.FindEnclosingTag(tt.content, tt.line, tt.char)
 			if got != tt.want {
-				t.Errorf("findEnclosingTag() = %q, want %q", got, tt.want)
+				t.Errorf("parser.FindEnclosingTag() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -3643,8 +3643,8 @@ func TestIsCFMLFile(t *testing.T) {
 		{"abc", false},
 	}
 	for _, tt := range tests {
-		if got := isCFMLFile(tt.path); got != tt.want {
-			t.Errorf("isCFMLFile(%q) = %v, want %v", tt.path, got, tt.want)
+		if got := cfpath.IsCFMLFile(tt.path); got != tt.want {
+			t.Errorf("cfpath.IsCFMLFile(%q) = %v, want %v", tt.path, got, tt.want)
 		}
 	}
 }
@@ -3660,8 +3660,8 @@ func TestIsCFCFile(t *testing.T) {
 		{"file:///test.js", false},
 	}
 	for _, tt := range tests {
-		if got := isCFCFile(tt.path); got != tt.want {
-			t.Errorf("isCFCFile(%q) = %v, want %v", tt.path, got, tt.want)
+		if got := cfpath.IsCFCFile(tt.path); got != tt.want {
+			t.Errorf("cfpath.IsCFCFile(%q) = %v, want %v", tt.path, got, tt.want)
 		}
 	}
 }

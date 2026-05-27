@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -58,7 +59,7 @@ func cmdScan(args []string) {
 			continue
 		}
 
-		if isBinary(content) {
+		if cfpath.IsBinary(content) {
 			continue
 		}
 

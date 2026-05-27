@@ -96,6 +96,66 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 	return defs
 }
 
+// LookupFuncWithExtends searches for a function in cfcPath, walking the extends chain.
+func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.FunctionDef {
+	seen := make(map[string]bool)
+	for cfcPath != "" && !seen[cfcPath] {
+		seen[cfcPath] = true
+		cfcURI := uri.URI("file://" + cfcPath)
+
+		defs := r.EnsureIndexed(cfcPath)
+		for _, d := range defs {
+			if strings.EqualFold(d.Name, funcName) {
+				return d
+			}
+		}
+
+		// Get extends from parse result
+		data, err := r.FS.ReadFile(cfcPath)
+		if err != nil {
+			break
+		}
+
+		pr := parser.Parse(cfcURI, string(data))
+		if pr.Extends == "" {
+			break
+		}
+
+		baseDir := filepath.Dir(cfcPath)
+		cfcPath = r.ComponentPath(pr.Extends, baseDir)
+	}
+
+	return nil
+}
+
+// ResolveFunc finds a function definition by component path and function name,
+// handling pipe-separated alternatives, absolute paths, and the extends chain.
+func (r *Resolver) ResolveFunc(component, funcName, baseDir string) *parser.FunctionDef {
+	alternatives := []string{component}
+	if strings.Contains(component, "|") {
+		alternatives = strings.Split(component, "|")
+	}
+
+	for _, alt := range alternatives {
+		var cfcPath string
+		if filepath.IsAbs(alt) {
+			cfcPath = alt
+		} else {
+			cfcPath = r.ComponentPath(alt, baseDir)
+		}
+
+		if cfcPath == "" {
+			continue
+		}
+
+		if d := r.LookupFuncWithExtends(cfcPath, funcName); d != nil {
+			return d
+		}
+	}
+
+	return nil
+}
+
 // HasFunction returns true if the component has a function with the given name.
 func (r *Resolver) HasFunction(component, funcName, baseDir string) bool {
 	cfcPath := r.ComponentPath(component, baseDir)

@@ -54,6 +54,9 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 	srv.setDocument(docURI, content)
 	pr := parser.Parse(docURI, content, srv.cfResolvers())
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.mu.Lock()
+	srv.parseResults[docURI] = pr
+	srv.mu.Unlock()
 
 	return docURI
 }
@@ -365,4 +368,54 @@ func TestDefinitionTestdata_CfModuleTemplate(t *testing.T) {
 	// Line 4: '<cfmodule template="includes/header.cfm">' — cursor on path
 	result := definitionAt(t, srv, docURI, 4, 25)
 	assertLocationFile(t, result, "header.cfm")
+}
+
+func TestDefinitionTestdata_UnqualifiedInherited(t *testing.T) {
+	srv := newTestdataServer()
+	openTestdataFile(t, srv, "models/Base.cfc")
+	openTestdataFile(t, srv, "models/Widget.cfc")
+	docURI := openTestdataFile(t, srv, "ExtendsTest.cfc")
+
+	// Line 4: "var html = render();" — inherited from Widget
+	assertLocationFile(t, definitionAt(t, srv, docURI, 4, 20), "Widget.cfc")
+}
+
+func TestDefinitionTestdata_UnqualifiedInheritedGrandparent(t *testing.T) {
+	srv := newTestdataServer()
+	openTestdataFile(t, srv, "models/Base.cfc")
+	openTestdataFile(t, srv, "models/Widget.cfc")
+	docURI := openTestdataFile(t, srv, "ExtendsTest.cfc")
+
+	// Line 6: "var name = getClassName();" — inherited from Base (grandparent)
+	assertLocationFile(t, definitionAt(t, srv, docURI, 6, 20), "Base.cfc")
+}
+
+func TestDefinitionTestdata_SuperMethod(t *testing.T) {
+	srv := newTestdataServer()
+	openTestdataFile(t, srv, "models/Base.cfc")
+	openTestdataFile(t, srv, "models/Widget.cfc")
+	docURI := openTestdataFile(t, srv, "ExtendsTest.cfc")
+
+	// Line 8: "var s = super.render();" — super resolves to Widget
+	assertLocationFile(t, definitionAt(t, srv, docURI, 8, 23), "Widget.cfc")
+}
+
+func TestDefinitionTestdata_TypedArgMethod(t *testing.T) {
+	srv := newTestdataServer()
+	openTestdataFile(t, srv, "models/Base.cfc")
+	openTestdataFile(t, srv, "models/Widget.cfc")
+	docURI := openTestdataFile(t, srv, "ExtendsTest.cfc")
+
+	// Line 15: "var html = arguments.widget.render();" — typed arg models.Widget
+	assertLocationFile(t, definitionAt(t, srv, docURI, 15, 37), "Widget.cfc")
+}
+
+func TestDefinitionTestdata_TypedArgInheritedMethod(t *testing.T) {
+	srv := newTestdataServer()
+	openTestdataFile(t, srv, "models/Base.cfc")
+	openTestdataFile(t, srv, "models/Widget.cfc")
+	docURI := openTestdataFile(t, srv, "ExtendsTest.cfc")
+
+	// Line 17: "var name = arguments.widget.getClassName();" — inherited from Base
+	assertLocationFile(t, definitionAt(t, srv, docURI, 17, 37), "Base.cfc")
 }

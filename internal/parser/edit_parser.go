@@ -475,3 +475,79 @@ func CountNewlines(s string) int {
 
 	return n
 }
+
+// ResolverArgAtCursor checks if the cursor is inside a string argument of a
+// resolver-matched call (e.g. getService("UserService")). Returns the resolved
+// component dot-path or empty string.
+func ResolverArgAtCursor(content string, line, char int, resolvers []Resolver) string {
+	if len(resolvers) == 0 {
+		return ""
+	}
+
+	lineText := LineTextAt(content, line)
+	if lineText == "" {
+		return ""
+	}
+
+	pos := min(char, len(lineText))
+	qStart := -1
+
+	var quote byte
+
+	for i := pos - 1; i >= 0; i-- {
+		if lineText[i] == '"' || lineText[i] == '\'' {
+			qStart = i
+			quote = lineText[i]
+
+			break
+		}
+	}
+
+	if qStart < 0 {
+		return ""
+	}
+
+	qEnd := -1
+
+	for i := qStart + 1; i < len(lineText); i++ {
+		if lineText[i] == quote {
+			qEnd = i
+
+			break
+		}
+	}
+
+	if qEnd < 0 || pos <= qStart || pos > qEnd {
+		return ""
+	}
+
+	parenIdx := -1
+
+	for i := qStart - 1; i >= 0; i-- {
+		if lineText[i] == '(' {
+			parenIdx = i
+
+			break
+		}
+	}
+
+	if parenIdx < 0 {
+		return ""
+	}
+
+	funcEnd := parenIdx
+
+	funcStart := funcEnd
+	for funcStart > 0 && IsWordChar(lineText[funcStart-1]) {
+		funcStart--
+	}
+
+	if funcStart == funcEnd {
+		return ""
+	}
+
+	value := lineText[qStart+1 : qEnd]
+	callExpr := lineText[funcStart:funcEnd] + "(\"" + value + "\")"
+
+	return ResolveFromCall(callExpr, resolvers)
+}

@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -57,6 +56,8 @@ type Server struct {
 	funcRanges               map[uri.URI][]cache.FuncRange   // cached function line ranges per file
 	cacheTimers              map[uri.URI]*time.Timer         // debounce timers for completion cache rebuild
 	parseResults             map[uri.URI]*parser.ParseResult // cached parse results per file
+	lastResolveKey           string                          // dedup key for hover/definition (uri:line:char)
+	lastResolveDef           *parser.FunctionDef             // cached result
 }
 
 // NewServer creates a new LSP server. If sharedIndex is non-nil it is used
@@ -81,51 +82,6 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		changeCount:       make(map[uri.URI]int),
 		changeWindowStart: make(map[uri.URI]time.Time),
 	}
-}
-
-// isCFMLFile returns true if the path/URI refers to a CFML file (.cfc, .cfm, .cfml, .cfs).
-func isCFMLFile(path string) bool {
-	if len(path) < 4 {
-		return false
-	}
-	// Check last char first as a fast reject
-	end := path[len(path)-1]
-	switch end | 0x20 {
-	case 'c': // .cfc
-		return len(path) > 4 && path[len(path)-4] == '.' &&
-			(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
-	case 'm': // .cfm
-		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
-	case 'l': // .cfml
-		return len(path) > 5 && path[len(path)-5] == '.' && (path[len(path)-4]|0x20) == 'c' &&
-			(path[len(path)-3]|0x20) == 'f' && (path[len(path)-2]|0x20) == 'm'
-	case 's': // .cfs
-		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
-	}
-
-	return false
-}
-
-// IsBinary returns true if data appears to be binary (contains null bytes in the first 512 bytes).
-func IsBinary(data []byte) bool {
-	n := 512
-	if len(data) < n {
-		n = len(data)
-	}
-
-	for i := 0; i < n; i++ {
-		if data[i] == 0 {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isCFCFile returns true if the path/URI refers to a CFC file.
-func isCFCFile(path string) bool {
-	return len(path) > 4 && path[len(path)-4] == '.' &&
-		(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f' && (path[len(path)-1]|0x20) == 'c'
 }
 
 func (s *Server) capabilities() protocol.ServerCapabilities {
@@ -296,6 +252,8 @@ func (s *Server) setDocument(docURI uri.URI, content string) {
 	defer s.mu.Unlock()
 
 	s.documents[docURI] = content
+	s.lastResolveKey = ""
+	s.lastResolveDef = nil
 }
 
 func (s *Server) removeDocument(docURI uri.URI) {
@@ -314,46 +272,11 @@ func (s *Server) isIncludedPath(rawURI string) bool {
 	filePath := strings.TrimPrefix(rawURI, "file://")
 	// If index globs are defined, match against them
 	if len(s.IndexGlobs) > 0 {
-		return matchesGlob(filePath, s.IndexGlobs)
+		return cfpath.MatchesGlob(filePath, s.IndexGlobs)
 	}
 	// Otherwise, any .cfc under a workspace folder is included
 	for _, f := range s.WorkspaceFolders {
 		if strings.HasPrefix(filePath, f+"/") {
-			return true
-		}
-	}
-
-	return false
-}
-
-func matchesGlob(filePath string, globs []string) bool {
-	for _, g := range globs {
-		if !strings.Contains(g, "**") {
-			if matched, _ := filepath.Match(g, filePath); matched {
-				return true
-			}
-
-			if strings.HasPrefix(filePath, g+"/") || filePath == g {
-				return true
-			}
-
-			continue
-		}
-
-		idx := strings.Index(g, "**")
-		base := filepath.Clean(g[:idx])
-		suffix := g[idx+2:]
-		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
-
-		if !strings.HasPrefix(filePath, base+"/") && filePath != base {
-			continue
-		}
-
-		if suffix == "" {
-			return true
-		}
-
-		if matched, _ := filepath.Match(suffix, filepath.Base(filePath)); matched {
 			return true
 		}
 	}
@@ -412,15 +335,3 @@ func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.P
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{Shallow: true})
 }
 
-func resolveComponentFromCall(expr string, resolvers []config.Resolver) string {
-	if len(resolvers) == 0 {
-		return ""
-	}
-
-	cfr := make([]parser.Resolver, len(resolvers))
-	for i, r := range resolvers {
-		cfr[i] = parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix}
-	}
-
-	return parser.ResolveFromCall(expr, cfr)
-}

@@ -129,13 +129,13 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 	tagName := ""
 	if hasDoc {
-		tagName = findEnclosingTag(content, int(params.Position.Line), int(params.Position.Character))
+		tagName = parser.FindEnclosingTag(content, int(params.Position.Line), int(params.Position.Character))
 	}
 
 	triggeredByTag := (params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		params.Context.TriggerCharacter == "<") ||
-		(hasDoc && strings.HasSuffix(textBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<"))
+		(hasDoc && strings.HasSuffix(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<"))
 
 	triggeredByClose := params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
@@ -144,7 +144,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	triggeredByDot := (params.Context != nil &&
 		params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		params.Context.TriggerCharacter == ".") ||
-		(hasDoc && wordBeforeDot(content, int(params.Position.Line), int(params.Position.Character)) != "")
+		(hasDoc && parser.WordBeforeDot(content, int(params.Position.Line), int(params.Position.Character)) != "")
 
 	closing := false
 	typingTag := false
@@ -152,13 +152,13 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	inAttrValue := false
 
 	if hasDoc {
-		closing = isClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
+		closing = parser.IsClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
 		if !closing && tagName == "" {
-			typingTag = isTypingTagName(content, int(params.Position.Line), int(params.Position.Character))
+			typingTag = parser.IsTypingTagName(content, int(params.Position.Line), int(params.Position.Character))
 		}
 
-		inHashExpr = isInsideHashExpr(content, int(params.Position.Line), int(params.Position.Character))
-		inAttrValue = isInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
+		inHashExpr = parser.IsInsideHashExpr(content, int(params.Position.Line), int(params.Position.Character))
+		inAttrValue = parser.IsInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
 	}
 
 	contextDur := time.Since(t0)
@@ -191,7 +191,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		items = s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))
 	case inAttrValue:
 		if CompletionAttributes {
-			attrName := findCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
+			attrName := parser.FindCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
 			if attrName != "" && tagName != "" {
 				attrs := docs.TagParams(tagName)
 				if attrs == nil {
@@ -290,7 +290,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 			s.log.Debug("completion: closeTags", cflog.Duration("dur", time.Since(t1)))
 		}
-	case tagName != "" && !isSpecialTag(tagName):
+	case tagName != "" && !parser.IsSpecialTag(tagName):
 		if CompletionAttributes {
 			t1 := time.Now()
 
@@ -320,7 +320,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			TextEdit: &protocol.TextEdit{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: params.Position.Line, Character: uint32(int(params.Position.Character) - (len(textBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))) - strings.LastIndex(textBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<")))},
+					Start: protocol.Position{Line: params.Position.Line, Character: uint32(int(params.Position.Character) - (len(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))) - strings.LastIndex(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<")))},
 					End:   params.Position,
 				},
 				NewText: "<cfelseif $1",
@@ -427,165 +427,6 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}, nil)
 }
 
-// isClosingTagContext returns true if the cursor is right after "</".
-func isClosingTagContext(content string, line, char int) bool {
-	textBefore := textBeforeCursor(content, line, char)
-
-	return strings.HasSuffix(textBefore, "</")
-}
-
-// isInsideHashExpr returns true if the cursor is inside a #...# expression.
-func isInsideHashExpr(content string, line, char int) bool {
-	textBefore := textBeforeCursor(content, line, char)
-	// Find the relevant context boundary — last tag close or line start
-	boundary := strings.LastIndex(textBefore, ">")
-	lastOpen := strings.LastIndex(textBefore, "<")
-
-	if lastOpen > boundary {
-		// Inside an unclosed tag — count from tag open
-		boundary = lastOpen
-	}
-
-	if boundary == -1 {
-		boundary = 0
-	}
-	// In script context, limit to current line
-	lastNL := strings.LastIndex(textBefore, "\n")
-	if lastNL > boundary {
-		boundary = lastNL
-	}
-
-	return strings.Count(textBefore[boundary:], "#")%2 == 1
-}
-
-// isInsideAttrValue returns true if the cursor is inside a quoted attribute value.
-func isInsideAttrValue(content string, line, char int) bool {
-	textBefore := textBeforeCursor(content, line, char)
-	// Find the last '<' not closed by '>'
-	lastOpen := strings.LastIndex(textBefore, "<")
-	if lastOpen == -1 {
-		return false
-	}
-
-	afterOpen := textBefore[lastOpen:]
-	if strings.Contains(afterOpen, ">") {
-		return false
-	}
-	// Count quotes after the tag open to determine if we're inside a string
-	inSingle := false
-	inDouble := false
-
-	for _, ch := range afterOpen {
-		switch {
-		case ch == '"' && !inSingle:
-			inDouble = !inDouble
-		case ch == '\'' && !inDouble:
-			inSingle = !inSingle
-		}
-	}
-
-	return inSingle || inDouble
-}
-
-// findCurrentAttr returns the attribute name whose value the cursor is inside.
-func findCurrentAttr(content string, line, char int) string {
-	textBefore := textBeforeCursor(content, line, char)
-
-	lastOpen := strings.LastIndex(textBefore, "<")
-	if lastOpen == -1 {
-		return ""
-	}
-
-	afterOpen := textBefore[lastOpen:]
-	// Find the last '=' before an open quote that isn't closed
-	inSingle := false
-	inDouble := false
-	lastEq := -1
-
-	for i, ch := range afterOpen {
-		switch {
-		case ch == '=' && !inSingle && !inDouble:
-			lastEq = i
-		case ch == '"' && !inSingle:
-			inDouble = !inDouble
-		case ch == '\'' && !inDouble:
-			inSingle = !inSingle
-		}
-	}
-
-	if lastEq == -1 {
-		return ""
-	}
-	// Extract attribute name before the '='
-	before := strings.TrimRight(afterOpen[:lastEq], " \t")
-	start := strings.LastIndexAny(before, " \t\r\n") + 1
-
-	return strings.ToLower(before[start:])
-}
-
-// isTypingTagName returns true if the cursor is inside an incomplete tag name (e.g. "<cfif").
-func isTypingTagName(content string, line, char int) bool {
-	textBefore := textBeforeCursor(content, line, char)
-
-	lastOpen := strings.LastIndex(textBefore, "<")
-	if lastOpen == -1 {
-		return false
-	}
-
-	after := textBefore[lastOpen:]
-	if strings.Contains(after, ">") {
-		return false
-	}
-
-	rest := after[1:]
-	if len(rest) == 0 || rest[0] == '/' || rest[0] == '!' {
-		return false
-	}
-
-	if strings.ContainsAny(rest, " \t\r\n/>") {
-		return false
-	}
-
-	return true
-}
-
-func isVoidTag(name string) bool {
-	switch name {
-	case "cfparam", "cfreturn", "cfargument", "cfproperty", "cfrethrow", "cfthrow", "cfschedule", "cfhttpparam", "cfqueryparam", "cftimer", "cfflush", "cfcache", "cflogout", "cfprocessingdirective", "cfzipelement",
-		"cfbreak", "cfcontinue", "cfabort", "cfexit", "cfinclude", "cflocation", "cfheader", "cfdump",
-		"cfcontent", "cfcookie", "cflog", "cffile", "cfdirectory", "cfsetting", "cfwddx",
-		"cfhtmlhead", "cfhtmlbody", "cfauthenticate", "cfntauthenticate", "cfreportparam",
-		"cfprocparam", "cfprocresult", "cfinvokeargument", "cfspreadsheet", "cfpdfparam",
-		"cfpdfformparam", "cfpdfsubform", "cfmailparam", "cfgridrow", "cfgridupdate", "cfimage",
-		"cftreeitem", "cfmenuitem", "cfmaplocation", "cfpresenteritem", "cfimport", "cftrace",
-		"cfgridcolumn",
-		"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr":
-		return true
-	}
-
-	return false
-}
-
-func isSpecialTag(name string) bool {
-	switch name {
-	case "cfset", "cfif", "cfelse", "cfelseif":
-		return true
-	}
-
-	return false
-}
-
-// isSubordinateTag returns true for tags that share another tag's closing tag
-// (e.g. cfelse and cfelseif are closed by </cfif>).
-func isSubordinateTag(name string) bool {
-	switch name {
-	case "cfelse", "cfelseif":
-		return true
-	}
-
-	return false
-}
-
 // findUnclosedTagsScoped scans for unclosed tags within the enclosing function body,
 // falling back to the full file if the cursor is outside any function.
 func (s *Server) findUnclosedTagsScoped(content string, docURI uri.URI, line, char int) []string {
@@ -602,154 +443,7 @@ func (s *Server) findUnclosedTagsScoped(content string, docURI uri.URI, line, ch
 		startLine = funcs[idx].Start
 	}
 
-	return findUnclosedTags(content, startLine, line, char)
-}
-
-// findUnclosedTags scans the document from startLine to the cursor and returns tag names
-// that have been opened but not yet closed, most recent first.
-func findUnclosedTags(content string, startLine, line, char int) []string {
-	text := textBeforeCursor(content, line, char)
-	// Trim to startLine offset
-	if startLine > 0 {
-		offset := 0
-		for i := 0; i < startLine; i++ {
-			idx := strings.IndexByte(text[offset:], '\n')
-			if idx < 0 {
-				offset = len(text)
-
-				break
-			}
-
-			offset += idx + 1
-		}
-
-		text = text[offset:]
-	}
-
-	var stack []string
-
-	i := 0
-	for i < len(text) {
-		idx := strings.Index(text[i:], "<")
-		if idx == -1 {
-			break
-		}
-
-		i += idx + 1
-		if i >= len(text) {
-			break
-		}
-
-		if text[i] == '/' {
-			// Closing tag
-			i++
-
-			end := strings.IndexAny(text[i:], "> \t\r\n")
-			if end == -1 {
-				break
-			}
-
-			closeName := toLowerASCII(text[i : i+end])
-			// Pop matching tag from stack
-			for j := len(stack) - 1; j >= 0; j-- {
-				if stack[j] == closeName {
-					stack = append(stack[:j], stack[j+1:]...)
-
-					break
-				}
-			}
-
-			i += end
-		} else {
-			// Opening tag
-			end := strings.IndexAny(text[i:], " \t\r\n/>")
-			if end == -1 {
-				break
-			}
-
-			name := toLowerASCII(text[i : i+end])
-			if name == "" || name[0] == '!' || name == "cfset" || isSubordinateTag(name) || isVoidTag(name) {
-				i += end
-
-				continue
-			}
-
-			// Check for self-closing />
-			closeIdx := strings.Index(text[i:], ">")
-			if closeIdx != -1 && closeIdx > 0 && text[i+closeIdx-1] == '/' {
-				i += closeIdx + 1
-
-				continue
-			}
-
-			stack = append(stack, name)
-
-			if closeIdx != -1 {
-				i += closeIdx + 1
-			} else {
-				i += end
-			}
-		}
-	}
-
-	// Reverse so most recent unclosed tag is first
-	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
-		stack[i], stack[j] = stack[j], stack[i]
-	}
-
-	return stack
-}
-
-func textBeforeCursor(content string, line, char int) string {
-	offset := 0
-	for i := 0; i < line; i++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return content
-		}
-
-		offset += idx + 1
-	}
-
-	end := offset + char
-	if end > len(content) {
-		end = len(content)
-	}
-
-	return content[:end]
-}
-
-// findEnclosingTag scans backwards from the cursor position to determine
-// if the cursor is inside an open CFML tag (after the tag name and a space).
-// Returns the lowercase tag name if found, or empty string otherwise.
-func findEnclosingTag(content string, line, char int) string {
-	textBefore := textBeforeCursor(content, line, char)
-
-	// Find the last '<' that isn't closed by '>'
-	lastOpen := strings.LastIndex(textBefore, "<")
-	if lastOpen == -1 {
-		return ""
-	}
-
-	afterOpen := textBefore[lastOpen:]
-	if strings.Contains(afterOpen, ">") {
-		return ""
-	}
-
-	// Extract tag name: first word after '<'
-	rest := strings.TrimLeft(afterOpen[1:], " \t")
-
-	tagEnd := strings.IndexAny(rest, " \t\r\n/>")
-	if tagEnd == -1 {
-		return "" // still typing the tag name
-	}
-
-	tagName := strings.ToLower(rest[:tagEnd])
-	if tagName == "" || tagName[0] == '/' {
-		return ""
-	}
-
-	return tagName
+	return parser.FindUnclosedTags(content, startLine, line, char)
 }
 
 // duplicateGtCompletion offers to remove a duplicate '>' when the user types
@@ -1173,7 +867,7 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 // component ref, resolves the CFC path, and returns its function defs.
 func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem {
 	// Extract variable name before the dot
-	varName := wordBeforeDot(content, line, char)
+	varName := parser.WordBeforeDot(content, line, char)
 
 	// If no simple word, check for call expression before dot: e.g. getService("tours").
 	if varName == "" {
@@ -1200,7 +894,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 						fnStart++
 						callExpr := lineText[fnStart:dotPos]
 
-						comp := resolveComponentFromCall(callExpr, s.ComponentResolvers)
+						comp := parser.ResolveFromCall(callExpr, s.cfResolvers())
 						if comp != "" {
 							currentPath := strings.TrimPrefix(string(docURI), "file://")
 							baseDir := filepath.Dir(currentPath)
@@ -1241,7 +935,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	if ref != nil {
 		component = ref.Component
-	} else if comp := resolveComponentFromCall(varName, s.ComponentResolvers); comp != "" {
+	} else if comp := parser.ResolveFromCall(varName, s.cfResolvers()); comp != "" {
 		component = comp
 	} else {
 		return nil
@@ -1416,8 +1110,6 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 	return items
 }
 
-// wordBeforeDot extracts the identifier immediately before the dot at the cursor.
-// scopePrefix returns a scope name with the configured case applied.
 // buildTagSnippet creates a snippet for a CF tag with required attributes as tab stops.
 func buildTagSnippet(tag *docs.Entry) string {
 	params := tag.Params
@@ -1452,51 +1144,5 @@ func (s *Server) scopePrefix(scope string) string {
 	}
 }
 
-func wordBeforeDot(content string, line, char int) string {
-	lineText := parser.LineTextAt(content, line)
-	if lineText == "" && line > 0 {
-		return ""
-	}
-	// char is after the dot, so dot is at char-1
-	dotPos := char - 1
-	if dotPos < 1 || dotPos >= len(lineText) || lineText[dotPos] != '.' {
-		return ""
-	}
 
-	end := dotPos
 
-	start := end - 1
-	for start >= 0 && parser.IsWordChar(lineText[start]) {
-		start--
-	}
-
-	start++
-	if start == end {
-		return ""
-	}
-
-	return lineText[start:end]
-}
-
-// toLowerASCII lowercases an ASCII string using a stack buffer for short strings.
-func toLowerASCII(s string) string {
-	var buf [32]byte
-
-	var b []byte
-	if len(s) <= len(buf) {
-		b = buf[:len(s)]
-	} else {
-		b = make([]byte, len(s))
-	}
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 0x20
-		}
-
-		b[i] = c
-	}
-
-	return string(b)
-}

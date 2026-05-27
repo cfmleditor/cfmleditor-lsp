@@ -371,3 +371,45 @@ func containsFold(s, substr string) bool {
 
 	return false
 }
+
+// isComponentType returns true if a type string looks like a component path
+// (contains a dot) rather than a primitive type.
+func isComponentType(t string) bool {
+	if t == "" {
+		return false
+	}
+
+	return strings.Contains(t, ".")
+}
+
+// FormatHover returns a markdown-formatted hover string for the function definition.
+func (def *FunctionDef) FormatHover() string {
+	var b strings.Builder
+
+	b.WriteString("**")
+	b.WriteString(def.Name)
+	b.WriteString("**\n\n```cfml\n")
+	b.WriteString(def.Name)
+	b.WriteString("(")
+
+	for i, arg := range def.Arguments {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		if arg.Required {
+			b.WriteString("required ")
+		}
+
+		if arg.Type != "" {
+			b.WriteString(arg.Type)
+			b.WriteString(" ")
+		}
+
+		b.WriteString(arg.Name)
+	}
+
+	b.WriteString(")\n```")
+
+	return b.String()
+}

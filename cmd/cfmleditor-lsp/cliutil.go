@@ -48,19 +48,3 @@ func loadResolversFromConfig(paths []string) []parser.Resolver {
 
 	return nil
 }
-
-// isBinary returns true if data appears to be binary (contains null bytes in the first 512 bytes).
-func isBinary(data []byte) bool {
-	n := 512
-	if len(data) < n {
-		n = len(data)
-	}
-
-	for i := 0; i < n; i++ {
-		if data[i] == 0 {
-			return true
-		}
-	}
-
-	return false
-}

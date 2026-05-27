@@ -255,3 +255,92 @@ func ExpandGlob(pattern string) []string {
 
 	return out
 }
+
+// IsCFMLFile returns true if the path/URI refers to a CFML file (.cfc, .cfm, .cfml, .cfs).
+func IsCFMLFile(path string) bool {
+	if len(path) < 4 {
+		return false
+	}
+
+	end := path[len(path)-1]
+	switch end | 0x20 {
+	case 'c': // .cfc
+		return len(path) > 4 && path[len(path)-4] == '.' &&
+			(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	case 'm': // .cfm
+		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	case 'l': // .cfml
+		return len(path) > 5 && path[len(path)-5] == '.' && (path[len(path)-4]|0x20) == 'c' &&
+			(path[len(path)-3]|0x20) == 'f' && (path[len(path)-2]|0x20) == 'm'
+	case 's': // .cfs
+		return path[len(path)-4] == '.' && (path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f'
+	}
+
+	return false
+}
+
+// IsCFCFile returns true if the path/URI refers to a CFC file.
+func IsCFCFile(path string) bool {
+	return len(path) > 4 && path[len(path)-4] == '.' &&
+		(path[len(path)-3]|0x20) == 'c' && (path[len(path)-2]|0x20) == 'f' && (path[len(path)-1]|0x20) == 'c'
+}
+
+// IsBinary returns true if data appears to be binary (contains null bytes in the first 512 bytes).
+func IsBinary(data []byte) bool {
+	n := 512
+	if len(data) < n {
+		n = len(data)
+	}
+
+	for i := 0; i < n; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// MatchesGlob checks whether a file path matches any of the given glob patterns.
+func MatchesGlob(filePath string, globs []string) bool {
+	for _, g := range globs {
+		if !strings.Contains(g, "**") {
+			if matched, _ := filepath.Match(g, filePath); matched {
+				return true
+			}
+
+			if strings.HasPrefix(filePath, g+"/") || filePath == g {
+				return true
+			}
+
+			continue
+		}
+
+		idx := strings.Index(g, "**")
+		base := filepath.Clean(g[:idx])
+		suffix := g[idx+2:]
+		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
+
+		if !strings.HasPrefix(filePath, base+"/") && filePath != base {
+			continue
+		}
+
+		if suffix == "" {
+			return true
+		}
+
+		if matched, _ := filepath.Match(suffix, filepath.Base(filePath)); matched {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CfcNameFromURI extracts the CFC filename without extension from a URI.
+func CfcNameFromURI(fileURI string) string {
+	path := strings.TrimPrefix(fileURI, "file://")
+	base := filepath.Base(path)
+
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}

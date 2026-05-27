@@ -41,9 +41,13 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			return reply(ctx, &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: formatFuncHover(def),
+					Value: def.FormatHover(),
 				},
 			}, nil)
+		}
+
+		if !s.GlobalFunctionResolution {
+			return reply(ctx, nil, nil)
 		}
 	}
 
@@ -89,7 +93,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			return reply(ctx, &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: formatFuncHover(def),
+					Value: def.FormatHover(),
 				},
 			}, nil)
 		}
@@ -99,11 +103,46 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 }
 
 func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *parser.FunctionDef {
+	key := fmt.Sprintf("%s:%d:%s.%s", docURI, line, qualifier, funcName)
+
+	s.mu.RLock()
+
+	if s.lastResolveKey == key {
+		def := s.lastResolveDef
+		s.mu.RUnlock()
+
+		return def
+	}
+
+	s.mu.RUnlock()
+
+	def := s.doResolveUserFunc(qualifier, funcName, docURI, line)
+
+	s.mu.Lock()
+	s.lastResolveKey = key
+	s.lastResolveDef = def
+	s.mu.Unlock()
+
+	return def
+}
+
+func (s *Server) doResolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *parser.FunctionDef {
 	var comp string
 
 	switch {
+	case strings.EqualFold(qualifier, "super"):
+		// Resolve from parent component
+		s.mu.RLock()
+		pr := s.parseResults[docURI]
+		s.mu.RUnlock()
+
+		if pr == nil || pr.Extends == "" {
+			return nil
+		}
+
+		comp = pr.Extends
 	case strings.HasPrefix(qualifier, "~?"):
-		comp = resolveComponentFromCall(qualifier[2:], s.ComponentResolvers)
+		comp = parser.ResolveFromCall(qualifier[2:], s.cfResolvers())
 	case strings.HasPrefix(qualifier, "~"):
 		comp = qualifier[1:]
 	default:
@@ -116,7 +155,7 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 		if ref != nil {
 			comp = ref.Component
 		} else {
-			comp = resolveComponentFromCall(qualifier, s.ComponentResolvers)
+			comp = parser.ResolveFromCall(qualifier, s.cfResolvers())
 		}
 	}
 
@@ -127,47 +166,5 @@ func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, lin
 	currentPath := strings.TrimPrefix(string(docURI), "file://")
 	baseDir := filepath.Dir(currentPath)
 
-	cfcPath := s.getResolver().ComponentPath(comp, baseDir)
-	if cfcPath == "" {
-		return nil
-	}
-
-	for _, d := range s.getResolver().EnsureIndexed(cfcPath) {
-		if strings.EqualFold(d.Name, funcName) {
-			return d
-		}
-	}
-
-	return nil
-}
-
-func formatFuncHover(def *parser.FunctionDef) string {
-	var b strings.Builder
-
-	b.WriteString("**")
-	b.WriteString(def.Name)
-	b.WriteString("**\n\n```cfml\n")
-	b.WriteString(def.Name)
-	b.WriteString("(")
-
-	for i, arg := range def.Arguments {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-
-		if arg.Required {
-			b.WriteString("required ")
-		}
-
-		if arg.Type != "" {
-			b.WriteString(arg.Type)
-			b.WriteString(" ")
-		}
-
-		b.WriteString(arg.Name)
-	}
-
-	b.WriteString(")\n```")
-
-	return b.String()
+	return s.getResolver().ResolveFunc(comp, funcName, baseDir)
 }

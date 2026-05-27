@@ -135,7 +135,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	docURI := params.TextDocument.URI
 
-	if !isCFMLFile(string(docURI)) {
+	if !cfpath.IsCFMLFile(string(docURI)) {
 		return reply(ctx, nil, nil)
 	}
 
@@ -177,7 +177,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, nil)
 	}
 
-	if !isCFMLFile(string(docURI)) {
+	if !cfpath.IsCFMLFile(string(docURI)) {
 		return reply(ctx, nil, nil)
 	}
 
@@ -355,34 +355,9 @@ func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine i
 
 // applyEdit replaces the text in the given range with newText.
 func applyEdit(content string, r protocol.Range, newText string) string {
-	offset := positionToOffset(content, r.Start)
-	endOffset := positionToOffset(content, r.End)
-
-	return content[:offset] + newText + content[endOffset:]
+	return parser.ApplyEdit(content, int(r.Start.Line), int(r.Start.Character), int(r.End.Line), int(r.End.Character), newText)
 }
 
-// positionToOffset converts a line/character position to a byte offset.
-func positionToOffset(content string, pos protocol.Position) int {
-	line := int(pos.Line)
-	char := int(pos.Character)
-
-	offset := 0
-	for i := 0; i < line; i++ {
-		idx := strings.IndexByte(content[offset:], '\n')
-		if idx < 0 {
-			return len(content)
-		}
-
-		offset += idx + 1
-	}
-
-	offset += char
-	if offset > len(content) {
-		offset = len(content)
-	}
-
-	return offset
-}
 
 func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidCloseTextDocumentParams
@@ -426,7 +401,7 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 		cfpath.InvalidateAppMappingsCache()
 	}
 
-	if isCFMLFile(filePath) {
+	if cfpath.IsCFMLFile(filePath) {
 		s.safeGo("runDiagnostics", func() { s.runDiagnostics(ctx, docURI) })
 		s.safeGo("rebuildFileCompletionCache", func() { s.rebuildFileCompletionCache(docURI) })
 	}
@@ -497,11 +472,11 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
-	if !isCFMLFile(string(docURI)) {
+	if !cfpath.IsCFMLFile(string(docURI)) {
 		return
 	}
 
-	if isCFCFile(string(docURI)) && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
+	if cfpath.IsCFCFile(string(docURI)) && len(s.WorkspaceFolders) > 0 && !s.isIncludedPath(string(docURI)) {
 		return
 	}
 
@@ -510,17 +485,17 @@ func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
 
 // reindexFromParseResult updates the index using an existing ParseResult.
 func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) {
-	if !isCFMLFile(string(docURI)) {
+	if !cfpath.IsCFMLFile(string(docURI)) {
 		return
 	}
 
 	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
 	s.index.SetThisVars(docURI, pr.ThisVars())
 	// Only register as entity if within ORM scope and workspace
-	if isCFCFile(string(docURI)) && pr.Persistent {
+	if cfpath.IsCFCFile(string(docURI)) && pr.Persistent {
 		filePath := strings.TrimPrefix(string(docURI), "file://")
 		if s.isOrmPath(filePath) {
-			s.index.SetEntity(cfcNameFromURI(docURI), docURI)
+			s.index.SetEntity(cfpath.CfcNameFromURI(string(docURI)), docURI)
 		}
 	}
 }

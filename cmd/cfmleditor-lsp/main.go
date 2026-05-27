@@ -16,6 +16,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -246,7 +247,7 @@ func cmdParse(args []string) {
 			continue
 		}
 
-		if isBinary(content) {
+		if cfpath.IsBinary(content) {
 			continue
 		}
 

@@ -162,6 +162,18 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 
 	args := p.parseCFArguments(block)
 
+	// Create component refs for arguments with component-like types
+	for _, a := range args {
+		if isComponentType(a.Type) {
+			p.refs = append(p.refs, ComponentRef{
+				Variable:  a.Name,
+				Component: a.Type,
+				URI:       uriFromString(p.fileURI),
+				Line:      uint32(line),
+			})
+		}
+	}
+
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      name,
 		URI:       uriFromString(p.fileURI),

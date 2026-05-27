@@ -21,7 +21,7 @@ func (s *Server) indexWorkspace() {
 		if len(s.IndexGlobs) > 0 {
 			for _, g := range s.IndexGlobs {
 				for _, f := range expandGlob(g) {
-					if isCFCFile(f) {
+					if cfpath.IsCFCFile(f) {
 						files = append(files, f)
 					}
 				}
@@ -66,7 +66,7 @@ func (s *Server) indexWorkspace() {
 			s.index.SetThisVars(r.fileURI, r.pr.ThisVars())
 
 			if r.persistent && s.isOrmPath(r.file) {
-				s.index.SetEntity(cfcNameFromURI(r.fileURI), r.fileURI)
+				s.index.SetEntity(cfpath.CfcNameFromURI(string(r.fileURI)), r.fileURI)
 			}
 
 			indexed++
@@ -102,7 +102,7 @@ func (s *Server) indexWorkspace() {
 				return
 			}
 
-			if IsBinary(data) {
+			if cfpath.IsBinary(data) {
 				return
 			}
 
@@ -116,14 +116,6 @@ func (s *Server) indexWorkspace() {
 	indexWg.Wait()
 
 	s.log.Info("indexing complete", cflog.Int("files", indexed), cflog.Int("total", total), cflog.Duration("dur", time.Since(indexStart)))
-}
-
-// cfcNameFromURI extracts the CFC filename without extension from a URI.
-func cfcNameFromURI(fileURI uri.URI) string {
-	path := strings.TrimPrefix(string(fileURI), "file://")
-	base := filepath.Base(path)
-
-	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // isOrmPath returns true if the file path is within the ORM entity scope.
@@ -169,7 +161,7 @@ func (s *Server) collectCFCFiles(root string) []string {
 			return nil
 		}
 
-		if isCFCFile(path) {
+		if cfpath.IsCFCFile(path) {
 			files = append(files, path)
 		}
 
@@ -195,7 +187,7 @@ func (s *Server) indexRoot(root string) {
 			return nil
 		}
 
-		if isCFCFile(path) {
+		if cfpath.IsCFCFile(path) {
 			fileURI := uri.File(path)
 			// Skip files already open in the editor — their buffer
 			// content was indexed via didOpen and may be newer than disk.
@@ -208,7 +200,7 @@ func (s *Server) indexRoot(root string) {
 				return err
 			}
 
-			if IsBinary(data) {
+			if cfpath.IsBinary(data) {
 				return nil
 			}
 
@@ -218,7 +210,7 @@ func (s *Server) indexRoot(root string) {
 			s.index.SetThisVars(fileURI, pr.ThisVars())
 
 			if pr.Persistent && s.isOrmPath(path) {
-				s.index.SetEntity(cfcNameFromURI(fileURI), fileURI)
+				s.index.SetEntity(cfpath.CfcNameFromURI(string(fileURI)), fileURI)
 			}
 		}
 

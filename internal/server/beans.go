@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -34,7 +35,7 @@ func buildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 				return nil
 			}
 
-			if !isCFCFile(path) {
+			if !cfpath.IsCFCFile(path) {
 				return nil
 			}
 
