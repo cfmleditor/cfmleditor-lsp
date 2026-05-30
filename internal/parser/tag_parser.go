@@ -323,8 +323,8 @@ func (p *tagParser) parseCFProperty(tag string, line int) {
 
 func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 	// Find = and check what's after it
-	if i := strings.IndexByte(rest, '='); i >= 0 {
-		p.checkSetRHSStr(strings.TrimSpace(rest[i+1:]), varName, line)
+	if _, after, ok := strings.Cut(rest, "="); ok {
+		p.checkSetRHSStr(strings.TrimSpace(after), varName, line)
 	}
 }
 

@@ -60,23 +60,24 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 		builtinFuncItems = make([]protocol.CompletionItem, 0, len(fns)+len(scopes))
 
 		for _, fn := range fns {
-			insertText := fn.Name + "("
+			var insertText strings.Builder
+			insertText.WriteString(fn.Name + "(")
 
 			for i, p := range fn.Params {
 				if i > 0 {
-					insertText += ", "
+					insertText.WriteString(", ")
 				}
 
-				insertText += fmt.Sprintf("${%d:%s}", i+1, p.Name)
+				fmt.Fprintf(&insertText, "${%d:%s}", i+1, p.Name)
 			}
 
-			insertText += ")"
+			insertText.WriteString(")")
 			builtinFuncItems = append(builtinFuncItems, protocol.CompletionItem{
 				Label:            fn.Name,
 				Kind:             protocol.CompletionItemKindFunction,
 				Detail:           fn.Syntax,
 				Documentation:    fn.Description,
-				InsertText:       insertText,
+				InsertText:       insertText.String(),
 				InsertTextFormat: protocol.InsertTextFormatSnippet,
 				SortText:         SortBuiltinFuncs + fn.Name,
 			})
@@ -697,29 +698,32 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	}
 
 	for _, f := range pr.Funcs {
-		detail := f.Name + "("
+		var detail strings.Builder
+		detail.WriteString(f.Name + "(")
 		insertText := f.Name + "("
 
 		for i, arg := range f.Arguments {
 			if i > 0 {
-				detail += ", "
+				detail.WriteString(", ")
+
 				insertText += ", "
 			}
 
 			if arg.Type != "" {
-				detail += arg.Type + " "
+				detail.WriteString(arg.Type + " ")
 			}
 
-			detail += arg.Name
+			detail.WriteString(arg.Name)
 			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
 		}
 
-		detail += ")"
+		detail.WriteString(")")
+
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
 			Label:            f.Name,
 			Kind:             protocol.CompletionItemKindFunction,
-			Detail:           detail,
+			Detail:           detail.String(),
 			InsertText:       insertText,
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			SortText:         SortUserFunctions + f.Name,
@@ -741,25 +745,26 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	}
 
 	for _, f := range pr.Funcs {
-		detail := f.Name + "("
+		var detail strings.Builder
+		detail.WriteString(f.Name + "(")
 
 		for i, arg := range f.Arguments {
 			if i > 0 {
-				detail += ", "
+				detail.WriteString(", ")
 			}
 
 			if arg.Type != "" {
-				detail += arg.Type + " "
+				detail.WriteString(arg.Type + " ")
 			}
 
-			detail += arg.Name
+			detail.WriteString(arg.Name)
 		}
 
-		detail += ")"
+		detail.WriteString(")")
 		thisItems = append(thisItems, protocol.CompletionItem{
 			Label:    f.Name,
 			Kind:     protocol.CompletionItemKindMethod,
-			Detail:   detail,
+			Detail:   detail.String(),
 			SortText: SortUserFunctions + f.Name,
 		})
 	}
@@ -836,25 +841,26 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0, len(defs))
 
 	for _, d := range defs {
-		detail := d.Name + "("
+		var detail strings.Builder
+		detail.WriteString(d.Name + "(")
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
-				detail += ", "
+				detail.WriteString(", ")
 			}
 
 			if arg.Type != "" {
-				detail += arg.Type + " "
+				detail.WriteString(arg.Type + " ")
 			}
 
-			detail += arg.Name
+			detail.WriteString(arg.Name)
 		}
 
-		detail += ")"
+		detail.WriteString(")")
 		items = append(items, protocol.CompletionItem{
 			Label:    d.Name,
 			Kind:     protocol.CompletionItemKindMethod,
-			Detail:   detail,
+			Detail:   detail.String(),
 			SortText: SortUserFunctions + d.Name,
 		})
 	}
@@ -981,25 +987,26 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	}
 
 	for _, d := range defs {
-		detail := d.Name + "("
+		var detail strings.Builder
+		detail.WriteString(d.Name + "(")
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
-				detail += ", "
+				detail.WriteString(", ")
 			}
 
 			if arg.Type != "" {
-				detail += arg.Type + " "
+				detail.WriteString(arg.Type + " ")
 			}
 
-			detail += arg.Name
+			detail.WriteString(arg.Name)
 		}
 
-		detail += ")"
+		detail.WriteString(")")
 		items = append(items, protocol.CompletionItem{
 			Label:    d.Name,
 			Kind:     protocol.CompletionItemKindMethod,
-			Detail:   detail,
+			Detail:   detail.String(),
 			SortText: SortUserFunctions + d.Name,
 		})
 	}
@@ -1078,29 +1085,32 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 	items := make([]protocol.CompletionItem, 0, len(defs))
 
 	for _, d := range defs {
-		detail := d.Name + "("
+		var detail strings.Builder
+		detail.WriteString(d.Name + "(")
 		insertText := d.Name + "("
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
-				detail += ", "
+				detail.WriteString(", ")
+
 				insertText += ", "
 			}
 
 			if arg.Type != "" {
-				detail += arg.Type + " "
+				detail.WriteString(arg.Type + " ")
 			}
 
-			detail += arg.Name
+			detail.WriteString(arg.Name)
 			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
 		}
 
-		detail += ")"
+		detail.WriteString(")")
+
 		insertText += ")"
 		items = append(items, protocol.CompletionItem{
 			Label:            d.Name,
 			Kind:             protocol.CompletionItemKindMethod,
-			Detail:           detail,
+			Detail:           detail.String(),
 			InsertText:       insertText,
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			SortText:         SortUserFunctions + d.Name,
@@ -1143,6 +1153,3 @@ func (s *Server) scopePrefix(scope string) string {
 		return scope
 	}
 }
-
-
-

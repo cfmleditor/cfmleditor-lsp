@@ -87,12 +87,13 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 }
 
 func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
-	label := def.Name + "("
+	var label strings.Builder
+	label.WriteString(def.Name + "(")
 	paramInfos := make([]protocol.ParameterInformation, 0, len(def.Arguments))
 
 	for i, arg := range def.Arguments {
 		if i > 0 {
-			label += ", "
+			label.WriteString(", ")
 		}
 
 		paramLabel := ""
@@ -105,22 +106,24 @@ func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 		}
 
 		paramLabel += arg.Name
-		label += paramLabel
+		label.WriteString(paramLabel)
 		paramInfos = append(paramInfos, protocol.ParameterInformation{Label: paramLabel})
 	}
 
-	label += ")"
+	label.WriteString(")")
 
-	return protocol.SignatureInformation{Label: label, Parameters: paramInfos}
+	return protocol.SignatureInformation{Label: label.String(), Parameters: paramInfos}
 }
 
 func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 	paramInfos := make([]protocol.ParameterInformation, 0, len(e.Params))
-	label := e.Name + "("
+
+	var label strings.Builder
+	label.WriteString(e.Name + "(")
 
 	for i, p := range e.Params {
 		if i > 0 {
-			label += ", "
+			label.WriteString(", ")
 		}
 
 		paramLabel := p.Name
@@ -128,7 +131,7 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 			paramLabel = p.Type + " " + p.Name
 		}
 
-		label += paramLabel
+		label.WriteString(paramLabel)
 
 		doc := p.Description
 		if len(p.Values) > 0 {
@@ -141,10 +144,10 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 		})
 	}
 
-	label += ")"
+	label.WriteString(")")
 
 	return protocol.SignatureInformation{
-		Label:         label,
+		Label:         label.String(),
 		Documentation: &protocol.MarkupContent{Kind: protocol.Markdown, Value: e.Doc()},
 		Parameters:    paramInfos,
 	}

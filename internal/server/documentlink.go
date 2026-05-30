@@ -68,7 +68,7 @@ func (s *Server) handleDocumentLinkResolve(ctx context.Context, reply jsonrpc2.R
 		return reply(ctx, nil, err)
 	}
 
-	data, _ := link.Data.(map[string]interface{})
+	data, _ := link.Data.(map[string]any)
 	if data == nil {
 		return reply(ctx, link, nil)
 	}

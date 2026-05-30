@@ -59,10 +59,7 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 			}
 		}
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { _ = c.Close() }()
 
 			if ct != nil {
@@ -96,6 +93,6 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 
 				<-conn.Done()
 			}
-		}()
+		})
 	}
 }

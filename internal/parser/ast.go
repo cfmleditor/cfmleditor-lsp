@@ -187,8 +187,8 @@ func ResolveProperty(attrs map[string]string, resolvers []PropertyResolver) stri
 }
 
 func matchPropertyPattern(value, pattern, resolve string) string {
-	idx := strings.Index(pattern, "$1")
-	if idx < 0 {
+	before, after, ok := strings.Cut(pattern, "$1")
+	if !ok {
 		// Exact match
 		if strings.EqualFold(value, pattern) {
 			return resolve
@@ -197,8 +197,8 @@ func matchPropertyPattern(value, pattern, resolve string) string {
 		return ""
 	}
 
-	prefix := pattern[:idx]
-	suffix := pattern[idx+2:]
+	prefix := before
+	suffix := after
 
 	if len(value) < len(prefix)+len(suffix) {
 		return ""
@@ -297,8 +297,8 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 // simpleMatch handles patterns with $1 placeholder or exact match using string ops only.
 // Quote characters (" and ') in the pattern match either quote type in the expression.
 func simpleMatch(expr, pattern, resolve string) string {
-	idx := strings.Index(pattern, "$1")
-	if idx < 0 {
+	before, after, ok := strings.Cut(pattern, "$1")
+	if !ok {
 		// Exact match
 		if strings.EqualFold(expr, pattern) {
 			return resolve
@@ -307,8 +307,8 @@ func simpleMatch(expr, pattern, resolve string) string {
 		return ""
 	}
 
-	prefix := pattern[:idx]
-	suffix := pattern[idx+2:]
+	prefix := before
+	suffix := after
 
 	// Normalize quotes in prefix/suffix for matching: replace " with ' in both
 	normPrefix := strings.ReplaceAll(prefix, `"`, `'`)
@@ -356,7 +356,7 @@ func containsFold(s, substr string) bool {
 	for i := 0; i <= len(s)-n; i++ {
 		match := true
 
-		for j := 0; j < n; j++ {
+		for j := range n {
 			if s[i+j]|0x20 != substr[j]|0x20 {
 				match = false
 

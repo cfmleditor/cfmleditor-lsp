@@ -144,8 +144,8 @@ func TestInlineAttrNotExpanded(t *testing.T) {
 	src := `<cfset x = 1>`
 	got := format(t, src)
 
-	lines := strings.Split(got, "\n")
-	for _, l := range lines {
+	lines := strings.SplitSeq(got, "\n")
+	for l := range lines {
 		if strings.Contains(l, "<cfset") {
 			// Should be a single line tag
 			if !strings.Contains(l, "x") {
@@ -184,8 +184,8 @@ var y = 2;
 	assertContains(t, got, "<cfscript>")
 	assertContains(t, got, "</cfscript>")
 
-	lines := strings.Split(got, "\n")
-	for _, l := range lines {
+	lines := strings.SplitSeq(got, "\n")
+	for l := range lines {
 		if strings.Contains(l, "var x") || strings.Contains(l, "var y") {
 			if !strings.HasPrefix(l, "    ") {
 				t.Errorf("cfscript body should be indented, got: %q", l)

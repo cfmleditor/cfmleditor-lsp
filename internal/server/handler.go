@@ -358,7 +358,6 @@ func applyEdit(content string, r protocol.Range, newText string) string {
 	return parser.ApplyEdit(content, int(r.Start.Line), int(r.Start.Character), int(r.End.Line), int(r.End.Character), newText)
 }
 
-
 func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidCloseTextDocumentParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
@@ -435,16 +434,16 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	s.log.Debug("cflint scan starting", cflog.String("file", filePath))
 
 	// Show progress
-	s.notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+	s.notify(scanCtx, protocol.MethodProgress, map[string]any{
 		"token": "cflint",
-		"value": map[string]interface{}{"kind": "begin", "title": "CFLint", "message": filepath.Base(filePath)},
+		"value": map[string]any{"kind": "begin", "title": "CFLint", "message": filepath.Base(filePath)},
 	})
 
 	diags, err := s.linter.Scan(scanCtx, filePath)
 
-	s.notify(scanCtx, protocol.MethodProgress, map[string]interface{}{
+	s.notify(scanCtx, protocol.MethodProgress, map[string]any{
 		"token": "cflint",
-		"value": map[string]interface{}{"kind": "end"},
+		"value": map[string]any{"kind": "end"},
 	})
 
 	if scanCtx.Err() != nil {
@@ -774,7 +773,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
 			if _, err := s.FS.Stat(filepath.Join(appDir, name)); err == nil {
 				target := "file://" + filepath.Join(appDir, name)
-				s.call(ctx, "window/showDocument", map[string]interface{}{
+				s.call(ctx, "window/showDocument", map[string]any{
 					"uri":       target,
 					"takeFocus": true,
 				}, nil)

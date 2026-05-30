@@ -1152,13 +1152,13 @@ func lineOffsets(content string, startLine, endLine int) (int, int) {
 	return start, end
 }
 
-func (pr *ParseResult) logDebug(msg string, keysAndValues ...interface{}) {
+func (pr *ParseResult) logDebug(msg string, keysAndValues ...any) {
 	if pr.log != nil {
 		pr.log.Debug(msg, keysAndValues...)
 	}
 }
 
-func (pr *ParseResult) logWarn(msg string, keysAndValues ...interface{}) {
+func (pr *ParseResult) logWarn(msg string, keysAndValues ...any) {
 	if pr.log != nil {
 		pr.log.Warn(msg, keysAndValues...)
 	}

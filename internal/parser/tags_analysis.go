@@ -5,7 +5,7 @@ import "strings"
 // TextBeforeCursor returns all content from the start of the document up to the cursor position.
 func TextBeforeCursor(content string, line, char int) string {
 	offset := 0
-	for i := 0; i < line; i++ {
+	for range line {
 		idx := strings.IndexByte(content[offset:], '\n')
 		if idx < 0 {
 			return content
@@ -14,10 +14,7 @@ func TextBeforeCursor(content string, line, char int) string {
 		offset += idx + 1
 	}
 
-	end := offset + char
-	if end > len(content) {
-		end = len(content)
-	}
+	end := min(offset+char, len(content))
 
 	return content[:end]
 }
@@ -130,7 +127,7 @@ func FindUnclosedTags(content string, startLine, line, char int) []string {
 
 	if startLine > 0 {
 		offset := 0
-		for i := 0; i < startLine; i++ {
+		for range startLine {
 			idx := strings.IndexByte(text[offset:], '\n')
 			if idx < 0 {
 				offset = len(text)
@@ -346,7 +343,7 @@ func WordBeforeDot(content string, line, char int) string {
 // PositionToOffset converts a line/character position to a byte offset.
 func PositionToOffset(content string, line, char int) int {
 	offset := 0
-	for i := 0; i < line; i++ {
+	for range line {
 		idx := strings.IndexByte(content[offset:], '\n')
 		if idx < 0 {
 			return len(content)

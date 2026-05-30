@@ -26,7 +26,7 @@ func newTestServer() *Server {
 	return NewServer(nil, cflog.NewLogger(false))
 }
 
-func makeCall(t *testing.T, method string, params interface{}) jsonrpc2.Request {
+func makeCall(t *testing.T, method string, params any) jsonrpc2.Request {
 	t.Helper()
 
 	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), method, params)
@@ -37,14 +37,14 @@ func makeCall(t *testing.T, method string, params interface{}) jsonrpc2.Request 
 	return req
 }
 
-func captureReply(t *testing.T) (jsonrpc2.Replier, *interface{}, *error) {
+func captureReply(t *testing.T) (jsonrpc2.Replier, *any, *error) {
 	t.Helper()
 
-	var result interface{}
+	var result any
 
 	var replyErr error
 
-	replier := func(_ context.Context, res interface{}, err error) error {
+	replier := func(_ context.Context, res any, err error) error {
 		result = res
 		replyErr = err
 
@@ -1011,7 +1011,7 @@ func TestHoverUnknown(t *testing.T) {
 	}
 }
 
-func completionListFromResult(t *testing.T, result interface{}) *protocol.CompletionList {
+func completionListFromResult(t *testing.T, result any) *protocol.CompletionList {
 	t.Helper()
 	// The reply captures the value as-is, but it may be a pointer
 	if list, ok := result.(*protocol.CompletionList); ok {
@@ -2830,7 +2830,7 @@ func TestExecuteCommandCopyPackage(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command:   "cfmleditor.copyPackage",
-		Arguments: []interface{}{"file:///project/models/User.cfc"},
+		Arguments: []any{"file:///project/models/User.cfc"},
 	})
 
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
@@ -3818,7 +3818,7 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command:   "cfmleditor.showFileIndex",
-		Arguments: []interface{}{"file:///test.cfc"},
+		Arguments: []any{"file:///test.cfc"},
 	})
 
 	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
@@ -4205,7 +4205,7 @@ func TestCompletionResponseTime(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = srv.handleCompletion(context.Background(), reply, req)
 	}
 
@@ -4232,7 +4232,7 @@ func TestHoverResponseTime(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = srv.handleHover(context.Background(), reply, req)
 	}
 
@@ -4261,7 +4261,7 @@ func TestDefinitionResponseTime(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = srv.handleDefinition(context.Background(), reply, req)
 	}
 
@@ -4278,7 +4278,7 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	// Generate a large document with many includes
 	var lines []string
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		lines = append(lines, fmt.Sprintf(`<cfinclude template="file%d.cfm">`, i))
 	}
 
@@ -4296,7 +4296,7 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = srv.handleDocumentLink(context.Background(), reply, req)
 	}
 
@@ -4335,7 +4335,7 @@ func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
 	// Subsequent calls should be fast (cached regex)
 	start := time.Now()
 
-	for i := 0; i < 10000; i++ {
+	for range 10000 {
 		parser.ResolveFromCall("kernel.getBar()", resolvers)
 	}
 

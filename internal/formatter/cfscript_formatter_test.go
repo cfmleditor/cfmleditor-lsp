@@ -69,8 +69,8 @@ return x + y;
 }`)
 	got := format(t, src)
 
-	lines := strings.Split(got, "\n")
-	for _, l := range lines {
+	lines := strings.SplitSeq(got, "\n")
+	for l := range lines {
 		if strings.Contains(l, "var x") || strings.Contains(l, "var y") || strings.Contains(l, "return x") {
 			if !strings.HasPrefix(l, "        ") { // 2 levels of indent (cfscript + function body)
 				// Accept either 1 or 2 levels depending on context

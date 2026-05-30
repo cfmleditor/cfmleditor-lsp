@@ -11,10 +11,10 @@ import (
 
 // Logger is the common logging interface used across all packages.
 type Logger interface {
-	Debug(msg string, keysAndValues ...interface{})
-	Info(msg string, keysAndValues ...interface{})
-	Warn(msg string, keysAndValues ...interface{})
-	Error(msg string, keysAndValues ...interface{})
+	Debug(msg string, keysAndValues ...any)
+	Info(msg string, keysAndValues ...any)
+	Warn(msg string, keysAndValues ...any)
+	Error(msg string, keysAndValues ...any)
 }
 
 // String constructs a string field.
@@ -33,7 +33,7 @@ func Bool(key string, val bool) zap.Field { return zap.Bool(key, val) }
 func Duration(key string, val time.Duration) zap.Field { return zap.Duration(key, val) }
 
 // Any constructs a field with an arbitrary value.
-func Any(key string, val interface{}) zap.Field { return zap.Any(key, val) }
+func Any(key string, val any) zap.Field { return zap.Any(key, val) }
 
 // Err constructs an error field.
 func Err(err error) zap.Field { return zap.Error(err) }
@@ -56,13 +56,13 @@ func NewLogger(debug bool) Logger {
 
 type zapLogger struct{ l *zap.SugaredLogger }
 
-func (z *zapLogger) Debug(msg string, kv ...interface{}) { z.l.Debugw(msg, kv...) }
-func (z *zapLogger) Info(msg string, kv ...interface{})  { z.l.Infow(msg, kv...) }
-func (z *zapLogger) Warn(msg string, kv ...interface{})  { z.l.Warnw(msg, kv...) }
-func (z *zapLogger) Error(msg string, kv ...interface{}) { z.l.Errorw(msg, kv...) }
+func (z *zapLogger) Debug(msg string, kv ...any) { z.l.Debugw(msg, kv...) }
+func (z *zapLogger) Info(msg string, kv ...any)  { z.l.Infow(msg, kv...) }
+func (z *zapLogger) Warn(msg string, kv ...any)  { z.l.Warnw(msg, kv...) }
+func (z *zapLogger) Error(msg string, kv ...any) { z.l.Errorw(msg, kv...) }
 
 // Fatalf logs a message to stderr and exits the process.
-func Fatalf(format string, args ...interface{}) {
+func Fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
 }

@@ -33,7 +33,7 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 	tracedFuncs := make(map[string]bool)
 	tracedFuncs[opts.SourceFile+"\t"+strings.ToLower(opts.FuncName)] = true
 
-	for depth := 0; depth < 10; depth++ {
+	for range 10 {
 		var newFuncs []funcRef
 
 		for _, e := range entries {

@@ -4,7 +4,7 @@ import "strings"
 
 // FindMatchingTag finds the matching open/close tag at the given position.
 // Returns a map with "line" and "character" keys, or nil if no match.
-func FindMatchingTag(content string, line, char int) map[string]interface{} {
+func FindMatchingTag(content string, line, char int) map[string]any {
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return nil
@@ -45,7 +45,7 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 	tagName := strings.ToLower(lineText[nameStart:nameEnd])
 
 	offset := 0
-	for l := 0; l < line; l++ {
+	for range line {
 		idx := strings.IndexByte(content[offset:], '\n')
 		if idx < 0 {
 			return nil
@@ -133,7 +133,7 @@ func FindMatchingTag(content string, line, char int) map[string]interface{} {
 	return nil
 }
 
-func offsetToPosition(content string, offset int) map[string]interface{} {
+func offsetToPosition(content string, offset int) map[string]any {
 	line := 0
 	lastNL := -1
 
@@ -146,5 +146,5 @@ func offsetToPosition(content string, offset int) map[string]interface{} {
 
 	char := offset - lastNL - 1
 
-	return map[string]interface{}{"line": line, "character": char}
+	return map[string]any{"line": line, "character": char}
 }

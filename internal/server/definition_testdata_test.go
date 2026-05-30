@@ -62,7 +62,7 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 }
 
 // definitionAt calls handleDefinition and returns the result.
-func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) interface{} {
+func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) any {
 	t.Helper()
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
@@ -83,7 +83,7 @@ func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) 
 	return *result
 }
 
-func assertLocationFile(t *testing.T, result interface{}, expectedFile string) protocol.Location {
+func assertLocationFile(t *testing.T, result any, expectedFile string) protocol.Location {
 	t.Helper()
 
 	if result == nil {

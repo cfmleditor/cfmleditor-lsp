@@ -87,7 +87,7 @@ func FindCallContext(content string, line, char int) (funcName string, qualifier
 // LineTextAt returns the text of the given 0-based line.
 func LineTextAt(content string, line int) string {
 	offset := 0
-	for l := 0; l < line; l++ {
+	for range line {
 		idx := strings.IndexByte(content[offset:], '\n')
 		if idx < 0 {
 			return ""
@@ -381,7 +381,7 @@ func CfInvokeComponentAtCursor(content string, line, char int) string {
 // EnclosingTagAt returns the full tag text and cursor position within it.
 func EnclosingTagAt(content string, line, char int) (tag string, cursorOffset int) {
 	offset := 0
-	for l := 0; l < line; l++ {
+	for range line {
 		idx := strings.IndexByte(content[offset:], '\n')
 		if idx < 0 {
 			return "", -1

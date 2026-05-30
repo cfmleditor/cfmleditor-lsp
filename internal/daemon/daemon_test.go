@@ -51,8 +51,7 @@ func TestConnTrackerSafeDoubleZero(t *testing.T) {
 func TestServeMultipleClients(t *testing.T) {
 	sock := shortSock(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	log := cflog.NewLogger(false)
 	idx := index.New()
@@ -119,8 +118,7 @@ func TestServeMultipleClients(t *testing.T) {
 func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	sock := shortSock(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	log := cflog.NewLogger(false)
 	idx := index.New()
@@ -158,8 +156,7 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 func TestDaemonSurvivesAbruptClientDisconnect(t *testing.T) {
 	sock := shortSock(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	idx := index.New()
 	ct := NewConnTracker()
@@ -223,8 +220,7 @@ func TestDaemonShutdownClosesSocketClients(t *testing.T) {
 func TestMultipleConnectionsShareIndex(t *testing.T) {
 	sock := shortSock(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	idx := index.New()
 	ct := NewConnTracker()

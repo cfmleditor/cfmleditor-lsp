@@ -40,7 +40,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			Command: &protocol.Command{
 				Title:     "Find all references to " + word,
 				Command:   "cfmleditor.findRefs",
-				Arguments: []interface{}{word, docURI},
+				Arguments: []any{word, docURI},
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
@@ -49,7 +49,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			Command: &protocol.Command{
 				Title:     "Export dependency graph for " + qualifier + "." + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []interface{}{docURI, word},
+				Arguments: []any{docURI, word},
 			},
 		})
 	} else {
@@ -60,7 +60,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			Command: &protocol.Command{
 				Title:     "Find all calls to " + word,
 				Command:   "cfmleditor.findRefs",
-				Arguments: []interface{}{word, docURI},
+				Arguments: []any{word, docURI},
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
@@ -69,7 +69,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 			Command: &protocol.Command{
 				Title:     "Export dependency graph for " + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []interface{}{docURI, word},
+				Arguments: []any{docURI, word},
 			},
 		})
 	}

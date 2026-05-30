@@ -2,6 +2,7 @@
 package resolve
 
 import (
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -37,7 +38,7 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 	var result string
 
 	if strings.Contains(component, "|") {
-		for _, alt := range strings.Split(component, "|") {
+		for alt := range strings.SplitSeq(component, "|") {
 			if p := r.componentPathUncached(alt, baseDir); p != "" {
 				result = p
 
@@ -231,13 +232,9 @@ func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 	}
 
 	merged := make(map[string]string, len(appMappings)+len(r.Mappings))
-	for k, v := range appMappings {
-		merged[k] = v
-	}
+	maps.Copy(merged, appMappings)
 
-	for k, v := range r.Mappings {
-		merged[k] = v
-	}
+	maps.Copy(merged, r.Mappings)
 
 	return merged
 }

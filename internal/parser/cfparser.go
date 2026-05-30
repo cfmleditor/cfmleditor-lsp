@@ -316,10 +316,7 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 		i += pos
 		startLine := baseLine + lineAtOffset(idx, i)
 
-		end := i + 200
-		if end > len(src) {
-			end = len(src)
-		}
+		end := min(i+200, len(src))
 
 		funcName := getAttr(src[i:end], "name")
 		funcAccess := getAttr(src[i:end], "access")

@@ -276,15 +276,9 @@ func byteOffsetToLine(src []byte, offset int) int {
 }
 
 func snippetAt(src []byte, offset int) string {
-	start := offset - 10
-	if start < 0 {
-		start = 0
-	}
+	start := max(offset-10, 0)
 
-	end := offset + 10
-	if end > len(src) {
-		end = len(src)
-	}
+	end := min(offset+10, len(src))
 
 	return string(src[start:end])
 }
@@ -597,27 +591,28 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 	}
 
 	// Inline rendering
-	inline := " "
+	var inline strings.Builder
+	inline.WriteString(" ")
 
 	for i, a := range attrs {
 		if i > 0 {
-			inline += " "
+			inline.WriteString(" ")
 		}
 
 		if a.value == "" {
-			inline += a.name
+			inline.WriteString(a.name)
 		} else {
-			inline += fmt.Sprintf("%s=%s", a.name, a.value)
+			fmt.Fprintf(&inline, "%s=%s", a.name, a.value)
 		}
 	}
 
 	// Should we expand?
-	oneLiner := "<" + tagName + inline
+	oneLiner := "<" + tagName + inline.String()
 	expand := len(attrs) > f.opts.AttrBreakThreshold ||
 		f.lineLen+len(oneLiner) > f.opts.LineWidth
 
 	if !expand {
-		return inline
+		return inline.String()
 	}
 
 	// Multi-line rendering: one attribute per line, indented one level.

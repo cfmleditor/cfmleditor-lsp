@@ -224,9 +224,9 @@ func ExpandGlob(pattern string) []string {
 		return matches
 	}
 
-	idx := strings.Index(pattern, "**")
-	base := filepath.Clean(pattern[:idx])
-	suffix := pattern[idx+2:]
+	before, after, _ := strings.Cut(pattern, "**")
+	base := filepath.Clean(before)
+	suffix := after
 	suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
 
 	var out []string
@@ -287,10 +287,7 @@ func IsCFCFile(path string) bool {
 
 // IsBinary returns true if data appears to be binary (contains null bytes in the first 512 bytes).
 func IsBinary(data []byte) bool {
-	n := 512
-	if len(data) < n {
-		n = len(data)
-	}
+	n := min(len(data), 512)
 
 	for i := 0; i < n; i++ {
 		if data[i] == 0 {
@@ -316,9 +313,9 @@ func MatchesGlob(filePath string, globs []string) bool {
 			continue
 		}
 
-		idx := strings.Index(g, "**")
-		base := filepath.Clean(g[:idx])
-		suffix := g[idx+2:]
+		before, after, _ := strings.Cut(g, "**")
+		base := filepath.Clean(before)
+		suffix := after
 		suffix = strings.TrimPrefix(suffix, string(filepath.Separator))
 
 		if !strings.HasPrefix(filePath, base+"/") && filePath != base {

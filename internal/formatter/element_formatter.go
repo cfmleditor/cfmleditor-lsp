@@ -3,6 +3,7 @@ package formatter
 // element_formatter.go — pretty-printer for HTML elements.
 
 import (
+	"slices"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -92,12 +93,12 @@ func (f *Formatter) allSingleLine(nodes []*sitter.Node) bool {
 		return false
 	}
 	// Concatenate the text of all nodes and check if the trimmed content is single-line.
-	var combined string
+	var combined strings.Builder
 	for _, n := range nodes {
-		combined += f.text(n)
+		combined.WriteString(f.text(n))
 	}
 
-	trimmed := strings.TrimSpace(combined)
+	trimmed := strings.TrimSpace(combined.String())
 	if trimmed == "" {
 		return false
 	}
@@ -107,12 +108,12 @@ func (f *Formatter) allSingleLine(nodes []*sitter.Node) bool {
 
 // fitsOnLine returns true if the collapsed content of nodes fits within the line width.
 func (f *Formatter) fitsOnLine(nodes []*sitter.Node) bool {
-	var combined string
+	var combined strings.Builder
 	for _, n := range nodes {
-		combined += f.text(n)
+		combined.WriteString(f.text(n))
 	}
 
-	collapsed := collapseWhitespace(strings.TrimSpace(combined))
+	collapsed := collapseWhitespace(strings.TrimSpace(combined.String()))
 	indent := len(f.opts.indent(f.level))
 
 	return indent+len(collapsed) <= f.opts.LineWidth
@@ -120,24 +121,18 @@ func (f *Formatter) fitsOnLine(nodes []*sitter.Node) bool {
 
 // hasBlockChild returns true if any node in the list is a block-level tag.
 func (f *Formatter) hasBlockChild(nodes []*sitter.Node) bool {
-	for _, c := range nodes {
-		if f.isBlockTagKind(c) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(nodes, f.isBlockTagKind)
 }
 
 // formatInlineRun emits a sequence of inline nodes on a single line,
 // preserving the original spacing between them.
 func (f *Formatter) formatInlineRun(nodes []*sitter.Node) {
-	var combined string
+	var combined strings.Builder
 	for _, n := range nodes {
-		combined += f.text(n)
+		combined.WriteString(f.text(n))
 	}
 
-	trimmed := strings.TrimSpace(combined)
+	trimmed := strings.TrimSpace(combined.String())
 	if trimmed == "" {
 		return
 	}
@@ -186,12 +181,12 @@ func (f *Formatter) isInlineNode(n *sitter.Node) bool {
 // formatTextRun emits a run of inline nodes on a single indented line,
 // collapsing all internal whitespace to single spaces (HTML whitespace rules).
 func (f *Formatter) formatTextRun(nodes []*sitter.Node) {
-	var combined string
+	var combined strings.Builder
 	for _, n := range nodes {
-		combined += f.text(n)
+		combined.WriteString(f.text(n))
 	}
 
-	trimmed := strings.TrimSpace(combined)
+	trimmed := strings.TrimSpace(combined.String())
 	if trimmed == "" {
 		return
 	}

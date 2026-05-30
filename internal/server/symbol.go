@@ -94,7 +94,7 @@ func containsFoldStr(s, substr string) bool {
 	for i := 0; i <= end; i++ {
 		match := true
 
-		for j := 0; j < n; j++ {
+		for j := range n {
 			if s[i+j]|0x20 != substr[j] {
 				match = false
 

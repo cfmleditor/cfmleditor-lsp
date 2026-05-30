@@ -290,7 +290,7 @@ func containsFold(data []byte, target string) bool {
 	for i := 0; i <= end; i++ {
 		match := true
 
-		for j := 0; j < tLen; j++ {
+		for j := range tLen {
 			if data[i+j]|0x20 != target[j]|0x20 {
 				match = false
 

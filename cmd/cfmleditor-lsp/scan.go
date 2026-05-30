@@ -68,13 +68,12 @@ func cmdScan(args []string) {
 			continue
 		}
 
-		if !tree.RootNode().HasError() {
-			tree.Close()
-
-			continue
+		if tree.RootNode().HasError() {
+			printErrors(f, "cfml", tree.RootNode(), content)
 		}
 
-		printErrors(f, "cfml", tree.RootNode(), content)
+		// Scan injection languages (cfscript, cfquery)
+		scanInjections(f, tree.RootNode(), content)
 		tree.Close()
 	}
 
@@ -110,4 +109,70 @@ func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		printErrorNodes(file, lang, n.Child(i), src)
 	}
+}
+
+func scanInjections(file string, node *sitter.Node, src []byte) {
+	var walk func(*sitter.Node)
+
+	walk = func(n *sitter.Node) {
+		switch n.Kind() {
+		case "cf_script_content":
+			content := src[n.StartByte():n.EndByte()]
+
+			tree := language.Parse(language.CFScript, content, nil)
+			if tree != nil {
+				if tree.RootNode().HasError() {
+					printErrorsOffset(file, "cfscript", tree.RootNode(), content, n.StartPosition().Row)
+				}
+
+				tree.Close()
+			}
+		case "cf_query_content":
+			content := src[n.StartByte():n.EndByte()]
+
+			tree := language.Parse(language.CFQuery, content, nil)
+			if tree != nil {
+				if tree.RootNode().HasError() {
+					printErrorsOffset(file, "cfquery", tree.RootNode(), content, n.StartPosition().Row)
+				}
+
+				tree.Close()
+			}
+		}
+
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(node)
+}
+
+func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lineOffset uint) {
+	var walk func(*sitter.Node)
+
+	walk = func(n *sitter.Node) {
+		if n.IsError() || n.IsMissing() {
+			pos := n.StartPosition()
+
+			snippet := string(src[n.StartByte():n.EndByte()])
+			if len(snippet) > 50 {
+				snippet = snippet[:50] + "..."
+			}
+
+			snippet = strings.ReplaceAll(snippet, "\n", "\\n")
+
+			if n.IsMissing() {
+				fmt.Printf("%s:%d:%d: [%s] missing %s\n", file, pos.Row+lineOffset+1, pos.Column+1, lang, n.Kind())
+			} else {
+				fmt.Printf("%s:%d:%d: [%s] parse error near %q\n", file, pos.Row+lineOffset+1, pos.Column+1, lang, snippet)
+			}
+
+			return
+		}
+
+		for i := uint(0); i < n.ChildCount(); i++ {
+			walk(n.Child(i))
+		}
+	}
+	walk(n)
 }

@@ -89,7 +89,7 @@ func (pr *ParseResult) funcContaining(startLine, endLine, startChar int) int {
 // on the given line, or -1 if not found.
 func (pr *ParseResult) closingTokenCol(line int) int {
 	lineStart := 0
-	for i := 0; i < line; i++ {
+	for range line {
 		idx := strings.IndexByte(pr.Content[lineStart:], '\n')
 		if idx < 0 {
 			return -1
@@ -176,7 +176,7 @@ func (pr *ParseResult) resetGlobalCaches() {
 // posOffset converts line/char to byte offset.
 func posOffset(content string, line, char int) int {
 	off := 0
-	for i := 0; i < line; i++ {
+	for range line {
 		idx := strings.IndexByte(content[off:], '\n')
 		if idx < 0 {
 			return len(content)

@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -212,9 +213,7 @@ func (s *Server) ensureBeansLoaded() {
 		}
 	}
 
-	for ns, dir := range s.BeanPaths {
-		allBeanPaths[ns] = dir
-	}
+	maps.Copy(allBeanPaths, s.BeanPaths)
 
 	if len(allBeanPaths) > 0 {
 		beans := buildBeanMap(allBeanPaths, s.FS)
@@ -226,13 +225,13 @@ func (s *Server) ensureBeansLoaded() {
 	s.mu.Unlock()
 }
 
-func (s *Server) notify(ctx context.Context, method string, params interface{}) {
+func (s *Server) notify(ctx context.Context, method string, params any) {
 	if s.conn != nil {
 		_ = s.conn.Notify(ctx, method, params)
 	}
 }
 
-func (s *Server) call(ctx context.Context, method string, params, result interface{}) {
+func (s *Server) call(ctx context.Context, method string, params, result any) {
 	if s.conn != nil {
 		_, _ = s.conn.Call(ctx, method, params, result)
 	}
@@ -334,4 +333,3 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.ParseResult {
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{Shallow: true})
 }
-

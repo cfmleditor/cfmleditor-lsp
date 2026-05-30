@@ -81,7 +81,7 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 
 	if len(out) == 0 {
 		if m := diLocationsRe.FindStringSubmatch(content); m != nil {
-			for _, p := range strings.Split(m[1], ",") {
+			for p := range strings.SplitSeq(m[1], ",") {
 				p = strings.TrimSpace(p)
 				if p == "" {
 					continue
@@ -115,7 +115,7 @@ func ParseOrmLocations(content string, appDir string) []string {
 	if m := ormCfcLocationArrayRe.FindStringSubmatch(content); m != nil {
 		var out []string
 
-		for _, part := range strings.Split(m[1], ",") {
+		for part := range strings.SplitSeq(m[1], ",") {
 			part = strings.TrimSpace(part)
 			part = strings.Trim(part, `"'`)
 
