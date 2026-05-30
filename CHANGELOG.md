@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.21]
+
 - Config refactor
 - Completion ordering refactor
 - Fix completions and help for scoped functions
