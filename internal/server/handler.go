@@ -875,8 +875,14 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 
 		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
-		_ = os.WriteFile(outFile, []byte(output), 0o644)
-		_ = os.WriteFile(filepath.Join(outDir, "refs-"+funcName+".dot"), []byte(result.Graph.DOT()), 0o644)
+		if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
+		}
+
+		dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
+		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
+		}
 
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
@@ -959,9 +965,16 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		}
 
 		mermaid := result.Graph.Mermaid()
+
 		outFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".md")
-		_ = os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644)
-		_ = os.WriteFile(filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".dot"), []byte(result.Graph.DOT()), 0o644)
+		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil {
+			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
+		}
+
+		dotFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".dot")
+		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
+		}
 
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,

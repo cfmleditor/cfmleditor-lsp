@@ -67,7 +67,7 @@ func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnost
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading %s: %w", filePath, err)
 	}
 
 	cmd.Stdin = strings.NewReader(string(content))

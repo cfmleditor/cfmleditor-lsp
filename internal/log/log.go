@@ -44,11 +44,20 @@ func Uint32(key string, val uint32) zap.Field { return zap.Uint32(key, val) }
 // NewLogger creates a Logger. When debug is true, logs at Debug level with
 // human-readable output; otherwise logs at Info level with JSON output.
 func NewLogger(debug bool) Logger {
-	var l *zap.Logger
+	var (
+		l   *zap.Logger
+		err error
+	)
 	if debug {
-		l, _ = zap.NewDevelopment()
+		l, err = zap.NewDevelopment()
 	} else {
-		l, _ = zap.NewProduction()
+		l, err = zap.NewProduction()
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+
+		l = zap.NewNop()
 	}
 
 	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar()}

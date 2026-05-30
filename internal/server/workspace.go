@@ -197,7 +197,9 @@ func (s *Server) indexRoot(root string) {
 
 			data, err := s.FS.ReadFile(path)
 			if err != nil {
-				return err
+				s.log.Warn("skipping file", cflog.String("path", path), cflog.Err(err))
+
+				return nil
 			}
 
 			if cfpath.IsBinary(data) {
