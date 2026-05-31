@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Improvements to exception handling
+- `tree-sitter-cfml` grammar updates
+- Improvements to grammar detection for scanner
+
 ## [0.1.21]
 
 - Config refactor

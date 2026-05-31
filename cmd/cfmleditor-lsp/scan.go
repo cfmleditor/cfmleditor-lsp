@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -75,6 +76,19 @@ func cmdScan(args []string) {
 		// Scan injection languages (cfscript, cfquery)
 		scanInjections(f, tree.RootNode(), content)
 		tree.Close()
+
+		// For script-based files, also parse with CFScript grammar
+		regions := parser.ClassifyRegions(string(content))
+		if len(regions) == 1 && regions[0].Kind == parser.RegionScript {
+			scriptTree := language.Parse(language.CFScript, content, nil)
+			if scriptTree != nil {
+				if scriptTree.RootNode().HasError() {
+					printErrors(f, "cfscript", scriptTree.RootNode(), content)
+				}
+
+				scriptTree.Close()
+			}
+		}
 	}
 
 	if totalErrors == 0 {
