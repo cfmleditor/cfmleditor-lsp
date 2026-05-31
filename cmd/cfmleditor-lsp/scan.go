@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -64,31 +63,33 @@ func cmdScan(args []string) {
 			continue
 		}
 
-		tree := language.Parse(language.CFML, content, nil)
+		// Determine initial grammar by extension (matching zed-cfml config)
+		ext := strings.ToLower(filepath.Ext(f))
+
+		var grammar language.Grammar
+		if ext == ".cfs" {
+			grammar = language.CFScript
+		} else {
+			grammar = language.CFML
+		}
+
+		tree := language.Parse(grammar, content, nil)
 		if tree == nil {
 			continue
 		}
 
+		label := "cfml"
+		if grammar == language.CFScript {
+			label = "cfscript"
+		}
+
 		if tree.RootNode().HasError() {
-			printErrors(f, "cfml", tree.RootNode(), content)
+			printErrors(f, label, tree.RootNode(), content)
 		}
 
-		// Scan injection languages (cfscript, cfquery)
-		scanInjections(f, tree.RootNode(), content)
+		// Scan injection languages based on injections.scm rules
+		scanInjections(f, tree, content)
 		tree.Close()
-
-		// For script-based files, also parse with CFScript grammar
-		regions := parser.ClassifyRegions(string(content))
-		if len(regions) == 1 && regions[0].Kind == parser.RegionScript {
-			scriptTree := language.Parse(language.CFScript, content, nil)
-			if scriptTree != nil {
-				if scriptTree.RootNode().HasError() {
-					printErrors(f, "cfscript", scriptTree.RootNode(), content)
-				}
-
-				scriptTree.Close()
-			}
-		}
 	}
 
 	if totalErrors == 0 {
@@ -125,40 +126,24 @@ func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) {
 	}
 }
 
-func scanInjections(file string, node *sitter.Node, src []byte) {
-	var walk func(*sitter.Node)
-
-	walk = func(n *sitter.Node) {
-		switch n.Kind() {
-		case "cf_script_content":
-			content := src[n.StartByte():n.EndByte()]
-
-			tree := language.Parse(language.CFScript, content, nil)
-			if tree != nil {
-				if tree.RootNode().HasError() {
-					printErrorsOffset(file, "cfscript", tree.RootNode(), content, n.StartPosition().Row)
-				}
-
-				tree.Close()
-			}
-		case "cf_query_content":
-			content := src[n.StartByte():n.EndByte()]
-
-			tree := language.Parse(language.CFQuery, content, nil)
-			if tree != nil {
-				if tree.RootNode().HasError() {
-					printErrorsOffset(file, "cfquery", tree.RootNode(), content, n.StartPosition().Row)
-				}
-
-				tree.Close()
-			}
+func scanInjections(file string, tree *sitter.Tree, src []byte) {
+	for _, inj := range language.FindInjections(tree, src) {
+		grammar := language.GrammarForLanguage(inj.Language)
+		if grammar < 0 {
+			continue
 		}
 
-		for i := uint(0); i < n.ChildCount(); i++ {
-			walk(n.Child(i))
+		content := src[inj.Node.StartByte():inj.Node.EndByte()]
+
+		injTree := language.Parse(grammar, content, nil)
+		if injTree != nil {
+			if injTree.RootNode().HasError() {
+				printErrorsOffset(file, inj.Language, injTree.RootNode(), content, inj.Node.StartPosition().Row)
+			}
+
+			injTree.Close()
 		}
 	}
-	walk(node)
 }
 
 func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lineOffset uint) {

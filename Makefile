@@ -17,10 +17,12 @@ generate: docs
 	go run scripts/generate_docs.go
 
 update-grammar: generate
-	npm --prefix ../tree-sitter-cfml run build
 	go get github.com/cfmleditor/tree-sitter-cfml@latest
 	go mod tidy
 	go clean -cache
+	@mkdir -p internal/language/queries
+	@curl -sL "https://raw.githubusercontent.com/cfmleditor/tree-sitter-cfml/$$(grep tree-sitter-cfml go.mod | awk '{print $$2}')/cfml/queries/injections.scm" -o internal/language/queries/injections.scm
+	@echo "Updated injections.scm from tree-sitter-cfml"
 
 build: generate
 	@mkdir -p target/release

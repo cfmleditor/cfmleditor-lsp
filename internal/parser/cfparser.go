@@ -397,7 +397,7 @@ func isScriptFile(content string) bool {
 	tok := sc.NextSkipComments()
 	if tok.Kind == TokIdent {
 		lower := strings.ToLower(tok.Value)
-		if lower == "component" || lower == "interface" || lower == "property" {
+		if lower == "component" || lower == "interface" || lower == "property" || lower == "import" {
 			return true
 		}
 	}
