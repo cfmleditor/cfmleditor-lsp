@@ -5,6 +5,7 @@
 - Improvements to exception handling
 - `tree-sitter-cfml` grammar updates
 - Improvements to grammar detection for scanner
+- Skip binary files during indexing and CLI scans
 
 ## [0.1.21]
 
