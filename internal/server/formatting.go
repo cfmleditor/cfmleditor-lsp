@@ -26,6 +26,8 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, err)
 	}
 
+	s.log.Info("formatting document", cflog.String("uri", string(params.TextDocument.URI)))
+
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return reply(ctx, nil, nil)

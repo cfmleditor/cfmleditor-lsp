@@ -422,6 +422,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 	}
 
+	if items == nil {
+		items = []protocol.CompletionItem{}
+	}
+
 	return reply(ctx, &protocol.CompletionList{
 		IsIncomplete: false,
 		Items:        items,
