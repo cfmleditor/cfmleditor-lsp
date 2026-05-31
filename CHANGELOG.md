@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.22]
+
 - Improvements to exception handling
 - `tree-sitter-cfml` grammar updates
 - Improvements to grammar detection for scanner
