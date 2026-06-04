@@ -704,13 +704,14 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	for _, f := range pr.Funcs {
 		var detail strings.Builder
 		detail.WriteString(f.Name + "(")
-		insertText := f.Name + "("
+		var insertText strings.Builder
+		insertText.WriteString(f.Name + "(")
 
 		for i, arg := range f.Arguments {
 			if i > 0 {
 				detail.WriteString(", ")
 
-				insertText += ", "
+				insertText.WriteString(", ")
 			}
 
 			if arg.Type != "" {
@@ -718,17 +719,17 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			}
 
 			detail.WriteString(arg.Name)
-			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
+			insertText.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Name))
 		}
 
 		detail.WriteString(")")
 
-		insertText += ")"
+		insertText.WriteString(")")
 		items = append(items, protocol.CompletionItem{
 			Label:            f.Name,
 			Kind:             protocol.CompletionItemKindFunction,
 			Detail:           detail.String(),
-			InsertText:       insertText,
+			InsertText:       insertText.String(),
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			SortText:         SortUserFunctions + f.Name,
 		})
@@ -1091,13 +1092,14 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 	for _, d := range defs {
 		var detail strings.Builder
 		detail.WriteString(d.Name + "(")
-		insertText := d.Name + "("
+		var insertText strings.Builder
+		insertText.WriteString(d.Name + "(")
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
 				detail.WriteString(", ")
 
-				insertText += ", "
+				insertText.WriteString(", ")
 			}
 
 			if arg.Type != "" {
@@ -1105,17 +1107,17 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 			}
 
 			detail.WriteString(arg.Name)
-			insertText += fmt.Sprintf("${%d:%s}", i+1, arg.Name)
+			insertText.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Name))
 		}
 
 		detail.WriteString(")")
 
-		insertText += ")"
+		insertText.WriteString(")")
 		items = append(items, protocol.CompletionItem{
 			Label:            d.Name,
 			Kind:             protocol.CompletionItemKindMethod,
 			Detail:           detail.String(),
-			InsertText:       insertText,
+			InsertText:       insertText.String(),
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			SortText:         SortUserFunctions + d.Name,
 		})

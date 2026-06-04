@@ -289,7 +289,7 @@ func IsCFCFile(path string) bool {
 func IsBinary(data []byte) bool {
 	n := min(len(data), 512)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if data[i] == 0 {
 			return true
 		}

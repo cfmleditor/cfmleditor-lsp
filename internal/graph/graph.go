@@ -44,7 +44,7 @@ func (g *Graph) Mermaid() string {
 			arrow = "-.->"
 		}
 
-		lines = append(lines, fmt.Sprintf("    %s[\"%s\"] %s %s[\"%s\"]", nodeID(e.From), e.From, arrow, nodeID(e.To), e.To))
+		lines = append(lines, fmt.Sprintf("    %s[\"%s\"] %s %s[\"%s\"]", nodeID(e.From), escapeMermaid(e.From), arrow, nodeID(e.To), escapeMermaid(e.To)))
 	}
 
 	return strings.Join(lines, "\n")
@@ -76,7 +76,7 @@ func (g *Graph) DOT() string {
 			style = " [style=dashed]"
 		}
 
-		lines = append(lines, fmt.Sprintf("    \"%s\" -> \"%s\"%s;", e.From, e.To, style))
+		lines = append(lines, fmt.Sprintf("    \"%s\" -> \"%s\"%s;", escapeDOT(e.From), escapeDOT(e.To), style))
 	}
 
 	lines = append(lines, "}")
@@ -88,4 +88,20 @@ func nodeID(name string) string {
 	r := strings.NewReplacer(".", "_", "/", "_", ":", "_", " ", "_", "-", "_")
 
 	return r.Replace(name)
+}
+
+func escapeMermaid(s string) string {
+	r := strings.NewReplacer(
+		`"`, `#quot;`, `[`, `#lsqb;`, `]`, `#rsqb;`, `#`, `#35;`,
+		`:`, `#colon;`, `-`, `#45;`, `(`, `#40;`, `)`, `#41;`,
+		`{`, `#123;`, `}`, `#125;`, `;`, `#59;`, `>`, `#gt;`, `<`, `#lt;`,
+	)
+
+	return r.Replace(s)
+}
+
+func escapeDOT(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+	return r.Replace(s)
 }
