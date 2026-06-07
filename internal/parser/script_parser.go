@@ -212,20 +212,21 @@ func (p *scriptParser) parse() {
 				p.parseFunction(tok, "", tok.Value)
 			case peek.Kind == TokDot:
 				// Could be dotted return type: models.User function ...
-				retVal := tok.Value
+				var retVal strings.Builder
+				retVal.WriteString(tok.Value)
 
 				for p.sc.PeekSkipComments().Kind == TokDot {
 					p.sc.NextSkipComments()
 
 					seg := p.sc.NextSkipComments()
 					if seg.Kind == TokIdent {
-						retVal += "." + seg.Value
+						retVal.WriteString("." + seg.Value)
 					}
 				}
 
 				if next := p.sc.PeekSkipComments(); next.Kind == TokIdent && identEq(next.Value, "function") {
 					p.sc.NextSkipComments()
-					p.parseFunction(tok, "", retVal)
+					p.parseFunction(tok, "", retVal.String())
 				}
 			default:
 				p.checkAssignRef(tok)
@@ -355,7 +356,9 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 	}
 
 	retType := p.sc.NextSkipComments()
-	retVal := retType.Value
+
+	var retVal strings.Builder
+	retVal.WriteString(retType.Value)
 
 	// Handle dotted return types (e.g. models.User)
 	for p.sc.PeekSkipComments().Kind == TokDot {
@@ -363,14 +366,14 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 
 		seg := p.sc.NextSkipComments()
 		if seg.Kind == TokIdent {
-			retVal += "." + seg.Value
+			retVal.WriteString("." + seg.Value)
 		}
 	}
 
 	next2 := p.sc.PeekSkipComments()
 	if next2.Kind == TokIdent && identEq(next2.Value, "function") {
 		p.sc.NextSkipComments()
-		p.parseFunction(accessTok, accessTok.Value, retVal)
+		p.parseFunction(accessTok, accessTok.Value, retVal.String())
 	}
 }
 
@@ -695,7 +698,8 @@ func (p *scriptParser) readNewComponent() string {
 	}
 
 	if tok.Kind == TokIdent {
-		comp := tok.Value
+		var comp strings.Builder
+		comp.WriteString(tok.Value)
 
 		for {
 			if p.sc.PeekSkipComments().Kind == TokDot {
@@ -703,14 +707,14 @@ func (p *scriptParser) readNewComponent() string {
 
 				next := p.sc.NextSkipComments()
 				if next.Kind == TokIdent {
-					comp += "." + next.Value
+					comp.WriteString("." + next.Value)
 				}
 			} else {
 				break
 			}
 		}
 
-		return comp
+		return comp.String()
 	}
 
 	return ""

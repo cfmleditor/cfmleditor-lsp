@@ -755,12 +755,12 @@ func extractEntityNewArg(s string) string {
 // extractMethodCallBase returns the base variable name from a "baseVar.method(" pattern.
 // For "variables.jss.getInstance(..." returns "jss". Returns "" if not a method call.
 func extractMethodCallBase(rhs string) string {
-	paren := strings.IndexByte(rhs, '(')
-	if paren < 0 {
+	before, _, ok := strings.Cut(rhs, "(")
+	if !ok {
 		return ""
 	}
 
-	prefix := rhs[:paren]
+	prefix := before
 
 	dot := strings.LastIndexByte(prefix, '.')
 	if dot < 0 {
