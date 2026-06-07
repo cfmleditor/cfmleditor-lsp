@@ -124,6 +124,15 @@ func (p *tagParser) parse() {
 
 		// Check for CF tags we care about
 		if idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f' {
+			// Fast skip: only process tags starting with cfc/cff/cfp/cfs/cfo/cfi/cfr
+			// (cfcomponent, cffunction, cfproperty, cfset, cfobject, cfinvoke, cfreturn)
+			ch := toLowerByte(p.src[idx+3])
+			if ch != 'c' && ch != 'f' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != '/' {
+				pos = idx + 1
+
+				continue
+			}
+
 			tagEnd := strings.IndexByte(p.src[idx:], '>')
 			if tagEnd < 0 {
 				pos = idx + 1

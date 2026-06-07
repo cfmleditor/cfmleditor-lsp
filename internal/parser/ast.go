@@ -107,6 +107,12 @@ type Resolver struct {
 	re      *regexp.Regexp // compiled regex, lazily initialized
 	simple  bool           // true if pattern is a plain string (no regex, no $N)
 	reOnce  sync.Once
+	// Precomputed for simple matches
+	simplePrefix    string // part before $1
+	simpleSuffix    string // part after $1
+	normPrefix      string // prefix with " replaced by '
+	normSuffix      string // suffix with " replaced by '
+	hasPlaceholder  bool
 }
 
 // isRegexPattern returns true if the pattern contains backslash escapes (definitive regex indicator).
@@ -120,14 +126,18 @@ func (r *Resolver) compiledRe() *regexp.Regexp {
 	r.reOnce.Do(func() {
 		pattern := r.Match
 		hasPlaceholder := placeholderRe.MatchString(pattern)
+		r.hasPlaceholder = hasPlaceholder
 
 		switch {
 		case !hasPlaceholder && !isRegexPattern(pattern):
-			// No placeholders, no regex chars — simple exact match
 			r.simple = true
 		case hasPlaceholder && !isRegexPattern(pattern) && !strings.Contains(pattern, "$2"):
-			// Has $1 only, no regex chars — simple prefix/suffix match
 			r.simple = true
+			before, after, _ := strings.Cut(pattern, "$1")
+			r.simplePrefix = before
+			r.simpleSuffix = after
+			r.normPrefix = strings.ReplaceAll(before, `"`, `'`)
+			r.normSuffix = strings.ReplaceAll(after, `"`, `'`)
 		case !hasPlaceholder:
 			re, err := regexp.Compile("(?i)" + pattern)
 			if err == nil {
@@ -268,7 +278,7 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 	r.compiledRe() // ensure reOnce has run
 
 	if r.simple {
-		return simpleMatch(expr, r.Match, r.Resolve)
+		return simpleMatch(expr, r)
 	}
 
 	if r.re == nil {
@@ -299,23 +309,20 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 
 // simpleMatch handles patterns with $1 placeholder or exact match using string ops only.
 // Quote characters (" and ') in the pattern match either quote type in the expression.
-func simpleMatch(expr, pattern, resolve string) string {
-	before, after, ok := strings.Cut(pattern, "$1")
-	if !ok {
+func simpleMatch(expr string, r *Resolver) string {
+	if !r.hasPlaceholder {
 		// Exact match
-		if strings.EqualFold(expr, pattern) {
-			return resolve
+		if strings.EqualFold(expr, r.Match) {
+			return r.Resolve
 		}
 
 		return ""
 	}
 
-	prefix := before
-	suffix := after
-
-	// Normalize quotes in prefix/suffix for matching: replace " with ' in both
-	normPrefix := strings.ReplaceAll(prefix, `"`, `'`)
-	normSuffix := strings.ReplaceAll(suffix, `"`, `'`)
+	prefix := r.simplePrefix
+	suffix := r.simpleSuffix
+	normPrefix := r.normPrefix
+	normSuffix := r.normSuffix
 
 	if len(expr) < len(prefix)+len(suffix) {
 		return ""
@@ -344,7 +351,7 @@ func simpleMatch(expr, pattern, resolve string) string {
 	}
 
 	captured = strings.Trim(captured, "\"'")
-	result := strings.ReplaceAll(resolve, "$1", captured)
+	result := strings.ReplaceAll(r.Resolve, "$1", captured)
 	result = strings.TrimSuffix(result, ".cfc")
 	result = strings.ReplaceAll(result, "/", ".")
 

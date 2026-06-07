@@ -326,6 +326,7 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 				if commentDepth < 0 {
 					commentDepth = 0
 				}
+
 				j += 3
 			}
 		}
@@ -510,27 +511,6 @@ func indexCFTag(s, suffix string) int {
 	}
 
 	return -1
-}
-
-// isInsideCFComment returns true if the byte offset is inside a <!--- ---> block.
-func isInsideCFComment(src string, offset int) bool {
-	depth := 0
-
-	for i := 0; i < offset; i++ {
-		if i+4 < len(src) && src[i:i+5] == "<!---" {
-			depth++
-			i += 4
-		} else if i+2 < len(src) && src[i:i+3] == "---" && i+3 < len(src) && src[i+3] == '>' {
-			depth--
-			if depth < 0 {
-				depth = 0
-			}
-
-			i += 3
-		}
-	}
-
-	return depth > 0
 }
 
 func findFuncScope(line int, scopes []FuncScope) FuncScope {

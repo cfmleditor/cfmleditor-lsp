@@ -531,15 +531,14 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 
 	p.sc.NextSkipComments() // consume {
 
-	// Enter function scope
+	// Enter function scope with a temporary key (will fix up after finding end)
 	prevInFunc := p.inFunc
 	prevLocalVarSet := p.localVarSet
 	prevReturnVar := p.returnVar
 
-	// Find closing brace to determine endLine for funcKey
-	endLine := p.scanBodyEndLine()
-
-	p.inFunc = funcKey(funcLine, p.baseLine+endLine)
+	// Use a placeholder funcKey; we'll remap after finding the real end
+	tempKey := funcKey(funcLine, funcLine)
+	p.inFunc = tempKey
 	p.returnVar = ""
 
 	p.localVarSet = make(map[string]bool)
@@ -548,6 +547,9 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	}
 
 	depth := 1
+
+	var endLine int
+
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
 		if t.Kind == TokEOF {
@@ -563,12 +565,33 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			depth++
 		case TokRBrace:
 			depth--
+			if depth == 0 {
+				endLine = t.Line
+			}
 		case TokIdent:
 			if depth > 0 {
 				p.handleBodyToken(t, depth)
 			}
 		}
 	}
+
+	// Remap funcRefs from temp key to real key
+	realKey := funcKey(funcLine, p.baseLine+endLine)
+	if p.funcRefs != nil {
+		if refs, ok := p.funcRefs[tempKey]; ok {
+			delete(p.funcRefs, tempKey)
+			p.funcRefs[realKey] = refs
+		}
+	}
+
+	// Remap pending calls
+	for i := range p.pendingCalls {
+		if p.pendingCalls[i].funcKey == tempKey {
+			p.pendingCalls[i].funcKey = realKey
+		}
+	}
+
+	p.inFunc = realKey
 
 	// Resolve ReturnComponent on the current function
 	if len(p.funcs) > 0 {
@@ -607,39 +630,6 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.returnVar = prevReturnVar
 
 	return endLine
-}
-
-// scanBodyEndLine peeks ahead to find the matching } line without consuming tokens.
-// Must be called after the opening { has been consumed. Uses the scanner's saved position.
-func (p *scriptParser) scanBodyEndLine() int {
-	saved := p.sc.Save()
-	depth := 1
-
-	var lastLine int
-
-	for depth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			lastLine = t.Line
-
-			break
-		}
-
-		if t.Kind == TokLBrace {
-			depth++
-		}
-
-		if t.Kind == TokRBrace {
-			depth--
-			if depth == 0 {
-				lastLine = t.Line
-			}
-		}
-	}
-
-	p.sc.Restore(saved)
-
-	return lastLine
 }
 
 // handleBodyToken processes an identifier inside a function body.
