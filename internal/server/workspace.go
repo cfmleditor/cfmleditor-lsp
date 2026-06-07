@@ -62,7 +62,7 @@ func (s *Server) indexWorkspace() {
 		defer indexWg.Done()
 
 		for r := range results {
-			s.index.IndexFileFromResult(r.fileURI, r.pr.Funcs, r.pr.Refs)
+			s.index.IndexFileFromResult(r.fileURI, r.pr.Funcs, r.pr.ComponentRefs)
 			s.index.SetThisVars(r.fileURI, r.pr.ThisVars())
 
 			if r.persistent && s.isOrmPath(r.file) {
@@ -208,7 +208,7 @@ func (s *Server) indexRoot(root string) {
 
 			content := string(data)
 			pr := s.parseContentForIndex(fileURI, content)
-			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.Refs)
+			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.ComponentRefs)
 			s.index.SetThisVars(fileURI, pr.ThisVars())
 
 			if pr.Persistent && s.isOrmPath(path) {

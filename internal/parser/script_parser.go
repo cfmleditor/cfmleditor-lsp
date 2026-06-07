@@ -2,25 +2,176 @@ package parser
 
 import "strings"
 
-// scriptParser extracts definitions from CFScript source.
-type scriptParser struct {
-	sc       *Scanner
-	funcs    []FunctionDef
-	vars     []VarDef
-	refs     []ComponentRef
-	fileURI  string
-	baseLine int // line offset for this region within the file
+// propertyDef holds parsed property metadata.
+type propertyDef struct {
+	name     string
+	typeName string
+	line     uint32
+	attrs    map[string]string // all attribute key=value pairs (lowercase keys)
 }
 
-func newScriptParser(src, fileURI string, baseLine int) *scriptParser {
+// scriptParser extracts function signatures, component refs, and variable
+// declarations from CFScript source in a single pass.
+type scriptParser struct {
+	sc            *Scanner
+	funcs         []FunctionDef
+	vars          []VarDef
+	componentRefs []ComponentRef
+	funcRefs      map[string][]ComponentRef // keyed by "start:end"
+	scopes        []FuncScope
+	properties    []propertyDef
+	extends       string
+	persistent    bool
+	fileURI       string
+	baseLine      int
+	resolvers     []Resolver
+	inFunc        string          // current function scope key, empty if global
+	localVarSet   map[string]bool // var'd/local. names in current function
+	forceGlobal   bool            // when true, addRef routes to componentRefs
+	returnVar     string          // last "return varName" seen in current function
+	pendingCalls  []pendingCall   // unresolved varName = funcCall(...) assignments
+}
+
+// pendingCall records an unresolved assignment from a function call.
+type pendingCall struct {
+	varName  string
+	funcName string
+	baseVar  string // for x = baseVar.method() — resolve x to same component as baseVar
+	line     uint32
+	funcKey  string // scope key, empty if global
+}
+
+func newScriptParser(src, fileURI string, baseLine int, resolvers []Resolver) *scriptParser {
 	return &scriptParser{
-		sc:       NewScanner(src),
-		fileURI:  fileURI,
-		baseLine: baseLine,
+		sc:        NewScanner(src),
+		fileURI:   fileURI,
+		baseLine:  baseLine,
+		resolvers: resolvers,
 	}
 }
 
-// parse scans through CFScript source extracting all definitions.
+func (p *scriptParser) addRef(ref ComponentRef) {
+	if p.inFunc == "" || p.forceGlobal {
+		p.componentRefs = append(p.componentRefs, ref)
+	} else {
+		if p.funcRefs == nil {
+			p.funcRefs = make(map[string][]ComponentRef)
+		}
+
+		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+	}
+}
+
+func (p *scriptParser) isVarDeclaredLocal(name string) bool {
+	if p.localVarSet == nil {
+		return false
+	}
+
+	return p.localVarSet[strings.ToLower(name)]
+}
+
+// parseVarDecl handles: var name = expr
+func (p *scriptParser) parseVarDecl(tok Token) {
+	nameTok := p.sc.NextSkipComments()
+	if nameTok.Kind != TokIdent {
+		return
+	}
+
+	peek := p.sc.PeekSkipComments()
+	if peek.Kind != TokEquals {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume =
+
+	if p.localVarSet != nil {
+		p.localVarSet[strings.ToLower(nameTok.Value)] = true
+	}
+
+	p.vars = append(p.vars, VarDef{
+		Name: nameTok.Value, Scope: ScopeLocal,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+
+	// Check RHS for component refs
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind != TokIdent {
+		return
+	}
+
+	switch strings.ToLower(rhs.Value) {
+	case "new":
+		p.sc.NextSkipComments()
+		p.parseNewRef(nameTok.Value, tok.Line)
+	case "createobject":
+		p.sc.NextSkipComments()
+		p.parseCreateObjectRef(nameTok.Value, tok.Line)
+	case "entitynew":
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(nameTok.Value, tok.Line)
+	case "entityload":
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(nameTok.Value, tok.Line)
+	}
+}
+
+// parseScopedVar handles: scope.name = expr (local., arguments., this., variables.)
+func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
+	dot := p.sc.PeekSkipComments()
+	if dot.Kind != TokDot {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume .
+
+	nameTok := p.sc.NextSkipComments()
+	if nameTok.Kind != TokIdent {
+		return
+	}
+
+	eq := p.sc.PeekSkipComments()
+	if eq.Kind != TokEquals {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume =
+
+	p.vars = append(p.vars, VarDef{
+		Name: nameTok.Value, Scope: scope,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+
+	isLocal := scope == ScopeLocal || scope == ScopeArguments
+	if isLocal && p.localVarSet != nil {
+		p.localVarSet[strings.ToLower(nameTok.Value)] = true
+	}
+
+	if !isLocal {
+		p.forceGlobal = true
+	}
+
+	// Check RHS for component refs
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind == TokIdent {
+		switch strings.ToLower(rhs.Value) {
+		case "new":
+			p.sc.NextSkipComments()
+			p.parseNewRef(nameTok.Value, tok.Line)
+		case "createobject":
+			p.sc.NextSkipComments()
+			p.parseCreateObjectRef(nameTok.Value, tok.Line)
+		case "entitynew":
+			p.sc.NextSkipComments()
+			p.parseEntityNewRef(nameTok.Value, tok.Line)
+		case "entityload":
+			p.sc.NextSkipComments()
+			p.parseEntityNewRef(nameTok.Value, tok.Line)
+		}
+	}
+
+	p.forceGlobal = false
+}
+
 func (p *scriptParser) parse() {
 	for {
 		tok := p.sc.NextSkipComments()
@@ -28,71 +179,207 @@ func (p *scriptParser) parse() {
 			return
 		}
 
-		if tok.Kind == TokIdent {
-			p.handleIdent(tok)
+		if tok.Kind != TokIdent {
+			continue
+		}
+
+		lower := strings.ToLower(tok.Value)
+		switch lower {
+		case "function":
+			p.parseFunction(tok, "", "")
+		case "public", "private", "remote", "package":
+			p.parseAccessModified(tok)
+		case "component":
+			p.parseComponentAttrs()
+		case "property":
+			p.parseProperty(tok)
+		case "var":
+			p.parseVarDecl(tok)
+		case "local":
+			p.parseScopedVar(tok, ScopeLocal)
+		case "arguments":
+			p.parseScopedVar(tok, ScopeArguments)
+		case "this":
+			p.parseScopedVar(tok, ScopeThis)
+		case "variables":
+			p.parseScopedVar(tok, ScopeVariables)
+		default:
+			// Check for returnType function pattern (e.g. "string function getName()")
+			peek := p.sc.PeekSkipComments()
+			switch {
+			case peek.Kind == TokIdent && identEq(peek.Value, "function"):
+				p.sc.NextSkipComments()
+				p.parseFunction(tok, "", tok.Value)
+			case peek.Kind == TokDot:
+				// Could be dotted return type: models.User function ...
+				retVal := tok.Value
+
+				for p.sc.PeekSkipComments().Kind == TokDot {
+					p.sc.NextSkipComments()
+
+					seg := p.sc.NextSkipComments()
+					if seg.Kind == TokIdent {
+						retVal += "." + seg.Value
+					}
+				}
+
+				if next := p.sc.PeekSkipComments(); next.Kind == TokIdent && identEq(next.Value, "function") {
+					p.sc.NextSkipComments()
+					p.parseFunction(tok, "", retVal)
+				}
+			default:
+				p.checkAssignRef(tok)
+			}
 		}
 	}
 }
 
-func (p *scriptParser) handleIdent(tok Token) {
-	val := tok.Value
-	lower := strings.ToLower(val)
+// parseProperty handles script-style property declarations:
+//
+//	property name="person" type="models.Person";
+//	property string name;
+//	property name;
+func (p *scriptParser) parseProperty(startTok Token) {
+	line := uint32(p.baseLine + startTok.Line)
 
-	switch lower {
-	case "function":
-		p.parseFunction(tok, "", "")
-	case "public", "private", "remote", "package":
-		p.parseAccessModified(tok)
-	case "var":
-		p.parseVarDecl(tok)
-	case "local":
-		p.parseDotAssign(tok, ScopeLocal)
-	case "arguments":
-		p.parseDotAssign(tok, ScopeArguments)
-	case "this":
-		p.parseDotAssign(tok, ScopeThis)
-	case "variables":
-		p.parseDotAssign(tok, ScopeVariables)
-	case "new":
-		// new X() without assignment — skip
-	default:
-		p.parseIdentAssign(tok)
+	var name, typeName string
+
+	attrs := make(map[string]string)
+
+	// Collect tokens until semicolon or EOF
+	var tokens []Token
+
+	for {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF || tok.Kind == TokSemicolon {
+			break
+		}
+
+		tokens = append(tokens, tok)
+	}
+
+	// Check for attribute-style: property name="x" type="y" inject="z";
+	for i, tok := range tokens {
+		if tok.Kind == TokIdent && i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+			if i+2 < len(tokens) && tokens[i+2].Kind == TokString {
+				val := unquote(tokens[i+2].Value)
+				attrs[strings.ToLower(tok.Value)] = val
+			}
+		}
+	}
+
+	name = attrs["name"]
+	typeName = attrs["type"]
+
+	// If no name= attribute, try positional: property [type] name [attrs...];
+	if name == "" {
+		idents := make([]string, 0, 2)
+
+		for i, tok := range tokens {
+			if tok.Kind == TokIdent {
+				// Stop if this ident is followed by = (it's an attribute, not positional)
+				if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+					break
+				}
+
+				idents = append(idents, tok.Value)
+			} else {
+				break
+			}
+		}
+
+		switch len(idents) {
+		case 1:
+			name = idents[0]
+		case 2:
+			typeName = idents[0]
+			name = idents[1]
+		}
+	}
+
+	if name == "" {
+		return
+	}
+
+	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: line, attrs: attrs})
+}
+
+func (p *scriptParser) parseComponentAttrs() {
+	for {
+		tok := p.sc.PeekSkipComments()
+		if tok.Kind == TokLBrace || tok.Kind == TokEOF {
+			return
+		}
+
+		p.sc.NextSkipComments()
+
+		if tok.Kind == TokIdent {
+			if strings.EqualFold(tok.Value, "extends") {
+				eq := p.sc.PeekSkipComments()
+				if eq.Kind == TokEquals {
+					p.sc.NextSkipComments()
+
+					val := p.sc.NextSkipComments()
+					if val.Kind == TokString {
+						p.extends = unquote(val.Value)
+					}
+				}
+			} else if strings.EqualFold(tok.Value, "persistent") {
+				eq := p.sc.PeekSkipComments()
+				if eq.Kind == TokEquals {
+					p.sc.NextSkipComments()
+
+					val := p.sc.NextSkipComments()
+					if val.Kind == TokString && isTruthy(unquote(val.Value)) {
+						p.persistent = true
+					} else if val.Kind == TokIdent && isTruthy(val.Value) {
+						p.persistent = true
+					}
+				}
+			}
+		}
 	}
 }
 
-// parseAccessModified handles: access [returntype] function name(...)
 func (p *scriptParser) parseAccessModified(accessTok Token) {
-	access := accessTok.Value
-
 	next := p.sc.PeekSkipComments()
 	if next.Kind != TokIdent {
 		return
 	}
 
 	if identEq(next.Value, "function") {
-		p.sc.NextSkipComments() // consume "function"
-		p.parseFunction(accessTok, access, "")
+		p.sc.NextSkipComments()
+		p.parseFunction(accessTok, accessTok.Value, "")
 
 		return
 	}
-	// Could be returntype before function
-	retType := p.sc.NextSkipComments() // consume returntype
+
+	retType := p.sc.NextSkipComments()
+	retVal := retType.Value
+
+	// Handle dotted return types (e.g. models.User)
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments()
+
+		seg := p.sc.NextSkipComments()
+		if seg.Kind == TokIdent {
+			retVal += "." + seg.Value
+		}
+	}
 
 	next2 := p.sc.PeekSkipComments()
 	if next2.Kind == TokIdent && identEq(next2.Value, "function") {
-		p.sc.NextSkipComments() // consume "function"
-		p.parseFunction(accessTok, access, retType.Value)
+		p.sc.NextSkipComments()
+		p.parseFunction(accessTok, accessTok.Value, retVal)
 	}
 }
 
-// parseFunction handles: function name( args ) { body }
-func (p *scriptParser) parseFunction(startTok Token, _ string, _ string) {
+func (p *scriptParser) parseFunction(startTok Token, access string, returnType string) {
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind != TokIdent {
 		return
 	}
 
-	// Expect (
 	lp := p.sc.NextSkipComments()
 	if lp.Kind != TokLParen {
 		return
@@ -100,32 +387,33 @@ func (p *scriptParser) parseFunction(startTok Token, _ string, _ string) {
 
 	args := p.parseArgList()
 
+	funcLine := p.baseLine + startTok.Line
+
 	// Create component refs for arguments with component-like types
 	for _, a := range args {
 		if isComponentType(a.Type) {
-			p.refs = append(p.refs, ComponentRef{
+			p.componentRefs = append(p.componentRefs, ComponentRef{
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
-				Line:      uint32(p.baseLine + startTok.Line),
+				Line:      uint32(funcLine),
 			})
 		}
 	}
 
-	fd := FunctionDef{
-		Name:      nameTok.Value,
-		URI:       uriFromString(p.fileURI),
-		Line:      uint32(p.baseLine + startTok.Line),
-		Arguments: args,
-	}
-	p.funcs = append(p.funcs, fd)
+	p.funcs = append(p.funcs, FunctionDef{
+		Name:       nameTok.Value,
+		URI:        uriFromString(p.fileURI),
+		Line:       uint32(funcLine),
+		Arguments:  args,
+		ReturnType: returnType,
+	})
 
-	// Parse the body for variable declarations
-	p.parseFuncBody()
+	// Process body: set inFunc scope, parse assignments, then clear
+	endLine := p.parseBody(funcLine, args)
+	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Access: access, ReturnType: returnType, Start: funcLine, End: p.baseLine + endLine})
 }
 
-// parseArgList parses comma-separated arguments until ')'.
-// Format: [required] [type] name [= default]
 func (p *scriptParser) parseArgList() []Argument {
 	var args []Argument
 
@@ -147,20 +435,30 @@ func (p *scriptParser) parseArgList() []Argument {
 
 		var typeName, name string
 
-		// Collect up to 3 identifiers: [required] [type] name
 		idents := []string{tok.Value}
 
+	loop:
 		for {
 			peek := p.sc.PeekSkipComments()
-			if peek.Kind == TokIdent {
+			switch peek.Kind { //nolint:exhaustive // only care about dot and ident
+			case TokDot:
+				p.sc.NextSkipComments() // consume dot
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					idents[len(idents)-1] += "." + next.Value
+				}
+			case TokIdent:
 				p.sc.NextSkipComments()
 
 				idents = append(idents, peek.Value)
 				if len(idents) == 3 {
-					break
+					break loop
 				}
-			} else {
-				break
+			default:
+				break loop
 			}
 		}
 
@@ -181,11 +479,10 @@ func (p *scriptParser) parseArgList() []Argument {
 			name = idents[2]
 		}
 
-		// Skip default value: = expr (until , or ))
 		peek := p.sc.PeekSkipComments()
 		if peek.Kind == TokEquals {
-			p.sc.NextSkipComments() // consume =
-			p.skipDefaultValue()
+			p.sc.NextSkipComments()
+			p.skipDefault()
 		}
 
 		args = append(args, Argument{Name: name, Type: typeName, Required: required})
@@ -194,8 +491,7 @@ func (p *scriptParser) parseArgList() []Argument {
 	return args
 }
 
-// skipDefaultValue skips tokens until we hit , or ) at depth 0.
-func (p *scriptParser) skipDefaultValue() {
+func (p *scriptParser) skipDefault() {
 	depth := 0
 
 	for {
@@ -219,58 +515,47 @@ func (p *scriptParser) skipDefaultValue() {
 	}
 }
 
-// skipToBodyEnd skips past the next { ... } block (or ; for interface methods).
-func (p *scriptParser) skipToBodyEnd() {
+// parseBody processes { ... } or ; for a function body, extracting refs.
+// Sets inFunc/localVarSet on entry, clears on exit. Returns the line of the closing token.
+func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
-		p.sc.NextSkipComments()
+		t := p.sc.NextSkipComments()
 
-		return
+		return t.Line
 	}
 
 	if tok.Kind != TokLBrace {
-		return
+		return tok.Line
 	}
 
 	p.sc.NextSkipComments() // consume {
+
+	// Enter function scope
+	prevInFunc := p.inFunc
+	prevLocalVarSet := p.localVarSet
+	prevReturnVar := p.returnVar
+
+	// Find closing brace to determine endLine for funcKey
+	endLine := p.scanBodyEndLine()
+
+	p.inFunc = funcKey(funcLine, p.baseLine+endLine)
+	p.returnVar = ""
+
+	p.localVarSet = make(map[string]bool)
+	for _, a := range args {
+		p.localVarSet[strings.ToLower(a.Name)] = true
+	}
 
 	depth := 1
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
 		if t.Kind == TokEOF {
-			return
-		}
+			p.inFunc = prevInFunc
+			p.localVarSet = prevLocalVarSet
+			p.returnVar = prevReturnVar
 
-		switch t.Kind { //nolint:exhaustive
-		case TokLBrace:
-			depth++
-		case TokRBrace:
-			depth--
-		}
-	}
-}
-
-// parseFuncBody parses the body of a function for variable declarations.
-// Handles { ... } or ; (interface methods).
-func (p *scriptParser) parseFuncBody() {
-	tok := p.sc.PeekSkipComments()
-	if tok.Kind == TokSemicolon {
-		p.sc.NextSkipComments()
-
-		return
-	}
-
-	if tok.Kind != TokLBrace {
-		return
-	}
-
-	p.sc.NextSkipComments() // consume {
-
-	depth := 1
-	for depth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
+			return t.Line
 		}
 
 		switch t.Kind { //nolint:exhaustive
@@ -280,69 +565,211 @@ func (p *scriptParser) parseFuncBody() {
 			depth--
 		case TokIdent:
 			if depth > 0 {
-				p.handleBodyIdent(t, depth)
+				p.handleBodyToken(t, depth)
 			}
 		}
 	}
+
+	// Resolve ReturnComponent on the current function
+	if len(p.funcs) > 0 {
+		f := &p.funcs[len(p.funcs)-1]
+		if f.ReturnComponent == "" && p.returnVar != "" {
+			// Look up returnVar in this function's refs
+			if refs := p.funcRefs[p.inFunc]; refs != nil {
+				for _, ref := range refs {
+					if strings.EqualFold(ref.Variable, p.returnVar) {
+						f.ReturnComponent = ref.Component
+
+						break
+					}
+				}
+			}
+			// Also check componentRefs (for variables./this. scoped)
+			if f.ReturnComponent == "" {
+				for _, ref := range p.componentRefs {
+					if strings.EqualFold(ref.Variable, p.returnVar) {
+						f.ReturnComponent = ref.Component
+
+						break
+					}
+				}
+			}
+			// If still unresolved, store for deferred resolution
+			if f.ReturnComponent == "" {
+				f.returnVar = p.returnVar
+			}
+		}
+	}
+
+	// Exit function scope
+	p.inFunc = prevInFunc
+	p.localVarSet = prevLocalVarSet
+	p.returnVar = prevReturnVar
+
+	return endLine
 }
 
-// handleBodyIdent handles identifiers inside a function body for var extraction.
-func (p *scriptParser) handleBodyIdent(tok Token, _ int) {
+// scanBodyEndLine peeks ahead to find the matching } line without consuming tokens.
+// Must be called after the opening { has been consumed. Uses the scanner's saved position.
+func (p *scriptParser) scanBodyEndLine() int {
+	saved := p.sc.Save()
+	depth := 1
+
+	var lastLine int
+
+	for depth > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			lastLine = t.Line
+
+			break
+		}
+
+		if t.Kind == TokLBrace {
+			depth++
+		}
+
+		if t.Kind == TokRBrace {
+			depth--
+			if depth == 0 {
+				lastLine = t.Line
+			}
+		}
+	}
+
+	p.sc.Restore(saved)
+
+	return lastLine
+}
+
+// handleBodyToken processes an identifier inside a function body.
+func (p *scriptParser) handleBodyToken(tok Token, depth int) {
 	lower := strings.ToLower(tok.Value)
 	switch lower {
 	case "var":
-		p.parseVarDecl(tok)
+		p.parseBodyVarDecl(tok)
 	case "local":
-		p.parseDotAssign(tok, ScopeLocal)
+		p.parseBodyScopedVar(tok, ScopeLocal)
 	case "arguments":
-		p.parseDotAssign(tok, ScopeArguments)
-	case "this":
-		p.parseDotAssign(tok, ScopeThis)
+		p.parseBodyScopedVar(tok, ScopeArguments)
 	case "variables":
-		p.parseDotAssign(tok, ScopeVariables)
-	case "function":
-		// Nested function — skip its body
-		nameTok := p.sc.NextSkipComments()
-		if nameTok.Kind != TokIdent {
-			return
-		}
-
-		lp := p.sc.NextSkipComments()
-		if lp.Kind != TokLParen {
-			return
-		}
-		// Skip args
-		pd := 1
-		for pd > 0 {
-			t := p.sc.NextSkipComments()
-			if t.Kind == TokEOF {
-				return
-			}
-
-			if t.Kind == TokLParen {
-				pd++
-			}
-
-			if t.Kind == TokRParen {
-				pd--
-			}
-		}
-
-		p.skipToBodyEnd()
-	case "new":
-		// skip
+		p.parseBodyScopedVar(tok, ScopeVariables)
+	case "this":
+		p.parseBodyScopedVar(tok, ScopeThis)
+	case "return":
+		p.checkReturnComponent()
+	case "function", "public", "private", "remote", "package":
+		// Nested function — skip its entire body
+		p.skipNestedFunction(tok, depth)
 	default:
-		p.parseIdentAssign(tok)
+		p.checkAssignRef(tok)
 	}
 }
 
-// parseVarDecl handles: var name = expr
-func (p *scriptParser) parseVarDecl(varTok Token) {
+// checkReturnComponent checks if a return statement returns a component expression or variable.
+func (p *scriptParser) checkReturnComponent() {
+	peek := p.sc.PeekSkipComments()
+	if peek.Kind != TokIdent {
+		return
+	}
+
+	var comp string
+
+	switch strings.ToLower(peek.Value) {
+	case "new":
+		p.sc.NextSkipComments()
+		comp = p.readNewComponent()
+	case "createobject":
+		p.sc.NextSkipComments()
+		comp = p.readCreateObjectComponent()
+	case "entitynew":
+		p.sc.NextSkipComments()
+		comp = p.readEntityNewComponent()
+	default:
+		// return varName — track for resolution after body parse
+		p.returnVar = peek.Value
+
+		return
+	}
+
+	if comp != "" && len(p.funcs) > 0 {
+		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// readNewComponent reads the component path after "new" keyword.
+func (p *scriptParser) readNewComponent() string {
+	tok := p.sc.NextSkipComments()
+	if tok.Kind == TokString {
+		return unquote(tok.Value)
+	}
+
+	if tok.Kind == TokIdent {
+		comp := tok.Value
+
+		for {
+			if p.sc.PeekSkipComments().Kind == TokDot {
+				p.sc.NextSkipComments()
+
+				next := p.sc.NextSkipComments()
+				if next.Kind == TokIdent {
+					comp += "." + next.Value
+				}
+			} else {
+				break
+			}
+		}
+
+		return comp
+	}
+
+	return ""
+}
+
+// readCreateObjectComponent reads the component path from createObject("component","path").
+func (p *scriptParser) readCreateObjectComponent() string {
+	if p.sc.NextSkipComments().Kind != TokLParen {
+		return ""
+	}
+
+	arg1 := p.sc.NextSkipComments()
+	if arg1.Kind != TokString || !identEq(unquote(arg1.Value), "component") {
+		return ""
+	}
+
+	if p.sc.NextSkipComments().Kind != TokComma {
+		return ""
+	}
+
+	arg2 := p.sc.NextSkipComments()
+	if arg2.Kind != TokString {
+		return ""
+	}
+
+	return unquote(arg2.Value)
+}
+
+// readEntityNewComponent reads the entity name from entityNew("Name").
+func (p *scriptParser) readEntityNewComponent() string {
+	if p.sc.NextSkipComments().Kind != TokLParen {
+		return ""
+	}
+
+	arg := p.sc.NextSkipComments()
+	if arg.Kind != TokString {
+		return ""
+	}
+
+	return unquote(arg.Value)
+}
+
+// parseBodyVarDecl handles: var name = expr inside a function body.
+func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind != TokIdent {
 		return
 	}
-	// Check for = to confirm assignment
+
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
 		return
@@ -350,18 +777,75 @@ func (p *scriptParser) parseVarDecl(varTok Token) {
 
 	p.sc.NextSkipComments() // consume =
 
+	p.localVarSet[strings.ToLower(nameTok.Value)] = true
 	p.vars = append(p.vars, VarDef{
-		Name:  nameTok.Value,
-		Scope: ScopeLocal,
-		Line:  uint32(p.baseLine + varTok.Line),
+		Name: nameTok.Value, Scope: ScopeLocal,
+		Line: uint32(p.baseLine + varTok.Line),
 	})
 
 	// Check RHS for component refs
-	p.scanRHSForRefs(nameTok.Value, varTok.Line)
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind != TokIdent {
+		return
+	}
+
+	rhsLower := strings.ToLower(rhs.Value)
+	switch rhsLower {
+	case "new":
+		p.sc.NextSkipComments()
+		p.parseNewRef(nameTok.Value, varTok.Line)
+	case "createobject":
+		p.sc.NextSkipComments()
+		p.parseCreateObjectRef(nameTok.Value, varTok.Line)
+	case "entitynew":
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(nameTok.Value, varTok.Line)
+	case "entityload":
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(nameTok.Value, varTok.Line)
+	default:
+		if !isKeyword(rhs.Value) {
+			p.sc.NextSkipComments()
+
+			prevIdent := ""
+			lastIdent := rhs.Value
+
+			for p.sc.PeekSkipComments().Kind == TokDot {
+				p.sc.NextSkipComments()
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					prevIdent = lastIdent
+					lastIdent = next.Value
+				} else {
+					break
+				}
+			}
+
+			if p.sc.PeekSkipComments().Kind == TokLParen {
+				if comp := p.tryResolveCall(lastIdent); comp != "" {
+					p.addRef(ComponentRef{
+						Variable: nameTok.Value, Component: comp,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+					})
+				} else {
+					p.pendingCalls = append(p.pendingCalls, pendingCall{
+						varName:  nameTok.Value,
+						funcName: lastIdent,
+						baseVar:  prevIdent,
+						line:     uint32(p.baseLine + varTok.Line),
+						funcKey:  p.inFunc,
+					})
+				}
+			}
+		}
+	}
 }
 
-// parseDotAssign handles: scope.name = expr
-func (p *scriptParser) parseDotAssign(scopeTok Token, scope Scope) {
+// parseBodyScopedVar handles: scope.name = expr inside a function body.
+func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
 		return
@@ -382,70 +866,267 @@ func (p *scriptParser) parseDotAssign(scopeTok Token, scope Scope) {
 	p.sc.NextSkipComments() // consume =
 
 	p.vars = append(p.vars, VarDef{
-		Name:  nameTok.Value,
-		Scope: scope,
-		Line:  uint32(p.baseLine + scopeTok.Line),
+		Name: nameTok.Value, Scope: scope,
+		Line: uint32(p.baseLine + scopeTok.Line),
 	})
 
-	p.scanRHSForRefs(nameTok.Value, scopeTok.Line)
+	isLocal := scope == ScopeLocal || scope == ScopeArguments
+	if isLocal {
+		p.localVarSet[strings.ToLower(nameTok.Value)] = true
+	} else {
+		p.forceGlobal = true
+	}
+
+	// Check RHS for component refs
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind == TokIdent {
+		switch strings.ToLower(rhs.Value) {
+		case "new":
+			p.sc.NextSkipComments()
+			p.parseNewRef(nameTok.Value, scopeTok.Line)
+		case "createobject":
+			p.sc.NextSkipComments()
+			p.parseCreateObjectRef(nameTok.Value, scopeTok.Line)
+		case "entitynew":
+			p.sc.NextSkipComments()
+			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
+		case "entityload":
+			p.sc.NextSkipComments()
+			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
+		default:
+			if !isKeyword(rhs.Value) {
+				p.sc.NextSkipComments()
+
+				if p.sc.PeekSkipComments().Kind == TokLParen {
+					if comp := p.tryResolveCall(rhs.Value); comp != "" {
+						p.addRef(ComponentRef{
+							Variable: nameTok.Value, Component: comp,
+							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+						})
+					} else {
+						p.pendingCalls = append(p.pendingCalls, pendingCall{
+							varName:  nameTok.Value,
+							funcName: rhs.Value,
+							line:     uint32(p.baseLine + scopeTok.Line),
+							funcKey:  p.inFunc,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	p.forceGlobal = false
 }
 
-// parseIdentAssign handles: name = expr (plain assignment → variables scope)
-func (p *scriptParser) parseIdentAssign(identTok Token) {
-	if isKeyword(identTok.Value) {
+// skipNestedFunction skips a nested function declaration and its body.
+func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
+	lower := strings.ToLower(tok.Value)
+	// Handle access modifier before function keyword
+	if lower != "function" {
+		next := p.sc.PeekSkipComments()
+		if next.Kind != TokIdent {
+			return
+		}
+
+		if identEq(next.Value, "function") {
+			p.sc.NextSkipComments()
+		} else {
+			// access returnType function
+			p.sc.NextSkipComments()
+
+			next2 := p.sc.PeekSkipComments()
+			if next2.Kind == TokIdent && identEq(next2.Value, "function") {
+				p.sc.NextSkipComments()
+			} else {
+				return
+			}
+		}
+	}
+	// Skip name (or handle anonymous function)
+	nameTok := p.sc.NextSkipComments()
+	if nameTok.Kind == TokLParen {
+		// Anonymous function: function() { ... }
+		// Already consumed (, skip args
+		pd := 1
+		for pd > 0 {
+			t := p.sc.NextSkipComments()
+			if t.Kind == TokEOF {
+				return
+			}
+
+			if t.Kind == TokLParen {
+				pd++
+			}
+
+			if t.Kind == TokRParen {
+				pd--
+			}
+		}
+
+		p.skipBody()
+
+		return
+	}
+
+	if nameTok.Kind != TokIdent {
+		return
+	}
+	// Skip args
+	lp := p.sc.NextSkipComments()
+	if lp.Kind != TokLParen {
+		return
+	}
+
+	pd := 1
+	for pd > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			return
+		}
+
+		if t.Kind == TokLParen {
+			pd++
+		}
+
+		if t.Kind == TokRParen {
+			pd--
+		}
+	}
+	// Skip body
+	p.skipBody()
+}
+
+// skipBody skips { ... } or ; without processing content.
+func (p *scriptParser) skipBody() {
+	tok := p.sc.PeekSkipComments()
+	if tok.Kind == TokSemicolon {
+		p.sc.NextSkipComments()
+
+		return
+	}
+
+	if tok.Kind != TokLBrace {
+		return
+	}
+
+	p.sc.NextSkipComments()
+
+	depth := 1
+
+	for depth > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			return
+		}
+
+		if t.Kind == TokLBrace {
+			depth++
+		}
+
+		if t.Kind == TokRBrace {
+			depth--
+		}
+	}
+}
+
+func (p *scriptParser) checkAssignRef(tok Token) {
+	if isKeyword(tok.Value) {
 		return
 	}
 
 	peek := p.sc.PeekSkipComments()
-	if peek.Kind == TokEquals { //nolint:gocritic,staticcheck // simple if-else is clearer here
-		p.sc.NextSkipComments() // consume =
-
-		p.vars = append(p.vars, VarDef{
-			Name:  identTok.Value,
-			Scope: ScopeVariables,
-			Line:  uint32(p.baseLine + identTok.Line),
-		})
-
-		p.scanRHSForRefs(identTok.Value, identTok.Line)
-	} else if peek.Kind == TokDot { //nolint:staticcheck,revive // intentionally empty — x.y = ... is not a new var
-	}
-}
-
-// scanRHSForRefs checks if the RHS is a new/createObject/entityNew expression.
-func (p *scriptParser) scanRHSForRefs(varName string, line int) {
-	tok := p.sc.PeekSkipComments()
-	if tok.Kind != TokIdent {
+	if peek.Kind != TokEquals {
 		return
 	}
 
-	lower := strings.ToLower(tok.Value)
+	p.sc.NextSkipComments() // consume =
+
+	// Record the variable
+	p.vars = append(p.vars, VarDef{
+		Name: tok.Value, Scope: ScopeVariables,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+
+	// If inside a function and variable is NOT declared local, route to componentRefs
+	if p.inFunc != "" && !p.isVarDeclaredLocal(tok.Value) {
+		p.forceGlobal = true
+	}
+
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind != TokIdent {
+		p.forceGlobal = false
+
+		return
+	}
+
+	lower := strings.ToLower(rhs.Value)
 	switch lower {
 	case "new":
-		p.sc.NextSkipComments() // consume "new"
-		p.parseNewExpr(varName, line)
+		p.sc.NextSkipComments()
+		p.parseNewRef(tok.Value, tok.Line)
 	case "createobject":
-		p.sc.NextSkipComments() // consume "createObject"
-		p.parseCreateObject(varName, line)
+		p.sc.NextSkipComments()
+		p.parseCreateObjectRef(tok.Value, tok.Line)
 	case "entitynew":
-		p.sc.NextSkipComments() // consume "entityNew"
-		p.parseEntityNew(varName, line)
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(tok.Value, tok.Line)
 	case "entityload":
-		p.sc.NextSkipComments() // consume "entityLoad"
-		p.parseEntityNew(varName, line)
+		p.sc.NextSkipComments()
+		p.parseEntityNewRef(tok.Value, tok.Line)
+	default:
+		// Check if RHS is a function call: funcName( or someVar.method(
+		if !isKeyword(rhs.Value) {
+			p.sc.NextSkipComments() // consume first ident
+
+			// Walk dot chain: [scope.]varName.method(
+			prevIdent := ""
+			lastIdent := rhs.Value
+
+			for p.sc.PeekSkipComments().Kind == TokDot {
+				p.sc.NextSkipComments() // consume .
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					prevIdent = lastIdent
+					lastIdent = next.Value
+				} else {
+					break
+				}
+			}
+
+			if p.sc.PeekSkipComments().Kind == TokLParen {
+				if comp := p.tryResolveCall(lastIdent); comp != "" {
+					p.addRef(ComponentRef{
+						Variable: tok.Value, Component: comp,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+					})
+				} else {
+					p.pendingCalls = append(p.pendingCalls, pendingCall{
+						varName:  tok.Value,
+						funcName: lastIdent,
+						baseVar:  prevIdent,
+						line:     uint32(p.baseLine + tok.Line),
+						funcKey:  p.inFunc,
+					})
+				}
+			}
+		}
 	}
+
+	p.forceGlobal = false
 }
 
-// parseNewExpr handles: new ["]path.Component["][()]
-func (p *scriptParser) parseNewExpr(varName string, line int) {
+func (p *scriptParser) parseNewRef(varName string, line int) {
 	tok := p.sc.NextSkipComments()
 
 	var component string
 
-	if tok.Kind == TokString { //nolint:gocritic // if-else chain is clearer than switch here
-		// Quoted: new "path.Component" or new 'path.Component'
+	if tok.Kind == TokString {
 		component = unquote(tok.Value)
 	} else if tok.Kind == TokIdent {
-		// Unquoted: new path.Component
 		component = tok.Value
 
 		for {
@@ -461,55 +1142,70 @@ func (p *scriptParser) parseNewExpr(varName string, line int) {
 				break
 			}
 		}
-	} else {
-		return
 	}
 
 	if component != "" {
-		p.refs = append(p.refs, ComponentRef{
-			Variable:  varName,
-			Component: component,
-			URI:       uriFromString(p.fileURI),
-			Line:      uint32(p.baseLine + line),
+		p.addRef(ComponentRef{
+			Variable: varName, Component: component,
+			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
 	}
 }
 
-// parseCreateObject handles: createObject("component", "path.Component")
-func (p *scriptParser) parseCreateObject(varName string, line int) {
+func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 	lp := p.sc.NextSkipComments()
 	if lp.Kind != TokLParen {
 		return
 	}
-	// First arg should be "component"
+
 	arg1 := p.sc.NextSkipComments()
-	if arg1.Kind != TokString || !identEq(unquote(arg1.Value), "component") {
+	if arg1.Kind != TokString {
 		return
 	}
 
-	comma := p.sc.NextSkipComments()
-	if comma.Kind != TokComma {
-		return
-	}
+	arg1Val := unquote(arg1.Value)
 
-	arg2 := p.sc.NextSkipComments()
-	if arg2.Kind != TokString {
-		return
-	}
+	if identEq(arg1Val, "component") {
+		comma := p.sc.NextSkipComments()
+		if comma.Kind != TokComma {
+			return
+		}
 
-	component := unquote(arg2.Value)
-	if component != "" {
-		p.refs = append(p.refs, ComponentRef{
-			Variable:  varName,
-			Component: component,
-			URI:       uriFromString(p.fileURI),
-			Line:      uint32(p.baseLine + line),
-		})
+		arg2 := p.sc.NextSkipComments()
+		if arg2.Kind != TokString {
+			return
+		}
+
+		comp := unquote(arg2.Value)
+		if comp != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			})
+		}
+	} else if len(p.resolvers) > 0 {
+		// Try resolvers for non-component createObject (e.g. java)
+		comma := p.sc.NextSkipComments()
+		if comma.Kind != TokComma {
+			return
+		}
+
+		arg2 := p.sc.NextSkipComments()
+		if arg2.Kind != TokString {
+			return
+		}
+
+		expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
+		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			})
+		}
 	}
 }
 
-// parseEntityNew handles: entityNew("EntityName")
-func (p *scriptParser) parseEntityNew(varName string, line int) {
+func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 	lp := p.sc.NextSkipComments()
 	if lp.Kind != TokLParen {
 		return
@@ -520,15 +1216,219 @@ func (p *scriptParser) parseEntityNew(varName string, line int) {
 		return
 	}
 
-	component := unquote(arg.Value)
-	if component != "" {
-		p.refs = append(p.refs, ComponentRef{
-			Variable:  varName,
-			Component: component,
-			URI:       uriFromString(p.fileURI),
-			Line:      uint32(p.baseLine + line),
+	comp := unquote(arg.Value)
+	if comp != "" {
+		p.addRef(ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
 	}
+}
+
+// globalScriptParser extracts only variable declarations outside function bodies.
+type globalScriptParser struct {
+	sc       *Scanner
+	vars     []VarDef
+	baseLine int
+	scopes   []FuncScope
+}
+
+func newGlobalScriptParser(src string, baseLine int, scopes []FuncScope) *globalScriptParser {
+	return &globalScriptParser{
+		sc:       NewScanner(src),
+		baseLine: baseLine,
+		scopes:   scopes,
+	}
+}
+
+func (p *globalScriptParser) parse() {
+	for {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF {
+			return
+		}
+
+		if tok.Kind != TokIdent {
+			continue
+		}
+
+		line := p.baseLine + tok.Line
+		// Skip if inside a function
+		if findFuncScope(line, p.scopes).Start != -1 {
+			// Skip to end of function body
+			p.skipPastScope(line)
+
+			continue
+		}
+
+		lower := strings.ToLower(tok.Value)
+		switch lower {
+		case "var":
+			p.parseVar(tok)
+		case "local":
+			p.parseDot(tok, ScopeVariables) // local outside func → variables
+		case "this":
+			p.parseDot(tok, ScopeThis)
+		case "variables":
+			p.parseDot(tok, ScopeVariables)
+		case "function", "public", "private", "remote", "package":
+			// skip function declarations
+		case "property":
+			// skip property declaration tokens until semicolon
+			for {
+				t := p.sc.NextSkipComments()
+				if t.Kind == TokEOF || t.Kind == TokSemicolon {
+					break
+				}
+			}
+		default:
+			p.parsePlain(tok)
+		}
+	}
+}
+
+func (p *globalScriptParser) skipPastScope(line int) {
+	fs := findFuncScope(line, p.scopes)
+	if fs.Start == -1 {
+		return
+	}
+	// Skip tokens until we're past the function's end line
+	for {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF {
+			return
+		}
+
+		if p.baseLine+tok.Line > fs.End {
+			return
+		}
+	}
+}
+
+func (p *globalScriptParser) parseVar(tok Token) {
+	name := p.sc.NextSkipComments()
+	if name.Kind != TokIdent {
+		return
+	}
+
+	eq := p.sc.PeekSkipComments()
+	if eq.Kind != TokEquals {
+		return
+	}
+
+	p.vars = append(p.vars, VarDef{
+		Name: name.Value, Scope: ScopeVariables,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+}
+
+func (p *globalScriptParser) parseDot(tok Token, scope Scope) {
+	dot := p.sc.PeekSkipComments()
+	if dot.Kind != TokDot {
+		return
+	}
+
+	p.sc.NextSkipComments()
+
+	name := p.sc.NextSkipComments()
+	if name.Kind != TokIdent {
+		return
+	}
+
+	eq := p.sc.PeekSkipComments()
+	if eq.Kind != TokEquals {
+		return
+	}
+
+	p.vars = append(p.vars, VarDef{
+		Name: name.Value, Scope: scope,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+}
+
+func (p *globalScriptParser) parsePlain(tok Token) {
+	if isKeyword(tok.Value) {
+		return
+	}
+
+	eq := p.sc.PeekSkipComments()
+	if eq.Kind != TokEquals {
+		return
+	}
+
+	p.vars = append(p.vars, VarDef{
+		Name: tok.Value, Scope: ScopeVariables,
+		Line: uint32(p.baseLine + tok.Line),
+	})
+}
+
+func isTruthy(s string) bool {
+	return strings.EqualFold(s, "true") || strings.EqualFold(s, "yes")
+}
+
+// looksLikeCFCType returns true if a property type looks like a CFC reference
+// (dotted path or non-primitive name).
+func looksLikeCFCType(t string) bool {
+	if strings.Contains(t, ".") {
+		return true
+	}
+
+	switch strings.ToLower(t) {
+	case "string", "numeric", "boolean", "date", "struct", "array", "query",
+		"binary", "guid", "uuid", "void", "any", "xml", "function":
+		return false
+	}
+
+	return true
+}
+
+// tryResolveCall attempts to resolve a function call via resolvers.
+// Called when scanner is positioned at '(' (peeked, not consumed).
+// Reconstructs the call expression (e.g. getService("foo")) and tries resolvers.
+func (p *scriptParser) tryResolveCall(funcName string) string {
+	if len(p.resolvers) == 0 {
+		return ""
+	}
+
+	// Quick prefix check
+	hasPrefix := false
+
+	for i := range p.resolvers {
+		if p.resolvers[i].Prefix == "" || containsFold(funcName, p.resolvers[i].Prefix) {
+			hasPrefix = true
+
+			break
+		}
+	}
+
+	if !hasPrefix {
+		return ""
+	}
+
+	// Save position — peek ahead to build the expression
+	saved := p.sc.Save()
+	p.sc.NextSkipComments() // consume (
+
+	arg := p.sc.PeekSkipComments()
+	if arg.Kind == TokString {
+		p.sc.NextSkipComments()
+
+		expr := funcName + "(\"" + unquote(arg.Value) + "\")"
+		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+			return comp
+		}
+	} else {
+		// Try no-arg match: funcName()
+		expr := funcName + "()"
+		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+			return comp
+		}
+	}
+
+	// No match — restore scanner
+	p.sc.Restore(saved)
+
+	return ""
 }
 
 func unquote(s string) string {

@@ -68,7 +68,7 @@ func TestPropertyAccessors_PositionalSyntax(t *testing.T) {
 	// UserDAO type should generate a component ref
 	found := false
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "userDAO" && ref.Component == "UserDAO" {
 			found = true
 
@@ -147,13 +147,13 @@ func TestPropertyAccessors_TypeComponentRef(t *testing.T) {
 
 	// services.UserService should generate a ref, numeric should not
 	var refs []string
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		refs = append(refs, ref.Variable+"→"+ref.Component)
 	}
 
 	found := false
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "userService" && ref.Component == "services.UserService" {
 			found = true
 		}
@@ -163,7 +163,7 @@ func TestPropertyAccessors_TypeComponentRef(t *testing.T) {
 		t.Errorf("expected ref userService→services.UserService, got %v", refs)
 	}
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "count" {
 			t.Error("numeric property should not generate a component ref")
 		}
@@ -202,7 +202,7 @@ func TestPropertyAccessors_InjectAttr(t *testing.T) {
 
 	// Without property resolvers or bean lookup, inject alone doesn't create refs
 	// (type is empty and not a CFC path)
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "config" {
 			t.Error("inject with coldbox namespace should not create ref without resolvers")
 		}
@@ -230,7 +230,7 @@ func TestPropertyAccessors_BeanLookup(t *testing.T) {
 	})
 
 	refMap := make(map[string]string)
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		refMap[ref.Variable] = ref.Component
 	}
 
@@ -261,7 +261,7 @@ func TestPropertyResolvers(t *testing.T) {
 	})
 
 	refMap := make(map[string]string)
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		refMap[ref.Variable] = ref.Component
 	}
 

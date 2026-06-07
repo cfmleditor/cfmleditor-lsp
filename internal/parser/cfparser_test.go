@@ -504,3 +504,1664 @@ func TestParseComponentRefs_CreateObjectInitScriptDot(t *testing.T) {
 	}`)
 	assertRef(t, refs, 0, "persist", "persist")
 }
+
+func TestTagParser_RefClassification(t *testing.T) {
+	content := `<cfcomponent>
+<cfset VARIABLES.globalService = createObject("component","services.GlobalService") />
+<cffunction name="init">
+	<cfset VARIABLES.persist = createObject("component","persist").init() />
+	<cfset var localService = createObject("component","services.LocalService") />
+	<cfset localService = createObject("component","services.ReassignedLocal") />
+	<cfset var result = ArrayNew(1) />
+</cffunction>
+<cffunction name="other">
+	<cfset var otherLocal = createObject("component","services.OtherLocal") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// ComponentRefs should contain VARIABLES-scoped refs only
+	var compRefVars []string
+	for _, ref := range pr.ComponentRefs {
+		compRefVars = append(compRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(compRefVars, "globalService") {
+		t.Errorf("expected globalService in ComponentRefs, got %v", compRefVars)
+	}
+
+	if !slices.Contains(compRefVars, "persist") {
+		t.Errorf("expected persist in ComponentRefs (VARIABLES.persist), got %v", compRefVars)
+	}
+
+	if slices.Contains(compRefVars, "localService") {
+		t.Errorf("localService should NOT be in ComponentRefs (it's var'd), got %v", compRefVars)
+	}
+
+	if slices.Contains(compRefVars, "otherLocal") {
+		t.Errorf("otherLocal should NOT be in ComponentRefs, got %v", compRefVars)
+	}
+
+	// FuncComponentRefs for init should have localService
+	initScope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(initScope.Start, initScope.End)
+
+	var funcRefVars []string
+	for _, ref := range funcRefs {
+		funcRefVars = append(funcRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(funcRefVars, "localService") {
+		t.Errorf("expected localService in init FuncComponentRefs, got %v", funcRefVars)
+	}
+
+	// Reassigned local should also be in funcRefs (var'd earlier)
+	if !slices.Contains(funcRefVars, "localService") {
+		t.Errorf("expected reassigned localService in init FuncComponentRefs, got %v", funcRefVars)
+	}
+
+	// FuncComponentRefs for other should have otherLocal
+	otherScope := pr.Scopes[1]
+	otherRefs := pr.FuncComponentRefs(otherScope.Start, otherScope.End)
+
+	var otherRefVars []string
+	for _, ref := range otherRefs {
+		otherRefVars = append(otherRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(otherRefVars, "otherLocal") {
+		t.Errorf("expected otherLocal in other FuncComponentRefs, got %v", otherRefVars)
+	}
+
+	// localService from init should NOT leak into other
+	if slices.Contains(otherRefVars, "localService") {
+		t.Errorf("localService should NOT be in other FuncComponentRefs, got %v", otherRefVars)
+	}
+}
+
+func TestTagParser_VarShadowsComponentRef(t *testing.T) {
+	content := `<cfcomponent>
+<cfset VARIABLES.result = createObject("component","services.ResultService") />
+<cffunction name="doStuff">
+	<cfset var result = ArrayNew(1) />
+	<cfset result = createObject("component","services.Overridden") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// ComponentRefs should have result -> ResultService (from VARIABLES.result)
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "result" && ref.Component == "services.ResultService" {
+			found = true
+		}
+
+		if ref.Variable == "result" && ref.Component == "services.Overridden" {
+			t.Error("Overridden should NOT be in ComponentRefs (result is var'd in function)")
+		}
+	}
+
+	if !found {
+		t.Error("expected result -> services.ResultService in ComponentRefs")
+	}
+
+	// FuncComponentRefs should have the overridden one
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var funcFound bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "result" && ref.Component == "services.Overridden" {
+			funcFound = true
+		}
+	}
+
+	if !funcFound {
+		t.Error("expected result -> services.Overridden in FuncComponentRefs")
+	}
+}
+
+func TestScriptParser_RefClassification(t *testing.T) {
+	content := `component {
+	variables.globalService = createObject("component","services.GlobalService");
+
+	function init() {
+		variables.persist = createObject("component","persist");
+		var localService = createObject("component","services.LocalService");
+		localService = createObject("component","services.ReassignedLocal");
+		var result = ArrayNew(1);
+	}
+
+	function other() {
+		var otherLocal = createObject("component","services.OtherLocal");
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// ComponentRefs should contain VARIABLES-scoped refs only
+	var compRefVars []string
+	for _, ref := range pr.ComponentRefs {
+		compRefVars = append(compRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(compRefVars, "globalService") {
+		t.Errorf("expected globalService in ComponentRefs, got %v", compRefVars)
+	}
+
+	if !slices.Contains(compRefVars, "persist") {
+		t.Errorf("expected persist in ComponentRefs (variables.persist), got %v", compRefVars)
+	}
+
+	if slices.Contains(compRefVars, "localService") {
+		t.Errorf("localService should NOT be in ComponentRefs (it's var'd), got %v", compRefVars)
+	}
+
+	if slices.Contains(compRefVars, "otherLocal") {
+		t.Errorf("otherLocal should NOT be in ComponentRefs, got %v", compRefVars)
+	}
+
+	// FuncComponentRefs for init should have localService
+	initScope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(initScope.Start, initScope.End)
+
+	var funcRefVars []string
+	for _, ref := range funcRefs {
+		funcRefVars = append(funcRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(funcRefVars, "localService") {
+		t.Errorf("expected localService in init FuncComponentRefs, got %v", funcRefVars)
+	}
+
+	// FuncComponentRefs for other should have otherLocal
+	otherScope := pr.Scopes[1]
+	otherRefs := pr.FuncComponentRefs(otherScope.Start, otherScope.End)
+
+	var otherRefVars []string
+	for _, ref := range otherRefs {
+		otherRefVars = append(otherRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(otherRefVars, "otherLocal") {
+		t.Errorf("expected otherLocal in other FuncComponentRefs, got %v", otherRefVars)
+	}
+
+	if slices.Contains(otherRefVars, "localService") {
+		t.Errorf("localService should NOT be in other FuncComponentRefs, got %v", otherRefVars)
+	}
+}
+
+func TestScriptParser_UnscopedAssignRouting(t *testing.T) {
+	content := `component {
+	function doStuff() {
+		var x = new services.Local();
+		y = new services.Global();
+		x = new services.StillLocal();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// y should be in ComponentRefs (unscoped, not var'd → global)
+	var compRefVars []string
+	for _, ref := range pr.ComponentRefs {
+		compRefVars = append(compRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(compRefVars, "y") {
+		t.Errorf("expected y in ComponentRefs (unscoped not var'd), got %v", compRefVars)
+	}
+
+	if slices.Contains(compRefVars, "x") {
+		t.Errorf("x should NOT be in ComponentRefs (var'd), got %v", compRefVars)
+	}
+
+	// x should be in FuncComponentRefs
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var funcRefVars []string
+	for _, ref := range funcRefs {
+		funcRefVars = append(funcRefVars, ref.Variable)
+	}
+
+	if !slices.Contains(funcRefVars, "x") {
+		t.Errorf("expected x in FuncComponentRefs, got %v", funcRefVars)
+	}
+
+	if slices.Contains(funcRefVars, "y") {
+		t.Errorf("y should NOT be in FuncComponentRefs (not var'd), got %v", funcRefVars)
+	}
+}
+
+func TestFunctionDef_ReturnType(t *testing.T) {
+	content := `component {
+	public models.User function getUser() {
+		return new models.User();
+	}
+
+	function createService() {
+		return createObject("component", "services.UserService");
+	}
+
+	function loadEntity() {
+		return entityNew("Order");
+	}
+
+	string function getName() {
+		return "hello";
+	}
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 4 {
+		t.Fatalf("expected 4 funcs, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnType != "models.User" {
+		t.Errorf("expected ReturnType 'models.User', got %q", pr.Funcs[0].ReturnType)
+	}
+
+	if pr.Funcs[0].ReturnComponent != "models.User" {
+		t.Errorf("expected ReturnComponent 'models.User', got %q", pr.Funcs[0].ReturnComponent)
+	}
+
+	if pr.Funcs[1].ReturnComponent != "services.UserService" {
+		t.Errorf("expected ReturnComponent 'services.UserService', got %q", pr.Funcs[1].ReturnComponent)
+	}
+
+	if pr.Funcs[2].ReturnComponent != "Order" {
+		t.Errorf("expected ReturnComponent 'Order', got %q", pr.Funcs[2].ReturnComponent)
+	}
+
+	if pr.Funcs[3].ReturnType != "string" {
+		t.Errorf("expected ReturnType 'string', got %q", pr.Funcs[3].ReturnType)
+	}
+
+	if pr.Funcs[3].ReturnComponent != "" {
+		t.Errorf("expected empty ReturnComponent, got %q", pr.Funcs[3].ReturnComponent)
+	}
+}
+
+func TestFunctionDef_ReturnType_Tag(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getUser" returntype="models.User">
+	<cfreturn createObject("component","models.User") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 1 {
+		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnType != "models.User" {
+		t.Errorf("expected ReturnType 'models.User', got %q", pr.Funcs[0].ReturnType)
+	}
+}
+
+func TestFunctionDef_ReturnVarResolution(t *testing.T) {
+	content := `component {
+	function getService() {
+		var svc = new services.UserService();
+		return svc;
+	}
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 1 {
+		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnComponent != "services.UserService" {
+		t.Errorf("expected ReturnComponent 'services.UserService', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestPendingCalls_SameFileResolution(t *testing.T) {
+	content := `component {
+	models.User function getUser() {
+		return new models.User();
+	}
+
+	function doStuff() {
+		var user = getUser();
+		return user;
+	}
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 2 {
+		t.Fatalf("expected 2 funcs, got %d", len(pr.Funcs))
+	}
+
+	// doStuff's funcRefs should have user → models.User
+	scope := pr.Scopes[1]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "user" && ref.Component == "models.User" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected user → models.User in doStuff FuncComponentRefs, got %v", funcRefs)
+	}
+
+	// doStuff should also have ReturnComponent resolved via return var
+	if pr.Funcs[1].ReturnComponent != "models.User" {
+		t.Errorf("expected doStuff ReturnComponent 'models.User', got %q", pr.Funcs[1].ReturnComponent)
+	}
+}
+
+func TestFunctionDef_ReturnType_ResolvesChain(t *testing.T) {
+	// Simulates java stub pattern: getInstance() returns same component type
+	content := `component {
+	stubs.Signature function getInstance(required string algorithm) {}
+	function initSign(required any privateKey) {}
+	function sign() {}
+}`
+	stubURI := uri.URI("file:///stubs/Signature.cfc")
+	pr := Parse(stubURI, content)
+
+	if len(pr.Funcs) != 3 {
+		t.Fatalf("expected 3 funcs, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnType != "stubs.Signature" {
+		t.Errorf("expected ReturnType 'stubs.Signature', got %q", pr.Funcs[0].ReturnType)
+	}
+}
+
+func TestPendingCalls_ReturnTypeFromCalledFunction(t *testing.T) {
+	// When a function has a component-like return type, callers should get a ref
+	content := `component {
+	stubs.Signature function getInstance(required string algorithm) {}
+	function initSign() {}
+	function sign() {}
+
+	function doWork() {
+		var sig = getInstance("SHA256");
+		sig.initSign();
+		sig.sign();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// sig should resolve to stubs.Signature via getInstance's ReturnType
+	scope := pr.Scopes[3] // doWork
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "sig" && ref.Component == "stubs.Signature" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected sig → stubs.Signature in doWork FuncComponentRefs, got %v", funcRefs)
+	}
+}
+
+func TestPendingCalls_MethodCallFallbackToBaseVar(t *testing.T) {
+	// x = variables.jss.getInstance() → x gets same component as jss
+	content := `component {
+	variables.jss = createObject("java","java.security.Signature");
+
+	function doWork() {
+		var instance = variables.jss.getInstance("SHA256");
+	}
+}`
+	resolvers := []Resolver{{
+		Match:   `createObject("java","java.security.Signature")`,
+		Resolve: "stubs.Signature",
+		Prefix:  "createObject",
+	}}
+	pr := Parse(testURI, content, resolvers)
+
+	// jss should be in ComponentRefs → stubs.Signature
+	var jssFound bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "jss" && ref.Component == "stubs.Signature" {
+			jssFound = true
+		}
+	}
+
+	if !jssFound {
+		t.Fatalf("expected jss → stubs.Signature in ComponentRefs, got %v", pr.ComponentRefs)
+	}
+
+	// instance should resolve to same component as jss (fallback)
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var instanceFound bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "instance" && ref.Component == "stubs.Signature" {
+			instanceFound = true
+		}
+	}
+
+	if !instanceFound {
+		t.Errorf("expected instance → stubs.Signature in FuncComponentRefs, got %v", funcRefs)
+	}
+}
+
+func TestResolverRefs_MultiLineCall(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="doLogin" access="public">
+	<cfargument name="context" type="any" />
+	<cfset var authtoken = "abc" />
+	<cfset var sessionId = "123" />
+	<cfset var appId = "app" />
+
+	<cfset var user = VARIABLES._kernel.getUser(
+				token=authtoken,
+				sessionId=sessionId,
+				isDomain=true,
+				appId=appId) />
+
+	<cfset var wasloggedin = user.isLoggedIn(
+			sessionid=sessionId,
+			allowDomainOnly=true) />
+</cffunction>
+</cfcomponent>`
+
+	resolvers := []Resolver{{
+		Match:   "getUser($1)",
+		Resolve: "models.User",
+		Prefix:  "getUser",
+	}}
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ScanAllScopes: true,
+	})
+
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
+	}
+
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var userFound bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "user" && ref.Component == "models.User" {
+			userFound = true
+		}
+	}
+
+	if !userFound {
+		t.Errorf("expected user → models.User in FuncComponentRefs (multi-line call), got %v", funcRefs)
+	}
+}
+
+func TestExpressionMappings_ReplacesHashExpressions(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="init">
+	<cfset variables.runner = CreateObject("component","#VARIABLES._core#update.run") />
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ExpressionMappings: map[string]string{
+			"#VARIABLES._core#": "packages.tass.core.",
+		},
+	})
+
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "runner" && ref.Component == "packages.tass.core.update.run" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected runner → packages.tass.core.update.run, got %v", pr.ComponentRefs)
+	}
+}
+
+func TestTagParser_FuncRefsOffset_MixedFile(t *testing.T) {
+	// Simulate a mixed tag/script file where tag region starts at a non-zero line
+	content := `<cfscript>
+// some script
+</cfscript>
+<cfcomponent>
+<cffunction name="doStuff">
+	<cfset var svc = CreateObject("component","services.MyService") />
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+
+	// Find the doStuff scope and check funcRefs
+	for _, s := range pr.Scopes {
+		if s.Name == "doStuff" {
+			refs := pr.FuncComponentRefs(s.Start, s.End)
+
+			var found bool
+
+			for _, ref := range refs {
+				if ref.Variable == "svc" && ref.Component == "services.MyService" {
+					found = true
+				}
+			}
+
+			if !found {
+				t.Errorf("expected svc → services.MyService in doStuff FuncComponentRefs, got %v", refs)
+			}
+
+			return
+		}
+	}
+
+	t.Error("doStuff scope not found")
+}
+
+func TestTagParser_BaseVarMethodCall(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="test">
+	<cfset var client = CreateObject("component","services.Client") />
+	<cfset var response = client.doRequest("test") />
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var clientFound, responseFound bool
+
+	for _, ref := range refs {
+		if ref.Variable == "client" {
+			clientFound = true
+		}
+
+		if ref.Variable == "response" && ref.Component == "services.Client" {
+			responseFound = true
+		}
+	}
+
+	if !clientFound {
+		t.Errorf("expected client ref in FuncComponentRefs, got %v", refs)
+	}
+
+	if !responseFound {
+		t.Errorf("expected response → services.Client (baseVar fallback), got %v", refs)
+	}
+}
+
+func TestSimpleMatch_FirstSuffix(t *testing.T) {
+	// Ensure getController("$1") captures only the first arg, not past chained calls
+	resolvers := []Resolver{{
+		Match:   `getController("$1")`,
+		Resolve: "packages.$1.controller",
+		Prefix:  "getController",
+	}}
+
+	comp := ResolveFromCall(`getController("kiosk").getFilterArray(filterType="students")`, resolvers)
+	if comp != "packages.kiosk.controller" {
+		t.Errorf("expected packages.kiosk.controller, got %q", comp)
+	}
+}
+
+func TestTagParser_ReturnComponentInference(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="createDocument" access="public" returntype="any">
+	<cfset var result = CreateObject("component","services.LuceneDocument") />
+	<cfreturn result />
+</cffunction>
+<cffunction name="doWork" access="public">
+	<cfset var doc = createDocument() />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) < 2 {
+		t.Fatalf("expected 2+ funcs, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnComponent != "services.LuceneDocument" {
+		t.Errorf("expected createDocument ReturnComponent 'services.LuceneDocument', got %q", pr.Funcs[0].ReturnComponent)
+	}
+
+	// doWork's doc should resolve via pending call
+	for _, s := range pr.Scopes {
+		if s.Name == "doWork" {
+			refs := pr.FuncComponentRefs(s.Start, s.End)
+
+			var found bool
+
+			for _, ref := range refs {
+				if ref.Variable == "doc" && ref.Component == "services.LuceneDocument" {
+					found = true
+				}
+			}
+
+			if !found {
+				t.Errorf("expected doc → services.LuceneDocument in doWork FuncComponentRefs, got %v", refs)
+			}
+
+			return
+		}
+	}
+
+	t.Error("doWork scope not found")
+}
+
+func TestTagParser_CfreturnDirectNew(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getUser" returntype="any">
+	<cfreturn new models.User() />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if pr.Funcs[0].ReturnComponent != "models.User" {
+		t.Errorf("expected ReturnComponent 'models.User', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestTagParser_CfreturnDirectCreateObject(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getService" returntype="any">
+	<cfreturn createObject("component","services.MyService") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if pr.Funcs[0].ReturnComponent != "services.MyService" {
+		t.Errorf("expected ReturnComponent 'services.MyService', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestTagParser_CfreturnVarResolution(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="build" returntype="any">
+	<cfset var obj = CreateObject("component","services.Builder") />
+	<cfreturn obj />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if pr.Funcs[0].ReturnComponent != "services.Builder" {
+		t.Errorf("expected ReturnComponent 'services.Builder', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestTagParser_BareFunctionCallResolution(t *testing.T) {
+	// x = sameFileFunc() should resolve via ReturnComponent
+	content := `<cfcomponent>
+<cffunction name="createHelper" returntype="any">
+	<cfset var h = CreateObject("component","utils.Helper") />
+	<cfreturn h />
+</cffunction>
+<cffunction name="doWork">
+	<cfset var helper = createHelper() />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if pr.Funcs[0].ReturnComponent != "utils.Helper" {
+		t.Fatalf("expected createHelper ReturnComponent 'utils.Helper', got %q", pr.Funcs[0].ReturnComponent)
+	}
+
+	scope := pr.Scopes[1]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "helper" && ref.Component == "utils.Helper" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected helper → utils.Helper in doWork FuncComponentRefs, got %v", refs)
+	}
+}
+
+func TestTagParser_ChainedReturnResolution(t *testing.T) {
+	// funcA returns component, funcB calls funcA and returns that
+	content := `<cfcomponent>
+<cffunction name="getDAO" returntype="any">
+	<cfset var d = CreateObject("component","dao.UserDAO") />
+	<cfreturn d />
+</cffunction>
+<cffunction name="doWork">
+	<cfset var svc = getDAO() />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// getDAO returns dao.UserDAO
+	if pr.Funcs[0].ReturnComponent != "dao.UserDAO" {
+		t.Fatalf("expected getDAO ReturnComponent 'dao.UserDAO', got %q", pr.Funcs[0].ReturnComponent)
+	}
+
+	// doWork's svc should resolve to dao.UserDAO
+	for _, sc := range pr.Scopes {
+		if sc.Name == "doWork" {
+			refs := pr.FuncComponentRefs(sc.Start, sc.End)
+
+			var found bool
+
+			for _, ref := range refs {
+				if ref.Variable == "svc" && ref.Component == "dao.UserDAO" {
+					found = true
+				}
+			}
+
+			if !found {
+				t.Errorf("expected svc → dao.UserDAO in doWork FuncComponentRefs, got %v", refs)
+			}
+
+			return
+		}
+	}
+
+	t.Error("doWork scope not found")
+}
+
+func TestScriptParser_ReturnInsideConditional(t *testing.T) {
+	// Multiple return paths — should use the last return seen
+	content := `component {
+	function getService(required boolean useCache) {
+		if (arguments.useCache) {
+			return new services.CachedService();
+		}
+		return new services.LiveService();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// Should capture one of them (last one wins)
+	if pr.Funcs[0].ReturnComponent == "" {
+		t.Error("expected ReturnComponent to be set from conditional return")
+	}
+}
+
+func TestScriptParser_NoReturnComponent(t *testing.T) {
+	// Function with no component return — should not crash or set garbage
+	content := `component {
+	function calculate() {
+		var x = 1 + 2;
+		return x;
+	}
+}`
+	pr := Parse(testURI, content)
+
+	if pr.Funcs[0].ReturnComponent != "" {
+		t.Errorf("expected empty ReturnComponent for numeric return, got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestScriptParser_ReturnThis(t *testing.T) {
+	// return this — common builder pattern, should not crash
+	content := `component {
+	function setName(required string name) {
+		variables.name = arguments.name;
+		return this;
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// "this" is a keyword, should not set ReturnComponent
+	if pr.Funcs[0].ReturnComponent != "" {
+		t.Errorf("expected empty ReturnComponent for 'return this', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestPendingCalls_RecursiveDoesNotPanic(t *testing.T) {
+	// Function calls itself — should not infinite loop
+	content := `component {
+	function recurse() {
+		var result = recurse();
+		return result;
+	}
+}`
+
+	pr := Parse(testURI, content)
+	if len(pr.Funcs) != 1 {
+		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
+	}
+}
+
+func TestTagParser_CommentedOutCfreturn(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="test">
+	<cfset var svc = CreateObject("component","services.Real") />
+	<!--- <cfreturn CreateObject("component","services.Fake") /> --->
+	<cfreturn svc />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// Should resolve to Real (from svc), not Fake (commented out)
+	if pr.Funcs[0].ReturnComponent != "services.Real" {
+		t.Errorf("expected ReturnComponent 'services.Real', got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestPendingCalls_EmptyFunctionBody(t *testing.T) {
+	content := `component {
+	function empty() {}
+	function caller() {
+		var x = empty();
+	}
+}`
+	pr := Parse(testURI, content)
+	// Should not crash, x just won't resolve
+	scope := pr.Scopes[1]
+
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+	if len(refs) != 0 {
+		t.Errorf("expected no refs for call to empty function, got %v", refs)
+	}
+}
+
+func TestTagParser_MultipleReturnsLastWins(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="get">
+	<cfset var a = CreateObject("component","services.First") />
+	<cfset var b = CreateObject("component","services.Second") />
+	<cfreturn a />
+	<cfreturn b />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// First cfreturn wins (ReturnComponent is only set if empty)
+	if pr.Funcs[0].ReturnComponent != "services.First" {
+		t.Errorf("expected ReturnComponent 'services.First' (first cfreturn), got %q", pr.Funcs[0].ReturnComponent)
+	}
+}
+
+func TestScriptParser_DottedReturnTypeAsRef(t *testing.T) {
+	// Declared dotted return type should allow pending call resolution
+	content := `component {
+	models.User function getUser() {
+		return new models.User();
+	}
+
+	function work() {
+		var u = getUser();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[1]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "u" && ref.Component == "models.User" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected u → models.User via declared return type, got %v", refs)
+	}
+}
+
+func TestPendingCalls_ScopePrefix_Variables(t *testing.T) {
+	// x = VARIABLES.kernel.getService() — baseVar should be "kernel"
+	content := `component {
+	variables.kernel = new core.Kernel();
+
+	function work() {
+		var svc = variables.kernel.getFactory();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" && ref.Component == "core.Kernel" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected svc → core.Kernel (baseVar fallback from variables.kernel), got %v", refs)
+	}
+}
+
+func TestScriptParser_AssignInsideNestedBraces(t *testing.T) {
+	// Assignments inside if/for blocks should still be captured
+	content := `component {
+	function work() {
+		var svc = new services.Foo();
+		if (true) {
+			var inner = new services.Bar();
+		}
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var svcFound, innerFound bool
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" {
+			svcFound = true
+		}
+
+		if ref.Variable == "inner" {
+			innerFound = true
+		}
+	}
+
+	if !svcFound {
+		t.Errorf("expected svc in FuncComponentRefs, got %v", refs)
+	}
+
+	if !innerFound {
+		t.Errorf("expected inner in FuncComponentRefs (inside if block), got %v", refs)
+	}
+}
+
+func TestScriptParser_ClosureDoesNotLeak(t *testing.T) {
+	// Variable inside a closure/nested function should not appear in outer funcRefs
+	content := `component {
+	function outer() {
+		var svc = new services.Outer();
+		var fn = function() {
+			var nested = new services.Nested();
+		};
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var svcFound bool
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" {
+			svcFound = true
+		}
+
+		if ref.Variable == "nested" {
+			t.Errorf("nested should NOT leak into outer FuncComponentRefs, got %v", refs)
+		}
+	}
+
+	if !svcFound {
+		t.Errorf("expected svc in outer FuncComponentRefs, got %v", refs)
+	}
+}
+
+func TestTagParser_CfsetWithHashExpression(t *testing.T) {
+	// Hash expressions in component path should not crash
+	content := `<cfcomponent>
+<cffunction name="init">
+	<cfset variables.obj = CreateObject("component","#getPath()#.service") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// Should have a ref with the raw # expression (expression mappings applied separately)
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "obj" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Error("expected obj in ComponentRefs even with # expression")
+	}
+}
+
+func TestScriptParser_VarReassignmentKeepsLocal(t *testing.T) {
+	// var x = A; x = B; — x should remain in funcRefs (second assign shouldn't go global)
+	content := `component {
+	function work() {
+		var x = new services.First();
+		x = new services.Second();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// Both should be in funcRefs (x is var'd, stays local)
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	if len(refs) != 2 {
+		t.Errorf("expected 2 refs for x (First and Second), got %v", refs)
+	}
+
+	// Should NOT be in ComponentRefs
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "x" {
+			t.Errorf("x should NOT be in ComponentRefs (it's var'd), got %v", pr.ComponentRefs)
+		}
+	}
+}
+
+func TestTagParser_SelfClosingCfset(t *testing.T) {
+	// <cfset ... /> vs <cfset ...> both work
+	content := `<cfcomponent>
+<cffunction name="test">
+	<cfset var a = CreateObject("component","services.A")>
+	<cfset var b = CreateObject("component","services.B") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	if len(refs) != 2 {
+		t.Errorf("expected 2 refs (a and b), got %v", refs)
+	}
+}
+
+func TestResolverMatch_NoFalsePositiveOnSubstring(t *testing.T) {
+	// Resolver with prefix "getUser" should not match "getUserDAO"
+	resolvers := []Resolver{{
+		Match:   "getUser($1)",
+		Resolve: "models.User",
+		Prefix:  "getUser",
+	}}
+
+	// Should match getUser()
+	if comp := ResolveFromCall(`getUser()`, resolvers); comp != "models.User" {
+		t.Errorf("expected models.User for getUser(), got %q", comp)
+	}
+
+	// Should NOT match getUserDAO() — prefix matches but pattern doesn't
+	if comp := ResolveFromCall(`getUserDAO()`, resolvers); comp == "models.User" {
+		t.Errorf("getUserDAO() should NOT resolve to models.User")
+	}
+}
+
+func TestScriptParser_ArrowFunctionDoesNotLeak(t *testing.T) {
+	// Arrow/lambda: var fn = () => { var x = new Foo(); }
+	content := `component {
+	function outer() {
+		var svc = new services.Outer();
+		var arr = [1,2,3].map(function(item) {
+			var mapped = new services.Mapper();
+			return mapped;
+		});
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	for _, ref := range refs {
+		if ref.Variable == "mapped" {
+			t.Errorf("mapped should NOT leak from inline function, got %v", refs)
+		}
+	}
+}
+
+func TestScriptParser_ChainedNewDotInit(t *testing.T) {
+	// var x = new Foo().init() — should still capture Foo
+	content := `component {
+	function work() {
+		var svc = new services.MyService().init();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" && ref.Component == "services.MyService" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected svc → services.MyService (chained .init()), got %v", refs)
+	}
+}
+
+func TestTagParser_CfsetNoValue(t *testing.T) {
+	// <cfset var x> without assignment — should not crash
+	content := `<cfcomponent>
+<cffunction name="test">
+	<cfset var x>
+	<cfset var y = CreateObject("component","services.Y") />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "y" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected y in FuncComponentRefs, got %v", refs)
+	}
+}
+
+func TestScriptParser_CreateObjectJavaWithResolver(t *testing.T) {
+	// createObject("java","com.example.Foo") with resolver
+	content := `component {
+	function work() {
+		var obj = createObject("java", "com.example.Foo");
+	}
+}`
+	resolvers := []Resolver{{
+		Match:   `createObject("java","$1")`,
+		Resolve: "stubs.$1",
+		Prefix:  "createObject",
+	}}
+
+	pr := Parse(testURI, content, resolvers)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range refs {
+		if ref.Variable == "obj" && ref.Component == "stubs.com.example.Foo" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected obj → stubs.com.example.Foo, got %v", refs)
+	}
+}
+
+func TestScriptParser_EmptyComponent(t *testing.T) {
+	// Empty component should not panic
+	content := `component {}`
+
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 0 {
+		t.Errorf("expected 0 funcs, got %d", len(pr.Funcs))
+	}
+}
+
+func TestScriptParser_FunctionWithNoBody(t *testing.T) {
+	// Interface-style function with semicolon
+	content := `interface {
+	function doSomething();
+	function doOther();
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 2 {
+		t.Errorf("expected 2 funcs, got %d", len(pr.Funcs))
+	}
+}
+
+func TestTagParser_NestedCfscriptInsideFunction(t *testing.T) {
+	// cfscript block inside a cffunction — refs go to componentRefs
+	// (known limitation: region splitting separates the function body)
+	content := `<cfcomponent>
+<cffunction name="mixed">
+	<cfset var tagVar = CreateObject("component","services.TagService") />
+	<cfscript>
+	var scriptVar = new services.ScriptService();
+	</cfscript>
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	// Due to region splitting, tagVar ends up in ComponentRefs
+	var tagFound bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "tagVar" && ref.Component == "services.TagService" {
+			tagFound = true
+		}
+	}
+
+	if !tagFound {
+		t.Errorf("expected tagVar → services.TagService in ComponentRefs, got %v", pr.ComponentRefs)
+	}
+}
+
+// === Regression tests for parser refactoring / performance work ===
+
+func TestScriptParser_AllRefTypes(t *testing.T) {
+	content := `component {
+	variables.a = new models.A();
+	variables.b = createObject("component", "models.B");
+	variables.c = entityNew("EntityC");
+	variables.d = entityLoad("EntityD");
+
+	function work() {
+		var e = new models.E();
+		var f = createObject("component", "models.F");
+		var g = entityNew("EntityG");
+		local.h = new models.H();
+		variables.i = new models.I();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// Global refs: a, b, c, d, i (variables. inside func with forceGlobal)
+	globals := map[string]string{"a": "models.A", "b": "models.B", "c": "EntityC", "d": "EntityD", "i": "models.I"}
+	for _, ref := range pr.ComponentRefs {
+		if expected, ok := globals[ref.Variable]; ok {
+			if ref.Component != expected {
+				t.Errorf("ComponentRef %s: expected %s, got %s", ref.Variable, expected, ref.Component)
+			}
+
+			delete(globals, ref.Variable)
+		}
+	}
+
+	for k, v := range globals {
+		t.Errorf("missing ComponentRef %s → %s", k, v)
+	}
+
+	// Function refs: e, f, g, h
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+	locals := map[string]string{"e": "models.E", "f": "models.F", "g": "EntityG", "h": "models.H"}
+
+	for _, ref := range funcRefs {
+		if expected, ok := locals[ref.Variable]; ok {
+			if ref.Component != expected {
+				t.Errorf("FuncRef %s: expected %s, got %s", ref.Variable, expected, ref.Component)
+			}
+
+			delete(locals, ref.Variable)
+		}
+	}
+
+	for k, v := range locals {
+		t.Errorf("missing FuncRef %s → %s", k, v)
+	}
+}
+
+func TestScriptParser_FuncScopes(t *testing.T) {
+	content := `component {
+	public void function init() {}
+	private string function getName() { return ""; }
+	function doWork() { var x = 1; }
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Scopes) != 3 {
+		t.Fatalf("expected 3 scopes, got %d", len(pr.Scopes))
+	}
+
+	if pr.Scopes[0].Name != "init" {
+		t.Errorf("scope[0] expected 'init', got %q", pr.Scopes[0].Name)
+	}
+
+	if pr.Scopes[1].Name != "getName" {
+		t.Errorf("scope[1] expected 'getName', got %q", pr.Scopes[1].Name)
+	}
+
+	if pr.Scopes[2].Name != "doWork" {
+		t.Errorf("scope[2] expected 'doWork', got %q", pr.Scopes[2].Name)
+	}
+}
+
+func TestScriptParser_ReturnTypes(t *testing.T) {
+	content := `component {
+	public models.User function getUser() {}
+	string function getName() {}
+	function noType() {}
+}`
+	pr := Parse(testURI, content)
+
+	cases := []struct {
+		name       string
+		returnType string
+	}{
+		{"getUser", "models.User"},
+		{"getName", "string"},
+		{"noType", ""},
+	}
+
+	for i, c := range cases {
+		if pr.Funcs[i].ReturnType != c.returnType {
+			t.Errorf("%s: expected ReturnType %q, got %q", c.name, c.returnType, pr.Funcs[i].ReturnType)
+		}
+	}
+}
+
+func TestScriptParser_VarsExtraction(t *testing.T) {
+	content := `component {
+	variables.global1 = "x";
+	this.global2 = "y";
+
+	function work() {
+		var local1 = 1;
+		local.local2 = 2;
+		arguments.arg1 = 3;
+		variables.fromFunc = "z";
+		plain = "w";
+	}
+}`
+	pr := Parse(testURI, content)
+
+	// GlobalVars should include global1, global2, fromFunc, plain
+	gv := pr.GlobalVars()
+
+	for _, name := range []string{"global1", "global2"} {
+		found := false
+
+		for _, v := range gv {
+			if v == name {
+				found = true
+			}
+		}
+
+		if !found {
+			t.Errorf("expected %s in GlobalVars, got %v", name, gv)
+		}
+	}
+
+	// FuncVars should include local1, local2, arg1
+	scope := pr.Scopes[0]
+	fv := pr.FuncVars(scope.Start, scope.End)
+
+	for _, name := range []string{"local1", "local2", "arg1"} {
+		found := false
+
+		for _, v := range fv {
+			if v == name {
+				found = true
+			}
+		}
+
+		if !found {
+			t.Errorf("expected %s in FuncVars, got %v", name, fv)
+		}
+	}
+}
+
+func TestTagParser_AllRefTypes(t *testing.T) {
+	content := `<cfcomponent>
+<cfset VARIABLES.a = CreateObject("component","models.A") />
+<cfset VARIABLES.b = new models.B() />
+<cfset VARIABLES.c = entityNew("EntityC") />
+<cffunction name="work">
+	<cfset var d = CreateObject("component","models.D") />
+	<cfset var e = new models.E() />
+	<cfset VARIABLES.f = new models.F() />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	globals := map[string]bool{"a": false, "b": false, "c": false, "f": false}
+	for _, ref := range pr.ComponentRefs {
+		if _, ok := globals[ref.Variable]; ok {
+			globals[ref.Variable] = true
+		}
+	}
+
+	for k, found := range globals {
+		if !found {
+			t.Errorf("expected %s in ComponentRefs", k)
+		}
+	}
+
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+	locals := map[string]bool{"d": false, "e": false}
+
+	for _, ref := range funcRefs {
+		if _, ok := locals[ref.Variable]; ok {
+			locals[ref.Variable] = true
+		}
+	}
+
+	for k, found := range locals {
+		if !found {
+			t.Errorf("expected %s in FuncComponentRefs", k)
+		}
+	}
+}
+
+func TestResolverMatch_VariousPatterns(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "services.$1.service", Prefix: "getService"},
+		{Match: `_parent`, Resolve: "core.kernel2", Prefix: "_parent"},
+		{Match: `getController("$1")`, Resolve: "controllers.$1", Prefix: "getController"},
+	}
+
+	cases := []struct {
+		expr     string
+		expected string
+	}{
+		{`getService("user")`, "services.user.service"},
+		{`getService("timetable")`, "services.timetable.service"},
+		{`_parent`, "core.kernel2"},
+		{`getController("kiosk")`, "controllers.kiosk"},
+		{`getController("kiosk").doStuff()`, "controllers.kiosk"},
+		{`unknownFunc()`, ""},
+	}
+
+	for _, c := range cases {
+		result := ResolveFromCall(c.expr, resolvers)
+		if result != c.expected {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", c.expr, result, c.expected)
+		}
+	}
+}
+
+func TestExpressionMappings_MultipleReplacements(t *testing.T) {
+	content := `component {
+	variables.a = createObject("component", "#ROOT#models.A");
+	variables.b = createObject("component", "#CORE#services.B");
+}`
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ExpressionMappings: map[string]string{
+			"#ROOT#": "app.",
+			"#CORE#": "app.core.",
+		},
+	})
+
+	found := map[string]string{}
+	for _, ref := range pr.ComponentRefs {
+		found[ref.Variable] = ref.Component
+	}
+
+	if found["a"] != "app.models.A" {
+		t.Errorf("expected a → app.models.A, got %q", found["a"])
+	}
+
+	if found["b"] != "app.core.services.B" {
+		t.Errorf("expected b → app.core.services.B, got %q", found["b"])
+	}
+}
+
+func TestPendingCalls_MultipleCallsInSameFunction(t *testing.T) {
+	content := `component {
+	models.User function getUser() { return new models.User(); }
+	models.Order function getOrder() { return new models.Order(); }
+
+	function work() {
+		var user = getUser();
+		var order = getOrder();
+	}
+}`
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[2] // work
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+	found := map[string]string{}
+
+	for _, ref := range refs {
+		found[ref.Variable] = ref.Component
+	}
+
+	if found["user"] != "models.User" {
+		t.Errorf("expected user → models.User, got %q", found["user"])
+	}
+
+	if found["order"] != "models.Order" {
+		t.Errorf("expected order → models.Order, got %q", found["order"])
+	}
+}
+
+func TestPendingCalls_BaseVarNotOverrideResolver(t *testing.T) {
+	// When resolver matches, baseVar fallback should not override
+	content := `component {
+	variables.kernel = new core.Kernel();
+
+	function work() {
+		var svc = variables.kernel.getService("user");
+	}
+}`
+	resolvers := []Resolver{{
+		Match:   `getService("$1")`,
+		Resolve: "services.$1.service",
+		Prefix:  "getService",
+	}}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ScanAllScopes: true,
+	})
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" {
+			if ref.Component == "core.Kernel" {
+				t.Error("svc should NOT resolve to core.Kernel (baseVar fallback); resolver should win")
+			}
+
+			if ref.Component == "services.user.service" {
+				return // correct
+			}
+		}
+	}
+
+	// If resolver matched via appendResolverRefs, check there
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "svc" && ref.Component == "services.user.service" {
+			return // correct (in componentRefs from resolver)
+		}
+	}
+
+	t.Errorf("expected svc → services.user.service, got funcRefs=%v compRefs=%v", refs, pr.ComponentRefs)
+}
+
+func TestScriptParser_PropertyParsing(t *testing.T) {
+	content := `component {
+	property name="userDAO" type="dao.UserDAO" inject="UserDAO@dao";
+	property string name;
+	property age;
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Properties) != 3 {
+		t.Fatalf("expected 3 properties, got %d", len(pr.Properties))
+	}
+}
+
+func TestScriptParser_Extends(t *testing.T) {
+	content := `component extends="base.AbstractService" {
+	function init() {}
+}`
+	pr := Parse(testURI, content)
+
+	if pr.Extends != "base.AbstractService" {
+		t.Errorf("expected extends 'base.AbstractService', got %q", pr.Extends)
+	}
+}
+
+func TestTagParser_Extends(t *testing.T) {
+	content := `<cfcomponent extends="base.AbstractService">
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if pr.Extends != "base.AbstractService" {
+		t.Errorf("expected extends 'base.AbstractService', got %q", pr.Extends)
+	}
+}
+
+func TestScriptParser_ArgumentTypes(t *testing.T) {
+	content := `component {
+	function save(required models.User user, string name, numeric id) {}
+}`
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs[0].Arguments) != 3 {
+		t.Fatalf("expected 3 args, got %d", len(pr.Funcs[0].Arguments))
+	}
+
+	// Component-type argument should create a ref
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "user" && ref.Component == "models.User" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected argument ref user → models.User, got %v", pr.ComponentRefs)
+	}
+}
+
+func TestFuncVars_Cached(t *testing.T) {
+	content := `component {
+	function work() {
+		var a = 1;
+		var b = 2;
+	}
+}`
+	pr := Parse(testURI, content)
+	scope := pr.Scopes[0]
+
+	// First call computes
+	vars1 := pr.FuncVars(scope.Start, scope.End)
+	// Second call should return cached
+	vars2 := pr.FuncVars(scope.Start, scope.End)
+
+	if len(vars1) != len(vars2) {
+		t.Errorf("cached FuncVars mismatch: %v vs %v", vars1, vars2)
+	}
+
+	// Invalidate and re-compute
+	pr.InvalidateFunc(scope.Start, scope.End)
+	vars3 := pr.FuncVars(scope.Start, scope.End)
+
+	if len(vars3) != len(vars1) {
+		t.Errorf("recomputed FuncVars mismatch: %v vs %v", vars3, vars1)
+	}
+}

@@ -145,10 +145,10 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.log.Debug("document opened: parse result",
 		cflog.String("uri", string(docURI)),
 		cflog.Int("funcs", len(pr.Funcs)),
-		cflog.Int("refs", len(pr.Refs)),
+		cflog.Int("refs", len(pr.ComponentRefs)),
 		cflog.Int("resolvers", len(pr.Resolvers)))
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		s.log.Debug("document opened: ref", cflog.String("var", ref.Variable), cflog.String("component", ref.Component))
 	}
 
@@ -488,7 +488,7 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) 
 		return
 	}
 
-	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 	s.index.SetThisVars(docURI, pr.ThisVars())
 	// Only register as entity if within ORM scope and workspace
 	if cfpath.IsCFCFile(string(docURI)) && pr.Persistent {

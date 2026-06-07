@@ -133,7 +133,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 			// Component ref matching (from parsed refs — includes all scopes)
 			if compTarget != "" {
-				for _, ref := range pr.Refs {
+				for _, ref := range pr.ComponentRefs {
 					if strings.EqualFold(ref.Component, compTarget) {
 						entries = append(entries, Entry{
 							File: f, Variable: ref.Variable, Line: ref.Line, Resolved: true,

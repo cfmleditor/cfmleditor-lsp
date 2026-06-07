@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -15,25 +16,41 @@ import (
 
 // Resolver resolves component dot-paths to files and functions.
 type Resolver struct {
-	FS               vfs.FS
-	WorkspaceFolders []string
-	Mappings         map[string]string
-	Index            *index.Index
-	Resolvers        []parser.Resolver
-	appRootCache     map[string]string // dir → Application.cfc root
-	resolveCache     map[string]string // component+"\t"+baseDir → file path
+	FS                 vfs.FS
+	WorkspaceFolders   []string
+	Mappings           map[string]string
+	ExpressionMappings map[string]string
+	Index              *index.Index
+	Resolvers          []parser.Resolver
+	mu                 sync.RWMutex
+	appRootCache       map[string]string // dir → Application.cfc root
+	resolveCache       map[string]string // component+"\t"+baseDir → file path
 }
 
 // ComponentPath resolves a component dot-path to an absolute .cfc file path
 // using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
 // If component contains pipe characters, each alternative is tried left-to-right.
 func (r *Resolver) ComponentPath(component, baseDir string) string {
+	// Apply expression mappings (replace runtime expressions with static values)
+	for expr, value := range r.ExpressionMappings {
+		if strings.Contains(component, expr) {
+			component = strings.ReplaceAll(component, expr, value)
+		}
+	}
+
 	key := component + "\t" + baseDir
+
+	r.mu.RLock()
+
 	if r.resolveCache != nil {
 		if p, ok := r.resolveCache[key]; ok {
+			r.mu.RUnlock()
+
 			return p
 		}
 	}
+
+	r.mu.RUnlock()
 
 	var result string
 
@@ -49,11 +66,13 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 		result = r.componentPathUncached(component, baseDir)
 	}
 
+	r.mu.Lock()
 	if r.resolveCache == nil {
 		r.resolveCache = make(map[string]string)
 	}
 
 	r.resolveCache[key] = result
+	r.mu.Unlock()
 
 	return result
 }
@@ -175,19 +194,27 @@ func (r *Resolver) HasFunction(component, funcName, baseDir string) bool {
 
 // FindApplicationRoot walks up from dir looking for Application.cfc or Application.cfm.
 func (r *Resolver) FindApplicationRoot(dir string) string {
+	r.mu.RLock()
+
 	if r.appRootCache != nil {
 		if v, ok := r.appRootCache[dir]; ok {
+			r.mu.RUnlock()
+
 			return v
 		}
 	}
 
+	r.mu.RUnlock()
+
 	result := r.findApplicationRootUncached(dir)
 
+	r.mu.Lock()
 	if r.appRootCache == nil {
 		r.appRootCache = make(map[string]string)
 	}
 
 	r.appRootCache[dir] = result
+	r.mu.Unlock()
 
 	return result
 }
@@ -242,4 +269,104 @@ func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 // ResolveFromCall resolves a call expression against configured resolvers.
 func (r *Resolver) ResolveFromCall(expr string) string {
 	return parser.ResolveFromCall(expr, r.Resolvers)
+}
+
+// CanResolveCall determines whether a function call can be resolved given the
+// parse result context. Returns empty string if resolved, or a reason if not.
+func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) string {
+	funcName := call.FuncName
+	variable := call.Variable
+
+	// Unqualified call — check same file, then extends chain
+	if variable == "" {
+		for _, f := range pr.Funcs {
+			if strings.EqualFold(f.Name, funcName) {
+				return ""
+			}
+		}
+		// Check extends chain
+		if pr.Extends != "" {
+			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+				return ""
+			}
+
+			return "not found in extends chain"
+		}
+
+		return "no qualifier, not in file"
+	}
+
+	// super. qualifier
+	if strings.EqualFold(variable, "super") {
+		if pr.Extends == "" {
+			return "super used but no extends"
+		}
+
+		if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+			return ""
+		}
+
+		return "not found in parent component"
+	}
+
+	// Qualified call — find the component from refs
+	comp := call.Component
+	if comp == "" {
+		// Strip scope prefix for matching (VARIABLES.x -> x)
+		lookupVar := variable
+		if dotIdx := strings.LastIndexByte(lookupVar, '.'); dotIdx >= 0 {
+			lookupVar = lookupVar[dotIdx+1:]
+		}
+
+		// Try function-scoped refs first
+		for _, scope := range pr.Scopes {
+			if int(call.Line) >= scope.Start && int(call.Line) <= scope.End {
+				for _, ref := range pr.FuncComponentRefs(scope.Start, scope.End) {
+					if strings.EqualFold(ref.Variable, lookupVar) {
+						comp = ref.Component
+
+						break
+					}
+				}
+
+				break
+			}
+		}
+
+		// Fall back to component refs
+		if comp == "" {
+			for i := range pr.ComponentRefs {
+				ref := &pr.ComponentRefs[i]
+				if strings.EqualFold(ref.Variable, lookupVar) {
+					comp = ref.Component
+
+					break
+				}
+			}
+		}
+	}
+
+	if comp == "" {
+		// Try component resolvers
+		comp = parser.ResolveFromCall(variable, r.Resolvers)
+	}
+
+	if comp == "" && call.Text != "" {
+		// Try resolvers against the full line text (handles chained calls like x.method().prop.func())
+		comp = parser.ResolveFromCall(call.Text, r.Resolvers)
+	}
+
+	if comp == "" {
+		return "variable '" + variable + "' has no component ref"
+	}
+
+	if r.ResolveFunc(comp, funcName, baseDir) != nil {
+		return ""
+	}
+
+	if parser.IsMemberMethod(funcName) {
+		return ""
+	}
+
+	return "method '" + funcName + "' not found in " + comp
 }

@@ -704,6 +704,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 	for _, f := range pr.Funcs {
 		var detail strings.Builder
 		detail.WriteString(f.Name + "(")
+
 		var insertText strings.Builder
 		insertText.WriteString(f.Name + "(")
 
@@ -719,7 +720,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			}
 
 			detail.WriteString(arg.Name)
-			insertText.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Name))
+			fmt.Fprintf(&insertText, "${%d:%s}", i+1, arg.Name)
 		}
 
 		detail.WriteString(")")
@@ -1092,6 +1093,7 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 	for _, d := range defs {
 		var detail strings.Builder
 		detail.WriteString(d.Name + "(")
+
 		var insertText strings.Builder
 		insertText.WriteString(d.Name + "(")
 
@@ -1107,7 +1109,7 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 			}
 
 			detail.WriteString(arg.Name)
-			insertText.WriteString(fmt.Sprintf("${%d:%s}", i+1, arg.Name))
+			fmt.Fprintf(&insertText, "${%d:%s}", i+1, arg.Name)
 		}
 
 		detail.WriteString(")")

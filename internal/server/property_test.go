@@ -33,7 +33,7 @@ func TestPropertyDefinition_BeanLookupViaInject(t *testing.T) {
 	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// Index the target CFC
 	daoAbs := filepath.Join(dir, "dao", "UserDAO.cfc")
@@ -64,7 +64,7 @@ func TestPropertyDefinition_TypeBasedRef(t *testing.T) {
 	srv.setDocument(docURI, content)
 
 	pr := parser.Parse(docURI, content)
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// logger has type="services.BeanUserService" which is a CFC path
 	ref := srv.index.LookupComponentRefInFile("logger", docURI, 100)
@@ -87,7 +87,7 @@ func TestPropertyDefinition_PrimitiveTypeNoRef(t *testing.T) {
 	srv.setDocument(docURI, content)
 
 	pr := parser.Parse(docURI, content)
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// config has type="string" — should NOT create a component ref
 	ref := srv.index.LookupComponentRefInFile("config", docURI, 100)
@@ -113,7 +113,7 @@ func TestPropertyDefinition_TagCFC(t *testing.T) {
 	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// userDAO has inject="UserDAO@dao"
 	ref := srv.index.LookupComponentRefInFile("userDAO", docURI, 100)
@@ -146,7 +146,7 @@ func TestPropertyDefinition_AccessorsGenerated(t *testing.T) {
 	srv.setDocument(docURI, content)
 
 	pr := parser.Parse(docURI, content)
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// Check that accessor functions are indexed
 	expected := []string{"getUserDAO", "setUserDAO", "getOrderDAO", "setOrderDAO",

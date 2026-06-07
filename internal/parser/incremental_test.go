@@ -92,11 +92,11 @@ func TestApplyEdit_ShiftsRefs(t *testing.T) {
 	content := "component {\nfunction first() {\n\tvar x = 1\n}\nsvc = new services.Foo()\n}"
 	pr := Parse(testURI, content)
 
-	if len(pr.Refs) != 1 {
-		t.Fatalf("expected 1 ref, got %d", len(pr.Refs))
+	if len(pr.ComponentRefs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(pr.ComponentRefs))
 	}
 
-	origLine := pr.Refs[0].Line
+	origLine := pr.ComponentRefs[0].Line
 
 	// Insert a line inside the function
 	kind := pr.ApplyEdit(2, 0, 2, 0, "\tvar y = 2\n")
@@ -105,8 +105,8 @@ func TestApplyEdit_ShiftsRefs(t *testing.T) {
 	}
 
 	// Ref should be shifted by 1
-	if pr.Refs[0].Line != origLine+1 {
-		t.Errorf("ref line = %d, want %d", pr.Refs[0].Line, origLine+1)
+	if pr.ComponentRefs[0].Line != origLine+1 {
+		t.Errorf("ref line = %d, want %d", pr.ComponentRefs[0].Line, origLine+1)
 	}
 }
 

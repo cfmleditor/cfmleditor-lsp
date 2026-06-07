@@ -96,6 +96,16 @@ func (c *Config) Mappings() map[string]string {
 	return cfpath.ResolveMappings(raw.Mappings, filepath.Dir(c.Path))
 }
 
+// ExpressionMappings returns expression-to-value substitutions from config.
+func (c *Config) ExpressionMappings() map[string]string {
+	raw := c.raw()
+	if raw == nil {
+		return nil
+	}
+
+	return raw.ExpressionMappings
+}
+
 // Debug returns whether debug logging is enabled in config.
 func (c *Config) Debug() bool {
 	raw := c.raw()

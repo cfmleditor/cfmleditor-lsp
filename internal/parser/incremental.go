@@ -138,9 +138,9 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 		}
 	}
 
-	for i := range pr.Refs {
-		if int(pr.Refs[i].Line) > editLine {
-			pr.Refs[i].Line = uint32(int(pr.Refs[i].Line) + delta)
+	for i := range pr.ComponentRefs {
+		if int(pr.ComponentRefs[i].Line) > editLine {
+			pr.ComponentRefs[i].Line = uint32(int(pr.ComponentRefs[i].Line) + delta)
 		}
 	}
 }
@@ -151,7 +151,7 @@ func (pr *ParseResult) reparseShallow() {
 	start := time.Now()
 	pr.Regions = ClassifyRegions(pr.Content)
 	pr.Funcs = pr.Funcs[:0]
-	pr.Refs = pr.Refs[:0]
+	pr.ComponentRefs = pr.ComponentRefs[:0]
 	pr.Scopes = pr.Scopes[:0]
 	pr.extractSignatures()
 	pr.resetGlobalCaches()

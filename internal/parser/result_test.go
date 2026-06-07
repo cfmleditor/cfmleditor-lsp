@@ -26,12 +26,12 @@ func TestParseResult_Refs(t *testing.T) {
 	content := "component {\n\tsvc = new services.OrderService()\n}"
 
 	pr := Parse(testURI, content)
-	if len(pr.Refs) != 1 {
-		t.Fatalf("expected 1 ref, got %d", len(pr.Refs))
+	if len(pr.ComponentRefs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(pr.ComponentRefs))
 	}
 
-	if pr.Refs[0].Component != "services.OrderService" {
-		t.Errorf("ref component = %q", pr.Refs[0].Component)
+	if pr.ComponentRefs[0].Component != "services.OrderService" {
+		t.Errorf("ref component = %q", pr.ComponentRefs[0].Component)
 	}
 }
 
@@ -181,7 +181,7 @@ func TestParseResult_InitVars(t *testing.T) {
 
 	// Refs should include init() body refs
 	var refComponents []string
-	for _, r := range pr.Refs {
+	for _, r := range pr.ComponentRefs {
 		refComponents = append(refComponents, r.Component)
 	}
 
@@ -215,7 +215,7 @@ func TestParseResult_InitVarsTag(t *testing.T) {
 
 	var found bool
 
-	for _, r := range pr.Refs {
+	for _, r := range pr.ComponentRefs {
 		if r.Component == "persist" {
 			found = true
 
@@ -224,7 +224,7 @@ func TestParseResult_InitVarsTag(t *testing.T) {
 	}
 
 	if !found {
-		t.Error("expected persist component ref in pr.Refs")
+		t.Error("expected persist component ref in pr.ComponentRefs")
 	}
 }
 
@@ -303,7 +303,7 @@ func TestParseResult_ResolverRefs(t *testing.T) {
 	// temp2 should resolve via resolver (inside init — init is always scanned)
 	var found bool
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "temp2" && ref.Component == "packages.general.service" {
 			found = true
 

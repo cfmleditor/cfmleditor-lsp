@@ -1855,7 +1855,7 @@ func TestDefinitionComponentResolver(t *testing.T) {
 	docContent := "svc = getService(\"timetable\")\nsvc.getSchedule()"
 	srv.setDocument(docURI, docContent)
 	pr := parser.Parse(docURI, docContent, srv.cfResolvers())
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
@@ -2304,7 +2304,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
@@ -2502,7 +2502,7 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
@@ -2676,7 +2676,7 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
@@ -2769,7 +2769,7 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
@@ -2889,7 +2889,7 @@ func TestDefinitionViaRegexResolver(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// Check that svc resolved to finance
 	ref := srv.index.LookupComponentRefInFile("svc", docURI, 1)
@@ -2912,7 +2912,7 @@ func TestCompletionDotOnThis(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 	srv.index.SetThisVars(docURI, pr.ThisVars())
 
 	// Rebuild completion cache
@@ -2986,10 +2986,10 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 		Resolvers: resolvers,
 	})
 
-	// init refs should be in pr.Refs (eagerly scanned)
+	// init refs should be in pr.ComponentRefs (eagerly scanned)
 	found := false
 
-	for _, ref := range pr.Refs {
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "svc" && strings.Contains(ref.Component, "general") {
 			found = true
 		}
@@ -2999,8 +2999,8 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 		t.Error("expected eager ref for svc in init()")
 	}
 
-	// doWork refs should NOT be in pr.Refs (lazy)
-	for _, ref := range pr.Refs {
+	// doWork refs should NOT be in pr.ComponentRefs (lazy)
+	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "helper" {
 			t.Error("did not expect eager ref for helper in doWork() — should be lazy")
 		}
@@ -3217,7 +3217,7 @@ func TestResolverMultipleCaptures(t *testing.T) {
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	ref := srv.index.LookupComponentRefInFile("dao", docURI, 1)
 	if ref == nil {
@@ -4535,7 +4535,7 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 			return ""
 		},
 	})
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
@@ -4585,7 +4585,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 			return ""
 		},
 	})
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
@@ -4639,7 +4639,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	pr := parser.ParseWithOptions(ptURI, string(ptContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
-	srv.index.IndexFileFromResult(ptURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(ptURI, pr.Funcs, pr.ComponentRefs)
 	srv.setDocument(ptURI, string(ptContent))
 
 	// Index UserDAO.cfc
@@ -4696,7 +4696,7 @@ func TestBeansTestdata_PositionalTypeResolution(t *testing.T) {
 	pr := parser.ParseWithOptions(ppURI, string(ppContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
-	srv.index.IndexFileFromResult(ppURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(ppURI, pr.Funcs, pr.ComponentRefs)
 	srv.setDocument(ppURI, string(ppContent))
 
 	// Check that userDAO ref was created
@@ -4725,7 +4725,7 @@ func TestBeansTestdata_ServiceInjectResolution(t *testing.T) {
 	pr := parser.ParseWithOptions(svcURI, string(svcContent), parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
-	srv.index.IndexFileFromResult(svcURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(svcURI, pr.Funcs, pr.ComponentRefs)
 
 	// Check that userDAO ref was created from inject="UserDAO@dao"
 	ref := srv.index.LookupComponentRefInFile("userDAO", svcURI, 100)

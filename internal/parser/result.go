@@ -16,25 +16,26 @@ type Logger = log.Logger
 // ParseResult caches a single parse of a file. It extracts function signatures
 // and component refs eagerly, but defers function body parsing until requested.
 type ParseResult struct {
-	URI               uri.URI
-	Content           string
-	Regions           []Region
-	Funcs             []FunctionDef
-	Refs              []ComponentRef
-	Scopes            []FuncScope
-	Extends           string              // dot-path of parent component (from extends attribute)
-	Persistent        bool                // true if component has persistent="true" (ORM entity)
-	Properties        []propertyDef       // parsed property declarations
-	Links             []DocumentLink      // file path references extracted during shallow scan
-	Calls             []CallSite          // function call sites (when FindCalls is set)
-	log               Logger              // optional logger for timing and errors
-	Resolvers         []Resolver          // optional component resolvers for RHS matching
-	PropertyResolvers []PropertyResolver  // optional property-to-component resolvers
-	BeanLookup        func(string) string // optional bean name → dot-path lookup
-	extractLinks      bool                // whether to extract links during global scan
-	findCalls         []string            // function names to scan for
-	scanAllScopes     bool                // scan all lines including function bodies
-	shallow           bool                // minimal parse mode
+	URI                uri.URI
+	Content            string
+	Regions            []Region
+	Funcs              []FunctionDef
+	ComponentRefs      []ComponentRef
+	Scopes             []FuncScope
+	Extends            string              // dot-path of parent component (from extends attribute)
+	Persistent         bool                // true if component has persistent="true" (ORM entity)
+	Properties         []propertyDef       // parsed property declarations
+	Links              []DocumentLink      // file path references extracted during shallow scan
+	Calls              []CallSite          // function call sites (when FindCalls is set)
+	log                Logger              // optional logger for timing and errors
+	Resolvers          []Resolver          // optional component resolvers for RHS matching
+	PropertyResolvers  []PropertyResolver  // optional property-to-component resolvers
+	BeanLookup         func(string) string // optional bean name → dot-path lookup
+	expressionMappings map[string]string   // runtime expression → static value substitutions
+	extractLinks       bool                // whether to extract links during global scan
+	findCalls          []string            // function names to scan for
+	scanAllScopes      bool                // scan all lines including function bodies
+	shallow            bool                // minimal parse mode
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -48,18 +49,24 @@ type ParseResult struct {
 	// funcVars caches per-function variable lists keyed by "start:end".
 	funcVarsMu sync.Mutex
 	funcVars   map[string][]string
+
+	// funcRefs caches per-function component refs keyed by "start:end".
+	funcRefsMu   sync.Mutex
+	funcRefsMap  map[string][]ComponentRef
+	funcLinksMap map[string][]DocumentLink
 }
 
 // ParseOptions configures optional parse behaviour.
 type ParseOptions struct {
-	Logger            Logger
-	Resolvers         []Resolver
-	PropertyResolvers []PropertyResolver
-	BeanLookup        func(name string) string // optional: resolve bean name → dot-path
-	ExtractLinks      bool                     // extract document links during global scan
-	FindCalls         []string                 // function names to find call sites for
-	ScanAllScopes     bool                     // scan all lines including function bodies (for refs/deps)
-	Shallow           bool                     // minimal parse: signatures only, no refs/properties/args
+	Logger             Logger
+	Resolvers          []Resolver
+	PropertyResolvers  []PropertyResolver
+	BeanLookup         func(name string) string // optional: resolve bean name → dot-path
+	ExpressionMappings map[string]string        // runtime expression → static value substitutions
+	ExtractLinks       bool                     // extract document links during global scan
+	FindCalls          []string                 // function names to find call sites for
+	ScanAllScopes      bool                     // scan all lines including function bodies (for refs/deps)
+	Shallow            bool                     // minimal parse: signatures only, no refs/properties/args
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -77,7 +84,7 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
 	pr.extractSignatures()
-	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
+	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
 	return pr
 }
@@ -85,22 +92,23 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 // ParseWithOptions performs a full file parse with extended options.
 func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *ParseResult {
 	pr := &ParseResult{
-		URI:               fileURI,
-		Content:           content,
-		funcVars:          make(map[string][]string),
-		log:               opts.Logger,
-		Resolvers:         opts.Resolvers,
-		PropertyResolvers: opts.PropertyResolvers,
-		BeanLookup:        opts.BeanLookup,
-		extractLinks:      opts.ExtractLinks,
-		findCalls:         opts.FindCalls,
-		scanAllScopes:     opts.ScanAllScopes,
-		shallow:           opts.Shallow,
+		URI:                fileURI,
+		Content:            content,
+		funcVars:           make(map[string][]string),
+		log:                opts.Logger,
+		Resolvers:          opts.Resolvers,
+		PropertyResolvers:  opts.PropertyResolvers,
+		BeanLookup:         opts.BeanLookup,
+		expressionMappings: opts.ExpressionMappings,
+		extractLinks:       opts.ExtractLinks,
+		findCalls:          opts.FindCalls,
+		scanAllScopes:      opts.ScanAllScopes,
+		shallow:            opts.Shallow,
 	}
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
 	pr.extractSignatures()
-	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.Refs), "dur", time.Since(start))
+	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
 	return pr
 }
@@ -113,14 +121,29 @@ func (pr *ParseResult) extractSignatures() {
 		}
 	}()
 
+	var allPendingCalls []pendingCall
+
 	for _, r := range pr.Regions {
 		if r.Kind == RegionScript {
-			sp := newShallowScriptParser(r.Text, string(pr.URI), r.StartLine)
+			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
 			sp.parse()
 			pr.Funcs = append(pr.Funcs, sp.funcs...)
-			pr.Refs = append(pr.Refs, sp.refs...)
+			pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
 			pr.Scopes = append(pr.Scopes, sp.scopes...)
 			pr.Properties = append(pr.Properties, sp.properties...)
+
+			// Merge function-scoped refs from script parser
+			if len(sp.funcRefs) > 0 {
+				if pr.funcRefsMap == nil {
+					pr.funcRefsMap = make(map[string][]ComponentRef)
+				}
+
+				for k, refs := range sp.funcRefs {
+					pr.funcRefsMap[k] = append(pr.funcRefsMap[k], refs...)
+				}
+			}
+
+			allPendingCalls = append(allPendingCalls, sp.pendingCalls...)
 
 			if sp.extends != "" {
 				pr.Extends = sp.extends
@@ -137,8 +160,8 @@ func (pr *ParseResult) extractSignatures() {
 				tp.funcs[i].Line += uint32(r.StartLine)
 			}
 
-			for i := range tp.refs {
-				tp.refs[i].Line += uint32(r.StartLine)
+			for i := range tp.componentRefs {
+				tp.componentRefs[i].Line += uint32(r.StartLine)
 			}
 
 			for i := range tp.properties {
@@ -146,8 +169,49 @@ func (pr *ParseResult) extractSignatures() {
 			}
 
 			pr.Funcs = append(pr.Funcs, tp.funcs...)
-			pr.Refs = append(pr.Refs, tp.refs...)
+			pr.ComponentRefs = append(pr.ComponentRefs, tp.componentRefs...)
 			pr.Properties = append(pr.Properties, tp.properties...)
+
+			// Merge function-scoped refs from tag parser
+			if len(tp.funcRefs) > 0 {
+				if pr.funcRefsMap == nil {
+					pr.funcRefsMap = make(map[string][]ComponentRef)
+				}
+
+				for k, refs := range tp.funcRefs {
+					// Offset the key and ref lines by region start line
+					if r.StartLine > 0 {
+						parts := strings.SplitN(k, ":", 2)
+						if len(parts) == 2 {
+							start := atoi(parts[0]) + r.StartLine
+							end := atoi(parts[1]) + r.StartLine
+							k = funcKey(start, end)
+						}
+
+						for i := range refs {
+							refs[i].Line += uint32(r.StartLine)
+						}
+					}
+
+					pr.funcRefsMap[k] = append(pr.funcRefsMap[k], refs...)
+				}
+			}
+
+			// Collect pending calls from tag parser (offset lines and funcKey)
+			for i := range tp.pendingCalls {
+				tp.pendingCalls[i].line += uint32(r.StartLine)
+				if r.StartLine > 0 && tp.pendingCalls[i].funcKey != "" {
+					parts := strings.SplitN(tp.pendingCalls[i].funcKey, ":", 2)
+					if len(parts) == 2 {
+						start := atoi(parts[0]) + r.StartLine
+						end := atoi(parts[1]) + r.StartLine
+						tp.pendingCalls[i].funcKey = funcKey(start, end)
+					}
+				}
+			}
+
+			allPendingCalls = append(allPendingCalls, tp.pendingCalls...)
+
 			scopes := findTagFuncScopes(r.Text, r.StartLine)
 
 			pr.Scopes = append(pr.Scopes, scopes...)
@@ -162,9 +226,201 @@ func (pr *ParseResult) extractSignatures() {
 	}
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
 	if !pr.shallow {
+		pr.applyExpressionMappings()
 		pr.generatePropertyAccessors()
-		pr.appendInitRefs()
 		pr.appendResolverRefs()
+		pr.resolvePendingCalls(allPendingCalls)
+	}
+}
+
+// applyExpressionMappings replaces runtime expressions in component paths with static values.
+func (pr *ParseResult) applyExpressionMappings() {
+	if len(pr.expressionMappings) == 0 {
+		return
+	}
+
+	for i := range pr.ComponentRefs {
+		pr.ComponentRefs[i].Component = pr.replaceExpressions(pr.ComponentRefs[i].Component)
+	}
+
+	for k, refs := range pr.funcRefsMap {
+		for i := range refs {
+			refs[i].Component = pr.replaceExpressions(refs[i].Component)
+		}
+
+		pr.funcRefsMap[k] = refs
+	}
+}
+
+func (pr *ParseResult) replaceExpressions(comp string) string {
+	if !strings.Contains(comp, "#") {
+		return comp
+	}
+
+	for expr, value := range pr.expressionMappings {
+		if strings.Contains(comp, expr) {
+			comp = strings.ReplaceAll(comp, expr, value)
+		}
+	}
+
+	return comp
+}
+
+// resolvePendingCalls resolves varName = funcCall(...) assignments against same-file functions.
+func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
+	// Build lookup of function name → return component
+	funcReturns := make(map[string]string, len(pr.Funcs))
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
+		comp := f.ReturnComponent
+		if comp == "" && isComponentType(f.ReturnType) {
+			comp = f.ReturnType
+		}
+
+		if comp != "" {
+			funcReturns[strings.ToLower(f.Name)] = comp
+		}
+	}
+
+	// Track which functions have pending return vars to resolve
+	type returnPending struct {
+		funcIdx int
+		varName string
+		funcKey string
+	}
+
+	var returnPendings []returnPending
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if f.ReturnComponent == "" && f.returnVar != "" {
+			scope := findFuncScope(int(f.Line), pr.Scopes)
+			if scope.Start >= 0 {
+				returnPendings = append(returnPendings, returnPending{
+					funcIdx: i,
+					varName: f.returnVar,
+					funcKey: funcKey(scope.Start, scope.End),
+				})
+			}
+		}
+	}
+
+	// Resolve ReturnComponent from return var before processing calls
+	for _, rp := range returnPendings {
+		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
+			for _, ref := range refs {
+				if strings.EqualFold(ref.Variable, rp.varName) {
+					pr.Funcs[rp.funcIdx].ReturnComponent = ref.Component
+
+					break
+				}
+			}
+		}
+	}
+
+	// Rebuild funcReturns with newly resolved ReturnComponents
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
+		comp := f.ReturnComponent
+		if comp == "" && isComponentType(f.ReturnType) {
+			comp = f.ReturnType
+		}
+
+		if comp != "" {
+			funcReturns[strings.ToLower(f.Name)] = comp
+		}
+	}
+
+	for _, c := range calls {
+		// Skip if this variable already has a ref (e.g. from appendResolverRefs)
+		varLower := strings.ToLower(c.varName)
+		alreadyResolved := false
+
+		if c.funcKey != "" && pr.funcRefsMap != nil {
+			for _, ref := range pr.funcRefsMap[c.funcKey] {
+				if strings.EqualFold(ref.Variable, varLower) {
+					alreadyResolved = true
+
+					break
+				}
+			}
+		}
+
+		if !alreadyResolved {
+			for _, ref := range pr.ComponentRefs {
+				if strings.EqualFold(ref.Variable, varLower) {
+					alreadyResolved = true
+
+					break
+				}
+			}
+		}
+
+		if alreadyResolved {
+			continue
+		}
+
+		comp := funcReturns[strings.ToLower(c.funcName)]
+
+		// Fallback: x = baseVar.method() — assign x same component as baseVar
+		if comp == "" && c.baseVar != "" {
+			baseVarLower := strings.ToLower(c.baseVar)
+			for _, ref := range pr.ComponentRefs {
+				if strings.EqualFold(ref.Variable, baseVarLower) {
+					comp = ref.Component
+
+					break
+				}
+			}
+
+			if comp == "" && c.funcKey != "" && pr.funcRefsMap != nil {
+				refs := pr.funcRefsMap[c.funcKey]
+				for _, ref := range refs {
+					if strings.EqualFold(ref.Variable, baseVarLower) {
+						comp = ref.Component
+
+						break
+					}
+				}
+			}
+		}
+
+		if comp == "" {
+			continue
+		}
+
+		ref := ComponentRef{
+			Variable: c.varName, Component: comp,
+			URI: pr.URI, Line: c.line,
+		}
+		if c.funcKey == "" {
+			pr.ComponentRefs = append(pr.ComponentRefs, ref)
+		} else {
+			if pr.funcRefsMap == nil {
+				pr.funcRefsMap = make(map[string][]ComponentRef)
+			}
+
+			pr.funcRefsMap[c.funcKey] = append(pr.funcRefsMap[c.funcKey], ref)
+		}
+	}
+
+	// Second pass: resolve ReturnComponent for functions whose return var was just added by calls
+	for _, rp := range returnPendings {
+		if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
+			continue
+		}
+
+		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
+			for _, ref := range refs {
+				if strings.EqualFold(ref.Variable, rp.varName) {
+					pr.Funcs[rp.funcIdx].ReturnComponent = ref.Component
+
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -282,7 +538,7 @@ func (pr *ParseResult) generatePropertyAccessors() {
 		}
 
 		if comp != "" {
-			pr.Refs = append(pr.Refs, ComponentRef{
+			pr.ComponentRefs = append(pr.ComponentRefs, ComponentRef{
 				Variable: prop.name, Component: comp, URI: u, Line: prop.line,
 			})
 		}
@@ -376,7 +632,7 @@ func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 	body := pr.Content[start:end]
 
 	t := time.Now()
-	sp := newScriptParser(body, "", 0)
+	sp := newScriptParser(body, "", 0, nil)
 	sp.parse()
 
 	seen := make(map[string]bool)
@@ -481,7 +737,7 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 	var bodyVars []VarDef
 
 	if regionKind == RegionScript {
-		sp := newScriptParser(body, "", initScope.Start)
+		sp := newScriptParser(body, "", initScope.Start, nil)
 		sp.parse()
 		bodyVars = sp.vars
 	} else {
@@ -512,63 +768,6 @@ func (pr *ParseResult) initFuncScope() FuncScope {
 	return FuncScope{Start: -1, End: -1}
 }
 
-// appendInitRefs parses the init() body for component refs. Init refs replace
-// any existing ref for the same variable since init() redefines the value.
-func (pr *ParseResult) appendInitRefs() {
-	initScope := pr.initFuncScope()
-	if initScope.Start == -1 {
-		return
-	}
-
-	start, end := lineOffsets(pr.Content, initScope.Start, initScope.End)
-	if start < 0 {
-		return
-	}
-
-	body := pr.Content[start:end]
-	regionKind := RegionScript
-
-	for _, r := range pr.Regions {
-		if r.StartLine <= initScope.Start {
-			regionKind = r.Kind
-		}
-	}
-
-	var initRefs []ComponentRef
-
-	if regionKind == RegionScript {
-		sp := newScriptParser(body, string(pr.URI), initScope.Start)
-		sp.parse()
-		initRefs = sp.refs
-	} else {
-		tp := newTagParser(body, string(pr.URI))
-		tp.parse()
-
-		for i := range tp.refs {
-			tp.refs[i].Line += uint32(initScope.Start)
-		}
-
-		initRefs = tp.refs
-	}
-	// Replace existing refs where init provides a new value
-	for _, iref := range initRefs {
-		replaced := false
-
-		for i := range pr.Refs {
-			if strings.EqualFold(pr.Refs[i].Variable, iref.Variable) {
-				pr.Refs[i] = iref
-				replaced = true
-
-				break
-			}
-		}
-
-		if !replaced {
-			pr.Refs = append(pr.Refs, iref)
-		}
-	}
-}
-
 // appendResolverRefs scans content for assignments matching configured resolvers.
 // Only considers global scope and init() body, same as other ref extraction.
 func (pr *ParseResult) appendResolverRefs() {
@@ -589,6 +788,7 @@ func (pr *ParseResult) appendResolverRefs() {
 	scopeIdx := 0
 	currentFunc := ""
 	isInitFunc := false
+	commentDepth := 0
 
 	for len(content) > 0 {
 		nl := strings.IndexByte(content, '\n')
@@ -601,6 +801,27 @@ func (pr *ParseResult) appendResolverRefs() {
 		} else {
 			line = content[:nl]
 			content = content[nl+1:]
+		}
+
+		// Track block comments
+		commentDepth += strings.Count(line, "/*") + strings.Count(line, "<!---")
+
+		commentDepth -= strings.Count(line, "*/") + strings.Count(line, "--->")
+		if commentDepth < 0 {
+			commentDepth = 0
+		}
+
+		if commentDepth > 0 {
+			lineNum++
+
+			continue
+		}
+		// Skip single-line comments
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "<!---") {
+			lineNum++
+
+			continue
 		}
 
 		// Track current function scope
@@ -660,7 +881,13 @@ func (pr *ParseResult) appendResolverRefs() {
 					rhs = strings.TrimSpace(rhs)
 
 					if rhs != "" {
-						if comp := ResolveFromCall(rhs, pr.Resolvers); comp != "" {
+						comp := ResolveFromCall(rhs, pr.Resolvers)
+						// Multi-line call: RHS has unbalanced parens, try with closing )
+						if comp == "" && strings.Count(rhs, "(") > strings.Count(rhs, ")") {
+							comp = ResolveFromCall(rhs+")", pr.Resolvers)
+						}
+
+						if comp != "" {
 							lhs := strings.TrimSpace(line[:eqIdx])
 							varName := lhs
 
@@ -671,7 +898,20 @@ func (pr *ParseResult) appendResolverRefs() {
 							}
 
 							if varName != "" {
-								pr.Refs = append(pr.Refs, ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)})
+								ref := ComponentRef{Variable: varName, Component: comp, URI: pr.URI, Line: uint32(lineNum)}
+								// Route to funcRefsMap if inside a function body
+								fs := findFuncScope(lineNum, pr.Scopes)
+								if fs.Start != -1 && !strings.EqualFold(fs.Name, "init") {
+									key := funcKey(fs.Start, fs.End)
+
+									if pr.funcRefsMap == nil {
+										pr.funcRefsMap = make(map[string][]ComponentRef)
+									}
+
+									pr.funcRefsMap[key] = append(pr.funcRefsMap[key], ref)
+								} else {
+									pr.ComponentRefs = append(pr.ComponentRefs, ref)
+								}
 							}
 						}
 					}
@@ -815,8 +1055,49 @@ func ExtractLinks(content string) []DocumentLink {
 	return links
 }
 
-// FuncRefs extracts resolver refs and document links from a function body (lazy, on demand).
+// FuncComponentRefs returns cached component refs for a function scope.
+func (pr *ParseResult) FuncComponentRefs(funcStart, funcEnd int) []ComponentRef {
+	refs, _ := pr.cachedFuncRefs(funcStart, funcEnd)
+
+	return refs
+}
+
+// FuncRefs returns cached component refs and document links for a function body.
 func (pr *ParseResult) FuncRefs(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
+	return pr.cachedFuncRefs(funcStart, funcEnd)
+}
+
+func (pr *ParseResult) cachedFuncRefs(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
+	key := funcKey(funcStart, funcEnd)
+
+	pr.funcRefsMu.Lock()
+	defer pr.funcRefsMu.Unlock()
+
+	if pr.funcRefsMap != nil {
+		if cached, ok := pr.funcRefsMap[key]; ok {
+			links := pr.funcLinksMap[key]
+
+			return cached, links
+		}
+	}
+
+	refs, links := pr.funcRefsUncached(funcStart, funcEnd)
+
+	if pr.funcRefsMap == nil {
+		pr.funcRefsMap = make(map[string][]ComponentRef)
+	}
+
+	if pr.funcLinksMap == nil {
+		pr.funcLinksMap = make(map[string][]DocumentLink)
+	}
+
+	pr.funcRefsMap[key] = refs
+	pr.funcLinksMap[key] = links
+
+	return refs, links
+}
+
+func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
 	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
 	if start < 0 {
 		return nil, nil
@@ -901,12 +1182,29 @@ func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 	seen := make(map[string]bool)
 	lineNum := funcStart + 1
 
+	// Get function-local component refs
+	localRefs, _ := pr.FuncRefs(funcStart, funcEnd)
+
 	// Find the caller name for this scope
 	caller := ""
 
 	for _, f := range pr.Funcs {
 		if int(f.Line) == funcStart {
 			caller = f.Name
+
+			break
+		}
+	}
+
+	var commentDepth int
+
+	// Determine comment style based on region context
+	isScript := false
+
+	for _, r := range pr.Regions {
+		regionEnd := r.StartLine + strings.Count(r.Text, "\n")
+		if funcStart >= r.StartLine && funcStart <= regionEnd {
+			isScript = r.Kind == RegionScript
 
 			break
 		}
@@ -925,8 +1223,53 @@ func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 			body = body[nl+1:]
 		}
 
-		// Find all variable.method( patterns in this line
-		lower := strings.ToLower(line)
+		// Track nested block comments
+		if isScript {
+			commentDepth += strings.Count(line, "/*")
+			commentDepth -= strings.Count(line, "*/")
+		} else {
+			commentDepth += strings.Count(line, "<!---")
+			commentDepth -= strings.Count(line, "--->")
+		}
+
+		if commentDepth < 0 {
+			commentDepth = 0
+		}
+
+		if commentDepth > 0 {
+			lineNum++
+
+			continue
+		}
+
+		// Skip lines that are entirely within a comment (opened and closed on same line)
+		if isScript {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "/*") {
+				lineNum++
+
+				continue
+			}
+
+			if strings.HasPrefix(trimmed, "//") {
+				lineNum++
+
+				continue
+			}
+		} else {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "<!---") {
+				lineNum++
+
+				continue
+			}
+		}
+
+		// Find all variable.method( patterns in this line — mask quoted strings
+		// to avoid matching content inside string literals (e.g. JS in cfset).
+		masked := maskStrings(line)
+
+		lower := strings.ToLower(masked)
 		for i := 0; i < len(lower); i++ {
 			if lower[i] != '(' {
 				continue
@@ -965,13 +1308,23 @@ func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 
 			varName := line[varStart:varEnd]
 
+			// Skip numeric literals (e.g. 1.02(...) is not a method call)
+			if varName[0] >= '0' && varName[0] <= '9' {
+				continue
+			}
+
 			// Strip scope prefix for resolution (VARIABLES.service -> service)
 			resolveVar := varName
 			if dotIdx := strings.LastIndexByte(resolveVar, '.'); dotIdx >= 0 {
 				resolveVar = resolveVar[dotIdx+1:]
 			}
 
-			comp := pr.resolveVarComponent(resolveVar, uint32(lineNum))
+			comp := pr.resolveVarComponentScoped(resolveVar, uint32(lineNum), localRefs)
+
+			// Skip if unresolved but method is a known member function (native type call)
+			if comp == "" && isMemberMethod(methodName) {
+				continue
+			}
 
 			key := strings.ToLower(comp + "." + methodName)
 			if seen[key] {
@@ -1031,7 +1384,7 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 
 			varStart++
 			varName := line[varStart:varEnd]
-			comp := pr.resolveVarComponent(varName, uint32(lineNum))
+			comp := pr.resolveVarComponent(varName)
 			// If no variable match, try resolving call expression before the dot
 			if comp == "" && varEnd > 0 && line[varEnd-1] == ')' && len(pr.Resolvers) > 0 {
 				// Find matching open paren
@@ -1074,26 +1427,95 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 	}
 }
 
-// resolveVarComponent finds the component a variable resolves to from pr.Refs.
-func (pr *ParseResult) resolveVarComponent(varName string, line uint32) string {
-	var best string
+// resolveVarComponent finds the component a variable resolves to from pr.ComponentRefs.
+func (pr *ParseResult) resolveVarComponent(varName string) string {
+	// Check ComponentRefs — these are component-wide, always valid
+	for _, ref := range pr.ComponentRefs {
+		if strings.EqualFold(ref.Variable, varName) {
+			return ref.Component
+		}
+	}
 
-	var bestLine uint32
+	return ""
+}
 
-	for _, ref := range pr.Refs {
-		if strings.EqualFold(ref.Variable, varName) && ref.Line <= line {
-			if ref.Line >= bestLine {
-				best = ref.Component
-				bestLine = ref.Line
-			}
+// resolveVarComponentScoped checks function-local refs only.
+// ComponentRefs are checked separately by the caller when appropriate.
+func (pr *ParseResult) resolveVarComponentScoped(varName string, line uint32, funcRefs []ComponentRef) string {
+	// Check function-local refs only
+	var (
+		best     string
+		bestLine uint32
+	)
+
+	for _, ref := range funcRefs {
+		if !strings.EqualFold(ref.Variable, varName) || ref.Line > line {
+			continue
+		}
+
+		if ref.Line >= bestLine {
+			best = ref.Component
+			bestLine = ref.Line
 		}
 	}
 
 	return best
 }
 
+// maskStrings replaces content inside quoted strings with spaces,
+// preserving character positions so index-based scanning still works.
+func maskStrings(line string) string {
+	var buf []byte
+
+	inQ := byte(0)
+
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inQ == 0:
+			if c == '"' || c == '\'' {
+				inQ = c
+
+				if buf == nil {
+					buf = []byte(line)
+				}
+
+				buf[i] = ' '
+			}
+		case c == inQ:
+			inQ = 0
+
+			if buf != nil {
+				buf[i] = ' '
+			}
+		default:
+			if buf != nil {
+				buf[i] = ' '
+			}
+		}
+	}
+
+	if buf != nil {
+		return string(buf)
+	}
+
+	return line
+}
+
 func funcKey(start, end int) string {
 	return strings.Join([]string{itoa(start), itoa(end)}, ":")
+}
+
+func atoi(s string) int {
+	n := 0
+
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+
+	return n
 }
 
 func itoa(n int) string {
@@ -1162,4 +1584,44 @@ func (pr *ParseResult) logWarn(msg string, keysAndValues ...any) {
 	if pr.log != nil {
 		pr.log.Warn(msg, keysAndValues...)
 	}
+}
+
+// IsMemberMethod returns true if the method name is a known CFML member function
+// on native types (Array, Struct, Query, String, List).
+func IsMemberMethod(name string) bool {
+	return isMemberMethod(name)
+}
+
+// isMemberMethod returns true if the method name is a known CFML member function
+// on native types (Array, Struct, Query, String, List).
+func isMemberMethod(name string) bool {
+	switch strings.ToLower(name) {
+	// Array
+	case "append", "prepend", "clear", "delete", "deleteat", "each", "every", "filter",
+		"find", "findall", "findallnocase", "findnocase", "first", "getat", "indexexists",
+		"insertat", "isdefined", "isempty", "last", "len", "map", "max", "median", "merge",
+		"mid", "min", "new", "pop", "push", "range", "reduce", "reduceright",
+		"removeduplicates", "resize", "reverse", "set", "shift", "slice", "some", "sort",
+		"splice", "sum", "swap", "tolist", "tostruct", "unshift", "avg", "contains",
+		"containsnocase", "addall", "getduplicates", "compact", "rest",
+		// Struct
+		"copy", "count", "equals", "findkey", "findvalue", "get", "getmetadata",
+		"insert", "iscasesensitive", "isordered", "keyarray", "keyexists", "keylist",
+		"keytranslate", "listnew", "setmetadata", "toquerystring", "tosorted", "update",
+		"valuearray",
+		// Query
+		"addcolumn", "addrow", "close", "columnarray", "columncount", "columndata",
+		"columnexists", "columnlist", "currentrow", "deletecolumn", "deleterow", "execute",
+		"getcell", "getcellbyindex", "getresult", "getrow", "lazy",
+		"recordcount", "renamecolumn", "rowbyindex", "rowdata", "rowdatabyindex", "rowswap",
+		"setcell", "setrow", "convertforgrid",
+		// String/List
+		"changedelims", "qualifiedtoarray", "qualify", "itemtrim", "trim",
+		"valuecount", "valuecountnocase",
+		// Common global/Java methods
+		"getbytes", "tostring", "hashcode", "getclass", "init":
+		return true
+	}
+
+	return false
 }

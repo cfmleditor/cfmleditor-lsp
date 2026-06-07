@@ -50,6 +50,10 @@ func main() {
 			cmdRefs(os.Args[2:])
 
 			return
+		case "unresolved":
+			cmdUnresolved(os.Args[2:])
+
+			return
 		case "version":
 			fmt.Printf("cfmleditor-lsp %s\n", version)
 
@@ -155,6 +159,7 @@ func runServer() {
 		srv.WorkspaceFolders = folders
 		srv.IndexGlobs = globs
 		srv.Mappings = mappings
+		srv.ExpressionMappings = cfg.ExpressionMappings()
 
 		for _, p := range resolverPairs {
 			srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
@@ -259,10 +264,10 @@ func cmdParse(args []string) {
 
 		totalDur += dur
 		totalFuncs += len(pr.Funcs)
-		totalRefs += len(pr.Refs)
+		totalRefs += len(pr.ComponentRefs)
 		totalFiles++
 
-		fmt.Printf("  %s  funcs=%d refs=%d scopes=%d  %v\n", f, len(pr.Funcs), len(pr.Refs), len(pr.Scopes), dur)
+		fmt.Printf("  %s  funcs=%d refs=%d scopes=%d  %v\n", f, len(pr.Funcs), len(pr.ComponentRefs), len(pr.Scopes), dur)
 	}
 
 	avg := time.Duration(0)

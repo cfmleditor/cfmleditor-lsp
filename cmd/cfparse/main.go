@@ -101,10 +101,10 @@ func main() {
 
 		totalDur += dur
 		totalFuncs += len(pr.Funcs)
-		totalRefs += len(pr.Refs)
+		totalRefs += len(pr.ComponentRefs)
 		totalFiles++
 
-		fmt.Printf("  %s  funcs=%d refs=%d scopes=%d  %v\n", f, len(pr.Funcs), len(pr.Refs), len(pr.Scopes), dur)
+		fmt.Printf("  %s  funcs=%d refs=%d scopes=%d  %v\n", f, len(pr.Funcs), len(pr.ComponentRefs), len(pr.Scopes), dur)
 	}
 
 	fmt.Printf("\n  total: %d files, %d funcs, %d refs in %v (avg %v/file)\n",

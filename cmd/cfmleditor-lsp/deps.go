@@ -109,7 +109,7 @@ func cmdDeps(args []string) {
 
 				var entries []DepEdge
 
-				for _, ref := range pr.Refs {
+				for _, ref := range pr.ComponentRefs {
 					entries = append(entries, DepEdge{
 						FromFile: f, ToComponent: ref.Component, Line: ref.Line,
 					})

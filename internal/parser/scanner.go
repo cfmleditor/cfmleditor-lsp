@@ -72,6 +72,18 @@ func (s *Scanner) Pos() int { return s.pos }
 // Line returns the current line number.
 func (s *Scanner) Line() int { return s.line }
 
+// ScannerState holds saved scanner position for backtracking.
+type ScannerState struct {
+	pos  int
+	line int
+}
+
+// Save returns the current scanner state for later restoration.
+func (s *Scanner) Save() ScannerState { return ScannerState{pos: s.pos, line: s.line} }
+
+// Restore resets the scanner to a previously saved state.
+func (s *Scanner) Restore(st ScannerState) { s.pos = st.pos; s.line = st.line }
+
 // Peek returns the next token without advancing.
 func (s *Scanner) Peek() Token {
 	pos, line := s.pos, s.line

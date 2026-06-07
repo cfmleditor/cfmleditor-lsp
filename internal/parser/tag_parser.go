@@ -6,15 +6,20 @@ import (
 
 // tagParser extracts definitions from CFML tag-based source.
 type tagParser struct {
-	src        string
-	fileURI    string
-	funcs      []FunctionDef
-	vars       []VarDef
-	refs       []ComponentRef
-	properties []propertyDef
-	extends    string
-	persistent bool
-	lineIndex  []int // byte offset of each line start
+	src           string
+	fileURI       string
+	funcs         []FunctionDef
+	vars          []VarDef
+	componentRefs []ComponentRef
+	funcRefs      map[string][]ComponentRef // keyed by "start:end"
+	pendingCalls  []pendingCall
+	properties    []propertyDef
+	extends       string
+	persistent    bool
+	lineIndex     []int           // byte offset of each line start
+	inFunc        string          // current function scope key ("start:end"), empty if global
+	localVarSet   map[string]bool // var'd/local. variable names in current function
+	forceGlobal   bool            // when true, addRef routes to componentRefs regardless of inFunc
 }
 
 func newTagParser(src, fileURI string) *tagParser {
@@ -69,6 +74,18 @@ func (p *tagParser) parse() {
 
 		idx += pos
 
+		// Skip CFML comments
+		if idx+4 < len(p.src) && p.src[idx:idx+5] == "<!---" {
+			closeIdx := strings.Index(p.src[idx+5:], "--->")
+			if closeIdx >= 0 {
+				pos = idx + 5 + closeIdx + 4
+			} else {
+				pos = len(p.src)
+			}
+
+			continue
+		}
+
 		// Check for cfscript block
 		if idx+10 <= len(p.src) && strings.EqualFold(p.src[idx:idx+10], "<cfscript>") {
 			bodyStart := idx + 10
@@ -83,11 +100,18 @@ func (p *tagParser) parse() {
 			}
 
 			baseLine := p.lineAt(bodyStart)
-			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine)
+			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, nil)
 			sp.parse()
 			p.funcs = append(p.funcs, sp.funcs...)
 			p.vars = append(p.vars, sp.vars...)
-			p.refs = append(p.refs, sp.refs...)
+
+			if p.inFunc != "" {
+				for _, ref := range sp.componentRefs {
+					p.addRef(ref)
+				}
+			} else {
+				p.componentRefs = append(p.componentRefs, sp.componentRefs...)
+			}
 
 			if closeIdx < 0 {
 				pos = len(p.src)
@@ -111,24 +135,48 @@ func (p *tagParser) parse() {
 			tag := p.src[idx:tagEnd]
 			line := p.lineAt(idx)
 
+			// Detect </cffunction> to exit function scope
+			if len(tag) > 13 && tag[1] == '/' && strings.EqualFold(tag[2:13], "cffunction") {
+				p.inFunc = ""
+				p.localVarSet = nil
+				pos = tagEnd
+
+				continue
+			}
+
 			switch {
-			case len(tag) > 12 && strings.EqualFold(tag[:13], "<cfcomponent "):
+			case hasCFTagPrefix(tag, "<cfcomponent"):
 				p.extends = getAttr(tag, "extends")
 				if isTruthy(getAttr(tag, "persistent")) {
 					p.persistent = true
 				}
-			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cffunction "):
+			case hasCFTagPrefix(tag, "<cffunction"):
 				p.parseCFFunction(tag, idx, tagEnd, line)
+				// Find end of function to set scope
+				if closeIdx := indexCFTag(p.src[tagEnd:], "/cffunction"); closeIdx >= 0 {
+					endLine := p.lineAt(tagEnd + closeIdx)
+					p.inFunc = funcKey(line, endLine)
+					p.localVarSet = make(map[string]bool)
+					// Add function arguments to local var set
+					if len(p.funcs) > 0 {
+						for _, arg := range p.funcs[len(p.funcs)-1].Arguments {
+							p.localVarSet[strings.ToLower(arg.Name)] = true
+						}
+					}
+				}
+
 				pos = tagEnd
 
 				continue
-			case len(tag) > 11 && strings.EqualFold(tag[:12], "<cfproperty "):
+			case hasCFTagPrefix(tag, "<cfproperty"):
 				p.parseCFProperty(tag, line)
-			case len(tag) > 5 && strings.EqualFold(tag[:6], "<cfset"):
+			case hasCFTagPrefix(tag, "<cfset"):
 				p.parseCFSet(tag, line)
-			case len(tag) > 8 && strings.EqualFold(tag[:9], "<cfobject"):
+			case hasCFTagPrefix(tag, "<cfreturn"):
+				p.parseCFReturn(tag)
+			case hasCFTagPrefix(tag, "<cfobject"):
 				p.parseCFObject(tag, line)
-			case len(tag) > 8 && strings.EqualFold(tag[:9], "<cfinvoke"):
+			case hasCFTagPrefix(tag, "<cfinvoke"):
 				p.parseCFInvoke(tag, line)
 			}
 
@@ -165,7 +213,7 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 	// Create component refs for arguments with component-like types
 	for _, a := range args {
 		if isComponentType(a.Type) {
-			p.refs = append(p.refs, ComponentRef{
+			p.addRef(ComponentRef{
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
@@ -175,10 +223,11 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 	}
 
 	p.funcs = append(p.funcs, FunctionDef{
-		Name:      name,
-		URI:       uriFromString(p.fileURI),
-		Line:      uint32(line),
-		Arguments: args,
+		Name:       name,
+		URI:        uriFromString(p.fileURI),
+		Line:       uint32(line),
+		Arguments:  args,
+		ReturnType: getAttr(tag, "returntype"),
 	})
 }
 
@@ -236,6 +285,10 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name := extractIdent(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
+			if p.localVarSet != nil {
+				p.localVarSet[strings.ToLower(name)] = true
+			}
+
 			p.checkSetRHS(rest, name, line)
 		}
 	case hasPrefixFold(inner, "local."):
@@ -244,6 +297,10 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
+			if p.localVarSet != nil {
+				p.localVarSet[strings.ToLower(name)] = true
+			}
+
 			p.checkSetRHSStr(rhs, name, line)
 		}
 	case hasPrefixFold(inner, "arguments."):
@@ -260,7 +317,9 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: uint32(line)})
+			p.forceGlobal = true
 			p.checkSetRHSStr(rhs, name, line)
+			p.forceGlobal = false
 		}
 	case hasPrefixFold(inner, "variables."):
 		rest := inner[10:]
@@ -268,13 +327,22 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			p.forceGlobal = true
 			p.checkSetRHSStr(rhs, name, line)
+			p.forceGlobal = false
 		}
 	default:
 		name, rhs := splitAssign(inner)
 		if name != "" && !isKeyword(name) {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			// If var was previously declared local in this function, keep it local
+			isLocal := p.inFunc != "" && p.isVarDeclaredLocal(name)
+			if !isLocal {
+				p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			}
+
+			p.forceGlobal = !isLocal
 			p.checkSetRHSStr(rhs, name, line)
+			p.forceGlobal = false
 		}
 	}
 }
@@ -285,7 +353,7 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 	name := getAttr(tag, "name")
 
 	if component != "" && name != "" {
-		p.refs = append(p.refs, ComponentRef{
+		p.addRef(ComponentRef{
 			Variable:  name,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
@@ -300,12 +368,54 @@ func (p *tagParser) parseCFInvoke(tag string, line int) {
 	variable := getAttr(tag, "returnvariable")
 
 	if component != "" && variable != "" {
-		p.refs = append(p.refs, ComponentRef{
+		p.addRef(ComponentRef{
 			Variable:  variable,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
 			Line:      uint32(line),
 		})
+	}
+}
+
+// parseCFReturn handles <cfreturn expr /> to infer function return component.
+func (p *tagParser) parseCFReturn(tag string) {
+	if p.inFunc == "" || len(p.funcs) == 0 {
+		return
+	}
+
+	f := &p.funcs[len(p.funcs)-1]
+	if f.ReturnComponent != "" || f.returnVar != "" {
+		return // already set from an earlier return
+	}
+	// Extract the expression: strip <cfreturn and trailing /> or >
+	inner := tag
+	if i := strings.IndexByte(inner, ' '); i >= 0 {
+		inner = inner[i+1:]
+	}
+
+	inner = strings.TrimSuffix(inner, "/>")
+	inner = strings.TrimSuffix(inner, ">")
+
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return
+	}
+	// Check for direct new/createObject
+	switch {
+	case hasPrefixFold(inner, "new "):
+		if comp := extractComponentPath(inner[4:]); comp != "" {
+			f.ReturnComponent = comp
+		}
+	case hasPrefixFold(inner, "createobject("):
+		if comp := extractCreateObjectArg(inner[13:]); comp != "" {
+			f.ReturnComponent = comp
+		}
+	default:
+		// return varName — store for deferred resolution
+		varName := extractIdent(inner)
+		if varName != "" && !strings.Contains(inner, "(") {
+			f.returnVar = varName
+		}
 	}
 }
 
@@ -335,7 +445,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "new "):
 		comp := extractComponentPath(rhs[4:])
 		if comp != "" {
-			p.refs = append(p.refs, ComponentRef{
+			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -343,7 +453,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "createobject("):
 		comp := extractCreateObjectArg(rhs[13:])
 		if comp != "" {
-			p.refs = append(p.refs, ComponentRef{
+			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -351,7 +461,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
 		if comp != "" {
-			p.refs = append(p.refs, ComponentRef{
+			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -359,10 +469,30 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "entityload("):
 		comp := extractEntityNewArg(rhs[11:])
 		if comp != "" {
-			p.refs = append(p.refs, ComponentRef{
+			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
+		}
+	default:
+		// Detect x = someVar.method(...) or x = funcName(...) pattern
+		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
+			p.pendingCalls = append(p.pendingCalls, pendingCall{
+				varName: varName,
+				baseVar: baseVar,
+				line:    uint32(line),
+				funcKey: p.inFunc,
+			})
+		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
+			funcName := extractIdent(rhs)
+			if funcName != "" && !isKeyword(funcName) {
+				p.pendingCalls = append(p.pendingCalls, pendingCall{
+					varName:  varName,
+					funcName: funcName,
+					line:     uint32(line),
+					funcKey:  p.inFunc,
+				})
+			}
 		}
 	}
 }
@@ -370,22 +500,50 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 // getAttr extracts an attribute value from a tag string (case-insensitive).
 func getAttr(tag, attr string) string {
 	lower := strings.ToLower(tag)
-	key := strings.ToLower(attr) + "="
-	idx := strings.Index(lower, key)
+	attrLower := strings.ToLower(attr)
 
-	if idx < 0 {
-		// Try with space before
-		key = " " + key
+	// Find the attribute name followed by optional whitespace and =
+	idx := -1
+	searchFrom := 0
 
-		idx = strings.Index(lower, key)
-		if idx < 0 {
-			return ""
+	for {
+		i := strings.Index(lower[searchFrom:], attrLower)
+		if i < 0 {
+			break
 		}
 
-		idx++ // skip the space
+		i += searchFrom
+
+		j := i + len(attrLower)
+		for j < len(tag) && isWhitespace(tag[j]) {
+			j++
+		}
+
+		if j < len(tag) && tag[j] == '=' {
+			idx = i
+
+			break
+		}
+
+		searchFrom = i + 1
 	}
 
-	valStart := idx + len(attr) + 1 // past =
+	if idx < 0 {
+		return ""
+	}
+
+	// Skip past attr name, whitespace, =, whitespace to reach the value
+	valStart := idx + len(attrLower)
+	for valStart < len(tag) && isWhitespace(tag[valStart]) {
+		valStart++
+	}
+
+	valStart++ // skip =
+
+	for valStart < len(tag) && isWhitespace(tag[valStart]) {
+		valStart++
+	}
+
 	if valStart >= len(tag) {
 		return ""
 	}
@@ -435,7 +593,7 @@ func extractAllAttrs(tag string) map[string]string {
 
 	for i < len(tag) {
 		// Skip whitespace
-		for i < len(tag) && (tag[i] == ' ' || tag[i] == '\t' || tag[i] == '\n' || tag[i] == '\r') {
+		for i < len(tag) && isWhitespace(tag[i]) {
 			i++
 		}
 
@@ -585,6 +743,29 @@ func extractEntityNewArg(s string) string {
 	return s[1 : 1+end]
 }
 
+// extractMethodCallBase returns the base variable name from a "baseVar.method(" pattern.
+// For "variables.jss.getInstance(..." returns "jss". Returns "" if not a method call.
+func extractMethodCallBase(rhs string) string {
+	paren := strings.IndexByte(rhs, '(')
+	if paren < 0 {
+		return ""
+	}
+
+	prefix := rhs[:paren]
+
+	dot := strings.LastIndexByte(prefix, '.')
+	if dot < 0 {
+		return ""
+	}
+
+	base := prefix[:dot]
+	if lastDot := strings.LastIndexByte(base, '.'); lastDot >= 0 {
+		return base[lastDot+1:]
+	}
+
+	return base
+}
+
 func toLowerByte(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + 32
@@ -600,4 +781,49 @@ func hasPrefixFold(s, prefix string) bool {
 	}
 
 	return strings.EqualFold(s[:len(prefix)], prefix)
+}
+
+// addRef appends a component ref to the correct bucket (global or per-function).
+// isVarDeclaredLocal returns true if the variable was declared with var or local.
+// in the current function.
+func (p *tagParser) isVarDeclaredLocal(name string) bool {
+	if p.localVarSet == nil {
+		return false
+	}
+
+	return p.localVarSet[strings.ToLower(name)]
+}
+
+// Refs assigned to VARIABLES. or this. scopes are always global.
+func (p *tagParser) addRef(ref ComponentRef) {
+	if p.inFunc == "" || p.forceGlobal {
+		p.componentRefs = append(p.componentRefs, ref)
+	} else {
+		if p.funcRefs == nil {
+			p.funcRefs = make(map[string][]ComponentRef)
+		}
+
+		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+	}
+}
+
+// isWhitespace returns true if the byte is any whitespace character.
+func isWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
+}
+
+// hasCFTagPrefix checks if tag starts with prefix (case-insensitive) followed by whitespace.
+func hasCFTagPrefix(tag, prefix string) bool {
+	n := len(prefix)
+	if len(tag) <= n {
+		return false
+	}
+
+	if !strings.EqualFold(tag[:n], prefix) {
+		return false
+	}
+
+	c := tag[n]
+
+	return isWhitespace(c)
 }

@@ -15,7 +15,7 @@ func ParseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 
 	for _, r := range regions {
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(fileURI), r.StartLine)
+			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil)
 			sp.parse()
 			defs = append(defs, sp.funcs...)
 		} else {
@@ -41,18 +41,18 @@ func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 
 	for _, r := range regions {
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(fileURI), r.StartLine)
+			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil)
 			sp.parse()
-			refs = append(refs, sp.refs...)
+			refs = append(refs, sp.componentRefs...)
 		} else {
 			tp := newTagParser(r.Text, string(fileURI))
 			tp.parse()
 
-			for i := range tp.refs {
-				tp.refs[i].Line += uint32(r.StartLine)
+			for i := range tp.componentRefs {
+				tp.componentRefs[i].Line += uint32(r.StartLine)
 			}
 
-			refs = append(refs, tp.refs...)
+			refs = append(refs, tp.componentRefs...)
 		}
 	}
 
@@ -79,7 +79,7 @@ func ParseVars(content string) []VarDef {
 		var regionVars []VarDef
 
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, "", r.StartLine)
+			sp := newScriptParser(r.Text, "", r.StartLine, nil)
 			sp.parse()
 			regionVars = sp.vars
 		} else {
@@ -306,6 +306,7 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 
 	idx := buildLineIdx(src)
 	pos := 0
+	commentDepth := 0
 
 	for {
 		i := indexCFTag(src[pos:], "cffunction")
@@ -314,6 +315,33 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 		}
 
 		i += pos
+
+		// Update comment depth from pos to i
+		for j := pos; j < i; j++ {
+			if j+4 < len(src) && src[j:j+5] == "<!---" {
+				commentDepth++
+				j += 4
+			} else if j+3 < len(src) && src[j:j+4] == "--->" {
+				commentDepth--
+				if commentDepth < 0 {
+					commentDepth = 0
+				}
+				j += 3
+			}
+		}
+
+		// Skip if inside a CFML comment block
+		if commentDepth > 0 {
+			if closeIdx := strings.Index(src[i:], "--->"); closeIdx >= 0 {
+				pos = i + closeIdx + 4
+				commentDepth--
+			} else {
+				break
+			}
+
+			continue
+		}
+
 		startLine := baseLine + lineAtOffset(idx, i)
 
 		end := min(i+200, len(src))
@@ -482,6 +510,27 @@ func indexCFTag(s, suffix string) int {
 	}
 
 	return -1
+}
+
+// isInsideCFComment returns true if the byte offset is inside a <!--- ---> block.
+func isInsideCFComment(src string, offset int) bool {
+	depth := 0
+
+	for i := 0; i < offset; i++ {
+		if i+4 < len(src) && src[i:i+5] == "<!---" {
+			depth++
+			i += 4
+		} else if i+2 < len(src) && src[i:i+3] == "---" && i+3 < len(src) && src[i+3] == '>' {
+			depth--
+			if depth < 0 {
+				depth = 0
+			}
+
+			i += 3
+		}
+	}
+
+	return depth > 0
 }
 
 func findFuncScope(line int, scopes []FuncScope) FuncScope {

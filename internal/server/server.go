@@ -37,6 +37,7 @@ type Server struct {
 	WorkspaceFolders         []string                  // project folders from config
 	IndexGlobs               []string                  // optional glob filters (absolute paths)
 	Mappings                 map[string]string         // component path mappings (key -> abs path)
+	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
@@ -166,11 +167,12 @@ func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 func (s *Server) getResolver() *resolve.Resolver {
 	if s.resolver == nil {
 		s.resolver = &resolve.Resolver{
-			FS:               s.FS,
-			WorkspaceFolders: s.WorkspaceFolders,
-			Mappings:         s.Mappings,
-			Index:            s.index,
-			Resolvers:        s.cfResolvers(),
+			FS:                 s.FS,
+			WorkspaceFolders:   s.WorkspaceFolders,
+			Mappings:           s.Mappings,
+			ExpressionMappings: s.ExpressionMappings,
+			Index:              s.index,
+			Resolvers:          s.cfResolvers(),
 		}
 	}
 
@@ -325,6 +327,7 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
 		BeanLookup:        s.index.LookupBean,
+		ExpressionMappings: s.ExpressionMappings,
 		ExtractLinks:      true,
 	})
 }

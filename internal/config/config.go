@@ -9,6 +9,7 @@ type JSON struct {
 	WorkspacePaths      []string          `json:"workspacePaths"`
 	WorkspaceIndexGlobs []string          `json:"workspaceIndexGlobs"`
 	Mappings            map[string]string `json:"mappings"`
+	ExpressionMappings  map[string]string `json:"expressionMappings"`
 	ComponentResolvers  []Resolver        `json:"componentResolvers"`
 	PropertyResolvers   []PropResolver    `json:"propertyResolvers"`
 	BeanPaths           map[string]string `json:"beanPaths"`

@@ -18,10 +18,13 @@ type Argument struct {
 
 // FunctionDef represents a user-defined function found in a CFC file.
 type FunctionDef struct {
-	Name      string
-	URI       uri.URI
-	Line      uint32
-	Arguments []Argument
+	Name            string
+	URI             uri.URI
+	Line            uint32
+	Arguments       []Argument
+	ReturnType      string // declared return type (e.g. "query", "models.User")
+	ReturnComponent string // inferred component from return statements (e.g. "services.Foo")
+	returnVar       string // unexported: variable name from "return varName" for deferred resolution
 }
 
 // Scope represents the CFML variable scope.
@@ -323,16 +326,21 @@ func simpleMatch(expr, pattern, resolve string) string {
 		return ""
 	}
 
+	var captured string
+
 	if normSuffix != "" {
-		exprSuffix := strings.ReplaceAll(expr[len(expr)-len(suffix):], `"`, `'`)
-		if !strings.EqualFold(exprSuffix, normSuffix) {
+		// Find first occurrence of suffix after prefix (not last)
+		rest := expr[len(prefix):]
+		normRest := strings.ReplaceAll(rest, `"`, `'`)
+
+		suffixIdx := indexFold(normRest, normSuffix)
+		if suffixIdx < 0 {
 			return ""
 		}
-	}
 
-	captured := expr[len(prefix):]
-	if suffix != "" {
-		captured = captured[:len(captured)-len(suffix)]
+		captured = rest[:suffixIdx]
+	} else {
+		captured = expr[len(prefix):]
 	}
 
 	captured = strings.Trim(captured, "\"'")

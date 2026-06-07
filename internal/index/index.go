@@ -113,12 +113,12 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 
 	idx.fileFuncs[fk] = fileDefs
 
-	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.Refs))
+	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.ComponentRefs))
 
-	for i := range pr.Refs {
-		key := strings.ToLower(pr.Refs[i].Variable)
-		idx.comprefs[key] = append(idx.comprefs[key], &pr.Refs[i])
-		fileRefsList = append(fileRefsList, &pr.Refs[i])
+	for i := range pr.ComponentRefs {
+		key := strings.ToLower(pr.ComponentRefs[i].Variable)
+		idx.comprefs[key] = append(idx.comprefs[key], &pr.ComponentRefs[i])
+		fileRefsList = append(fileRefsList, &pr.ComponentRefs[i])
 	}
 
 	idx.fileRefs[fk] = fileRefsList

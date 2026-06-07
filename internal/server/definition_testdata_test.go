@@ -53,7 +53,7 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 	content := string(data)
 	srv.setDocument(docURI, content)
 	pr := parser.Parse(docURI, content, srv.cfResolvers())
-	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.Refs)
+	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 	srv.mu.Lock()
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()

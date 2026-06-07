@@ -51,7 +51,7 @@ func buildIndex(t *testing.T, dir string) *index.Index {
 
 	for _, name := range []string{"controller.cfc", "service.cfc", "persist.cfc"} {
 		pr := parseFile(t, filepath.Join(dir, name))
-		idx.IndexFileFromResult(pr.URI, pr.Funcs, pr.Refs)
+		idx.IndexFileFromResult(pr.URI, pr.Funcs, pr.ComponentRefs)
 	}
 
 	return idx
@@ -130,8 +130,8 @@ func TestBuild_FileDeps(t *testing.T) {
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
 	// All file-level refs
-	refs := make([]parser.ComponentRef, len(pr.Refs))
-	copy(refs, pr.Refs)
+	refs := make([]parser.ComponentRef, len(pr.ComponentRefs))
+	copy(refs, pr.ComponentRefs)
 
 	result := Build(Options{
 		DocURI:   "file://" + controllerPath,
@@ -177,8 +177,8 @@ func TestBuild_CleanupDeps(t *testing.T) {
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
-	refs := make([]parser.ComponentRef, len(pr.Refs))
-	copy(refs, pr.Refs)
+	refs := make([]parser.ComponentRef, len(pr.ComponentRefs))
+	copy(refs, pr.ComponentRefs)
 
 	result := Build(Options{
 		DocURI:   "file://" + controllerPath,
