@@ -15,20 +15,20 @@ jobs:
         include:
           - goos: darwin
             goarch: arm64
-            runner: macos-latest
+            zig_target: aarch64-macos
           - goos: darwin
             goarch: amd64
-            runner: macos-13
+            zig_target: x86_64-macos
           - goos: linux
             goarch: arm64
-            runner: ubuntu-24.04-arm
+            zig_target: aarch64-linux-gnu
           - goos: linux
             goarch: amd64
-            runner: ubuntu-latest
+            zig_target: x86_64-linux-gnu
           - goos: windows
             goarch: amd64
-            runner: windows-latest
-    runs-on: ${{ matrix.runner }}
+            zig_target: x86_64-windows-gnu
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +36,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: goto-bus-stop/setup-zig@v2
+
       - name: Fetch cfdocs
-        shell: bash
         run: ./scripts/fetch-docs-cfdocs.sh
 
       - name: Generate built-in entries
@@ -48,7 +49,8 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "1"
-        shell: bash
+          CC: zig cc -target ${{ matrix.zig_target }}
+          CXX: zig c++ -target ${{ matrix.zig_target }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ext=""
@@ -56,7 +58,6 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "cfmleditor-lsp${ext}" ./cmd/cfmleditor-lsp
 
       - name: Package
-        shell: bash
         run: |
           if [ "${{ matrix.goos }}" = "windows" ]; then
             7z a cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip cfmleditor-lsp.exe

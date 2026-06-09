@@ -13,23 +13,27 @@ type propertyDef struct {
 // scriptParser extracts function signatures, component refs, and variable
 // declarations from CFScript source in a single pass.
 type scriptParser struct {
-	sc            *Scanner
-	funcs         []FunctionDef
-	vars          []VarDef
-	componentRefs []ComponentRef
-	funcRefs      map[string][]ComponentRef // keyed by "start:end"
-	scopes        []FuncScope
-	properties    []propertyDef
-	extends       string
-	persistent    bool
-	fileURI       string
-	baseLine      int
-	resolvers     []Resolver
-	inFunc        string          // current function scope key, empty if global
-	localVarSet   map[string]bool // var'd/local. names in current function
-	forceGlobal   bool            // when true, addRef routes to componentRefs
-	returnVar     string          // last "return varName" seen in current function
-	pendingCalls  []pendingCall   // unresolved varName = funcCall(...) assignments
+	sc                  *Scanner
+	funcs               []FunctionDef
+	vars                []VarDef
+	componentRefs       []ComponentRef
+	funcRefs            map[string][]ComponentRef // keyed by "start:end"
+	funcLinks           map[string][]DocumentLink // keyed by "start:end"
+	links               []DocumentLink            // global scope links
+	scopes              []FuncScope
+	properties          []propertyDef
+	extends             string
+	persistent          bool
+	fileURI             string
+	baseLine            int
+	resolvers           []Resolver
+	extractLinks        bool // whether to extract document links
+	builtinReturnLookup func(string) string
+	inFunc              string          // current function scope key, empty if global
+	localVarSet         map[string]bool // var'd/local. names in current function
+	forceGlobal         bool            // when true, addRef routes to componentRefs
+	returnVar           string          // last "return varName" seen in current function
+	pendingCalls        []pendingCall   // unresolved varName = funcCall(...) assignments
 }
 
 // pendingCall records an unresolved assignment from a function call.
@@ -68,6 +72,47 @@ func (p *scriptParser) isVarDeclaredLocal(name string) bool {
 	}
 
 	return p.localVarSet[strings.ToLower(name)]
+}
+
+// extractAllLinks scans source lines for document links, routing them to
+// global links or funcLinks based on which scope the line falls in.
+func (p *scriptParser) extractAllLinks() {
+	src := p.sc.src
+	lineNum := p.baseLine
+	scopeIdx := 0
+
+	for len(src) > 0 {
+		nl := strings.IndexByte(src, '\n')
+
+		var line string
+		if nl < 0 {
+			line = src
+			src = ""
+		} else {
+			line = src[:nl]
+			src = src[nl+1:]
+		}
+
+		// Find which scope this line belongs to
+		for scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].End {
+			scopeIdx++
+		}
+
+		if scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].Start && lineNum < p.scopes[scopeIdx].End {
+			key := funcKey(p.scopes[scopeIdx].Start, p.scopes[scopeIdx].End)
+			if p.funcLinks == nil {
+				p.funcLinks = make(map[string][]DocumentLink)
+			}
+
+			links := p.funcLinks[key]
+			extractLinksFromLine(line, lineNum, &links)
+			p.funcLinks[key] = links
+		} else {
+			extractLinksFromLine(line, lineNum, &p.links)
+		}
+
+		lineNum++
+	}
 }
 
 // parseVarDecl handles: var name = expr
@@ -112,6 +157,71 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 	case "entityload":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, tok.Line)
+	default:
+		p.checkVarRHS(nameTok.Value, tok.Line)
+	}
+}
+
+// checkVarRHS handles unrecognized RHS for var declarations: walks dot chain,
+// tries resolver match or records pending call.
+func (p *scriptParser) checkVarRHS(varName string, line int) {
+	rhs := p.sc.PeekSkipComments()
+	if rhs.Kind != TokIdent || isKeyword(rhs.Value) {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume first ident
+
+	prevIdent := ""
+	lastIdent := rhs.Value
+	fullChain := rhs.Value
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		next := p.sc.PeekSkipComments()
+		if next.Kind == TokIdent {
+			p.sc.NextSkipComments()
+
+			prevIdent = lastIdent
+			lastIdent = next.Value
+			fullChain += "." + next.Value
+		} else {
+			break
+		}
+	}
+
+	if p.sc.PeekSkipComments().Kind == TokLParen {
+		if comp := p.tryResolveCall(fullChain); comp != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			})
+		} else if p.builtinReturnLookup != nil {
+			if comp := p.builtinReturnLookup(lastIdent); comp != "" {
+				p.addRef(ComponentRef{
+					Variable: varName, Component: comp,
+					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				})
+			} else {
+				p.pendingCalls = append(p.pendingCalls, pendingCall{
+					varName: varName, funcName: lastIdent, baseVar: prevIdent,
+					line: uint32(p.baseLine + line), funcKey: p.inFunc,
+				})
+			}
+		} else {
+			p.pendingCalls = append(p.pendingCalls, pendingCall{
+				varName: varName, funcName: lastIdent, baseVar: prevIdent,
+				line: uint32(p.baseLine + line), funcKey: p.inFunc,
+			})
+		}
+	} else if len(p.resolvers) > 0 {
+		if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			})
+		}
 	}
 }
 
@@ -166,6 +276,8 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 		case "entityload":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, tok.Line)
+		default:
+			p.checkVarRHS(nameTok.Value, tok.Line)
 		}
 	}
 
@@ -176,7 +288,7 @@ func (p *scriptParser) parse() {
 	for {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokEOF {
-			return
+			break
 		}
 
 		if tok.Kind != TokIdent {
@@ -220,7 +332,8 @@ func (p *scriptParser) parse() {
 
 					seg := p.sc.NextSkipComments()
 					if seg.Kind == TokIdent {
-						retVal.WriteString("." + seg.Value)
+						retVal.WriteByte('.')
+						retVal.WriteString(seg.Value)
 					}
 				}
 
@@ -232,6 +345,10 @@ func (p *scriptParser) parse() {
 				p.checkAssignRef(tok)
 			}
 		}
+	}
+
+	if p.extractLinks {
+		p.extractAllLinks()
 	}
 }
 
@@ -366,7 +483,8 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 
 		seg := p.sc.NextSkipComments()
 		if seg.Kind == TokIdent {
-			retVal.WriteString("." + seg.Value)
+			retVal.WriteByte('.')
+			retVal.WriteString(seg.Value)
 		}
 	}
 
@@ -378,6 +496,10 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 }
 
 func (p *scriptParser) parseFunction(startTok Token, access string, returnType string) {
+	// Capture JSDoc comment that preceded this function
+	docComment := p.sc.LastBlockComment
+	p.sc.LastBlockComment = ""
+
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind != TokIdent {
 		return
@@ -389,6 +511,11 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	}
 
 	args := p.parseArgList()
+
+	// Apply JSDoc @param {type} annotations to arguments
+	if docComment != "" {
+		applyJSDocParams(docComment, args)
+	}
 
 	funcLine := p.baseLine + startTok.Line
 
@@ -707,7 +834,8 @@ func (p *scriptParser) readNewComponent() string {
 
 				next := p.sc.NextSkipComments()
 				if next.Kind == TokIdent {
-					comp.WriteString("." + next.Value)
+					comp.WriteByte('.')
+					comp.WriteString(next.Value)
 				}
 			} else {
 				break
@@ -803,6 +931,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 			prevIdent := ""
 			lastIdent := rhs.Value
+			fullChain := rhs.Value
 
 			for p.sc.PeekSkipComments().Kind == TokDot {
 				p.sc.NextSkipComments()
@@ -813,13 +942,14 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 					prevIdent = lastIdent
 					lastIdent = next.Value
+					fullChain += "." + next.Value
 				} else {
 					break
 				}
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				if comp := p.tryResolveCall(lastIdent); comp != "" {
+				if comp := p.tryResolveCall(fullChain); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
@@ -831,6 +961,13 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						baseVar:  prevIdent,
 						line:     uint32(p.baseLine + varTok.Line),
 						funcKey:  p.inFunc,
+					})
+				}
+			} else if len(p.resolvers) > 0 {
+				if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+					p.addRef(ComponentRef{
+						Variable: nameTok.Value, Component: comp,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
 				}
 			}
@@ -891,8 +1028,27 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			if !isKeyword(rhs.Value) {
 				p.sc.NextSkipComments()
 
+				prevIdent := ""
+				lastIdent := rhs.Value
+				fullChain := rhs.Value
+
+				for p.sc.PeekSkipComments().Kind == TokDot {
+					p.sc.NextSkipComments()
+
+					next := p.sc.PeekSkipComments()
+					if next.Kind == TokIdent {
+						p.sc.NextSkipComments()
+
+						prevIdent = lastIdent
+						lastIdent = next.Value
+						fullChain += "." + next.Value
+					} else {
+						break
+					}
+				}
+
 				if p.sc.PeekSkipComments().Kind == TokLParen {
-					if comp := p.tryResolveCall(rhs.Value); comp != "" {
+					if comp := p.tryResolveCall(fullChain); comp != "" {
 						p.addRef(ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
@@ -900,9 +1056,17 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 					} else {
 						p.pendingCalls = append(p.pendingCalls, pendingCall{
 							varName:  nameTok.Value,
-							funcName: rhs.Value,
+							funcName: lastIdent,
+							baseVar:  prevIdent,
 							line:     uint32(p.baseLine + scopeTok.Line),
 							funcKey:  p.inFunc,
+						})
+					}
+				} else if len(p.resolvers) > 0 {
+					if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+						p.addRef(ComponentRef{
+							Variable: nameTok.Value, Component: comp,
+							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
 						})
 					}
 				}
@@ -1076,6 +1240,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			// Walk dot chain: [scope.]varName.method(
 			prevIdent := ""
 			lastIdent := rhs.Value
+			fullChain := rhs.Value
 
 			for p.sc.PeekSkipComments().Kind == TokDot {
 				p.sc.NextSkipComments() // consume .
@@ -1086,13 +1251,14 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 					prevIdent = lastIdent
 					lastIdent = next.Value
+					fullChain += "." + next.Value
 				} else {
 					break
 				}
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				if comp := p.tryResolveCall(lastIdent); comp != "" {
+				if comp := p.tryResolveCall(fullChain); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: tok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
@@ -1104,6 +1270,14 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 						baseVar:  prevIdent,
 						line:     uint32(p.baseLine + tok.Line),
 						funcKey:  p.inFunc,
+					})
+				}
+			} else if len(p.resolvers) > 0 {
+				// Try generic resolver match on non-call RHS (e.g. "_parent")
+				if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+					p.addRef(ComponentRef{
+						Variable: tok.Value, Component: comp,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
 					})
 				}
 			}
@@ -1379,7 +1553,7 @@ func looksLikeCFCType(t string) bool {
 // tryResolveCall attempts to resolve a function call via resolvers.
 // Called when scanner is positioned at '(' (peeked, not consumed).
 // Reconstructs the call expression (e.g. getService("foo")) and tries resolvers.
-func (p *scriptParser) tryResolveCall(funcName string) string {
+func (p *scriptParser) tryResolveCall(callExpr string) string {
 	if len(p.resolvers) == 0 {
 		return ""
 	}
@@ -1388,7 +1562,7 @@ func (p *scriptParser) tryResolveCall(funcName string) string {
 	hasPrefix := false
 
 	for i := range p.resolvers {
-		if p.resolvers[i].Prefix == "" || containsFold(funcName, p.resolvers[i].Prefix) {
+		if p.resolvers[i].Prefix == "" || containsFold(callExpr, p.resolvers[i].Prefix) {
 			hasPrefix = true
 
 			break
@@ -1407,13 +1581,34 @@ func (p *scriptParser) tryResolveCall(funcName string) string {
 	if arg.Kind == TokString {
 		p.sc.NextSkipComments()
 
-		expr := funcName + "(\"" + unquote(arg.Value) + "\")"
+		// Build arg list: read comma-separated string args
+		args := "\"" + unquote(arg.Value) + "\""
+
+		for {
+			next := p.sc.PeekSkipComments()
+			if next.Kind != TokComma {
+				break
+			}
+
+			p.sc.NextSkipComments() // consume ,
+
+			nextArg := p.sc.PeekSkipComments()
+			if nextArg.Kind != TokString {
+				break
+			}
+
+			p.sc.NextSkipComments()
+
+			args += ", \"" + unquote(nextArg.Value) + "\""
+		}
+
+		expr := callExpr + "(" + args + ")"
 		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
 			return comp
 		}
 	} else {
-		// Try no-arg match: funcName()
-		expr := funcName + "()"
+		// Try no-arg match: callExpr()
+		expr := callExpr + "()"
 		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
 			return comp
 		}
@@ -1442,4 +1637,70 @@ func isKeyword(s string) bool {
 	}
 
 	return false
+}
+
+// applyJSDocParams parses @param {type} name annotations from a JSDoc comment
+// and sets the Type on matching arguments (only if their Type is empty or "any").
+func applyJSDocParams(comment string, args []Argument) {
+	for len(comment) > 0 {
+		idx := strings.Index(comment, "@param")
+		if idx < 0 {
+			break
+		}
+
+		comment = comment[idx+6:]
+
+		// Skip whitespace
+		i := 0
+		for i < len(comment) && (comment[i] == ' ' || comment[i] == '\t') {
+			i++
+		}
+
+		if i >= len(comment) || comment[i] != '{' {
+			continue
+		}
+
+		// Extract type inside braces
+		i++ // skip {
+
+		end := strings.IndexByte(comment[i:], '}')
+		if end < 0 {
+			break
+		}
+
+		typeName := strings.TrimSpace(comment[i : i+end])
+		comment = comment[i+end+1:]
+
+		if typeName == "" {
+			continue
+		}
+
+		// Skip whitespace to get param name
+		i = 0
+		for i < len(comment) && (comment[i] == ' ' || comment[i] == '\t') {
+			i++
+		}
+
+		// Read param name
+		nameStart := i
+		for i < len(comment) && comment[i] != ' ' && comment[i] != '\t' && comment[i] != '\n' && comment[i] != '\r' && comment[i] != '*' {
+			i++
+		}
+
+		paramName := comment[nameStart:i]
+		if paramName == "" {
+			continue
+		}
+
+		// Match to argument and override type if it's generic
+		for j := range args {
+			if strings.EqualFold(args[j].Name, paramName) {
+				if args[j].Type == "" || strings.EqualFold(args[j].Type, "any") || strings.EqualFold(args[j].Type, "struct") {
+					args[j].Type = typeName
+				}
+
+				break
+			}
+		}
+	}
 }

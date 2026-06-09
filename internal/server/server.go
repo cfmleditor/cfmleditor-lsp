@@ -12,6 +12,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -323,12 +324,13 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 	s.ensureBeansLoaded()
 
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
-		Logger:            s.log,
-		Resolvers:         s.cfResolvers(),
-		PropertyResolvers: s.cfPropertyResolvers(),
-		BeanLookup:        s.index.LookupBean,
-		ExpressionMappings: s.ExpressionMappings,
-		ExtractLinks:      true,
+		Logger:              s.log,
+		Resolvers:           s.cfResolvers(),
+		PropertyResolvers:   s.cfPropertyResolvers(),
+		BeanLookup:          s.index.LookupBean,
+		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
+		ExpressionMappings:  s.ExpressionMappings,
+		ExtractLinks:        true,
 	})
 }
 

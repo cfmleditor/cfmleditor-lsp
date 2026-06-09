@@ -6,20 +6,26 @@ import (
 
 // tagParser extracts definitions from CFML tag-based source.
 type tagParser struct {
-	src           string
-	fileURI       string
-	funcs         []FunctionDef
-	vars          []VarDef
-	componentRefs []ComponentRef
-	funcRefs      map[string][]ComponentRef // keyed by "start:end"
-	pendingCalls  []pendingCall
-	properties    []propertyDef
-	extends       string
-	persistent    bool
-	lineIndex     []int           // byte offset of each line start
-	inFunc        string          // current function scope key ("start:end"), empty if global
-	localVarSet   map[string]bool // var'd/local. variable names in current function
-	forceGlobal   bool            // when true, addRef routes to componentRefs regardless of inFunc
+	src                 string
+	fileURI             string
+	funcs               []FunctionDef
+	vars                []VarDef
+	componentRefs       []ComponentRef
+	funcRefs            map[string][]ComponentRef // keyed by "start:end"
+	funcLinks           map[string][]DocumentLink // keyed by "start:end"
+	links               []DocumentLink            // global scope links
+	scopes              []FuncScope
+	pendingCalls        []pendingCall
+	properties          []propertyDef
+	extends             string
+	persistent          bool
+	lineIndex           []int // byte offset of each line start
+	resolvers           []Resolver
+	extractLinks        bool // whether to extract document links
+	builtinReturnLookup func(string) string
+	inFunc              string          // current function scope key ("start:end"), empty if global
+	localVarSet         map[string]bool // var'd/local. variable names in current function
+	forceGlobal         bool            // when true, addRef routes to componentRefs regardless of inFunc
 }
 
 func newTagParser(src, fileURI string) *tagParser {
@@ -148,6 +154,7 @@ func (p *tagParser) parse() {
 			if len(tag) > 13 && tag[1] == '/' && strings.EqualFold(tag[2:13], "cffunction") {
 				p.inFunc = ""
 				p.localVarSet = nil
+				p.forceGlobal = false
 				pos = tagEnd
 
 				continue
@@ -165,6 +172,7 @@ func (p *tagParser) parse() {
 				if closeIdx := indexCFTag(p.src[tagEnd:], "/cffunction"); closeIdx >= 0 {
 					endLine := p.lineAt(tagEnd + closeIdx)
 					p.inFunc = funcKey(line, endLine)
+					p.scopes = append(p.scopes, FuncScope{Start: line, End: endLine})
 					p.localVarSet = make(map[string]bool)
 					// Add function arguments to local var set
 					if len(p.funcs) > 0 {
@@ -194,14 +202,21 @@ func (p *tagParser) parse() {
 			pos = idx + 1
 		}
 	}
+
+	if p.extractLinks {
+		p.extractAllLinks()
+	}
 }
 
 // parseCFFunction extracts a function def from <cffunction> and its <cfargument> children.
-func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
+func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 	name := getAttr(tag, "name")
 	if name == "" {
 		return
 	}
+
+	// Check for JSDoc comment preceding this function tag
+	docComment := p.precedingComment(idx)
 
 	// Find arguments between this tag and </cffunction> or next <cffunction
 	rest := p.src[tagEnd:]
@@ -218,6 +233,11 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 	block := rest[:end]
 
 	args := p.parseCFArguments(block)
+
+	// Apply JSDoc @param {type} annotations
+	if docComment != "" {
+		applyJSDocParams(docComment, args)
+	}
 
 	// Create component refs for arguments with component-like types
 	for _, a := range args {
@@ -241,6 +261,28 @@ func (p *tagParser) parseCFFunction(tag string, _, tagEnd, line int) {
 }
 
 // parseCFArguments extracts <cfargument> tags from a block of source.
+// precedingComment extracts the CFML comment (<!--- ... --->) immediately before position idx.
+func (p *tagParser) precedingComment(idx int) string {
+	// Walk backward from idx skipping whitespace to find --->
+	i := idx - 1
+	for i >= 0 && (p.src[i] == ' ' || p.src[i] == '\t' || p.src[i] == '\n' || p.src[i] == '\r') {
+		i--
+	}
+
+	// Check for ---> ending (i points to '>')
+	if i < 3 || p.src[i-3:i+1] != "--->" {
+		return ""
+	}
+
+	// Find matching <!---
+	start := strings.LastIndex(p.src[:i-3], "<!---")
+	if start < 0 {
+		return ""
+	}
+
+	return p.src[start+5 : i-3]
+}
+
 func (p *tagParser) parseCFArguments(block string) []Argument {
 	var args []Argument
 
@@ -285,6 +327,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	}
 
 	inner = strings.TrimSuffix(inner, ">")
+	inner = strings.TrimSuffix(strings.TrimSpace(inner), "/")
 	inner = strings.TrimSpace(inner)
 
 	switch {
@@ -466,6 +509,13 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
+		} else if len(p.resolvers) > 0 {
+			if comp := ResolveFromCall(rhs, p.resolvers); comp != "" {
+				p.addRef(ComponentRef{
+					Variable: varName, Component: comp,
+					URI: uriFromString(p.fileURI), Line: uint32(line),
+				})
+			}
 		}
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
@@ -484,6 +534,17 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 	default:
+		// Try generic resolver match on the RHS expression
+		if len(p.resolvers) > 0 {
+			if comp := ResolveFromCall(rhs, p.resolvers); comp != "" {
+				p.addRef(ComponentRef{
+					Variable: varName, Component: comp,
+					URI: uriFromString(p.fileURI), Line: uint32(line),
+				})
+
+				return
+			}
+		}
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
 		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
 			p.pendingCalls = append(p.pendingCalls, pendingCall{
@@ -495,6 +556,17 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
 			funcName := extractIdent(rhs)
 			if funcName != "" && !isKeyword(funcName) {
+				if p.builtinReturnLookup != nil {
+					if comp := p.builtinReturnLookup(funcName); comp != "" {
+						p.addRef(ComponentRef{
+							Variable: varName, Component: comp,
+							URI: uriFromString(p.fileURI), Line: uint32(line),
+						})
+
+						return
+					}
+				}
+
 				p.pendingCalls = append(p.pendingCalls, pendingCall{
 					varName:  varName,
 					funcName: funcName,
@@ -813,6 +885,47 @@ func (p *tagParser) addRef(ref ComponentRef) {
 		}
 
 		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+	}
+}
+
+// extractAllLinks scans source lines for document links, routing them to
+// global links or funcLinks based on which scope the line falls in.
+func (p *tagParser) extractAllLinks() {
+	src := p.src
+	lineNum := 0
+	scopeIdx := 0
+
+	for len(src) > 0 {
+		nl := strings.IndexByte(src, '\n')
+
+		var line string
+		if nl < 0 {
+			line = src
+			src = ""
+		} else {
+			line = src[:nl]
+			src = src[nl+1:]
+		}
+
+		// Advance past finished scopes
+		for scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].End {
+			scopeIdx++
+		}
+
+		if scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].Start && lineNum < p.scopes[scopeIdx].End {
+			key := funcKey(p.scopes[scopeIdx].Start, p.scopes[scopeIdx].End)
+			if p.funcLinks == nil {
+				p.funcLinks = make(map[string][]DocumentLink)
+			}
+
+			links := p.funcLinks[key]
+			extractLinksFromLine(line, lineNum, &links)
+			p.funcLinks[key] = links
+		} else {
+			extractLinksFromLine(line, lineNum, &p.links)
+		}
+
+		lineNum++
 	}
 }
 

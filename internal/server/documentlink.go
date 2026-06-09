@@ -34,10 +34,9 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 	if pr != nil {
 		// Global scope links from parse time
 		docLinks = append(docLinks, pr.Links...)
-		// Function body links (lightweight string scan only)
+		// Function body links (pre-computed at parse time)
 		for _, sc := range pr.Scopes {
-			_, funcLinks := pr.FuncRefs(sc.Start, sc.End)
-			docLinks = append(docLinks, funcLinks...)
+			docLinks = append(docLinks, pr.FuncLinks(sc.Start, sc.End)...)
 		}
 	} else {
 		// Fallback: full scan

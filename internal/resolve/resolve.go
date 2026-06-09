@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -358,6 +359,16 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	if comp == "" {
 		return "variable '" + variable + "' has no component ref"
+	}
+
+	// Builtin return type — check method exists in-memory
+	if strings.HasPrefix(comp, "$builtin.") {
+		builtinName := comp[9:]
+		if docs.LookupBuiltinMethod(builtinName, funcName) {
+			return ""
+		}
+
+		return "method '" + funcName + "' not found on builtin " + builtinName
 	}
 
 	if r.ResolveFunc(comp, funcName, baseDir) != nil {

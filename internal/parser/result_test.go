@@ -300,10 +300,22 @@ func TestParseResult_ResolverRefs(t *testing.T) {
 </cfcomponent>`
 	pr := Parse(testURI, content, resolvers)
 
-	// temp2 should resolve via resolver (inside init — init is always scanned)
+	// temp2 is var'd inside init — should be in funcRefs for init scope
+	var initScope FuncScope
+
+	for _, sc := range pr.Scopes {
+		for _, f := range pr.Funcs {
+			if int(f.Line) == sc.Start && f.Name == "init" {
+				initScope = sc
+			}
+		}
+	}
+
+	initRefs, _ := pr.FuncRefs(initScope.Start, initScope.End)
+
 	var found bool
 
-	for _, ref := range pr.ComponentRefs {
+	for _, ref := range initRefs {
 		if ref.Variable == "temp2" && ref.Component == "packages.general.service" {
 			found = true
 

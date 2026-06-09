@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
@@ -116,6 +117,8 @@ func cmdUnresolved(args []string) {
 	// First pass: index all CFC files for function lookups
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))
 
+	indexStart := time.Now()
+
 	for _, f := range files {
 		if !cfpath.IsCFCFile(f) {
 			continue
@@ -131,6 +134,8 @@ func cmdUnresolved(args []string) {
 	}
 
 	// Filter scan targets if specific files were passed
+	indexDur := time.Since(indexStart)
+
 	var scanFiles []string
 
 	for _, a := range args {
@@ -145,14 +150,17 @@ func cmdUnresolved(args []string) {
 	}
 
 	var (
-		mu      sync.Mutex
-		results []UnresolvedCall
-		wg      sync.WaitGroup
+		mu       sync.Mutex
+		results  []UnresolvedCall
+		resolved int
+		wg       sync.WaitGroup
 	)
 
 	sem := make(chan struct{}, 8)
 
 	fmt.Fprintf(os.Stderr, "Scanning %d files for unresolved calls...\n", len(scanFiles))
+
+	scanStart := time.Now()
 
 	for _, f := range scanFiles {
 		wg.Add(1)
@@ -178,35 +186,56 @@ func cmdUnresolved(args []string) {
 				ScanAllScopes:      true,
 			})
 
-			for _, scope := range pr.Scopes {
-				calls := pr.FuncCalls(scope.Start, scope.End)
-				for _, call := range calls {
-					if isBuiltin(call.FuncName) {
-						continue
-					}
-
-					reason := resolver.CanResolveCall(call, pr, baseDir)
-					if reason == "" {
-						if verbose {
-							fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line, call.Variable, call.FuncName)
-						}
-
-						continue
-					}
-
-					mu.Lock()
-
-					results = append(results, UnresolvedCall{
-						File:     file,
-						Line:     call.Line,
-						Caller:   call.Caller,
-						Variable: call.Variable,
-						Function: call.FuncName,
-						Reason:   reason,
-						Text:     call.Text,
-					})
-					mu.Unlock()
+			pr.FuncLookup = func(component, funcName string) string {
+				fd := resolver.ResolveFunc(component, funcName, baseDir)
+				if fd == nil {
+					return ""
 				}
+
+				if fd.ReturnComponent != "" {
+					return fd.ReturnComponent
+				}
+
+				if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
+					return fd.ReturnType
+				}
+
+				return ""
+			}
+
+			lastLine := strings.Count(content, "\n")
+
+			calls := pr.FuncCalls(0, lastLine)
+			for _, call := range calls {
+				if isBuiltin(call.FuncName) {
+					continue
+				}
+
+				reason := resolver.CanResolveCall(call, pr, baseDir)
+				if reason == "" {
+					mu.Lock()
+					resolved++
+					mu.Unlock()
+
+					if verbose {
+						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line, call.Variable, call.FuncName)
+					}
+
+					continue
+				}
+
+				mu.Lock()
+
+				results = append(results, UnresolvedCall{
+					File:     file,
+					Line:     call.Line,
+					Caller:   call.Caller,
+					Variable: call.Variable,
+					Function: call.FuncName,
+					Reason:   reason,
+					Text:     call.Text,
+				})
+				mu.Unlock()
 			}
 		}(f)
 	}
@@ -234,7 +263,14 @@ func cmdUnresolved(args []string) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d unresolved calls found\n", len(results))
+	fmt.Fprintf(os.Stderr, "%d unresolved calls found (%d resolved)\n", len(results), resolved)
+
+	scanDur := time.Since(scanStart)
+
+	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
+	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", indexDur, len(files))
+	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", scanDur, len(scanFiles))
+	fmt.Fprintf(os.Stderr, "  Total:  %v\n", indexDur+scanDur)
 }
 
 func isBuiltin(name string) bool {
@@ -246,16 +282,16 @@ func isBuiltin(name string) bool {
 	return isMemberFunction(name)
 }
 
-var memberFuncSet map[string]bool
-
-func isMemberFunction(name string) bool {
-	if memberFuncSet == nil {
-		memberFuncSet = make(map[string]bool)
-		for _, mf := range docs.AllMemberFunctions() {
-			memberFuncSet[strings.ToLower(mf.Name)] = true
-		}
+var memberFuncSet = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, mf := range docs.AllMemberFunctions() {
+		m[strings.ToLower(mf.Name)] = true
 	}
 
+	return m
+}()
+
+func isMemberFunction(name string) bool {
 	return memberFuncSet[strings.ToLower(name)]
 }
 

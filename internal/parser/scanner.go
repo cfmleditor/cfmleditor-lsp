@@ -56,9 +56,10 @@ type Token struct {
 
 // Scanner tokenizes CFML/CFScript source.
 type Scanner struct {
-	src  string
-	pos  int
-	line int
+	src              string
+	pos              int
+	line             int
+	LastBlockComment string // most recent /** ... */ or /* ... */ comment value
 }
 
 // NewScanner creates a scanner for the given source.
@@ -143,7 +144,11 @@ func (s *Scanner) NextSkipComments() Token {
 	for {
 		tok := s.Next()
 		switch tok.Kind { //nolint:exhaustive
-		case TokCFComment, TokBlockComment, TokLineComment, TokNewline:
+		case TokBlockComment:
+			s.LastBlockComment = tok.Value
+
+			continue
+		case TokCFComment, TokLineComment, TokNewline:
 			continue
 		default:
 			return tok

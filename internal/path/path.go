@@ -148,6 +148,12 @@ func LoadOrmLocations(appDir string) []string {
 // .cfc file path. It checks mappings first (matching the first segment), then
 // falls back to resolving relative to baseDir. Returns empty string if not found.
 func ResolvePath(dotPath string, baseDir string, mappings map[string]string) string {
+	// Normalize CF slash-paths (e.g. /tassweb/packages/foo) to dot-paths
+	if strings.Contains(dotPath, "/") {
+		dotPath = strings.TrimPrefix(dotPath, "/")
+		dotPath = strings.ReplaceAll(dotPath, "/", ".")
+	}
+
 	parts := strings.SplitN(dotPath, ".", 2)
 	if mappings != nil {
 		if mapped, ok := mappings[parts[0]]; ok {
