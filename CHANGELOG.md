@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.00]
+
 - Major refactor and consolidation of Parsing / Scanning
 - Many testing bug fixes ( from daily use )
 - `tree-sitter-cfml` grammar updates
