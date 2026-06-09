@@ -1650,6 +1650,7 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 		r := &p.resolvers[i]
 		if r.Prefix != "" && strings.EqualFold(callExpr, r.Prefix) {
 			r.compiledRe()
+
 			if r.simple && !r.hasPlaceholder && strings.EqualFold(callExpr, r.Match) {
 				return r.Resolve
 			}

@@ -120,9 +120,9 @@ func isRegexPattern(s string) bool {
 	return strings.Contains(s, `\`)
 }
 
-// compiledRe returns the compiled regex for this resolver, caching it.
+// compiledRe ensures the resolver's regex/simple-match fields are initialized.
 // Sets r.simple=true if the pattern needs no regex.
-func (r *Resolver) compiledRe() *regexp.Regexp {
+func (r *Resolver) compiledRe() {
 	r.reOnce.Do(func() {
 		pattern := r.Match
 		hasPlaceholder := placeholderRe.MatchString(pattern)
@@ -171,8 +171,6 @@ func (r *Resolver) compiledRe() *regexp.Regexp {
 			}
 		}
 	})
-
-	return r.re
 }
 
 // PropertyResolver maps a property attribute value to a component path.
@@ -395,6 +393,7 @@ func simpleMatch(expr string, r *Resolver) string {
 		if strings.EqualFold(expr, r.Match) {
 			return r.Resolve
 		}
+
 		if strings.HasSuffix(expr, "()") && strings.EqualFold(expr[:len(expr)-2], r.Match) {
 			return r.Resolve
 		}

@@ -551,6 +551,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 					r := &p.resolvers[i]
 					if r.Prefix != "" && strings.EqualFold(funcName, r.Prefix) {
 						r.compiledRe()
+
 						if r.simple && !r.hasPlaceholder && strings.EqualFold(funcName, r.Match) {
 							p.addRef(ComponentRef{
 								Variable: varName, Component: r.Resolve,
