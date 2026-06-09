@@ -16,28 +16,29 @@ type Logger = log.Logger
 // ParseResult caches a single parse of a file. It extracts function signatures
 // and component refs eagerly, but defers function body parsing until requested.
 type ParseResult struct {
-	URI                uri.URI
-	Content            string
-	Regions            []Region
-	Funcs              []FunctionDef
-	ComponentRefs      []ComponentRef
-	Scopes             []FuncScope
-	Extends            string                                  // dot-path of parent component (from extends attribute)
-	Persistent         bool                                    // true if component has persistent="true" (ORM entity)
-	Properties         []propertyDef                           // parsed property declarations
-	Links              []DocumentLink                          // file path references extracted during shallow scan
-	Calls              []CallSite                              // function call sites (when FindCalls is set)
-	log                Logger                                  // optional logger for timing and errors
+	URI                 uri.URI
+	Content             string
+	Regions             []Region
+	Funcs               []FunctionDef
+	ComponentRefs       []ComponentRef
+	Scopes              []FuncScope
+	Extends             string                                  // dot-path of parent component (from extends attribute)
+	Persistent          bool                                    // true if component has persistent="true" (ORM entity)
+	Properties          []propertyDef                           // parsed property declarations
+	Links               []DocumentLink                          // file path references extracted during shallow scan
+	Calls               []CallSite                              // function call sites (when FindCalls is set)
+	log                 Logger                                  // optional logger for timing and errors
 	Resolvers           []Resolver                              // optional component resolvers for RHS matching
+	resolverSet         *ResolverSet                            // pre-grouped resolvers for fast matching
 	PropertyResolvers   []PropertyResolver                      // optional property-to-component resolvers
 	BeanLookup          func(string) string                     // optional bean name → dot-path lookup
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
-	expressionMappings map[string]string                       // runtime expression → static value substitutions
-	extractLinks       bool                                    // whether to extract links during global scan
-	findCalls          []string                                // function names to scan for
-	scanAllScopes      bool                                    // scan all lines including function bodies
-	shallow            bool                                    // minimal parse mode
+	expressionMappings  map[string]string                       // runtime expression → static value substitutions
+	extractLinks        bool                                    // whether to extract links during global scan
+	findCalls           []string                                // function names to scan for
+	scanAllScopes       bool                                    // scan all lines including function bodies
+	shallow             bool                                    // minimal parse mode
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -109,6 +110,10 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		scanAllScopes:       opts.ScanAllScopes,
 		shallow:             opts.Shallow,
 	}
+	if len(pr.Resolvers) > 0 {
+		pr.resolverSet = BuildResolverSet(pr.Resolvers)
+	}
+
 	start := time.Now()
 	pr.Regions = ClassifyRegions(content)
 	pr.extractSignatures()
@@ -130,6 +135,7 @@ func (pr *ParseResult) extractSignatures() {
 	for _, r := range pr.Regions {
 		if r.Kind == RegionScript {
 			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
+			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
 			sp.builtinReturnLookup = pr.BuiltinReturnLookup
 			sp.parse()
@@ -173,6 +179,7 @@ func (pr *ParseResult) extractSignatures() {
 		} else {
 			tp := newTagParser(r.Text, string(pr.URI))
 			tp.resolvers = pr.Resolvers
+			tp.resolverSet = pr.resolverSet
 			tp.extractLinks = pr.extractLinks
 			tp.builtinReturnLookup = pr.BuiltinReturnLookup
 			tp.parse()
@@ -865,13 +872,16 @@ func (pr *ParseResult) appendResolverRefs() {
 
 // extractLinksFromLine extracts file path references from a single line.
 func extractLinksFromLine(line string, lineNum int, links *[]DocumentLink) {
-	lower := strings.ToLower(line)
+	// Quick reject: all link attrs contain '=' or "include " — check for quote presence
+	if !strings.ContainsAny(line, "\"'") {
+		return
+	}
 
 	for _, attr := range linkAttrs {
 		idx := 0
 
 		for {
-			pos := strings.Index(lower[idx:], attr)
+			pos := indexFold(line[idx:], attr)
 			if pos < 0 {
 				break
 			}
@@ -938,13 +948,11 @@ func ExtractLinks(content string) []DocumentLink {
 			content = content[nl+1:]
 		}
 
-		lower := strings.ToLower(line)
-
 		for _, attr := range linkAttrs {
 			idx := 0
 
 			for {
-				pos := strings.Index(lower[idx:], attr)
+				pos := indexFold(line[idx:], attr)
 				if pos < 0 {
 					break
 				}
@@ -1075,6 +1083,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 
 	if regionKind == RegionScript {
 		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
+		sp.resolverSet = pr.resolverSet
 		sp.extractLinks = true
 		sp.parse()
 		refs = sp.componentRefs
@@ -1090,6 +1099,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 	} else {
 		tp := newTagParser(body, string(pr.URI))
 		tp.resolvers = pr.Resolvers
+		tp.resolverSet = pr.resolverSet
 		tp.extractLinks = true
 		tp.parse()
 		refs = tp.componentRefs

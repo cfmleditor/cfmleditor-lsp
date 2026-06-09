@@ -1,5 +1,7 @@
 package docs
 
+import "slices"
+
 import "strings"
 
 // BuiltinObject defines the methods available on an object returned by a built-in function.
@@ -117,11 +119,6 @@ func LookupBuiltinMethod(funcName, method string) bool {
 	}
 
 	m := strings.ToLower(method)
-	for _, name := range obj.Methods {
-		if name == m {
-			return true
-		}
-	}
 
-	return false
+	return slices.Contains(obj.Methods, m)
 }

@@ -21,6 +21,7 @@ type tagParser struct {
 	persistent          bool
 	lineIndex           []int // byte offset of each line start
 	resolvers           []Resolver
+	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key ("start:end"), empty if global
@@ -510,7 +511,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
 		} else if len(p.resolvers) > 0 {
-			if comp := ResolveFromCall(rhs, p.resolvers); comp != "" {
+			if comp := p.resolveCall(rhs); comp != "" {
 				p.addRef(ComponentRef{
 					Variable: varName, Component: comp,
 					URI: uriFromString(p.fileURI), Line: uint32(line),
@@ -536,7 +537,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	default:
 		// Try generic resolver match on the RHS expression
 		if len(p.resolvers) > 0 {
-			if comp := ResolveFromCall(rhs, p.resolvers); comp != "" {
+			if comp := p.resolveCall(rhs); comp != "" {
 				p.addRef(ComponentRef{
 					Variable: varName, Component: comp,
 					URI: uriFromString(p.fileURI), Line: uint32(line),
@@ -873,6 +874,14 @@ func (p *tagParser) isVarDeclaredLocal(name string) bool {
 	}
 
 	return p.localVarSet[strings.ToLower(name)]
+}
+
+func (p *tagParser) resolveCall(expr string) string {
+	if p.resolverSet != nil {
+		return p.resolverSet.Resolve(expr)
+	}
+
+	return ResolveFromCall(expr, p.resolvers)
 }
 
 // Refs assigned to VARIABLES. or this. scopes are always global.

@@ -41,6 +41,8 @@ type Server struct {
 	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
+	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
+	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
 	Formatting               config.ResolvedFormatting // formatting settings
 	Linting                  bool                      // enable cflint diagnostics
@@ -298,12 +300,25 @@ func (s *Server) cfResolvers() []parser.Resolver {
 		return nil
 	}
 
+	if s.cachedResolvers != nil {
+		return s.cachedResolvers
+	}
+
 	r := make([]parser.Resolver, len(s.ComponentResolvers))
 	for i, cr := range s.ComponentResolvers {
 		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}
 	}
 
+	s.cachedResolvers = r
+	s.cachedResolverSet = parser.BuildResolverSet(r)
+
 	return r
+}
+
+func (s *Server) cfResolverSet() *parser.ResolverSet {
+	s.cfResolvers() // ensure built
+
+	return s.cachedResolverSet
 }
 
 func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {

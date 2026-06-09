@@ -142,7 +142,7 @@ func (s *Server) doResolveUserFunc(qualifier, funcName string, docURI uri.URI, l
 
 		comp = pr.Extends
 	case strings.HasPrefix(qualifier, "~?"):
-		comp = parser.ResolveFromCall(qualifier[2:], s.cfResolvers())
+		comp = s.cfResolverSet().Resolve(qualifier[2:])
 	case strings.HasPrefix(qualifier, "~"):
 		comp = qualifier[1:]
 	default:
@@ -155,7 +155,7 @@ func (s *Server) doResolveUserFunc(qualifier, funcName string, docURI uri.URI, l
 		if ref != nil {
 			comp = ref.Component
 		} else {
-			comp = parser.ResolveFromCall(qualifier, s.cfResolvers())
+			comp = s.cfResolverSet().Resolve(qualifier)
 		}
 	}
 

@@ -108,11 +108,11 @@ type Resolver struct {
 	simple  bool           // true if pattern is a plain string (no regex, no $N)
 	reOnce  sync.Once
 	// Precomputed for simple matches
-	simplePrefix    string // part before $1
-	simpleSuffix    string // part after $1
-	normPrefix      string // prefix with " replaced by '
-	normSuffix      string // suffix with " replaced by '
-	hasPlaceholder  bool
+	simplePrefix   string // part before $1
+	simpleSuffix   string // part after $1
+	normPrefix     string // prefix with " replaced by '
+	normSuffix     string // suffix with " replaced by '
+	hasPlaceholder bool
 }
 
 // isRegexPattern returns true if the pattern contains backslash escapes (definitive regex indicator).
@@ -233,6 +233,34 @@ func matchPropertyPattern(value, pattern, resolve string) string {
 	return resolved
 }
 
+// ResolverSet groups resolvers by the first byte of their prefix for fast rejection.
+type ResolverSet struct {
+	resolvers []Resolver
+	byByte    [256][]int // lowercase first byte → resolver indices
+	built     bool
+}
+
+// BuildResolverSet creates an optimized resolver set from a slice of resolvers.
+func BuildResolverSet(resolvers []Resolver) *ResolverSet {
+	rs := &ResolverSet{resolvers: resolvers}
+	for i := range resolvers {
+		if resolvers[i].Prefix == "" {
+			continue
+		}
+
+		b := resolvers[i].Prefix[0]
+		if b >= 'A' && b <= 'Z' {
+			b += 32
+		}
+
+		rs.byByte[b] = append(rs.byByte[b], i)
+	}
+
+	rs.built = true
+
+	return rs
+}
+
 // ResolveFromCall matches an expression against resolvers and returns the component dot-path.
 func ResolveFromCall(expr string, resolvers []Resolver) string {
 	expr = strings.TrimSpace(expr)
@@ -249,6 +277,58 @@ func ResolveFromCall(expr string, resolvers []Resolver) string {
 		}
 
 		sub := expr[idx:]
+		if len(sub) > 200 {
+			sub = sub[:200]
+		}
+
+		if resolved := matchResolverWithCache(sub, r); resolved != "" {
+			return resolved
+		}
+	}
+
+	return ""
+}
+
+// Resolve matches an expression against the pre-grouped resolvers.
+func (rs *ResolverSet) Resolve(expr string) string {
+	if rs == nil {
+		return ""
+	}
+
+	expr = strings.TrimSpace(expr)
+	if len(expr) == 0 {
+		return ""
+	}
+
+	// Collect unique resolver indices whose prefix first-byte appears in expr
+	var (
+		seen       [256]bool
+		candidates []int
+	)
+
+	for i := 0; i < len(expr); i++ {
+		b := expr[i]
+		if b >= 'A' && b <= 'Z' {
+			b += 32
+		}
+
+		if seen[b] {
+			continue
+		}
+
+		seen[b] = true
+		candidates = append(candidates, rs.byByte[b]...)
+	}
+
+	for _, idx := range candidates {
+		r := &rs.resolvers[idx]
+
+		pos := indexFold(expr, r.Prefix)
+		if pos < 0 {
+			continue
+		}
+
+		sub := expr[pos:]
 		if len(sub) > 200 {
 			sub = sub[:200]
 		}

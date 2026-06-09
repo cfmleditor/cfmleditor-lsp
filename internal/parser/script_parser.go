@@ -27,6 +27,7 @@ type scriptParser struct {
 	fileURI             string
 	baseLine            int
 	resolvers           []Resolver
+	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
@@ -52,6 +53,14 @@ func newScriptParser(src, fileURI string, baseLine int, resolvers []Resolver) *s
 		baseLine:  baseLine,
 		resolvers: resolvers,
 	}
+}
+
+func (p *scriptParser) resolveCall(expr string) string {
+	if p.resolverSet != nil {
+		return p.resolverSet.Resolve(expr)
+	}
+
+	return ResolveFromCall(expr, p.resolvers)
 }
 
 func (p *scriptParser) addRef(ref ComponentRef) {
@@ -174,7 +183,9 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 	prevIdent := ""
 	lastIdent := rhs.Value
-	fullChain := rhs.Value
+
+	var fullChain strings.Builder
+	fullChain.WriteString(rhs.Value)
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments() // consume .
@@ -185,14 +196,16 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 			prevIdent = lastIdent
 			lastIdent = next.Value
-			fullChain += "." + next.Value
+
+			fullChain.WriteByte('.')
+			fullChain.WriteString(next.Value)
 		} else {
 			break
 		}
 	}
 
 	if p.sc.PeekSkipComments().Kind == TokLParen {
-		if comp := p.tryResolveCall(fullChain); comp != "" {
+		if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
@@ -216,7 +229,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 			})
 		}
 	} else if len(p.resolvers) > 0 {
-		if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+		if comp := p.resolveCall(fullChain.String()); comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
@@ -931,7 +944,9 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 			prevIdent := ""
 			lastIdent := rhs.Value
-			fullChain := rhs.Value
+
+			var fullChain strings.Builder
+			fullChain.WriteString(rhs.Value)
 
 			for p.sc.PeekSkipComments().Kind == TokDot {
 				p.sc.NextSkipComments()
@@ -942,14 +957,16 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 					prevIdent = lastIdent
 					lastIdent = next.Value
-					fullChain += "." + next.Value
+
+					fullChain.WriteByte('.')
+					fullChain.WriteString(next.Value)
 				} else {
 					break
 				}
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				if comp := p.tryResolveCall(fullChain); comp != "" {
+				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
@@ -964,7 +981,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 					})
 				}
 			} else if len(p.resolvers) > 0 {
-				if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+				if comp := p.resolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
@@ -1030,7 +1047,9 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 				prevIdent := ""
 				lastIdent := rhs.Value
-				fullChain := rhs.Value
+
+				var fullChain strings.Builder
+				fullChain.WriteString(rhs.Value)
 
 				for p.sc.PeekSkipComments().Kind == TokDot {
 					p.sc.NextSkipComments()
@@ -1041,14 +1060,16 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 						prevIdent = lastIdent
 						lastIdent = next.Value
-						fullChain += "." + next.Value
+
+						fullChain.WriteByte('.')
+						fullChain.WriteString(next.Value)
 					} else {
 						break
 					}
 				}
 
 				if p.sc.PeekSkipComments().Kind == TokLParen {
-					if comp := p.tryResolveCall(fullChain); comp != "" {
+					if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 						p.addRef(ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
@@ -1063,7 +1084,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 						})
 					}
 				} else if len(p.resolvers) > 0 {
-					if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+					if comp := p.resolveCall(fullChain.String()); comp != "" {
 						p.addRef(ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
@@ -1240,7 +1261,9 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			// Walk dot chain: [scope.]varName.method(
 			prevIdent := ""
 			lastIdent := rhs.Value
-			fullChain := rhs.Value
+
+			var fullChain strings.Builder
+			fullChain.WriteString(rhs.Value)
 
 			for p.sc.PeekSkipComments().Kind == TokDot {
 				p.sc.NextSkipComments() // consume .
@@ -1251,14 +1274,16 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 					prevIdent = lastIdent
 					lastIdent = next.Value
-					fullChain += "." + next.Value
+
+					fullChain.WriteByte('.')
+					fullChain.WriteString(next.Value)
 				} else {
 					break
 				}
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				if comp := p.tryResolveCall(fullChain); comp != "" {
+				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: tok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
@@ -1274,7 +1299,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 				}
 			} else if len(p.resolvers) > 0 {
 				// Try generic resolver match on non-call RHS (e.g. "_parent")
-				if comp := ResolveFromCall(fullChain, p.resolvers); comp != "" {
+				if comp := p.resolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: tok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
@@ -1364,7 +1389,7 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 		}
 
 		expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
-		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+		if comp := p.resolveCall(expr); comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
@@ -1582,7 +1607,10 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 		p.sc.NextSkipComments()
 
 		// Build arg list: read comma-separated string args
-		args := "\"" + unquote(arg.Value) + "\""
+		var args strings.Builder
+		args.WriteByte('"')
+		args.WriteString(unquote(arg.Value))
+		args.WriteByte('"')
 
 		for {
 			next := p.sc.PeekSkipComments()
@@ -1599,17 +1627,19 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 
 			p.sc.NextSkipComments()
 
-			args += ", \"" + unquote(nextArg.Value) + "\""
+			args.WriteString(`, "`)
+			args.WriteString(unquote(nextArg.Value))
+			args.WriteByte('"')
 		}
 
-		expr := callExpr + "(" + args + ")"
-		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+		expr := callExpr + "(" + args.String() + ")"
+		if comp := p.resolveCall(expr); comp != "" {
 			return comp
 		}
 	} else {
 		// Try no-arg match: callExpr()
 		expr := callExpr + "()"
-		if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+		if comp := p.resolveCall(expr); comp != "" {
 			return comp
 		}
 	}

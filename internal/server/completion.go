@@ -906,7 +906,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 						fnStart++
 						callExpr := lineText[fnStart:dotPos]
 
-						comp := parser.ResolveFromCall(callExpr, s.cfResolvers())
+						comp := s.cfResolverSet().Resolve(callExpr)
 						if comp != "" {
 							currentPath := strings.TrimPrefix(string(docURI), "file://")
 							baseDir := filepath.Dir(currentPath)
@@ -947,7 +947,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	if ref != nil {
 		component = ref.Component
-	} else if comp := parser.ResolveFromCall(varName, s.cfResolvers()); comp != "" {
+	} else if comp := s.cfResolverSet().Resolve(varName); comp != "" {
 		component = comp
 	} else {
 		return nil
