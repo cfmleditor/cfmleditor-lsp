@@ -391,8 +391,11 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 // Quote characters (" and ') in the pattern match either quote type in the expression.
 func simpleMatch(expr string, r *Resolver) string {
 	if !r.hasPlaceholder {
-		// Exact match
+		// Exact match — also accept match() form
 		if strings.EqualFold(expr, r.Match) {
+			return r.Resolve
+		}
+		if strings.HasSuffix(expr, "()") && strings.EqualFold(expr[:len(expr)-2], r.Match) {
 			return r.Resolve
 		}
 

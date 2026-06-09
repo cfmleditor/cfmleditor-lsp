@@ -1644,6 +1644,18 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 		}
 	}
 
+	// No match — try bare name for exact-match resolvers (e.g. "getFile" matches getFile(...))
+	// Only use exact match to avoid substring conflicts (e.g. "_objInit" matching "objInit")
+	for i := range p.resolvers {
+		r := &p.resolvers[i]
+		if r.Prefix != "" && strings.EqualFold(callExpr, r.Prefix) {
+			r.compiledRe()
+			if r.simple && !r.hasPlaceholder && strings.EqualFold(callExpr, r.Match) {
+				return r.Resolve
+			}
+		}
+	}
+
 	// No match — restore scanner
 	p.sc.Restore(saved)
 

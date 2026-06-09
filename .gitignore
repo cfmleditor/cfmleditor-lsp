@@ -40,3 +40,4 @@ target/
 /docs/.etag
 /docs/.sha-cfdocs
 /cfparse
+/cfmleditor-lsp

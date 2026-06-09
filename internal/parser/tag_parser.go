@@ -545,6 +545,23 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 				return
 			}
+			// Try bare function name for exact-match resolvers
+			if funcName := extractIdent(rhs); funcName != "" {
+				for i := range p.resolvers {
+					r := &p.resolvers[i]
+					if r.Prefix != "" && strings.EqualFold(funcName, r.Prefix) {
+						r.compiledRe()
+						if r.simple && !r.hasPlaceholder && strings.EqualFold(funcName, r.Match) {
+							p.addRef(ComponentRef{
+								Variable: varName, Component: r.Resolve,
+								URI: uriFromString(p.fileURI), Line: uint32(line),
+							})
+
+							return
+						}
+					}
+				}
+			}
 		}
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
 		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
