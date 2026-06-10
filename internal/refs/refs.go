@@ -113,6 +113,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 			parseOpts := parser.ParseOptions{
 				Resolvers:         opts.Resolvers,
 				PropertyResolvers: opts.PropertyResolvers,
+				ExtractCalls:      true,
 				ScanAllScopes:     true,
 			}
 			// Build per-file bean lookup from nearest Application.cfc

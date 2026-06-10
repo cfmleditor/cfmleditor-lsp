@@ -88,7 +88,9 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 
 func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 	var label strings.Builder
-	label.WriteString(def.Name + "(")
+	label.WriteString(def.Name)
+	label.WriteByte('(')
+
 	paramInfos := make([]protocol.ParameterInformation, 0, len(def.Arguments))
 
 	for i, arg := range def.Arguments {
@@ -119,7 +121,8 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 	paramInfos := make([]protocol.ParameterInformation, 0, len(e.Params))
 
 	var label strings.Builder
-	label.WriteString(e.Name + "(")
+	label.WriteString(e.Name)
+	label.WriteByte('(')
 
 	for i, p := range e.Params {
 		if i > 0 {

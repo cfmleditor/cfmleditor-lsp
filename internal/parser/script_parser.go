@@ -19,7 +19,9 @@ type scriptParser struct {
 	componentRefs       []ComponentRef
 	funcRefs            map[string][]ComponentRef // keyed by "start:end"
 	funcLinks           map[string][]DocumentLink // keyed by "start:end"
+	funcCalls           map[string][]CallSite     // keyed by "start:end"
 	links               []DocumentLink            // global scope links
+	calls               []CallSite                // global scope call sites
 	scopes              []FuncScope
 	properties          []propertyDef
 	extends             string
@@ -29,6 +31,7 @@ type scriptParser struct {
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
+	extractCalls        bool // whether to extract all call sites
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
@@ -73,6 +76,141 @@ func (p *scriptParser) addRef(ref ComponentRef) {
 
 		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
 	}
+}
+
+func (p *scriptParser) addCall(call CallSite) {
+	if p.inFunc == "" {
+		p.calls = append(p.calls, call)
+	} else {
+		if p.funcCalls == nil {
+			p.funcCalls = make(map[string][]CallSite)
+		}
+
+		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], call)
+	}
+}
+
+// recordBareCallAndChain handles funcName(...) optionally followed by .method(...) chains.
+func (p *scriptParser) recordBareCallAndChain(tok Token) {
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	p.addCall(CallSite{
+		FuncName: tok.Value,
+		Line:     uint32(p.baseLine + tok.Line),
+		Caller:   caller,
+	})
+
+	// Skip balanced parens, capture first string arg for resolver
+	p.sc.NextSkipComments() // consume (
+
+	var firstArg string
+
+	parenDepth := 1
+
+	for parenDepth > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			return
+		}
+
+		if t.Kind == TokString && firstArg == "" && parenDepth == 1 {
+			firstArg = unquote(t.Value)
+		}
+
+		switch t.Kind { //nolint:exhaustive
+		case TokLParen:
+			parenDepth++
+		case TokRParen:
+			parenDepth--
+		}
+	}
+
+	// Build call expression for resolver: funcName("arg")
+	callExpr := tok.Value
+	if firstArg != "" {
+		callExpr = tok.Value + "(\"" + firstArg + "\")"
+	}
+
+	// Check for .method( chain
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			break
+		}
+
+		p.sc.NextSkipComments() // consume method name
+
+		if p.sc.PeekSkipComments().Kind == TokLParen {
+			comp := p.tryResolveCall(callExpr)
+
+			p.addCall(CallSite{
+				FuncName:  methTok.Value,
+				Variable:  tok.Value,
+				Component: comp,
+				Line:      uint32(p.baseLine + tok.Line),
+				Caller:    caller,
+				Resolved:  comp != "",
+			})
+
+			// Skip these parens too for further chaining
+			p.sc.NextSkipComments() // consume (
+
+			pd := 1
+
+			for pd > 0 {
+				t := p.sc.NextSkipComments()
+				if t.Kind == TokEOF {
+					return
+				}
+
+				switch t.Kind { //nolint:exhaustive
+				case TokLParen:
+					pd++
+				case TokRParen:
+					pd--
+				}
+			}
+		} else {
+			break
+		}
+	}
+}
+
+// recordCallFromChain records a call site when a dot chain ending in ( is detected.
+// fullChain is e.g. "VARIABLES.service.GetData" or just "GetData", line is the source line.
+func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
+	if !p.extractCalls {
+		return
+	}
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	dotIdx := strings.LastIndexByte(fullChain, '.')
+	if dotIdx < 0 {
+		// Bare function call (no dot)
+		p.addCall(CallSite{
+			FuncName: fullChain,
+			Line:     uint32(p.baseLine + line),
+			Caller:   caller,
+		})
+
+		return
+	}
+
+	p.addCall(CallSite{
+		FuncName: fullChain[dotIdx+1:],
+		Variable: fullChain[:dotIdx],
+		Line:     uint32(p.baseLine + line),
+		Caller:   caller,
+	})
 }
 
 func (p *scriptParser) isVarDeclaredLocal(name string) bool {
@@ -205,6 +343,8 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 	}
 
 	if p.sc.PeekSkipComments().Kind == TokLParen {
+		p.recordCallFromChain(fullChain.String(), line)
+
 		if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
@@ -254,6 +394,32 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		// Not an assignment — check for method call chain: scope.name.method(...)
+		if p.extractCalls && eq.Kind == TokDot {
+			var fullChain strings.Builder
+			fullChain.WriteString(tok.Value)
+			fullChain.WriteByte('.')
+			fullChain.WriteString(nameTok.Value)
+
+			for p.sc.PeekSkipComments().Kind == TokDot {
+				p.sc.NextSkipComments()
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					fullChain.WriteByte('.')
+					fullChain.WriteString(next.Value)
+				} else {
+					break
+				}
+			}
+
+			if p.sc.PeekSkipComments().Kind == TokLParen {
+				p.recordCallFromChain(fullChain.String(), tok.Line)
+			}
+		}
+
 		return
 	}
 
@@ -336,24 +502,52 @@ func (p *scriptParser) parse() {
 				p.sc.NextSkipComments()
 				p.parseFunction(tok, "", tok.Value)
 			case peek.Kind == TokDot:
-				// Could be dotted return type: models.User function ...
+				// Walk the dot chain — could be dotted return type or bare call
 				var retVal strings.Builder
 				retVal.WriteString(tok.Value)
+
+				lastIdent := tok.Value
+				prevIdent := ""
 
 				for p.sc.PeekSkipComments().Kind == TokDot {
 					p.sc.NextSkipComments()
 
-					seg := p.sc.NextSkipComments()
+					seg := p.sc.PeekSkipComments()
 					if seg.Kind == TokIdent {
+						p.sc.NextSkipComments()
+
+						prevIdent = lastIdent
+						lastIdent = seg.Value
+
 						retVal.WriteByte('.')
 						retVal.WriteString(seg.Value)
+					} else {
+						break
 					}
 				}
 
-				if next := p.sc.PeekSkipComments(); next.Kind == TokIdent && identEq(next.Value, "function") {
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent && identEq(next.Value, "function") {
 					p.sc.NextSkipComments()
 					p.parseFunction(tok, "", retVal.String())
+				} else if p.extractCalls && next.Kind == TokLParen && !isKeyword(tok.Value) {
+					_ = prevIdent
+
+					varName := ""
+					chain := retVal.String()
+
+					if dotIdx := strings.LastIndexByte(chain, '.'); dotIdx >= 0 {
+						varName = chain[:dotIdx]
+					}
+
+					p.addCall(CallSite{
+						FuncName: lastIdent,
+						Variable: varName,
+						Line:     uint32(p.baseLine + tok.Line),
+					})
 				}
+			case p.extractCalls && peek.Kind == TokLParen && !isKeyword(tok.Value):
+				p.recordBareCallAndChain(tok)
 			default:
 				p.checkAssignRef(tok)
 			}
@@ -727,6 +921,14 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		}
 	}
 
+	// Remap funcCalls from temp key to real key
+	if p.funcCalls != nil {
+		if calls, ok := p.funcCalls[tempKey]; ok {
+			delete(p.funcCalls, tempKey)
+			p.funcCalls[realKey] = calls
+		}
+	}
+
 	// Remap pending calls
 	for i := range p.pendingCalls {
 		if p.pendingCalls[i].funcKey == tempKey {
@@ -795,6 +997,13 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int) {
 		// Nested function — skip its entire body
 		p.skipNestedFunction(tok, depth)
 	default:
+		peek := p.sc.PeekSkipComments()
+		if p.extractCalls && !isKeyword(tok.Value) && peek.Kind == TokLParen {
+			p.recordBareCallAndChain(tok)
+
+			return
+		}
+
 		p.checkAssignRef(tok)
 	}
 }
@@ -819,6 +1028,47 @@ func (p *scriptParser) checkReturnComponent() {
 		p.sc.NextSkipComments()
 		comp = p.readEntityNewComponent()
 	default:
+		// Check for return obj.method(...) or return func(...) if extractCalls
+		if p.extractCalls && !isKeyword(peek.Value) {
+			p.sc.NextSkipComments() // consume first ident
+
+			nextKind := p.sc.PeekSkipComments().Kind
+			if nextKind == TokDot {
+				var fullChain strings.Builder
+				fullChain.WriteString(peek.Value)
+
+				for p.sc.PeekSkipComments().Kind == TokDot {
+					p.sc.NextSkipComments() // consume .
+
+					seg := p.sc.PeekSkipComments()
+					if seg.Kind == TokIdent {
+						p.sc.NextSkipComments()
+
+						fullChain.WriteByte('.')
+						fullChain.WriteString(seg.Value)
+					} else {
+						break
+					}
+				}
+
+				if p.sc.PeekSkipComments().Kind == TokLParen {
+					p.recordCallFromChain(fullChain.String(), peek.Line)
+				}
+			} else if nextKind == TokLParen {
+				// Bare function call: return funcName(...)
+				caller := ""
+				if len(p.funcs) > 0 {
+					caller = p.funcs[len(p.funcs)-1].Name
+				}
+
+				p.addCall(CallSite{
+					FuncName: peek.Value,
+					Line:     uint32(p.baseLine + peek.Line),
+					Caller:   caller,
+				})
+			}
+		}
+
 		// return varName — track for resolution after body parse
 		p.returnVar = peek.Value
 
@@ -966,6 +1216,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
+				p.recordCallFromChain(fullChain.String(), varTok.Line)
+
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
@@ -1008,6 +1260,32 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		// Not an assignment — check for method call chain: scope.name.method(...)
+		if p.extractCalls && eq.Kind == TokDot {
+			var fullChain strings.Builder
+			fullChain.WriteString(scopeTok.Value)
+			fullChain.WriteByte('.')
+			fullChain.WriteString(nameTok.Value)
+
+			for p.sc.PeekSkipComments().Kind == TokDot {
+				p.sc.NextSkipComments()
+
+				next := p.sc.PeekSkipComments()
+				if next.Kind == TokIdent {
+					p.sc.NextSkipComments()
+
+					fullChain.WriteByte('.')
+					fullChain.WriteString(next.Value)
+				} else {
+					break
+				}
+			}
+
+			if p.sc.PeekSkipComments().Kind == TokLParen {
+				p.recordCallFromChain(fullChain.String(), scopeTok.Line)
+			}
+		}
+
 		return
 	}
 
@@ -1069,6 +1347,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 				}
 
 				if p.sc.PeekSkipComments().Kind == TokLParen {
+					p.recordCallFromChain(fullChain.String(), scopeTok.Line)
+
 					if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 						p.addRef(ComponentRef{
 							Variable: nameTok.Value, Component: comp,
@@ -1216,6 +1496,11 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
+		// Check for bare dotted call: obj.method()
+		if p.extractCalls && peek.Kind == TokDot {
+			p.checkBareCall(tok)
+		}
+
 		return
 	}
 
@@ -1283,6 +1568,8 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
+				p.recordCallFromChain(fullChain.String(), tok.Line)
+
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: tok.Value, Component: comp,
@@ -1310,6 +1597,63 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	}
 
 	p.forceGlobal = false
+}
+
+// checkBareCall handles bare obj.method() calls (not in assignment context).
+// Records a CallSite when extractCalls is enabled. The scanner position is
+// on the first ident (the variable/scope prefix); peek is a dot.
+func (p *scriptParser) checkBareCall(tok Token) {
+	// Walk the dot chain: tok already consumed, peek is TokDot
+	var fullChain strings.Builder
+	fullChain.WriteString(tok.Value)
+
+	lastIdent := tok.Value
+	prevIdent := ""
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		next := p.sc.PeekSkipComments()
+		if next.Kind == TokIdent {
+			p.sc.NextSkipComments()
+
+			prevIdent = lastIdent
+			lastIdent = next.Value
+
+			fullChain.WriteByte('.')
+			fullChain.WriteString(next.Value)
+		} else {
+			break
+		}
+	}
+
+	// Must end with ( to be a call
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return
+	}
+
+	// It's a method call — the method is lastIdent, variable is everything before it
+	varName := ""
+
+	chain := fullChain.String()
+	if dotIdx := strings.LastIndexByte(chain, '.'); dotIdx >= 0 {
+		varName = chain[:dotIdx]
+	}
+
+	// Strip scope prefix for the caller field
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	_ = prevIdent // reserved for future resolution
+
+	p.addCall(CallSite{
+		FuncName: lastIdent,
+		Variable: varName,
+		Line:     uint32(p.baseLine + tok.Line),
+		Caller:   caller,
+	})
 }
 
 func (p *scriptParser) parseNewRef(varName string, line int) {
@@ -1675,7 +2019,9 @@ func isKeyword(s string) bool {
 	switch strings.ToLower(s) {
 	case "var", "local", "if", "else", "for", "while", "do", "switch", "case",
 		"try", "catch", "finally", "return", "break", "continue", "function",
-		"component", "interface", "new", "throw", "import", "true", "false":
+		"component", "interface", "new", "throw", "import", "true", "false",
+		"and", "or", "not", "eq", "neq", "lt", "gt", "lte", "gte", "mod",
+		"in", "default", "null":
 		return true
 	}
 

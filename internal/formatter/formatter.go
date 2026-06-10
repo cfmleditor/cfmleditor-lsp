@@ -1647,11 +1647,15 @@ func (f *Formatter) normalizeCFComment(raw string) string {
 		if strings.TrimSpace(line) == "" {
 			sb.WriteString("\n")
 		} else {
-			sb.WriteString(baseIndent + f.opts.indent(1) + line + "\n")
+			sb.WriteString(baseIndent)
+			sb.WriteString(f.opts.indent(1))
+			sb.WriteString(line)
+			sb.WriteByte('\n')
 		}
 	}
 
-	sb.WriteString(baseIndent + "--->")
+	sb.WriteString(baseIndent)
+	sb.WriteString("--->")
 
 	return sb.String()
 }

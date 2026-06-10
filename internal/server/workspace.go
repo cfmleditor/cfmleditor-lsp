@@ -17,8 +17,12 @@ func (s *Server) indexWorkspace() {
 	// Collect all .cfc files to index.
 	var files []string
 
+	var source string
+
 	if len(s.WorkspaceFolders) > 0 {
 		if len(s.IndexGlobs) > 0 {
+			source = "globs"
+
 			for _, g := range s.IndexGlobs {
 				for _, f := range expandGlob(g) {
 					if cfpath.IsCFCFile(f) {
@@ -27,18 +31,22 @@ func (s *Server) indexWorkspace() {
 				}
 			}
 		} else {
+			source = "workspaceFolders"
+
 			for _, folder := range s.WorkspaceFolders {
 				files = append(files, s.collectCFCFiles(folder)...)
 			}
 		}
 	} else {
+		source = "editorRoots"
+
 		for _, root := range s.workspaceRoots {
 			files = append(files, s.collectCFCFiles(root)...)
 		}
 	}
 
 	total := len(files)
-	s.log.Info("indexing workspace", cflog.Int("totalFiles", total))
+	s.log.Info("indexing workspace", cflog.String("source", source), cflog.Int("totalFiles", total), cflog.Any("paths", s.WorkspaceFolders))
 
 	indexStart := time.Now()
 

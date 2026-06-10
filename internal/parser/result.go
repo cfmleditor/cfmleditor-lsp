@@ -36,6 +36,7 @@ type ParseResult struct {
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
 	expressionMappings  map[string]string                       // runtime expression → static value substitutions
 	extractLinks        bool                                    // whether to extract links during global scan
+	extractCalls        bool                                    // whether to extract all call sites during parsing
 	findCalls           []string                                // function names to scan for
 	scanAllScopes       bool                                    // scan all lines including function bodies
 	shallow             bool                                    // minimal parse mode
@@ -57,6 +58,7 @@ type ParseResult struct {
 	funcRefsMu   sync.Mutex
 	funcRefsMap  map[string][]ComponentRef
 	funcLinksMap map[string][]DocumentLink
+	funcCallsMap map[string][]CallSite // per-function call sites keyed by "start:end"
 }
 
 // ParseOptions configures optional parse behaviour.
@@ -68,6 +70,7 @@ type ParseOptions struct {
 	BuiltinReturnLookup func(name string) string // optional: resolve builtin function → return component
 	ExpressionMappings  map[string]string        // runtime expression → static value substitutions
 	ExtractLinks        bool                     // extract document links during global scan
+	ExtractCalls        bool                     // extract all variable.method() call sites during parsing
 	FindCalls           []string                 // function names to find call sites for
 	ScanAllScopes       bool                     // scan all lines including function bodies (for refs/deps)
 	Shallow             bool                     // minimal parse: signatures only, no refs/properties/args
@@ -106,6 +109,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		BuiltinReturnLookup: opts.BuiltinReturnLookup,
 		expressionMappings:  opts.ExpressionMappings,
 		extractLinks:        opts.ExtractLinks,
+		extractCalls:        opts.ExtractCalls,
 		findCalls:           opts.FindCalls,
 		scanAllScopes:       opts.ScanAllScopes,
 		shallow:             opts.Shallow,
@@ -137,6 +141,7 @@ func (pr *ParseResult) extractSignatures() {
 			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
 			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
+			sp.extractCalls = pr.extractCalls
 			sp.builtinReturnLookup = pr.BuiltinReturnLookup
 			sp.parse()
 			pr.Funcs = append(pr.Funcs, sp.funcs...)
@@ -167,6 +172,18 @@ func (pr *ParseResult) extractSignatures() {
 				}
 			}
 
+			// Merge calls from script parser
+			pr.Calls = append(pr.Calls, sp.calls...)
+			if len(sp.funcCalls) > 0 {
+				if pr.funcCallsMap == nil {
+					pr.funcCallsMap = make(map[string][]CallSite)
+				}
+
+				for k, calls := range sp.funcCalls {
+					pr.funcCallsMap[k] = append(pr.funcCallsMap[k], calls...)
+				}
+			}
+
 			allPendingCalls = append(allPendingCalls, sp.pendingCalls...)
 
 			if sp.extends != "" {
@@ -181,6 +198,7 @@ func (pr *ParseResult) extractSignatures() {
 			tp.resolvers = pr.Resolvers
 			tp.resolverSet = pr.resolverSet
 			tp.extractLinks = pr.extractLinks
+			tp.extractCalls = pr.extractCalls
 			tp.builtinReturnLookup = pr.BuiltinReturnLookup
 			tp.parse()
 
@@ -271,9 +289,39 @@ func (pr *ParseResult) extractSignatures() {
 
 			allPendingCalls = append(allPendingCalls, tp.pendingCalls...)
 
-			scopes := findTagFuncScopes(r.Text, r.StartLine)
+			// Merge calls from tag parser
+			if r.StartLine > 0 {
+				for i := range tp.calls {
+					tp.calls[i].Line += uint32(r.StartLine)
+				}
+			}
 
-			pr.Scopes = append(pr.Scopes, scopes...)
+			pr.Calls = append(pr.Calls, tp.calls...)
+			if len(tp.funcCalls) > 0 {
+				if pr.funcCallsMap == nil {
+					pr.funcCallsMap = make(map[string][]CallSite)
+				}
+
+				for k, calls := range tp.funcCalls {
+					if r.StartLine > 0 {
+						parts := strings.SplitN(k, ":", 2)
+						if len(parts) == 2 {
+							start := atoi(parts[0]) + r.StartLine
+							end := atoi(parts[1]) + r.StartLine
+							k = funcKey(start, end)
+						}
+
+						for i := range calls {
+							calls[i].Line += uint32(r.StartLine)
+						}
+					}
+
+					pr.funcCallsMap[k] = append(pr.funcCallsMap[k], calls...)
+				}
+			}
+
+			// Tag scopes are computed from full content after region processing
+			// to handle functions spanning region boundaries.
 			if tp.extends != "" {
 				pr.Extends = tp.extends
 			}
@@ -283,6 +331,42 @@ func (pr *ParseResult) extractSignatures() {
 			}
 		}
 	}
+
+	// Detect tag-based function scopes from full content (handles functions
+	// that span region boundaries, e.g. containing <cfscript> blocks).
+	hasTagRegion := false
+
+	for _, r := range pr.Regions {
+		if r.Kind == RegionTag {
+			hasTagRegion = true
+
+			break
+		}
+	}
+
+	if hasTagRegion {
+		tagScopes := findTagFuncScopes(pr.Content, 0)
+
+		for _, s := range tagScopes {
+			duplicate := false
+
+			for _, existing := range pr.Scopes {
+				if existing.Start == s.Start {
+					duplicate = true
+
+					break
+				}
+			}
+
+			if !duplicate {
+				pr.Scopes = append(pr.Scopes, s)
+			}
+		}
+	}
+
+	// Sort scopes by start line to match function order.
+	sortScopes(pr.Scopes)
+
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
 	if !pr.shallow {
 		pr.applyExpressionMappings()
@@ -834,6 +918,13 @@ func (pr *ParseResult) appendResolverRefs() {
 		return
 	}
 
+	if pr.extractCalls {
+		// Filter recorded calls by target function names
+		pr.filterCallsByName()
+
+		return
+	}
+
 	content := pr.Content
 	lineNum := 0
 	scopeIdx := 0
@@ -867,6 +958,52 @@ func (pr *ParseResult) appendResolverRefs() {
 		pr.scanLineForCalls(line, lineNum, currentFunc)
 
 		lineNum++
+	}
+}
+
+// filterCallsByName populates pr.Calls with calls from funcCallsMap and global
+// calls that match the pr.findCalls target names.
+func (pr *ParseResult) filterCallsByName() {
+	targets := make(map[string]bool, len(pr.findCalls))
+	for _, t := range pr.findCalls {
+		targets[strings.ToLower(t)] = true
+	}
+
+	// Gather all calls (global + per-function)
+	var allCalls []CallSite
+
+	allCalls = append(allCalls, pr.Calls...)
+
+	for _, calls := range pr.funcCallsMap {
+		allCalls = append(allCalls, calls...)
+	}
+
+	// Filter by target names and resolve components
+	pr.Calls = nil
+
+	for _, call := range allCalls {
+		if !targets[strings.ToLower(call.FuncName)] {
+			continue
+		}
+
+		// Resolve component from variable name
+		if call.Variable != "" && call.Component == "" {
+			// Strip scope prefix (VARIABLES.service → service)
+			resolveVar := call.Variable
+			if dotIdx := strings.LastIndexByte(resolveVar, '.'); dotIdx >= 0 {
+				resolveVar = resolveVar[dotIdx+1:]
+			}
+
+			call.Component = pr.resolveVarComponent(resolveVar)
+			call.Resolved = call.Component != ""
+		}
+
+		// Determine caller from line
+		if call.Caller == "" {
+			call.Caller = pr.callerAtLine(int(call.Line))
+		}
+
+		pr.Calls = append(pr.Calls, call)
 	}
 }
 
@@ -1126,7 +1263,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 	}
 
 	// Scan for function calls (still line-based as it's only for exportDeps)
-	if len(pr.findCalls) > 0 {
+	if len(pr.findCalls) > 0 && !pr.extractCalls {
 		lineNum := funcStart + 1
 
 		scan := pr.Content[start:end]
@@ -1304,9 +1441,32 @@ func isIdentifier(s string) bool {
 	return len(s) > 0
 }
 
-// FuncCalls scans a function body and returns all variable.method() calls
-// with resolved components. Used for downstream dependency tracing.
+// FuncCalls returns all variable.method() calls recorded for a function scope.
+// Requires ExtractCalls: true in parse options.
 func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
+	if pr.extractCalls {
+		key := funcKey(funcStart, funcEnd)
+		if calls, ok := pr.funcCallsMap[key]; ok {
+			return calls
+		}
+
+		// Key not found — aggregate all calls (full-file scan)
+		var all []CallSite
+
+		all = append(all, pr.Calls...)
+
+		for _, calls := range pr.funcCallsMap {
+			all = append(all, calls...)
+		}
+
+		return all
+	}
+
+	return pr.funcCallsUncached(funcStart, funcEnd)
+}
+
+// funcCallsUncached parses a function body on-demand to extract call sites.
+func (pr *ParseResult) funcCallsUncached(funcStart, funcEnd int) []CallSite {
 	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
 	if start < 0 {
 		return nil
@@ -1314,192 +1474,41 @@ func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 
 	body := pr.Content[start:end]
 
-	var calls []CallSite
-
-	seen := make(map[string]bool)
-	lineNum := funcStart + 1
-
-	// Get function-local component refs
-	localRefs, _ := pr.FuncRefs(funcStart, funcEnd)
-
-	// Find the caller name for this scope
-	caller := ""
-
-	for _, f := range pr.Funcs {
-		if int(f.Line) == funcStart {
-			caller = f.Name
-
-			break
-		}
-	}
-
-	var commentDepth int
-
-	// Determine comment style based on region context
-	isScript := false
+	regionKind := RegionScript
 
 	for _, r := range pr.Regions {
-		regionEnd := r.StartLine + strings.Count(r.Text, "\n")
-		if funcStart >= r.StartLine && funcStart <= regionEnd {
-			isScript = r.Kind == RegionScript
-
-			break
+		if r.StartLine <= funcStart {
+			regionKind = r.Kind
 		}
 	}
 
-	for len(body) > 0 {
-		nl := strings.IndexByte(body, '\n')
+	var calls []CallSite
 
-		var line string
+	if regionKind == RegionScript {
+		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
+		sp.resolverSet = pr.resolverSet
+		sp.extractCalls = true
+		sp.parse()
+		calls = append(calls, sp.calls...)
 
-		if nl < 0 {
-			line = body
-			body = ""
-		} else {
-			line = body[:nl]
-			body = body[nl+1:]
+		for _, c := range sp.funcCalls {
+			calls = append(calls, c...)
+		}
+	} else {
+		tp := newTagParser(body, string(pr.URI))
+		tp.resolvers = pr.Resolvers
+		tp.resolverSet = pr.resolverSet
+		tp.extractCalls = true
+		tp.parse()
+		calls = append(calls, tp.calls...)
+
+		for _, c := range tp.funcCalls {
+			calls = append(calls, c...)
 		}
 
-		// Track nested block comments
-		if isScript {
-			commentDepth += strings.Count(line, "/*")
-			commentDepth -= strings.Count(line, "*/")
-		} else {
-			commentDepth += strings.Count(line, "<!---")
-			commentDepth -= strings.Count(line, "--->")
+		for i := range calls {
+			calls[i].Line += uint32(funcStart)
 		}
-
-		if commentDepth < 0 {
-			commentDepth = 0
-		}
-
-		if commentDepth > 0 {
-			lineNum++
-
-			continue
-		}
-
-		// Skip lines that are entirely within a comment (opened and closed on same line)
-		if isScript {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "/*") {
-				lineNum++
-
-				continue
-			}
-
-			if strings.HasPrefix(trimmed, "//") {
-				lineNum++
-
-				continue
-			}
-		} else {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "<!---") {
-				lineNum++
-
-				continue
-			}
-		}
-
-		// Find all variable.method( patterns in this line — mask quoted strings
-		// to avoid matching content inside string literals (e.g. JS in cfset).
-		masked := maskStrings(line)
-
-		// Strip inline // comments (after string masking so quoted // aren't affected)
-		if idx := strings.Index(masked, "//"); idx >= 0 {
-			masked = masked[:idx]
-		}
-
-		lower := strings.ToLower(masked)
-		for i := 0; i < len(lower); i++ {
-			if lower[i] != '(' {
-				continue
-			}
-			// Walk back to find method name
-			methEnd := i
-
-			methStart := methEnd - 1
-			for methStart >= 0 && (lower[methStart] >= 'a' && lower[methStart] <= 'z' || lower[methStart] >= '0' && lower[methStart] <= '9' || lower[methStart] == '_') {
-				methStart--
-			}
-
-			methStart++
-			if methStart == methEnd {
-				continue
-			}
-			// Check for dot before method
-			if methStart == 0 || line[methStart-1] != '.' {
-				continue
-			}
-
-			methodName := line[methStart:methEnd]
-
-			// Walk back to find variable name
-			varEnd := methStart - 1
-
-			varStart := varEnd - 1
-			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_' || line[varStart] == '.' || line[varStart] == '$') {
-				varStart--
-			}
-
-			varStart++
-			if varStart == varEnd {
-				continue
-			}
-
-			varName := line[varStart:varEnd]
-
-			// Skip numeric literals (e.g. 1.02(...) is not a method call)
-			if varName[0] >= '0' && varName[0] <= '9' {
-				continue
-			}
-
-			// Skip jQuery/chained expressions starting with . or $
-			if varName[0] == '.' || varName[0] == '$' {
-				continue
-			}
-
-			// Strip scope prefix for resolution (VARIABLES.service -> service)
-			resolveVar := varName
-			if dotIdx := strings.LastIndexByte(resolveVar, '.'); dotIdx >= 0 {
-				resolveVar = resolveVar[dotIdx+1:]
-			}
-
-			comp := pr.resolveVarComponentScoped(resolveVar, uint32(lineNum), localRefs)
-
-			// Skip if unresolved but method is a known member function (native type call)
-			if comp == "" {
-				if isMemberMethod(methodName) || isDOMObject(resolveVar) {
-					continue
-				}
-				// Check first segment of dotted variable (e.g. parent.window.x → parent)
-				if dotIdx := strings.IndexByte(varName, '.'); dotIdx > 0 {
-					if isDOMObject(varName[:dotIdx]) {
-						continue
-					}
-				}
-			}
-
-			key := strings.ToLower(comp + "." + methodName)
-			if seen[key] {
-				continue
-			}
-
-			seen[key] = true
-
-			calls = append(calls, CallSite{
-				FuncName:  methodName,
-				Component: comp,
-				Variable:  varName,
-				Line:      uint32(lineNum),
-				Caller:    caller,
-				Resolved:  comp != "",
-				Text:      strings.TrimSpace(line),
-			})
-		}
-
-		lineNum++
 	}
 
 	return calls
@@ -1594,95 +1603,12 @@ func (pr *ParseResult) resolveVarComponent(varName string) string {
 	return ""
 }
 
-// resolveVarComponentScoped checks function-local refs only.
-// ComponentRefs are checked separately by the caller when appropriate.
-func (pr *ParseResult) resolveVarComponentScoped(varName string, line uint32, funcRefs []ComponentRef) string {
-	// Check function-local refs only
-	var (
-		best     string
-		bestLine uint32
-	)
-
-	for _, ref := range funcRefs {
-		if !strings.EqualFold(ref.Variable, varName) || ref.Line > line {
-			continue
-		}
-
-		if ref.Line >= bestLine {
-			best = ref.Component
-			bestLine = ref.Line
+func sortScopes(scopes []FuncScope) {
+	for i := 1; i < len(scopes); i++ {
+		for j := i; j > 0 && scopes[j].Start < scopes[j-1].Start; j-- {
+			scopes[j], scopes[j-1] = scopes[j-1], scopes[j]
 		}
 	}
-
-	return best
-}
-
-// isDOMObject returns true if the variable name is a known JavaScript/DOM global,
-// avoiding false positives from JS code in CFML templates.
-func isDOMObject(name string) bool {
-	lower := strings.ToLower(name)
-	switch lower {
-	case "document", "window", "navigator", "console", "location", "history",
-		"screen", "performance", "fetch", "json", "math", "promise",
-		"object", "array", "string", "number", "date", "regexp",
-		"error", "map", "set", "symbol", "proxy", "reflect",
-		"xmlhttprequest", "formdata", "url", "urlsearchparams",
-		"event", "customevent", "eventtarget", "node", "element",
-		"htmlelement", "htmldocument", "htmlcollection", "nodelist",
-		// Common JS variable names in CFML templates
-		"self", "e", "f", "top", "parent",
-		// jQuery
-		"$", "jquery", "dataprovider":
-		return true
-	}
-
-	// Variables starting with _ followed by a lowercase letter are typically
-	// JS callback/config objects (e.g. _checkConfiguration, _getStudentData)
-	if len(lower) > 1 && lower[0] == '_' && lower[1] >= 'a' && lower[1] <= 'z' {
-		return true
-	}
-
-	return false
-}
-
-// maskStrings replaces content inside quoted strings with spaces,
-// preserving character positions so index-based scanning still works.
-func maskStrings(line string) string {
-	var buf []byte
-
-	inQ := byte(0)
-
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		switch {
-		case inQ == 0:
-			if c == '"' || c == '\'' {
-				inQ = c
-
-				if buf == nil {
-					buf = []byte(line)
-				}
-
-				buf[i] = ' '
-			}
-		case c == inQ:
-			inQ = 0
-
-			if buf != nil {
-				buf[i] = ' '
-			}
-		default:
-			if buf != nil {
-				buf[i] = ' '
-			}
-		}
-	}
-
-	if buf != nil {
-		return string(buf)
-	}
-
-	return line
 }
 
 func funcKey(start, end int) string {
@@ -1802,7 +1728,7 @@ func isMemberMethod(name string) bool {
 		"changedelims", "qualifiedtoarray", "qualify", "itemtrim", "trim",
 		"valuecount", "valuecountnocase",
 		// Common global/Java methods
-		"getbytes", "tostring", "hashcode", "getclass", "init",
+		"getbytes", "tostring", "hashcode", "getclass", "init", "tobytearray",
 		// JavaScript String/Array/RegExp methods
 		"split", "substr", "substring", "indexof", "lastindexof", "tolowercase",
 		"touppercase", "charat", "concat", "search", "test", "exec", "join",

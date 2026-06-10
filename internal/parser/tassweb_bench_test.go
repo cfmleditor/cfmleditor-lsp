@@ -23,8 +23,11 @@ func TestBenchTasswebParse(t *testing.T) {
 	var files []string
 
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && filepath.Ext(path) == ".cfc" {
-			files = append(files, path)
+		if err == nil && !info.IsDir() {
+			switch filepath.Ext(path) {
+			case ".cfc", ".cfm", ".cfml", ".cfs":
+				files = append(files, path)
+			}
 		}
 
 		return nil
@@ -58,6 +61,36 @@ func TestBenchTasswebParse(t *testing.T) {
 	fmt.Printf("Functions: %d\n", totalFuncs)
 	fmt.Printf("Refs: %d\n", totalRefs)
 	fmt.Printf("Links: %d\n", totalLinks)
+
+	// Full parse with ExtractCalls
+	start = time.Now()
+
+	var totalCalls int
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+
+		pr := ParseWithOptions(uri.URI("file://"+f), string(data), ParseOptions{
+			Resolvers:    resolvers,
+			ExtractLinks: true,
+			ExtractCalls: true,
+		})
+
+		totalCalls += len(pr.Calls)
+		for _, c := range pr.funcCallsMap {
+			totalCalls += len(c)
+		}
+	}
+
+	callsDur := time.Since(start)
+
+	fmt.Printf("\nWith ExtractCalls:\n")
+	fmt.Printf("Duration: %v\n", callsDur)
+	fmt.Printf("Per file: %v\n", callsDur/time.Duration(len(files)))
+	fmt.Printf("Calls: %d\n", totalCalls)
 
 	// Shallow scan (signatures only — used by workspace indexer)
 	start = time.Now()

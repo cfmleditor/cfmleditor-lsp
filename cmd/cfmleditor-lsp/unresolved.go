@@ -183,6 +183,7 @@ func cmdUnresolved(args []string) {
 			pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
 				Resolvers:          cfResolvers,
 				ExpressionMappings: expressionMappings,
+				ExtractCalls:       true,
 				ScanAllScopes:      true,
 			})
 
@@ -218,7 +219,7 @@ func cmdUnresolved(args []string) {
 					mu.Unlock()
 
 					if verbose {
-						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line, call.Variable, call.FuncName)
+						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line+1, call.Variable, call.FuncName)
 					}
 
 					continue
@@ -259,7 +260,7 @@ func cmdUnresolved(args []string) {
 				call = r.Variable + "." + r.Function
 			}
 
-			fmt.Printf("%s:%d: %s (%s)\n", r.File, r.Line, call, r.Reason)
+			fmt.Printf("%s:%d: %s (%s)\n", r.File, r.Line+1, call, r.Reason)
 		}
 	}
 
@@ -276,6 +277,10 @@ func cmdUnresolved(args []string) {
 func isBuiltin(name string) bool {
 	_, ok := docs.LookupFunction(name)
 	if ok {
+		return true
+	}
+
+	if parser.IsMemberMethod(name) {
 		return true
 	}
 

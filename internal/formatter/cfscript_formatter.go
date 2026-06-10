@@ -388,7 +388,8 @@ func (f *Formatter) expr(n *sitter.Node) string {
 				sb.WriteString("\n")
 			}
 
-			sb.WriteString(outerIndent + ")")
+			sb.WriteString(outerIndent)
+			sb.WriteByte(')')
 			argsStr = sb.String()
 		}
 
@@ -635,7 +636,8 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 			sb.WriteString("\n")
 		}
 
-		sb.WriteString(outerIndent + ")")
+		sb.WriteString(outerIndent)
+		sb.WriteByte(')')
 
 		return sb.String()
 	}

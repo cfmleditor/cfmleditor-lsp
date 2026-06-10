@@ -13,7 +13,9 @@ type tagParser struct {
 	componentRefs       []ComponentRef
 	funcRefs            map[string][]ComponentRef // keyed by "start:end"
 	funcLinks           map[string][]DocumentLink // keyed by "start:end"
+	funcCalls           map[string][]CallSite     // keyed by "start:end"
 	links               []DocumentLink            // global scope links
+	calls               []CallSite                // global scope call sites
 	scopes              []FuncScope
 	pendingCalls        []pendingCall
 	properties          []propertyDef
@@ -23,6 +25,7 @@ type tagParser struct {
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
+	extractCalls        bool // whether to extract all call sites
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key ("start:end"), empty if global
 	localVarSet         map[string]bool // var'd/local. variable names in current function
@@ -81,14 +84,25 @@ func (p *tagParser) parse() {
 
 		idx += pos
 
-		// Skip CFML comments
+		// Skip CFML comments (nested)
 		if idx+4 < len(p.src) && p.src[idx:idx+5] == "<!---" {
-			closeIdx := strings.Index(p.src[idx+5:], "--->")
-			if closeIdx >= 0 {
-				pos = idx + 5 + closeIdx + 4
-			} else {
-				pos = len(p.src)
+			depth := 1
+			j := idx + 5
+
+			for j < len(p.src) && depth > 0 {
+				switch {
+				case j+4 < len(p.src) && p.src[j:j+5] == "<!---":
+					depth++
+					j += 5
+				case j+3 < len(p.src) && p.src[j:j+4] == "--->":
+					depth--
+					j += 4
+				default:
+					j++
+				}
 			}
+
+			pos = j
 
 			continue
 		}
@@ -107,10 +121,25 @@ func (p *tagParser) parse() {
 			}
 
 			baseLine := p.lineAt(bodyStart)
-			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, nil)
+			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, p.resolvers)
+			sp.resolverSet = p.resolverSet
+			sp.extractCalls = p.extractCalls
 			sp.parse()
 			p.funcs = append(p.funcs, sp.funcs...)
 			p.vars = append(p.vars, sp.vars...)
+
+			// Merge calls from cfscript sub-parser
+			if p.extractCalls {
+				for _, c := range sp.calls {
+					p.addCall(c)
+				}
+
+				for _, calls := range sp.funcCalls {
+					for _, c := range calls {
+						p.addCall(c)
+					}
+				}
+			}
 
 			if p.inFunc != "" {
 				for _, ref := range sp.componentRefs {
@@ -387,15 +416,20 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	default:
 		name, rhs := splitAssign(inner)
 		if name != "" && !isKeyword(name) {
-			// If var was previously declared local in this function, keep it local
-			isLocal := p.inFunc != "" && p.isVarDeclaredLocal(name)
-			if !isLocal {
-				p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
-			}
+			if rhs == "" && p.extractCalls {
+				// No assignment — check for bare call: obj.method(...)
+				p.checkBareCallStr(inner, line)
+			} else if rhs != "" {
+				// If var was previously declared local in this function, keep it local
+				isLocal := p.inFunc != "" && p.isVarDeclaredLocal(name)
+				if !isLocal {
+					p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+				}
 
-			p.forceGlobal = !isLocal
-			p.checkSetRHSStr(rhs, name, line)
-			p.forceGlobal = false
+				p.forceGlobal = !isLocal
+				p.checkSetRHSStr(rhs, name, line)
+				p.forceGlobal = false
+			}
 		}
 	}
 }
@@ -566,6 +600,27 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
 		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
+			if p.extractCalls {
+				// Record full call: extract method name from rhs
+				before, _, _ := strings.Cut(rhs, "(")
+				if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
+					methodName := before[dot+1:]
+					if isIdentifier(methodName) {
+						caller := ""
+						if p.inFunc != "" && len(p.funcs) > 0 {
+							caller = p.funcs[len(p.funcs)-1].Name
+						}
+
+						p.addCall(CallSite{
+							FuncName: methodName,
+							Variable: before[:dot],
+							Line:     uint32(line),
+							Caller:   caller,
+						})
+					}
+				}
+			}
+
 			p.pendingCalls = append(p.pendingCalls, pendingCall{
 				varName: varName,
 				baseVar: baseVar,
@@ -595,6 +650,43 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			}
 		}
 	}
+}
+
+// checkBareCallStr detects bare obj.method(...) patterns in a <cfset> without assignment.
+func (p *tagParser) checkBareCallStr(expr string, line int) {
+	before, _, ok := strings.Cut(expr, "(")
+	if !ok {
+		return
+	}
+
+	// If there's an = before the (, it's an assignment, not a bare call
+	if strings.IndexByte(before, '=') >= 0 {
+		return
+	}
+
+	dot := strings.LastIndexByte(before, '.')
+	if dot < 0 {
+		return
+	}
+
+	varName := strings.TrimSpace(before[:dot])
+	methodName := strings.TrimSpace(before[dot+1:])
+
+	if methodName == "" || varName == "" || !isIdentifier(methodName) {
+		return
+	}
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	p.addCall(CallSite{
+		FuncName: methodName,
+		Variable: varName,
+		Line:     uint32(line),
+		Caller:   caller,
+	})
 }
 
 // getAttr extracts an attribute value from a tag string (case-insensitive).
@@ -912,6 +1004,18 @@ func (p *tagParser) addRef(ref ComponentRef) {
 		}
 
 		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+	}
+}
+
+func (p *tagParser) addCall(call CallSite) {
+	if p.inFunc == "" {
+		p.calls = append(p.calls, call)
+	} else {
+		if p.funcCalls == nil {
+			p.funcCalls = make(map[string][]CallSite)
+		}
+
+		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], call)
 	}
 }
 

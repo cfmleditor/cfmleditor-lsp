@@ -41,7 +41,7 @@ func parseFile(t *testing.T, path string) *parser.ParseResult {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), parser.ParseOptions{})
+	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), parser.ParseOptions{ExtractCalls: true})
 }
 
 func buildIndex(t *testing.T, dir string) *index.Index {

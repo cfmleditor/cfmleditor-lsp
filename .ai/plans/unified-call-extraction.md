@@ -18,12 +18,26 @@ Three separate call-scanning mechanisms:
 
 ## Plan
 
+### 0. Make call extraction opt-in
+
+Call extraction adds overhead that isn't needed for all parse contexts. Function signature parsing (e.g. hover, completions for parameter names) only needs refs/links, not call sites.
+
+Add an option to the parse request:
+
+```go
+type ParseOptions struct {
+    ExtractCalls bool // when true, record all call sites during parsing
+}
+```
+
+The parsers check this flag before recording calls. Callers that need call data (exportDeps, unresolved, findRefs) pass `ExtractCalls: true`. Callers that only need signatures/refs leave it false (the default).
+
 ### 1. Add `calls` slice to scriptParser and tagParser
 
 ```go
 type scriptParser struct {
     ...
-    calls []CallSite // all variable.method() calls found
+    calls []CallSite // all variable.method() calls found (only populated when ExtractCalls is true)
 }
 ```
 
@@ -90,18 +104,21 @@ The `FindCalls` feature (used by exportDeps) searches for calls TO specific func
 
 ## Key Considerations
 
+- **Opt-in**: Call extraction is gated behind `ExtractCalls`. Signature-only parses (hover, completions) skip it entirely — no wasted work.
 - **Performance**: The parser already processes every token — adding call detection is O(1) per call found, no extra pass needed
 - **Accuracy**: The parser-based approach won't be fooled by strings containing `.method(` patterns (the current line scanner uses `maskStrings` as a workaround)
 - **Completeness**: Need to handle: bare calls, chained calls (`a.b().c()`), calls in return statements, calls as arguments
 
 ## Execution Order
 
+0. Add `ParseOptions` with `ExtractCalls` flag; thread it through to parsers
 1. Add `calls`/`funcCalls` fields to script parser
-2. Detect bare `obj.method()` calls in `handleBodyToken` (non-assignment context)
+2. Detect bare `obj.method()` calls in `handleBodyToken` (non-assignment context), guarded by `ExtractCalls`
 3. Detect calls in main parse loop (global scope)
 4. Add same to tag parser for `<cfset>` without `=`
 5. Merge calls in buildParseResult
 6. Rewrite `FuncCalls` to return cached data
 7. Remove old line-based scanner
 8. Migrate `scanLineForCalls`/`FindCalls` to filter on recorded calls
-9. Tests — verify unresolved/exportDeps/findRefs still work
+9. Update callers: exportDeps/unresolved/findRefs pass `ExtractCalls: true`
+10. Tests — verify unresolved/exportDeps/findRefs still work; verify signature-only parses don't populate calls

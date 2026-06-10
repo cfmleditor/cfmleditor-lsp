@@ -61,7 +61,8 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 
 		for _, fn := range fns {
 			var insertText strings.Builder
-			insertText.WriteString(fn.Name + "(")
+			insertText.WriteString(fn.Name)
+			insertText.WriteByte('(')
 
 			for i, p := range fn.Params {
 				if i > 0 {
@@ -703,10 +704,12 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 
 	for _, f := range pr.Funcs {
 		var detail strings.Builder
-		detail.WriteString(f.Name + "(")
+		detail.WriteString(f.Name)
+		detail.WriteByte('(')
 
 		var insertText strings.Builder
-		insertText.WriteString(f.Name + "(")
+		insertText.WriteString(f.Name)
+		insertText.WriteByte('(')
 
 		for i, arg := range f.Arguments {
 			if i > 0 {
@@ -716,7 +719,8 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			}
 
 			if arg.Type != "" {
-				detail.WriteString(arg.Type + " ")
+				detail.WriteString(arg.Type)
+				detail.WriteByte(' ')
 			}
 
 			detail.WriteString(arg.Name)
@@ -752,7 +756,8 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 
 	for _, f := range pr.Funcs {
 		var detail strings.Builder
-		detail.WriteString(f.Name + "(")
+		detail.WriteString(f.Name)
+		detail.WriteByte('(')
 
 		for i, arg := range f.Arguments {
 			if i > 0 {
@@ -760,7 +765,8 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			}
 
 			if arg.Type != "" {
-				detail.WriteString(arg.Type + " ")
+				detail.WriteString(arg.Type)
+				detail.WriteByte(' ')
 			}
 
 			detail.WriteString(arg.Name)
@@ -848,7 +854,8 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 
 	for _, d := range defs {
 		var detail strings.Builder
-		detail.WriteString(d.Name + "(")
+		detail.WriteString(d.Name)
+		detail.WriteByte('(')
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
@@ -856,7 +863,8 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 			}
 
 			if arg.Type != "" {
-				detail.WriteString(arg.Type + " ")
+				detail.WriteString(arg.Type)
+				detail.WriteByte(' ')
 			}
 
 			detail.WriteString(arg.Name)
@@ -994,7 +1002,8 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 	for _, d := range defs {
 		var detail strings.Builder
-		detail.WriteString(d.Name + "(")
+		detail.WriteString(d.Name)
+		detail.WriteByte('(')
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
@@ -1002,7 +1011,8 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 			}
 
 			if arg.Type != "" {
-				detail.WriteString(arg.Type + " ")
+				detail.WriteString(arg.Type)
+				detail.WriteByte(' ')
 			}
 
 			detail.WriteString(arg.Name)
@@ -1092,10 +1102,12 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 
 	for _, d := range defs {
 		var detail strings.Builder
-		detail.WriteString(d.Name + "(")
+		detail.WriteString(d.Name)
+		detail.WriteByte('(')
 
 		var insertText strings.Builder
-		insertText.WriteString(d.Name + "(")
+		insertText.WriteString(d.Name)
+		insertText.WriteByte('(')
 
 		for i, arg := range d.Arguments {
 			if i > 0 {
@@ -1105,7 +1117,8 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 			}
 
 			if arg.Type != "" {
-				detail.WriteString(arg.Type + " ")
+				detail.WriteString(arg.Type)
+				detail.WriteByte(' ')
 			}
 
 			detail.WriteString(arg.Name)

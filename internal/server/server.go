@@ -346,6 +346,7 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
 		ExpressionMappings:  s.ExpressionMappings,
 		ExtractLinks:        true,
+		ExtractCalls:        true,
 	})
 }
 
