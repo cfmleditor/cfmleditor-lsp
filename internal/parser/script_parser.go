@@ -503,6 +503,8 @@ func (p *scriptParser) parse() {
 			p.parseScopedVar(tok, ScopeThis)
 		case "variables":
 			p.parseScopedVar(tok, ScopeVariables)
+		case "new":
+			p.parseStandaloneNew(tok)
 		default:
 			// Check for returnType function pattern (e.g. "string function getName()")
 			peek := p.sc.PeekSkipComments()
@@ -1002,6 +1004,8 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int) {
 		p.parseBodyScopedVar(tok, ScopeThis)
 	case "return":
 		p.checkReturnComponent()
+	case "new":
+		p.parseStandaloneNew(tok)
 	case "function", "public", "private", "remote", "package":
 		// Nested function — skip its entire body
 		p.skipNestedFunction(tok, depth)
@@ -2031,6 +2035,109 @@ func unquote(s string) string {
 	}
 
 	return s
+}
+
+// parseStandaloneNew handles `new com.path(args)` expressions that are not
+// assignment RHS (those are handled by parseNewRef). It consumes the component
+// dot-path and constructor args so the scanner doesn't mis-parse the path as a
+// variable.method() call site. Any chained `.method()` calls after the constructor
+// are recorded as resolved call sites against the instantiated component.
+func (p *scriptParser) parseStandaloneNew(newTok Token) {
+	first := p.sc.PeekSkipComments()
+	if first.Kind != TokIdent {
+		return
+	}
+
+	p.sc.NextSkipComments()
+
+	component := first.Value
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments()
+
+		next := p.sc.PeekSkipComments()
+		if next.Kind != TokIdent {
+			break
+		}
+
+		p.sc.NextSkipComments()
+
+		component += "." + next.Value
+	}
+
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return
+	}
+
+	// Skip constructor args
+	p.sc.NextSkipComments() // consume (
+
+	depth := 1
+
+	for depth > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			return
+		}
+
+		switch t.Kind { //nolint:exhaustive
+		case TokLParen:
+			depth++
+		case TokRParen:
+			depth--
+		}
+	}
+
+	if !p.extractCalls {
+		return
+	}
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			break
+		}
+
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			break
+		}
+
+		p.addCall(CallSite{
+			FuncName:  methTok.Value,
+			Component: component,
+			Line:      uint32(p.baseLine + newTok.Line),
+			Caller:    caller,
+			Resolved:  true,
+		})
+
+		// Skip method args
+		p.sc.NextSkipComments() // consume (
+
+		pd := 1
+
+		for pd > 0 {
+			t := p.sc.NextSkipComments()
+			if t.Kind == TokEOF {
+				return
+			}
+
+			switch t.Kind { //nolint:exhaustive
+			case TokLParen:
+				pd++
+			case TokRParen:
+				pd--
+			}
+		}
+	}
 }
 
 func isKeyword(s string) bool {

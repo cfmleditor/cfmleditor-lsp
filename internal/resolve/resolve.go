@@ -362,6 +362,26 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				}
 			}
 		}
+
+		// Fall back to Application.cfc component refs
+		if comp == "" {
+			if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
+				for _, appName := range []string{"Application.cfc", "Application.cfm"} {
+					appURI := uri.URI("file://" + filepath.Join(appDir, appName))
+					for _, ref := range r.Index.RefsForFile(appURI) {
+						if strings.EqualFold(ref.Variable, lookupVar) {
+							comp = ref.Component
+
+							break
+						}
+					}
+
+					if comp != "" {
+						break
+					}
+				}
+			}
+		}
 	}
 
 	if comp == "" {
