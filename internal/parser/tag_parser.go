@@ -612,6 +612,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				before, _, _ := strings.Cut(rhs, "(")
 				if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
 					methodName := before[dot+1:]
+
 					varChain := before[:dot]
 					if isIdentifier(methodName) && isValidVarChain(varChain) {
 						caller := ""

@@ -457,6 +457,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 			p.parseEntityNewRef(nameTok.Value, tok.Line)
 		case "this":
 			p.sc.NextSkipComments()
+
 			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
 				p.addRef(ComponentRef{
 					Variable: nameTok.Value, Component: selfPath,
@@ -1329,6 +1330,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
 		case "this":
 			p.sc.NextSkipComments()
+
 			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
 				p.addRef(ComponentRef{
 					Variable: nameTok.Value, Component: selfPath,
