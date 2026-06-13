@@ -350,6 +350,16 @@ func TestParseComponentRefs_CfInvoke(t *testing.T) {
 	assertRef(t, refs, 0, "h", "svc.Helper")
 }
 
+func TestParseComponentRefs_ThisAssignmentScript(t *testing.T) {
+	refs := ParseComponentRefs(testURI, "component {\n\tVARIABLES.self = this;\n}")
+	assertRef(t, refs, 0, "self", "/test.cfc")
+}
+
+func TestParseComponentRefs_ThisAssignmentTag(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `<cfcomponent><cfset VARIABLES.prs = this></cfcomponent>`)
+	assertRef(t, refs, 0, "prs", "/test.cfc")
+}
+
 func TestParseComponentRefs_CfInvokeReversed(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfinvoke returnvariable="h" method="init" component="svc.Helper">`)
 	assertRef(t, refs, 0, "h", "svc.Helper")

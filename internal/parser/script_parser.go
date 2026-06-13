@@ -455,6 +455,14 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 		case "entityload":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, tok.Line)
+		case "this":
+			p.sc.NextSkipComments()
+			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+				p.addRef(ComponentRef{
+					Variable: nameTok.Value, Component: selfPath,
+					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+				})
+			}
 		default:
 			p.checkVarRHS(nameTok.Value, tok.Line)
 		}
@@ -1319,6 +1327,14 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		case "entityload":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
+		case "this":
+			p.sc.NextSkipComments()
+			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+				p.addRef(ComponentRef{
+					Variable: nameTok.Value, Component: selfPath,
+					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+				})
+			}
 		default:
 			if !isKeyword(rhs.Value) {
 				p.sc.NextSkipComments()

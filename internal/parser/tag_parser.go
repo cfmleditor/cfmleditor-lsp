@@ -529,6 +529,13 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	rhs = strings.TrimSpace(rhs)
 
 	switch {
+	case strings.EqualFold(rhs, "this"):
+		if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: selfPath,
+				URI: uriFromString(p.fileURI), Line: uint32(line),
+			})
+		}
 	case hasPrefixFold(rhs, "new "):
 		comp := extractComponentPath(rhs[4:])
 		if comp != "" {
@@ -605,7 +612,8 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				before, _, _ := strings.Cut(rhs, "(")
 				if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
 					methodName := before[dot+1:]
-					if isIdentifier(methodName) {
+					varChain := before[:dot]
+					if isIdentifier(methodName) && isValidVarChain(varChain) {
 						caller := ""
 						if p.inFunc != "" && len(p.funcs) > 0 {
 							caller = p.funcs[len(p.funcs)-1].Name
@@ -613,7 +621,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 						p.addCall(CallSite{
 							FuncName: methodName,
-							Variable: before[:dot],
+							Variable: varChain,
 							Line:     uint32(line),
 							Caller:   caller,
 						})
@@ -673,6 +681,10 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 	methodName := strings.TrimSpace(before[dot+1:])
 
 	if methodName == "" || varName == "" || !isIdentifier(methodName) {
+		return
+	}
+
+	if !isValidVarChain(varName) {
 		return
 	}
 

@@ -1441,6 +1441,25 @@ func isIdentifier(s string) bool {
 	return len(s) > 0
 }
 
+// isValidVarChain returns true if s looks like a valid CFML variable chain
+// (e.g. "VARIABLES.prs", "obj", "result[1].data"). Rejects strings containing
+// operators, quotes, hash signs, or whitespace.
+func isValidVarChain(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, c := range s {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c >= '0' && c <= '9' || c == '.' || c == '[' || c == ']' {
+			continue
+		}
+
+		return false
+	}
+
+	return true
+}
+
 // FuncCalls returns all variable.method() calls recorded for a function scope.
 // Requires ExtractCalls: true in parse options.
 func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
