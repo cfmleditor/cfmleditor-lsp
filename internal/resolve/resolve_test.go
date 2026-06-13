@@ -14,6 +14,7 @@ import (
 
 func testdataDir() string {
 	_, file, _, _ := runtime.Caller(0)
+
 	return filepath.Join(filepath.Dir(file), "..", "..", "testdata")
 }
 
@@ -50,23 +51,28 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 
 	// Confirm the parser assigned the wrong component to objFile via the _parent resolver.
 	var objFileComp string
+
 	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "objFile" {
 			objFileComp = ref.Component
+
 			break
 		}
 	}
+
 	if objFileComp == "" {
 		// Also check function-scoped refs.
 		for _, scope := range pr.Scopes {
 			for _, ref := range pr.FuncComponentRefs(scope.Start, scope.End) {
 				if ref.Variable == "objFile" {
 					objFileComp = ref.Component
+
 					break
 				}
 			}
 		}
 	}
+
 	if objFileComp != "models.Base" {
 		t.Fatalf("expected objFile to have ref models.Base (from broad _parent resolver), got %q", objFileComp)
 	}
@@ -77,10 +83,12 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 
 	for _, rel := range []string{"models/Base.cfc", "models/FileObject.cfc"} {
 		abs := filepath.Join(dir, rel)
+
 		data, err := fsys.ReadFile(abs)
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
 		}
+
 		idx.IndexFile(uri.URI("file://"+abs), string(data))
 	}
 
@@ -95,13 +103,17 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 
 	// Find the objFile.open() call site.
 	calls := pr.FuncCalls(0, 10)
+
 	var openCall *parser.CallSite
+
 	for i := range calls {
 		if calls[i].FuncName == "open" && calls[i].Variable == "objFile" {
 			openCall = &calls[i]
+
 			break
 		}
 	}
+
 	if openCall == nil {
 		t.Fatal("expected to find objFile.open() call site")
 	}

@@ -13,6 +13,7 @@ import (
 type Argument struct {
 	Name     string
 	Type     string // empty if untyped
+	Hint     string // hint attribute value (used as supplemental type when Type is generic)
 	Required bool
 }
 

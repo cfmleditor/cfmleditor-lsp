@@ -328,6 +328,21 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return "not found in parent component"
 	}
 
+	// ARGUMENTS qualifier — funcName is being called as a function-reference argument.
+	// These are dynamic (type="any"), so we can't verify them statically; accept if the
+	// argument is declared in the enclosing function.
+	if strings.EqualFold(variable, "ARGUMENTS") {
+		for _, f := range pr.Funcs {
+			if strings.EqualFold(f.Name, call.Caller) {
+				for _, arg := range f.Arguments {
+					if strings.EqualFold(arg.Name, funcName) {
+						return ""
+					}
+				}
+			}
+		}
+	}
+
 	// Qualified call — find the component from refs
 	comp := call.Component
 	if comp == "" {

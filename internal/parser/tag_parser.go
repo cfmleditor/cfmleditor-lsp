@@ -337,8 +337,14 @@ func (p *tagParser) parseCFArguments(block string) []Argument {
 		if name != "" {
 			a := Argument{Name: name}
 			a.Type = getAttr(tag, "type")
+			a.Hint = getAttr(tag, "hint")
 			req := getAttr(tag, "required")
 			a.Required = strings.EqualFold(req, "true") || strings.EqualFold(req, "yes")
+			// Promote hint to type when type is generic and hint looks like a component path
+			if isComponentType(a.Hint) && !isComponentType(a.Type) {
+				a.Type = a.Hint
+			}
+
 			args = append(args, a)
 		}
 
