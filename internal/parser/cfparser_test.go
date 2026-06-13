@@ -2209,6 +2209,7 @@ func TestScriptParser_DollarSignGlobalVar(t *testing.T) {
 	pr := Parse(testURI, content)
 
 	var found bool
+
 	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "$service" && ref.Component == "services.MyService" {
 			found = true
@@ -2231,6 +2232,7 @@ func TestScriptParser_DollarSignLocalComponentRef(t *testing.T) {
 	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
 
 	var found bool
+
 	for _, ref := range funcRefs {
 		if ref.Variable == "$svc" && ref.Component == "services.SomeService" {
 			found = true
@@ -2256,6 +2258,7 @@ func TestScriptParser_DollarSignResolverRef(t *testing.T) {
 	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
 
 	var found bool
+
 	for _, ref := range funcRefs {
 		if ref.Variable == "$svc" && ref.Component == "services.user" {
 			found = true

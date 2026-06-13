@@ -297,6 +297,23 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return "no qualifier, not in file"
 	}
 
+	// this. qualifier — refers to the current component
+	if strings.EqualFold(variable, "this") {
+		for _, f := range pr.Funcs {
+			if strings.EqualFold(f.Name, funcName) {
+				return ""
+			}
+		}
+
+		if pr.Extends != "" {
+			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+				return ""
+			}
+		}
+
+		return "method '" + funcName + "' not found in current component"
+	}
+
 	// super. qualifier
 	if strings.EqualFold(variable, "super") {
 		if pr.Extends == "" {
