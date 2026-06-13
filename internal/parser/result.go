@@ -1427,7 +1427,7 @@ func (pr *ParseResult) lookupMethodReturn(component, methodName string) string {
 
 func isIdentifier(s string) bool {
 	for i, c := range s {
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$' {
 			continue
 		}
 
@@ -1450,7 +1450,7 @@ func isValidVarChain(s string) bool {
 	}
 
 	for _, c := range s {
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c >= '0' && c <= '9' || c == '.' || c == '[' || c == ']' {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$' || c >= '0' && c <= '9' || c == '.' || c == '[' || c == ']' {
 			continue
 		}
 
@@ -1561,7 +1561,7 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 			varEnd := idx
 
 			varStart := varEnd - 1
-			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_') {
+			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_' || line[varStart] == '$') {
 				varStart--
 			}
 
@@ -1581,7 +1581,7 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 						depth--
 						if depth == 0 {
 							fnStart := j - 1
-							for fnStart >= 0 && (line[fnStart] >= 'a' && line[fnStart] <= 'z' || line[fnStart] >= 'A' && line[fnStart] <= 'Z' || line[fnStart] >= '0' && line[fnStart] <= '9' || line[fnStart] == '_') {
+							for fnStart >= 0 && (line[fnStart] >= 'a' && line[fnStart] <= 'z' || line[fnStart] >= 'A' && line[fnStart] <= 'Z' || line[fnStart] >= '0' && line[fnStart] <= '9' || line[fnStart] == '_' || line[fnStart] == '$') {
 								fnStart--
 							}
 

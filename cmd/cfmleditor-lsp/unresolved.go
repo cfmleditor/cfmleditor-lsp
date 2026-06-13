@@ -31,12 +31,13 @@ type UnresolvedCall struct {
 
 func cmdUnresolved(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp unresolved [--json] <dir> [...]\n")
+		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp unresolved [--json] [--global-defs] <dir> [...]\n")
 		os.Exit(1)
 	}
 
 	jsonOutput := false
 	verbose := false
+	matchGlobalDefs := false
 
 	var filteredArgs []string
 
@@ -46,6 +47,8 @@ func cmdUnresolved(args []string) {
 			jsonOutput = true
 		case "--verbose":
 			verbose = true
+		case "--global-defs":
+			matchGlobalDefs = true
 		default:
 			filteredArgs = append(filteredArgs, a)
 		}
@@ -54,7 +57,7 @@ func cmdUnresolved(args []string) {
 	args = filteredArgs
 
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp unresolved [--json] <dir> [...]\n")
+		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp unresolved [--json] [--global-defs] <dir> [...]\n")
 		os.Exit(1)
 	}
 
@@ -220,6 +223,18 @@ func cmdUnresolved(args []string) {
 
 					if verbose {
 						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line+1, call.Variable, call.FuncName)
+					}
+
+					continue
+				}
+
+				if matchGlobalDefs && len(resolver.Index.Lookup(call.FuncName)) > 0 {
+					mu.Lock()
+					resolved++
+					mu.Unlock()
+
+					if verbose {
+						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s (global def)\n", filepath.Base(file), call.Line+1, call.FuncName)
 					}
 
 					continue

@@ -283,7 +283,7 @@ func (s *Scanner) Rest() string {
 
 func isDigit(ch byte) bool { return ch >= '0' && ch <= '9' }
 func isIdentStart(ch byte) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$'
 }
 func isIdentPart(ch byte) bool { return isIdentStart(ch) || isDigit(ch) }
 

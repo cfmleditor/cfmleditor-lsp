@@ -2148,6 +2148,143 @@ func TestScriptParser_ArgumentTypes(t *testing.T) {
 	}
 }
 
+// --- Dollar-sign identifier tests ---
+
+func TestParseFunctionDefs_DollarSignName_Script(t *testing.T) {
+	content := "component {\n\tfunction $init() {}\n\tpublic string function $helper() {}\n}"
+	defs := ParseFunctionDefs(testURI, content)
+	assertDefs(t, defs, []string{"$init", "$helper"})
+}
+
+func TestParseFunctionDefs_DollarSignName_Tag(t *testing.T) {
+	content := "<cfcomponent>\n<cffunction name=\"$init\">\n</cffunction>\n<cffunction name=\"$helper\">\n</cffunction>\n</cfcomponent>"
+	defs := ParseFunctionDefs(testURI, content)
+	assertDefs(t, defs, []string{"$init", "$helper"})
+}
+
+func TestParseFunctionDefs_DollarSignArgName(t *testing.T) {
+	content := "component {\nfunction save(required string $name, numeric $age) {}\n}"
+
+	defs := ParseFunctionDefs(testURI, content)
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 def, got %d", len(defs))
+	}
+
+	args := defs[0].Arguments
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d: %+v", len(args), args)
+	}
+
+	if args[0].Name != "$name" || args[0].Type != "string" || !args[0].Required {
+		t.Errorf("arg 0 = %+v, want {$name, string, required}", args[0])
+	}
+
+	if args[1].Name != "$age" || args[1].Type != "numeric" || args[1].Required {
+		t.Errorf("arg 1 = %+v, want {$age, numeric, not required}", args[1])
+	}
+}
+
+func TestScriptParser_DollarSignVarName(t *testing.T) {
+	content := `component {
+	function work() {
+		var $result = 1;
+		local.$temp = 2;
+	}
+}`
+	pr := Parse(testURI, content)
+	scope := pr.Scopes[0]
+	fv := pr.FuncVars(scope.Start, scope.End)
+
+	for _, name := range []string{"$result", "$temp"} {
+		if !slices.Contains(fv, name) {
+			t.Errorf("expected %s in FuncVars, got %v", name, fv)
+		}
+	}
+}
+
+func TestScriptParser_DollarSignGlobalVar(t *testing.T) {
+	content := `component {
+	variables.$service = createObject("component", "services.MyService");
+}`
+	pr := Parse(testURI, content)
+
+	var found bool
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "$service" && ref.Component == "services.MyService" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected $service → services.MyService in ComponentRefs, got %v", pr.ComponentRefs)
+	}
+}
+
+func TestScriptParser_DollarSignLocalComponentRef(t *testing.T) {
+	content := `component {
+	function work() {
+		var $svc = createObject("component", "services.SomeService");
+	}
+}`
+	pr := Parse(testURI, content)
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+	for _, ref := range funcRefs {
+		if ref.Variable == "$svc" && ref.Component == "services.SomeService" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected $svc → services.SomeService in FuncComponentRefs, got %v", funcRefs)
+	}
+}
+
+func TestScriptParser_DollarSignResolverRef(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "services.$1", Prefix: "getService"},
+	}
+	content := `component {
+	function work() {
+		var $svc = getService("user");
+	}
+}`
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+	for _, ref := range funcRefs {
+		if ref.Variable == "$svc" && ref.Component == "services.user" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected $svc → services.user in FuncComponentRefs, got %v", funcRefs)
+	}
+}
+
+func TestTagParser_DollarSignVarName(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="work">
+	<cfset var $result = 1 />
+	<cfset local.$temp = 2 />
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+	scope := pr.Scopes[0]
+	fv := pr.FuncVars(scope.Start, scope.End)
+
+	for _, name := range []string{"$result", "$temp"} {
+		if !slices.Contains(fv, name) {
+			t.Errorf("expected %s in FuncVars, got %v", name, fv)
+		}
+	}
+}
+
 func TestFuncVars_Cached(t *testing.T) {
 	content := `component {
 	function work() {
