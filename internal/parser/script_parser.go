@@ -1033,24 +1033,30 @@ func (p *scriptParser) checkReturnComponent() {
 	switch strings.ToLower(peek.Value) {
 	case "new":
 		p.sc.NextSkipComments()
+
 		comp = p.readNewComponent()
 		if p.sc.PeekSkipComments().Kind == TokLParen {
 			p.skipBalancedParens()
 		}
+
 		p.scanChainedCalls(comp, peek.Line)
 	case "createobject":
 		p.sc.NextSkipComments()
+
 		comp = p.readCreateObjectComponent()
 		if p.sc.PeekSkipComments().Kind == TokRParen {
 			p.sc.NextSkipComments()
 		}
+
 		p.scanChainedCalls(comp, peek.Line)
 	case "entitynew":
 		p.sc.NextSkipComments()
+
 		comp = p.readEntityNewComponent()
 		if p.sc.PeekSkipComments().Kind == TokRParen {
 			p.sc.NextSkipComments()
 		}
+
 		p.scanChainedCalls(comp, peek.Line)
 	default:
 		// Check for return obj.method(...) or return func(...) if extractCalls

@@ -1748,6 +1748,11 @@ func isMemberMethod(name string) bool {
 		"valuecount", "valuecountnocase",
 		// Common global/Java methods
 		"getbytes", "tostring", "hashcode", "getclass", "init", "tobytearray",
+		// java.lang.Class / java.lang.reflect methods
+		"getcomponenttype", "getname", "getsimplename", "getdeclaredmethods",
+		"getmethods", "getdeclaredfields", "getfields", "newinstance",
+		"isarray", "isassignablefrom", "isinstance", "getinterfaces",
+		"getsuperclass", "forname",
 		// JavaScript String/Array/RegExp methods
 		"split", "substr", "substring", "indexof", "lastindexof", "tolowercase",
 		"touppercase", "charat", "concat", "search", "test", "exec", "join",

@@ -211,10 +211,6 @@ func cmdUnresolved(args []string) {
 
 			calls := pr.FuncCalls(0, lastLine)
 			for _, call := range calls {
-				if isBuiltin(call.FuncName) {
-					continue
-				}
-
 				reason := resolver.CanResolveCall(call, pr, baseDir)
 				if reason == "" {
 					mu.Lock()
@@ -225,6 +221,10 @@ func cmdUnresolved(args []string) {
 						fmt.Fprintf(os.Stderr, "  ✓ %s:%d: %s.%s\n", filepath.Base(file), call.Line+1, call.Variable, call.FuncName)
 					}
 
+					continue
+				}
+
+				if isBuiltin(call.FuncName) {
 					continue
 				}
 
