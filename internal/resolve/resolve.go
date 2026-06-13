@@ -278,8 +278,9 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	funcName := call.FuncName
 	variable := call.Variable
 
-	// Unqualified call — check same file, then extends chain
-	if variable == "" {
+	// Unqualified call — check same file, then extends chain.
+	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
+	if variable == "" && call.Component == "" {
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, funcName) {
 				return ""

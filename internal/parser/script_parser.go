@@ -1034,12 +1034,24 @@ func (p *scriptParser) checkReturnComponent() {
 	case "new":
 		p.sc.NextSkipComments()
 		comp = p.readNewComponent()
+		if p.sc.PeekSkipComments().Kind == TokLParen {
+			p.skipBalancedParens()
+		}
+		p.scanChainedCalls(comp, peek.Line)
 	case "createobject":
 		p.sc.NextSkipComments()
 		comp = p.readCreateObjectComponent()
+		if p.sc.PeekSkipComments().Kind == TokRParen {
+			p.sc.NextSkipComments()
+		}
+		p.scanChainedCalls(comp, peek.Line)
 	case "entitynew":
 		p.sc.NextSkipComments()
 		comp = p.readEntityNewComponent()
+		if p.sc.PeekSkipComments().Kind == TokRParen {
+			p.sc.NextSkipComments()
+		}
+		p.scanChainedCalls(comp, peek.Line)
 	default:
 		// Check for return obj.method(...) or return func(...) if extractCalls
 		if p.extractCalls && !isKeyword(peek.Value) {
@@ -1124,27 +1136,49 @@ func (p *scriptParser) readNewComponent() string {
 	return ""
 }
 
-// readCreateObjectComponent reads the component path from createObject("component","path").
+// readCreateObjectComponent reads the component path from createObject("component","path")
+// or resolves createObject("java","class") via configured resolvers. Scanner is left at the
+// closing ) so the caller can consume it and scan for chained calls.
 func (p *scriptParser) readCreateObjectComponent() string {
 	if p.sc.NextSkipComments().Kind != TokLParen {
 		return ""
 	}
 
 	arg1 := p.sc.NextSkipComments()
-	if arg1.Kind != TokString || !identEq(unquote(arg1.Value), "component") {
+	if arg1.Kind != TokString {
 		return ""
 	}
 
-	if p.sc.NextSkipComments().Kind != TokComma {
+	arg1Val := unquote(arg1.Value)
+
+	if identEq(arg1Val, "component") {
+		if p.sc.NextSkipComments().Kind != TokComma {
+			return ""
+		}
+
+		arg2 := p.sc.NextSkipComments()
+		if arg2.Kind != TokString {
+			return ""
+		}
+
+		return unquote(arg2.Value)
+	}
+
+	// Non-component createObject (e.g. java) — consume comma+arg2 and try resolvers
+	if p.sc.PeekSkipComments().Kind != TokComma {
 		return ""
 	}
+
+	p.sc.NextSkipComments() // consume ,
 
 	arg2 := p.sc.NextSkipComments()
 	if arg2.Kind != TokString {
 		return ""
 	}
 
-	return unquote(arg2.Value)
+	expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
+
+	return p.resolveCall(expr)
 }
 
 // readEntityNewComponent reads the entity name from entityNew("Name").
@@ -1708,6 +1742,12 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 			Variable: varName, Component: component,
 			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
+
+		// Consume constructor args and handle any chained .method() calls
+		if p.sc.PeekSkipComments().Kind == TokLParen {
+			p.skipBalancedParens()
+			p.scanChainedCalls(component, line)
+		}
 	}
 }
 
@@ -1742,6 +1782,15 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
 		}
+
+		// Consume closing ) and handle any chained .method() calls
+		if p.sc.PeekSkipComments().Kind == TokRParen {
+			p.sc.NextSkipComments()
+		}
+
+		if comp != "" {
+			p.scanChainedCalls(comp, line)
+		}
 	} else if len(p.resolvers) > 0 {
 		// Try resolvers for non-component createObject (e.g. java)
 		comma := p.sc.NextSkipComments()
@@ -1755,11 +1804,85 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 		}
 
 		expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
-		if comp := p.resolveCall(expr); comp != "" {
+		comp := p.resolveCall(expr)
+
+		if comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
+		}
+
+		// Consume closing ) and handle any chained .method() calls
+		if p.sc.PeekSkipComments().Kind == TokRParen {
+			p.sc.NextSkipComments()
+		}
+
+		if comp != "" {
+			p.scanChainedCalls(comp, line)
+		}
+	}
+}
+
+// scanChainedCalls records resolved CallSites for any .method() chains following
+// a constructor or factory call whose component is already known.
+func (p *scriptParser) scanChainedCalls(component string, line int) {
+	if !p.extractCalls {
+		return
+	}
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			break
+		}
+
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			break
+		}
+
+		p.addCall(CallSite{
+			FuncName:  methTok.Value,
+			Component: component,
+			Line:      uint32(p.baseLine + line),
+			Caller:    caller,
+			Resolved:  true,
+		})
+
+		p.skipBalancedParens()
+	}
+}
+
+// skipBalancedParens consumes a balanced (...) sequence from the scanner.
+func (p *scriptParser) skipBalancedParens() {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume (
+
+	depth := 1
+
+	for depth > 0 {
+		t := p.sc.NextSkipComments()
+		if t.Kind == TokEOF {
+			return
+		}
+
+		switch t.Kind { //nolint:exhaustive
+		case TokLParen:
+			depth++
+		case TokRParen:
+			depth--
 		}
 	}
 }
@@ -2069,75 +2192,8 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 		return
 	}
 
-	// Skip constructor args
-	p.sc.NextSkipComments() // consume (
-
-	depth := 1
-
-	for depth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
-		}
-
-		switch t.Kind { //nolint:exhaustive
-		case TokLParen:
-			depth++
-		case TokRParen:
-			depth--
-		}
-	}
-
-	if !p.extractCalls {
-		return
-	}
-
-	caller := ""
-	if p.inFunc != "" && len(p.funcs) > 0 {
-		caller = p.funcs[len(p.funcs)-1].Name
-	}
-
-	for p.sc.PeekSkipComments().Kind == TokDot {
-		p.sc.NextSkipComments() // consume .
-
-		methTok := p.sc.PeekSkipComments()
-		if methTok.Kind != TokIdent {
-			break
-		}
-
-		p.sc.NextSkipComments()
-
-		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
-		}
-
-		p.addCall(CallSite{
-			FuncName:  methTok.Value,
-			Component: component,
-			Line:      uint32(p.baseLine + newTok.Line),
-			Caller:    caller,
-			Resolved:  true,
-		})
-
-		// Skip method args
-		p.sc.NextSkipComments() // consume (
-
-		pd := 1
-
-		for pd > 0 {
-			t := p.sc.NextSkipComments()
-			if t.Kind == TokEOF {
-				return
-			}
-
-			switch t.Kind { //nolint:exhaustive
-			case TokLParen:
-				pd++
-			case TokRParen:
-				pd--
-			}
-		}
-	}
+	p.skipBalancedParens()
+	p.scanChainedCalls(component, newTok.Line)
 }
 
 func isKeyword(s string) bool {
