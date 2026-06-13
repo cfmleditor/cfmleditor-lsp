@@ -417,5 +417,15 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return ""
 	}
 
+	// The ref-derived component didn't have the method. Try the variable-name resolver
+	// as a fallback — a pendingCall propagation may have assigned the wrong component
+	// (e.g. var objFile = _parent.getFile() inherits _parent's component, but the
+	// "objFile" resolver names the real type).
+	if altComp := parser.ResolveFromCall(variable, r.Resolvers); altComp != "" && altComp != comp {
+		if r.ResolveFunc(altComp, funcName, baseDir) != nil {
+			return ""
+		}
+	}
+
 	return "method '" + funcName + "' not found in " + comp
 }
