@@ -2,6 +2,7 @@ package parser
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/uri"
@@ -2285,6 +2286,28 @@ func TestTagParser_DollarSignVarName(t *testing.T) {
 		if !slices.Contains(fv, name) {
 			t.Errorf("expected %s in FuncVars, got %v", name, fv)
 		}
+	}
+}
+
+func TestScriptParser_ChainedAssignment_NoSpuriousRef(t *testing.T) {
+	// variables.$assert = this.$assert = new testbox.system.Assertion()
+	// The `this.$assert` in the middle is an assignment TO this, not a source;
+	// only the final `new testbox.system.Assertion()` should produce a ref.
+	content := `component {
+	variables.$assert = this.$assert = new testbox.system.Assertion();
+}`
+	pr := Parse(testURI, content)
+
+	var got []string
+
+	for _, r := range pr.ComponentRefs {
+		if strings.EqualFold(r.Variable, "$assert") {
+			got = append(got, r.Component)
+		}
+	}
+
+	if len(got) != 1 || got[0] != "testbox.system.Assertion" {
+		t.Errorf("expected exactly one $assert ref → testbox.system.Assertion, got %v", got)
 	}
 }
 

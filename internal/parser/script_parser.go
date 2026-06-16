@@ -458,11 +458,16 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 		case "this":
 			p.sc.NextSkipComments()
 
-			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
-				p.addRef(ComponentRef{
-					Variable: nameTok.Value, Component: selfPath,
-					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
-				})
+			// Only treat `scope.x = this` (bare) as a self-ref.
+			// `scope.x = this.prop = ...` is a chained assignment — the real
+			// component comes from the continuation, so skip the ref here.
+			if p.sc.PeekSkipComments().Kind != TokDot {
+				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+					p.addRef(ComponentRef{
+						Variable: nameTok.Value, Component: selfPath,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+					})
+				}
 			}
 		default:
 			p.checkVarRHS(nameTok.Value, tok.Line)
@@ -1375,11 +1380,16 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		case "this":
 			p.sc.NextSkipComments()
 
-			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
-				p.addRef(ComponentRef{
-					Variable: nameTok.Value, Component: selfPath,
-					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
-				})
+			// Only treat `scope.x = this` (bare) as a self-ref.
+			// `scope.x = this.prop = ...` is a chained assignment — the real
+			// component comes from the continuation, so skip the ref here.
+			if p.sc.PeekSkipComments().Kind != TokDot {
+				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+					p.addRef(ComponentRef{
+						Variable: nameTok.Value, Component: selfPath,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+					})
+				}
 			}
 		default:
 			if !isKeyword(rhs.Value) {

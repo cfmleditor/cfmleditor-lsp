@@ -96,6 +96,40 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	// For bare names (no dots/slashes), search the index by filename as a last resort.
+	// This handles `extends="BaseAssertionsTest"` where the file isn't in the same
+	// directory or workspace root but is somewhere in the indexed workspace.
+	if !strings.Contains(component, ".") && !strings.Contains(component, "/") && r.Index != nil {
+		candidates := r.Index.FindFilesByBasename(component)
+		if len(candidates) == 1 {
+			return candidates[0]
+		}
+
+		if len(candidates) > 1 {
+			// Multiple matches — pick the one with the shortest relative path from baseDir.
+			best := ""
+			bestDist := -1
+
+			for _, c := range candidates {
+				rel, err := filepath.Rel(baseDir, c)
+				if err != nil {
+					continue
+				}
+
+				dist := strings.Count(rel, string(filepath.Separator))
+
+				if bestDist < 0 || dist < bestDist {
+					best = c
+					bestDist = dist
+				}
+			}
+
+			if best != "" {
+				return best
+			}
+		}
+	}
+
 	return ""
 }
 
@@ -396,6 +430,48 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 						break
 					}
 				}
+			}
+		}
+
+		// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
+		if comp == "" && pr.Extends != "" {
+			seen := make(map[string]bool)
+			extends := pr.Extends
+
+			for extends != "" && !seen[extends] {
+				seen[extends] = true
+
+				cfcPath := r.ComponentPath(extends, baseDir)
+				if cfcPath == "" {
+					break
+				}
+
+				parentURI := uri.URI("file://" + cfcPath)
+
+				// Ensure the parent is indexed so RefsForFile returns its component refs.
+				// (EnsureIndexed is a fast no-op if already indexed.)
+				r.EnsureIndexed(cfcPath)
+
+				for _, ref := range r.Index.RefsForFile(parentURI) {
+					if strings.EqualFold(ref.Variable, lookupVar) {
+						comp = ref.Component
+
+						break
+					}
+				}
+
+				if comp != "" {
+					break
+				}
+
+				// Walk up the extends chain
+				data, err := r.FS.ReadFile(cfcPath)
+				if err != nil {
+					break
+				}
+
+				parentPR := parser.Parse(parentURI, string(data))
+				extends = parentPR.Extends
 			}
 		}
 	}

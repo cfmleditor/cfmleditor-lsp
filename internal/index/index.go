@@ -324,3 +324,36 @@ func (idx *Index) LookupEntity(name string) uri.URI {
 
 	return idx.entities[strings.ToLower(name)]
 }
+
+// FindFilesByBasename returns absolute file paths for all indexed CFC files whose
+// filename (without extension) matches name case-insensitively.
+func (idx *Index) FindFilesByBasename(name string) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	suffix := "/" + strings.ToLower(name) + ".cfc"
+
+	var paths []string
+
+	for key, defs := range idx.fileFuncs {
+		if !strings.HasSuffix(key, suffix) {
+			continue
+		}
+
+		// Recover the real (correctly-cased) path from a stored definition's URI.
+		if len(defs) > 0 {
+			if p := strings.TrimPrefix(string(defs[0].URI), "file://"); p != "" {
+				paths = append(paths, p)
+
+				continue
+			}
+		}
+
+		// File has no functions — fall back to the lowercased key (works on case-insensitive FSes).
+		if p := strings.TrimPrefix(key, "file://"); p != "" {
+			paths = append(paths, p)
+		}
+	}
+
+	return paths
+}
