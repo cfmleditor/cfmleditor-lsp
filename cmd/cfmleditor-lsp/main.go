@@ -161,9 +161,7 @@ func runServer() {
 		srv.Mappings = mappings
 		srv.ExpressionMappings = cfg.ExpressionMappings()
 
-		for _, p := range resolverPairs {
-			srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: p[0], Resolve: p[1], Prefix: p[2]})
-		}
+		srv.ComponentResolvers = append(srv.ComponentResolvers, resolverPairs...)
 
 		for _, p := range propResolverPairs {
 			srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})

@@ -446,6 +446,8 @@ func containsCFTag(s string) bool {
 }
 
 // splitCFScriptBlocks splits tag-based content into tag and script regions.
+// CFML comments (<!--- ... --->) are skipped so that <cfscript> blocks inside
+// comments do not produce spurious script regions.
 func splitCFScriptBlocks(content string) []Region {
 	idx := buildLineIdx(content)
 
@@ -454,12 +456,54 @@ func splitCFScriptBlocks(content string) []Region {
 	pos := 0
 
 	for {
-		openIdx := indexCFTag(content[pos:], "cfscript>")
+		// Find the next <cfscript> while skipping CFML comments.
+		openIdx := -1
+		scanPos := pos
+
+		for scanPos < len(content) {
+			i := strings.IndexByte(content[scanPos:], '<')
+			if i < 0 {
+				break
+			}
+
+			i += scanPos
+
+			// Skip CFML comment (<!--- ... --->) with nesting support.
+			if i+4 < len(content) && content[i:i+5] == "<!---" {
+				depth := 1
+				j := i + 5
+
+				for j < len(content) && depth > 0 {
+					switch {
+					case j+4 < len(content) && content[j:j+5] == "<!---":
+						depth++
+						j += 5
+					case j+3 < len(content) && content[j:j+4] == "--->":
+						depth--
+						j += 4
+					default:
+						j++
+					}
+				}
+
+				scanPos = j
+
+				continue
+			}
+
+			if i+10 <= len(content) && strings.EqualFold(content[i:i+10], "<cfscript>") {
+				openIdx = i
+
+				break
+			}
+
+			scanPos = i + 1
+		}
+
 		if openIdx < 0 {
 			break
 		}
 
-		openIdx += pos
 		if openIdx > pos {
 			text := content[pos:openIdx]
 			if strings.TrimSpace(text) != "" {

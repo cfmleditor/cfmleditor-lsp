@@ -433,6 +433,27 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			}
 		}
 
+		// ARGUMENTS.x qualifier — resolve directly from the enclosing function's argument list.
+		// This handles cases where the argument has a component type (via hint promotion or
+		// explicit type) without requiring a ComponentRef to have been created.
+		if comp == "" && strings.HasPrefix(strings.ToUpper(variable), "ARGUMENTS.") {
+			argName := variable[10:]
+
+			for _, f := range pr.Funcs {
+				if strings.EqualFold(f.Name, call.Caller) {
+					for _, arg := range f.Arguments {
+						if strings.EqualFold(arg.Name, argName) && strings.Contains(arg.Type, ".") {
+							comp = arg.Type
+
+							break
+						}
+					}
+
+					break
+				}
+			}
+		}
+
 		// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
 		if comp == "" && pr.Extends != "" {
 			seen := make(map[string]bool)
@@ -478,16 +499,31 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	if comp == "" {
 		// Try component resolvers
-		comp = parser.ResolveFromCall(variable, r.Resolvers)
+		var noFollow bool
+
+		comp, noFollow = parser.ResolveFromCallFull(variable, r.Resolvers)
+		if noFollow && comp != "" {
+			return ""
+		}
 	}
 
 	if comp == "" && call.Text != "" {
 		// Try resolvers against the full line text (handles chained calls like x.method().prop.func())
-		comp = parser.ResolveFromCall(call.Text, r.Resolvers)
+		var noFollow bool
+
+		comp, noFollow = parser.ResolveFromCallFull(call.Text, r.Resolvers)
+		if noFollow && comp != "" {
+			return ""
+		}
 	}
 
 	if comp == "" {
 		return "variable '" + variable + "' has no component ref"
+	}
+
+	// Dynamic return type — method called on a result of a function returning "any".
+	if comp == "$any" {
+		return ""
 	}
 
 	// Builtin return type — check method exists in-memory
@@ -508,12 +544,17 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return ""
 	}
 
+	// Component defines onMissingMethod — any method call is valid.
+	if r.ResolveFunc(comp, "onMissingMethod", baseDir) != nil {
+		return ""
+	}
+
 	// The ref-derived component didn't have the method. Try the variable-name resolver
 	// as a fallback — a pendingCall propagation may have assigned the wrong component
 	// (e.g. var objFile = _parent.getFile() inherits _parent's component, but the
 	// "objFile" resolver names the real type).
-	if altComp := parser.ResolveFromCall(variable, r.Resolvers); altComp != "" && altComp != comp {
-		if r.ResolveFunc(altComp, funcName, baseDir) != nil {
+	if altComp, altNoFollow := parser.ResolveFromCallFull(variable, r.Resolvers); altComp != "" && altComp != comp {
+		if altNoFollow || r.ResolveFunc(altComp, funcName, baseDir) != nil {
 			return ""
 		}
 	}

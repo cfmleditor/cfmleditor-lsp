@@ -267,17 +267,17 @@ func (c *Config) FormattingIndentWidth() int {
 }
 
 // ComponentResolvers returns the configured component resolver patterns as [match, resolve, prefix] triples.
-func (c *Config) ComponentResolvers() [][3]string {
+func (c *Config) ComponentResolvers() []config.Resolver {
 	raw := c.raw()
 	if raw == nil || len(raw.ComponentResolvers) == 0 {
 		return nil
 	}
 
-	out := make([][3]string, 0, len(raw.ComponentResolvers))
+	out := make([]config.Resolver, 0, len(raw.ComponentResolvers))
 
 	for _, r := range raw.ComponentResolvers {
 		if r.Match != "" && r.Resolve != "" {
-			out = append(out, [3]string{r.Match, r.Resolve, r.Prefix})
+			out = append(out, r)
 		}
 	}
 

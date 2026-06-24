@@ -72,6 +72,57 @@ func TestClassifyRegions_CommentBeforeComponent(t *testing.T) {
 	}
 }
 
+func TestClassifyRegions_CFScriptInsideComment(t *testing.T) {
+	content := "<cfcomponent>\n<!---\n<cfscript>\nvar x = obj.foo();\n</cfscript>\n--->\n</cfcomponent>"
+
+	regions := ClassifyRegions(content)
+	if len(regions) != 1 {
+		t.Fatalf("expected 1 region (all tag), got %d", len(regions))
+	}
+
+	if regions[0].Kind != RegionTag {
+		t.Errorf("expected RegionTag, got %v — <cfscript> inside comment should not create a script region", regions[0].Kind)
+	}
+}
+
+func TestClassifyRegions_CFScriptAfterComment(t *testing.T) {
+	content := "<cfcomponent>\n<!---\n<cfscript>var hidden = 1;</cfscript>\n--->\n<cfscript>\nfunction realFunc() {}\n</cfscript>\n</cfcomponent>"
+
+	regions := ClassifyRegions(content)
+	if len(regions) != 3 {
+		t.Fatalf("expected 3 regions (tag, script, tag), got %d", len(regions))
+	}
+
+	if regions[0].Kind != RegionTag {
+		t.Errorf("region 0: expected RegionTag, got %v", regions[0].Kind)
+	}
+
+	if regions[1].Kind != RegionScript {
+		t.Errorf("region 1: expected RegionScript, got %v", regions[1].Kind)
+	}
+
+	if !strings.Contains(regions[1].Text, "realFunc") {
+		t.Errorf("region 1: expected real function body, got %q", regions[1].Text)
+	}
+
+	if regions[2].Kind != RegionTag {
+		t.Errorf("region 2: expected RegionTag, got %v", regions[2].Kind)
+	}
+}
+
+func TestClassifyRegions_NestedCommentWithCFScript(t *testing.T) {
+	content := "<cfcomponent>\n<!---\nouter comment\n<!--- <cfscript>var x=1;</cfscript> --->\nstill in outer\n--->\n</cfcomponent>"
+
+	regions := ClassifyRegions(content)
+	if len(regions) != 1 {
+		t.Fatalf("expected 1 region (all tag), got %d", len(regions))
+	}
+
+	if regions[0].Kind != RegionTag {
+		t.Errorf("expected RegionTag, got %v — nested commented <cfscript> should not create script region", regions[0].Kind)
+	}
+}
+
 // --- ParseFunctionDefs tests ---
 
 func TestParseFunctionDefs_ScriptCFC(t *testing.T) {
@@ -2271,6 +2322,42 @@ func TestScriptParser_DollarSignResolverRef(t *testing.T) {
 	}
 }
 
+func TestScriptParser_ChainedCallResolverRef(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `createMock("$1")`, Resolve: "$1", Prefix: "createMock"},
+	}
+	content := `component {
+	function work() {
+		var mock = getMockBox().createMock("models.User");
+		mock.save();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ScanAllScopes: true,
+		ExtractCalls:  true,
+	})
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
+	}
+
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found bool
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "mock" && ref.Component == "models.User" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected mock → models.User in FuncComponentRefs (chained call resolver), got %v", funcRefs)
+	}
+}
+
 func TestTagParser_DollarSignVarName(t *testing.T) {
 	content := `<cfcomponent>
 <cffunction name="work">
@@ -2337,4 +2424,62 @@ func TestFuncVars_Cached(t *testing.T) {
 	if len(vars3) != len(vars1) {
 		t.Errorf("recomputed FuncVars mismatch: %v vs %v", vars3, vars1)
 	}
+}
+
+func TestTagParser_ArgumentHintRef(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="work">
+	<cfargument name="document" type="any" required="true" hint="my.dotted.component" />
+	<cfset var result = {} />
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
+	}
+
+	scope := pr.Scopes[0]
+
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+	for _, ref := range funcRefs {
+		if ref.Variable == "document" && ref.Component == "my.dotted.component" {
+			return
+		}
+	}
+
+	t.Errorf("expected document → my.dotted.component in FuncComponentRefs, got %v", funcRefs)
+}
+
+func TestTagParser_ArgumentHintRef_WithResolver(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="generatePDF">
+	<cfargument name="document" type="any" required="true" hint="reporting.itext" />
+	<cfset var result = {} />
+	<cfset var table = ARGUMENTS.document.createTable(6) />
+</cffunction>
+</cfcomponent>`
+	resolvers := []Resolver{
+		{Match: `document.createStamper()`, Resolve: "reporting.directcontent", Prefix: "document.createStamper"},
+		{Match: `createTable($1)`, Resolve: "reporting.table", Prefix: "createTable"},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ScanAllScopes: true,
+	})
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
+	}
+
+	scope := pr.Scopes[0]
+
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+	for _, ref := range funcRefs {
+		if ref.Variable == "document" && ref.Component == "reporting.itext" {
+			return
+		}
+	}
+
+	t.Errorf("expected document → reporting.itext in FuncComponentRefs with resolvers active, got %v", funcRefs)
 }

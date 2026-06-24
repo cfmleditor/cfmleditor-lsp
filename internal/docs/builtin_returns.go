@@ -89,6 +89,11 @@ var builtinReturnObjects = map[string]*BuiltinObject{
 		"send", "setmethod", "seturl", "addparam",
 		"getprefix", "setresolveurls", "settimeout",
 	}},
+	// Cloud service object (S3, etc.)
+	"getcloudservice": {Methods: []string{
+		"root", "downloadobject", "downloadtofile", "uploadobject", "deleteobject",
+		"listobjects", "getobjectmetadata", "copyobject",
+	}},
 	// XML object
 	"xmlparse": {Methods: []string{
 		"search", "transform", "tostring", "getnode",

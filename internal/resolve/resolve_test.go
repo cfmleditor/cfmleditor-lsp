@@ -238,7 +238,7 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 	middleParentPath := filepath.Join(dir, "MiddleParentSpec.cfc")
 
 	for path, content := range map[string]string{
-		grandParentPath: grandParentContent,
+		grandParentPath:  grandParentContent,
 		middleParentPath: middleParentContent,
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -327,5 +327,119 @@ func TestComponentPath_BareNameIndexFallback(t *testing.T) {
 	got := r.ComponentPath("FileObject", dir)
 	if got != cfcPath {
 		t.Errorf("ComponentPath(\"FileObject\", dir) = %q, want %q", got, cfcPath)
+	}
+}
+
+// TestCanResolveCall_ArgumentsTypedDirectLookup covers the case where a call is made
+// on a typed argument via ARGUMENTS.x.method() — the resolver should find the component
+// type directly from the function definition's argument list without requiring a ComponentRef.
+func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
+	dir := testdataDir()
+
+	content := `component {
+	function work(required models.FileObject doc) {
+		ARGUMENTS.doc.open();
+	}
+}`
+	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_lookup.cfc"))
+	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	idx := index.New()
+	fsys := vfs.OS{}
+
+	cfcPath := filepath.Join(dir, "models", "FileObject.cfc")
+
+	data, err := fsys.ReadFile(cfcPath)
+	if err != nil {
+		t.Fatalf("read FileObject.cfc: %v", err)
+	}
+
+	idx.IndexFile(uri.URI("file://"+cfcPath), string(data))
+
+	r := &resolve.Resolver{
+		FS:               fsys,
+		Index:            idx,
+		WorkspaceFolders: []string{dir},
+	}
+
+	calls := pr.FuncCalls(0, 10)
+
+	var openCall *parser.CallSite
+
+	for i := range calls {
+		if calls[i].FuncName == "open" && calls[i].Variable == "ARGUMENTS.doc" {
+			openCall = &calls[i]
+
+			break
+		}
+	}
+
+	if openCall == nil {
+		t.Fatal("expected to find ARGUMENTS.doc.open() call site")
+	}
+
+	if reason := r.CanResolveCall(*openCall, pr, dir); reason != "" {
+		t.Errorf("expected ARGUMENTS.doc.open() to resolve via argument type, got: %s", reason)
+	}
+}
+
+// TestCanResolveCall_OnMissingMethodSkipsVerification verifies that when a
+// component defines onMissingMethod, any method call on it is accepted without
+// reporting "method not found".
+func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
+	dir := testdataDir()
+
+	// CFC that calls pageEvent.setDocument() where pageEvent resolves to JavaProxy.
+	content := `<cfcomponent>
+<cffunction name="generate">
+	<cfset var pageEvent = createObject("component", "models.JavaProxy").init()>
+	<cfset pageEvent.setDocument(doc)>
+</cffunction>
+</cfcomponent>`
+
+	fileURI := uri.URI("file://" + filepath.Join(dir, "test_onmissingmethod.cfc"))
+	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+		ExtractCalls: true,
+	})
+
+	idx := index.New()
+	fsys := vfs.OS{}
+
+	proxyPath := filepath.Join(dir, "models", "JavaProxy.cfc")
+
+	data, err := fsys.ReadFile(proxyPath)
+	if err != nil {
+		t.Fatalf("read JavaProxy.cfc: %v", err)
+	}
+
+	idx.IndexFile(uri.URI("file://"+proxyPath), string(data))
+
+	r := &resolve.Resolver{
+		FS:               fsys,
+		Index:            idx,
+		WorkspaceFolders: []string{dir},
+	}
+
+	calls := pr.FuncCalls(0, 10)
+
+	var setDocCall *parser.CallSite
+
+	for i := range calls {
+		if calls[i].FuncName == "setDocument" {
+			setDocCall = &calls[i]
+
+			break
+		}
+	}
+
+	if setDocCall == nil {
+		t.Fatal("expected to find pageEvent.setDocument() call site")
+	}
+
+	if reason := r.CanResolveCall(*setDocCall, pr, dir); reason != "" {
+		t.Errorf("expected pageEvent.setDocument() to resolve (onMissingMethod), got: %s", reason)
 	}
 }

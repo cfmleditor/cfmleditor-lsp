@@ -350,6 +350,11 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
+		} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
+			p.addRef(ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			})
 		} else if p.builtinReturnLookup != nil {
 			if comp := p.builtinReturnLookup(lastIdent); comp != "" {
 				p.addRef(ComponentRef{
@@ -1281,6 +1286,11 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						Variable: nameTok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
+				} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
+					p.addRef(ComponentRef{
+						Variable: nameTok.Value, Component: comp,
+						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+					})
 				} else {
 					p.pendingCalls = append(p.pendingCalls, pendingCall{
 						varName:  nameTok.Value,
@@ -2163,6 +2173,99 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 	}
 
 	// No match — restore scanner
+	p.sc.Restore(saved)
+
+	return ""
+}
+
+// skipParens consumes a balanced (...) group from the current scanner position.
+// Returns false if the scanner is not positioned at '(' or the group is unclosed.
+func (p *scriptParser) skipParens() bool {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return false
+	}
+
+	p.sc.NextSkipComments() // consume (
+
+	depth := 1
+
+	for depth > 0 {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF {
+			return false
+		}
+
+		switch tok.Kind { //nolint:exhaustive
+		case TokLParen:
+			depth++
+		case TokRParen:
+			depth--
+		}
+	}
+
+	return true
+}
+
+// tryExtendChain is called after tryResolveCall has failed and the scanner
+// sits at the '(' that tryResolveCall restored. It skips the argument list,
+// checks for a following '.method(' continuation, and tries tryResolveCall
+// on the extended chain. On success the scanner is advanced past the new
+// call's ')'. On failure the scanner position is unchanged.
+func (p *scriptParser) tryExtendChain(chain string) string {
+	if len(p.resolvers) == 0 {
+		return ""
+	}
+
+	saved := p.sc.Save()
+
+	if !p.skipParens() {
+		p.sc.Restore(saved)
+
+		return ""
+	}
+
+	if p.sc.PeekSkipComments().Kind != TokDot {
+		p.sc.Restore(saved)
+
+		return ""
+	}
+
+	p.sc.NextSkipComments() // consume .
+
+	next := p.sc.PeekSkipComments()
+	if next.Kind != TokIdent {
+		p.sc.Restore(saved)
+
+		return ""
+	}
+
+	p.sc.NextSkipComments() // consume method name
+
+	extChain := chain + "." + next.Value
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments()
+
+		n2 := p.sc.PeekSkipComments()
+		if n2.Kind != TokIdent {
+			break
+		}
+
+		p.sc.NextSkipComments()
+
+		extChain += "." + n2.Value
+	}
+
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		p.sc.Restore(saved)
+
+		return ""
+	}
+
+	if comp := p.tryResolveCall(extChain); comp != "" {
+		return comp
+	}
+
 	p.sc.Restore(saved)
 
 	return ""

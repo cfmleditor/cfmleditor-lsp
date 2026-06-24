@@ -269,15 +269,32 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 		applyJSDocParams(docComment, args)
 	}
 
-	// Create component refs for arguments with component-like types
+	// Create component refs for arguments with component-like types.
+	// p.inFunc is not yet set at this call site — the main loop sets it after
+	// parseCFFunction returns. Using p.addRef would route refs to componentRefs
+	// (global), which causes cachedFuncRefs to miss them when the funcRefsMap
+	// entry already exists from resolver-derived refs in the same scope.
+	// Instead, compute the funcKey directly and write to funcRefs[key].
 	for _, a := range args {
 		if isComponentType(a.Type) {
-			p.addRef(ComponentRef{
+			ref := ComponentRef{
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
 				Line:      uint32(line),
-			})
+			}
+			if end < len(rest) {
+				endLine := p.lineAt(tagEnd + end)
+				key := funcKey(line, endLine)
+
+				if p.funcRefs == nil {
+					p.funcRefs = make(map[string][]ComponentRef)
+				}
+
+				p.funcRefs[key] = append(p.funcRefs[key], ref)
+			} else {
+				p.componentRefs = append(p.componentRefs, ref)
+			}
 		}
 	}
 
@@ -613,9 +630,16 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
 		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
+			// Extract method name for pendingCall
+			var methodForPending string
+
+			before, _, _ := strings.Cut(rhs, "(")
+			if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
+				methodForPending = before[dot+1:]
+			}
+
 			if p.extractCalls {
 				// Record full call: extract method name from rhs
-				before, _, _ := strings.Cut(rhs, "(")
 				if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
 					methodName := before[dot+1:]
 
@@ -637,10 +661,11 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			}
 
 			p.pendingCalls = append(p.pendingCalls, pendingCall{
-				varName: varName,
-				baseVar: baseVar,
-				line:    uint32(line),
-				funcKey: p.inFunc,
+				varName:  varName,
+				funcName: methodForPending,
+				baseVar:  baseVar,
+				line:     uint32(line),
+				funcKey:  p.inFunc,
 			})
 		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
 			funcName := extractIdent(rhs)

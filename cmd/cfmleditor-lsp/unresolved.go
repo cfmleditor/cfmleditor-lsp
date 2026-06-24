@@ -84,7 +84,7 @@ func cmdUnresolved(args []string) {
 
 		expressionMappings = cfg.ExpressionMappings()
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
+			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow})
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
@@ -183,14 +183,7 @@ func cmdUnresolved(args []string) {
 			fileURI := uri.URI("file://" + file)
 			baseDir := filepath.Dir(file)
 
-			pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
-				Resolvers:          cfResolvers,
-				ExpressionMappings: expressionMappings,
-				ExtractCalls:       true,
-				ScanAllScopes:      true,
-			})
-
-			pr.FuncLookup = func(component, funcName string) string {
+			funcLookup := func(component, funcName string) string {
 				fd := resolver.ResolveFunc(component, funcName, baseDir)
 				if fd == nil {
 					return ""
@@ -206,6 +199,17 @@ func cmdUnresolved(args []string) {
 
 				return ""
 			}
+
+			pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+				Resolvers:           cfResolvers,
+				ExpressionMappings:  expressionMappings,
+				ExtractCalls:        true,
+				ScanAllScopes:       true,
+				FuncLookup:          funcLookup,
+				BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
+			})
+
+			pr.FuncLookup = funcLookup
 
 			lastLine := strings.Count(content, "\n")
 

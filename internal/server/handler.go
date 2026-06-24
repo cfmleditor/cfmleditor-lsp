@@ -410,6 +410,8 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 
 func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	if s.linter == nil || s.conn == nil {
+		s.log.Debug("cflint diagnostics skipped", cflog.String("reason", "linter not available (linting disabled or cflint not found)"))
+
 		return
 	}
 
@@ -431,7 +433,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 	}()
 
 	filePath := strings.TrimPrefix(string(docURI), "file://")
-	s.log.Debug("cflint scan starting", cflog.String("file", filePath))
+	s.log.Info("cflint scan starting", cflog.String("file", filePath))
 
 	// Show progress
 	s.notify(scanCtx, protocol.MethodProgress, map[string]any{
@@ -462,7 +464,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 		diags = []protocol.Diagnostic{}
 	}
 
-	s.log.Debug("cflint scan complete", cflog.String("file", filePath), cflog.Int("issues", len(diags)))
+	s.log.Info("cflint scan complete", cflog.String("file", filePath), cflog.Int("issues", len(diags)))
 
 	s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
 		URI:         docURI,

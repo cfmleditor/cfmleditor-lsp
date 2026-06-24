@@ -66,14 +66,15 @@ type ParseOptions struct {
 	Logger              Logger
 	Resolvers           []Resolver
 	PropertyResolvers   []PropertyResolver
-	BeanLookup          func(name string) string // optional: resolve bean name → dot-path
-	BuiltinReturnLookup func(name string) string // optional: resolve builtin function → return component
-	ExpressionMappings  map[string]string        // runtime expression → static value substitutions
-	ExtractLinks        bool                     // extract document links during global scan
-	ExtractCalls        bool                     // extract all variable.method() call sites during parsing
-	FindCalls           []string                 // function names to find call sites for
-	ScanAllScopes       bool                     // scan all lines including function bodies (for refs/deps)
-	Shallow             bool                     // minimal parse: signatures only, no refs/properties/args
+	BeanLookup          func(name string) string                     // optional: resolve bean name → dot-path
+	BuiltinReturnLookup func(name string) string                     // optional: resolve builtin function → return component
+	FuncLookup          func(component, funcName string) string      // optional: resolve method return type from external components
+	ExpressionMappings  map[string]string                            // runtime expression → static value substitutions
+	ExtractLinks        bool                                         // extract document links during global scan
+	ExtractCalls        bool                                         // extract all variable.method() call sites during parsing
+	FindCalls           []string                                     // function names to find call sites for
+	ScanAllScopes       bool                                         // scan all lines including function bodies (for refs/deps)
+	Shallow             bool                                         // minimal parse: signatures only, no refs/properties/args
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -107,6 +108,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		PropertyResolvers:   opts.PropertyResolvers,
 		BeanLookup:          opts.BeanLookup,
 		BuiltinReturnLookup: opts.BuiltinReturnLookup,
+		FuncLookup:          opts.FuncLookup,
 		expressionMappings:  opts.ExpressionMappings,
 		extractLinks:        opts.ExtractLinks,
 		extractCalls:        opts.ExtractCalls,
@@ -526,6 +528,14 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 
 						break
 					}
+				}
+			}
+
+			// If FuncLookup is available and the called method doesn't return a
+			// component type, don't propagate the base variable's component.
+			if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
+				if pr.FuncLookup(comp, c.funcName) == "" {
+					comp = "$any"
 				}
 			}
 		}

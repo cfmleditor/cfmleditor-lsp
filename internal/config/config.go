@@ -21,9 +21,10 @@ type JSON struct {
 
 // Resolver maps a call pattern to a component path.
 type Resolver struct {
-	Match   string `json:"match"`
-	Resolve string `json:"resolve"`
-	Prefix  string `json:"prefix"`
+	Match    string `json:"match"`
+	Resolve  string `json:"resolve"`
+	Prefix   string `json:"prefix"`
+	NoFollow bool   `json:"noFollow"`
 }
 
 // PropResolver maps a property attribute to a component path.

@@ -19,7 +19,7 @@ import (
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers [][3]string, propResolvers [][3]string, beanPaths map[string]string, fmtCfg config.ResolvedFormatting) error {
+func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.Index, ct *ConnTracker, folders []string, globs []string, mappings map[string]string, resolvers []config.Resolver, propResolvers [][3]string, beanPaths map[string]string, fmtCfg config.ResolvedFormatting) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}
@@ -74,9 +74,7 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 			srv.IndexGlobs = globs
 			srv.Mappings = mappings
 
-			for _, r := range resolvers {
-				srv.ComponentResolvers = append(srv.ComponentResolvers, config.Resolver{Match: r[0], Resolve: r[1], Prefix: r[2]})
-			}
+			srv.ComponentResolvers = append(srv.ComponentResolvers, resolvers...)
 
 			for _, r := range propResolvers {
 				srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: r[0], Resolve: r[1], Attribute: r[2]})

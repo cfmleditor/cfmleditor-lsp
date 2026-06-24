@@ -102,12 +102,13 @@ type Region struct {
 
 // Resolver maps a call pattern to a component path.
 type Resolver struct {
-	Match   string
-	Resolve string
-	Prefix  string
-	re      *regexp.Regexp // compiled regex, lazily initialized
-	simple  bool           // true if pattern is a plain string (no regex, no $N)
-	reOnce  sync.Once
+	Match    string
+	Resolve  string
+	Prefix   string
+	NoFollow bool           // if true, skip method verification when this resolver matches
+	re       *regexp.Regexp // compiled regex, lazily initialized
+	simple   bool           // true if pattern is a plain string (no regex, no $N)
+	reOnce   sync.Once
 	// Precomputed for simple matches
 	simplePrefix   string // part before $1
 	simpleSuffix   string // part after $1
@@ -260,8 +261,9 @@ func BuildResolverSet(resolvers []Resolver) *ResolverSet {
 	return rs
 }
 
-// ResolveFromCall matches an expression against resolvers and returns the component dot-path.
-func ResolveFromCall(expr string, resolvers []Resolver) string {
+// ResolveFromCallFull matches an expression against resolvers and returns the component dot-path
+// and whether the matching resolver has NoFollow set.
+func ResolveFromCallFull(expr string, resolvers []Resolver) (string, bool) {
 	expr = strings.TrimSpace(expr)
 
 	for i := range resolvers {
@@ -281,11 +283,18 @@ func ResolveFromCall(expr string, resolvers []Resolver) string {
 		}
 
 		if resolved := matchResolverWithCache(sub, r); resolved != "" {
-			return resolved
+			return resolved, r.NoFollow
 		}
 	}
 
-	return ""
+	return "", false
+}
+
+// ResolveFromCall matches an expression against resolvers and returns the component dot-path.
+func ResolveFromCall(expr string, resolvers []Resolver) string {
+	comp, _ := ResolveFromCallFull(expr, resolvers)
+
+	return comp
 }
 
 // Resolve matches an expression against the pre-grouped resolvers.
@@ -390,13 +399,23 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 // Quote characters (" and ') in the pattern match either quote type in the expression.
 func simpleMatch(expr string, r *Resolver) string {
 	if !r.hasPlaceholder {
-		// Exact match — also accept match() form
+		// Exact match — also accept match() or match(...) form for method-call patterns
 		if strings.EqualFold(expr, r.Match) {
 			return r.Resolve
 		}
 
-		if strings.HasSuffix(expr, "()") && strings.EqualFold(expr[:len(expr)-2], r.Match) {
-			return r.Resolve
+		if len(expr) > len(r.Match) && expr[len(r.Match)] == '(' && strings.EqualFold(expr[:len(r.Match)], r.Match) {
+			// Only allow match(...) when the pattern contains a dot (method call).
+			// Plain variable names like "document" should not match "document(args)"
+			// because prefix matching may have found it inside "createDocument(args)".
+			if strings.ContainsRune(r.Match, '.') {
+				return r.Resolve
+			}
+
+			// For patterns without a dot, only allow empty parens
+			if expr[len(r.Match)+1:] == ")" || strings.HasPrefix(expr[len(r.Match):], "()") {
+				return r.Resolve
+			}
 		}
 
 		return ""
