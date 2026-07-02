@@ -2,26 +2,25 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	json "github.com/go-json-experiment/json"
 	"path/filepath"
 	"strings"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DefinitionParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	line := int(params.Position.Line)
@@ -29,7 +28,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	docURI := params.TextDocument.URI
@@ -41,7 +40,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
 			s.log.Debug("definition: resolver arg resolved", cflog.String("component", comp))
 
-			return reply(ctx, *loc, nil)
+			return *loc, nil
 		}
 	}
 
@@ -50,7 +49,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
 			s.log.Debug("definition: component path resolved", cflog.String("path", comp), cflog.String("target", string(loc.URI)))
 
-			return reply(ctx, *loc, nil)
+			return *loc, nil
 		}
 
 		s.log.Debug("definition: component path not resolved", cflog.String("path", comp))
@@ -61,16 +60,16 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if loc := s.resolveFilePathDef(filePath, docURI); loc != nil {
 			s.log.Debug("definition: file path resolved", cflog.String("path", filePath), cflog.String("target", string(loc.URI)))
 
-			return reply(ctx, *loc, nil)
+			return *loc, nil
 		}
 		// Cursor is inside a file path — don't fall through to word-based lookup
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Check if cursor is inside a <cfinvoke> method attribute
 	if comp := parser.CfInvokeComponentAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
-			return reply(ctx, *loc, nil)
+			return *loc, nil
 		}
 	}
 
@@ -79,15 +78,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
 
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
-			return reply(ctx, protocol.Location{
+			return protocol.Location{
 				URI:   def.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: def.Line}, End: protocol.Position{Line: def.Line}},
-			}, nil)
+			}, nil
 		}
 
 		// Qualified call that can't be resolved — fall through to all matches
 		if !s.GlobalFunctionResolution {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		defs := s.index.Lookup(word)
@@ -105,14 +104,14 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 
 		if len(locations) == 1 {
-			return reply(ctx, locations[0], nil)
+			return locations[0], nil
 		}
 
 		if len(locations) > 1 {
-			return reply(ctx, locations, nil)
+			return locations, nil
 		}
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// No qualifier — prefer current file's definition
@@ -120,25 +119,25 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 	for _, d := range defs {
 		if d.URI == docURI {
-			return reply(ctx, protocol.Location{
+			return protocol.Location{
 				URI:   d.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
-			}, nil)
+			}, nil
 		}
 	}
 
 	// Check extends chain of current file
 	if loc := s.resolveSuper(word, docURI); loc != nil {
-		return reply(ctx, *loc, nil)
+		return *loc, nil
 	}
 
 	if len(defs) == 0 {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Not in current file — only return if global resolution is enabled
 	if !s.GlobalFunctionResolution {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	var locations []protocol.Location
@@ -150,10 +149,10 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	if len(locations) == 1 {
-		return reply(ctx, locations[0], nil)
+		return locations[0], nil
 	}
 
-	return reply(ctx, locations, nil)
+	return locations, nil
 }
 
 // func (s *Server) resolveQualifiedDef(qualifier, funcName string, docURI uri.URI, line uint32) *protocol.Location {
@@ -279,4 +278,3 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 
 	return nil
 }
-

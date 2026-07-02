@@ -18,17 +18,12 @@ func TestExecuteCommandScanWorkspace(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{dir}
 
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.scanWorkspace",
 	})
 
-	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
+	if _, err := srv.handleExecuteCommand(context.Background(), req); err != nil {
 		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
 	}
 }
 
@@ -52,8 +47,8 @@ func TestCollectErrorDiagnostics(t *testing.T) {
 			t.Errorf("expected error severity, got %v", d.Severity)
 		}
 
-		if d.Source != "cfmleditor" {
-			t.Errorf("expected source 'cfmleditor', got %q", d.Source)
+		if src, _ := d.Source.Get(); src != "cfmleditor" {
+			t.Errorf("expected source 'cfmleditor', got %q", src)
 		}
 	}
 }

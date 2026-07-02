@@ -2,26 +2,25 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	json "github.com/go-json-experiment/json"
 	"strings"
 
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
-func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DocumentOnTypeFormattingParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	if params.Ch != ">" {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	line := int(params.Position.Line)
@@ -29,7 +28,7 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 
 	lines := strings.SplitAfter(content, "\n")
 	if line >= len(lines) {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	lineText := lines[line]
@@ -39,7 +38,7 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 
 	idx := strings.IndexByte(rest, '>')
 	if idx == -1 {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	// Verify we're inside a tag.
@@ -47,18 +46,18 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 
 	openIdx := strings.LastIndexByte(before, '<')
 	if openIdx == -1 {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	if strings.ContainsRune(lineText[openIdx:char-1], '>') {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	middle := rest[:idx]
 
 	// Only act if the content between typed '>' and existing '>' is whitespace-only.
 	if strings.TrimSpace(middle) != "" {
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	// Remove the typed '>' and the whitespace and the original '>'.
@@ -72,5 +71,5 @@ func (s *Server) handleOnTypeFormatting(ctx context.Context, reply jsonrpc2.Repl
 		NewText: ">",
 	}}
 
-	return reply(ctx, edits, nil)
+	return edits, nil
 }

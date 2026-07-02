@@ -64,7 +64,6 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 // definitionAt calls handleDefinition and returns the result.
 func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) any {
 	t.Helper()
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -72,15 +71,12 @@ func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) 
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
+	result, err := srv.handleDefinition(context.Background(), req)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	return *result
+	return result
 }
 
 func assertLocationFile(t *testing.T, result any, expectedFile string) protocol.Location {

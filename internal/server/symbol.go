@@ -2,18 +2,17 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	json "github.com/go-json-experiment/json"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
-func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDocumentSymbol(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DocumentSymbolParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	docURI := params.TextDocument.URI
@@ -28,7 +27,7 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 	} else {
 		content, ok := s.getDocument(docURI)
 		if !ok {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		defs = parser.ParseFunctionDefs(docURI, content)
@@ -49,13 +48,13 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 		})
 	}
 
-	return reply(ctx, symbols, nil)
+	return symbols, nil
 }
 
-func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.WorkspaceSymbolParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	query := strings.ToLower(params.Query)
@@ -67,8 +66,10 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 		}
 
 		symbols = append(symbols, protocol.SymbolInformation{
-			Name: d.Name,
-			Kind: protocol.SymbolKindFunction,
+			BaseSymbolInformation: protocol.BaseSymbolInformation{
+				Name: d.Name,
+				Kind: protocol.SymbolKindFunction,
+			},
 			Location: protocol.Location{
 				URI: d.URI,
 				Range: protocol.Range{
@@ -79,7 +80,7 @@ func (s *Server) handleWorkspaceSymbol(ctx context.Context, reply jsonrpc2.Repli
 		})
 	}
 
-	return reply(ctx, symbols, nil)
+	return symbols, nil
 }
 
 // containsFoldStr reports whether s contains substr (case-insensitive, ASCII).

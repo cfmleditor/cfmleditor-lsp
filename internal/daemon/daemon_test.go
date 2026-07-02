@@ -137,8 +137,8 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 
 	stream := jsonrpc2.NewStream(conn)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error { //nolint:revive // req required by handler signature
-		return reply(ctx, nil, nil)
+	rpc.Go(ctx, func(ctx context.Context, req *jsonrpc2.Request) (any, error) { //nolint:revive // req required by handler signature
+		return nil, nil
 	})
 
 	var result json.RawMessage
@@ -308,8 +308,8 @@ func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2
 
 	stream := jsonrpc2.NewStream(c)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error { //nolint:revive // req required by handler signature
-		return reply(ctx, nil, nil)
+	rpc.Go(ctx, func(ctx context.Context, req *jsonrpc2.Request) (any, error) { //nolint:revive // req required by handler signature
+		return nil, nil
 	})
 
 	return c, rpc

@@ -1,21 +1,18 @@
 module github.com/cfmleditor/cfmleditor-lsp
 
-go 1.26
+go 1.26.4
 
 require (
 	github.com/cfmleditor/tree-sitter-cfml v0.26.29
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/tree-sitter/go-tree-sitter v0.25.0
-	go.lsp.dev/jsonrpc2 v0.10.0
-	go.lsp.dev/protocol v0.12.0
-	go.lsp.dev/uri v0.3.0
+	go.lsp.dev/jsonrpc2 v1.0.1
+	go.lsp.dev/protocol v1.0.1
+	go.lsp.dev/uri v1.0.1
 	go.uber.org/zap v1.28.0
 )
 
 require (
 	github.com/mattn/go-pointer v0.0.1 // indirect
-	github.com/segmentio/asm v1.2.1 // indirect
-	github.com/segmentio/encoding v0.5.4 // indirect
-	go.lsp.dev/pkg v0.0.0-20210717090340-384b27a52fb2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 )

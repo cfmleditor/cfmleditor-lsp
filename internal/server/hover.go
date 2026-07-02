@@ -2,27 +2,26 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	json "github.com/go-json-experiment/json"
 	"path/filepath"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.HoverParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	line := int(params.Position.Line)
@@ -30,7 +29,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Builtin function
@@ -38,37 +37,37 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	docURI := params.TextDocument.URI
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
-			return reply(ctx, &protocol.Hover{
-				Contents: protocol.MarkupContent{
-					Kind:  protocol.Markdown,
+			return &protocol.Hover{
+				Contents: &protocol.MarkupContent{
+					Kind:  protocol.MarkupKindMarkdown,
 					Value: def.FormatHover(),
 				},
-			}, nil)
+			}, nil
 		}
 
 		if !s.GlobalFunctionResolution {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 	}
 
 	// Builtin function
 	if e, ok := docs.LookupFunction(word); ok {
-		return reply(ctx, &protocol.Hover{
-			Contents: protocol.MarkupContent{
-				Kind:  protocol.Markdown,
+		return &protocol.Hover{
+			Contents: &protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
 				Value: fmt.Sprintf("**%s**\n\n```cfml\n%s\n```\n\n%s", e.Name, e.Syntax, e.Doc()),
 			},
-		}, nil)
+		}, nil
 	}
 
 	// Builtin tag
 	if e, ok := docs.LookupTag(word); ok {
-		return reply(ctx, &protocol.Hover{
-			Contents: protocol.MarkupContent{
-				Kind:  protocol.Markdown,
+		return &protocol.Hover{
+			Contents: &protocol.MarkupContent{
+				Kind:  protocol.MarkupKindMarkdown,
 				Value: fmt.Sprintf("**<%s>**\n\n%s", e.Name, e.Doc()),
 			},
-		}, nil)
+		}, nil
 	}
 
 	// User-defined function in current file or index (unqualified)
@@ -90,16 +89,16 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}
 
 		if def != nil {
-			return reply(ctx, &protocol.Hover{
-				Contents: protocol.MarkupContent{
-					Kind:  protocol.Markdown,
+			return &protocol.Hover{
+				Contents: &protocol.MarkupContent{
+					Kind:  protocol.MarkupKindMarkdown,
 					Value: def.FormatHover(),
 				},
-			}, nil)
+			}, nil
 		}
 	}
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
 func (s *Server) resolveUserFunc(qualifier, funcName string, docURI uri.URI, line uint32) *parser.FunctionDef {

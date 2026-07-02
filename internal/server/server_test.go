@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	json "github.com/go-json-experiment/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -26,54 +25,77 @@ func newTestServer() *Server {
 	return NewServer(nil, cflog.NewLogger(false))
 }
 
-func makeCall(t *testing.T, method string, params any) jsonrpc2.Request {
+func makeCall(t *testing.T, _ string, params any) []byte {
 	t.Helper()
 
-	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), method, params)
+	b, err := json.Marshal(params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return req
+	return b
 }
 
-func captureReply(t *testing.T) (jsonrpc2.Replier, *any, *error) {
-	t.Helper()
+func strPtr(s string) *string { return &s }
 
-	var result any
+func optVal(o protocol.Optional[string]) string {
+	v, _ := o.Get()
 
-	var replyErr error
+	return v
+}
 
-	replier := func(_ context.Context, res any, err error) error {
-		result = res
-		replyErr = err
+func nullVal[T any](n protocol.Nullable[T]) T {
+	v, _ := n.Get()
 
-		return nil
+	return v
+}
+
+func strVal(s *string) string {
+	if s == nil {
+		return ""
 	}
 
-	return replier, &result, &replyErr
+	return *s
+}
+
+func textEdit(t *testing.T, ce protocol.CompletionItemTextEdit) *protocol.TextEdit {
+	t.Helper()
+
+	te, ok := ce.(*protocol.TextEdit)
+	if !ok {
+		t.Fatalf("expected *protocol.TextEdit, got %T", ce)
+	}
+
+	return te
+}
+
+func markupContent(t *testing.T, hc protocol.HoverContents) *protocol.MarkupContent {
+	t.Helper()
+
+	mc, ok := hc.(*protocol.MarkupContent)
+	if !ok {
+		t.Fatalf("expected *protocol.MarkupContent, got %T", hc)
+	}
+
+	return mc
 }
 
 func TestHandleInitialize(t *testing.T) {
 	srv := newTestServer()
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodInitialize, protocol.InitializeParams{})
 
-	if err := srv.handleInitialize(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	result, replyErr := srv.handleInitialize(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	if !srv.initialized {
 		t.Error("expected server to be initialized")
 	}
 
-	res, ok := (*result).(protocol.InitializeResult)
+	res, ok := (result).(protocol.InitializeResult)
 	if !ok {
-		t.Fatalf("expected InitializeResult, got %T", *result)
+		t.Fatalf("expected InitializeResult, got %T", result)
 	}
 
 	if res.ServerInfo.Name != "cfmleditor-lsp" {
@@ -87,7 +109,6 @@ func TestHandleInitialize(t *testing.T) {
 
 func TestHandleDidOpen(t *testing.T) {
 	srv := newTestServer()
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:  "file:///test.cfm",
@@ -95,12 +116,9 @@ func TestHandleDidOpen(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDidOpen(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidOpen(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	content, ok := srv.getDocument(uri.URI("file:///test.cfm"))
@@ -117,22 +135,18 @@ func TestHandleDidChange(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "old content")
 
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidChange, protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 		},
 		ContentChanges: []protocol.TextDocumentContentChangeEvent{
-			{Text: "new content"},
+			&protocol.TextDocumentContentChangeWholeDocument{Text: "new content"},
 		},
 	})
 
-	if err := srv.handleDidChange(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidChange(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	content, _ := srv.getDocument(uri.URI("file:///test.cfm"))
@@ -148,17 +162,13 @@ func TestHandleDidClose(t *testing.T) {
 	srv.setDocument(cfcURI, cfcContent)
 	srv.index.IndexFile(cfcURI, cfcContent)
 
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
 	})
 
-	if err := srv.handleDidClose(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidClose(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	if _, ok := srv.getDocument(cfcURI); ok {
@@ -172,23 +182,19 @@ func TestHandleDidClose(t *testing.T) {
 
 func TestCompletionTriggeredByTag(t *testing.T) {
 	srv := newTestServer()
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: "<",
+			TriggerCharacter: strPtr("<"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) == 0 {
 		t.Fatal("expected tag completions")
 	}
@@ -221,26 +227,22 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</cfoutput>\n<")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 1, Character: 1},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) == 0 {
 		t.Fatal("expected tag completions when cursor is after < with Invoked trigger")
 	}
@@ -262,22 +264,18 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 
 func TestCompletionTriggeredByTyping(t *testing.T) {
 	srv := newTestServer()
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) == 0 {
 		t.Fatal("expected function completions")
 	}
@@ -291,18 +289,14 @@ func TestCompletionTriggeredByTyping(t *testing.T) {
 
 func TestCompletionWithNilContext(t *testing.T) {
 	srv := newTestServer()
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	for _, item := range list.Items {
 		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("nil context should return functions, got kind %v for %s", item.Kind, item.Label)
@@ -314,27 +308,23 @@ func TestCompletionTagAttributes(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfquery ")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 9},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: " ",
+			TriggerCharacter: strPtr(" "),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) == 0 {
 		t.Fatal("expected attribute completions for cfquery")
 	}
@@ -364,26 +354,22 @@ func TestCompletionTagAttributesMultiline(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfloop\n  ")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 1, Character: 2},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) == 0 {
 		t.Fatal("expected attribute completions for cfloop")
 	}
@@ -406,24 +392,20 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 		srv := newTestServer()
 		srv.setDocument(uri.URI("file:///test.cfm"), tc.doc)
 
-		reply, result, replyErr := captureReply(t)
 		req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 				Position:     tc.pos,
 			},
-			Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+			Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 		})
 
-		if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-			t.Fatalf("%s: %v", tc.doc, err)
+		result, replyErr := srv.handleCompletion(context.Background(), req)
+		if replyErr != nil {
+			t.Fatalf("%s: %v", tc.doc, replyErr)
 		}
 
-		if *replyErr != nil {
-			t.Fatalf("%s: %v", tc.doc, *replyErr)
-		}
-
-		list := completionListFromResult(t, *result)
+		list := completionListFromResult(t, result)
 		if len(list.Items) == 0 {
 			t.Fatalf("%s: expected function completions", tc.doc)
 		}
@@ -440,24 +422,20 @@ func TestCompletionCfElseOffersIf(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfelse ")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 8},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
@@ -471,12 +449,12 @@ func TestCompletionCfElseOffersIf(t *testing.T) {
 		t.Fatal("expected TextEdit to be set")
 	}
 
-	if item.TextEdit.Range.Start.Character != 0 {
-		t.Errorf("expected start char 0, got %d", item.TextEdit.Range.Start.Character)
+	if textEdit(t, item.TextEdit).Range.Start.Character != 0 {
+		t.Errorf("expected start char 0, got %d", textEdit(t, item.TextEdit).Range.Start.Character)
 	}
 
-	if item.TextEdit.NewText != "<cfelseif $1" {
-		t.Errorf("expected NewText '<cfelseif $1', got %q", item.TextEdit.NewText)
+	if textEdit(t, item.TextEdit).NewText != "<cfelseif $1" {
+		t.Errorf("expected NewText '<cfelseif $1', got %q", textEdit(t, item.TextEdit).NewText)
 	}
 }
 
@@ -484,26 +462,22 @@ func TestCompletionAfterClosedTag(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 15},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	for _, item := range list.Items {
 		if item.Kind != protocol.CompletionItemKindFunction && item.Kind != protocol.CompletionItemKindKeyword {
 			t.Errorf("after closed tag should return functions, got kind %v for %s", item.Kind, item.Label)
@@ -515,27 +489,23 @@ func TestCompletionClosingTag(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 17},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: "/",
+			TriggerCharacter: strPtr("/"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 closing tag, got %d", len(list.Items))
 	}
@@ -544,8 +514,8 @@ func TestCompletionClosingTag(t *testing.T) {
 		t.Errorf("expected cfoutput, got %s", list.Items[0].Label)
 	}
 
-	if list.Items[0].InsertText != "cfoutput>" {
-		t.Errorf("expected insert text 'cfoutput>', got %s", list.Items[0].InsertText)
+	if optVal(list.Items[0].InsertText) != "cfoutput>" {
+		t.Errorf("expected insert text 'cfoutput>', got %s", optVal(list.Items[0].InsertText))
 	}
 }
 
@@ -553,27 +523,23 @@ func TestCompletionClosingTagNested(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput><cfloop query=\"q\">hello</")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 36},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: "/",
+			TriggerCharacter: strPtr("/"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 2 {
 		t.Fatalf("expected 2 closing tags, got %d", len(list.Items))
 	}
@@ -591,27 +557,23 @@ func TestCompletionClosingTagAlreadyClosed(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</cfoutput></")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 28},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: "/",
+			TriggerCharacter: strPtr("/"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 0 {
 		t.Errorf("expected no closing tags, got %d", len(list.Items))
 	}
@@ -723,7 +685,6 @@ func TestDefinitionLookup(t *testing.T) {
 	srv.setDocument(callerURI, callerContent)
 	srv.index.IndexFile(callerURI, callerContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
@@ -731,17 +692,14 @@ func TestDefinitionLookup(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "User.cfc") {
@@ -757,7 +715,6 @@ func TestDefinitionNotFound(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = noSuchFunc()>")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
@@ -765,16 +722,13 @@ func TestDefinitionNotFound(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result != nil {
-		t.Errorf("expected nil result for unknown function, got %v", *result)
+	if result != nil {
+		t.Errorf("expected nil result for unknown function, got %v", result)
 	}
 }
 
@@ -834,22 +788,18 @@ function saveUser() {
 </cfcomponent>`
 	srv.setDocument(uri.URI("file:///app/User.cfc"), content)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentSymbol, protocol.DocumentSymbolParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///app/User.cfc"},
 	})
 
-	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDocumentSymbol(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	symbols, ok := (*result).([]protocol.DocumentSymbol)
+	symbols, ok := (result).([]protocol.DocumentSymbol)
 	if !ok {
-		t.Fatalf("expected []DocumentSymbol, got %T", *result)
+		t.Fatalf("expected []DocumentSymbol, got %T", result)
 	}
 
 	if len(symbols) != 2 {
@@ -870,20 +820,16 @@ func TestWorkspaceSymbol(t *testing.T) {
 	srv.index.IndexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
 	srv.index.IndexFile("file:///app/Order.cfc", "component {\nfunction getOrder() {}\n}")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "get"})
 
-	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleWorkspaceSymbol(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	symbols, ok := (*result).([]protocol.SymbolInformation)
+	symbols, ok := (result).([]protocol.SymbolInformation)
 	if !ok {
-		t.Fatalf("expected []SymbolInformation, got %T", *result)
+		t.Fatalf("expected []SymbolInformation, got %T", result)
 	}
 
 	if len(symbols) != 2 {
@@ -901,20 +847,16 @@ func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	srv := newTestServer()
 	srv.index.IndexFile("file:///app/User.cfc", "component {\nfunction getUser() {}\nfunction deleteUser() {}\n}")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: ""})
 
-	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleWorkspaceSymbol(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	symbols, ok := (*result).([]protocol.SymbolInformation)
+	symbols, ok := (result).([]protocol.SymbolInformation)
 	if !ok {
-		t.Fatalf("expected []SymbolInformation, got %T", *result)
+		t.Fatalf("expected []SymbolInformation, got %T", result)
 	}
 
 	if len(symbols) != 2 {
@@ -926,7 +868,6 @@ func TestHoverFunction(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = Len(y)>")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
@@ -934,25 +875,22 @@ func TestHoverFunction(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleHover(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleHover(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok {
-		t.Fatalf("expected *Hover, got %T", *result)
+		t.Fatalf("expected *Hover, got %T", result)
 	}
 
-	if !strings.Contains(strings.ToLower(hover.Contents.Value), "len") {
-		t.Errorf("expected hover to contain 'len', got %s", hover.Contents.Value)
+	if !strings.Contains(strings.ToLower(markupContent(t, hover.Contents).Value), "len") {
+		t.Errorf("expected hover to contain 'len', got %s", markupContent(t, hover.Contents).Value)
 	}
 
-	if hover.Contents.Kind != protocol.Markdown {
-		t.Errorf("expected markdown, got %s", hover.Contents.Kind)
+	if markupContent(t, hover.Contents).Kind != protocol.MarkupKindMarkdown {
+		t.Errorf("expected markdown, got %s", markupContent(t, hover.Contents).Kind)
 	}
 }
 
@@ -960,7 +898,6 @@ func TestHoverTag(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfquery name=\"q\">")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
@@ -968,21 +905,18 @@ func TestHoverTag(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleHover(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleHover(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok {
-		t.Fatalf("expected *Hover, got %T", *result)
+		t.Fatalf("expected *Hover, got %T", result)
 	}
 
-	if !strings.Contains(hover.Contents.Value, "cfquery") {
-		t.Errorf("expected hover to contain 'cfquery', got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "cfquery") {
+		t.Errorf("expected hover to contain 'cfquery', got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -990,7 +924,6 @@ func TestHoverUnknown(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "myCustomVar")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
@@ -998,16 +931,13 @@ func TestHoverUnknown(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleHover(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleHover(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result != nil {
-		t.Errorf("expected nil for unknown word, got %v", *result)
+	if result != nil {
+		t.Errorf("expected nil for unknown word, got %v", result)
 	}
 }
 
@@ -1140,19 +1070,15 @@ func TestDidChangeWorkspaceFoldersAdd(t *testing.T) {
 	_ = os.WriteFile(cfcPath, []byte("component {\nfunction addedFunc() {}\n}"), 0o644)
 
 	srv := newTestServer()
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
 		Event: protocol.WorkspaceFoldersChangeEvent{
-			Added: []protocol.WorkspaceFolder{{URI: "file://" + dir, Name: "added"}},
+			Added: []protocol.WorkspaceFolder{{URI: uri.URI("file://" + dir), Name: "added"}},
 		},
 	})
 
-	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidChangeWorkspaceFolders(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	if defs := srv.index.Lookup("addedFunc"); len(defs) != 1 {
@@ -1166,19 +1092,15 @@ func TestDidChangeWorkspaceFoldersRemove(t *testing.T) {
 	srv.index.IndexFile("file:///workspace/B/Other.cfc", "component {\nfunction otherFunc() {}\n}")
 	srv.workspaceRoots = []string{"/workspace/A", "/workspace/B"}
 
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
 		Event: protocol.WorkspaceFoldersChangeEvent{
 			Removed: []protocol.WorkspaceFolder{{URI: "file:///workspace/A", Name: "A"}},
 		},
 	})
 
-	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidChangeWorkspaceFolders(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	if defs := srv.index.Lookup("svcFunc"); len(defs) != 0 {
@@ -1217,7 +1139,6 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 	srv.index.IndexFile("file:///workspace/App.cfc", "component {\nfunction appFunc() {}\n}")
 	srv.workspaceRoots = []string{"/shared/lib", "/workspace"}
 
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceDidChangeWorkspaceFolders, protocol.DidChangeWorkspaceFoldersParams{
 		Event: protocol.WorkspaceFoldersChangeEvent{
 			Removed: []protocol.WorkspaceFolder{
@@ -1227,12 +1148,9 @@ func TestDidChangeWorkspaceFoldersRemoveProtectsWorkspaceFolders(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDidChangeWorkspaceFolders(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidChangeWorkspaceFolders(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
 	if defs := srv.index.Lookup("sharedUtil"); len(defs) != 1 {
@@ -1249,24 +1167,20 @@ func TestOnTypeFormattingRemovesDuplicateClose(t *testing.T) {
 	// User typed '>' before existing '>'. Doc now has '>>' at indices 21-22. Cursor at 22.
 	srv.setDocument(uri.URI("file:///test.cfm"), `<cfoutput name="test">>hello</cfoutput>`)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 		Position:     protocol.Position{Line: 0, Character: 22}, // after the typed '>'
 		Ch:           ">",
 	})
 
-	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleOnTypeFormatting(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	edits, ok := (*result).([]protocol.TextEdit)
+	edits, ok := (result).([]protocol.TextEdit)
 	if !ok {
-		t.Fatalf("expected []TextEdit, got %T", *result)
+		t.Fatalf("expected []TextEdit, got %T", result)
 	}
 
 	if len(edits) != 1 {
@@ -1287,24 +1201,20 @@ func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
 	// User typed '>' with only whitespace before existing '>'. Doc: "<cfif>  >"
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif>  >")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 		Position:     protocol.Position{Line: 0, Character: 6},
 		Ch:           ">",
 	})
 
-	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleOnTypeFormatting(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	edits, ok := (*result).([]protocol.TextEdit)
+	edits, ok := (result).([]protocol.TextEdit)
 	if !ok {
-		t.Fatalf("expected []TextEdit, got %T", *result)
+		t.Fatalf("expected []TextEdit, got %T", result)
 	}
 
 	if len(edits) != 1 {
@@ -1325,24 +1235,20 @@ func TestOnTypeFormattingNoOpNonWhitespace(t *testing.T) {
 	// Non-whitespace between typed '>' and existing '>': should not act.
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif> true>")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 		Position:     protocol.Position{Line: 0, Character: 6},
 		Ch:           ">",
 	})
 
-	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleOnTypeFormatting(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	edits, ok := (*result).([]protocol.TextEdit)
+	edits, ok := (result).([]protocol.TextEdit)
 	if !ok {
-		t.Fatalf("expected []TextEdit, got %T", *result)
+		t.Fatalf("expected []TextEdit, got %T", result)
 	}
 
 	if len(edits) != 0 {
@@ -1355,27 +1261,23 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 	// User typed '>' mid-tag with non-whitespace after. Doc: "<cfif> true>"
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif> true>")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 6},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ">",
+			TriggerCharacter: strPtr(">"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
@@ -1389,8 +1291,8 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 		t.Fatal("expected TextEdit")
 	}
 
-	if item.TextEdit.NewText != " true>" {
-		t.Errorf("expected NewText ' true>', got %q", item.TextEdit.NewText)
+	if textEdit(t, item.TextEdit).NewText != " true>" {
+		t.Errorf("expected NewText ' true>', got %q", textEdit(t, item.TextEdit).NewText)
 	}
 }
 
@@ -1399,46 +1301,42 @@ func TestCompletionDuplicateGtAfterTag(t *testing.T) {
 	// User typed '>' after existing '>'. Doc: "<cfif test>></cfif>", cursor at 12.
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif test>></cfif>")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ">",
+			TriggerCharacter: strPtr(">"),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(list.Items))
 	}
 
 	item := list.Items[0]
-	if item.Detail != "Remove duplicate >" {
-		t.Errorf("expected detail 'Remove duplicate >', got %q", item.Detail)
+	if optVal(item.Detail) != "Remove duplicate >" {
+		t.Errorf("expected detail 'Remove duplicate >', got %q", optVal(item.Detail))
 	}
 
 	if item.TextEdit == nil {
 		t.Fatal("expected TextEdit")
 	}
 
-	if item.TextEdit.NewText != "" {
-		t.Errorf("expected empty NewText, got %q", item.TextEdit.NewText)
+	if textEdit(t, item.TextEdit).NewText != "" {
+		t.Errorf("expected empty NewText, got %q", textEdit(t, item.TextEdit).NewText)
 	}
 
-	if item.TextEdit.Range.Start.Character != 11 || item.TextEdit.Range.End.Character != 12 {
-		t.Errorf("expected range [11,12), got [%d,%d)", item.TextEdit.Range.Start.Character, item.TextEdit.Range.End.Character)
+	if textEdit(t, item.TextEdit).Range.Start.Character != 11 || textEdit(t, item.TextEdit).Range.End.Character != 12 {
+		t.Errorf("expected range [11,12), got [%d,%d)", textEdit(t, item.TextEdit).Range.Start.Character, textEdit(t, item.TextEdit).Range.End.Character)
 	}
 }
 
@@ -1447,24 +1345,20 @@ func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
 	// Document after user typed '>': the '>' at index 21 is the one they typed, cursor at 22.
 	srv.setDocument(uri.URI("file:///test.cfm"), `<cfoutput name="test">hello</cfoutput>`)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentOnTypeFormatting, protocol.DocumentOnTypeFormattingParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 		Position:     protocol.Position{Line: 0, Character: 22}, // after the '>'
 		Ch:           ">",
 	})
 
-	if err := srv.handleOnTypeFormatting(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleOnTypeFormatting(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	edits, ok := (*result).([]protocol.TextEdit)
+	edits, ok := (result).([]protocol.TextEdit)
 	if !ok {
-		t.Fatalf("expected []TextEdit, got %T", *result)
+		t.Fatalf("expected []TextEdit, got %T", result)
 	}
 
 	if len(edits) != 0 {
@@ -1488,27 +1382,23 @@ func TestCompletionDotComponentMethods(t *testing.T) {
 	// Index the document so the compref is stored
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 2 {
 		t.Fatalf("expected 2 method completions, got %d", len(list.Items))
 	}
@@ -1541,27 +1431,23 @@ func TestCompletionDotPositionAware(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 6}, // after "myObj." on line 3
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 {
 		t.Fatalf("expected 1 method (getTotal), got %d: %v", len(list.Items), list.Items)
 	}
@@ -1592,27 +1478,23 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 8, Character: 17}, // after "persist."
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 2 {
 		labels := make([]string, len(list.Items))
 		for i, item := range list.Items {
@@ -1642,7 +1524,6 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1650,21 +1531,18 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "persist.cfc") {
@@ -1682,7 +1560,6 @@ func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1690,21 +1567,18 @@ func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
@@ -1723,7 +1597,6 @@ func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1731,21 +1604,18 @@ func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "User.cfc") {
@@ -1762,7 +1632,6 @@ func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
 	docContent := `<cfinvoke component="Widget" method="render">`
 	srv.setDocument(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1770,21 +1639,18 @@ func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
@@ -1806,7 +1672,6 @@ function generateID() {
 	srv.setDocument(cfcURI, cfcContent)
 	srv.index.IndexFile(cfcURI, cfcContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
@@ -1814,21 +1679,18 @@ function generateID() {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.URI != cfcURI {
@@ -1857,7 +1719,6 @@ func TestDefinitionComponentResolver(t *testing.T) {
 	pr := parser.Parse(docURI, docContent, srv.cfResolvers())
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1865,21 +1726,18 @@ func TestDefinitionComponentResolver(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "service.cfc") {
@@ -1904,7 +1762,6 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 	srv.setDocument(callerURI, callerContent)
 	srv.index.IndexFile(callerURI, callerContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
@@ -1912,21 +1769,18 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 	// Should resolve to Service1 specifically
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location (resolved to specific CFC), got %T", *result)
+		t.Fatalf("expected Location (resolved to specific CFC), got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "Service1.cfc") {
@@ -1944,7 +1798,6 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 	srv.setDocument(currentURI, currentContent)
 	srv.index.IndexFile(currentURI, currentContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: currentURI},
@@ -1952,17 +1805,14 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.URI != currentURI {
@@ -1987,7 +1837,6 @@ func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
 	// Also index a doStuff in the current file to verify it's excluded for qualified calls
 	srv.index.IndexFile(uri.URI("file://"+filepath.Join(dir, "caller.cfc")), docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -1995,21 +1844,18 @@ func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "Helper.cfc") {
@@ -2027,7 +1873,6 @@ func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
 	docContent := `<cfinvoke component="models.Widget" method="render">`
 	srv.setDocument(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2035,21 +1880,18 @@ func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "Widget.cfc") {
@@ -2071,7 +1913,6 @@ func TestDefinitionTagFunctionLookup(t *testing.T) {
 	srv.setDocument(cfcURI, cfcContent)
 	srv.index.IndexFile(cfcURI, cfcContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: cfcURI},
@@ -2079,21 +1920,18 @@ func TestDefinitionTagFunctionLookup(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.Range.Start.Line != 1 {
@@ -2115,7 +1953,6 @@ func TestDefinitionMappingResolution(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2123,21 +1960,18 @@ func TestDefinitionMappingResolution(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "User.cfc") {
@@ -2159,7 +1993,6 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 	srv.setDocument(callerURI, callerContent)
 	srv.index.IndexFile(callerURI, callerContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
@@ -2167,21 +2000,18 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.URI != cfcURI {
@@ -2201,26 +2031,22 @@ func TestCompletionDotInvokedTrigger(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8}, // after "userObj."
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	if len(list.Items) != 1 || list.Items[0].Label != "getName" {
 		labels := make([]string, len(list.Items))
 		for i, item := range list.Items {
@@ -2246,27 +2072,23 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 	docContent := `<cfset result = getService("tours").`
 	srv.setDocument(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 36},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	found := false
 
 	for _, item := range list.Items {
@@ -2306,7 +2128,6 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	srv.mu.Unlock()
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2314,17 +2135,14 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	help, ok := (*result).(*protocol.SignatureHelp)
+	help, ok := (result).(*protocol.SignatureHelp)
 	if !ok || help == nil {
-		t.Fatalf("expected *SignatureHelp, got %T", *result)
+		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
 
 	if len(help.Signatures) == 0 {
@@ -2349,7 +2167,6 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2357,25 +2174,22 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleHover(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleHover(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
-		t.Fatalf("expected *Hover, got %T", *result)
+		t.Fatalf("expected *Hover, got %T", result)
 	}
 
-	if !strings.Contains(hover.Contents.Value, "getName") {
-		t.Errorf("expected hover to contain 'getName', got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "getName") {
+		t.Errorf("expected hover to contain 'getName', got %s", markupContent(t, hover.Contents).Value)
 	}
 
-	if !strings.Contains(hover.Contents.Value, "id") {
-		t.Errorf("expected hover to contain parameter 'id', got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "id") {
+		t.Errorf("expected hover to contain parameter 'id', got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -2394,7 +2208,6 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 	docContent := `<cfset result = getService("tours").getParameters(`
 	srv.setDocument(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2402,17 +2215,14 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	help, ok := (*result).(*protocol.SignatureHelp)
+	help, ok := (result).(*protocol.SignatureHelp)
 	if !ok || help == nil {
-		t.Fatalf("expected *SignatureHelp, got %T", *result)
+		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
 
 	if len(help.Signatures) == 0 {
@@ -2429,7 +2239,6 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, ")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2437,17 +2246,14 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleSignatureHelp(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	help, ok := (*result).(*protocol.SignatureHelp)
+	help, ok := (result).(*protocol.SignatureHelp)
 	if !ok || help == nil {
-		t.Fatalf("expected *SignatureHelp, got %T", *result)
+		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
 
 	if len(help.Signatures) == 0 {
@@ -2458,8 +2264,8 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 		t.Errorf("expected label to contain arrayAppend, got %s", help.Signatures[0].Label)
 	}
 
-	if help.ActiveParameter != 1 {
-		t.Errorf("expected activeParam=1 (after comma), got %d", help.ActiveParameter)
+	if nullVal(help.ActiveParameter) != 1 {
+		t.Errorf("expected activeParam=1 (after comma), got %d", nullVal(help.ActiveParameter))
 	}
 }
 
@@ -2468,7 +2274,6 @@ func TestSignatureHelpNoContext(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = 123>")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2476,10 +2281,10 @@ func TestSignatureHelpNoContext(t *testing.T) {
 		},
 	})
 
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	if *result != nil {
-		t.Errorf("expected nil result outside function call, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil result outside function call, got %T", result)
 	}
 }
 
@@ -2504,7 +2309,6 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	srv.mu.Unlock()
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -2512,25 +2316,22 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleHover(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleHover(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
-		t.Fatalf("expected *Hover, got %T", *result)
+		t.Fatalf("expected *Hover, got %T", result)
 	}
 
-	if !strings.Contains(hover.Contents.Value, "getYearGroups") {
-		t.Errorf("expected hover to contain 'getYearGroups', got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "getYearGroups") {
+		t.Errorf("expected hover to contain 'getYearGroups', got %s", markupContent(t, hover.Contents).Value)
 	}
 
-	if !strings.Contains(hover.Contents.Value, "companyCode") {
-		t.Errorf("expected hover to contain 'companyCode', got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "companyCode") {
+		t.Errorf("expected hover to contain 'companyCode', got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -2545,51 +2346,43 @@ func TestDocumentLinkResolve(t *testing.T) {
 	srv.setDocument(docURI, `<cfinclude template="header.cfm">`)
 
 	// Test documentLink request
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 
-	if err := srv.handleDocumentLink(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDocumentLink(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	links, ok := (*result).([]protocol.DocumentLink)
+	links, ok := (result).([]protocol.DocumentLink)
 	if !ok || len(links) == 0 {
 		t.Fatal("expected at least one document link")
 	}
 
-	if links[0].Tooltip != "header.cfm" {
-		t.Errorf("expected tooltip 'header.cfm', got %q", links[0].Tooltip)
+	if strVal(links[0].Tooltip) != "header.cfm" {
+		t.Errorf("expected tooltip 'header.cfm', got %q", strVal(links[0].Tooltip))
 	}
 
 	// Test resolve
-	reply2, result2, replyErr2 := captureReply(t)
 	resolveReq := makeCall(t, protocol.MethodDocumentLinkResolve, links[0])
 
-	if err := srv.handleDocumentLinkResolve(context.Background(), reply2, resolveReq); err != nil {
-		t.Fatal(err)
+	result2, replyErr2 := srv.handleDocumentLinkResolve(context.Background(), resolveReq)
+	if replyErr2 != nil {
+		t.Fatal(replyErr2)
 	}
 
-	if *replyErr2 != nil {
-		t.Fatal(*replyErr2)
-	}
-
-	resolved, ok := (*result2).(protocol.DocumentLink)
+	resolved, ok := (result2).(protocol.DocumentLink)
 	if !ok {
-		t.Fatalf("expected DocumentLink, got %T", *result2)
+		t.Fatalf("expected DocumentLink, got %T", result2)
 	}
 
-	if resolved.Target == "" {
+	if resolved.Target == nil || *resolved.Target == "" {
 		t.Error("expected resolved target to be non-empty")
 	}
 
-	if !strings.Contains(string(resolved.Target), "header.cfm") {
-		t.Errorf("expected target to contain 'header.cfm', got %s", resolved.Target)
+	if !strings.Contains(string(*resolved.Target), "header.cfm") {
+		t.Errorf("expected target to contain 'header.cfm', got %s", *resolved.Target)
 	}
 }
 
@@ -2617,18 +2410,17 @@ func TestSignatureHelpActiveParamMultiple(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = Replace(str, find, repl, ")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 36},
 		},
 	})
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (*result).(*protocol.SignatureHelp)
-	if help.ActiveParameter != 3 {
-		t.Errorf("expected activeParam=3, got %d", help.ActiveParameter)
+	help := (result).(*protocol.SignatureHelp)
+	if nullVal(help.ActiveParameter) != 3 {
+		t.Errorf("expected activeParam=3, got %d", nullVal(help.ActiveParameter))
 	}
 }
 
@@ -2638,16 +2430,15 @@ func TestSignatureHelpNestedCall(t *testing.T) {
 	// Cursor inside Len( — should show Len signature, not ArrayAppend
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, Len(")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 32},
 		},
 	})
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (*result).(*protocol.SignatureHelp)
+	help := (result).(*protocol.SignatureHelp)
 	if help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature")
 	}
@@ -2678,27 +2469,23 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 	srv.mu.Unlock()
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var names []string
 
@@ -2720,13 +2507,12 @@ func TestDocumentLinkSkipsHashExpressions(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, `<cfinclude template="#dynamicPath#">`)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for hash expression, got %d", len(links))
 	}
@@ -2737,13 +2523,12 @@ func TestDocumentLinkSkipsURLs(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, `<a href="https://example.com">link</a>`)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for URL, got %d", len(links))
 	}
@@ -2771,27 +2556,23 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 	srv.mu.Unlock()
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	found := false
 
 	for _, item := range list.Items {
@@ -2809,17 +2590,13 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 
 func TestExecuteCommandReindex(t *testing.T) {
 	srv := newTestServer()
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.reindex",
 	})
 
-	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleExecuteCommand(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 }
 
@@ -2827,21 +2604,17 @@ func TestExecuteCommandCopyPackage(t *testing.T) {
 	srv := newTestServer()
 	srv.WorkspaceFolders = []string{"/project"}
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command:   "cfmleditor.copyPackage",
-		Arguments: []any{"file:///project/models/User.cfc"},
+		Arguments: lspAnyArgs("file:///project/models/User.cfc"),
 	})
 
-	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleExecuteCommand(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	dotPath, _ := (*result).(string)
+	dotPath, _ := (result).(string)
 	if dotPath != "models.User" {
 		t.Errorf("expected 'models.User', got %q", dotPath)
 	}
@@ -2851,22 +2624,21 @@ func TestHoverBuiltinCaseInsensitive(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = ARRAYAPPEND(arr, val)>")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 15},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for uppercase ARRAYAPPEND")
 	}
 
-	if !strings.Contains(strings.ToLower(hover.Contents.Value), "arrayappend") {
-		t.Errorf("expected arrayappend in hover, got %s", hover.Contents.Value)
+	if !strings.Contains(strings.ToLower(markupContent(t, hover.Contents).Value), "arrayappend") {
+		t.Errorf("expected arrayappend in hover, got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -2918,27 +2690,23 @@ func TestCompletionDotOnThis(t *testing.T) {
 	// Rebuild completion cache
 	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 5},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var names []string
 
@@ -2957,13 +2725,12 @@ func TestDocumentLinkMultipleOnSameLine(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, `<cfinclude template="a.cfm"><cfinclude template="b.cfm">`)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) != 2 {
 		t.Errorf("expected 2 links, got %d", len(links))
 	}
@@ -3045,13 +2812,12 @@ func TestExtractLinksFromContent(t *testing.T) {
 
 func TestExecuteCommandUnknown(t *testing.T) {
 	srv := newTestServer()
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.nonexistent",
 	})
-	_ = srv.handleExecuteCommand(context.Background(), reply, req)
 
-	if *replyErr == nil {
+	_, replyErr := srv.handleExecuteCommand(context.Background(), req)
+	if replyErr == nil {
 		t.Error("expected error for unknown command")
 	}
 }
@@ -3081,16 +2847,15 @@ func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 9},
 		},
 	})
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help, ok := (*result).(*protocol.SignatureHelp)
+	help, ok := (result).(*protocol.SignatureHelp)
 	if !ok || help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature for myHelper")
 	}
@@ -3108,17 +2873,16 @@ func TestHoverNoResultForUnknownWord(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset xyz123 = 1>")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 8},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	if *result != nil {
-		t.Errorf("expected nil hover for unknown word, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil hover for unknown word, got %T", result)
 	}
 }
 
@@ -3134,27 +2898,23 @@ func TestCompletionDotAfterNewExpression(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
-		Context: &protocol.CompletionContext{
+		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: ".",
+			TriggerCharacter: strPtr("."),
 		},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var names []string
 
@@ -3173,20 +2933,19 @@ func TestDocumentLinkHrefAndAction(t *testing.T) {
 	srv.setDocument(docURI, `<a href="about.cfm">About</a>
 <form action="submit.cfm">`)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) != 2 {
 		t.Errorf("expected 2 links (href + action), got %d", len(links))
 	}
 
 	paths := make(map[string]bool)
 	for _, l := range links {
-		paths[l.Tooltip] = true
+		paths[strVal(l.Tooltip)] = true
 	}
 
 	if !paths["about.cfm"] {
@@ -3265,17 +3024,16 @@ func TestSignatureHelpAfterSecondComma(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, `<cfset x = ListAppend(list, val, `)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 33},
 		},
 	})
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (*result).(*protocol.SignatureHelp)
-	if help == nil || help.ActiveParameter != 2 {
+	help := (result).(*protocol.SignatureHelp)
+	if help == nil || nullVal(help.ActiveParameter) != 2 {
 		t.Errorf("expected activeParam=2, got %v", help)
 	}
 }
@@ -3292,24 +3050,20 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	found := false
 
 	for _, item := range list.Items {
@@ -3336,7 +3090,6 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -3344,17 +3097,14 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.URI != otherURI {
@@ -3377,13 +3127,12 @@ func TestDocumentLinkInsideFunction(t *testing.T) {
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) == 0 {
 		t.Error("expected link inside function body via FuncRefs")
 	}
@@ -3432,7 +3181,6 @@ func TestResolveComponentPathWithMappings(t *testing.T) {
 
 func TestHandleDidOpenNonCFML(t *testing.T) {
 	srv := newTestServer()
-	reply, _, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI:        "file:///test.js",
@@ -3442,12 +3190,9 @@ func TestHandleDidOpenNonCFML(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDidOpen(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
-	}
-
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
+	_, replyErr := srv.handleDidOpen(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 	// Should not be stored
 	if _, ok := srv.getDocument(uri.URI("file:///test.js")); ok {
@@ -3477,22 +3222,21 @@ func TestHoverUnqualifiedUserFunction(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 3},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for unqualified user function")
 	}
 
-	if !strings.Contains(hover.Contents.Value, "flag") {
-		t.Errorf("expected 'flag' param in hover, got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "flag") {
+		t.Errorf("expected 'flag' param in hover, got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -3501,24 +3245,20 @@ func TestCompletionClosingTagSlash(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfoutput></")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "/"},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr("/")},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	found := false
 
 	for _, item := range list.Items {
@@ -3545,18 +3285,17 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 		{Name: "helper", URI: otherURI, Line: 50},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 3},
 		},
 	})
-	_ = srv.handleDefinition(context.Background(), reply, req)
+	result, _ := srv.handleDefinition(context.Background(), req)
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if loc.URI != docURI {
@@ -3571,25 +3310,21 @@ func TestDocumentSymbolBasic(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentSymbol, protocol.DocumentSymbolParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
 
-	if err := srv.handleDocumentSymbol(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDocumentSymbol(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	symbols, ok := (*result).([]protocol.DocumentSymbol)
+	symbols, ok := (result).([]protocol.DocumentSymbol)
 	if !ok {
 		// Might be SymbolInformation
-		syms, ok2 := (*result).([]protocol.SymbolInformation)
+		syms, ok2 := (result).([]protocol.SymbolInformation)
 		if !ok2 || len(syms) < 2 {
-			t.Fatalf("expected at least 2 symbols, got %T", *result)
+			t.Fatalf("expected at least 2 symbols, got %T", result)
 		}
 
 		return
@@ -3607,18 +3342,14 @@ func TestWorkspaceSymbolQuery(t *testing.T) {
 		{Name: "deleteUser", URI: "file:///a.cfc", Line: 20},
 	}, nil)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "getUser"})
 
-	if err := srv.handleWorkspaceSymbol(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleWorkspaceSymbol(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	symbols, ok := (*result).([]protocol.SymbolInformation)
+	symbols, ok := (result).([]protocol.SymbolInformation)
 	if !ok || len(symbols) == 0 {
 		t.Fatal("expected at least one workspace symbol")
 	}
@@ -3708,13 +3439,12 @@ func TestDocumentLinkEmptyDocument(t *testing.T) {
 	docURI := uri.URI("file:///empty.cfm")
 	srv.setDocument(docURI, "")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
-	_ = srv.handleDocumentLink(context.Background(), reply, req)
+	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (*result).([]protocol.DocumentLink)
+	links, _ := (result).([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for empty doc, got %d", len(links))
 	}
@@ -3725,17 +3455,16 @@ func TestSignatureHelpEmptyDocument(t *testing.T) {
 	docURI := uri.URI("file:///empty.cfm")
 	srv.setDocument(docURI, "")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 0},
 		},
 	})
-	_ = srv.handleSignatureHelp(context.Background(), reply, req)
+	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	if *result != nil {
-		t.Errorf("expected nil for empty doc, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil for empty doc, got %T", result)
 	}
 }
 
@@ -3744,17 +3473,16 @@ func TestHoverEmptyDocument(t *testing.T) {
 	docURI := uri.URI("file:///empty.cfm")
 	srv.setDocument(docURI, "")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 0},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	if *result != nil {
-		t.Errorf("expected nil for empty doc, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil for empty doc, got %T", result)
 	}
 }
 
@@ -3763,17 +3491,16 @@ func TestDefinitionEmptyWord(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "   ")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 1},
 		},
 	})
-	_ = srv.handleDefinition(context.Background(), reply, req)
+	result, _ := srv.handleDefinition(context.Background(), req)
 
-	if *result != nil {
-		t.Errorf("expected nil for whitespace, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil for whitespace, got %T", result)
 	}
 }
 
@@ -3784,20 +3511,16 @@ func TestExecuteCommandShowResolvers(t *testing.T) {
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command: "cfmleditor.showResolvers",
 	})
 
-	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleExecuteCommand(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	msg, _ := (*result).(string)
+	msg, _ := (result).(string)
 	if !strings.Contains(msg, "models") {
 		t.Errorf("expected mappings in output, got %s", msg)
 	}
@@ -3815,21 +3538,17 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 		{Name: "getData", URI: docURI, Line: 5},
 	}, nil)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
 		Command:   "cfmleditor.showFileIndex",
-		Arguments: []any{"file:///test.cfc"},
+		Arguments: lspAnyArgs("file:///test.cfc"),
 	})
 
-	if err := srv.handleExecuteCommand(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleExecuteCommand(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	msg, _ := (*result).(string)
+	msg, _ := (result).(string)
 	if !strings.Contains(msg, "init") || !strings.Contains(msg, "getData") {
 		t.Errorf("expected function names in output, got %s", msg)
 	}
@@ -3895,22 +3614,21 @@ func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 8},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover result")
 	}
 	// Should show user-defined len with "input" param, not the builtin Len
-	if !strings.Contains(hover.Contents.Value, "input") {
-		t.Errorf("expected user-defined len(input), got builtin: %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "input") {
+		t.Errorf("expected user-defined len(input), got builtin: %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -3919,25 +3637,24 @@ func TestHoverUnqualifiedShowsBuiltin(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = Len(y)>")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for builtin Len")
 	}
 	// Should show builtin, not a user function
-	if !strings.Contains(strings.ToLower(hover.Contents.Value), "len") {
-		t.Errorf("expected builtin len hover, got %s", hover.Contents.Value)
+	if !strings.Contains(strings.ToLower(markupContent(t, hover.Contents).Value), "len") {
+		t.Errorf("expected builtin len hover, got %s", markupContent(t, hover.Contents).Value)
 	}
 	// Should NOT contain user-defined params
-	if strings.Contains(hover.Contents.Value, "input") {
+	if strings.Contains(markupContent(t, hover.Contents).Value, "input") {
 		t.Error("should show builtin, not user-defined")
 	}
 }
@@ -3954,16 +3671,15 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 		{Name: "getData", URI: "file:///b.cfc", Line: 5},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	if *result != nil {
+	if result != nil {
 		t.Error("expected nil hover for ambiguous unqualified function")
 	}
 }
@@ -3978,22 +3694,21 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []parser.Argument{{Name: "x", Type: "string"}}},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 5},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (*result).(*protocol.Hover)
+	hover, ok := (result).(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for globally unique function")
 	}
 
-	if !strings.Contains(hover.Contents.Value, "uniqueFunc") {
-		t.Errorf("expected uniqueFunc in hover, got %s", hover.Contents.Value)
+	if !strings.Contains(markupContent(t, hover.Contents).Value, "uniqueFunc") {
+		t.Errorf("expected uniqueFunc in hover, got %s", markupContent(t, hover.Contents).Value)
 	}
 }
 
@@ -4002,24 +3717,20 @@ func TestArgumentCompletionBuiltin(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(")
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 23},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 	// Should have named argument items with = suffix
 	foundArg := false
 
@@ -4043,24 +3754,20 @@ func TestArgumentCompletionUserFunction(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 3, Character: 5},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var argNames []string
 
@@ -4084,21 +3791,20 @@ func TestArgumentCompletionSortOrder(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = Len(")
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 15},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
-	_ = srv.handleCompletion(context.Background(), reply, req)
-	list := completionListFromResult(t, *result)
+	result, _ := srv.handleCompletion(context.Background(), req)
+	list := completionListFromResult(t, result)
 
 	// First items should be argument completions (sort with !)
 	if len(list.Items) > 0 && list.Items[0].Kind == protocol.CompletionItemKindField {
-		if !strings.HasPrefix(list.Items[0].SortText, SortFuncArguments) {
-			t.Errorf("expected argument items to sort first with SortFuncArguments, got sortText=%q", list.Items[0].SortText)
+		if !strings.HasPrefix(optVal(list.Items[0].SortText), SortFuncArguments) {
+			t.Errorf("expected argument items to sort first with SortFuncArguments, got sortText=%q", optVal(list.Items[0].SortText))
 		}
 	}
 }
@@ -4135,12 +3841,12 @@ func TestCompletionSnippetFormat(t *testing.T) {
 		t.Error("expected snippet format")
 	}
 
-	if !strings.Contains(found.InsertText, "${1:name}") {
-		t.Errorf("expected ${1:name} placeholder, got %s", found.InsertText)
+	if !strings.Contains(optVal(found.InsertText), "${1:name}") {
+		t.Errorf("expected ${1:name} placeholder, got %s", optVal(found.InsertText))
 	}
 
-	if !strings.Contains(found.InsertText, "${2:count}") {
-		t.Errorf("expected ${2:count} placeholder, got %s", found.InsertText)
+	if !strings.Contains(optVal(found.InsertText), "${2:count}") {
+		t.Errorf("expected ${2:count} placeholder, got %s", optVal(found.InsertText))
 	}
 }
 
@@ -4160,8 +3866,8 @@ func TestScopeSortOrder(t *testing.T) {
 	}
 	// All scopes should have ~ prefix in SortText
 	for _, item := range scopeItems {
-		if !strings.HasPrefix(item.SortText, SortScopes) {
-			t.Errorf("scope %q should have SortScopes prefix, got %q", item.Label, item.SortText)
+		if !strings.HasPrefix(optVal(item.SortText), SortScopes) {
+			t.Errorf("scope %q should have SortScopes prefix, got %q", item.Label, optVal(item.SortText))
 		}
 	}
 	// VARIABLES should sort before SESSION
@@ -4194,19 +3900,18 @@ func TestCompletionResponseTime(t *testing.T) {
 	srv.mu.Unlock()
 	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
 
-	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 0},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
 	start := time.Now()
 
 	for range 100 {
-		_ = srv.handleCompletion(context.Background(), reply, req)
+		_, _ = srv.handleCompletion(context.Background(), req)
 	}
 
 	elapsed := time.Since(start)
@@ -4222,7 +3927,6 @@ func TestHoverResponseTime(t *testing.T) {
 	docURI := uri.URI("file:///test.cfm")
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, val)>")
 
-	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -4233,7 +3937,7 @@ func TestHoverResponseTime(t *testing.T) {
 	start := time.Now()
 
 	for range 100 {
-		_ = srv.handleHover(context.Background(), reply, req)
+		_, _ = srv.handleHover(context.Background(), req)
 	}
 
 	elapsed := time.Since(start)
@@ -4251,7 +3955,6 @@ func TestDefinitionResponseTime(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -4262,7 +3965,7 @@ func TestDefinitionResponseTime(t *testing.T) {
 	start := time.Now()
 
 	for range 100 {
-		_ = srv.handleDefinition(context.Background(), reply, req)
+		_, _ = srv.handleDefinition(context.Background(), req)
 	}
 
 	elapsed := time.Since(start)
@@ -4289,7 +3992,6 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 	srv.parseResults[docURI] = pr
 	srv.mu.Unlock()
 
-	reply, _, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDocumentLink, protocol.DocumentLinkParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 	})
@@ -4297,7 +3999,7 @@ func TestDocumentLinkResponseTime(t *testing.T) {
 	start := time.Now()
 
 	for range 10 {
-		_ = srv.handleDocumentLink(context.Background(), reply, req)
+		_, _ = srv.handleDocumentLink(context.Background(), req)
 	}
 
 	elapsed := time.Since(start)
@@ -4358,17 +4060,16 @@ func TestDefinitionNoGlobalResolution(t *testing.T) {
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
-	_ = srv.handleDefinition(context.Background(), reply, req)
+	result, _ := srv.handleDefinition(context.Background(), req)
 	// With global resolution disabled, should NOT resolve to other file
-	if *result != nil {
-		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", result)
 	}
 }
 
@@ -4381,17 +4082,16 @@ func TestHoverNoGlobalResolution(t *testing.T) {
 		{Name: "uniqueFunc", URI: "file:///only.cfc", Line: 10, Arguments: []parser.Argument{{Name: "x"}}},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 5},
 		},
 	})
-	_ = srv.handleHover(context.Background(), reply, req)
+	result, _ := srv.handleHover(context.Background(), req)
 	// With global resolution disabled, should NOT show hover from other file
-	if *result != nil {
-		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", *result)
+	if result != nil {
+		t.Errorf("expected nil with GlobalFunctionResolution disabled, got %T", result)
 	}
 }
 
@@ -4406,16 +4106,15 @@ func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
 		{Name: "myFunc", URI: otherURI, Line: 10},
 	}, nil)
 
-	reply, result, _ := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 3},
 		},
 	})
-	_ = srv.handleDefinition(context.Background(), reply, req)
+	result, _ := srv.handleDefinition(context.Background(), req)
 	// With global resolution enabled, should resolve
-	if *result == nil {
+	if result == nil {
 		t.Error("expected definition with GlobalFunctionResolution enabled")
 	}
 }
@@ -4434,7 +4133,6 @@ func TestDefinitionViaCreateObject(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -4442,15 +4140,12 @@ func TestDefinitionViaCreateObject(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition for obj.getTotal() via createObject")
 	}
 }
@@ -4468,24 +4163,20 @@ func TestCompletionViaCreateObject(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 	srv.index.IndexFile(docURI, docContent)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 15},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var names []string
 
@@ -4537,7 +4228,6 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -4545,15 +4235,12 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition for variables.userDAO.getAll() via bean property")
 	}
 }
@@ -4587,24 +4274,20 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 20},
 		},
-		Context: &protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: "."},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
 	})
 
-	if err := srv.handleCompletion(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleCompletion(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	list := completionListFromResult(t, *result)
+	list := completionListFromResult(t, result)
 
 	var names []string
 
@@ -4649,7 +4332,6 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	srv.index.IndexFile(daoURI, string(daoContent))
 
 	// Test: variables.userDAO.getById should resolve to UserDAO.cfc
-	reply, result, replyErr := captureReply(t)
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: ptURI},
@@ -4657,21 +4339,18 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 		},
 	})
 
-	if err := srv.handleDefinition(context.Background(), reply, req); err != nil {
-		t.Fatal(err)
+	result, replyErr := srv.handleDefinition(context.Background(), req)
+	if replyErr != nil {
+		t.Fatal(replyErr)
 	}
 
-	if *replyErr != nil {
-		t.Fatal(*replyErr)
-	}
-
-	if *result == nil {
+	if result == nil {
 		t.Fatal("expected definition for variables.userDAO.getById via inject bean")
 	}
 
-	loc, ok := (*result).(protocol.Location)
+	loc, ok := (result).(protocol.Location)
 	if !ok {
-		t.Fatalf("expected Location, got %T", *result)
+		t.Fatalf("expected Location, got %T", result)
 	}
 
 	if !strings.Contains(string(loc.URI), "UserDAO.cfc") {

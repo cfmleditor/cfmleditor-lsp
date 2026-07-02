@@ -90,35 +90,40 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 }
 
 func (s *Server) capabilities() protocol.ServerCapabilities {
+	openClose := true
+	change := protocol.TextDocumentSyncKindIncremental
+	resolveProvider := true
+	supported := true
+
 	return protocol.ServerCapabilities{
-		TextDocumentSync: protocol.TextDocumentSyncOptions{
-			OpenClose: true,
-			Change:    protocol.TextDocumentSyncKindIncremental,
+		TextDocumentSync: &protocol.TextDocumentSyncOptions{
+			OpenClose: &openClose,
+			Change:    &change,
 			Save:      &protocol.SaveOptions{},
 		},
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{"<", "/", ".", ">"},
 		},
-		DocumentFormattingProvider: true,
-		DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
+		DocumentFormattingProvider: protocol.Boolean(true),
+		DocumentOnTypeFormattingProvider: protocol.DocumentOnTypeFormattingOptions{
 			FirstTriggerCharacter: ">",
 		},
-		DefinitionProvider: true,
+		DefinitionProvider: protocol.Boolean(true),
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: []string{"(", ","},
 		},
-		DocumentSymbolProvider:  true,
-		WorkspaceSymbolProvider: true,
-		HoverProvider:           true,
-		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: true},
-		CodeActionProvider:      true,
-		ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+		DocumentSymbolProvider:  protocol.Boolean(true),
+		WorkspaceSymbolProvider: protocol.Boolean(true),
+		HoverProvider:           protocol.Boolean(true),
+		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
+		CodeActionProvider:      protocol.Boolean(true),
+		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
 			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace"},
 		},
-		Workspace: &protocol.ServerCapabilitiesWorkspace{
-			WorkspaceFolders: &protocol.ServerCapabilitiesWorkspaceFolders{
-				Supported:           true,
-				ChangeNotifications: true,
+		Workspace: &protocol.WorkspaceOptions{
+			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
+				Supported:           &supported,
+				ChangeNotifications: protocol.Boolean(true),
 			},
 		},
 	}

@@ -2,25 +2,24 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	json "github.com/go-json-experiment/json"
 	"path/filepath"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DocumentLinkParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Use cached parse result for global-scope links; scan function bodies on demand
@@ -44,49 +43,56 @@ func (s *Server) handleDocumentLink(ctx context.Context, reply jsonrpc2.Replier,
 	}
 
 	var links []protocol.DocumentLink
+
 	for _, dl := range docLinks {
+		tip := dl.Path
+		data, _ := json.Marshal(map[string]string{
+			"path": dl.Path,
+			"uri":  string(params.TextDocument.URI),
+		})
 		links = append(links, protocol.DocumentLink{
 			Range: protocol.Range{
 				Start: protocol.Position{Line: dl.Line, Character: dl.Start},
 				End:   protocol.Position{Line: dl.Line, Character: dl.End},
 			},
-			Tooltip: dl.Path,
-			Data: map[string]string{
-				"path": dl.Path,
-				"uri":  string(params.TextDocument.URI),
-			},
+			Tooltip: &tip,
+			Data:    protocol.LSPAny(data),
 		})
 	}
 
-	return reply(ctx, links, nil)
+	return links, nil
 }
 
-func (s *Server) handleDocumentLinkResolve(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDocumentLinkResolve(_ context.Context, rawParams []byte) (any, error) {
 	var link protocol.DocumentLink
-	if err := json.Unmarshal(req.Params(), &link); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &link); err != nil {
+		return nil, err
 	}
 
-	data, _ := link.Data.(map[string]any)
+	var data map[string]string
+
+	_ = json.Unmarshal(link.Data, &data)
+
 	if data == nil {
-		return reply(ctx, link, nil)
+		return link, nil
 	}
 
-	filePath, _ := data["path"].(string)
-	docURI, _ := data["uri"].(string)
+	filePath := data["path"]
+	docURI := data["uri"]
 
 	if filePath == "" || docURI == "" {
-		return reply(ctx, link, nil)
+		return link, nil
 	}
 
 	baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
 
 	target := s.resolveLink(filePath, baseDir)
 	if target != "" {
-		link.Target = uri.URI("file://" + target)
+		targetURI := uri.URI("file://" + target)
+		link.Target = &targetURI
 	}
 
-	return reply(ctx, link, nil)
+	return link, nil
 }
 
 func (s *Server) resolveLink(filePath, baseDir string) string {

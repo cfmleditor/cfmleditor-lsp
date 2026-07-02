@@ -2,21 +2,20 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	json "github.com/go-json-experiment/json"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
-func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.SignatureHelpParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	s.log.Debug("signatureHelp: request",
@@ -26,7 +25,7 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	line := int(params.Position.Line)
@@ -34,19 +33,21 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 
 	funcName, qualifier, activeParam := parser.FindCallContext(content, line, char)
 	if funcName == "" {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
+
+	var activeSignature uint32
 
 	// Try builtin functions first
 	if e, ok := docs.LookupFunction(funcName); ok {
 		sig := buildBuiltinSignature(e)
-		sig.ActiveParameter = uint32(activeParam)
+		sig.ActiveParameter = protocol.NewNullable(uint32(activeParam))
 
-		return reply(ctx, &protocol.SignatureHelp{
+		return &protocol.SignatureHelp{
 			Signatures:      []protocol.SignatureInformation{sig},
-			ActiveSignature: 0,
-			ActiveParameter: uint32(activeParam),
-		}, nil)
+			ActiveSignature: &activeSignature,
+			ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+		}, nil
 	}
 
 	docURI := params.TextDocument.URI
@@ -54,18 +55,18 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 	// Try resolving via qualifier (e.g. service.method or getService("x").method)
 	if qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, funcName, docURI, uint32(line)); def != nil {
-			return reply(ctx, &protocol.SignatureHelp{
+			return &protocol.SignatureHelp{
 				Signatures:      []protocol.SignatureInformation{buildUserSignature(def)},
-				ActiveSignature: 0,
-				ActiveParameter: uint32(activeParam),
-			}, nil)
+				ActiveSignature: &activeSignature,
+				ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+			}, nil
 		}
 	}
 
 	// Try user-defined functions from the index
 	defs := s.index.Lookup(funcName)
 	if len(defs) == 0 {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Prefer current file
@@ -79,11 +80,11 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 		}
 	}
 
-	return reply(ctx, &protocol.SignatureHelp{
+	return &protocol.SignatureHelp{
 		Signatures:      []protocol.SignatureInformation{buildUserSignature(def)},
-		ActiveSignature: 0,
-		ActiveParameter: uint32(activeParam),
-	}, nil)
+		ActiveSignature: &activeSignature,
+		ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+	}, nil
 }
 
 func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
@@ -109,7 +110,7 @@ func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 
 		paramLabel += arg.Name
 		label.WriteString(paramLabel)
-		paramInfos = append(paramInfos, protocol.ParameterInformation{Label: paramLabel})
+		paramInfos = append(paramInfos, protocol.ParameterInformation{Label: protocol.String(paramLabel)})
 	}
 
 	label.WriteString(")")
@@ -142,8 +143,8 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 		}
 
 		paramInfos = append(paramInfos, protocol.ParameterInformation{
-			Label:         paramLabel,
-			Documentation: doc,
+			Label:         protocol.String(paramLabel),
+			Documentation: tooltip(doc),
 		})
 	}
 
@@ -151,7 +152,7 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 
 	return protocol.SignatureInformation{
 		Label:         label.String(),
-		Documentation: &protocol.MarkupContent{Kind: protocol.Markdown, Value: e.Doc()},
+		Documentation: &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: e.Doc()},
 		Parameters:    paramInfos,
 	}
 }

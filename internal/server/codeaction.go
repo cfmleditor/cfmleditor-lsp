@@ -2,22 +2,21 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	json "github.com/go-json-experiment/json"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
-func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.CodeActionParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	line := int(params.Range.Start.Line)
@@ -25,7 +24,7 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	docURI := string(params.TextDocument.URI)
@@ -37,19 +36,19 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		actions = append(actions, protocol.CodeAction{
 			Title: "Find all references to " + word,
 
-			Command: &protocol.Command{
+			Command: protocol.Command{
 				Title:     "Find all references to " + word,
 				Command:   "cfmleditor.findRefs",
-				Arguments: []any{word, docURI},
+				Arguments: lspAnyArgs(word, docURI),
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
 			Title: "Export dependency graph for " + qualifier + "." + word,
 
-			Command: &protocol.Command{
+			Command: protocol.Command{
 				Title:     "Export dependency graph for " + qualifier + "." + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []any{docURI, word},
+				Arguments: lspAnyArgs(docURI, word),
 			},
 		})
 	} else {
@@ -57,22 +56,34 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 		actions = append(actions, protocol.CodeAction{
 			Title: "Find all calls to " + word,
 
-			Command: &protocol.Command{
+			Command: protocol.Command{
 				Title:     "Find all calls to " + word,
 				Command:   "cfmleditor.findRefs",
-				Arguments: []any{word, docURI},
+				Arguments: lspAnyArgs(word, docURI),
 			},
 		})
 		actions = append(actions, protocol.CodeAction{
 			Title: "Export dependency graph for " + word,
 
-			Command: &protocol.Command{
+			Command: protocol.Command{
 				Title:     "Export dependency graph for " + word,
 				Command:   "cfmleditor.exportDeps",
-				Arguments: []any{docURI, word},
+				Arguments: lspAnyArgs(docURI, word),
 			},
 		})
 	}
 
-	return reply(ctx, actions, nil)
+	return actions, nil
+}
+
+// lspAnyArgs marshals each argument to a protocol.LSPAny for use in a Command's Arguments field.
+func lspAnyArgs(args ...any) []protocol.LSPAny {
+	out := make([]protocol.LSPAny, len(args))
+
+	for i, a := range args {
+		b, _ := json.Marshal(a)
+		out[i] = protocol.LSPAny(b)
+	}
+
+	return out
 }

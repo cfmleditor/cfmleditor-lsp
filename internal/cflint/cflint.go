@@ -115,9 +115,9 @@ func toDiagnostics(result Result) []protocol.Diagnostic {
 					End:   protocol.Position{Line: uint32(line), Character: uint32(col)},
 				},
 				Severity: sev,
-				Source:   "cflint",
-				Code:     issue.ID,
-				Message:  loc.Message,
+				Source:   protocol.NewOptional("cflint"),
+				Code:     protocol.String(issue.ID),
+				Message:  protocol.String(loc.Message),
 			})
 		}
 	}

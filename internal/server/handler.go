@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	json "github.com/go-json-experiment/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,13 +22,13 @@ import (
 
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
-	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
+	return func(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
 		start := time.Now()
 
 		defer func() {
 			if r := recover(); r != nil {
 				s.log.Error("handler panic", cflog.String("method", req.Method()), cflog.Any("panic", r))
-				err = reply(ctx, nil, fmt.Errorf("internal error: %v", r))
+				result, err = nil, fmt.Errorf("internal error: %v", r)
 			}
 
 			if dur := time.Since(start); dur > 100*time.Millisecond {
@@ -38,74 +38,76 @@ func (s *Server) Handler() jsonrpc2.Handler {
 
 		switch req.Method() {
 		case protocol.MethodInitialize:
-			return s.handleInitialize(ctx, reply, req)
+			return s.handleInitialize(ctx, req.Params())
 		case protocol.MethodInitialized:
-			return reply(ctx, nil, nil)
+			return nil, nil
 		case protocol.MethodShutdown:
-			return reply(ctx, nil, nil)
+			return nil, nil
 		case protocol.MethodExit:
-			return reply(ctx, nil, nil)
+			return nil, nil
 		case protocol.MethodTextDocumentDidOpen:
-			return s.handleDidOpen(ctx, reply, req)
+			return s.handleDidOpen(ctx, req.Params())
 		case protocol.MethodTextDocumentDidChange:
-			return s.handleDidChange(ctx, reply, req)
+			return s.handleDidChange(ctx, req.Params())
 		case protocol.MethodTextDocumentDidClose:
-			return s.handleDidClose(ctx, reply, req)
+			return s.handleDidClose(ctx, req.Params())
 		case protocol.MethodTextDocumentDidSave:
-			return s.handleDidSave(ctx, reply, req)
+			return s.handleDidSave(ctx, req.Params())
 		case protocol.MethodTextDocumentCompletion:
-			return s.handleCompletion(ctx, reply, req)
+			return s.handleCompletion(ctx, req.Params())
 		case protocol.MethodTextDocumentDefinition:
-			return s.handleDefinition(ctx, reply, req)
+			return s.handleDefinition(ctx, req.Params())
 		case protocol.MethodTextDocumentFormatting:
-			return s.handleFormatting(ctx, reply, req)
+			return s.handleFormatting(ctx, req.Params())
 		case protocol.MethodTextDocumentOnTypeFormatting:
-			return s.handleOnTypeFormatting(ctx, reply, req)
+			return s.handleOnTypeFormatting(ctx, req.Params())
 		case protocol.MethodTextDocumentDocumentSymbol:
-			return s.handleDocumentSymbol(ctx, reply, req)
+			return s.handleDocumentSymbol(ctx, req.Params())
 		case protocol.MethodWorkspaceSymbol:
-			return s.handleWorkspaceSymbol(ctx, reply, req)
+			return s.handleWorkspaceSymbol(ctx, req.Params())
 		case protocol.MethodTextDocumentHover:
-			return s.handleHover(ctx, reply, req)
+			return s.handleHover(ctx, req.Params())
 		case protocol.MethodTextDocumentSignatureHelp:
-			return s.handleSignatureHelp(ctx, reply, req)
+			return s.handleSignatureHelp(ctx, req.Params())
 		case protocol.MethodTextDocumentDocumentLink:
-			return s.handleDocumentLink(ctx, reply, req)
+			return s.handleDocumentLink(ctx, req.Params())
 		case protocol.MethodDocumentLinkResolve:
-			return s.handleDocumentLinkResolve(ctx, reply, req)
+			return s.handleDocumentLinkResolve(ctx, req.Params())
 		case protocol.MethodTextDocumentCodeAction:
-			return s.handleCodeAction(ctx, reply, req)
+			return s.handleCodeAction(ctx, req.Params())
 		case protocol.MethodWorkspaceDidChangeWorkspaceFolders:
-			return s.handleDidChangeWorkspaceFolders(ctx, reply, req)
+			return s.handleDidChangeWorkspaceFolders(ctx, req.Params())
 		case protocol.MethodWorkspaceExecuteCommand:
-			return s.handleExecuteCommand(ctx, reply, req)
+			return s.handleExecuteCommand(ctx, req.Params())
 		default:
-			return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
+			return jsonrpc2.MethodNotFoundHandler(ctx, req)
 		}
 	}
 }
 
-func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.InitializeParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	s.initialized = true
 
-	s.log.Debug("initialize params workspace folders", cflog.Int("count", len(params.WorkspaceFolders)))
+	folders, _ := params.WorkspaceFolders.Get()
 
-	for i, folder := range params.WorkspaceFolders {
-		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", folder.URI))
+	s.log.Debug("initialize params workspace folders", cflog.Int("count", len(folders)))
+
+	for i, folder := range folders {
+		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", string(folder.URI)))
 	}
 
-	for _, folder := range params.WorkspaceFolders {
-		root := strings.TrimPrefix(folder.URI, "file://")
+	for _, folder := range folders {
+		root := strings.TrimPrefix(string(folder.URI), "file://")
 		s.workspaceRoots = append(s.workspaceRoots, root)
 	}
 
-	if len(s.workspaceRoots) == 0 && params.RootURI != "" { //nolint:all // this is for compatibility
-		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(params.RootURI), "file://")) //nolint:all // this is for compatibility
+	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
+		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(*params.RootURI), "file://")) //nolint:all // this is for compatibility
 	}
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
@@ -118,25 +120,25 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.workspaceRoots))
 
-	return reply(ctx, protocol.InitializeResult{
+	return protocol.InitializeResult{
 		Capabilities: s.capabilities(),
-		ServerInfo: &protocol.ServerInfo{
+		ServerInfo: protocol.ServerInfo{
 			Name:    "cfmleditor-lsp",
-			Version: s.Version,
+			Version: optStr(s.Version),
 		},
-	}, nil)
+	}, nil
 }
 
-func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidOpenTextDocumentParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	docURI := params.TextDocument.URI
 
 	if !cfpath.IsCFMLFile(string(docURI)) {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	s.setDocument(docURI, params.TextDocument.Text)
@@ -162,23 +164,23 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.safeGo("rebuildFileCompletionCacheFromPR", func() { s.rebuildFileCompletionCacheFromPR(docURI, pr) })
 	s.log.Debug("document opened", cflog.String("uri", string(docURI)))
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
-func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidChangeTextDocumentParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	docURI := params.TextDocument.URI
 
 	if len(params.ContentChanges) == 0 {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	if !cfpath.IsCFMLFile(string(docURI)) {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	s.mu.RLock()
@@ -187,7 +189,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	content, ok := s.getDocument(docURI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	s.mu.Lock()
@@ -203,8 +205,10 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	s.mu.Unlock()
 
 	totalBytes := 0
+
 	for _, c := range params.ContentChanges {
-		totalBytes += len(c.Text)
+		_, text, _ := changeRangeAndText(c)
+		totalBytes += len(text)
 	}
 
 	s.log.Debug("didChange",
@@ -221,10 +225,11 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 	if rapidChanges {
 		// Too many changes in quick succession — just apply text and defer reindex.
 		for _, change := range params.ContentChanges {
-			if change.Range == (protocol.Range{}) && change.RangeLength == 0 {
-				content = change.Text
+			r, text, isFull := changeRangeAndText(change)
+			if isFull {
+				content = text
 			} else {
-				content = applyEdit(content, change.Range, change.Text)
+				content = applyEdit(content, r, text)
 			}
 		}
 
@@ -262,27 +267,28 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		})
 		s.mu.Unlock()
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	for _, change := range params.ContentChanges {
-		if change.Range == (protocol.Range{}) && change.RangeLength == 0 { //nolint:gocritic // ifElseChain: intentional for clarity
+		r, text, isFull := changeRangeAndText(change)
+		if isFull { //nolint:gocritic // ifElseChain: intentional for clarity
 			// Full document replacement
-			content = change.Text
+			content = text
 			if pr != nil {
 				pr.ApplyFullReplace(content)
 
 				lastKind = parser.EditFull
 			}
 		} else {
-			content = applyEdit(content, change.Range, change.Text)
-			editLine = int(change.Range.Start.Line)
+			content = applyEdit(content, r, text)
+			editLine = int(r.Start.Line)
 
 			if pr != nil {
 				lastKind = pr.ApplyEdit(
-					int(change.Range.Start.Line), int(change.Range.Start.Character),
-					int(change.Range.End.Line), int(change.Range.End.Character),
-					change.Text,
+					int(r.Start.Line), int(r.Start.Character),
+					int(r.End.Line), int(r.End.Character),
+					text,
 				)
 			}
 		}
@@ -299,7 +305,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.mu.Unlock()
 		s.reindexFromParseResult(docURI, pr)
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	// Update funcRanges from the parse result
@@ -315,9 +321,10 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		lineDelta := 0
 
 		for _, change := range params.ContentChanges {
-			if change.Range != (protocol.Range{}) || change.RangeLength != 0 {
-				oldLines := int(change.Range.End.Line) - int(change.Range.Start.Line)
-				newLines := strings.Count(change.Text, "\n")
+			r, text, isFull := changeRangeAndText(change)
+			if !isFull {
+				oldLines := int(r.End.Line) - int(r.Start.Line)
+				newLines := strings.Count(text, "\n")
 				lineDelta += newLines - oldLines
 			}
 		}
@@ -329,7 +336,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.debounceCacheRebuild(docURI, content, editLine)
 	}
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
 const cacheRebuildDelay = 150 * time.Millisecond
@@ -358,10 +365,10 @@ func applyEdit(content string, r protocol.Range, newText string) string {
 	return parser.ApplyEdit(content, int(r.Start.Line), int(r.Start.Character), int(r.End.Line), int(r.End.Character), newText)
 }
 
-func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidCloseTextDocumentParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	docURI := params.TextDocument.URI
@@ -379,13 +386,13 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 		})
 	}
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
-func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDidSave(ctx context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidSaveTextDocumentParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	docURI := params.TextDocument.URI
@@ -405,7 +412,7 @@ func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req 
 		s.safeGo("rebuildFileCompletionCache", func() { s.rebuildFileCompletionCache(docURI) })
 	}
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
 func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
@@ -527,16 +534,16 @@ func scopesToFuncRanges(pr *parser.ParseResult) []cache.FuncRange {
 	return ranges
 }
 
-func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidChangeWorkspaceFoldersParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	for _, removed := range params.Event.Removed {
-		root := strings.TrimPrefix(removed.URI, "file://")
+		root := strings.TrimPrefix(string(removed.URI), "file://")
 		if !s.isWorkspaceFolder(root) {
-			s.index.RemoveFilesUnder(removed.URI)
+			s.index.RemoveFilesUnder(string(removed.URI))
 		}
 
 		s.mu.Lock()
@@ -548,27 +555,27 @@ func (s *Server) handleDidChangeWorkspaceFolders(ctx context.Context, reply json
 			}
 		}
 		s.mu.Unlock()
-		s.log.Info("workspace folder removed", cflog.String("uri", removed.URI))
+		s.log.Info("workspace folder removed", cflog.String("uri", string(removed.URI)))
 	}
 
 	for _, added := range params.Event.Added {
-		root := strings.TrimPrefix(added.URI, "file://")
+		root := strings.TrimPrefix(string(added.URI), "file://")
 
 		s.mu.Lock()
 		s.workspaceRoots = append(s.workspaceRoots, root)
 		s.mu.Unlock()
 		s.indexRoot(root)
-		s.log.Info("workspace folder added", cflog.String("uri", added.URI))
+		s.log.Info("workspace folder added", cflog.String("uri", string(added.URI)))
 	}
 
-	return reply(ctx, nil, nil)
+	return nil, nil
 }
 
 // safeGo runs fn in a goroutine with panic recovery.
-func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) {
 	var params protocol.ExecuteCommandParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	switch params.Command {
@@ -578,34 +585,35 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		s.safeGo("reindex", s.indexWorkspace)
 		s.log.Info("reindex triggered via command")
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	case "cfmleditor.format":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.format requires a document URI argument"))
+			return nil, fmt.Errorf("cfmleditor.format requires a document URI argument")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.format: invalid URI argument"))
+			return nil, fmt.Errorf("cfmleditor.format: invalid URI argument")
 		}
 
 		content, ok := s.getDocument(uri.URI(docURI))
 		if !ok {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(s.Formatting.IndentWidth)}, s.Formatting)
 		if err != nil {
-			return reply(ctx, nil, err)
+			return nil, err
 		}
 
 		if formatted == content {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		lines := parser.CountNewlines(content)
+		formatLabel := "Format document"
 		s.call(ctx, protocol.MethodWorkspaceApplyEdit, &protocol.ApplyWorkspaceEditParams{
-			Label: "Format document",
+			Label: &formatLabel,
 			Edit: protocol.WorkspaceEdit{
 				Changes: map[uri.URI][]protocol.TextEdit{
 					uri.URI(docURI): {{
@@ -619,21 +627,21 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			},
 		}, nil)
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	case "cfmleditor.showComponentPath":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.showComponentPath requires a dot-path argument"))
+			return nil, fmt.Errorf("cfmleditor.showComponentPath requires a dot-path argument")
 		}
 
-		dotPath, _ := params.Arguments[0].(string)
+		dotPath, _ := argString(params.Arguments, 0)
 		if dotPath == "" {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.showComponentPath: invalid argument"))
+			return nil, fmt.Errorf("cfmleditor.showComponentPath: invalid argument")
 		}
 
 		var baseDir string
 
 		if len(params.Arguments) > 1 {
-			if docURI, ok := params.Arguments[1].(string); ok {
+			if docURI, ok := argString(params.Arguments, 1); ok {
 				baseDir = filepath.Dir(strings.TrimPrefix(docURI, "file://"))
 			}
 		}
@@ -655,7 +663,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			})
 		}
 
-		return reply(ctx, resolved, nil)
+		return resolved, nil
 	case "cfmleditor.restartDaemon":
 		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 			Type:    protocol.MessageTypeInfo,
@@ -671,7 +679,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 		s.safeGo("reindex", s.indexWorkspace)
 		s.log.Info("daemon restart triggered via command")
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	case "cfmleditor.showResolvers":
 		var lines []string
 
@@ -703,15 +711,15 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			Message: msg,
 		})
 
-		return reply(ctx, msg, nil)
+		return msg, nil
 	case "cfmleditor.showFileIndex":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.showFileIndex requires a document URI argument"))
+			return nil, fmt.Errorf("cfmleditor.showFileIndex requires a document URI argument")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.showFileIndex: invalid argument"))
+			return nil, fmt.Errorf("cfmleditor.showFileIndex: invalid argument")
 		}
 
 		fileURI := uri.URI(docURI)
@@ -738,7 +746,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			Message: msg,
 		})
 
-		return reply(ctx, msg, nil)
+		return msg, nil
 	case "cfmleditor.showConnections":
 		s.mu.RLock()
 		openDocs := len(s.documents)
@@ -749,15 +757,15 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			Message: msg,
 		})
 
-		return reply(ctx, msg, nil)
+		return msg, nil
 	case "cfmleditor.openActiveApplicationFile":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.openActiveApplicationFile requires a document URI argument"))
+			return nil, fmt.Errorf("cfmleditor.openActiveApplicationFile requires a document URI argument")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
@@ -769,7 +777,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 				Message: "No Application.cfc found",
 			})
 
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 		// Find the actual file
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
@@ -780,71 +788,71 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 					"takeFocus": true,
 				}, nil)
 
-				return reply(ctx, target, nil)
+				return target, nil
 			}
 		}
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	case "cfmleditor.goToMatchingTag":
 		if len(params.Arguments) < 2 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.goToMatchingTag requires [documentURI, line, char]"))
+			return nil, fmt.Errorf("cfmleditor.goToMatchingTag requires [documentURI, line, char]")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		content, ok := s.getDocument(uri.URI(docURI))
 		if !ok {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		var line, char int
 
 		if len(params.Arguments) >= 3 {
-			if v, ok := params.Arguments[1].(float64); ok {
+			if v, ok := argFloat(params.Arguments, 1); ok {
 				line = int(v)
 			}
 
-			if v, ok := params.Arguments[2].(float64); ok {
+			if v, ok := argFloat(params.Arguments, 2); ok {
 				char = int(v)
 			}
 		}
 
 		pos := parser.FindMatchingTag(content, line, char)
 		if pos == nil {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
-		return reply(ctx, pos, nil)
+		return pos, nil
 	case "cfmleditor.copyPackage":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.copyPackage requires a document URI argument"))
+			return nil, fmt.Errorf("cfmleditor.copyPackage requires a document URI argument")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		filePath := strings.TrimPrefix(docURI, "file://")
 		dotPath := s.fileToPackage(filePath)
 
-		return reply(ctx, dotPath, nil)
+		return dotPath, nil
 	case "cfmleditor.findRefs":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.findRefs requires a function name argument"))
+			return nil, fmt.Errorf("cfmleditor.findRefs requires a function name argument")
 		}
 
-		funcName, _ := params.Arguments[0].(string)
+		funcName, _ := argString(params.Arguments, 0)
 		if funcName == "" {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		sourceURI := ""
 		if len(params.Arguments) > 1 {
-			sourceURI, _ = params.Arguments[1].(string)
+			sourceURI, _ = argString(params.Arguments, 1)
 		}
 
 		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
@@ -891,20 +899,20 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			Message: "Wrote " + outFile,
 		})
 
-		return reply(ctx, result.Summary, nil)
+		return result.Summary, nil
 	case "cfmleditor.exportDeps":
 		if len(params.Arguments) == 0 {
-			return reply(ctx, nil, fmt.Errorf("cfmleditor.exportDeps requires a document URI"))
+			return nil, fmt.Errorf("cfmleditor.exportDeps requires a document URI")
 		}
 
-		docURI, _ := params.Arguments[0].(string)
+		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return reply(ctx, nil, nil)
+			return nil, nil
 		}
 
 		funcName := ""
 		if len(params.Arguments) > 1 {
-			funcName, _ = params.Arguments[1].(string)
+			funcName, _ = argString(params.Arguments, 1)
 		}
 
 		fileURI := uri.URI(docURI)
@@ -983,13 +991,13 @@ func (s *Server) handleExecuteCommand(ctx context.Context, reply jsonrpc2.Replie
 			Message: "Wrote " + outFile,
 		})
 
-		return reply(ctx, mermaid, nil)
+		return mermaid, nil
 	case "cfmleditor.scanWorkspace":
 		s.safeGo("scanWorkspace", func() { s.scanWorkspace(ctx) })
 
-		return reply(ctx, nil, nil)
+		return nil, nil
 	default:
-		return reply(ctx, nil, fmt.Errorf("unknown command: %s", params.Command))
+		return nil, fmt.Errorf("unknown command: %s", params.Command)
 	}
 }
 

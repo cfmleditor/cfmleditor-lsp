@@ -111,8 +111,8 @@ func collectErrors(n *sitter.Node, src []byte, diags *[]protocol.Diagnostic) {
 				End:   protocol.Position{Line: uint32(end.Row), Character: uint32(end.Column)},
 			},
 			Severity: protocol.DiagnosticSeverityError,
-			Source:   "cfmleditor",
-			Message:  msg,
+			Source:   protocol.NewOptional("cfmleditor"),
+			Message:  protocol.String(msg),
 		})
 
 		return

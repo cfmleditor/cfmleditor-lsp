@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	json "github.com/go-json-experiment/json"
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
@@ -12,25 +12,24 @@ import (
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	sitter "github.com/tree-sitter/go-tree-sitter"
-	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
-func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, error) {
 	if !s.Formatting.Enabled {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	var params protocol.DocumentFormattingParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
 	}
 
 	s.log.Info("formatting document", cflog.String("uri", string(params.TextDocument.URI)))
 
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
-		return reply(ctx, nil, nil)
+		return nil, nil
 	}
 
 	start := time.Now()
@@ -44,13 +43,13 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 			Message: "Formatting failed: " + err.Error(),
 		})
 
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	if formatted == content {
 		s.log.Debug("formatting complete (no changes)", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
 
-		return reply(ctx, []protocol.TextEdit{}, nil)
+		return []protocol.TextEdit{}, nil
 	}
 
 	s.log.Debug("formatting complete", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
@@ -82,7 +81,7 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		NewText: formatted,
 	}}
 
-	return reply(ctx, edits, nil)
+	return edits, nil
 }
 
 func formatDocument(content string, opts protocol.FormattingOptions, cfg config.ResolvedFormatting) (string, error) {
