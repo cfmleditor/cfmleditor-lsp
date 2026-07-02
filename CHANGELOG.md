@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.1]
+
 - Upgrade `go.lsp.dev/jsonrpc2` and `go.lsp.dev/protocol` to v1.0.1 (direct-return handler dispatch, `Optional`/`Nullable`/union-typed protocol fields)
 - Switch LSP param marshaling to `github.com/go-json-experiment/json` for correct encoding of the new protocol types
 - Bump Go toolchain to 1.26.4
