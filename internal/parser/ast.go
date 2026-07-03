@@ -362,6 +362,19 @@ func indexFold(s, substr string) int {
 // placeholderRe matches $1, $2, etc. in patterns.
 var placeholderRe = regexp.MustCompile(`\$(\d+)`)
 
+// substitutePlaceholder replaces $N and its case-folded ${N:lower}/${N:upper} variants in
+// result with captured. The case-folded forms let a resolver normalize a captured call-site
+// value — typically written in whatever case the caller used — to match a lowercase (or
+// uppercase) file/package naming convention, e.g. `resolve: "packages.tass.${1:lower}"` for
+// `match: "get$1()"` turns `getPageTools()` into `packages.tass.pagetools`.
+func substitutePlaceholder(result string, n int, captured string) string {
+	result = strings.ReplaceAll(result, fmt.Sprintf("${%d:lower}", n), strings.ToLower(captured))
+	result = strings.ReplaceAll(result, fmt.Sprintf("${%d:upper}", n), strings.ToUpper(captured))
+	result = strings.ReplaceAll(result, fmt.Sprintf("$%d", n), captured)
+
+	return result
+}
+
 func matchResolverWithCache(expr string, r *Resolver) string {
 	r.compiledRe() // ensure reOnce has run
 
@@ -382,7 +395,7 @@ func matchResolverWithCache(expr string, r *Resolver) string {
 
 	for i := 1; i < len(m); i++ {
 		captured := strings.Trim(m[i], "\"'")
-		result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), captured)
+		result = substitutePlaceholder(result, i, captured)
 	}
 
 	if result == r.Resolve && len(m) == 1 {
@@ -453,7 +466,7 @@ func simpleMatch(expr string, r *Resolver) string {
 	}
 
 	captured = strings.Trim(captured, "\"'")
-	result := strings.ReplaceAll(r.Resolve, "$1", captured)
+	result := substitutePlaceholder(r.Resolve, 1, captured)
 	result = strings.TrimSuffix(result, ".cfc")
 	result = strings.ReplaceAll(result, "/", ".")
 

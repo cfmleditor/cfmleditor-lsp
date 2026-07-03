@@ -145,8 +145,10 @@ func LoadOrmLocations(appDir string) []string {
 }
 
 // ResolvePath resolves a CFML dot-path (e.g. "models.User") to an absolute
-// .cfc file path. It checks mappings first (matching the first segment), then
-// falls back to resolving relative to baseDir. Returns empty string if not found.
+// .cfc file path. It checks mappings first (matching the first segment, case-insensitively),
+// then falls back to resolving relative to baseDir. CFML component paths are conventionally
+// case-insensitive, so every path segment is matched without regard to case. Returns empty
+// string if not found.
 func ResolvePath(dotPath string, baseDir string, mappings map[string]string) string {
 	// Normalize CF slash-paths (e.g. /tassweb/packages/foo) to dot-paths
 	if strings.Contains(dotPath, "/") {
@@ -156,48 +158,90 @@ func ResolvePath(dotPath string, baseDir string, mappings map[string]string) str
 
 	parts := strings.SplitN(dotPath, ".", 2)
 	if mappings != nil {
-		if mapped, ok := mappings[parts[0]]; ok {
-			var rel string
+		if mapped, ok := lookupFold(mappings, parts[0]); ok {
+			var segments []string
 			if len(parts) == 2 {
-				rel = strings.ReplaceAll(parts[1], ".", string(filepath.Separator)) + ".cfc"
+				segments = strings.Split(parts[1], ".")
 			} else {
-				rel = parts[0] + ".cfc"
+				segments = []string{parts[0]}
 			}
 
-			abs := filepath.Join(mapped, rel)
-			if _, err := DefaultFS.Stat(abs); err == nil {
-				return realPath(abs)
+			segments[len(segments)-1] += ".cfc"
+
+			if abs := resolveSegments(mapped, segments); abs != "" {
+				return abs
 			}
 		}
 	}
 
-	rel := strings.ReplaceAll(dotPath, ".", string(filepath.Separator)) + ".cfc"
+	segments := strings.Split(dotPath, ".")
+	segments[len(segments)-1] += ".cfc"
 
-	abs := filepath.Join(baseDir, rel)
-	if _, err := DefaultFS.Stat(abs); err == nil {
-		return realPath(abs)
-	}
-
-	return ""
+	return resolveSegments(baseDir, segments)
 }
 
-// realPath returns the actual case-correct path from the filesystem.
-func realPath(path string) string {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-
-	entries, err := DefaultFS.ReadDir(dir)
-	if err != nil {
-		return path
+// lookupFold returns the value for the first key in m that matches key
+// case-insensitively, and whether one was found.
+func lookupFold(m map[string]string, key string) (string, bool) {
+	if v, ok := m[key]; ok {
+		return v, true
 	}
 
-	for _, e := range entries {
-		if strings.EqualFold(e.Name(), base) {
-			return filepath.Join(dir, e.Name())
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v, true
 		}
 	}
 
-	return path
+	return "", false
+}
+
+// resolveSegments walks from baseDir through each path segment (the last segment being the
+// filename, already suffixed with .cfc), returning the real, case-correct absolute path if
+// found, or "" if any segment is missing.
+//
+// Each segment is resolved via a directory listing rather than a direct Stat: on a
+// case-insensitive filesystem (APFS, NTFS default), Stat succeeds for any case variant of an
+// existing name, which would silently accept whatever case the dot-path happened to use
+// instead of the real on-disk case. Listing the directory and matching entries — exact case
+// first, then case-insensitively — is the only way to recover the true name on every platform.
+func resolveSegments(baseDir string, segments []string) string {
+	dir := baseDir
+
+	for _, seg := range segments {
+		entries, err := DefaultFS.ReadDir(dir)
+		if err != nil {
+			return ""
+		}
+
+		found := ""
+
+		for _, e := range entries {
+			if e.Name() == seg {
+				found = e.Name()
+
+				break
+			}
+		}
+
+		if found == "" {
+			for _, e := range entries {
+				if strings.EqualFold(e.Name(), seg) {
+					found = e.Name()
+
+					break
+				}
+			}
+		}
+
+		if found == "" {
+			return ""
+		}
+
+		dir = filepath.Join(dir, found)
+	}
+
+	return dir
 }
 
 // ResolveMappings resolves relative paths in a map to absolute using baseDir.

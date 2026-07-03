@@ -443,3 +443,68 @@ func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
 		t.Errorf("expected pageEvent.setDocument() to resolve (onMissingMethod), got: %s", reason)
 	}
 }
+
+// TestCanResolveCall_NoFollowSkipsMethodVerification verifies the `noFollow` resolver flag:
+// when set, CanResolveCall must accept a call as soon as the resolver matches, without
+// checking whether the resolved component actually defines the called method. This exercises
+// the primary variable-resolver checkpoint (the first of three noFollow checks in
+// CanResolveCall). The test proves causation, not just "it passes": the same setup without
+// noFollow is shown to fail first, so the pass with noFollow can only be due to the flag.
+func TestCanResolveCall_NoFollowSkipsMethodVerification(t *testing.T) {
+	dir := testdataDir()
+
+	// phantomVar has no established component ref anywhere in the file, so CanResolveCall
+	// falls through to the variable-name resolver. models.Base (see testdata/models/Base.cfc)
+	// defines init() and getClassName(), but not doesNotExist().
+	content := `<cfcomponent>
+<cffunction name="testMethod">
+	<cfset phantomVar.doesNotExist()>
+</cffunction>
+</cfcomponent>`
+
+	fileURI := uri.URI("file://" + filepath.Join(dir, "test_nofollow.cfc"))
+	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+		ExtractCalls: true,
+	})
+
+	calls := pr.FuncCalls(0, 10)
+
+	var call *parser.CallSite
+
+	for i := range calls {
+		if calls[i].FuncName == "doesNotExist" {
+			call = &calls[i]
+
+			break
+		}
+	}
+
+	if call == nil {
+		t.Fatal("expected to find phantomVar.doesNotExist() call site")
+	}
+
+	fsys := vfs.OS{}
+
+	newResolver := func(noFollow bool) *resolve.Resolver {
+		return &resolve.Resolver{
+			FS:               fsys,
+			Index:            index.New(),
+			WorkspaceFolders: []string{dir},
+			Resolvers: []parser.Resolver{
+				{Match: "phantomVar", Resolve: "models.Base", Prefix: "phantomVar", NoFollow: noFollow},
+			},
+		}
+	}
+
+	// Without noFollow, models.Base's lack of doesNotExist() must be reported.
+	strict := newResolver(false)
+	if reason := strict.CanResolveCall(*call, pr, dir); reason == "" {
+		t.Fatal("expected phantomVar.doesNotExist() to fail without noFollow (models.Base has no such method)")
+	}
+
+	// With noFollow, the same call must be accepted purely because the resolver matched.
+	lenient := newResolver(true)
+	if reason := lenient.CanResolveCall(*call, pr, dir); reason != "" {
+		t.Errorf("expected phantomVar.doesNotExist() to resolve with noFollow set, got: %s", reason)
+	}
+}

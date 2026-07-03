@@ -2042,6 +2042,136 @@ func TestResolverMatch_VariousPatterns(t *testing.T) {
 	}
 }
 
+// TestResolveFromCall_RegexPatternShapes covers the two regex-match variants a `\`-containing
+// Match pattern can take: an explicit capture group whose value is substituted into Resolve
+// (already exercised elsewhere via `kernel\.get([A-Za-z0-9_]+)\(\)`-style resolvers), and — the
+// previously-untested shape — a pure boolean regex gate with no capture group at all, where
+// Resolve is returned verbatim via the `len(m) == 1` short-circuit in matchResolverWithCache.
+func TestResolveFromCall_RegexPatternShapes(t *testing.T) {
+	resolvers := []Resolver{
+		// No capture group — regex is just a gate; Resolve is a fixed string.
+		{Match: `createModel\([^)]*\)`, Resolve: "core.contextmodel", Prefix: "createModel"},
+		// Capture group inside quoted call args — captured value substituted into Resolve.
+		{Match: `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`, Resolve: "javastubs.$1", Prefix: "createObject"},
+	}
+
+	cases := []struct {
+		expr     string
+		expected string
+	}{
+		{`createModel()`, "core.contextmodel"},
+		{`createModel(arg1, arg2)`, "core.contextmodel"},
+		{`createModelSomethingElse()`, ""},
+		{`createObject("java", "java.util.HashMap")`, "javastubs.java.util.HashMap"},
+		{`createObject('java', 'com.example.Foo')`, "javastubs.com.example.Foo"},
+		{`createObject("component", "models.User")`, ""},
+	}
+
+	for _, c := range cases {
+		result := ResolveFromCall(c.expr, resolvers)
+		if result != c.expected {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", c.expr, result, c.expected)
+		}
+	}
+}
+
+// TestResolveFromCall_DiscardedCaptureDottedChain covers the "$1 at the very end of Match"
+// shape (empty suffix), used by struct-key handle patterns like `itextObj.Foo.$1` where the
+// captured method call is discarded (Resolve has no $1) and the target is fixed. This exercises
+// the `else` branch of simpleMatch (capture everything after prefix) that a suffixed pattern like
+// `getUser($1)` never reaches, and confirms a two-level dotted RHS assignment
+// (`var x = handle.Key.method(...)`) is actually recognized as a component ref during parsing,
+// not just matched in isolation.
+func TestResolveFromCall_DiscardedCaptureDottedChain(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: "itextObj.PDFtableCell.$1", Resolve: "javastubs.com.lowagie.text.pdf.PdfPCell", Prefix: "itextObj.PDFtableCell"},
+	}
+
+	cases := []struct {
+		expr     string
+		expected string
+	}{
+		{`itextObj.PDFtableCell.init()`, "javastubs.com.lowagie.text.pdf.PdfPCell"},
+		{`itextObj.PDFtableCell.init(1, 2)`, "javastubs.com.lowagie.text.pdf.PdfPCell"},
+		{`itextObj.PDFtable.init()`, ""},
+	}
+
+	for _, c := range cases {
+		result := ResolveFromCall(c.expr, resolvers)
+		if result != c.expected {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", c.expr, result, c.expected)
+		}
+	}
+
+	content := `component {
+	function build() {
+		var cell = itextObj.PDFtableCell.init(6);
+	}
+}`
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ScanAllScopes: true,
+	})
+
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(pr.Scopes))
+	}
+
+	scope := pr.Scopes[0]
+
+	var cellComp string
+
+	for _, ref := range pr.FuncComponentRefs(scope.Start, scope.End) {
+		if ref.Variable == "cell" {
+			cellComp = ref.Component
+		}
+	}
+
+	if cellComp != "javastubs.com.lowagie.text.pdf.PdfPCell" {
+		t.Errorf("expected cell → javastubs.com.lowagie.text.pdf.PdfPCell via dotted-chain resolver, got %q", cellComp)
+	}
+}
+
+// TestResolveFromCall_CaseFoldedPlaceholder covers the ${1:lower}/${1:upper} substitution
+// modifiers, which let a single templated resolver replace a family of per-name resolvers
+// whose target is `packages.<lowercase-of-captured-name>` — the captured value is normally
+// written in call-site case (e.g. `getPageTools()` captures "PageTools"), but CFML package
+// paths are conventionally lowercase, so a plain $1 substitution would resolve the wrong,
+// wrongly-cased path. Covers both the simple-match ($1 in Match, no backslash) and regex-match
+// (capture group in Match) code paths, since substitutePlaceholder is shared by both.
+func TestResolveFromCall_CaseFoldedPlaceholder(t *testing.T) {
+	simpleResolvers := []Resolver{
+		{Match: "get$1()", Resolve: "tassweb.packages.tass.${1:lower}", Prefix: "get"},
+	}
+
+	regexResolvers := []Resolver{
+		{Match: `get([A-Za-z]+)\(\)`, Resolve: "tassweb.packages.tass.${1:lower}", Prefix: "get"},
+	}
+
+	upperResolvers := []Resolver{
+		{Match: "get$1()", Resolve: "constants.${1:upper}", Prefix: "get"},
+	}
+
+	cases := []struct {
+		name      string
+		resolvers []Resolver
+		expr      string
+		expected  string
+	}{
+		{"simple lower", simpleResolvers, "getPageTools()", "tassweb.packages.tass.pagetools"},
+		{"simple lower, already lowercase call", simpleResolvers, "getLockBroker()", "tassweb.packages.tass.lockbroker"},
+		{"regex lower", regexResolvers, "getPageTools()", "tassweb.packages.tass.pagetools"},
+		{"upper", upperResolvers, "getFoo()", "constants.FOO"},
+	}
+
+	for _, c := range cases {
+		result := ResolveFromCall(c.expr, c.resolvers)
+		if result != c.expected {
+			t.Errorf("%s: ResolveFromCall(%q) = %q, want %q", c.name, c.expr, result, c.expected)
+		}
+	}
+}
+
 func TestExpressionMappings_MultipleReplacements(t *testing.T) {
 	content := `component {
 	variables.a = createObject("component", "#ROOT#models.A");
