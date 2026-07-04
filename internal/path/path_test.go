@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -32,10 +33,8 @@ func (f *caseSensitiveFS) Stat(path string) (fs.FileInfo, error) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 
-	for _, e := range f.dirs[dir] {
-		if e == base {
-			return nil, nil
-		}
+	if slices.Contains(f.dirs[dir], base) {
+		return nil, nil
 	}
 
 	return nil, os.ErrNotExist

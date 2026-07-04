@@ -2015,6 +2015,264 @@ func TestTagParser_AllRefTypes(t *testing.T) {
 	}
 }
 
+// TestResolverMatch_PipeDelimitedPrefix covers a single resolver whose `Prefix` lists
+// multiple pipe-delimited alternatives, sharing one match/resolve pair across call-site
+// shapes that don't begin with a common substring (so a single plain Prefix can't cover both).
+func TestResolverMatch_PipeDelimitedPrefix(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `createModel\([^)]*\)|buildModel\([^)]*\)`, Resolve: "core.contextmodel", Prefix: "createModel|buildModel"},
+	}
+
+	cases := []struct {
+		expr     string
+		expected string
+	}{
+		{`createModel()`, "core.contextmodel"},
+		{`buildModel(arg1)`, "core.contextmodel"},
+		{`unrelatedCall()`, ""},
+	}
+
+	for _, c := range cases {
+		result := ResolveFromCall(c.expr, resolvers)
+		if result != c.expected {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", c.expr, result, c.expected)
+		}
+	}
+
+	// Same resolver via the pre-grouped ResolverSet path (BuildResolverSet/Resolve),
+	// which indexes by first byte of each prefix alternative.
+	rs := BuildResolverSet(resolvers)
+	for _, c := range cases {
+		result := rs.Resolve(c.expr)
+		if result != c.expected {
+			t.Errorf("ResolverSet.Resolve(%q) = %q, want %q", c.expr, result, c.expected)
+		}
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_OverlappingAlternatives pins down a subtle, surprising
+// behavior: findPrefixPos returns the position of whichever alternative is found first *in list
+// order*, not the alternative that would actually let match succeed. When one alternative is a
+// substring of another, listing the shorter one first makes the longer one unreachable — the
+// short alternative's (earlier, wrong) position is used to slice expr, so match never sees the
+// full text. This is the pipe-delimited-prefix variant of the pre-existing "prefix substring
+// false-positive" limitation documented in CLAUDE.md, not a new bug — it's inherent to
+// findPrefixPos trying alternatives in order and stopping at the first hit.
+func TestResolverMatch_PipeDelimitedPrefix_OverlappingAlternatives(t *testing.T) {
+	resolvers := []Resolver{
+		// "File" is a substring of "getFile" (found at position 3 within "getFile()").
+		{Match: `getFile\([^)]*\)`, Resolve: "customobjects.file", Prefix: "File|getFile"},
+	}
+
+	if got := ResolveFromCall(`getFile()`, resolvers); got != "" {
+		t.Errorf("ResolveFromCall(getFile()) = %q, want empty (shorter alternative listed first steals the match position)", got)
+	}
+
+	// Swapping alternative order to longest-first avoids the problem.
+	reordered := []Resolver{
+		{Match: `getFile\([^)]*\)`, Resolve: "customobjects.file", Prefix: "getFile|File"},
+	}
+	if got := ResolveFromCall(`getFile()`, reordered); got != "customobjects.file" {
+		t.Errorf("ResolveFromCall(getFile()) with longest-first order = %q, want customobjects.file", got)
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_ThreeAlternatives covers a Prefix with more than two
+// pipe-delimited alternatives (the earlier tests only use two), matching the shape of the real
+// merged config entries this feature was built for (e.g. the tassweb "nocheck" and
+// "subservices" groups collapse 4-6 entries into one resolver each).
+func TestResolverMatch_PipeDelimitedPrefix_ThreeAlternatives(t *testing.T) {
+	resolvers := []Resolver{
+		{
+			Match:   `^_user(?:\(\))?$|^ARGUMENTS\.user$|^SESSION\.userInfo$`,
+			Resolve: "core.user",
+			Prefix:  "_user|ARGUMENTS.user|SESSION.userInfo",
+		},
+	}
+
+	cases := []struct {
+		expr     string
+		expected string
+	}{
+		{"_user", "core.user"},
+		{"ARGUMENTS.user", "core.user"},
+		{"SESSION.userInfo", "core.user"},
+		{"REQUEST.user", ""},
+	}
+
+	rs := BuildResolverSet(resolvers)
+
+	for _, c := range cases {
+		if got := ResolveFromCall(c.expr, resolvers); got != c.expected {
+			t.Errorf("ResolveFromCall(%q) = %q, want %q", c.expr, got, c.expected)
+		}
+
+		if got := rs.Resolve(c.expr); got != c.expected {
+			t.Errorf("ResolverSet.Resolve(%q) = %q, want %q", c.expr, got, c.expected)
+		}
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_NoFollow confirms NoFollow still propagates correctly
+// when the match came via a non-first alternative of a pipe-delimited Prefix — ResolveFromCallFull
+// returns NoFollow from the resolver struct itself, not from which alternative matched, but this
+// pins that down explicitly since noFollow resolvers (config's "nocheck" pattern) are a real
+// merge candidate (e.g. collapsing several noFollow:true entries into one).
+//
+// Match must contain a literal backslash to compile as regex at all — isRegexPattern's only
+// trigger is "contains \\", independent of Prefix/pipe-delimiting entirely (a bare
+// "a|b" Match with no backslash is compared as one literal string, not an alternation, and
+// would silently fail here). The "(?:\(\))?" optional-parens tail supplies that backslash
+// naturally, same as the real merged config entries do.
+func TestResolverMatch_PipeDelimitedPrefix_NoFollow(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `^domobject_document(?:\(\))?$|^domobject_instance(?:\(\))?$`, Resolve: "nocheck", Prefix: "domobject_document|domobject_instance", NoFollow: true},
+	}
+
+	cases := []string{"domobject_document", "domobject_instance"}
+	for _, expr := range cases {
+		comp, noFollow := ResolveFromCallFull(expr, resolvers)
+		if comp != "nocheck" || !noFollow {
+			t.Errorf("ResolveFromCallFull(%q) = (%q, %v), want (\"nocheck\", true)", expr, comp, noFollow)
+		}
+	}
+
+	if comp, _ := ResolveFromCallFull("unrelated", resolvers); comp != "" {
+		t.Errorf("ResolveFromCallFull(unrelated) = %q, want empty", comp)
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_CaseInsensitive confirms each pipe-delimited alternative
+// is matched case-insensitively, same as a single Prefix always has been — the split just adds
+// alternatives, it must not change per-alternative matching semantics.
+func TestResolverMatch_PipeDelimitedPrefix_CaseInsensitive(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getFile\([^)]*\)|objFile\([^)]*\)`, Resolve: "customobjects.file", Prefix: "getFile|objFile"},
+	}
+
+	cases := []string{"GETFILE()", "ObjFile()", "getfile(1)"}
+	for _, expr := range cases {
+		if got := ResolveFromCall(expr, resolvers); got != "customobjects.file" {
+			t.Errorf("ResolveFromCall(%q) = %q, want customobjects.file", expr, got)
+		}
+	}
+}
+
+// TestPrefixEqualFold_EmptyAlternative documents the empty-alternative guard in prefixEqualFold
+// (ast.go), matching the guard its siblings prefixContainsFold/findPrefixPos already had. A
+// leading/trailing/doubled "|" in a Prefix (e.g. "getFile|", a plausible config typo) produces an
+// empty alternative via splitPrefix; without the guard, EqualFold("", "") would wrongly report a
+// match against an empty expr. No current caller passes an empty expr (both call sites already
+// guard non-empty), so this calls the unexported helper directly to pin the fix down regardless
+// of caller behavior.
+func TestPrefixEqualFold_EmptyAlternative(t *testing.T) {
+	if prefixEqualFold("", "getFile|") {
+		t.Error("prefixEqualFold(\"\", \"getFile|\") = true, want false")
+	}
+
+	if !prefixEqualFold("getFile", "getFile|") {
+		t.Error("prefixEqualFold(\"getFile\", \"getFile|\") = false, want true")
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_AssignmentCallSite guards against a regression where
+// a pipe-delimited Prefix resolved correctly through ResolveFromCall/ResolverSet.Resolve but
+// silently failed through scriptParser.tryResolveCall's separate quick-rejection check, which
+// used to compare the whole "a|b" Prefix string as one literal substring via containsFold
+// instead of checking each alternative. That check only runs for `x = foo.bar(...)`-shaped
+// assignments (not the bare "_parent"-style non-call RHS covered above), so this test exercises
+// that call-site shape specifically.
+func TestResolverMatch_PipeDelimitedPrefix_AssignmentCallSite(t *testing.T) {
+	content := `component {
+	function work() {
+		template = document.createTemplate(width=1);
+	}
+}`
+	resolvers := []Resolver{
+		{Match: `document\.createTemplate|document\.createStamper\(\)`, Resolve: "reporting.directcontent", Prefix: "document.createTemplate|document.createStamper"},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	found := ""
+
+	for _, ref := range refs {
+		if ref.Variable == "template" {
+			found = ref.Component
+		}
+	}
+
+	if found != "reporting.directcontent" {
+		t.Errorf("expected template -> reporting.directcontent, got %q", found)
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_BareNameFallback guards against a regression where the
+// "bare function name" fallback in checkSetRHSStr (tag_parser.go) and tryResolveCall
+// (script_parser.go) — used for e.g. "style = document.loadStylesheet(...)" where "document"
+// itself is a bare-word resolver match — only recognized r.simple resolvers via a hand-rolled
+// EqualFold(callExpr, r.Match) check. Pipe-merging turns Match into a regex (r.simple=false),
+// which this check silently skipped even though the resolver would otherwise match, dropping
+// the ComponentRef entirely. tag_parser.go must run the bare-name candidate through
+// matchResolverWithCache so regex-mode (merged) resolvers are recognized too.
+func TestResolverMatch_PipeDelimitedPrefix_BareNameFallback(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `_kernel\.createDocument\([^)]*\)|^document(?:\(\))?$`, Resolve: "reporting.itext", Prefix: "_kernel.createDocument|document"},
+	}
+
+	content := `<cfset style = document.loadStylesheet(cssfile="x",properties="y")>`
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+
+	found := ""
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "style" {
+			found = ref.Component
+		}
+	}
+
+	if found != "reporting.itext" {
+		t.Errorf("expected style -> reporting.itext, got %q", found)
+	}
+}
+
+// TestResolverMatch_PipeDelimitedPrefix_ScriptBareNameFallback is the script_parser.go
+// counterpart to TestResolverMatch_PipeDelimitedPrefix_BareNameFallback above: tryResolveCall's
+// own "bare name" fallback (script_parser.go) had the identical r.simple-only bug as
+// tag_parser.go's checkSetRHSStr, just on a different call shape — a bare function call with no
+// dot chain (e.g. "svc = _kernel()") rather than an obj.method() chain. The resolver's Match has
+// no optional-parens tail, so the earlier "callExpr()" attempt must fail and fall through to the
+// bare-name check for this test to actually exercise that code path.
+func TestResolverMatch_PipeDelimitedPrefix_ScriptBareNameFallback(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `_kernel\.foo\([^)]*\)|^_kernel$`, Resolve: "core.kernel2", Prefix: "_kernel.foo|_kernel"},
+	}
+
+	content := `component {
+	function work() {
+		svc = _kernel();
+	}
+}`
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	found := ""
+
+	for _, ref := range refs {
+		if ref.Variable == "svc" {
+			found = ref.Component
+		}
+	}
+
+	if found != "core.kernel2" {
+		t.Errorf("expected svc -> core.kernel2, got %q", found)
+	}
+}
+
 func TestResolverMatch_VariousPatterns(t *testing.T) {
 	resolvers := []Resolver{
 		{Match: `getService("$1")`, Resolve: "services.$1.service", Prefix: "getService"},

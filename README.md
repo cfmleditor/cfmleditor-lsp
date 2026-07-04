@@ -84,7 +84,7 @@ Component resolvers teach the LSP how to resolve custom factory patterns to spec
 |---|---|---|
 | `match` | Yes | Pattern to match against the RHS of an assignment. Use `$1` as a capture placeholder. Without `$1`, acts as an exact variable name match. |
 | `resolve` | Yes | Component dot-path or file path template. `$1` is replaced with the captured value. File paths (with `/` or `.cfc`) are normalised to dot-paths. |
-| `prefix` | Yes | Fast-check string. Lines without this prefix are skipped entirely — avoids expensive matching on every line. |
+| `prefix` | Yes | Fast-check string. Lines without this prefix are skipped entirely — avoids expensive matching on every line. Pipe-delimit multiple alternatives (e.g. `"createModel\|buildModel"`) to share one `match`/`resolve` pair across call-site shapes that don't start with a common substring. |
 
 The match is case-insensitive and works regardless of qualifiers before it. For example, `getService("$1")` matches all of:
 - `getService("timetable")`

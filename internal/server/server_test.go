@@ -36,8 +36,6 @@ func makeCall(t *testing.T, _ string, params any) []byte {
 	return b
 }
 
-func strPtr(s string) *string { return &s }
-
 func optVal(o protocol.Optional[string]) string {
 	v, _ := o.Get()
 
@@ -185,7 +183,7 @@ func TestCompletionTriggeredByTag(t *testing.T) {
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("<"),
+			TriggerCharacter: new("<"),
 		},
 	})
 
@@ -315,7 +313,7 @@ func TestCompletionTagAttributes(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr(" "),
+			TriggerCharacter: new(" "),
 		},
 	})
 
@@ -496,7 +494,7 @@ func TestCompletionClosingTag(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("/"),
+			TriggerCharacter: new("/"),
 		},
 	})
 
@@ -530,7 +528,7 @@ func TestCompletionClosingTagNested(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("/"),
+			TriggerCharacter: new("/"),
 		},
 	})
 
@@ -564,7 +562,7 @@ func TestCompletionClosingTagAlreadyClosed(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("/"),
+			TriggerCharacter: new("/"),
 		},
 	})
 
@@ -1268,7 +1266,7 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr(">"),
+			TriggerCharacter: new(">"),
 		},
 	})
 
@@ -1308,7 +1306,7 @@ func TestCompletionDuplicateGtAfterTag(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr(">"),
+			TriggerCharacter: new(">"),
 		},
 	})
 
@@ -1389,7 +1387,7 @@ func TestCompletionDotComponentMethods(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -1438,7 +1436,7 @@ func TestCompletionDotPositionAware(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -1485,7 +1483,7 @@ func TestCompletionDotUnscopedFromInit(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -2079,7 +2077,7 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -2476,7 +2474,7 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -2563,7 +2561,7 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -2697,7 +2695,7 @@ func TestCompletionDotOnThis(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -2905,7 +2903,7 @@ func TestCompletionDotAfterNewExpression(t *testing.T) {
 		},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
-			TriggerCharacter: strPtr("."),
+			TriggerCharacter: new("."),
 		},
 	})
 
@@ -3055,7 +3053,7 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 4},
 		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -3250,7 +3248,7 @@ func TestCompletionClosingTagSlash(t *testing.T) {
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 0, Character: 12},
 		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr("/")},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new("/")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -4168,7 +4166,7 @@ func TestCompletionViaCreateObject(t *testing.T) {
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 1, Character: 15},
 		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -4279,7 +4277,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
 			Position:     protocol.Position{Line: 4, Character: 20},
 		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: strPtr(".")},
+		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)

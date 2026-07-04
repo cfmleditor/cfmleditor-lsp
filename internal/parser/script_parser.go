@@ -2102,7 +2102,7 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 	hasPrefix := false
 
 	for i := range p.resolvers {
-		if p.resolvers[i].Prefix == "" || containsFold(callExpr, p.resolvers[i].Prefix) {
+		if p.resolvers[i].Prefix == "" || prefixContainsFold(callExpr, p.resolvers[i].Prefix) {
 			hasPrefix = true
 
 			break
@@ -2163,11 +2163,9 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 	// Only use exact match to avoid substring conflicts (e.g. "_objInit" matching "objInit")
 	for i := range p.resolvers {
 		r := &p.resolvers[i]
-		if r.Prefix != "" && strings.EqualFold(callExpr, r.Prefix) {
-			r.compiledRe()
-
-			if r.simple && !r.hasPlaceholder && strings.EqualFold(callExpr, r.Match) {
-				return r.Resolve
+		if r.Prefix != "" && prefixEqualFold(callExpr, r.Prefix) {
+			if comp := matchResolverWithCache(callExpr, r); comp != "" {
+				return comp
 			}
 		}
 	}
@@ -2241,7 +2239,8 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 
 	p.sc.NextSkipComments() // consume method name
 
-	extChain := chain + "." + next.Value
+	var extChain strings.Builder
+	extChain.WriteString(chain + "." + next.Value)
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments()
@@ -2253,7 +2252,7 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 
 		p.sc.NextSkipComments()
 
-		extChain += "." + n2.Value
+		extChain.WriteString("." + n2.Value)
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
@@ -2262,7 +2261,7 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 		return ""
 	}
 
-	if comp := p.tryResolveCall(extChain); comp != "" {
+	if comp := p.tryResolveCall(extChain.String()); comp != "" {
 		return comp
 	}
 
@@ -2292,7 +2291,8 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 
 	p.sc.NextSkipComments()
 
-	component := first.Value
+	var component strings.Builder
+	component.WriteString(first.Value)
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments()
@@ -2304,7 +2304,7 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 
 		p.sc.NextSkipComments()
 
-		component += "." + next.Value
+		component.WriteString("." + next.Value)
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
@@ -2312,7 +2312,7 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 	}
 
 	p.skipBalancedParens()
-	p.scanChainedCalls(component, newTok.Line)
+	p.scanChainedCalls(component.String(), newTok.Line)
 }
 
 func isKeyword(s string) bool {

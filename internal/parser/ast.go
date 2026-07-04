@@ -248,17 +248,85 @@ func BuildResolverSet(resolvers []Resolver) *ResolverSet {
 			continue
 		}
 
-		b := resolvers[i].Prefix[0]
-		if b >= 'A' && b <= 'Z' {
-			b += 32
-		}
+		seenByte := [256]bool{}
 
-		rs.byByte[b] = append(rs.byByte[b], i)
+		for _, alt := range splitPrefix(resolvers[i].Prefix) {
+			if alt == "" {
+				continue
+			}
+
+			b := alt[0]
+			if b >= 'A' && b <= 'Z' {
+				b += 32
+			}
+
+			if seenByte[b] {
+				continue
+			}
+
+			seenByte[b] = true
+			rs.byByte[b] = append(rs.byByte[b], i)
+		}
 	}
 
 	rs.built = true
 
 	return rs
+}
+
+// splitPrefix splits a `prefix` field on `|` into its alternatives, allowing a single
+// resolver to share one match/resolve pair across multiple fast-check prefixes
+// (e.g. "getPageTools|getLockBroker") instead of requiring a separate resolver entry
+// per prefix. A prefix with no `|` returns a single-element slice unchanged.
+func splitPrefix(prefix string) []string {
+	if !strings.Contains(prefix, "|") {
+		return []string{prefix}
+	}
+
+	return strings.Split(prefix, "|")
+}
+
+// prefixContainsFold reports whether expr contains any of prefix's pipe-delimited
+// alternatives as a case-insensitive substring. Used by the quick-rejection checks
+// that don't need the match position, only a yes/no signal.
+func prefixContainsFold(expr, prefix string) bool {
+	for _, alt := range splitPrefix(prefix) {
+		if alt != "" && containsFold(expr, alt) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// prefixEqualFold reports whether expr case-insensitively equals any of prefix's
+// pipe-delimited alternatives.
+func prefixEqualFold(expr, prefix string) bool {
+	for _, alt := range splitPrefix(prefix) {
+		if alt != "" && strings.EqualFold(expr, alt) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// findPrefixPos returns the position of the first matching prefix alternative in expr,
+// or -1 if none match. Semantics are unchanged from a single indexFold call: which
+// alternative matched doesn't affect the subsequent Match/Resolve step, since only the
+// matched position (not the matched text) is used to slice expr for matching.
+func findPrefixPos(expr, prefix string) int {
+	for _, alt := range splitPrefix(prefix) {
+		if alt == "" {
+			continue
+		}
+
+		if idx := indexFold(expr, alt); idx >= 0 {
+			return idx
+		}
+	}
+
+	return -1
 }
 
 // ResolveFromCallFull matches an expression against resolvers and returns the component dot-path
@@ -272,7 +340,7 @@ func ResolveFromCallFull(expr string, resolvers []Resolver) (string, bool) {
 			continue
 		}
 		// Find prefix position and only match from there, limited forward
-		idx := indexFold(expr, r.Prefix)
+		idx := findPrefixPos(expr, r.Prefix)
 		if idx < 0 {
 			continue
 		}
@@ -331,7 +399,7 @@ func (rs *ResolverSet) Resolve(expr string) string {
 	for _, idx := range candidates {
 		r := &rs.resolvers[idx]
 
-		pos := indexFold(expr, r.Prefix)
+		pos := findPrefixPos(expr, r.Prefix)
 		if pos < 0 {
 			continue
 		}

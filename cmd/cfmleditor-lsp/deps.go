@@ -91,7 +91,7 @@ func cmdDeps(args []string) {
 	fileCh := make(chan string, len(files))
 	resultCh := make(chan fileResult, len(files))
 
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			for f := range fileCh {
 				content, err := os.ReadFile(f)

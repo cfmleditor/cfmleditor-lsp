@@ -613,12 +613,10 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			if funcName := extractIdent(rhs); funcName != "" {
 				for i := range p.resolvers {
 					r := &p.resolvers[i]
-					if r.Prefix != "" && strings.EqualFold(funcName, r.Prefix) {
-						r.compiledRe()
-
-						if r.simple && !r.hasPlaceholder && strings.EqualFold(funcName, r.Match) {
+					if r.Prefix != "" && prefixEqualFold(funcName, r.Prefix) {
+						if comp := matchResolverWithCache(funcName, r); comp != "" {
 							p.addRef(ComponentRef{
-								Variable: varName, Component: r.Resolve,
+								Variable: varName, Component: comp,
 								URI: uriFromString(p.fileURI), Line: uint32(line),
 							})
 
