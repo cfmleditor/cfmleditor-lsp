@@ -2456,6 +2456,31 @@ func TestExpressionMappings_MultipleReplacements(t *testing.T) {
 	}
 }
 
+func TestExpressionMappings_PipeDelimitedAlternatives(t *testing.T) {
+	content := `component {
+	variables.a = createObject("component", "#ROOT#models.A");
+	variables.b = createObject("component", "#LEGACY_ROOT#models.B");
+}`
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ExpressionMappings: map[string]string{
+			"#ROOT#|#LEGACY_ROOT#": "app.",
+		},
+	})
+
+	found := map[string]string{}
+	for _, ref := range pr.ComponentRefs {
+		found[ref.Variable] = ref.Component
+	}
+
+	if found["a"] != "app.models.A" {
+		t.Errorf("expected a → app.models.A, got %q", found["a"])
+	}
+
+	if found["b"] != "app.models.B" {
+		t.Errorf("expected b → app.models.B, got %q", found["b"])
+	}
+}
+
 func TestPendingCalls_MultipleCallsInSameFunction(t *testing.T) {
 	content := `component {
 	models.User function getUser() { return new models.User(); }

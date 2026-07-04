@@ -402,9 +402,11 @@ func (pr *ParseResult) replaceExpressions(comp string) string {
 		return comp
 	}
 
-	for expr, value := range pr.expressionMappings {
-		if strings.Contains(comp, expr) {
-			comp = strings.ReplaceAll(comp, expr, value)
+	for key, value := range pr.expressionMappings {
+		for expr := range strings.SplitSeq(key, "|") {
+			if expr != "" && strings.Contains(comp, expr) {
+				comp = strings.ReplaceAll(comp, expr, value)
+			}
 		}
 	}
 

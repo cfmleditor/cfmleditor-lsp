@@ -32,10 +32,13 @@ type Resolver struct {
 // using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
 // If component contains pipe characters, each alternative is tried left-to-right.
 func (r *Resolver) ComponentPath(component, baseDir string) string {
-	// Apply expression mappings (replace runtime expressions with static values)
-	for expr, value := range r.ExpressionMappings {
-		if strings.Contains(component, expr) {
-			component = strings.ReplaceAll(component, expr, value)
+	// Apply expression mappings (replace runtime expressions with static values).
+	// A key may list multiple pipe-delimited alternatives that all map to the same value.
+	for key, value := range r.ExpressionMappings {
+		for expr := range strings.SplitSeq(key, "|") {
+			if expr != "" && strings.Contains(component, expr) {
+				component = strings.ReplaceAll(component, expr, value)
+			}
 		}
 	}
 

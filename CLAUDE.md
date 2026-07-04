@@ -90,6 +90,12 @@ Both the simple prefix/suffix match and regex match substitute captures into `re
 
 The same class of issue can appear *within* a single pipe-delimited `prefix`: `findPrefixPos` (see above) tries alternatives in the order written and returns the position of whichever is found first in that order — not the earliest position in the expression, and not the alternative that would actually let `match` succeed. If one alternative is a substring of another (e.g. `prefix: "File|getFile"` against `getFile()`), the shorter alternative found first fixes the slice position (`sub = "File()"`), and the longer alternative never gets a chance even though it would have matched. Order pipe-delimited alternatives so a shorter one that could be a substring of a longer one comes *after* it.
 
+## Expression mappings
+
+`expressionMappings` in `.cfmleditor.json` is a flat `map[string]string` of runtime expression → static value substitutions (e.g. `"#VARIABLES._core#": "packages.tass.core."`), applied to component-path strings before resolution. Unlike `componentResolvers`, there is no `match`/regex support — each key is matched with a plain `strings.Contains` and replaced with `strings.ReplaceAll`.
+
+A key may list multiple alternatives separated by `|` (e.g. `"#ROOT#|#LEGACY_ROOT#": "app."`), so several distinct runtime expressions that should collapse to the same static value don't need separate map entries. Each pipe-delimited alternative is checked and replaced independently — this is plain substring alternation, not regex, so `|` here has no relation to the regex-triggering `\` in `componentResolvers.match`. Implemented in `internal/resolve/resolve.go: ComponentPath` and `internal/parser/result.go: replaceExpressions`.
+
 **Known parser limitation: CFML comments containing CFScript**
 
 The tag parser does not fully skip `<!--- ... --->` comment blocks that contain embedded CFScript or `<cfset>` tags. Variables declared in live code but only used inside a comment block will still generate lint errors for the commented-out lines. Affected examples: `tf`/`field` in `reporting/itext.cfc:createTextField`, `communityObj`/`familyObj` in `donor/persist.cfc:saveDonor`. These are false positives; the fix requires improving comment boundary detection in the tag parser.
