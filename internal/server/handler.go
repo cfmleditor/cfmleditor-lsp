@@ -389,7 +389,7 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	return nil, nil
 }
 
-func (s *Server) handleDidSave(ctx context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
 	var params protocol.DidSaveTextDocumentParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -408,7 +408,11 @@ func (s *Server) handleDidSave(ctx context.Context, rawParams []byte) (any, erro
 	}
 
 	if cfpath.IsCFMLFile(filePath) {
-		s.safeGo("runDiagnostics", func() { s.runDiagnostics(ctx, docURI) })
+		// runDiagnostics outlives this handler, so it must not carry the
+		// request-scoped ctx: jsonrpc2 pools/resets incoming request contexts
+		// once the handler returns, and using the stale context afterward
+		// panics ("cannot create context from nil parent").
+		s.safeGo("runDiagnostics", func() { s.runDiagnostics(context.Background(), docURI) })
 		s.safeGo("rebuildFileCompletionCache", func() { s.rebuildFileCompletionCache(docURI) })
 	}
 
@@ -993,7 +997,9 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		return mermaid, nil
 	case "cfmleditor.scanWorkspace":
-		s.safeGo("scanWorkspace", func() { s.scanWorkspace(ctx) })
+		// Same reasoning as runDiagnostics: this goroutine outlives the
+		// handler, so the request ctx (pooled/reset on return) is unsafe here.
+		s.safeGo("scanWorkspace", func() { s.scanWorkspace(context.Background()) })
 
 		return nil, nil
 	default:
