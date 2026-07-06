@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -104,13 +105,7 @@ func (l *recordingLogger) hasError(msg string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	for _, e := range l.errors {
-		if e == msg {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(l.errors, msg)
 }
 
 // TestScanWorkspaceDoesNotUseRequestContextAfterHandlerReturns guards against
