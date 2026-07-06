@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.2]
+
 - Fix cflint scan panic 
 - Fix cflint issues with non [a-z0-9] characters in file names
 
