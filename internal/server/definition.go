@@ -164,7 +164,7 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 // }
 
 func (s *Server) resolveComponentDef(component, funcName string, docURI uri.URI) *protocol.Location {
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	if d := s.getResolver().ResolveFunc(component, funcName, baseDir); d != nil {
@@ -187,7 +187,7 @@ func (s *Server) resolveSuper(funcName string, docURI uri.URI) *protocol.Locatio
 		return nil
 	}
 
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	if d := s.getResolver().ResolveFunc(pr.Extends, funcName, baseDir); d != nil {
@@ -203,7 +203,7 @@ func (s *Server) resolveSuper(funcName string, docURI uri.URI) *protocol.Locatio
 // qualifierBeforeWord returns the identifier before the dot preceding the word at cursor.
 // Also handles createObject('component','path').init() by returning the component path prefixed with "~".
 func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *protocol.Location {
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	s.log.Debug("definition: resolveComponentFileDef", cflog.String("component", component), cflog.String("baseDir", baseDir))
@@ -223,7 +223,7 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 // (cfinclude template, cfmodule template, include). Returns the path or empty string.
 // resolveFilePathDef resolves a file path (from cfinclude etc.) to a location.
 func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.Location {
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	// Try relative to current file

@@ -866,7 +866,7 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 		return nil
 	}
 
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	cfcPath := s.getResolver().ComponentPath(pr.Extends, baseDir)
@@ -943,7 +943,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 
 						comp := s.cfResolverSet().Resolve(callExpr)
 						if comp != "" {
-							currentPath := strings.TrimPrefix(string(docURI), "file://")
+							currentPath := docURI.Path()
 							baseDir := filepath.Dir(currentPath)
 
 							cfcPath := s.getResolver().ComponentPath(comp, baseDir)
@@ -989,7 +989,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	}
 
 	// Resolve the dot-path to a CFC file relative to the current file's directory
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	var cfcPath string

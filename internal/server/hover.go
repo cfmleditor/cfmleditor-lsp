@@ -162,7 +162,7 @@ func (s *Server) doResolveUserFunc(qualifier, funcName string, docURI uri.URI, l
 		return nil
 	}
 
-	currentPath := strings.TrimPrefix(string(docURI), "file://")
+	currentPath := docURI.Path()
 	baseDir := filepath.Dir(currentPath)
 
 	return s.getResolver().ResolveFunc(comp, funcName, baseDir)

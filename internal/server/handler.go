@@ -102,12 +102,11 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	}
 
 	for _, folder := range folders {
-		root := strings.TrimPrefix(string(folder.URI), "file://")
-		s.workspaceRoots = append(s.workspaceRoots, root)
+		s.workspaceRoots = append(s.workspaceRoots, folder.URI.Path())
 	}
 
 	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
-		s.workspaceRoots = append(s.workspaceRoots, strings.TrimPrefix(string(*params.RootURI), "file://")) //nolint:all // this is for compatibility
+		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
 	}
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
@@ -400,7 +399,7 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 	s.invalidateResolveCache()
 
 	// Invalidate Application.cfc mappings cache if an Application file was saved
-	filePath := strings.TrimPrefix(string(docURI), "file://")
+	filePath := docURI.Path()
 
 	baseName := filepath.Base(filePath)
 	if strings.EqualFold(baseName, "Application.cfc") || strings.EqualFold(baseName, "Application.cfm") {
@@ -443,7 +442,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 		cancel()
 	}()
 
-	filePath := strings.TrimPrefix(string(docURI), "file://")
+	filePath := docURI.Path()
 	s.log.Info("cflint scan starting", cflog.String("file", filePath))
 
 	// Show progress
@@ -505,7 +504,7 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) 
 	s.index.SetThisVars(docURI, pr.ThisVars())
 	// Only register as entity if within ORM scope and workspace
 	if cfpath.IsCFCFile(string(docURI)) && pr.Persistent {
-		filePath := strings.TrimPrefix(string(docURI), "file://")
+		filePath := docURI.Path()
 		if s.isOrmPath(filePath) {
 			s.index.SetEntity(cfpath.CfcNameFromURI(string(docURI)), docURI)
 		}
@@ -545,7 +544,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, removed := range params.Event.Removed {
-		root := strings.TrimPrefix(string(removed.URI), "file://")
+		root := removed.URI.Path()
 		if !s.isWorkspaceFolder(root) {
 			s.index.RemoveFilesUnder(string(removed.URI))
 		}
@@ -563,7 +562,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, added := range params.Event.Added {
-		root := strings.TrimPrefix(string(added.URI), "file://")
+		root := added.URI.Path()
 
 		s.mu.Lock()
 		s.workspaceRoots = append(s.workspaceRoots, root)

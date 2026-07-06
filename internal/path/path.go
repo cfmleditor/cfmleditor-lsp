@@ -2,6 +2,7 @@
 package path
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,6 +388,10 @@ func MatchesGlob(filePath string, globs []string) bool {
 // CfcNameFromURI extracts the CFC filename without extension from a URI.
 func CfcNameFromURI(fileURI string) string {
 	path := strings.TrimPrefix(fileURI, "file://")
+	if decoded, err := url.PathUnescape(path); err == nil {
+		path = decoded
+	}
+
 	base := filepath.Base(path)
 
 	return strings.TrimSuffix(base, filepath.Ext(base))

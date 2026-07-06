@@ -153,3 +153,27 @@ func TestResolvePath_CaseInsensitiveMappingKey(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// TestCfcNameFromURI_PercentEncoded guards against a production bug where
+// LSP clients percent-encode special characters in file URIs (e.g. "$" in
+// Java inner-class-derived filenames like IndexWriterConfig$OpenMode.cfc
+// becomes "%24"). Without decoding, the extracted entity name kept the raw
+// "%24" and stat-based lookups against it failed with "no such file or
+// directory" even though the real file existed.
+func TestCfcNameFromURI_PercentEncoded(t *testing.T) {
+	got := CfcNameFromURI("file:///Users/x/javastubs/IndexWriterConfig%24OpenMode.cfc")
+	want := "IndexWriterConfig$OpenMode"
+
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCfcNameFromURI_PlainPath(t *testing.T) {
+	got := CfcNameFromURI("file:///Users/x/models/User.cfc")
+	want := "User"
+
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
