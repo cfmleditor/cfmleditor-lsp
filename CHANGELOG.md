@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Fix cflint scan panic 
+- Fix cflint issues with non [a-z0-9] characters in file names
+
 ## [0.2.1]
 
 - Upgrade `go.lsp.dev/jsonrpc2` and `go.lsp.dev/protocol` to v1.0.1 (direct-return handler dispatch, `Optional`/`Nullable`/union-typed protocol fields)
