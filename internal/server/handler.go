@@ -860,7 +860,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
 		r := s.getResolver()
-		sourceFile := strings.TrimPrefix(sourceURI, "file://")
+		sourceFile := uri.URI(sourceURI).Path()
 		findOpts := refs.Options{
 			FuncName:          funcName,
 			Resolvers:         s.cfResolvers(),
@@ -871,7 +871,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			VerifyTarget: func(component, fileDir, sourceFile string) bool {
 				resolved := r.ComponentPath(component, fileDir)
 
-				return resolved == sourceFile
+				return cfpath.SamePath(resolved, sourceFile)
+			},
+			Reason: func(call parser.CallSite, pr *parser.ParseResult, fileDir string) string {
+				return r.CanResolveCall(call, pr, fileDir)
 			},
 			SourceFile: sourceFile,
 		}
@@ -882,7 +885,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 
-		outDir := filepath.Dir(strings.TrimPrefix(sourceURI, "file://"))
+		outDir := filepath.Dir(sourceFile)
 		if outDir == "" || outDir == "." {
 			outDir = os.TempDir()
 		}

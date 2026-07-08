@@ -3,6 +3,7 @@ package refs
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
@@ -17,7 +18,11 @@ type TraceResult struct {
 }
 
 // Trace finds all callers of funcName, then recursively traces callers of
-// wrapper functions up to maxDepth levels.
+// wrapper functions up to maxDepth levels. Entries found via recursion are
+// stamped with Depth (hop count from the original target) and Via/ViaFile
+// (the wrapper function that hop's calls reach through) so callers can tell
+// a direct call to the target apart from a call to some other same-named
+// function that itself, further down the chain, reaches the target.
 func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 	entries := Find(fsys, roots, opts)
 
@@ -26,8 +31,9 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 	recurseOpts := opts
 
 	type funcRef struct {
-		name string
-		file string
+		name  string
+		file  string
+		depth int
 	}
 
 	tracedFuncs := make(map[string]bool)
@@ -41,7 +47,7 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 			if e.Function != "" && !tracedFuncs[key] {
 				tracedFuncs[key] = true
 
-				newFuncs = append(newFuncs, funcRef{name: e.Function, file: e.File})
+				newFuncs = append(newFuncs, funcRef{name: e.Function, file: e.File, depth: e.Depth + 1})
 			}
 		}
 
@@ -53,11 +59,42 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 			recurseOpts.FuncName = fr.name
 			recurseOpts.SourceFile = fr.file
 			extra := Find(fsys, roots, recurseOpts)
+
+			for i := range extra {
+				extra[i].Depth = fr.depth
+				extra[i].Via = fr.name
+				extra[i].ViaFile = fr.file
+			}
+
 			entries = append(entries, extra...)
 		}
 	}
 
-	return entries
+	return dedupEntries(entries)
+}
+
+// dedupEntries drops exact repeats of the same call site. These arise because
+// an unqualified/unresolved call (no known component) can't be verified
+// against any particular target, so it passes as a candidate match at every
+// depth Trace searches for — the same line then surfaces once per depth.
+// Keeps the first occurrence, which is the shallowest (Trace searches depth
+// 0 before recursing), so the more direct relationship wins.
+func dedupEntries(entries []Entry) []Entry {
+	seen := make(map[string]bool, len(entries))
+	out := make([]Entry, 0, len(entries))
+
+	for _, e := range entries {
+		key := fmt.Sprintf("%s\t%d\t%s\t%s", e.File, e.Line, e.Function, e.Call)
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		out = append(out, e)
+	}
+
+	return out
 }
 
 // FormatResult builds a summary and graph from trace entries.
@@ -67,15 +104,65 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)
 	lines = append(lines, fmt.Sprintf("Calls to '%s' (%s): %d match(es)", funcName, sourceRel, len(entries)))
 
-	for _, e := range entries {
-		rel := relativePath(e.File, roots)
+	// Group by relationship to the traced target: depth 0 is a direct call;
+	// depth N>0 is a call to some other same-named "wrapper" function that,
+	// N hops further on, itself reaches the target — grouping by (depth, via)
+	// makes that chain explicit instead of flattening every hit into one list.
+	type groupKey struct {
+		depth   int
+		via     string
+		viaFile string
+	}
 
-		marker := ""
-		if !e.Resolved {
-			marker = " [unresolved]"
+	var order []groupKey
+
+	groups := make(map[groupKey][]Entry)
+
+	for _, e := range entries {
+		gk := groupKey{depth: e.Depth, via: e.Via, viaFile: e.ViaFile}
+		if _, ok := groups[gk]; !ok {
+			order = append(order, gk)
 		}
 
-		lines = append(lines, fmt.Sprintf("  %s:%d%s  %s", rel, e.Line+1, marker, e.Call))
+		groups[gk] = append(groups[gk], e)
+	}
+
+	sort.SliceStable(order, func(i, j int) bool { return order[i].depth < order[j].depth })
+
+	for _, gk := range order {
+		if gk.depth == 0 {
+			lines = append(lines, "", "Direct calls:")
+		} else {
+			viaRel := relativePath(gk.viaFile, roots)
+			lines = append(lines, "", fmt.Sprintf(
+				"Indirect (%d hop%s) — via %s::%s, which itself calls the target:",
+				gk.depth, pluralS(gk.depth), viaRel, gk.via,
+			))
+		}
+
+		for _, e := range groups[gk] {
+			rel := relativePath(e.File, roots)
+
+			marker := ""
+			if !e.Resolved {
+				marker = " [unresolved]"
+				if e.Reason != "" {
+					marker = " [unresolved: " + e.Reason + "]"
+				}
+			}
+
+			caller := ""
+			if e.Function != "" {
+				caller = " in " + e.Function + "()"
+			}
+
+			call := ""
+			if e.Call != "" {
+				call = "  " + e.Call
+			}
+
+			lines = append(lines, fmt.Sprintf("  %s:%d%s%s%s", rel, e.Line+1, marker, caller, call))
+		}
 	}
 
 	// Build graph edges
@@ -149,6 +236,14 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 		Summary: strings.Join(lines, "\n"),
 		Graph:   graph.Graph{Direction: "TD", Edges: edges},
 	}
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+
+	return "s"
 }
 
 func relativePath(path string, roots []string) string {

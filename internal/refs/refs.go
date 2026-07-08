@@ -2,6 +2,7 @@
 package refs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,24 @@ import (
 // Entry represents a single reference found.
 type Entry struct {
 	File      string `json:"file"`
-	Function  string `json:"function,omitempty"`
+	Function  string `json:"function,omitempty"` // enclosing function containing the call/ref
 	Variable  string `json:"variable,omitempty"`
 	Call      string `json:"call,omitempty"`
 	Component string `json:"component,omitempty"`
 	Line      uint32 `json:"line"`
 	Resolved  bool   `json:"resolved"`
+	// Depth and Via describe how this entry relates to the originally traced
+	// function: Depth 0 is a direct call to it. Depth N>0 means this call is
+	// to Via (a same-named wrapper function found ViaFile away) which itself,
+	// N-1 hops further on, reaches the traced function. Set by Trace; zero
+	// value for entries returned directly from Find.
+	Depth   int    `json:"depth"`
+	Via     string `json:"via,omitempty"`
+	ViaFile string `json:"viaFile,omitempty"`
+	// Reason explains why an unresolved call couldn't be verified against the
+	// traced target (e.g. "variable 'x' has no component ref"). Empty when
+	// Resolved is true, or when Options.Reason wasn't supplied.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Options configures what to search for.
@@ -34,6 +47,10 @@ type Options struct {
 	BeanLookup        func(string) string                              // bean name → dot-path lookup
 	VerifyCall        func(component, funcName, fileDir string) bool   // optional: verify the component has this function
 	VerifyTarget      func(component, fileDir, sourceFile string) bool // optional: verify the call resolves to the source component
+	// Reason, when set, explains why a call with no resolved component
+	// (call.Component == "") couldn't be resolved at all — reused from the
+	// same resolution engine the `unresolved` command uses, so the two agree.
+	Reason func(call parser.CallSite, pr *parser.ParseResult, fileDir string) string
 }
 
 // Find scans all CFML files under roots and returns matching references.
@@ -109,6 +126,15 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 			absPath := f
 			fileURI := uri.URI("file://" + absPath)
 
+			// Call sites don't carry their own source text (CallSite.Text is only
+			// populated by the uncached fallback parse path, not the ExtractCalls
+			// path used here) — split lines once so we can pull the call's line
+			// text ourselves for display.
+			var contentLines []string
+			if funcTarget != "" {
+				contentLines = strings.Split(content, "\n")
+			}
+
 			// Parse once with resolvers and call scanning — scan all scopes
 			parseOpts := parser.ParseOptions{
 				Resolvers:         opts.Resolvers,
@@ -173,7 +199,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 						if sameFile {
 							// Same-file call — only a match if this IS the source file
-							if absPath != opts.SourceFile {
+							if !cfpath.SamePath(absPath, opts.SourceFile) {
 								continue
 							}
 
@@ -184,10 +210,32 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 						}
 					}
 
+					callText := call.Text
+					if callText == "" && int(call.Line) < len(contentLines) {
+						callText = strings.TrimSpace(strings.TrimSuffix(contentLines[call.Line], "\r"))
+					}
+
+					reason := ""
+					if !resolved && opts.Reason != nil {
+						reason = opts.Reason(call, pr, filepath.Dir(absPath))
+						if reason != "" {
+							// Restate the call target so the reason reads standalone —
+							// readers scanning one line at a time (without the group
+							// header above it) can otherwise lose track of which
+							// function/hop this failure was checked against.
+							target := call.FuncName
+							if call.Variable != "" {
+								target = call.Variable + "." + call.FuncName
+							}
+
+							reason = fmt.Sprintf("%s (needed for %s())", reason, target)
+						}
+					}
+
 					entries = append(entries, Entry{
-						File: f, Function: call.Caller, Call: call.Text,
+						File: f, Function: call.Caller, Call: callText,
 						Component: call.Component,
-						Line:      call.Line, Resolved: resolved,
+						Line:      call.Line, Resolved: resolved, Reason: reason,
 					})
 				}
 			}

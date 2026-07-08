@@ -648,11 +648,15 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 							caller = p.funcs[len(p.funcs)-1].Name
 						}
 
+						comp := p.lookupComponentRef(varChain)
+
 						p.addCall(CallSite{
-							FuncName: methodName,
-							Variable: varChain,
-							Line:     uint32(line),
-							Caller:   caller,
+							FuncName:  methodName,
+							Variable:  varChain,
+							Component: comp,
+							Resolved:  comp != "",
+							Line:      uint32(line),
+							Caller:    caller,
 						})
 					}
 				}
@@ -677,6 +681,19 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 						return
 					}
+				}
+
+				if p.extractCalls {
+					caller := ""
+					if p.inFunc != "" && len(p.funcs) > 0 {
+						caller = p.funcs[len(p.funcs)-1].Name
+					}
+
+					p.addCall(CallSite{
+						FuncName: funcName,
+						Line:     uint32(line),
+						Caller:   caller,
+					})
 				}
 
 				p.pendingCalls = append(p.pendingCalls, pendingCall{
@@ -723,11 +740,15 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
+	comp := p.lookupComponentRef(varName)
+
 	p.addCall(CallSite{
-		FuncName: methodName,
-		Variable: varName,
-		Line:     uint32(line),
-		Caller:   caller,
+		FuncName:  methodName,
+		Variable:  varName,
+		Component: comp,
+		Resolved:  comp != "",
+		Line:      uint32(line),
+		Caller:    caller,
 	})
 }
 
@@ -1047,6 +1068,35 @@ func (p *tagParser) addRef(ref ComponentRef) {
 
 		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
 	}
+}
+
+// lookupComponentRef finds a previously-recorded ComponentRef for varName, so
+// a call site like `psService.updatePerson(...)` can carry the Component that
+// an earlier `psService = getService("person")` assignment already resolved
+// (mirrors resolve.CanResolveCall's function-scope-then-global precedence).
+// Only sees refs recorded earlier in this single forward pass — same
+// limitation goto-definition has for forward references.
+func (p *tagParser) lookupComponentRef(varName string) string {
+	lookupVar := varName
+	if dot := strings.LastIndexByte(lookupVar, '.'); dot >= 0 {
+		lookupVar = lookupVar[dot+1:]
+	}
+
+	if p.inFunc != "" {
+		for _, ref := range p.funcRefs[p.inFunc] {
+			if strings.EqualFold(ref.Variable, lookupVar) {
+				return ref.Component
+			}
+		}
+	}
+
+	for i := range p.componentRefs {
+		if strings.EqualFold(p.componentRefs[i].Variable, lookupVar) {
+			return p.componentRefs[i].Component
+		}
+	}
+
+	return ""
 }
 
 func (p *tagParser) addCall(call CallSite) {

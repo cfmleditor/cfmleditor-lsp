@@ -2789,6 +2789,39 @@ func TestTagParser_DollarSignVarName(t *testing.T) {
 	}
 }
 
+// TestTagParser_BareCallAssignment_ExtractCalls guards against a regression where
+// checkSetRHSStr (tag_parser.go) recorded a CallSite for `x = obj.method(...)` assignments
+// but not for bare `x = funcName(...)` assignments (no dot) — the bare-call branch only fed
+// pendingCalls (for ComponentRef resolution), never p.addCall. That silently dropped
+// same-file calls like `<cfset result = getAndUpdateDisplayName(...)>` from pr.Calls, so the
+// `refs` command reported zero call sites even when the call and its target function were in
+// the same file.
+func TestTagParser_BareCallAssignment_ExtractCalls(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getAndUpdateDisplayName">
+	<cfreturn "" />
+</cffunction>
+<cffunction name="caller">
+	<cfset local_display_name = getAndUpdateDisplayName(companyCode=ARGUMENTS.companyCode
+														, person_num = ARGUMENTS.person_num)>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	found := false
+
+	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+		if call.FuncName == "getAndUpdateDisplayName" && call.Variable == "" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected bare call to getAndUpdateDisplayName in FuncCalls, got none")
+	}
+}
+
 func TestScriptParser_ChainedAssignment_NoSpuriousRef(t *testing.T) {
 	// variables.$assert = this.$assert = new testbox.system.Assertion()
 	// The `this.$assert` in the middle is an assignment TO this, not a source;
@@ -2895,4 +2928,77 @@ func TestTagParser_ArgumentHintRef_WithResolver(t *testing.T) {
 	}
 
 	t.Errorf("expected document → reporting.itext in FuncComponentRefs with resolvers active, got %v", funcRefs)
+}
+
+// TestTagParser_DottedCallAssignment_UsesEarlierComponentRef guards against a
+// regression where a dotted call assignment `<cfset result = psService.method(...)>`
+// never looked up the ComponentRef already recorded for `psService` from an earlier
+// `<cfset psService = getService("person")>` resolver match. Without this, the
+// CallSite's Component stayed empty, so `refs`/`findRefs` could never verify the call
+// resolved to the traced target — even though goto-definition resolved `psService`
+// fine, from that exact same ComponentRef.
+func TestTagParser_DottedCallAssignment_UsesEarlierComponentRef(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "services.$1.service", Prefix: "getService"},
+	}
+
+	content := `<cfcomponent>
+<cffunction name="updatePersonMaintenance">
+	<cfset var psService = getService("person")>
+	<cfset result = psService.updatePerson(argumentCollection=argsData)>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+
+	found := false
+
+	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+		if call.FuncName == "updatePerson" && call.Variable == "psService" {
+			found = true
+
+			if call.Component != "services.person.service" || !call.Resolved {
+				t.Errorf("expected updatePerson call to resolve to services.person.service (Resolved=true), got Component=%q Resolved=%v", call.Component, call.Resolved)
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("expected a CallSite for psService.updatePerson")
+	}
+}
+
+// TestTagParser_BareCallStatement_UsesEarlierComponentRef is the checkBareCallStr
+// counterpart to TestTagParser_DottedCallAssignment_UsesEarlierComponentRef: the
+// same lookup gap existed for a dotted call with no assignment at all, e.g.
+// `<cfset psService.updatePerson(...)>`.
+func TestTagParser_BareCallStatement_UsesEarlierComponentRef(t *testing.T) {
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "services.$1.service", Prefix: "getService"},
+	}
+
+	content := `<cfcomponent>
+<cffunction name="updatePersonMaintenance">
+	<cfset var psService = getService("person")>
+	<cfset psService.updatePerson(argumentCollection=argsData)>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+
+	found := false
+
+	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+		if call.FuncName == "updatePerson" && call.Variable == "psService" {
+			found = true
+
+			if call.Component != "services.person.service" || !call.Resolved {
+				t.Errorf("expected updatePerson call to resolve to services.person.service (Resolved=true), got Component=%q Resolved=%v", call.Component, call.Resolved)
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("expected a CallSite for psService.updatePerson")
+	}
 }

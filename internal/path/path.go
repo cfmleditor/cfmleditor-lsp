@@ -385,6 +385,17 @@ func MatchesGlob(filePath string, globs []string) bool {
 	return false
 }
 
+// SamePath reports whether two filesystem paths refer to the same file,
+// tolerating case differences (common on APFS/NTFS) and cosmetic
+// differences like trailing slashes or "./" segments.
+func SamePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
 // CfcNameFromURI extracts the CFC filename without extension from a URI.
 func CfcNameFromURI(fileURI string) string {
 	path := strings.TrimPrefix(fileURI, "file://")
