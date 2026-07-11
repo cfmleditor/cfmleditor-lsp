@@ -43,6 +43,10 @@ func loadResolversFromConfig(paths []string) []parser.Resolver {
 			}
 		}
 
+		if jr := config.JavaStubResolver(cfg.JavaStubsPath); jr.Match != "" {
+			resolvers = append(resolvers, parser.Resolver{Match: jr.Match, Resolve: jr.Resolve, Prefix: jr.Prefix})
+		}
+
 		return resolvers
 	}
 

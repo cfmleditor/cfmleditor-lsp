@@ -30,6 +30,18 @@ type tagParser struct {
 	inFunc              string          // current function scope key ("start:end"), empty if global
 	localVarSet         map[string]bool // var'd/local. variable names in current function
 	forceGlobal         bool            // when true, addRef routes to componentRefs regardless of inFunc
+
+	// baseLine is this region's absolute start line (0 if parsing the whole
+	// file as one region). knownScopes, when set by the caller, gives the
+	// true absolute (Start, End) of every tag function in the WHOLE file —
+	// computed once up front via findTagFuncScopes(pr.Content, 0), which is
+	// unaffected by region splitting. Used so a function whose body is
+	// interrupted by a nested <cfscript> block (splitting the file into
+	// separate regions here) still resolves its real end line, instead of
+	// only whatever "/cffunction" this region's own limited text happens to
+	// contain.
+	baseLine    int
+	knownScopes []FuncScope
 }
 
 func newTagParser(src, fileURI string) *tagParser {
@@ -149,6 +161,19 @@ func (p *tagParser) parse() {
 				p.componentRefs = append(p.componentRefs, sp.componentRefs...)
 			}
 
+			// Merge pending calls (unresolved "x = y.method()" assignments) from
+			// the cfscript sub-parser. Without this, chained factory calls inside
+			// a nested <cfscript> block (e.g. "conn = uri.openConnection();")
+			// never reach resolvePendingCalls, so they can never fall back to
+			// baseVar's own component (or FuncLookup's declared return type).
+			for _, c := range sp.pendingCalls {
+				if c.funcKey == "" {
+					c.funcKey = p.inFunc
+				}
+
+				p.pendingCalls = append(p.pendingCalls, c)
+			}
+
 			if closeIdx < 0 {
 				pos = len(p.src)
 			} else {
@@ -199,8 +224,26 @@ func (p *tagParser) parse() {
 			case hasCFTagPrefix(tag, "<cffunction"):
 				p.parseCFFunction(tag, idx, tagEnd, line)
 				// Find end of function to set scope
+				endLine := -1
+
 				if closeIdx := indexCFTag(p.src[tagEnd:], "/cffunction"); closeIdx >= 0 {
-					endLine := p.lineAt(tagEnd + closeIdx)
+					endLine = p.lineAt(tagEnd + closeIdx)
+				} else {
+					// Not found within this region's text — the function body
+					// is interrupted by a nested <cfscript> region split.
+					// Fall back to the whole-file pre-scan for the real end.
+					absStart := p.baseLine + line
+
+					for _, s := range p.knownScopes {
+						if s.Start == absStart {
+							endLine = s.End - p.baseLine
+
+							break
+						}
+					}
+				}
+
+				if endLine >= 0 {
 					p.inFunc = funcKey(line, endLine)
 					p.scopes = append(p.scopes, FuncScope{Start: line, End: endLine})
 					p.localVarSet = make(map[string]bool)
@@ -283,8 +326,27 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 				URI:       uriFromString(p.fileURI),
 				Line:      uint32(line),
 			}
+
+			endLine := -1
+
 			if end < len(rest) {
-				endLine := p.lineAt(tagEnd + end)
+				endLine = p.lineAt(tagEnd + end)
+			} else {
+				// Not found within this region's text — the function body is
+				// interrupted by a nested <cfscript> region split. Fall back
+				// to the whole-file pre-scan for the real end (see baseLine).
+				absStart := p.baseLine + line
+
+				for _, s := range p.knownScopes {
+					if s.Start == absStart {
+						endLine = s.End - p.baseLine
+
+						break
+					}
+				}
+			}
+
+			if endLine >= 0 {
 				key := funcKey(line, endLine)
 
 				if p.funcRefs == nil {
@@ -298,12 +360,22 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 		}
 	}
 
+	returnType := getAttr(tag, "returntype")
+
+	// Promote hint to returntype when returntype is generic and hint looks
+	// like a component path — same safe mechanism as cfargument's Type/Hint
+	// above (hint is documentation-only, so this carries no runtime
+	// type-coercion risk the way editing returntype directly would).
+	if returnHint := getAttr(tag, "hint"); isComponentType(returnHint) && !isComponentType(returnType) {
+		returnType = returnHint
+	}
+
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:       name,
 		URI:        uriFromString(p.fileURI),
 		Line:       uint32(line),
 		Arguments:  args,
-		ReturnType: getAttr(tag, "returntype"),
+		ReturnType: returnType,
 	})
 }
 
@@ -671,7 +743,11 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
 			funcName := extractIdent(rhs)
-			if funcName != "" && !isKeyword(funcName) {
+			// Confirm the parens actually belong to funcName (only whitespace between
+			// them) — otherwise rhs is a larger expression like `temp & "~" & DateFormat(...)`
+			// where extractIdent grabbed the leading token ("temp"), not the identifier the
+			// paren is attached to, and this isn't a `x = funcName(...)` shape at all.
+			if funcName != "" && !isKeyword(funcName) && strings.TrimSpace(rhs[len(funcName):paren]) == "" {
 				if p.builtinReturnLookup != nil {
 					if comp := p.builtinReturnLookup(funcName); comp != "" {
 						p.addRef(ComponentRef{

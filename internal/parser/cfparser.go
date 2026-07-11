@@ -430,8 +430,34 @@ func isScriptFile(content string) bool {
 			return true
 		}
 	}
+
+	// A literal <script> tag (HTML/JavaScript, not <cfscript>) is strong
+	// evidence this is an HTML page with embedded JS rather than a pure
+	// CFScript component — even one with zero CF tags of its own (e.g. a
+	// plain HTML dialog template). Without this check, "no CF tags found at
+	// all" below would misclassify the whole file as CFScript and feed raw
+	// JavaScript into the CFML scanner.
+	if hasScriptTag(content) {
+		return false
+	}
+
 	// If no CF tags found at all, treat as script
 	return !containsCFTag(content)
+}
+
+// hasScriptTag reports whether content contains a literal <script ...> or
+// <script> tag (case-insensitive), as opposed to <cfscript>.
+func hasScriptTag(content string) bool {
+	for i := 0; i+7 < len(content); i++ {
+		if content[i] == '<' && strings.EqualFold(content[i+1:i+7], "script") {
+			switch content[i+7] {
+			case '>', '/', ' ', '\t', '\n', '\r':
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // containsCFTag checks if content has any <cf (case-insensitive) without allocating.
@@ -445,11 +471,107 @@ func containsCFTag(s string) bool {
 	return false
 }
 
-// splitCFScriptBlocks splits tag-based content into tag and script regions.
-// CFML comments (<!--- ... --->) are skipped so that <cfscript> blocks inside
-// comments do not produce spurious script regions.
+// scriptSkipSpan is the byte range [start, end) of a literal <script>...
+// </script> block (not <cfscript>) that contains no "<cf" tag of its own.
+type scriptSkipSpan struct {
+	start, end int
+}
+
+// findScriptSkipSpans scans content for <script>...</script> blocks (case-
+// insensitive) that contain no "<cf" anywhere inside, returning their byte
+// ranges in order. CFML comments are skipped so a <script> tag inside a
+// <!--- ... ---> comment doesn't produce a spurious span. A <script> block
+// that DOES contain a "<cf" tag is deliberately left out of the result, so
+// real CFML mixed into it (a stray <cfoutput>, a nested <cfscript>) is still
+// parsed normally rather than being treated as opaque.
+func findScriptSkipSpans(content string) []scriptSkipSpan {
+	var spans []scriptSkipSpan
+
+	pos := 0
+
+	for pos < len(content) {
+		i := strings.IndexByte(content[pos:], '<')
+		if i < 0 {
+			break
+		}
+
+		i += pos
+
+		if i+4 < len(content) && content[i:i+5] == "<!---" {
+			depth := 1
+			j := i + 5
+
+			for j < len(content) && depth > 0 {
+				switch {
+				case j+4 < len(content) && content[j:j+5] == "<!---":
+					depth++
+					j += 5
+				case j+3 < len(content) && content[j:j+4] == "--->":
+					depth--
+					j += 4
+				default:
+					j++
+				}
+			}
+
+			pos = j
+
+			continue
+		}
+
+		if i+7 >= len(content) || !strings.EqualFold(content[i+1:i+7], "script") {
+			pos = i + 1
+
+			continue
+		}
+
+		switch content[i+7] {
+		case '>', '/', ' ', '\t', '\n', '\r':
+			// tag boundary — proceed
+		default:
+			pos = i + 1
+
+			continue
+		}
+
+		gt := strings.IndexByte(content[i:], '>')
+		if gt < 0 {
+			break
+		}
+
+		bodyStart := i + gt + 1
+
+		closeIdx := indexCFTag(content[bodyStart:], "/script>")
+
+		var bodyEnd, spanEnd int
+
+		if closeIdx < 0 {
+			bodyEnd = len(content)
+			spanEnd = len(content)
+		} else {
+			bodyEnd = bodyStart + closeIdx
+			spanEnd = bodyEnd + len("</script>")
+		}
+
+		if !containsCFTag(content[bodyStart:bodyEnd]) {
+			spans = append(spans, scriptSkipSpan{start: i, end: spanEnd})
+		}
+
+		pos = spanEnd
+	}
+
+	return spans
+}
+
+// splitCFScriptBlocks splits tag-based content into tag, script, and skip
+// regions. CFML comments (<!--- ... --->) are skipped so that <cfscript>
+// blocks inside comments do not produce spurious script regions. Literal
+// <script>...</script> blocks with no CFML inside (see findScriptSkipSpans)
+// are emitted as RegionSkip so their JavaScript is never scanned as CFML.
 func splitCFScriptBlocks(content string) []Region {
 	idx := buildLineIdx(content)
+	skipSpans := findScriptSkipSpans(content)
+	skipIdx := 0
 
 	var regions []Region
 
@@ -498,6 +620,34 @@ func splitCFScriptBlocks(content string) []Region {
 			}
 
 			scanPos = i + 1
+		}
+
+		// Find the next script-skip span at or after pos.
+		for skipIdx < len(skipSpans) && skipSpans[skipIdx].end <= pos {
+			skipIdx++
+		}
+
+		var nextSkip *scriptSkipSpan
+		if skipIdx < len(skipSpans) {
+			nextSkip = &skipSpans[skipIdx]
+		}
+
+		// A skip span starting before the next <cfscript> (or with no more
+		// <cfscript> left at all) is handled first.
+		if nextSkip != nil && (openIdx < 0 || nextSkip.start < openIdx) {
+			if nextSkip.start > pos {
+				text := content[pos:nextSkip.start]
+				if strings.TrimSpace(text) != "" {
+					regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
+				}
+			}
+
+			regions = append(regions, Region{Kind: RegionSkip, StartLine: lineAtOffset(idx, nextSkip.start), Text: content[nextSkip.start:nextSkip.end]})
+
+			pos = nextSkip.end
+			skipIdx++
+
+			continue
 		}
 
 		if openIdx < 0 {

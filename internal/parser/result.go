@@ -138,13 +138,58 @@ func (pr *ParseResult) extractSignatures() {
 
 	var allPendingCalls []pendingCall
 
+	// Pre-compute tag function boundaries from the whole file (not per-region)
+	// so a function whose body is interrupted by a nested <cfscript> block
+	// (which splits the file into separate Tag/Script/Tag... regions) still
+	// gets a correct end line and in-function tracking in every region it
+	// spans — not just the region containing its opening <cffunction> tag.
+	var tagScopes []FuncScope
+
 	for _, r := range pr.Regions {
+		if r.Kind == RegionTag {
+			tagScopes = findTagFuncScopes(pr.Content, 0)
+
+			break
+		}
+	}
+
+	for _, r := range pr.Regions {
+		if r.Kind == RegionSkip {
+			continue
+		}
+
 		if r.Kind == RegionScript {
 			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
 			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
 			sp.extractCalls = pr.extractCalls
 			sp.builtinReturnLookup = pr.BuiltinReturnLookup
+
+			// If this <cfscript> region sits inside a tag <cffunction> body
+			// (nested script island — ClassifyRegions splits the file there),
+			// seed inFunc so refs/pending calls in it route to that function's
+			// scope instead of global. scriptParser bakes baseLine into its own
+			// keys, so the seed must be the function's absolute funcKey — unlike
+			// the tag-region continuation seed below, which stays region-relative.
+			for _, s := range tagScopes {
+				if s.Start < r.StartLine && r.StartLine <= s.End {
+					sp.inFunc = funcKey(s.Start, s.End)
+					sp.localVarSet = make(map[string]bool)
+
+					for i := range pr.Funcs {
+						if int(pr.Funcs[i].Line) == s.Start {
+							for _, arg := range pr.Funcs[i].Arguments {
+								sp.localVarSet[strings.ToLower(arg.Name)] = true
+							}
+
+							break
+						}
+					}
+
+					break
+				}
+			}
+
 			sp.parse()
 			pr.Funcs = append(pr.Funcs, sp.funcs...)
 			pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
@@ -202,6 +247,32 @@ func (pr *ParseResult) extractSignatures() {
 			tp.extractLinks = pr.extractLinks
 			tp.extractCalls = pr.extractCalls
 			tp.builtinReturnLookup = pr.BuiltinReturnLookup
+			tp.baseLine = r.StartLine
+			tp.knownScopes = tagScopes
+
+			// If this region starts partway through a function whose opening
+			// <cffunction> tag was in an earlier region (interrupted by a
+			// nested <cfscript> region split), seed inFunc/localVarSet so refs
+			// in this region still route to function scope instead of global.
+			for _, s := range tagScopes {
+				if s.Start < r.StartLine && r.StartLine <= s.End {
+					tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
+					tp.localVarSet = make(map[string]bool)
+
+					for i := range pr.Funcs {
+						if int(pr.Funcs[i].Line) == s.Start {
+							for _, arg := range pr.Funcs[i].Arguments {
+								tp.localVarSet[strings.ToLower(arg.Name)] = true
+							}
+
+							break
+						}
+					}
+
+					break
+				}
+			}
+
 			tp.parse()
 
 			for i := range tp.funcs {
@@ -375,6 +446,58 @@ func (pr *ParseResult) extractSignatures() {
 		pr.generatePropertyAccessors()
 		pr.appendResolverRefs()
 		pr.resolvePendingCalls(allPendingCalls)
+		pr.applyChainedReturnLookup()
+	}
+}
+
+// applyChainedReturnLookup re-checks component refs created from a receiver.method()
+// call (see ComponentRef.ChainBase/ChainMethod) against FuncLookup, overriding the
+// componentResolver's guess on the call-site text with the callee's own declared
+// return type when FuncLookup can verify it (e.g. a Java stub's getInstance()
+// modeling its real return type). Runs last so a verified answer always wins.
+func (pr *ParseResult) applyChainedReturnLookup() {
+	if pr.FuncLookup == nil {
+		return
+	}
+
+	lookupBase := func(baseVar string, scopedRefs []ComponentRef) string {
+		for _, ref := range scopedRefs {
+			if strings.EqualFold(ref.Variable, baseVar) {
+				return ref.Component
+			}
+		}
+
+		for _, ref := range pr.ComponentRefs {
+			if strings.EqualFold(ref.Variable, baseVar) {
+				return ref.Component
+			}
+		}
+
+		return ""
+	}
+
+	override := func(refs []ComponentRef, scoped []ComponentRef) {
+		for i := range refs {
+			if refs[i].ChainBase == "" {
+				continue
+			}
+
+			baseComp := lookupBase(refs[i].ChainBase, scoped)
+			if baseComp == "" {
+				continue
+			}
+
+			if ret := pr.FuncLookup(baseComp, refs[i].ChainMethod); ret != "" {
+				refs[i].Component = ret
+			}
+		}
+	}
+
+	override(pr.ComponentRefs, nil)
+
+	for k, refs := range pr.funcRefsMap {
+		override(refs, refs)
+		pr.funcRefsMap[k] = refs
 	}
 }
 
@@ -533,10 +656,14 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 				}
 			}
 
-			// If FuncLookup is available and the called method doesn't return a
-			// component type, don't propagate the base variable's component.
+			// If FuncLookup is available, prefer the called method's own declared
+			// return type over the "same as baseVar" guess — it may differ from the
+			// receiver's type. If the method declares no component return type, don't
+			// propagate the base variable's component at all.
 			if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
-				if pr.FuncLookup(comp, c.funcName) == "" {
+				if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
+					comp = ret
+				} else {
 					comp = "$any"
 				}
 			}
@@ -834,6 +961,10 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 	}
 
 	for _, r := range pr.Regions {
+		if r.Kind == RegionSkip {
+			continue
+		}
+
 		var regionVars []VarDef
 
 		if r.Kind == RegionScript {
@@ -1647,12 +1778,23 @@ func funcKey(start, end int) string {
 }
 
 func atoi(s string) int {
+	neg := false
+
+	if strings.HasPrefix(s, "-") {
+		neg = true
+		s = s[1:]
+	}
+
 	n := 0
 
 	for _, c := range s {
 		if c >= '0' && c <= '9' {
 			n = n*10 + int(c-'0')
 		}
+	}
+
+	if neg {
+		return -n
 	}
 
 	return n
@@ -1759,7 +1901,7 @@ func isMemberMethod(name string) bool {
 		"changedelims", "qualifiedtoarray", "qualify", "itemtrim", "trim",
 		"valuecount", "valuecountnocase",
 		// Common global/Java methods
-		"getbytes", "tostring", "hashcode", "getclass", "init", "tobytearray",
+		"getbytes", "tostring", "hashcode", "getclass", "init", "tobytearray", "tochararray",
 		// java.lang.Class / java.lang.reflect methods
 		"getcomponenttype", "getname", "getsimplename", "getdeclaredmethods",
 		"getmethods", "getdeclaredfields", "getfields", "newinstance",

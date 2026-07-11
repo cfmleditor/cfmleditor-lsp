@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/uri"
 )
 
@@ -56,6 +57,102 @@ func TestClassifyRegions_MixedTagWithCFScript(t *testing.T) {
 
 	if regions[2].Kind != RegionTag {
 		t.Errorf("region 2: expected Tag, got %v", regions[2].Kind)
+	}
+}
+
+// TestClassifyRegions_ScriptTagNoCF_IsSkipped covers a plain HTML <script>
+// block (not <cfscript>) with no CFML tags inside — it should be emitted as
+// RegionSkip so its JavaScript is never scanned as CFML (e.g. a jQuery call
+// like "$matrix.attr(...)" mistaken for an unresolved CFML method call).
+func TestClassifyRegions_ScriptTagNoCF_IsSkipped(t *testing.T) {
+	content := "<cfcomponent>\n<cffunction name=\"test\">\n</cffunction>\n<script>\nvar $matrix = $form.find('x');\n$matrix.attr('y', 'z');\n</script>\n</cfcomponent>"
+
+	regions := ClassifyRegions(content)
+
+	var found bool
+
+	for _, r := range regions {
+		if r.Kind == RegionSkip {
+			found = true
+
+			if !strings.Contains(r.Text, "$matrix") {
+				t.Errorf("expected skip region to contain the script body, got %q", r.Text)
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("expected a RegionSkip for the <script> block, got %+v", regions)
+	}
+}
+
+// TestClassifyRegions_ScriptTagWithCF_NotSkipped covers the escape hatch: a
+// <script> block that itself contains a CF tag (e.g. a dynamically generated
+// <script> using <cfoutput>) must NOT be skipped, so the real CFML inside it
+// still gets parsed normally.
+func TestClassifyRegions_ScriptTagWithCF_NotSkipped(t *testing.T) {
+	content := "<cfcomponent>\n<script>\n<cfoutput>var x = 1;</cfoutput>\n</script>\n</cfcomponent>"
+
+	regions := ClassifyRegions(content)
+
+	for _, r := range regions {
+		if r.Kind == RegionSkip {
+			t.Errorf("expected no RegionSkip when the <script> block contains a CF tag, got %+v", regions)
+		}
+	}
+}
+
+// TestIsScriptFile_HTMLWithScriptTag_NotTreatedAsScript covers a .cfm file
+// that is pure HTML/JavaScript with zero CF tags anywhere (a plain dialog
+// template, say) — isScriptFile's "no CF tags found → treat as script"
+// fallback previously misclassified the whole file as CFScript, feeding raw
+// JavaScript into the CFML scanner. A literal <script> tag is strong enough
+// evidence to not take that fallback.
+func TestIsScriptFile_HTMLWithScriptTag_NotTreatedAsScript(t *testing.T) {
+	content := "<html>\n<body>\n<script>\nvar $matrix = $form.find('x');\n$matrix.attr('y', 'z');\n</script>\n</body>\n</html>"
+
+	if isScriptFile(content) {
+		t.Error("expected isScriptFile to be false for an HTML file with a <script> tag and no CF tags")
+	}
+
+	regions := ClassifyRegions(content)
+
+	var found bool
+
+	for _, r := range regions {
+		if r.Kind == RegionSkip {
+			found = true
+		}
+
+		if r.Kind == RegionScript {
+			t.Errorf("expected no RegionScript (raw JS parsed as CFScript), got %+v", regions)
+		}
+	}
+
+	if !found {
+		t.Errorf("expected the <script> block to be a RegionSkip, got %+v", regions)
+	}
+}
+
+// TestParse_ScriptTagNoCF_NoBogusCallSites is an end-to-end check that a
+// jQuery-style call inside a plain <script> block never becomes a CallSite
+// or ComponentRef — i.e. it won't show up as an "unresolved call" false
+// positive the way "$matrix.attr(...)" did before this fix.
+func TestParse_ScriptTagNoCF_NoBogusCallSites(t *testing.T) {
+	content := "<html>\n<body>\n<script>\nvar $matrix = $form.find('x');\n$matrix.attr('y', 'z');\n</script>\n</body>\n</html>"
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "$matrix" {
+			t.Errorf("expected no ComponentRef for $matrix, got %+v", ref)
+		}
+	}
+
+	for _, call := range pr.FuncCalls(0, 10) {
+		if call.Variable == "$matrix" {
+			t.Errorf("expected no CallSite for $matrix, got %+v", call)
+		}
 	}
 }
 
@@ -971,6 +1068,58 @@ func TestPendingCalls_ReturnTypeFromCalledFunction(t *testing.T) {
 	}
 }
 
+// TestParseBodyVarDecl_BuiltinReturnLookup covers "var x = someBuiltinFunc(...)"
+// assigned inside a function body (parseBodyVarDecl), not at component/global
+// scope (checkVarRHS). Before the fix, only checkVarRHS consulted
+// BuiltinReturnLookup — parseBodyVarDecl fell straight to an unresolved
+// pendingCall, so e.g. "var s3Service = getCloudService(...)" inside a function
+// never got typed, and a further "var s3Bucket = s3Service.root(...)" couldn't
+// inherit it either.
+func TestParseBodyVarDecl_BuiltinReturnLookup(t *testing.T) {
+	content := `component {
+	function work() {
+		var s3Service = getCloudService(cred, conf);
+		var s3Bucket = s3Service.root(bucket);
+	}
+}`
+
+	builtinReturnLookup := func(name string) string {
+		if name == "getCloudService" {
+			return "$builtin.getcloudservice"
+		}
+
+		return ""
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ExtractCalls:        true,
+		ScanAllScopes:       true,
+		BuiltinReturnLookup: builtinReturnLookup,
+	})
+
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	want := map[string]string{
+		"s3Service": "$builtin.getcloudservice",
+		"s3Bucket":  "$builtin.getcloudservice",
+	}
+
+	for name, wantComp := range want {
+		var found string
+
+		for _, ref := range funcRefs {
+			if ref.Variable == name {
+				found = ref.Component
+			}
+		}
+
+		if found != wantComp {
+			t.Errorf("expected %s -> %s, got %q (funcRefs: %+v)", name, wantComp, found, funcRefs)
+		}
+	}
+}
+
 func TestPendingCalls_MethodCallFallbackToBaseVar(t *testing.T) {
 	// x = variables.jss.getInstance() → x gets same component as jss
 	content := `component {
@@ -1791,29 +1940,113 @@ func TestScriptParser_FunctionWithNoBody(t *testing.T) {
 }
 
 func TestTagParser_NestedCfscriptInsideFunction(t *testing.T) {
-	// cfscript block inside a cffunction — refs go to componentRefs
-	// (known limitation: region splitting separates the function body)
+	// A <cfscript> block inside a <cffunction> splits the file into separate
+	// Tag/Script/Tag regions (ClassifyRegions). extractSignatures pre-computes
+	// tag function boundaries from the whole file (findTagFuncScopes) so both
+	// tagVar (before the nested script) and the content after it still resolve
+	// to the function's own scope rather than leaking to global ComponentRefs.
 	content := `<cfcomponent>
 <cffunction name="mixed">
 	<cfset var tagVar = CreateObject("component","services.TagService") />
 	<cfscript>
 	var scriptVar = new services.ScriptService();
 	</cfscript>
+	<cfset var afterVar = CreateObject("component","services.AfterService") />
 </cffunction>
 </cfcomponent>`
 	pr := Parse(testURI, content)
 
-	// Due to region splitting, tagVar ends up in ComponentRefs
-	var tagFound bool
+	if len(pr.Scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d: %+v", len(pr.Scopes), pr.Scopes)
+	}
 
-	for _, ref := range pr.ComponentRefs {
-		if ref.Variable == "tagVar" && ref.Component == "services.TagService" {
-			tagFound = true
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	want := map[string]string{
+		"tagVar":   "services.TagService",
+		"afterVar": "services.AfterService",
+	}
+
+	for name, wantComp := range want {
+		var found string
+
+		for _, ref := range funcRefs {
+			if ref.Variable == name {
+				found = ref.Component
+			}
+		}
+
+		if found != wantComp {
+			t.Errorf("expected %s -> %s in mixed's FuncComponentRefs, got %q (refs: %v)", name, wantComp, found, funcRefs)
 		}
 	}
 
-	if !tagFound {
-		t.Errorf("expected tagVar → services.TagService in ComponentRefs, got %v", pr.ComponentRefs)
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "tagVar" || ref.Variable == "afterVar" {
+			t.Errorf("expected %s to be function-scoped, not global: %+v", ref.Variable, ref)
+		}
+	}
+}
+
+// TestTagParser_NestedCfscriptChainedCallPendingResolution covers a chained
+// factory call *inside* the nested <cfscript> block itself (not just a plain
+// assignment): "conn = uri.openConnection();" where uri is a tag-declared
+// local whose own component was set before the script island. ClassifyRegions
+// parses this <cfscript> block as its own top-level RegionScript (a separate
+// newScriptParser call in extractSignatures, not tag_parser's inline cfscript
+// handling), which previously had no idea it was running inside the enclosing
+// <cffunction> — so "conn"'s pending call got funcKey "" and could never find
+// uri's function-scoped ref via the baseVar fallback.
+func TestTagParser_NestedCfscriptChainedCallPendingResolution(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="download">
+	<cfset var uri = "">
+	<cfset var conn = "">
+	<cfset uri = createObject("java", "java.net.URL").init("x") />
+	<cfscript>
+		conn = uri.openConnection();
+		conn.setRequestMethod("HEAD");
+	</cfscript>
+</cffunction>
+</cfcomponent>`
+
+	resolvers := []Resolver{
+		{
+			Match:   `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`,
+			Resolve: "stubs.$1",
+			Prefix:  "createObject",
+		},
+	}
+
+	funcLookup := func(component, funcName string) string {
+		if component == "stubs.java.net.URL" && funcName == "openConnection" {
+			return "stubs.java.net.HttpURLConnection"
+		}
+
+		return ""
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:    resolvers,
+		FuncLookup:   funcLookup,
+		ExtractCalls: true,
+	})
+
+	scope := pr.Scopes[0]
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found string
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "conn" {
+			found = ref.Component
+		}
+	}
+
+	want := "stubs.java.net.HttpURLConnection"
+	if found != want {
+		t.Errorf("expected conn -> %s, got %q (funcRefs: %+v)", want, found, funcRefs)
 	}
 }
 
@@ -3000,5 +3233,285 @@ func TestTagParser_BareCallStatement_UsesEarlierComponentRef(t *testing.T) {
 
 	if !found {
 		t.Errorf("expected a CallSite for psService.updatePerson")
+	}
+}
+
+// TestTagParser_ConcatenatedAssignment_NoSpuriousCall guards against a
+// regression in the bare-call branch of checkSetRHSStr: `temp = temp & "~" &
+// DateFormat(Now(), "yyyy-mm-dd")` contains a paren (from DateFormat(...)),
+// but the leading identifier extractIdent grabs is "temp" — the variable
+// being reassigned, not the function the paren belongs to. Before the fix,
+// the branch didn't verify the paren immediately follows the extracted
+// identifier, so it recorded a bogus CallSite{FuncName: "temp"}, which
+// `unresolved`/`refs` then flagged as an unresolved call to a nonexistent
+// function "temp".
+func TestTagParser_ConcatenatedAssignment_NoSpuriousCall(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="work">
+	<cfset temp = temp & "~" & DateFormat(Now(), "yyyy-mm-dd") />
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+		if strings.EqualFold(call.FuncName, "temp") {
+			t.Errorf("expected no CallSite for bare variable 'temp', got %+v", call)
+		}
+	}
+}
+
+// TestTagParser_JavaStubResolver_ResolvesCreateObjectJava is the parser-level
+// integration test for config.JavaStubResolver: confirms the synthesized
+// resolver actually resolves through the parser's own regex/simple-match
+// heuristics and $1 substitution, not just via a raw regexp.MatchString check.
+func TestTagParser_JavaStubResolver_ResolvesCreateObjectJava(t *testing.T) {
+	cr := config.JavaStubResolver("tassweb.packages.tass.javastubs")
+	resolvers := []Resolver{{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}}
+
+	content := `<cfcomponent>
+<cffunction name="work">
+	<cfset variables.jss = createObject('java', 'java.security.Signature') />
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+
+	found := ""
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "jss" {
+			found = ref.Component
+		}
+	}
+
+	want := "tassweb.packages.tass.javastubs.java.security.Signature"
+	if found != want {
+		t.Errorf("expected jss -> %s, got %q", want, found)
+	}
+}
+
+// TestFuncLookup_ChainedCallOverridesGenericResolver simulates the java stub
+// factory pattern (Signature.getInstance() returning another Signature): a
+// generic catch-all componentResolver (get(\w+)() -> packages.tass.<name>)
+// would otherwise misfire on jss.getInstance(...) and resolve jssInstance to
+// the wrong component. FuncLookup — modeling the stub's own declared return
+// type via applyChainedReturnLookup — must take priority.
+func TestFuncLookup_ChainedCallOverridesGenericResolver(t *testing.T) {
+	content := `component {
+	function init() {
+		variables.jss = createObject('java', 'java.security.Signature');
+	}
+
+	function verify(required any tmpkey, required string tmpsignature) {
+		var jssInstance = variables.jss.getInstance( algorithmMap[ ARGUMENTS.algorithm ] );
+		jssInstance.initVerify( tmpkey );
+		return jssInstance.verify( tmpsignature );
+	}
+}`
+
+	resolvers := []Resolver{
+		{
+			Match:   `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`,
+			Resolve: "stubs.$1",
+			Prefix:  "createObject",
+		},
+		{
+			// Generic catch-all getter resolver — the false-positive source.
+			Match:   `get([A-Za-z]+)\(\)`,
+			Resolve: "packages.tass.${1:lower}",
+			Prefix:  "get",
+		},
+	}
+
+	funcLookup := func(component, funcName string) string {
+		if component == "stubs.java.security.Signature" && strings.EqualFold(funcName, "getInstance") {
+			return "stubs.java.security.Signature"
+		}
+
+		return ""
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:  resolvers,
+		FuncLookup: funcLookup,
+	})
+
+	scope := pr.Scopes[1] // verify
+	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found string
+
+	for _, ref := range funcRefs {
+		if ref.Variable == "jssInstance" {
+			found = ref.Component
+		}
+	}
+
+	want := "stubs.java.security.Signature"
+	if found != want {
+		t.Errorf("expected jssInstance -> %s, got %q (funcRefs: %+v)", want, found, funcRefs)
+	}
+}
+
+// TestCheckBareCall_DeepChainTracksReceiver simulates
+// "kpg.generateKeyPair().getPublic().getParams()" (a 4-level call chain assigned
+// to an indexed lvalue, so it never gets a ComponentRef of its own). Before the
+// fix, checkBareCall recorded only the first hop and left the scanner mid-chain,
+// so the top-level dispatcher rediscovered ".getPublic(" and ".getParams(" as
+// unrelated bare calls — worse, the second one had its "Variable" set to
+// "getPublic" (the previous method's name, not a real variable). Every hop
+// should keep Variable "kpg" and accumulate the intermediate hops in Chain.
+func TestCheckBareCall_DeepChainTracksReceiver(t *testing.T) {
+	content := `component {
+	function work() {
+		var kpg = 1;
+		variables.cache[1] = kpg
+			.generateKeyPair()
+			.getPublic()
+			.getParams();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	lastLine := len(strings.Split(content, "\n"))
+	calls := pr.FuncCalls(0, lastLine)
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range calls {
+		byFunc[c.FuncName] = c
+	}
+
+	generateKeyPair, ok := byFunc["generateKeyPair"]
+	if !ok || generateKeyPair.Variable != "kpg" || len(generateKeyPair.Chain) != 0 {
+		t.Errorf("expected generateKeyPair CallSite Variable=kpg Chain=[], got %+v", generateKeyPair)
+	}
+
+	getPublic, ok := byFunc["getPublic"]
+	if !ok || getPublic.Variable != "kpg" || !slices.Equal(getPublic.Chain, []string{"generateKeyPair"}) {
+		t.Errorf("expected getPublic CallSite Variable=kpg Chain=[generateKeyPair], got %+v", getPublic)
+	}
+
+	getParams, ok := byFunc["getParams"]
+	if !ok || getParams.Variable != "kpg" || !slices.Equal(getParams.Chain, []string{"generateKeyPair", "getPublic"}) {
+		t.Errorf("expected getParams CallSite Variable=kpg Chain=[generateKeyPair getPublic], got %+v", getParams)
+	}
+}
+
+// TestChainedAssignRHS_FailedFirstHopContinuesChain covers
+// "subBackgnd = document.getJavaUtils().getRGBColor(r=16,g=58,b=59)" where
+// "document.getJavaUtils" matches NO resolver at all (tryResolveCall and
+// tryExtendChain both fail, falling to a pendingCall). Before the fix,
+// tryResolveCall/tryExtendChain restored the scanner to the unconsumed "("
+// on failure, but nothing then consumed the rest of the expression — so
+// ".getRGBColor(...)" was rediscovered by the top-level scan loop as an
+// orphaned, unqualified bare call ("no qualifier, not in file") instead of a
+// call chained off "document".
+func TestChainedAssignRHS_FailedFirstHopContinuesChain(t *testing.T) {
+	content := `component {
+	function work() {
+		subBackgnd = document.getJavaUtils().getRGBColor(r=16,g=58,b=59);
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	getRGBColor, ok := byFunc["getRGBColor"]
+	if !ok || getRGBColor.Variable != "document" || !slices.Equal(getRGBColor.Chain, []string{"getJavaUtils"}) {
+		t.Errorf("expected getRGBColor CallSite Variable=document Chain=[getJavaUtils], got %+v", getRGBColor)
+	}
+}
+
+// TestChainedAssignRHS_SucceededFirstHopContinuesChain covers the same shape
+// as above, but where "document.getJavaUtils" DOES match a resolver (a
+// realistic case: a broad "getjavaUtils(...)" resolver matching just that
+// hop). tryResolveCall must consume through its own hop's closing ')' before
+// returning success — otherwise ".getRGBColor(...)" is left dangling and,
+// same as the failure case, gets rediscovered as an orphaned bare call.
+func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
+	content := `component {
+	function work() {
+		subBackgnd = document.getJavaUtils().getRGBColor(r=16,g=58,b=59);
+	}
+}`
+
+	resolvers := []Resolver{
+		{
+			Match:   `getjavaUtils\([^)]*\)`,
+			Resolve: "helpers.javautils",
+			Prefix:  "getjavaUtils",
+		},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	getJavaUtils, ok := byFunc["getJavaUtils"]
+	if !ok || getJavaUtils.Variable != "document" {
+		t.Errorf("expected getJavaUtils CallSite Variable=document, got %+v", getJavaUtils)
+	}
+
+	getRGBColor, ok := byFunc["getRGBColor"]
+	if !ok || getRGBColor.Variable != "document" || !slices.Equal(getRGBColor.Chain, []string{"getJavaUtils"}) {
+		t.Errorf("expected getRGBColor CallSite Variable=document Chain=[getJavaUtils], got %+v", getRGBColor)
+	}
+}
+
+// TestTagParser_FunctionReturnHintPromotion covers promoting a <cffunction>'s
+// hint to its ReturnType when returntype is generic (e.g. "struct") and hint
+// looks like a genuine component path — the same safe mechanism already used
+// for <cfargument> Type/Hint, extended to the function's own return type.
+func TestTagParser_FunctionReturnHintPromotion(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getJavaUtils" access="public" output="false" returntype="struct" hint="tassreporting.packages.reporting.helpers.javautils">
+	<cfreturn VARIABLES._javaUtils />
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 1 {
+		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
+	}
+
+	want := "tassreporting.packages.reporting.helpers.javautils"
+	if pr.Funcs[0].ReturnType != want {
+		t.Errorf("expected ReturnType %q, got %q", want, pr.Funcs[0].ReturnType)
+	}
+}
+
+// TestTagParser_FunctionReturnHintPromotion_PlainProseNotPromoted covers the
+// false-positive this needed isComponentType to reject: a plain descriptive
+// hint that happens to end in a sentence "." (e.g. "Get Reference to Java
+// Utilities.") must NOT be mistaken for a dotted component path.
+func TestTagParser_FunctionReturnHintPromotion_PlainProseNotPromoted(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="getJavaUtils" access="public" output="false" returntype="struct" hint="Get Reference to Java Utilities.">
+	<cfreturn VARIABLES._javaUtils />
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+
+	if len(pr.Funcs) != 1 {
+		t.Fatalf("expected 1 func, got %d", len(pr.Funcs))
+	}
+
+	if pr.Funcs[0].ReturnType != "struct" {
+		t.Errorf("expected ReturnType to stay %q, got %q", "struct", pr.Funcs[0].ReturnType)
 	}
 }

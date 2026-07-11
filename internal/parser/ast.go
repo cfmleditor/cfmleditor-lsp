@@ -63,6 +63,14 @@ type ComponentRef struct {
 	Component string
 	URI       uri.URI
 	Line      uint32
+
+	// ChainBase and ChainMethod record the receiver.method() shape that produced
+	// this ref (e.g. "var x = jss.getInstance()" → ChainBase "jss", ChainMethod
+	// "getInstance"). Empty unless Component came from a receiver.method(...) call.
+	// Used by applyChainedReturnLookup to prefer the callee's own declared return
+	// type (verified via FuncLookup) over a componentResolver guess on the RHS text.
+	ChainBase   string
+	ChainMethod string
 }
 
 // DocumentLink represents a file path reference in source (cfinclude, href, etc.).
@@ -82,6 +90,15 @@ type CallSite struct {
 	Caller    string // enclosing function name (empty if global)
 	Resolved  bool   // true if qualified (obj.func), false if bare call
 	Text      string // the trimmed line text
+
+	// Chain lists the method-name hops between the resolved base (Variable or
+	// Component) and this call, for calls chained off a prior call's return value
+	// rather than a plain variable (e.g. "kpg.generateKeyPair().getPublic().getParams()":
+	// the getParams CallSite has Variable "kpg" and Chain []string{"generateKeyPair",
+	// "getPublic"}). Empty for a plain "x.method()" call. CanResolveCall walks Chain
+	// via ResolveFunc, applying each hop's declared return type in turn, before
+	// checking FuncName against the final component.
+	Chain []string
 }
 
 // RegionKind classifies a span of CFC content.
@@ -91,6 +108,10 @@ type RegionKind int
 const (
 	RegionScript RegionKind = iota
 	RegionTag
+	// RegionSkip is opaque content — currently a literal <script>...</script>
+	// block containing no CFML of its own — that is deliberately left
+	// unparsed. See findScriptSkipSpans in cfparser.go.
+	RegionSkip
 )
 
 // Region is a contiguous span of source with a single kind.
@@ -570,14 +591,25 @@ func containsFold(s, substr string) bool {
 	return false
 }
 
-// isComponentType returns true if a type string looks like a component path
-// (contains a dot) rather than a primitive type.
+// isComponentType returns true if a type string looks like a genuine dotted
+// component path (e.g. "models.User") rather than a primitive type or free
+// text. Used both for explicit type/returntype attributes and for hint
+// promotion — where a prose hint that merely ends in a sentence "." (e.g.
+// "Get Reference to Java Utilities.") must NOT be mistaken for a component
+// path, so this requires every dot-separated segment to be a valid
+// identifier, not just "contains a dot somewhere".
 func isComponentType(t string) bool {
-	if t == "" {
+	if t == "" || !strings.Contains(t, ".") {
 		return false
 	}
 
-	return strings.Contains(t, ".")
+	for seg := range strings.SplitSeq(t, ".") {
+		if !isIdentifier(seg) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // FormatHover returns a markdown-formatted hover string for the function definition.

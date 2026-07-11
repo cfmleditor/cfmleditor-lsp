@@ -13,10 +13,15 @@ type JSON struct {
 	ComponentResolvers  []Resolver        `json:"componentResolvers"`
 	PropertyResolvers   []PropResolver    `json:"propertyResolvers"`
 	BeanPaths           map[string]string `json:"beanPaths"`
-	Formatting          *Formatting       `json:"formatting"`
-	Linting             *Linting          `json:"linting"`
-	Completions         *Completions      `json:"completions"`
-	Debug               bool              `json:"debug"`
+	// JavaStubsPath is the dot-path prefix under which java stub CFCs live
+	// (e.g. "tassweb.packages.tass.javastubs"). When set, createObject("java",
+	// "X") calls are automatically resolved to "<JavaStubsPath>.X" without
+	// needing a hand-written componentResolver for the pattern.
+	JavaStubsPath string       `json:"javaStubsPath"`
+	Formatting    *Formatting  `json:"formatting"`
+	Linting       *Linting     `json:"linting"`
+	Completions   *Completions `json:"completions"`
+	Debug         bool         `json:"debug"`
 }
 
 // Resolver maps a call pattern to a component path.
@@ -32,6 +37,26 @@ type PropResolver struct {
 	Match     string `json:"match"`
 	Resolve   string `json:"resolve"`
 	Attribute string `json:"attribute"`
+}
+
+// javaStubCreateObjectPattern matches createObject("java", "some.Class.Name")
+// (single or double quotes, arbitrary whitespace inside the parens).
+const javaStubCreateObjectPattern = `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`
+
+// JavaStubResolver synthesizes the componentResolver equivalent of hand-writing
+// a createObject("java", "X") -> "<javaStubsPath>.X" pattern, so a project only
+// needs to set javaStubsPath once instead of writing the regex itself. Returns
+// the zero Resolver (Match == "") when javaStubsPath is empty.
+func JavaStubResolver(javaStubsPath string) Resolver {
+	if javaStubsPath == "" {
+		return Resolver{}
+	}
+
+	return Resolver{
+		Match:   javaStubCreateObjectPattern,
+		Resolve: javaStubsPath + ".$1",
+		Prefix:  "createObject",
+	}
 }
 
 // Linting holds linting configuration.
@@ -126,6 +151,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 		if cr.Match != "" && cr.Resolve != "" {
 			r.ComponentResolvers = append(r.ComponentResolvers, cr)
 		}
+	}
+
+	if jr := JavaStubResolver(cfg.JavaStubsPath); jr.Match != "" {
+		r.ComponentResolvers = append(r.ComponentResolvers, jr)
 	}
 
 	for _, pr := range cfg.PropertyResolvers {

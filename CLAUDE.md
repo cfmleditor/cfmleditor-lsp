@@ -143,6 +143,8 @@ component { function init(...) {} function methodName(required type argName) {} 
 
 **Existing `getJavaClass` resolver** maps `getJavaClass("pkg.ClassName","itext")` → `tassweb.packages.tass.javastubs.com.lowagie.text.pkg.ClassName`. The `itextObj.*` resolver entries (see above) are needed in addition because the struct-key assignments happen separately from the call-site expressions.
 
+**`javaStubsPath` config option** (`internal/config/config.go: JSON.JavaStubsPath`, `config.JavaStubResolver`): set `"javaStubsPath": "tassweb.packages.tass.javastubs"` in `.cfmleditor.json` to auto-resolve any `createObject("java", "some.Class.Name")` call to `<javaStubsPath>.some.Class.Name`, without hand-writing the equivalent `componentResolver` regex. It's synthesized and appended alongside your own `componentResolvers` (`config.Resolve`, `daemon.Config.ComponentResolvers`, `cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig` all wire it in). Only covers the `createObject("java", ...)` call site itself — it does not follow chained factory calls (e.g. `someJavaObj.getInstance(...)` returning another instance of the same Java type); those still need their own resolver entry or a stub method that models the return.
+
 ## Skills
 
 - `/add-parser-test` — patterns and pitfalls for adding tests to `internal/parser/cfparser_test.go`

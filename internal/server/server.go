@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -343,16 +344,43 @@ func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {
 func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResult {
 	s.ensureBeansLoaded()
 
+	baseDir := filepath.Dir(strings.TrimPrefix(string(fileURI), "file://"))
+	resolver := s.getResolver()
+
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
 		Logger:              s.log,
 		Resolvers:           s.cfResolvers(),
 		PropertyResolvers:   s.cfPropertyResolvers(),
 		BeanLookup:          s.index.LookupBean,
 		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
+		FuncLookup:          funcLookup(resolver, baseDir),
 		ExpressionMappings:  s.ExpressionMappings,
 		ExtractLinks:        true,
 		ExtractCalls:        true,
 	})
+}
+
+// funcLookup resolves a method's declared return-type component across files
+// (e.g. a Java stub's getInstance() modeling its own return type), so the parser
+// can prefer a verified cross-file answer over a componentResolver's guess on
+// the call-site text. Shared shape with cmd/cfmleditor-lsp/unresolved.go.
+func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, funcName string) string {
+	return func(component, funcName string) string {
+		fd := resolver.ResolveFunc(component, funcName, baseDir)
+		if fd == nil {
+			return ""
+		}
+
+		if fd.ReturnComponent != "" {
+			return fd.ReturnComponent
+		}
+
+		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
+			return fd.ReturnType
+		}
+
+		return ""
+	}
 }
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).

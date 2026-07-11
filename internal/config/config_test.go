@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
 
 func TestBoolDefault(t *testing.T) {
 	trueVal := true
@@ -102,6 +106,63 @@ func TestResolve_ComponentResolversFiltering(t *testing.T) {
 
 	if r.ComponentResolvers[0].Prefix != "getService" {
 		t.Errorf("expected the valid resolver to survive, got %+v", r.ComponentResolvers[0])
+	}
+}
+
+func TestJavaStubResolver_Empty(t *testing.T) {
+	r := JavaStubResolver("")
+	if r.Match != "" {
+		t.Errorf("expected zero-value Resolver when javaStubsPath is empty, got %+v", r)
+	}
+}
+
+func TestJavaStubResolver_ResolvesCreateObjectJava(t *testing.T) {
+	r := JavaStubResolver("tassweb.packages.tass.javastubs")
+
+	if r.Prefix != "createObject" {
+		t.Errorf("expected Prefix %q, got %q", "createObject", r.Prefix)
+	}
+
+	re, err := regexp.Compile(r.Match)
+	if err != nil {
+		t.Fatalf("Match is not a valid regex: %v", err)
+	}
+
+	m := re.FindStringSubmatch(`createObject('java', 'java.security.Signature')`)
+	if m == nil {
+		t.Fatalf("expected Match to match createObject('java', 'java.security.Signature')")
+	}
+
+	if m[1] != "java.security.Signature" {
+		t.Errorf("expected captured class name %q, got %q", "java.security.Signature", m[1])
+	}
+
+	got := strings.ReplaceAll(r.Resolve, "$1", m[1])
+	if got != "tassweb.packages.tass.javastubs.java.security.Signature" {
+		t.Errorf("expected resolved path %q, got %q", "tassweb.packages.tass.javastubs.java.security.Signature", got)
+	}
+}
+
+// TestResolve_JavaStubsPathAppendsSynthesizedResolver verifies javaStubsPath
+// produces a componentResolver alongside any hand-written ones, so a project
+// doesn't have to choose between the two.
+func TestResolve_JavaStubsPathAppendsSynthesizedResolver(t *testing.T) {
+	cfg := &JSON{
+		ComponentResolvers: []Resolver{
+			{Match: "getService(\"$1\")", Resolve: "services.$1", Prefix: "getService"},
+		},
+		JavaStubsPath: "tassweb.packages.tass.javastubs",
+	}
+
+	r := Resolve(cfg, "/proj")
+
+	if len(r.ComponentResolvers) != 2 {
+		t.Fatalf("expected 2 resolvers (1 configured + 1 synthesized), got %d: %+v", len(r.ComponentResolvers), r.ComponentResolvers)
+	}
+
+	last := r.ComponentResolvers[len(r.ComponentResolvers)-1]
+	if last.Prefix != "createObject" {
+		t.Errorf("expected synthesized java stub resolver appended last, got %+v", last)
 	}
 }
 

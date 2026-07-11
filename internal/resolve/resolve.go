@@ -445,11 +445,21 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			for _, f := range pr.Funcs {
 				if strings.EqualFold(f.Name, call.Caller) {
 					for _, arg := range f.Arguments {
-						if strings.EqualFold(arg.Name, argName) && strings.Contains(arg.Type, ".") {
-							comp = arg.Type
-
-							break
+						if !strings.EqualFold(arg.Name, argName) {
+							continue
 						}
+
+						if strings.Contains(arg.Type, ".") {
+							comp = arg.Type
+						} else if parser.IsMemberMethod(funcName) {
+							// Primitive-typed argument (string/numeric/array/etc.)
+							// calling a known member/Java-interop method (e.g.
+							// a string argument's .toCharArray()) — no component
+							// is needed to verify it.
+							return ""
+						}
+
+						break
 					}
 
 					break
@@ -517,6 +527,44 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		comp, noFollow = parser.ResolveFromCallFull(call.Text, r.Resolvers)
 		if noFollow && comp != "" {
 			return ""
+		}
+	}
+
+	// Walk any intermediate .method() hops between the resolved base and this
+	// call (e.g. "kpg.generateKeyPair().getPublic().getParams()" — comp here is
+	// kpg's own component; call.Chain lists "generateKeyPair", "getPublic", each
+	// needing its own declared return type applied before checking funcName below).
+	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") {
+		for _, hop := range call.Chain {
+			fd := r.ResolveFunc(comp, hop, baseDir)
+			if fd == nil {
+				return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+			}
+
+			ret := fd.ReturnComponent
+			if ret == "" && fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
+				ret = fd.ReturnType
+			}
+
+			// The real function's declared return type isn't a component (e.g.
+			// a generic returntype="struct" on a factory method that actually
+			// returns a specific component instance) — fall back to a
+			// componentResolver matching the hop's own call shape, same as the
+			// non-chain "altComp" fallback below.
+			if ret == "" {
+				var noFollow bool
+
+				ret, noFollow = parser.ResolveFromCallFull(hop+"()", r.Resolvers)
+				if noFollow && ret != "" {
+					return ""
+				}
+			}
+
+			if ret == "" {
+				return "method '" + hop + "' in " + comp + " has no component return type (chain to '" + funcName + "')"
+			}
+
+			comp = ret
 		}
 	}
 

@@ -126,6 +126,79 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 	}
 }
 
+// TestCanResolveCall_DeepChainWalksEachHopsReturnType covers a 4-level call chain
+// ("kpg.generateKeyPair().getPublic().getParams()" in real usage, here
+// gen.generatePair().getPart().getParams()) assigned to an indexed lvalue, so
+// the receiver never gets its own ComponentRef. CanResolveCall must walk
+// call.Chain — resolving generatePair's return type, then getPart's — before
+// checking getParams against the final component (chain.Part).
+func TestCanResolveCall_DeepChainWalksEachHopsReturnType(t *testing.T) {
+	dir := testdataDir()
+
+	resolvers := []parser.Resolver{
+		{Match: `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`, Resolve: "chain.$1", Prefix: "createObject"},
+	}
+
+	content := `component {
+	function work() {
+		var gen = createObject('java', 'Generator');
+		variables.cache[1] = gen
+			.generatePair()
+			.getPart()
+			.getParams();
+	}
+}`
+
+	fileURI := uri.URI("file://" + filepath.Join(dir, "chain", "test_chain.cfc"))
+	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+		Resolvers:    resolvers,
+		ExtractCalls: true,
+	})
+
+	idx := index.New()
+	fsys := vfs.OS{}
+
+	for _, rel := range []string{"chain/Generator.cfc", "chain/Pair.cfc", "chain/Part.cfc"} {
+		abs := filepath.Join(dir, rel)
+
+		data, err := fsys.ReadFile(abs)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+
+		idx.IndexFile(uri.URI("file://"+abs), string(data))
+	}
+
+	r := &resolve.Resolver{
+		FS:               fsys,
+		Index:            idx,
+		Resolvers:        resolvers,
+		WorkspaceFolders: []string{dir},
+	}
+
+	baseDir := filepath.Join(dir, "chain")
+
+	calls := pr.FuncCalls(0, 10)
+
+	var getParamsCall *parser.CallSite
+
+	for i := range calls {
+		if calls[i].FuncName == "getParams" {
+			getParamsCall = &calls[i]
+
+			break
+		}
+	}
+
+	if getParamsCall == nil {
+		t.Fatal("expected to find getParams() call site")
+	}
+
+	if reason := r.CanResolveCall(*getParamsCall, pr, baseDir); reason != "" {
+		t.Errorf("expected getParams() to resolve via chain walk, got: %s", reason)
+	}
+}
+
 // TestCanResolveCall_ExtendsChainRefLookupWithoutPreIndex covers the case where a parent
 // component (in the extends chain) assigns a component ref (e.g. variables.$assert = new Assertion())
 // but the parent file was NOT pre-indexed.  The lookup must trigger on-demand indexing of the
@@ -383,6 +456,52 @@ func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
 
 	if reason := r.CanResolveCall(*openCall, pr, dir); reason != "" {
 		t.Errorf("expected ARGUMENTS.doc.open() to resolve via argument type, got: %s", reason)
+	}
+}
+
+// TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod covers a primitive-typed
+// argument (e.g. type="string") calling a known member/Java-interop method, such
+// as ARGUMENTS.password.toCharArray(). Since "string" has no dot, the typed
+// direct-lookup path above never fires; CanResolveCall must instead recognize
+// the method as a known member method and accept the call without a component.
+func TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod(t *testing.T) {
+	dir := testdataDir()
+
+	content := `component {
+	function work(required string password) {
+		var chars = ARGUMENTS.password.toCharArray();
+	}
+}`
+	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_primitive.cfc"))
+	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	r := &resolve.Resolver{
+		FS:               vfs.OS{},
+		Index:            index.New(),
+		WorkspaceFolders: []string{dir},
+	}
+
+	calls := pr.FuncCalls(0, 10)
+
+	var call *parser.CallSite
+
+	for i := range calls {
+		if calls[i].FuncName == "toCharArray" {
+			call = &calls[i]
+
+			break
+		}
+	}
+
+	if call == nil {
+		t.Fatal("expected to find ARGUMENTS.password.toCharArray() call site")
+	}
+
+	if reason := r.CanResolveCall(*call, pr, dir); reason != "" {
+		t.Errorf("expected ARGUMENTS.password.toCharArray() to resolve as a member method, got: %s", reason)
 	}
 }
 
