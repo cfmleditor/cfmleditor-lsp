@@ -720,7 +720,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 							caller = p.funcs[len(p.funcs)-1].Name
 						}
 
-						comp := p.lookupComponentRef(varChain)
+						comp := p.lookupComponentRef(varChain, line)
 
 						p.addCall(CallSite{
 							FuncName:  methodName,
@@ -816,7 +816,7 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	comp := p.lookupComponentRef(varName)
+	comp := p.lookupComponentRef(varName, line)
 
 	p.addCall(CallSite{
 		FuncName:  methodName,
@@ -1152,23 +1152,56 @@ func (p *tagParser) addRef(ref ComponentRef) {
 // (mirrors resolve.CanResolveCall's function-scope-then-global precedence).
 // Only sees refs recorded earlier in this single forward pass — same
 // limitation goto-definition has for forward references.
-func (p *tagParser) lookupComponentRef(varName string) string {
+//
+// Prefers the nearest-preceding assignment at or before atLine over the first
+// match in parse order: a scratch variable can be reassigned multiple times in
+// the same file (e.g. once per <cfswitch>/<cfcase> branch), and the first ref
+// in parse order may belong to an earlier, unrelated branch. Falls back to the
+// first match in parse order for a genuine forward reference, where no
+// preceding ref exists.
+func (p *tagParser) lookupComponentRef(varName string, atLine int) string {
 	lookupVar := varName
 	if dot := strings.LastIndexByte(lookupVar, '.'); dot >= 0 {
 		lookupVar = lookupVar[dot+1:]
 	}
 
 	if p.inFunc != "" {
-		for _, ref := range p.funcRefs[p.inFunc] {
-			if strings.EqualFold(ref.Variable, lookupVar) {
-				return ref.Component
-			}
+		if comp := nearestComponentRef(p.funcRefs[p.inFunc], lookupVar, atLine); comp != "" {
+			return comp
 		}
 	}
 
-	for i := range p.componentRefs {
-		if strings.EqualFold(p.componentRefs[i].Variable, lookupVar) {
-			return p.componentRefs[i].Component
+	return nearestComponentRef(p.componentRefs, lookupVar, atLine)
+}
+
+// nearestComponentRef returns the Component of the ref matching lookupVar whose
+// Line is the largest value <= atLine, or the first matching ref in slice order
+// if none precede atLine.
+func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) string {
+	var best *ComponentRef
+
+	for i := range refs {
+		ref := &refs[i]
+		if !strings.EqualFold(ref.Variable, lookupVar) {
+			continue
+		}
+
+		if int(ref.Line) > atLine {
+			continue
+		}
+
+		if best == nil || ref.Line > best.Line {
+			best = ref
+		}
+	}
+
+	if best != nil {
+		return best.Component
+	}
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, lookupVar) {
+			return refs[i].Component
 		}
 	}
 

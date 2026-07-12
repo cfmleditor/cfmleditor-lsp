@@ -458,17 +458,46 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			}
 		}
 
-		// Fall back to component refs
+		// Fall back to component refs. A scratch variable can be reassigned multiple
+		// times in the same file (e.g. once per <cfswitch>/<cfcase> branch) — using
+		// the first matching ref in file order would lock onto whichever branch
+		// happens to appear earliest, regardless of which branch the call site is
+		// actually in. Prefer the ref with the highest line number at or before the
+		// call site (the assignment that's actually in scope there); only fall back
+		// to file order for a genuine forward reference, where no preceding ref exists.
 		if comp == "" {
+			var best *parser.ComponentRef
+
 			for i := range pr.ComponentRefs {
 				ref := &pr.ComponentRefs[i]
-				if strings.EqualFold(ref.Variable, lookupVar) {
-					comp = ref.Component
-
-					tr.add("resolved %q to %q via file-level ComponentRef", variable, comp)
-
-					break
+				if !strings.EqualFold(ref.Variable, lookupVar) {
+					continue
 				}
+
+				if ref.Line > call.Line {
+					continue
+				}
+
+				if best == nil || ref.Line > best.Line {
+					best = ref
+				}
+			}
+
+			if best == nil {
+				for i := range pr.ComponentRefs {
+					ref := &pr.ComponentRefs[i]
+					if strings.EqualFold(ref.Variable, lookupVar) {
+						best = ref
+
+						break
+					}
+				}
+			}
+
+			if best != nil {
+				comp = best.Component
+
+				tr.add("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line)
 			}
 		}
 

@@ -703,11 +703,57 @@ func (p *scriptParser) parse() {
 						varName = chain[:dotIdx]
 					}
 
+					funcName := lastIdent
+					line := tok.Line
+
+					if !p.skipParens() {
+						return
+					}
+
 					p.addCall(CallSite{
-						FuncName: lastIdent,
+						FuncName: funcName,
 						Variable: varName,
-						Line:     uint32(p.baseLine + tok.Line),
+						Line:     uint32(p.baseLine + line),
 					})
+
+					// Continue walking further .method() hops chained off this
+					// call's return value (e.g. "table.getTable().setSkipFirstHeader(...)")
+					// — without this, the scanner resumes right after this hop's
+					// "(" and the next ".method(" is rediscovered as an orphaned,
+					// unqualified bare call. Mirrors checkBareCall's chain loop.
+					var chainHops []string
+
+					for p.sc.PeekSkipComments().Kind == TokDot {
+						p.sc.NextSkipComments() // consume .
+
+						methTok := p.sc.PeekSkipComments()
+						if methTok.Kind != TokIdent {
+							break
+						}
+
+						p.sc.NextSkipComments() // consume method name
+
+						if p.sc.PeekSkipComments().Kind != TokLParen {
+							break
+						}
+
+						chainHops = append(chainHops, funcName)
+						funcName = methTok.Value
+
+						if !p.skipParens() {
+							return
+						}
+
+						hops := make([]string, len(chainHops))
+						copy(hops, chainHops)
+
+						p.addCall(CallSite{
+							FuncName: funcName,
+							Variable: varName,
+							Chain:    hops,
+							Line:     uint32(p.baseLine + line),
+						})
+					}
 				}
 			case p.extractCalls && peek.Kind == TokLParen && !isKeyword(tok.Value):
 				p.recordBareCallAndChain(tok)
