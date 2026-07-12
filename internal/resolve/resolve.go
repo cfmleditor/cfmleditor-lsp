@@ -2,6 +2,7 @@
 package resolve
 
 import (
+	"fmt"
 	"maps"
 	"path/filepath"
 	"strings"
@@ -312,20 +313,59 @@ func (r *Resolver) ResolveFromCall(expr string) string {
 // CanResolveCall determines whether a function call can be resolved given the
 // parse result context. Returns empty string if resolved, or a reason if not.
 func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) string {
+	return r.canResolveCall(call, pr, baseDir, nil)
+}
+
+// ExplainCall runs the same resolution logic as CanResolveCall but also returns a
+// human-readable trace of every decision point that produced (or failed to produce)
+// the final verdict — which mechanism set the call's component, which componentResolver
+// or FuncLookup hop fired, and why the final method check succeeded or failed. Intended
+// for the `explain` CLI command; not used on the hot lint path.
+func (r *Resolver) ExplainCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
+	tr := &traceRecorder{}
+	reason := r.canResolveCall(call, pr, baseDir, tr)
+
+	return reason, tr.steps
+}
+
+// traceRecorder accumulates human-readable resolution steps. A nil *traceRecorder
+// is always safe to call add on (no-op), so canResolveCall can be shared between the
+// hot lint path (tr == nil) and ExplainCall (tr != nil) without extra branching.
+type traceRecorder struct {
+	steps []string
+}
+
+func (t *traceRecorder) add(format string, args ...any) {
+	if t == nil {
+		return
+	}
+
+	t.steps = append(t.steps, fmt.Sprintf(format, args...))
+}
+
+func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string, tr *traceRecorder) string {
 	funcName := call.FuncName
 	variable := call.Variable
 
 	// Unqualified call — check same file, then extends chain.
 	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
 	if variable == "" && call.Component == "" {
+		tr.add("unqualified call to %q — checking same file", funcName)
+
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, funcName) {
+				tr.add("found %q defined in this file", funcName)
+
 				return ""
 			}
 		}
 		// Check extends chain
 		if pr.Extends != "" {
+			tr.add("not in this file — checking extends chain (%s)", pr.Extends)
+
 			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+				tr.add("found %q in extends chain", funcName)
+
 				return ""
 			}
 
@@ -337,6 +377,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	// this. qualifier — refers to the current component
 	if strings.EqualFold(variable, "this") {
+		tr.add("'this' qualifier — checking same file")
+
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, funcName) {
 				return ""
@@ -344,6 +386,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		}
 
 		if pr.Extends != "" {
+			tr.add("not in this file — checking extends chain (%s)", pr.Extends)
+
 			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
 				return ""
 			}
@@ -358,6 +402,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			return "super used but no extends"
 		}
 
+		tr.add("'super' qualifier — checking extends chain (%s)", pr.Extends)
+
 		if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
 			return ""
 		}
@@ -369,6 +415,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// These are dynamic (type="any"), so we can't verify them statically; accept if the
 	// argument is declared in the enclosing function.
 	if strings.EqualFold(variable, "ARGUMENTS") {
+		tr.add("ARGUMENTS.%s called as a function reference — checking caller %q's argument list", funcName, call.Caller)
+
 		for _, f := range pr.Funcs {
 			if strings.EqualFold(f.Name, call.Caller) {
 				for _, arg := range f.Arguments {
@@ -382,6 +430,10 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	// Qualified call — find the component from refs
 	comp := call.Component
+	if comp != "" {
+		tr.add("call.Component already set to %q (resolved earlier via chained new/createObject)", comp)
+	}
+
 	if comp == "" {
 		// Strip scope prefix for matching (VARIABLES.x -> x)
 		lookupVar := variable
@@ -395,6 +447,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				for _, ref := range pr.FuncComponentRefs(scope.Start, scope.End) {
 					if strings.EqualFold(ref.Variable, lookupVar) {
 						comp = ref.Component
+
+						tr.add("resolved %q to %q via function-scoped ComponentRef", variable, comp)
 
 						break
 					}
@@ -411,6 +465,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				if strings.EqualFold(ref.Variable, lookupVar) {
 					comp = ref.Component
 
+					tr.add("resolved %q to %q via file-level ComponentRef", variable, comp)
+
 					break
 				}
 			}
@@ -424,6 +480,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 					for _, ref := range r.Index.RefsForFile(appURI) {
 						if strings.EqualFold(ref.Variable, lookupVar) {
 							comp = ref.Component
+
+							tr.add("resolved %q to %q via %s ComponentRef", variable, comp, appName)
 
 							break
 						}
@@ -451,11 +509,15 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 						if strings.Contains(arg.Type, ".") {
 							comp = arg.Type
+
+							tr.add("resolved %q to %q via <cfargument type>", variable, comp)
 						} else if parser.IsMemberMethod(funcName) {
 							// Primitive-typed argument (string/numeric/array/etc.)
 							// calling a known member/Java-interop method (e.g.
 							// a string argument's .toCharArray()) — no component
 							// is needed to verify it.
+							tr.add("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
+
 							return ""
 						}
 
@@ -469,6 +531,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 		// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
 		if comp == "" && pr.Extends != "" {
+			tr.add("no ref found in this file — checking extends chain (%s) for a ComponentRef", pr.Extends)
+
 			seen := make(map[string]bool)
 			extends := pr.Extends
 
@@ -489,6 +553,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				for _, ref := range r.Index.RefsForFile(parentURI) {
 					if strings.EqualFold(ref.Variable, lookupVar) {
 						comp = ref.Component
+
+						tr.add("resolved %q to %q via ComponentRef in parent %s", variable, comp, extends)
 
 						break
 					}
@@ -515,6 +581,10 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		var noFollow bool
 
 		comp, noFollow = parser.ResolveFromCallFull(variable, r.Resolvers)
+		if comp != "" {
+			tr.add("resolved %q to %q via componentResolver matching the variable name (noFollow=%v)", variable, comp, noFollow)
+		}
+
 		if noFollow && comp != "" {
 			return ""
 		}
@@ -525,9 +595,17 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		var noFollow bool
 
 		comp, noFollow = parser.ResolveFromCallFull(call.Text, r.Resolvers)
+		if comp != "" {
+			tr.add("resolved %q to %q via componentResolver matching the full line text %q (noFollow=%v)", variable, comp, call.Text, noFollow)
+		}
+
 		if noFollow && comp != "" {
 			return ""
 		}
+	}
+
+	if comp == "" {
+		tr.add("no ComponentRef and no componentResolver matched %q", variable)
 	}
 
 	// Walk any intermediate .method() hops between the resolved base and this
@@ -542,8 +620,12 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			}
 
 			ret := fd.ReturnComponent
-			if ret == "" && fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
+			if ret != "" {
+				tr.add("chain hop %q on %q: declared/inferred ReturnComponent %q", hop, comp, ret)
+			} else if ret == "" && fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
 				ret = fd.ReturnType
+
+				tr.add("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
 			}
 
 			// The real function's declared return type isn't a component (e.g.
@@ -555,6 +637,10 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				var noFollow bool
 
 				ret, noFollow = parser.ResolveFromCallFull(hop+"()", r.Resolvers)
+				if ret != "" {
+					tr.add("chain hop %q on %q: no declared return type — componentResolver matched %q(): %q (noFollow=%v)", hop, comp, hop, ret, noFollow)
+				}
+
 				if noFollow && ret != "" {
 					return ""
 				}
@@ -574,6 +660,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	// Dynamic return type — method called on a result of a function returning "any".
 	if comp == "$any" {
+		tr.add("component is $any (dynamic) — accepted without a method check")
+
 		return ""
 	}
 
@@ -587,16 +675,22 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return "method '" + funcName + "' not found on builtin " + builtinName
 	}
 
+	tr.add("checking whether %q defines method %q", comp, funcName)
+
 	if r.ResolveFunc(comp, funcName, baseDir) != nil {
 		return ""
 	}
 
 	if parser.IsMemberMethod(funcName) {
+		tr.add("%q is a known member/Java-interop method — accepted without finding it in %q", funcName, comp)
+
 		return ""
 	}
 
 	// Component defines onMissingMethod — any method call is valid.
 	if r.ResolveFunc(comp, "onMissingMethod", baseDir) != nil {
+		tr.add("%q defines onMissingMethod — any method call accepted", comp)
+
 		return ""
 	}
 
@@ -605,6 +699,8 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// (e.g. var objFile = _parent.getFile() inherits _parent's component, but the
 	// "objFile" resolver names the real type).
 	if altComp, altNoFollow := parser.ResolveFromCallFull(variable, r.Resolvers); altComp != "" && altComp != comp {
+		tr.add("%q not found in %q — trying altComp fallback: componentResolver on variable name gives %q (noFollow=%v)", funcName, comp, altComp, altNoFollow)
+
 		if altNoFollow || r.ResolveFunc(altComp, funcName, baseDir) != nil {
 			return ""
 		}

@@ -1242,6 +1242,38 @@ func TestExpressionMappings_ReplacesHashExpressions(t *testing.T) {
 	}
 }
 
+// TestExpressionMappings_UnmappedHashExpressionBecomesAny verifies that a "#...#"
+// component path with no matching expressionMappings entry (e.g. a runtime-computed
+// factory path like CreateObject("component", "tools.templates.#ARGUMENTS.template#.generator"))
+// collapses to "$any" instead of leaking the literal "#...#" text as a bogus component
+// name — this must hold even with no expressionMappings configured at all.
+func TestExpressionMappings_UnmappedHashExpressionBecomesAny(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="init">
+	<cfargument name="template" required="true" type="string" />
+	<cfset generator = CreateObject("component","tools.templates.#ARGUMENTS.template#.generator").init() />
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{})
+
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "generator" {
+			found = true
+
+			if ref.Component != "$any" {
+				t.Errorf("expected generator → $any, got %q", ref.Component)
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("expected a ComponentRef for generator, got none: %v", pr.ComponentRefs)
+	}
+}
+
 func TestTagParser_FuncRefsOffset_MixedFile(t *testing.T) {
 	// Simulate a mixed tag/script file where tag region starts at a non-zero line
 	content := `<cfscript>
@@ -1912,6 +1944,40 @@ func TestScriptParser_CreateObjectJavaWithResolver(t *testing.T) {
 
 	if !found {
 		t.Errorf("expected obj → stubs.com.example.Foo, got %v", refs)
+	}
+}
+
+// TestScriptParser_RequestScopedAssignment verifies that "REQUEST.x = document.createTable(1);"
+// inside a cfscript function body is recognized as an assignment (not misread as a bare
+// call). Before this fix, checkAssignRef's default path only recognized a bare "x = ..."
+// (identifier directly followed by "="); for a scope-prefixed LHS the next token is "."
+// not "=", so it fell through to checkBareCall and the RHS's component type was silently
+// dropped, leaving "REQUEST.x" with no ComponentRef at all.
+func TestScriptParser_RequestScopedAssignment(t *testing.T) {
+	content := `component {
+	function work() {
+		REQUEST.objGroupTable = document.createTable(1);
+		REQUEST.objGroupTable.setTableWidth('100%');
+	}
+}`
+	resolvers := []Resolver{{
+		Match:   `document.createTable($1)`,
+		Resolve: "reporting.table",
+		Prefix:  "document.createTable",
+	}}
+
+	pr := Parse(testURI, content, resolvers)
+
+	var found bool
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "objGroupTable" && ref.Component == "reporting.table" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected objGroupTable → reporting.table, got %v", pr.ComponentRefs)
 	}
 }
 
@@ -3468,6 +3534,124 @@ func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
 	getRGBColor, ok := byFunc["getRGBColor"]
 	if !ok || getRGBColor.Variable != "document" || !slices.Equal(getRGBColor.Chain, []string{"getJavaUtils"}) {
 		t.Errorf("expected getRGBColor CallSite Variable=document Chain=[getJavaUtils], got %+v", getRGBColor)
+	}
+}
+
+// TestBracketIndexedChain_AssignmentRHS covers "x = REQUEST['a' & b & 'c'].someMethod();" —
+// a dynamic bracket-indexed key between the base identifier and a chained call. Before
+// the fix, the dot-walk loop in checkAssignRef only recognized TokDot to continue the
+// chain; hitting "[" (not "." or "(") made it stop immediately without consuming the
+// "[...]" group, leaving the scanner positioned mid-expression. The outer scan loop then
+// rediscovered ".someMethod(...)" as an orphaned, unqualified bare call ("no qualifier,
+// not in file") instead of a call chained off the (unknowable) REQUEST[...] receiver.
+func TestBracketIndexedChain_AssignmentRHS(t *testing.T) {
+	content := `component {
+	function work() {
+		x = REQUEST['a' & b & 'c'].someMethod(1,2);
+		other();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	someMethod, ok := byFunc["someMethod"]
+	if !ok || someMethod.Variable == "" {
+		t.Errorf("expected someMethod CallSite to have a non-empty (poisoned) Variable, not be orphaned as a bare call, got %+v", someMethod)
+	}
+
+	other, ok := byFunc["other"]
+	if !ok || other.Variable != "" {
+		t.Errorf("expected other() to remain a genuine bare call (Variable=\"\"), got %+v", other)
+	}
+}
+
+// TestBracketIndexedChain_BareCall covers the same shape as a bare call (no
+// assignment): "REQUEST['a' & b & 'c'].someMethod();" — exercises checkBareCall's
+// leading dot-chain walk.
+func TestBracketIndexedChain_BareCall(t *testing.T) {
+	content := `component {
+	function work() {
+		REQUEST['a' & b & 'c'].someMethod(1,2);
+		other();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	someMethod, ok := byFunc["someMethod"]
+	if !ok || someMethod.Variable == "" {
+		t.Errorf("expected someMethod CallSite to have a non-empty (poisoned) Variable, not be orphaned as a bare call, got %+v", someMethod)
+	}
+
+	other, ok := byFunc["other"]
+	if !ok || other.Variable != "" {
+		t.Errorf("expected other() to remain a genuine bare call (Variable=\"\"), got %+v", other)
+	}
+}
+
+// TestBracketIndexedChain_VarDecl covers "var x = REQUEST['a' & b & 'c'].someMethod();"
+// (parseBodyVarDecl's dot-walk).
+func TestBracketIndexedChain_VarDecl(t *testing.T) {
+	content := `component {
+	function work() {
+		var x = REQUEST['a' & b & 'c'].someMethod(1,2);
+		other();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	someMethod, ok := byFunc["someMethod"]
+	if !ok || someMethod.Variable == "" {
+		t.Errorf("expected someMethod CallSite to have a non-empty (poisoned) Variable, not be orphaned as a bare call, got %+v", someMethod)
+	}
+
+	other, ok := byFunc["other"]
+	if !ok || other.Variable != "" {
+		t.Errorf("expected other() to remain a genuine bare call (Variable=\"\"), got %+v", other)
+	}
+}
+
+// TestBracketIndexedChain_ScopedAssignment covers "variables.x = REQUEST['a' & b &
+// 'c'].someMethod();" (parseBodyScopedVar's dot-walk).
+func TestBracketIndexedChain_ScopedAssignment(t *testing.T) {
+	content := `component {
+	function work() {
+		variables.x = REQUEST['a' & b & 'c'].someMethod(1,2);
+		other();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.FuncCalls(0, 10) {
+		byFunc[c.FuncName] = c
+	}
+
+	someMethod, ok := byFunc["someMethod"]
+	if !ok || someMethod.Variable == "" {
+		t.Errorf("expected someMethod CallSite to have a non-empty (poisoned) Variable, not be orphaned as a bare call, got %+v", someMethod)
+	}
+
+	other, ok := byFunc["other"]
+	if !ok || other.Variable != "" {
+		t.Errorf("expected other() to remain a genuine bare call (Variable=\"\"), got %+v", other)
 	}
 }
 

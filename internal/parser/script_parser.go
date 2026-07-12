@@ -146,7 +146,23 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	first := true
 
 	// Check for .method( chain
-	for p.sc.PeekSkipComments().Kind == TokDot {
+	for {
+		if p.sc.PeekSkipComments().Kind == TokLBracket {
+			// Dynamic index between hops (e.g. someFunc()[key].method()) —
+			// skip it and keep walking the chain; no receiver identifier is
+			// at risk of misattribution here (the base is a call return, not
+			// a bare variable), so no poisoning is needed, just continuity.
+			if !p.skipBracketIndex() {
+				return
+			}
+
+			continue
+		}
+
+		if p.sc.PeekSkipComments().Kind != TokDot {
+			break
+		}
+
 		p.sc.NextSkipComments() // consume .
 
 		methTok := p.sc.PeekSkipComments()
@@ -417,20 +433,38 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 	var fullChain strings.Builder
 	fullChain.WriteString(rhs.Value)
 
-	for p.sc.PeekSkipComments().Kind == TokDot {
-		p.sc.NextSkipComments() // consume .
+chainWalk:
+	for {
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokLBracket:
+			// Dynamic key (e.g. REQUEST['a' & b & 'c'] or arr[i]) — can't be
+			// resolved statically. Skip the whole [...] group and poison
+			// fullChain with a marker that can never collide with a real
+			// resolver/ComponentRef match, so tryResolveCall/resolveCall
+			// below safely fail instead of misattributing to whatever the
+			// bare base identifier happens to resolve to elsewhere.
+			if !p.skipBracketIndex() {
+				return
+			}
 
-		next := p.sc.PeekSkipComments()
-		if next.Kind == TokIdent {
-			p.sc.NextSkipComments()
+			fullChain.WriteString("[]")
+		case TokDot:
+			p.sc.NextSkipComments() // consume .
 
-			prevIdent = lastIdent
-			lastIdent = next.Value
+			next := p.sc.PeekSkipComments()
+			if next.Kind == TokIdent {
+				p.sc.NextSkipComments()
 
-			fullChain.WriteByte('.')
-			fullChain.WriteString(next.Value)
-		} else {
-			break
+				prevIdent = lastIdent
+				lastIdent = next.Value
+
+				fullChain.WriteByte('.')
+				fullChain.WriteString(next.Value)
+			} else {
+				break chainWalk
+			}
+		default:
+			break chainWalk
 		}
 	}
 
@@ -484,6 +518,11 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
+		// See parseBodyScopedVar's identical case for why.
+		if p.extractCalls && dot.Kind == TokLBracket {
+			p.checkBareCall(tok)
+		}
+
 		return
 	}
 
@@ -609,6 +648,12 @@ func (p *scriptParser) parse() {
 		case "this":
 			p.parseScopedVar(tok, ScopeThis)
 		case "variables":
+			p.parseScopedVar(tok, ScopeVariables)
+		case "request", "session", "application":
+			// See the matching case in handleBodyToken for why this is needed:
+			// without it, a top-level (outside any function) "REQUEST.x = ..."
+			// assignment falls through to the bare-call path and its RHS
+			// component type is silently dropped.
 			p.parseScopedVar(tok, ScopeVariables)
 		case "new":
 			p.parseStandaloneNew(tok)
@@ -1109,6 +1154,17 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int) {
 		p.parseBodyScopedVar(tok, ScopeVariables)
 	case "this":
 		p.parseBodyScopedVar(tok, ScopeThis)
+	case "request", "session", "application":
+		// Request/session/application-scoped assignments (e.g. "REQUEST.generator =
+		// document.createTable(1);") — checkAssignRef's default path only recognizes
+		// a bare "x = ..." (identifier directly followed by "="); for a scope-prefixed
+		// LHS the next token is "." not "=", so without this case it falls through to
+		// checkBareCall and the assignment (and any component type it establishes) is
+		// silently dropped. parseBodyScopedVar already handles the "scope.name = rhs"
+		// vs "scope.name.method()" split correctly for variables./this./arguments.; the
+		// same handling applies verbatim here. Treated as global (forceGlobal), same as
+		// this./variables., since these scopes outlive the current function.
+		p.parseBodyScopedVar(tok, ScopeVariables)
 	case "return":
 		p.checkReturnComponent()
 	case "new":
@@ -1358,20 +1414,35 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 			var fullChain strings.Builder
 			fullChain.WriteString(rhs.Value)
 
-			for p.sc.PeekSkipComments().Kind == TokDot {
-				p.sc.NextSkipComments()
+		chainWalk:
+			for {
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				case TokLBracket:
+					// See checkVarRHS's identical case for why: skip the
+					// dynamic key and poison fullChain so resolution safely
+					// fails instead of misattributing to the bare base var.
+					if !p.skipBracketIndex() {
+						return
+					}
 
-				next := p.sc.PeekSkipComments()
-				if next.Kind == TokIdent {
+					fullChain.WriteString("[]")
+				case TokDot:
 					p.sc.NextSkipComments()
 
-					prevIdent = lastIdent
-					lastIdent = next.Value
+					next := p.sc.PeekSkipComments()
+					if next.Kind == TokIdent {
+						p.sc.NextSkipComments()
 
-					fullChain.WriteByte('.')
-					fullChain.WriteString(next.Value)
-				} else {
-					break
+						prevIdent = lastIdent
+						lastIdent = next.Value
+
+						fullChain.WriteByte('.')
+						fullChain.WriteString(next.Value)
+					} else {
+						break chainWalk
+					}
+				default:
+					break chainWalk
 				}
 			}
 
@@ -1433,6 +1504,15 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
+		// Not "scope.name" at all — e.g. REQUEST[key].method(), indexing the
+		// whole scope struct with a dynamic key rather than a dotted name.
+		// checkBareCall knows how to skip the "[...]" group and poison the
+		// receiver; without this, the scanner is left stuck at "[" and the
+		// trailing ".method()" gets rediscovered as an orphaned bare call.
+		if p.extractCalls && dot.Kind == TokLBracket {
+			p.checkBareCall(scopeTok)
+		}
+
 		return
 	}
 
@@ -1452,17 +1532,30 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			fullChain.WriteByte('.')
 			fullChain.WriteString(nameTok.Value)
 
-			for p.sc.PeekSkipComments().Kind == TokDot {
-				p.sc.NextSkipComments()
+		chainWalk:
+			for {
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				case TokLBracket:
+					// See checkVarRHS's identical case for why.
+					if !p.skipBracketIndex() {
+						return
+					}
 
-				next := p.sc.PeekSkipComments()
-				if next.Kind == TokIdent {
+					fullChain.WriteString("[]")
+				case TokDot:
 					p.sc.NextSkipComments()
 
-					fullChain.WriteByte('.')
-					fullChain.WriteString(next.Value)
-				} else {
-					break
+					next := p.sc.PeekSkipComments()
+					if next.Kind == TokIdent {
+						p.sc.NextSkipComments()
+
+						fullChain.WriteByte('.')
+						fullChain.WriteString(next.Value)
+					} else {
+						break chainWalk
+					}
+				default:
+					break chainWalk
 				}
 			}
 
@@ -1528,20 +1621,33 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 				var fullChain strings.Builder
 				fullChain.WriteString(rhs.Value)
 
-				for p.sc.PeekSkipComments().Kind == TokDot {
-					p.sc.NextSkipComments()
+			chainWalk2:
+				for {
+					switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+					case TokLBracket:
+						// See checkVarRHS's identical case for why.
+						if !p.skipBracketIndex() {
+							return
+						}
 
-					next := p.sc.PeekSkipComments()
-					if next.Kind == TokIdent {
+						fullChain.WriteString("[]")
+					case TokDot:
 						p.sc.NextSkipComments()
 
-						prevIdent = lastIdent
-						lastIdent = next.Value
+						next := p.sc.PeekSkipComments()
+						if next.Kind == TokIdent {
+							p.sc.NextSkipComments()
 
-						fullChain.WriteByte('.')
-						fullChain.WriteString(next.Value)
-					} else {
-						break
+							prevIdent = lastIdent
+							lastIdent = next.Value
+
+							fullChain.WriteByte('.')
+							fullChain.WriteString(next.Value)
+						} else {
+							break chainWalk2
+						}
+					default:
+						break chainWalk2
 					}
 				}
 
@@ -1698,8 +1804,12 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
-		// Check for bare dotted call: obj.method()
-		if p.extractCalls && peek.Kind == TokDot {
+		// Check for bare dotted call: obj.method() — also routes a bracket-indexed
+		// receiver (obj[key].method()) through checkBareCall, whose own chain-walk
+		// knows how to skip the "[...]" group; without TokLBracket here, a bare
+		// statement starting with obj[key]... never reaches checkBareCall at all
+		// and the scanner is left stuck at "[".
+		if p.extractCalls && (peek.Kind == TokDot || peek.Kind == TokLBracket) {
 			p.checkBareCall(tok)
 		}
 
@@ -1752,20 +1862,35 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			var fullChain strings.Builder
 			fullChain.WriteString(rhs.Value)
 
-			for p.sc.PeekSkipComments().Kind == TokDot {
-				p.sc.NextSkipComments() // consume .
+		chainWalk:
+			for {
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				case TokLBracket:
+					// See checkVarRHS's identical case for why: skip the
+					// dynamic key and poison fullChain so resolution safely
+					// fails instead of misattributing to the bare base var.
+					if !p.skipBracketIndex() {
+						return
+					}
 
-				next := p.sc.PeekSkipComments()
-				if next.Kind == TokIdent {
-					p.sc.NextSkipComments()
+					fullChain.WriteString("[]")
+				case TokDot:
+					p.sc.NextSkipComments() // consume .
 
-					prevIdent = lastIdent
-					lastIdent = next.Value
+					next := p.sc.PeekSkipComments()
+					if next.Kind == TokIdent {
+						p.sc.NextSkipComments()
 
-					fullChain.WriteByte('.')
-					fullChain.WriteString(next.Value)
-				} else {
-					break
+						prevIdent = lastIdent
+						lastIdent = next.Value
+
+						fullChain.WriteByte('.')
+						fullChain.WriteString(next.Value)
+					} else {
+						break chainWalk
+					}
+				default:
+					break chainWalk
 				}
 			}
 
@@ -1813,17 +1938,33 @@ func (p *scriptParser) checkBareCall(tok Token) {
 	// Walk the leading dot chain of plain identifiers: a.b.c
 	identChain := []string{tok.Value}
 
-	for p.sc.PeekSkipComments().Kind == TokDot {
-		p.sc.NextSkipComments() // consume .
+chainWalk:
+	for {
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokLBracket:
+			// Dynamic key (e.g. REQUEST['a' & b & 'c'].method()) — skip it and
+			// poison the receiver so it can't be misattributed to whatever
+			// the bare base identifier resolves to elsewhere. See
+			// checkVarRHS's identical case for the full rationale.
+			if !p.skipBracketIndex() {
+				return
+			}
 
-		next := p.sc.PeekSkipComments()
-		if next.Kind != TokIdent {
-			break
+			identChain[len(identChain)-1] += "[]"
+		case TokDot:
+			p.sc.NextSkipComments() // consume .
+
+			next := p.sc.PeekSkipComments()
+			if next.Kind != TokIdent {
+				break chainWalk
+			}
+
+			p.sc.NextSkipComments()
+
+			identChain = append(identChain, next.Value)
+		default:
+			break chainWalk
 		}
-
-		p.sc.NextSkipComments()
-
-		identChain = append(identChain, next.Value)
 	}
 
 	// Must end with ( to be a call
@@ -2368,6 +2509,38 @@ func (p *scriptParser) skipParenBody() bool {
 		case TokLParen:
 			depth++
 		case TokRParen:
+			depth--
+		}
+	}
+
+	return true
+}
+
+// skipBracketIndex consumes a balanced [...] group from the current scanner
+// position, e.g. the dynamic key expression in REQUEST['a' & b & 'c'] or
+// arr[i]. Mirrors skipParens() for (...). Returns false if the scanner isn't
+// at a '[' or the group is unclosed (EOF reached first) — callers should
+// treat false as "nothing to skip" / "malformed, bail" respectively (the
+// only way to tell them apart is checking the token before calling).
+func (p *scriptParser) skipBracketIndex() bool {
+	if p.sc.PeekSkipComments().Kind != TokLBracket {
+		return false
+	}
+
+	p.sc.NextSkipComments() // consume [
+
+	depth := 1
+
+	for depth > 0 {
+		tok := p.sc.NextSkipComments()
+		if tok.Kind == TokEOF {
+			return false
+		}
+
+		switch tok.Kind { //nolint:exhaustive
+		case TokLBracket:
+			depth++
+		case TokRBracket:
 			depth--
 		}
 	}

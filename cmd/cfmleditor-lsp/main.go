@@ -54,6 +54,10 @@ func main() {
 			cmdUnresolved(os.Args[2:])
 
 			return
+		case "explain":
+			cmdExplain(os.Args[2:])
+
+			return
 		case "version":
 			fmt.Printf("cfmleditor-lsp %s\n", version)
 
@@ -77,6 +81,10 @@ Commands:
   parse        Parse CFML files and report timing
   scan         Scan CFML files and report parse errors
   format       Format CFML files (stdout or in-place with -w)
+  unresolved   Scan for unresolved component/method calls
+  refs         Find references to a component or function
+  deps         Print component dependency info
+  explain      Explain how a call site's component was resolved
   version      Print version
   help         Show this help
 
@@ -88,6 +96,11 @@ Scan usage:
 
 Format usage:
   cfmleditor-lsp format [-w] <file> [...]
+
+Explain usage:
+  cfmleditor-lsp explain <file> <line> [call-substring]
+  e.g. cfmleditor-lsp explain directcontent.cfc 104
+       cfmleditor-lsp explain directcontent.cfc 104 createTemplate
 `, version)
 }
 

@@ -501,12 +501,14 @@ func (pr *ParseResult) applyChainedReturnLookup() {
 	}
 }
 
-// applyExpressionMappings replaces runtime expressions in component paths with static values.
+// applyExpressionMappings replaces runtime expressions in component paths with static
+// values, then treats anything still containing a "#...#" CFML expression as genuinely
+// dynamic (e.g. CreateObject("component", "tools.templates.#ARGUMENTS.template#.generator") —
+// a runtime-computed path with no configured mapping) and collapses it to "$any" so
+// CanResolveCall accepts calls through it instead of surfacing the raw "#...#" text as a
+// bogus "not found in #...#" component name. Runs even with no expressionMappings
+// configured, since the "$any" fallback is unconditional.
 func (pr *ParseResult) applyExpressionMappings() {
-	if len(pr.expressionMappings) == 0 {
-		return
-	}
-
 	for i := range pr.ComponentRefs {
 		pr.ComponentRefs[i].Component = pr.replaceExpressions(pr.ComponentRefs[i].Component)
 	}
@@ -517,6 +519,21 @@ func (pr *ParseResult) applyExpressionMappings() {
 		}
 
 		pr.funcRefsMap[k] = refs
+	}
+
+	// CallSite.Component can also be baked in directly at parse time (e.g. a bare
+	// "x.method()" call whose receiver was resolved inline via lookupComponentRef,
+	// or a chained new/createObject) — fix those up too, not just ComponentRefs.
+	for i := range pr.Calls {
+		pr.Calls[i].Component = pr.replaceExpressions(pr.Calls[i].Component)
+	}
+
+	for k, calls := range pr.funcCallsMap {
+		for i := range calls {
+			calls[i].Component = pr.replaceExpressions(calls[i].Component)
+		}
+
+		pr.funcCallsMap[k] = calls
 	}
 }
 
@@ -531,6 +548,10 @@ func (pr *ParseResult) replaceExpressions(comp string) string {
 				comp = strings.ReplaceAll(comp, expr, value)
 			}
 		}
+	}
+
+	if strings.Contains(comp, "#") {
+		return "$any"
 	}
 
 	return comp
