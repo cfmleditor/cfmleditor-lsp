@@ -359,6 +359,27 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				return ""
 			}
 		}
+
+		// A bare call whose name matches a declared local variable or argument in
+		// the enclosing function is a call through a function-reference value (e.g.
+		// "var columnfn = ARGUMENTS.extend[x].column; ... columnfn(...)"), not a call
+		// to a missing/undefined function — CFML supports first-class function
+		// values assigned to locals/arguments. This is a genuinely different case
+		// from "no qualifier, not in file": the identifier IS declared, its value is
+		// just dynamic (unknown until runtime), so — same reasoning as the
+		// ARGUMENTS.x-as-function-reference case below — there's nothing further to
+		// verify statically, and it should not be reported as if it were a missing
+		// function.
+		if scope := parser.FindFuncScopeAt(int(call.Line), pr.Scopes); scope.Start != -1 {
+			for _, v := range pr.FuncVars(scope.Start, scope.End) {
+				if strings.EqualFold(v, funcName) {
+					tr.add("%q is a declared local variable/argument in the enclosing function — treating as a call through a function-reference value, not a missing function", funcName)
+
+					return ""
+				}
+			}
+		}
+
 		// Check extends chain
 		if pr.Extends != "" {
 			tr.add("not in this file — checking extends chain (%s)", pr.Extends)
@@ -411,6 +432,25 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		return "not found in parent component"
 	}
 
+	// Bare VARIABLES qualifier (no further dot, e.g. "VARIABLES.someName(...)") —
+	// a scope can't itself be a component ref, so treating "VARIABLES" as the thing
+	// needing a ComponentRef is a category error. What's actually being called is a
+	// property assigned onto the scope (e.g. "VARIABLES.someName = ARGUMENTS.callback;
+	// ... VARIABLES.someName(...)"), a function-reference value passed in and stored —
+	// same reasoning as the ARGUMENTS-as-function-reference case below, just for a
+	// VARIABLES-scoped property instead of a bare argument. Accept if funcName was
+	// ever assigned in VARIABLES scope anywhere in the file (assignments inside any
+	// function are visible from every other function, unlike a var-scoped local).
+	if strings.EqualFold(variable, "VARIABLES") {
+		tr.add("VARIABLES.%s called as a function reference — checking for a VARIABLES-scoped assignment", funcName)
+
+		if pr.HasScopedAssignment(parser.ScopeVariables, funcName) {
+			tr.add("%q was assigned in VARIABLES scope — treating as a call through a function-reference property", funcName)
+
+			return ""
+		}
+	}
+
 	// ARGUMENTS qualifier — funcName is being called as a function-reference argument.
 	// These are dynamic (type="any"), so we can't verify them statically; accept if the
 	// argument is declared in the enclosing function.
@@ -435,11 +475,10 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	}
 
 	if comp == "" {
-		// Strip scope prefix for matching (VARIABLES.x -> x)
-		lookupVar := variable
-		if dotIdx := strings.LastIndexByte(lookupVar, '.'); dotIdx >= 0 {
-			lookupVar = lookupVar[dotIdx+1:]
-		}
+		// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
+		// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
+		// scope prefix and must not be stripped there.
+		lookupVar := parser.StripReceiverScope(variable)
 
 		// Try function-scoped refs first
 		for _, scope := range pr.Scopes {
@@ -497,7 +536,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			if best != nil {
 				comp = best.Component
 
-				tr.add("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line)
+				tr.add("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
 			}
 		}
 

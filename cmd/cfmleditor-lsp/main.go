@@ -173,6 +173,7 @@ func runServer() {
 		srv.IndexGlobs = globs
 		srv.Mappings = mappings
 		srv.ExpressionMappings = cfg.ExpressionMappings()
+		srv.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
 
 		srv.ComponentResolvers = append(srv.ComponentResolvers, resolverPairs...)
 

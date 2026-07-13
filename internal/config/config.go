@@ -10,9 +10,17 @@ type JSON struct {
 	WorkspaceIndexGlobs []string          `json:"workspaceIndexGlobs"`
 	Mappings            map[string]string `json:"mappings"`
 	ExpressionMappings  map[string]string `json:"expressionMappings"`
-	ComponentResolvers  []Resolver        `json:"componentResolvers"`
-	PropertyResolvers   []PropResolver    `json:"propertyResolvers"`
-	BeanPaths           map[string]string `json:"beanPaths"`
+	// ServicePropertyResolvers maps a "@serviceproperty" annotation kind (e.g. "package",
+	// "service", "controller") to a dot-path template containing "${name}". Recognizes
+	// "<!--- @serviceproperty varName kind|name --->" comments as documenting the real
+	// component type of a generically-typed (e.g. <cfargument type="struct">) dependency.
+	// E.g. {"service": "tassweb.packages.${name}.service"} turns "@serviceproperty
+	// objGLJournal service|gljournal" into a ComponentRef for objGLJournal pointing at
+	// "tassweb.packages.gljournal.service".
+	ServicePropertyResolvers map[string]string `json:"servicePropertyResolvers"`
+	ComponentResolvers       []Resolver        `json:"componentResolvers"`
+	PropertyResolvers        []PropResolver    `json:"propertyResolvers"`
+	BeanPaths                map[string]string `json:"beanPaths"`
 	// JavaStubsPath is the dot-path prefix under which java stub CFCs live
 	// (e.g. "tassweb.packages.tass.javastubs"). When set, createObject("java",
 	// "X") calls are automatically resolved to "<JavaStubsPath>.X" without
@@ -111,6 +119,7 @@ func IntDefault(p *int, def int) int {
 // Resolved holds fully resolved configuration ready for use by the server.
 type Resolved struct {
 	Mappings                 map[string]string
+	ServicePropertyResolvers map[string]string
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
@@ -145,6 +154,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	r := &Resolved{}
 	if len(cfg.Mappings) > 0 {
 		r.Mappings = ResolvePaths(cfg.Mappings, dir)
+	}
+
+	if len(cfg.ServicePropertyResolvers) > 0 {
+		r.ServicePropertyResolvers = cfg.ServicePropertyResolvers
 	}
 
 	for _, cr := range cfg.ComponentResolvers {

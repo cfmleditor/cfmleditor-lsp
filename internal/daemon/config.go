@@ -106,6 +106,17 @@ func (c *Config) ExpressionMappings() map[string]string {
 	return raw.ExpressionMappings
 }
 
+// ServicePropertyResolvers returns the "@serviceproperty" annotation kind → dot-path
+// template map from config (see config.JSON.ServicePropertyResolvers).
+func (c *Config) ServicePropertyResolvers() map[string]string {
+	raw := c.raw()
+	if raw == nil {
+		return nil
+	}
+
+	return raw.ServicePropertyResolvers
+}
+
 // Debug returns whether debug logging is enabled in config.
 func (c *Config) Debug() bool {
 	raw := c.raw()

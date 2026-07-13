@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -35,11 +36,17 @@ type ParseResult struct {
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
 	expressionMappings  map[string]string                       // runtime expression → static value substitutions
-	extractLinks        bool                                    // whether to extract links during global scan
-	extractCalls        bool                                    // whether to extract all call sites during parsing
-	findCalls           []string                                // function names to scan for
-	scanAllScopes       bool                                    // scan all lines including function bodies
-	shallow             bool                                    // minimal parse mode
+	// ServicePropertyResolvers maps a "@serviceproperty" annotation kind (e.g. "package",
+	// "service", "controller") to a dot-path template containing "${name}". Lets a project
+	// document the real component type of a generically-typed (e.g. <cfargument type="struct">)
+	// constructor-injected dependency via a "<!--- @serviceproperty varName kind|name --->"
+	// comment at each use site, instead of (or in addition to) a componentResolver.
+	ServicePropertyResolvers map[string]string
+	extractLinks             bool     // whether to extract links during global scan
+	extractCalls             bool     // whether to extract all call sites during parsing
+	findCalls                []string // function names to scan for
+	scanAllScopes            bool     // scan all lines including function bodies
+	shallow                  bool     // minimal parse mode
 
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
@@ -49,6 +56,11 @@ type ParseResult struct {
 	varsDone      bool
 	thisVars      []string
 	thisDone      bool
+
+	// anyScopedVars caches, per Scope, every name ever assigned in that scope
+	// anywhere in the file (see HasScopedAssignment) — unlike variablesVars/thisVars,
+	// which only look outside functions and inside init().
+	anyScopedVars map[Scope][]string
 
 	// funcVars caches per-function variable lists keyed by "start:end".
 	funcVarsMu sync.Mutex
@@ -63,18 +75,19 @@ type ParseResult struct {
 
 // ParseOptions configures optional parse behaviour.
 type ParseOptions struct {
-	Logger              Logger
-	Resolvers           []Resolver
-	PropertyResolvers   []PropertyResolver
-	BeanLookup          func(name string) string                     // optional: resolve bean name → dot-path
-	BuiltinReturnLookup func(name string) string                     // optional: resolve builtin function → return component
-	FuncLookup          func(component, funcName string) string      // optional: resolve method return type from external components
-	ExpressionMappings  map[string]string                            // runtime expression → static value substitutions
-	ExtractLinks        bool                                         // extract document links during global scan
-	ExtractCalls        bool                                         // extract all variable.method() call sites during parsing
-	FindCalls           []string                                     // function names to find call sites for
-	ScanAllScopes       bool                                         // scan all lines including function bodies (for refs/deps)
-	Shallow             bool                                         // minimal parse: signatures only, no refs/properties/args
+	Logger                   Logger
+	Resolvers                []Resolver
+	PropertyResolvers        []PropertyResolver
+	BeanLookup               func(name string) string                // optional: resolve bean name → dot-path
+	BuiltinReturnLookup      func(name string) string                // optional: resolve builtin function → return component
+	FuncLookup               func(component, funcName string) string // optional: resolve method return type from external components
+	ExpressionMappings       map[string]string                       // runtime expression → static value substitutions
+	ServicePropertyResolvers map[string]string                       // "@serviceproperty" annotation kind → dot-path template
+	ExtractLinks             bool                                    // extract document links during global scan
+	ExtractCalls             bool                                    // extract all variable.method() call sites during parsing
+	FindCalls                []string                                // function names to find call sites for
+	ScanAllScopes            bool                                    // scan all lines including function bodies (for refs/deps)
+	Shallow                  bool                                    // minimal parse: signatures only, no refs/properties/args
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -100,21 +113,22 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 // ParseWithOptions performs a full file parse with extended options.
 func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *ParseResult {
 	pr := &ParseResult{
-		URI:                 fileURI,
-		Content:             content,
-		funcVars:            make(map[string][]string),
-		log:                 opts.Logger,
-		Resolvers:           opts.Resolvers,
-		PropertyResolvers:   opts.PropertyResolvers,
-		BeanLookup:          opts.BeanLookup,
-		BuiltinReturnLookup: opts.BuiltinReturnLookup,
-		FuncLookup:          opts.FuncLookup,
-		expressionMappings:  opts.ExpressionMappings,
-		extractLinks:        opts.ExtractLinks,
-		extractCalls:        opts.ExtractCalls,
-		findCalls:           opts.FindCalls,
-		scanAllScopes:       opts.ScanAllScopes,
-		shallow:             opts.Shallow,
+		URI:                      fileURI,
+		Content:                  content,
+		funcVars:                 make(map[string][]string),
+		log:                      opts.Logger,
+		Resolvers:                opts.Resolvers,
+		PropertyResolvers:        opts.PropertyResolvers,
+		BeanLookup:               opts.BeanLookup,
+		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
+		FuncLookup:               opts.FuncLookup,
+		expressionMappings:       opts.ExpressionMappings,
+		ServicePropertyResolvers: opts.ServicePropertyResolvers,
+		extractLinks:             opts.ExtractLinks,
+		extractCalls:             opts.ExtractCalls,
+		findCalls:                opts.FindCalls,
+		scanAllScopes:            opts.ScanAllScopes,
+		shallow:                  opts.Shallow,
 	}
 	if len(pr.Resolvers) > 0 {
 		pr.resolverSet = BuildResolverSet(pr.Resolvers)
@@ -443,10 +457,81 @@ func (pr *ParseResult) extractSignatures() {
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
 	if !pr.shallow {
 		pr.applyExpressionMappings()
+		pr.applyServiceProperties()
 		pr.generatePropertyAccessors()
 		pr.appendResolverRefs()
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
+	}
+}
+
+// servicePropertyRe matches a "@serviceproperty varName kind|name" annotation inside a
+// CFML tag comment, e.g. "<!--- @serviceproperty donorObj package|sandbox.tasscom.components.donor --->".
+// This is a project-specific documentation convention (not standard CFML/CFC syntax) for
+// annotating the real component type of a dependency that's declared with a generic
+// <cfargument type="struct"> (CF doesn't enforce component types on constructor args, so
+// projects sometimes type them loosely and document the real type in a comment instead).
+// varName allows "." and "[...]" (e.g. "result.data[i]") so the same convention can
+// annotate a bracket-indexed receiver — a case CanResolveCall otherwise can't resolve at
+// all without a global componentResolver keyed on the bare receiver text, which risks
+// matching an unrelated same-named receiver anywhere else in the workspace. An in-source
+// annotation is scoped to this one file, so it doesn't carry that risk.
+var servicePropertyRe = regexp.MustCompile(`@serviceproperty\s+([A-Za-z_][A-Za-z0-9_.\[\]]*)\s+([A-Za-z]+)\|(\S+)`)
+
+// applyServiceProperties scans the whole file for "@serviceproperty" annotations and
+// registers a ComponentRef for the annotated variable at the annotation's line, resolved
+// via the per-kind dot-path template in pr.ServicePropertyResolvers (e.g.
+// "service" -> "tassweb.packages.${name}.service" turns "@serviceproperty objGLJournal
+// service|gljournal" into a ref pointing at "tassweb.packages.gljournal.service"). A no-op
+// when ServicePropertyResolvers isn't configured, so projects not using the convention pay
+// no parsing cost. Runs after pr.Scopes is finalized so each ref can be routed to the
+// enclosing function's scope, same as any other ref — this is what makes the annotation
+// work like a real (if file-scanned rather than scanner-tracked) assignment: a later
+// re-annotation of the same variable name overrides an earlier one, via the existing
+// nearest-preceding-ComponentRef resolution in resolve.CanResolveCall.
+func (pr *ParseResult) applyServiceProperties() {
+	if len(pr.ServicePropertyResolvers) == 0 {
+		return
+	}
+
+	for _, m := range servicePropertyRe.FindAllStringSubmatchIndex(pr.Content, -1) {
+		varName := pr.Content[m[2]:m[3]]
+		kind := strings.ToLower(pr.Content[m[4]:m[5]])
+		name := pr.Content[m[6]:m[7]]
+
+		tmpl, ok := pr.ServicePropertyResolvers[kind]
+		if !ok {
+			continue
+		}
+
+		component := strings.ReplaceAll(tmpl, "${name}", name)
+		line := uint32(strings.Count(pr.Content[:m[0]], "\n"))
+
+		// resolve.CanResolveCall strips a receiver down to the text after its last
+		// top-level "." before comparing against ComponentRef.Variable (e.g.
+		// "VARIABLES.donorObj" is looked up as "donorObj"; StripReceiverScope skips any
+		// "." inside a "[...]" subscript, so "linkMap[arguments.startSource]" is left
+		// unchanged rather than being cut to "startSource]"). Apply the same stripping
+		// here so an annotation written against the natural, full receiver text at the
+		// call site (e.g. "result.data[i]", matching what a reader actually sees in the
+		// source) is stored under the same key CanResolveCall will look it up with.
+		lookupVar := StripReceiverScope(varName)
+
+		ref := ComponentRef{
+			Variable: lookupVar, Component: component,
+			URI: pr.URI, Line: line,
+		}
+
+		if fs := findFuncScope(int(line), pr.Scopes); fs.Start != -1 {
+			if pr.funcRefsMap == nil {
+				pr.funcRefsMap = make(map[string][]ComponentRef)
+			}
+
+			key := funcKey(fs.Start, fs.End)
+			pr.funcRefsMap[key] = append(pr.funcRefsMap[key], ref)
+		} else {
+			pr.ComponentRefs = append(pr.ComponentRefs, ref)
+		}
 	}
 }
 
@@ -907,6 +992,99 @@ func (pr *ParseResult) FuncVars(funcStart, funcEnd int) []string {
 	pr.funcVarsMu.Unlock()
 
 	return vars
+}
+
+// HasScopedAssignment reports whether name was ever assigned in the given scope
+// (ScopeVariables or ScopeThis) anywhere in the file — globally, inside init(), or
+// inside any other function body. VARIABLES./THIS.-scoped values assigned inside one
+// function remain visible from every other function in the file (unlike a var-scoped
+// local), so telling "VARIABLES.someName(...) calls a property holding a function
+// reference" apart from "no such property exists" requires checking every function
+// body, not just VariablesVars/ThisVars (which only cover outside-function code and
+// init()). Results are cached per scope on first call.
+func (pr *ParseResult) HasScopedAssignment(scope Scope, name string) bool {
+	names := pr.VariablesVars()
+	if scope == ScopeThis {
+		names = pr.ThisVars()
+	}
+
+	for _, n := range names {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+
+	pr.mu.Lock()
+	cached, ok := pr.anyScopedVars[scope]
+	pr.mu.Unlock()
+
+	if !ok {
+		cached = pr.computeAnyScopedVars(scope)
+
+		pr.mu.Lock()
+		if pr.anyScopedVars == nil {
+			pr.anyScopedVars = make(map[Scope][]string)
+		}
+
+		pr.anyScopedVars[scope] = cached
+		pr.mu.Unlock()
+	}
+
+	for _, n := range cached {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// computeAnyScopedVars scans every function body in the file for assignments in the
+// given scope, so HasScopedAssignment can find a VARIABLES./THIS.-scoped assignment
+// regardless of which function set it.
+func (pr *ParseResult) computeAnyScopedVars(scope Scope) []string {
+	seen := make(map[string]bool)
+
+	var names []string
+
+	for _, fs := range pr.Scopes {
+		start, end := lineOffsets(pr.Content, fs.Start, fs.End)
+		if start < 0 {
+			continue
+		}
+
+		body := pr.Content[start:end]
+
+		regionKind := RegionScript
+
+		for _, r := range pr.Regions {
+			if r.StartLine <= fs.Start {
+				regionKind = r.Kind
+			}
+		}
+
+		var bodyVars []VarDef
+
+		if regionKind == RegionScript {
+			sp := newScriptParser(body, "", fs.Start, nil)
+			sp.parse()
+			bodyVars = sp.vars
+		} else {
+			tp := newTagParser(body, "")
+			tp.parse()
+			bodyVars = tp.vars
+		}
+
+		for _, v := range bodyVars {
+			if v.Scope == scope && !seen[v.Name] {
+				seen[v.Name] = true
+
+				names = append(names, v.Name)
+			}
+		}
+	}
+
+	return names
 }
 
 // InvalidateFunc clears the cached variables for a specific function,

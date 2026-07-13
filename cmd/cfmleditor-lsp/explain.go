@@ -80,10 +80,11 @@ func cmdExplain(args []string) {
 	}
 
 	var (
-		cfResolvers        []parser.Resolver
-		mappings           map[string]string
-		expressionMappings map[string]string
-		workspaceFolders   []string
+		cfResolvers              []parser.Resolver
+		mappings                 map[string]string
+		expressionMappings       map[string]string
+		servicePropertyResolvers map[string]string
+		workspaceFolders         []string
 	)
 
 	cfg, _ := daemon.FindConfig(searchDir)
@@ -91,6 +92,7 @@ func cmdExplain(args []string) {
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		expressionMappings = cfg.ExpressionMappings()
+		servicePropertyResolvers = cfg.ServicePropertyResolvers()
 
 		for _, r := range cfg.ComponentResolvers() {
 			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow})
@@ -155,12 +157,13 @@ func cmdExplain(args []string) {
 	}
 
 	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
-		Resolvers:           cfResolvers,
-		ExpressionMappings:  expressionMappings,
-		ExtractCalls:        true,
-		ScanAllScopes:       true,
-		FuncLookup:          funcLookup,
-		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
+		Resolvers:                cfResolvers,
+		ExpressionMappings:       expressionMappings,
+		ServicePropertyResolvers: servicePropertyResolvers,
+		ExtractCalls:             true,
+		ScanAllScopes:            true,
+		FuncLookup:               funcLookup,
+		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
 	})
 	pr.FuncLookup = funcLookup
 

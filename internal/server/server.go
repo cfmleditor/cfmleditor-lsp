@@ -40,6 +40,7 @@ type Server struct {
 	IndexGlobs               []string                  // optional glob filters (absolute paths)
 	Mappings                 map[string]string         // component path mappings (key -> abs path)
 	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
+	ServicePropertyResolvers map[string]string         // "@serviceproperty" annotation kind → dot-path template
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
@@ -348,15 +349,16 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 	resolver := s.getResolver()
 
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
-		Logger:              s.log,
-		Resolvers:           s.cfResolvers(),
-		PropertyResolvers:   s.cfPropertyResolvers(),
-		BeanLookup:          s.index.LookupBean,
-		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
-		FuncLookup:          funcLookup(resolver, baseDir),
-		ExpressionMappings:  s.ExpressionMappings,
-		ExtractLinks:        true,
-		ExtractCalls:        true,
+		Logger:                   s.log,
+		Resolvers:                s.cfResolvers(),
+		PropertyResolvers:        s.cfPropertyResolvers(),
+		BeanLookup:               s.index.LookupBean,
+		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
+		FuncLookup:               funcLookup(resolver, baseDir),
+		ExpressionMappings:       s.ExpressionMappings,
+		ServicePropertyResolvers: s.ServicePropertyResolvers,
+		ExtractLinks:             true,
+		ExtractCalls:             true,
 	})
 }
 

@@ -3699,3 +3699,207 @@ func TestTagParser_FunctionReturnHintPromotion_PlainProseNotPromoted(t *testing.
 		t.Errorf("expected ReturnType to stay %q, got %q", "struct", pr.Funcs[0].ReturnType)
 	}
 }
+
+// TestServiceProperty_FileLevel covers the basic "@serviceproperty" shape at file
+// scope: a generically-typed dependency (<cfargument type="struct">) documented via
+// a "<!--- @serviceproperty varName kind|name --->" comment at its use site should
+// resolve through the configured per-kind template, same as a real ComponentRef.
+func TestServiceProperty_FileLevel(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="init">
+	<cfargument name="donorObj" type="struct" required="yes">
+	<cfset VARIABLES.donorObj = ARGUMENTS.donorObj>
+	<cfreturn this />
+</cffunction>
+<cffunction name="getDonorAddress">
+	<!--- @serviceproperty donorObj package|sandbox.tasscom.components.donor --->
+	<cfset addrStruct = VARIABLES.donorObj.getAddress()>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ServicePropertyResolvers: map[string]string{
+			"package": "tassweb.packages.${name}",
+		},
+	})
+
+	scope := pr.Scopes[1] // getDonorAddress
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found *ComponentRef
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, "donorObj") {
+			found = &refs[i]
+		}
+	}
+
+	if found == nil {
+		t.Fatalf("expected a ComponentRef for donorObj in getDonorAddress, got %+v", refs)
+	}
+
+	want := "tassweb.packages.sandbox.tasscom.components.donor"
+	if found.Component != want {
+		t.Errorf("expected donorObj Component %q, got %q", want, found.Component)
+	}
+}
+
+// TestServiceProperty_UnknownKindIgnored covers an annotation whose kind has no
+// configured template — should be silently skipped rather than producing a bogus
+// ComponentRef (e.g. a "kind" typo, or a kind not yet added to the project's config).
+func TestServiceProperty_UnknownKindIgnored(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="doThing">
+	<!--- @serviceproperty widget mystery|thing --->
+	<cfset result = widget.build()>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ServicePropertyResolvers: map[string]string{
+			"package": "tassweb.packages.${name}",
+		},
+	})
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	for _, ref := range refs {
+		if strings.EqualFold(ref.Variable, "widget") {
+			t.Errorf("expected no ComponentRef for widget (unknown annotation kind), got %+v", ref)
+		}
+	}
+}
+
+// TestServiceProperty_NoOpWithoutConfig covers the opt-in guarantee: with no
+// ServicePropertyResolvers configured, "@serviceproperty" comments are inert (no
+// scan cost, no refs produced) — a project not using the convention is unaffected.
+func TestServiceProperty_NoOpWithoutConfig(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="doThing">
+	<!--- @serviceproperty widget package|some.widget --->
+	<cfset result = widget.build()>
+</cffunction>
+</cfcomponent>`
+
+	pr := Parse(testURI, content)
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	for _, ref := range refs {
+		if strings.EqualFold(ref.Variable, "widget") {
+			t.Errorf("expected no ComponentRef for widget without ServicePropertyResolvers configured, got %+v", ref)
+		}
+	}
+}
+
+// TestServiceProperty_BracketIndexedReceiver covers annotating a bracket-indexed
+// receiver (e.g. "result.data[i]") — a call CanResolveCall otherwise can never resolve,
+// since the script/tag parsers deliberately don't track dynamic-key element types. The
+// annotation is written against the natural, full receiver text as it appears at the
+// call site; applyServiceProperties must apply the same last-"."-segment stripping
+// CanResolveCall's lookup does, so "result.data[i]" is stored and found under "data[i]".
+func TestServiceProperty_BracketIndexedReceiver(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="run">
+	<cfset var result = StructNew()>
+	<cfset var i = 0>
+	<cfset result.data[i] = getPayrollEmployee()>
+
+	<!--- @serviceproperty result.data[i] package|payroll.bean.employee --->
+	<cfset result.data[i].setAccrual(acr_code="X")>
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ServicePropertyResolvers: map[string]string{
+			"package": "tassweb.packages.${name}",
+		},
+	})
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found *ComponentRef
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, "data[i]") {
+			found = &refs[i]
+		}
+	}
+
+	if found == nil {
+		t.Fatalf("expected a ComponentRef for \"data[i]\" (stripped from \"result.data[i]\"), got %+v", refs)
+	}
+
+	want := "tassweb.packages.payroll.bean.employee"
+	if found.Component != want {
+		t.Errorf("expected Component %q, got %q", want, found.Component)
+	}
+}
+
+// TestStripReceiverScope covers the bracket-aware "." stripping used to match a
+// receiver against a stored ComponentRef. A "." inside a "[...]" subscript is not a
+// scope-prefix separator and must be left alone — a naive last-index-of-"." strip
+// would cut "linkMap[arguments.startSource]" down to the nonsensical "startSource]".
+func TestStripReceiverScope(t *testing.T) {
+	cases := map[string]string{
+		"VARIABLES.donorObj":             "donorObj",
+		"result.data[i]":                 "data[i]",
+		"run[runName]":                   "run[runName]",
+		"linkMap[arguments.startSource]": "linkMap[arguments.startSource]",
+		"noDotAtAll":                     "noDotAtAll",
+		"a.b.c":                          "c",
+		"a[b.c].d":                       "d",
+	}
+
+	for input, want := range cases {
+		if got := StripReceiverScope(input); got != want {
+			t.Errorf("StripReceiverScope(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// TestServiceProperty_BracketWithInternalDot covers the case that motivated
+// StripReceiverScope: a bracket-indexed receiver whose subscript itself contains a
+// "." (e.g. "linkMap[arguments.startSource]"). Before the bracket-aware fix, the
+// naive last-"."-stripping cut this to "startSource]", so an annotation written
+// against the natural receiver text could never match the call site's lookup key.
+func TestServiceProperty_BracketWithInternalDot(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="runProcess">
+	<cfset linkMap[srcName] = createObject("component", cfcName)>
+
+	<!--- @serviceproperty linkMap[arguments.startSource] package|process.processinterface --->
+	<cfset exitCode = linkMap[arguments.startSource].main(argumentCollection="#arguments.args#")>
+	<cfreturn exitCode />
+</cffunction>
+</cfcomponent>`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		ServicePropertyResolvers: map[string]string{
+			"package": "tassweb.packages.${name}",
+		},
+	})
+
+	scope := pr.Scopes[0]
+	refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+	var found *ComponentRef
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, "linkMap[arguments.startSource]") {
+			found = &refs[i]
+		}
+	}
+
+	if found == nil {
+		t.Fatalf("expected a ComponentRef for \"linkMap[arguments.startSource]\" (unchanged, no top-level dot), got %+v", refs)
+	}
+
+	want := "tassweb.packages.process.processinterface"
+	if found.Component != want {
+		t.Errorf("expected Component %q, got %q", want, found.Component)
+	}
+}

@@ -722,6 +722,40 @@ func FindFuncScopeAt(line int, scopes []FuncScope) FuncScope {
 	return findFuncScope(line, scopes)
 }
 
+// StripReceiverScope strips a receiver expression down to the text after its last
+// top-level "." (e.g. "VARIABLES.donorObj" -> "donorObj"), matching how a ComponentRef
+// is stored without its scope prefix. "Top-level" skips any "." inside a "[...]"
+// subscript: for "linkMap[arguments.startSource]", the only "." is inside the brackets
+// (separating "arguments" from "startSource", not a scope prefix on "linkMap"), so it
+// must NOT be stripped there — a naive strings.LastIndexByte(s, '.') would cut the
+// receiver down to the nonsensical fragment "startSource]", losing the "linkMap["
+// prefix entirely. Returns s unchanged if it has no top-level ".".
+func StripReceiverScope(s string) string {
+	depth := 0
+	last := -1
+
+	for i, c := range s {
+		switch c {
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		case '.':
+			if depth == 0 {
+				last = i
+			}
+		}
+	}
+
+	if last < 0 {
+		return s
+	}
+
+	return s[last+1:]
+}
+
 func uriFromString(s string) uri.URI {
 	return uri.URI(s)
 }
