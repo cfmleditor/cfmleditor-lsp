@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fix linting intermittently never starting in standalone mode. `initialize` spawned `initLinter` before loading `.cfmleditor.json`, so the goroutine could read `linting.enabled` as `false`, leave the linter uninitialised, and silently skip diagnostics for the rest of the session. Workspace config is now applied before those goroutines start, which also stops the initial workspace index from running before `mappings`, `componentResolvers`, and `beanPaths` are applied.
+
 ## [0.2.2]
 
 - Fix cflint scan panic 

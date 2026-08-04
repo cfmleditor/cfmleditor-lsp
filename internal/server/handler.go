@@ -109,13 +109,19 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
 	}
 
-	s.safeGo("indexWorkspace", s.indexWorkspace)
-	s.safeGo("initLinter", s.initLinter)
-
-	// In standalone mode, load config from workspace roots if not already configured
+	// In standalone mode, load config from workspace roots if not already
+	// configured. This MUST happen before the goroutines below are spawned:
+	// applyConfig is what sets s.Linting, and initLinter returns early when it
+	// reads that field as false, which would leave s.linter nil and silently
+	// disable diagnostics for the rest of the session. Spawning after the
+	// writes also gives the goroutines a happens-before edge to them, so no
+	// locking is needed for config that is only written here.
 	if len(s.ComponentResolvers) == 0 {
 		s.loadConfigFromRoots()
 	}
+
+	s.safeGo("indexWorkspace", s.indexWorkspace)
+	s.safeGo("initLinter", s.initLinter)
 
 	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.workspaceRoots))
 
@@ -419,7 +425,13 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 }
 
 func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
-	if s.linter == nil || s.conn == nil {
+	// initLinter publishes s.linter from its own goroutine under s.mu, so this
+	// read has to take the lock too.
+	s.mu.RLock()
+	linter := s.linter
+	s.mu.RUnlock()
+
+	if linter == nil || s.conn == nil {
 		s.log.Debug("cflint diagnostics skipped", cflog.String("reason", "linter not available (linting disabled or cflint not found)"))
 
 		return
@@ -451,7 +463,7 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 		"value": map[string]any{"kind": "begin", "title": "CFLint", "message": filepath.Base(filePath)},
 	})
 
-	diags, err := s.linter.Scan(scanCtx, filePath)
+	diags, err := linter.Scan(scanCtx, filePath)
 
 	s.notify(scanCtx, protocol.MethodProgress, map[string]any{
 		"token": "cflint",
