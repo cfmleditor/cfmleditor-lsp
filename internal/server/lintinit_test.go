@@ -185,6 +185,119 @@ func TestUnparseableConfigDoesNotMaskAncestor(t *testing.T) {
 	}
 }
 
+// initializeWith drives handleInitialize with both a workspace root and
+// client-supplied initializationOptions.
+func initializeWith(t *testing.T, root, initOptions string) *Server {
+	t.Helper()
+
+	s := NewServer(nil, cflog.NewLogger(false))
+
+	params := map[string]any{
+		"processId":        nil,
+		"rootUri":          "file://" + root,
+		"capabilities":     map[string]any{},
+		"workspaceFolders": []map[string]any{{"uri": "file://" + root, "name": "w"}},
+	}
+
+	if initOptions != "" {
+		var opts any
+		if err := json.Unmarshal([]byte(initOptions), &opts); err != nil {
+			t.Fatalf("test initOptions is not valid JSON: %v", err)
+		}
+
+		params["initializationOptions"] = opts
+	}
+
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshalling params: %v", err)
+	}
+
+	if _, err := s.handleInitialize(context.Background(), raw); err != nil {
+		t.Fatalf("handleInitialize: %v", err)
+	}
+
+	return s
+}
+
+// TestEditorSettingsUsedWithoutConfigFile is the case that motivated this:
+// an editor with no .cfmleditor.json anywhere could not enable linting at all.
+func TestEditorSettingsUsedWithoutConfigFile(t *testing.T) {
+	s := initializeWith(t, t.TempDir(), `{"linting":{"enabled":true}}`)
+
+	if !s.Linting {
+		t.Error("linting from initializationOptions was ignored")
+	}
+}
+
+// TestConfigFileWinsOverEditorSettings pins the agreed precedence: a checked-in
+// .cfmleditor.json stays the source of truth for every key it states.
+func TestConfigFileWinsOverEditorSettings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":false},"javaStubsPath":"from.file"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := initializeWith(t, dir, `{"linting":{"enabled":true},"javaStubsPath":"from.editor"}`)
+
+	if s.Linting {
+		t.Error("editor settings overrode the config file's linting; the file must win")
+	}
+
+	// javaStubsPath becomes a synthesized resolver, so check it landed from the file.
+	for _, r := range s.ComponentResolvers {
+		if r.Resolve == "from.editor.$1" {
+			t.Error("editor javaStubsPath overrode the file's; the file must win")
+		}
+	}
+}
+
+// TestEditorSettingsFillGapsInConfigFile is the other half of the precedence
+// rule: keys the file does not mention still come from the editor.
+func TestEditorSettingsFillGapsInConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"mappings":{"models":"./src/models"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := initializeWith(t, dir, `{"linting":{"enabled":true}}`)
+
+	if !s.Linting {
+		t.Error("linting was set only by the editor and the file is silent on it, so it should apply")
+	}
+
+	if len(s.Mappings) == 0 {
+		t.Error("the config file's mappings were lost during the merge")
+	}
+}
+
+// TestMalformedEditorSettingsAreIgnored ensures bad initializationOptions
+// degrade to "no editor config" rather than breaking initialize outright.
+func TestMalformedEditorSettingsAreIgnored(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+
+	// A JSON string where an object is expected.
+	raw := []byte(`{"processId":null,"rootUri":"file://` + dir + `","capabilities":{},` +
+		`"workspaceFolders":[{"uri":"file://` + dir + `","name":"w"}],` +
+		`"initializationOptions":"not-an-object"}`)
+
+	if _, err := s.handleInitialize(context.Background(), raw); err != nil {
+		t.Fatalf("initialize should survive malformed initializationOptions: %v", err)
+	}
+
+	if !s.Linting {
+		t.Error("the config file should still have been applied despite bad editor settings")
+	}
+}
+
 // TestRunDiagnosticsWithoutLinterIsNoop guards the nil-linter path that stays
 // reachable whenever linting is disabled or cflint could not be located.
 func TestRunDiagnosticsWithoutLinterIsNoop(t *testing.T) {

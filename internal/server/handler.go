@@ -117,7 +117,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// writes also gives the goroutines a happens-before edge to them, so no
 	// locking is needed for config that is only written here.
 	if len(s.ComponentResolvers) == 0 {
-		s.loadConfigFromRoots()
+		s.loadWorkspaceConfig(s.editorConfig(params.InitializationOptions))
 	}
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)

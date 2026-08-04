@@ -30,6 +30,8 @@ Configure your editor to launch this binary as an LSP server for `.cfm`, `.cfc`,
 
 Place a `.cfmleditor.json` file in your project root to enable daemon mode and configure workspace indexing.
 
+The same settings can also be supplied by your editor as LSP `initializationOptions`, which is useful when you would rather not add a file to the project. `.cfmleditor.json` takes priority: it wins on every key it sets, and editor settings fill in the rest. See [Editor settings](#editor-settings) below.
+
 ```json
 {
   "workspaceName": "myproject",
@@ -133,6 +135,43 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `debug` | `false` | Enable formatter debug checks. |
 
 Note: `useTabs` and `tabSize` are taken from the editor's formatting options (sent with each formatting request), not from this config.
+
+### Editor settings
+
+Every field above can be sent as LSP `initializationOptions` instead of, or alongside, `.cfmleditor.json`. The payload has exactly the same shape as the file.
+
+In Zed, via `settings.json`:
+
+```json
+{
+  "lsp": {
+    "cfmleditor-lsp": {
+      "initialization_options": {
+        "linting": { "enabled": true },
+        "mappings": { "models": "./src/models" }
+      }
+    }
+  }
+}
+```
+
+In VS Code and most other clients the equivalent key is `initializationOptions`.
+
+Precedence, when both are present:
+
+| | Result |
+|---|---|
+| Key set in `.cfmleditor.json` | The file's value wins |
+| Key set only in editor settings | The editor's value applies |
+| `mappings`, `beanPaths`, and other maps | Merged per key; the file wins on conflicts |
+| `componentResolvers`, `propertyResolvers` | Both apply, with the file's entries tried first |
+
+Relative paths resolve against the directory of whichever source declared them — the config file's own directory, or the first workspace folder for editor settings.
+
+Two caveats:
+
+- Settings are read once, at `initialize`. Changing them requires restarting the language server.
+- `debug` is ignored here, because the logger is constructed before the client connects. Use `.cfmleditor.json` for that one.
 
 ### Daemon mode
 

@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Accept configuration from the editor as LSP `initializationOptions`, using the same shape as `.cfmleditor.json`, so settings like `linting.enabled` no longer require a file in the project. A discovered `.cfmleditor.json` still wins on every key it sets; editor settings fill in the rest. Read once at `initialize`; `debug` is not supported this way, since the logger is built before the client connects.
 - Fix standalone mode not finding `.cfmleditor.json` outside the workspace root itself. It now searches upwards from each workspace folder to the filesystem root, matching daemon mode, so opening a subdirectory of a project no longer silently drops mappings, resolvers, and linting. A malformed config no longer masks a valid one further up.
 - Fix linting intermittently never starting in standalone mode. `initialize` spawned `initLinter` before loading `.cfmleditor.json`, so the goroutine could read `linting.enabled` as `false`, leave the linter uninitialised, and silently skip diagnostics for the rest of the session. Workspace config is now applied before those goroutines start, which also stops the initial workspace index from running before `mappings`, `componentResolvers`, and `beanPaths` are applied.
 
