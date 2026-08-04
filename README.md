@@ -136,13 +136,13 @@ Note: `useTabs` and `tabSize` are taken from the editor's formatting options (se
 
 ### Daemon mode
 
-When `.cfmleditor.json` is found (in the current directory or one level up), the server starts in daemon mode:
+When `.cfmleditor.json` is found, the server starts in daemon mode. The search walks upwards from the current directory to the filesystem root, and the nearest config wins:
 
 1. The first editor session becomes the daemon, listening on a Unix socket and serving LSP over stdio.
 2. Subsequent sessions connect to the existing daemon via the socket, sharing a single index.
 3. The daemon shuts down automatically when all editor sessions disconnect.
 
-Without a config file the server runs in standalone mode — a single session with its own index.
+Without a config file the server runs in standalone mode — a single session with its own index. Standalone sessions look for a config the same way, walking upwards from each workspace folder the editor reports, so the same file is picked up in either mode.
 
 ### Indexing behaviour
 
