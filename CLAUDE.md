@@ -33,6 +33,18 @@ go test ./internal/parser/ -bench . -run '^$'
 `go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `golangci-lint run ./...` all work offline
 — use those when the fetch step can't run.
 
+**`make build` regeneration is lossy — expect an unwanted deletion in
+`internal/docs/generated_docs.go` and discard it.** Both fetch scripts populate the *same*
+`docs/data/` directory (and each `rm -rf`s it when its upstream has changed), and
+`scripts/generate_docs.go` simply globs `docs/data/*.json`. But `docs` only runs `docs-cfdocs`
+— so on a checkout without a pre-populated `docs/data/`, `make build` regenerates from cfdocs
+alone and silently drops every Lucee-sourced entry (`cfdistributedlock`, `cfstatic`,
+`cfauthenticate`, …), showing up as a pure-deletion diff of several hundred lines. The committed
+file was generated with **both** sources present. Never commit that deletion: either
+`git checkout -- internal/docs/generated_docs.go` afterwards, or run `make docs-cfdocs
+docs-lucee && make generate` to regenerate from the full set when you genuinely intend to
+refresh the docs.
+
 Go toolchain is pinned at **1.26.4** (`go.mod`). CGO is required (tree-sitter grammar).
 
 ### CLI subcommands
@@ -447,7 +459,8 @@ Some handles need both shapes; others only one, depending on how the code uses t
   before `return` and around block statements** — this is why existing code looks the way it
   does; match it or `make lint` fails. Test files are exempted from `prealloc`, `unparam`,
   `gosec`, and `staticcheck`.
-- `internal/docs/` content is generated — regenerate rather than hand-editing.
+- `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
+  lossy-regeneration warning under Commands before committing any change to it.
 
 ## Release
 
