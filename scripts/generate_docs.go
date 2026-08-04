@@ -47,7 +47,7 @@ type Entry struct {
 func main() {
 	files, err := filepath.Glob("docs/data/*.json")
 	if err != nil || len(files) == 0 {
-		fmt.Fprintln(os.Stderr, "no docs/data/*.json files found — run scripts/fetch-docs-cfdocs.sh or scripts/fetch-docs-lucee.sh first")
+		fmt.Fprintln(os.Stderr, "no docs/data/*.json files found — run `make docs` first (fetches every source and assembles docs/data)")
 		os.Exit(1)
 	}
 
@@ -123,7 +123,7 @@ func main() {
 	fmt.Fprintln(out, "\t}")
 	fmt.Fprintln(out, "}")
 
-	fmt.Fprintf(os.Stderr, "generated cfml/generated_docs.go with %d entries\n", len(entries))
+	fmt.Fprintf(os.Stderr, "generated internal/docs/generated_docs.go with %d entries\n", len(entries))
 }
 
 func goStr(s string) string {

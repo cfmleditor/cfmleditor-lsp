@@ -50,7 +50,7 @@ Exits 0 if all 7 checks pass, 1 on any failure. Covers:
 
 The script starts with `make build`, so it inherits that target's network requirement (above). If the cfdocs fetch fails, build with `go build` first and comment out the `make build` line rather than treating the failure as a smoke-test failure.
 
-**Check `git status` after a smoke run.** `make build` regenerates `internal/docs/generated_docs.go` from whatever `docs/data/*.json` holds, and `make docs` fetches cfdocs only — so on a checkout without a pre-populated `docs/data/`, the regenerated file loses every Lucee-sourced entry, leaving a several-hundred-line pure-deletion diff. That churn is an artifact of running the smoke test, not a change you made: `git checkout -- internal/docs/generated_docs.go`.
+**Check `git status` after a smoke run.** `make build` regenerates `internal/docs/generated_docs.go` from the assembled `docs/data/`, which needs *both* doc sources staged (cfdocs and Lucee). If `docs.lucee.org` is unreachable — some sandboxes and proxies block it — the regenerated file loses every Lucee-sourced entry, leaving a several-hundred-line pure-deletion diff. `make docs` warns when a fetch fails, but the build continues. That churn is an artifact of running the smoke test, not a change you made: `git checkout -- internal/docs/generated_docs.go`.
 
 ## Run (human path)
 

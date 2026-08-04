@@ -3,15 +3,31 @@ OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee generate cfparse cfparse-build update-grammar release release-dry
+.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar release release-dry
 
-docs: docs-cfdocs
+# Fetch every source, then assemble docs/data from all of them. Written as one
+# sequential recipe rather than as prerequisites so `make -j` cannot start the
+# assemble step before both fetches have finished.
+#
+# A single unreachable source must not abort the build: each fetch leaves its
+# previously staged copy intact on failure, so assemble still sees it. Only a
+# source that was never fetched at all goes missing, and assemble warns loudly
+# for that. Releases enforce completeness separately (.github/workflows).
+docs:
+	@./scripts/fetch-docs-cfdocs.sh || echo "warning: cfdocs fetch failed — using previously staged copy if present" >&2
+	@./scripts/fetch-docs-lucee.sh  || echo "warning: lucee fetch failed — using previously staged copy if present" >&2
+	@./scripts/assemble-docs.sh
 
 docs-cfdocs:
 	@./scripts/fetch-docs-cfdocs.sh
+	@./scripts/assemble-docs.sh
 
 docs-lucee:
 	@./scripts/fetch-docs-lucee.sh
+	@./scripts/assemble-docs.sh
+
+docs-assemble:
+	@./scripts/assemble-docs.sh
 
 generate: docs
 	go run scripts/generate_docs.go

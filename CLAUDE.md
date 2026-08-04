@@ -33,17 +33,28 @@ go test ./internal/parser/ -bench . -run '^$'
 `go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `golangci-lint run ./...` all work offline
 — use those when the fetch step can't run.
 
-**`make build` regeneration is lossy — expect an unwanted deletion in
-`internal/docs/generated_docs.go` and discard it.** Both fetch scripts populate the *same*
-`docs/data/` directory (and each `rm -rf`s it when its upstream has changed), and
-`scripts/generate_docs.go` simply globs `docs/data/*.json`. But `docs` only runs `docs-cfdocs`
-— so on a checkout without a pre-populated `docs/data/`, `make build` regenerates from cfdocs
-alone and silently drops every Lucee-sourced entry (`cfdistributedlock`, `cfstatic`,
-`cfauthenticate`, …), showing up as a pure-deletion diff of several hundred lines. The committed
-file was generated with **both** sources present. Never commit that deletion: either
-`git checkout -- internal/docs/generated_docs.go` afterwards, or run `make docs-cfdocs
-docs-lucee && make generate` to regenerate from the full set when you genuinely intend to
-refresh the docs.
+**The docs pipeline has two sources and both must be staged.** `internal/docs/generated_docs.go`
+is generated from `docs/data/*.json`, which is *assembled* from per-source staging directories:
+
+```
+scripts/fetch-docs-cfdocs.sh → docs/src/cfdocs   (cache marker docs/.sha-cfdocs)
+scripts/fetch-docs-lucee.sh  → docs/src/lucee    (cache marker docs/.etag)
+scripts/assemble-docs.sh     → docs/data         (cfdocs first, lucee wins on collision)
+```
+
+`make docs` runs all three in order; `make docs-cfdocs` / `make docs-lucee` refresh one source
+and re-assemble. Each fetch only ever touches its own staging directory and only replaces it
+after a successful download, so refreshing one source can't destroy the other and a transient
+outage can't destroy the cache.
+
+**If a source can't be fetched, the generated file loses that source's entries.** A blocked
+`docs.lucee.org` (some sandboxes and proxies deny it) means no `docs/src/lucee`, and
+regeneration then drops every Lucee-only entry (`cfdistributedlock`, `cfstatic`,
+`cfauthenticate`, …) — a pure-deletion diff of several hundred lines in
+`internal/docs/generated_docs.go`. `assemble-docs.sh` warns loudly when a source is missing, and
+`make docs` warns again when a fetch fails, but the build still proceeds. **Never commit that
+deletion** — `git checkout -- internal/docs/generated_docs.go`. Only commit a change to that
+file when `make docs` reported both sources staged.
 
 Go toolchain is pinned at **1.26.4** (`go.mod`). CGO is required (tree-sitter grammar).
 
