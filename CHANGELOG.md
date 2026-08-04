@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Bump Go toolchain to 1.26.5
+- Build the generated CFML docs from both sources again — `make docs` now fetches cfdocs *and* Lucee into separate staging directories and assembles `docs/data` from them, so regenerating no longer drops the Lucee-only entries. Release builds fetched cfdocs alone, so released binaries were missing those entries.
+
 ## [0.2.2]
 
 - Fix cflint scan panic 

@@ -1,6 +1,6 @@
 module github.com/cfmleditor/cfmleditor-lsp
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/cfmleditor/tree-sitter-cfml v0.26.29
