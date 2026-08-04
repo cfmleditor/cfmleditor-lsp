@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Bump Go toolchain to 1.26.5
+- `tree-sitter-cfml` grammar updates (v0.26.29 → v0.26.30)
 - Build the generated CFML docs from both sources again — `make docs` now fetches cfdocs *and* Lucee into separate staging directories and assembles `docs/data` from them, so regenerating no longer drops the Lucee-only entries. Release builds fetched cfdocs alone, so released binaries were missing those entries.
 
 ## [0.2.2]
