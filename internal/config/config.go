@@ -235,3 +235,94 @@ func ResolvePaths(raw map[string]string, baseDir string) map[string]string {
 
 	return out
 }
+
+// Merge overlays over onto base and returns the combination. Any field over
+// sets wins; fields it leaves unset fall through to base. Either side may be
+// nil.
+//
+// This exists so a lower-priority configuration source (editor-supplied
+// initializationOptions) can fill gaps in a higher-priority one (a project's
+// .cfmleditor.json) without overriding anything the latter actually states.
+// The merge has to happen on JSON rather than Resolved, because Resolve
+// substitutes defaults and so loses the distinction between "set to the
+// default" and "not set at all".
+//
+// Mappings and BeanPaths in either side should already be resolved to absolute
+// paths, since their relative values are meaningless once the two sides no
+// longer share a base directory.
+func Merge(base, over *JSON) *JSON {
+	switch {
+	case base == nil && over == nil:
+		return nil
+	case base == nil:
+		return over
+	case over == nil:
+		return base
+	}
+
+	out := *base
+
+	if over.WorkspaceName != "" {
+		out.WorkspaceName = over.WorkspaceName
+	}
+
+	if len(over.WorkspacePaths) > 0 {
+		out.WorkspacePaths = over.WorkspacePaths
+	}
+
+	if len(over.WorkspaceIndexGlobs) > 0 {
+		out.WorkspaceIndexGlobs = over.WorkspaceIndexGlobs
+	}
+
+	if over.JavaStubsPath != "" {
+		out.JavaStubsPath = over.JavaStubsPath
+	}
+
+	out.Mappings = mergeStringMap(base.Mappings, over.Mappings)
+	out.ExpressionMappings = mergeStringMap(base.ExpressionMappings, over.ExpressionMappings)
+	out.ServicePropertyResolvers = mergeStringMap(base.ServicePropertyResolvers, over.ServicePropertyResolvers)
+	out.BeanPaths = mergeStringMap(base.BeanPaths, over.BeanPaths)
+
+	// Resolvers from both sides stay active. Order is priority — the first
+	// match wins at lookup time — so over's entries lead.
+	out.ComponentResolvers = append(append([]Resolver{}, over.ComponentResolvers...), base.ComponentResolvers...)
+	out.PropertyResolvers = append(append([]PropResolver{}, over.PropertyResolvers...), base.PropertyResolvers...)
+
+	if over.Formatting != nil {
+		out.Formatting = over.Formatting
+	}
+
+	if over.Linting != nil {
+		out.Linting = over.Linting
+	}
+
+	if over.Completions != nil {
+		out.Completions = over.Completions
+	}
+
+	out.Debug = base.Debug || over.Debug
+
+	return &out
+}
+
+// mergeStringMap unions two maps, with over's entries winning per key.
+func mergeStringMap(base, over map[string]string) map[string]string {
+	if len(base) == 0 {
+		return over
+	}
+
+	if len(over) == 0 {
+		return base
+	}
+
+	out := make(map[string]string, len(base)+len(over))
+	for k, v := range base {
+		out[k] = v
+	}
+
+	for k, v := range over {
+		out[k] = v
+	}
+
+	return out
+}
