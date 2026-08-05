@@ -9,18 +9,6 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-// loadConfigFromRoots searches workspace roots for .cfmleditor.json and loads
-// settings in standalone mode.
-//
-// Each root is searched upwards to the filesystem root, matching what
-// daemon.FindConfig does for the daemon-mode startup path. Checking only the
-// root directory itself meant a config that daemon mode picks up happily was
-// invisible in standalone mode, which silently dropped mappings, resolvers,
-// and linting depending only on which mode the editor happened to start.
-func (s *Server) loadConfigFromRoots() {
-	s.loadWorkspaceConfig(nil)
-}
-
 // loadWorkspaceConfig applies the nearest .cfmleditor.json, using editorCfg
 // (the client's initializationOptions) to fill in anything that file does not
 // state. The file wins on every key it sets, so adding editor settings never
@@ -92,6 +80,12 @@ func (s *Server) editorConfig(raw protocol.LSPAny) *config.JSON {
 // first readable, parseable .cfmleditor.json it finds along with its path. A
 // file that exists but does not parse is skipped rather than aborting the
 // walk, so one malformed config cannot mask a valid one further up.
+//
+// Walking upwards matches what daemon.FindConfig does for the daemon-mode
+// startup path. Checking only the root directory itself meant a config that
+// daemon mode picks up happily was invisible in standalone mode, which
+// silently dropped mappings, resolvers, and linting depending only on which
+// mode the editor happened to start.
 func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 	d, err := filepath.Abs(dir)
 	if err != nil {
