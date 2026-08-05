@@ -38,8 +38,17 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2
 
-      - name: Fetch cfdocs
-        run: ./scripts/fetch-docs-cfdocs.sh
+      - name: Fetch and assemble docs sources
+        run: make docs
+
+      - name: Verify both docs sources were staged
+        run: |
+          for src in docs/src/cfdocs docs/src/lucee; do
+            if [ ! -d "$src" ]; then
+              echo "::error::$src was not staged — released binaries would be missing that source's entries"
+              exit 1
+            fi
+          done
 
       - name: Generate built-in entries
         run: go run scripts/generate_docs.go

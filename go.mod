@@ -1,9 +1,9 @@
 module github.com/cfmleditor/cfmleditor-lsp
 
-go 1.26.4
+go 1.26.5
 
 require (
-	github.com/cfmleditor/tree-sitter-cfml v0.26.29
+	github.com/cfmleditor/tree-sitter-cfml v0.26.30
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	go.lsp.dev/jsonrpc2 v1.0.1

@@ -5,30 +5,93 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-make build          # build binary to target/release/cfmleditor-lsp
+make build          # generate docs + build binary to target/release/cfmleditor-lsp
 make test           # go test ./...
 make lint           # golangci-lint run ./...
 make lint-fix       # golangci-lint run --fix ./...
-make install        # build and install to $GOPATH/bin
-make update-grammar # pull latest tree-sitter-cfml grammar, regen docs, clear build cache
-make cfparse        # build debug CLI for parser development
+make fmt            # gofmt -w . && golangci-lint run --fix ./...
+make install        # build and copy to $GOPATH/bin
+make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
+make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
+make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
+make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
+make release <ver>  # validate, build, test, lint, changelog, commit, tag, push
+make release-dry <ver>
 make clean          # remove target/
 
 # Run a single test
 go test ./internal/parser/... -run TestParseFunctionDefs_MixedTagAndCFScript
+go test -v ./internal/formatter/ -run TestFormatOutput
 
-# Explain how a specific call site's component was resolved (see "Debugging why a
-# call site resolved" below) — much faster than manually tracing the parser/resolver
-cfmleditor-lsp explain [--root <dir>] <file> <line> [call-substring]
+# Benchmarks live in internal/parser/{benchmark,tassweb_bench}_test.go
+go test ./internal/parser/ -bench . -run '^$'
 ```
+
+**`make build` requires network access.** `build` depends on `generate` → `docs` →
+`scripts/fetch-docs-cfdocs.sh`, which git-clones the cfdocs repo into the gitignored
+`docs/data/`. The *generated* Go file (`internal/docs/generated_docs.go`) is committed, so plain
+`go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `golangci-lint run ./...` all work offline
+— use those when the fetch step can't run.
+
+**The docs pipeline has two sources and both must be staged.** `internal/docs/generated_docs.go`
+is generated from `docs/data/*.json`, which is *assembled* from per-source staging directories:
+
+```
+scripts/fetch-docs-cfdocs.sh → docs/src/cfdocs   (cache marker docs/.sha-cfdocs)
+scripts/fetch-docs-lucee.sh  → docs/src/lucee    (cache marker docs/.etag)
+scripts/assemble-docs.sh     → docs/data         (cfdocs first, lucee wins on collision)
+```
+
+`make docs` runs all three in order; `make docs-cfdocs` / `make docs-lucee` refresh one source
+and re-assemble. Each fetch only ever touches its own staging directory and only replaces it
+after a successful download, so refreshing one source can't destroy the other and a transient
+outage can't destroy the cache.
+
+**If a source can't be fetched, the generated file loses that source's entries.** A blocked
+`docs.lucee.org` (some sandboxes and proxies deny it) means no `docs/src/lucee`, and
+regeneration then drops every Lucee-only entry (`cfdistributedlock`, `cfstatic`,
+`cfauthenticate`, …) — a pure-deletion diff of several hundred lines in
+`internal/docs/generated_docs.go`. `assemble-docs.sh` warns loudly when a source is missing, and
+`make docs` warns again when a fetch fails, but the build still proceeds. **Never commit that
+deletion** — `git checkout -- internal/docs/generated_docs.go`. Only commit a change to that
+file when `make docs` reported both sources staged.
+
+Go toolchain is pinned at **1.26.5** (`go.mod`). CGO is required (tree-sitter grammar).
+
+### CLI subcommands
+
+The binary is an LSP server by default; `os.Args[1]` selects a subcommand
+(`cmd/cfmleditor-lsp/main.go`).
+
+| Command | Usage |
+|---|---|
+| *(none)* | Run the LSP server over stdio (JSON-RPC 2.0, Content-Length framing) |
+| `parse` | `parse <file-or-dir> [...]` — parse and report per-file timing/counts |
+| `scan` | `scan <file-or-dir> [...]` — report parse errors |
+| `format` | `format [-w] <file> [...]` — format to stdout, or in place with `-w` |
+| `unresolved` | `unresolved [--json] [--verbose] [--global-defs] <dir> [...]` — batch scan for unresolvable component/method calls |
+| `refs` | `refs [--mermaid] <component-or-function> <dir> [...]` — find references |
+| `deps` | `deps [--mermaid] <dir-or-file> [...]` — component dependency graph |
+| `explain` | `explain [--root <dir>] <file> <line> [call-substring]` — trace how a call site resolved |
+| `version`, `help` | |
+
+`cmd/cfparse` is a separate debug binary for parser development (timing + `-cpuprofile`).
 
 ## Architecture
 
-This is a Language Server Protocol (LSP) server for CFML/ColdFusion markup language, written in Go and backed by the `tree-sitter-cfml` grammar.
+An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml` grammar.
 
-**Two runtime modes**, selected at startup:
-- **Daemon mode** — triggered when a `.cfmleditor.json` config file exists. First LSP client starts a daemon that listens on a Unix socket and builds/owns the workspace index; subsequent clients attach to it. Daemon shuts down when all clients disconnect.
-- **Standalone mode** — no config file; each LSP session is self-contained with its own index.
+**Two runtime modes**, selected at startup by whether `daemon.FindConfig(cwd)` finds a
+`.cfmleditor.json` (current dir or one level up):
+
+- **Daemon mode** — the first LSP client becomes the daemon: it listens on a Unix socket (path
+  derived from `workspaceName`) *and* serves that first client over stdio, sharing one
+  `index.Index`. Later clients `daemon.Proxy()` into the socket. A `ConnTracker` shuts the
+  daemon down when the last client disconnects.
+- **Standalone mode** — no config file; a single self-contained session with its own index.
+
+Note the repo root has its own `.cfmleditor.json` (`workspaceName: testdata`), so running the
+binary from the repo root enters daemon mode against `testdata/`.
 
 **Core data pipeline:**
 
@@ -41,133 +104,386 @@ Editor document change
       └─ tagParser extracts function defs + component refs via tag search
   → index (internal/index) stores function definitions, keyed by lowercase name
   → resolver (internal/resolve) maps dot-paths → .cfc file paths
-  → cached in server per URI
+  → cached in server per URI (parseResults, compCache, resolveCache)
 ```
 
-**Parser design** (`internal/parser`): The parser is intentionally not a full tree-sitter traversal — it uses a fast line-by-line `Scanner` for script files and string/regex searches for tag files. Function bodies are parsed lazily (only when completion or definition is requested). The entry point is `Parse(fileURI, content)` returning a `ParseResult`.
+### Package map
 
-**Resolution chain** (`internal/resolve`): Converts CFML component dot-paths (e.g. `models.User`) to absolute `.cfc` file paths. Lookup order: baseDir → Application.cfc root → workspace folders → config `mappings`. Results are cached. Component resolvers in config teach the LSP about custom factory patterns (e.g. `getService("UserService")` → `packages.UserService.service`).
+| Package | Responsibility |
+|---|---|
+| `internal/parser` | Line-scanner/tag-search parsing → `ParseResult`; resolver matching (`ast.go`) |
+| `internal/server` | LSP handler wiring, completion, definition, hover, symbols, signature help, code actions, document links, formatting, on-type formatting, workspace commands, bean scanning |
+| `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities |
+| `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain |
+| `internal/path` | Case-insensitive path resolution, mappings, globs, `Application.cfc` mapping/bean/ORM extraction, binary + CFML file detection |
+| `internal/config` | `.cfmleditor.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
+| `internal/daemon` | Unix socket serve/proxy, connection tracking, config discovery |
+| `internal/formatter` | tree-sitter CST-walking formatter (elements, cfscript, cfquery/SQL) |
+| `internal/language` | tree-sitter language handles (`CFML`, `CFScript`, `CFQuery`) + injection queries |
+| `internal/docs` | Built-in CFML function/tag signatures and return types (**generated — do not hand-edit**) |
+| `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
+| `internal/cache` | Per-file, per-scope completion item cache with content hashing |
+| `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI and `cfmleditor.findRefs` |
+| `internal/deps` | Transitive dependency graph builder for the `deps` CLI and `cfmleditor.exportDeps` |
+| `internal/graph` | Graph type + Mermaid renderer |
+| `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
+| `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment` |
 
-**Formatter** (`internal/formatter`): Walks the tree-sitter CST. All formatting rules (case, indentation, quotes, comma position, SQL keyword casing) come from config. Has a `whitespaceOnly` safety guard that rejects changes touching non-whitespace characters.
+### Parser design (`internal/parser`)
 
-**Daemon/IPC** (`internal/daemon`): Uses Unix sockets. The config file (`.cfmleditor.json`) in the project root or one level up controls workspace paths, index globs, mappings, expression mappings, component/property resolvers, and formatting rules.
+The parser is intentionally **not** a full tree-sitter traversal — it uses a fast line-by-line
+`Scanner` for script regions and string/regex searches for tag regions. tree-sitter is used by
+the *formatter*, not the parser.
+
+- Entry points: `Parse(fileURI, content, resolvers...)` and `ParseWithOptions(fileURI, content,
+  ParseOptions{...})`. `ParseOptions` gates the expensive work: `ExtractCalls`, `ExtractLinks`,
+  `ScanAllScopes`, `FindCalls`, `Shallow`, plus lookup hooks (`FuncLookup`, `BeanLookup`,
+  `BuiltinReturnLookup`).
+- **Function bodies are parsed lazily** — `FuncVars`/`FuncRefs`/`FuncCalls`/`FuncLinks` parse
+  and memoize per function, keyed `"start:end"`.
+- **Incremental edits** (`incremental.go`): `ParseResult.ApplyEdit` classifies an edit as
+  `EditInFunc` (shift line numbers + invalidate that one function's caches), `EditGlobal`
+  (`reparseShallow()` of signatures), or `EditFull`. Parse entry points recover from panics and
+  fall back to a shallow re-parse rather than crashing the daemon.
+- `edit_parser.go` holds cursor-context helpers (`FindCallContext`) used by signature help and
+  completion.
+
+### Formatter (`internal/formatter`)
+
+Walks the tree-sitter CST. All rules (tag/attribute case, indentation, quotes, comma position,
+SQL keyword casing, line width, attribute break threshold) come from `formatting` config. The
+`whitespaceOnly` guard rejects any result that changes non-whitespace characters. `queryFormat`
+is off by default — `<cfquery>` bodies are emitted verbatim unless opted in.
 
 ## Key structural notes
 
-- `internal/parser/result.go` — `ParseResult` struct and `Parse()` entry point; also `ClassifyRegions()`
-- `internal/parser/script_parser.go` — `scriptParser` and the `Scanner` line tokenizer. Scope-prefixed assignments (`variables.x =`, `this.x =`, `arguments.x =`, `request.x =`, `session.x =`, `application.x =`) each need their own `case` in the `handleBodyToken`/`parse()` dispatch switches routing to `parseBodyScopedVar`/`parseScopedVar` — that handler is the only one that correctly distinguishes `scope.name = rhs` (assignment) from `scope.name.method()` (bare call) for a two-token-prefixed LHS. Any scope keyword *not* listed falls through to `checkAssignRef`'s default path, which only recognizes a bare `x = ...` (single identifier directly followed by `=`); for a scope-prefixed LHS the next token is `.` not `=`, so the whole statement is silently misread as a bare-call check and any component type the RHS establishes is dropped. `url.`/`form.`/`cookie.`/`cgi.`/`client.`/`server.` deliberately aren't in this list (those scopes hold primitive request/config data in this codebase, not component instances) — add them the same way if a project's code assigns components through one of them.
+- `internal/parser/result.go` — `ParseResult`, `ParseOptions`, `Parse()`/`ParseWithOptions()`,
+  lazy per-function caches, `replaceExpressions`, `resolvePendingCalls`, property accessors
+- `internal/parser/cfparser.go` — `ClassifyRegions()` plus the standalone
+  `ParseFunctionDefs`/`ParseComponentRefs` helpers
+- `internal/parser/script_parser.go` — `scriptParser` and the two parse loops (top-level
+  `parse()` and `handleBodyToken`); see the scope-dispatch note below
 - `internal/parser/tag_parser.go` — `tagParser` for `<cffunction>`, `<cfcomponent>`, etc.
-- `internal/server/server.go` — LSP handler wiring; completion, definition, formatting, hover, symbols
-- `internal/index/index.go` — concurrency-safe function definition store
-- `internal/resolve/resolve.go` — dot-path → file resolution with caching
-- `internal/config/config.go` — `.cfmleditor.json` schema and loader
-- `internal/docs/` — built-in CFML function signatures (generated; do not edit manually)
+- `internal/parser/scanner.go` — byte-level tokenizer (`isIdentStart` treats `_` and `$` as
+  identifier starts)
+- `internal/parser/ast.go` — resolver matching: `BuildResolverSet`, `ResolveFromCall(Full)`,
+  `matchResolverWithCache`, `splitPrefix`/`findPrefixPos`, `substitutePlaceholder`
+- `internal/server/server.go` — `Server` struct, capabilities, per-URI caches
+- `internal/server/handler.go` — LSP method dispatch and `workspace/executeCommand`
+- `internal/resolve/resolve.go` — `ComponentPath`, `CanResolveCall`, `ExplainCall`, extends walking
+- `internal/config/config.go` — `.cfmleditor.json` schema and defaults
+- `internal/docs/` — generated; regenerate via `make generate`, never hand-edit
 
-The `docs/` package content is generated by `make update-grammar` / `make build` — regenerate rather than hand-editing it.
+**Scope-prefixed assignments:** each handled scope (`local.`, `variables.`, `this.`,
+`arguments.`, `request.`, `session.`, `application.`) needs its own `case` in *both* dispatch
+switches (`scriptParser.parse()` and `handleBodyToken`) routing to
+`parseScopedVar`/`parseBodyScopedVar` — that handler is the only one that correctly
+distinguishes `scope.name = rhs` (assignment) from `scope.name.method()` (bare call) for a
+two-token-prefixed LHS. Any scope keyword *not* listed falls through to `checkAssignRef`'s
+default path, which only recognizes a bare `x = ...` (single identifier directly followed by
+`=`); for a scope-prefixed LHS the next token is `.` not `=`, so the statement is silently
+misread as a bare-call check and any component type the RHS establishes is dropped.
+`url.`/`form.`/`cookie.`/`cgi.`/`client.`/`server.` deliberately aren't listed (those scopes
+hold primitive request/config data, not component instances) — add them the same way if a
+project assigns components through one.
 
-## Debugging why a call site resolved (or didn't) the way it did
+## LSP surface
 
-`cfmleditor-lsp explain [--root <dir>] <file> <line> [call-substring]` prints, for every call site on that line, the exact sequence of decisions `CanResolveCall` (`internal/resolve/resolve.go`) walked through: which mechanism set the receiver's component (function-scoped ref, file-level ref, Application.cfc ref, `<cfargument>` type, extends chain, a `componentResolver` match on the variable name, a `componentResolver` match on the full line text), which `FuncLookup`/componentResolver fallback fired for each hop of a chained call, and why the final method-exists check passed or failed. `--root <dir>` picks which `.cfmleditor.json` to load and which files to index — same semantics as `unresolved`'s directory argument — and defaults to the target file's own directory if omitted, which matters because a file's *own* nearest config can differ from the config a batch `unresolved` scan used (e.g. a file inside `tassreporting/` has its own `.cfmleditor.json`, distinct from `tassweb/.cfmleditor.json`'s resolvers/mappings).
+Declared in `Server.capabilities()` (`internal/server/server.go`):
 
-**Reach for this before manually tracing through script_parser.go/tag_parser.go/result.go/resolve.go.** A component path that shows up in an unresolved-call error but doesn't match anything literal in `.cfmleditor.json` or on disk is almost always a `componentResolver` firing on a substring you didn't expect (see "Known resolver false-positive" below) — `explain` shows the exact resolver and match in one call instead of a multi-file manual trace. Example: `directcontent.cfc:104`'s `VARIABLES._content.createTemplate(...)` reported "not found in tassweb.packages.tass.directcontent" — a path absent from config entirely — because two lines earlier, `VARIABLES._content = VARIABLES._document.getDirectContent()` had its RHS matched by the generic catch-all resolver `{"match": "get$1()", "resolve": "tassweb.packages.tass.${1:lower}", "prefix": "get"}` (intended for `getPageTools()`-style factory methods): `indexFold` found the `"get"` prefix inside `"getDirectContent"`, matched the whole `getDirectContent()` call, and produced `tassweb.packages.tass.directcontent` — even though this call is a genuine iText/PdfWriter passthrough getter with nothing to do with that resolver's intended target. `explain` surfaces this as a single `resolved "..." to "..." via componentResolver matching the variable name` step instead of requiring a manual trace through four files.
+- Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
+  signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
+  actions, document formatting, on-type formatting (`>`), workspace folders.
+- Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
+  the binary from `cfmleditor/CFLint` releases on first use.
+- `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
+  `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
+  `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
+  `.scanWorkspace`.
+
+## Configuration (`.cfmleditor.json`)
+
+The authoritative schema is `config.JSON` in `internal/config/config.go`; README.md documents
+the user-facing view and all `formatting` defaults.
+
+| Field | Purpose |
+|---|---|
+| `workspaceName` | Required for daemon mode; derives the socket path |
+| `workspacePaths`, `workspaceIndexGlobs` | Which roots / `.cfc` files to index |
+| `mappings` | Virtual dot-path root → directory |
+| `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
+| `componentResolvers` | Call expression → component dot-path (see below) |
+| `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
+| `servicePropertyResolvers` | `@serviceproperty <var> <kind>\|<name>` doc-comment kind → `${name}` dot-path template, for generically-typed dependencies |
+| `beanPaths` | namespace → directory; `.cfc`s registered as `name@namespace`, plus a bare `name` when unique across all namespaces |
+| `javaStubsPath` | Auto-synthesizes a `createObject("java", "X")` → `<javaStubsPath>.X` resolver |
+| `formatting` | Formatter options |
+| `linting.enabled` | Enable CFLint diagnostics |
+| `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
+| `debug` | Verbose zap development logging to stderr |
+
+## Debugging why a call site resolved (or didn't)
+
+`cfmleditor-lsp explain [--root <dir>] <file> <line> [call-substring]` prints, for every call
+site on that line, the exact sequence of decisions `CanResolveCall`
+(`internal/resolve/resolve.go`) walked through: which mechanism set the receiver's component
+(function-scoped ref, file-level ref, `Application.cfc` ref, `<cfargument>` type, extends chain,
+a `componentResolver` match on the variable name, a `componentResolver` match on the full line
+text), which `FuncLookup`/componentResolver fallback fired for each hop of a chained call, and
+why the final method-exists check passed or failed. `--root <dir>` picks which
+`.cfmleditor.json` to load and which files to index — same semantics as `unresolved`'s directory
+argument — and defaults to the target file's own directory if omitted, which matters because a
+file's *own* nearest config can differ from the config a batch `unresolved` scan used.
+
+**Reach for this before manually tracing through
+script_parser.go/tag_parser.go/result.go/resolve.go.** A component path that shows up in an
+unresolved-call error but doesn't match anything literal in `.cfmleditor.json` or on disk is
+almost always a `componentResolver` firing on a substring you didn't expect (see "Known resolver
+false-positive" below) — `explain` shows the exact resolver and match in one call instead of a
+multi-file manual trace. Example: a `VARIABLES._content.createTemplate(...)` call reported "not
+found in tassweb.packages.tass.directcontent" — a path absent from config entirely — because two
+lines earlier, `VARIABLES._content = VARIABLES._document.getDirectContent()` had its RHS matched
+by the generic catch-all resolver `{"match": "get$1()", "resolve":
+"tassweb.packages.tass.${1:lower}", "prefix": "get"}` (intended for `getPageTools()`-style
+factory methods): `indexFold` found the `"get"` prefix inside `"getDirectContent"`, matched the
+whole call, and produced `tassweb.packages.tass.directcontent` — even though it's a genuine
+iText/PdfWriter passthrough getter. `explain` surfaces this as a single `resolved "..." to "..."
+via componentResolver matching the variable name` step.
 
 ## Component resolvers
 
-Component resolvers (`componentResolvers` in `.cfmleditor.json`) teach the LSP how to map a call-site expression to a component dot-path. They are tried in order by `ResolveFromCall` / `ResolveFromCallFull` in `internal/parser/ast.go`.
+Component resolvers (`componentResolvers`) teach the LSP how to map a call-site expression to a
+component dot-path. They are tried in order by `ResolveFromCall` / `ResolveFromCallFull` in
+`internal/parser/ast.go`.
 
-**Component-type resolution order** (`CanResolveCall`, `internal/resolve/resolve.go`): for a qualified call `x.method()`, the receiver's component is looked up in this order, stopping at the first hit — (1) `call.Component`, if already set at parse time (e.g. a chained `new`/`createObject`, or a bare-call site where the tag/script parser resolved the receiver inline via `lookupComponentRef`); (2) a function-scoped `ComponentRef` for `x`; (3) a file-level (global/`VARIABLES.`/`this.`) `ComponentRef`; (4) a `ComponentRef` on `Application.cfc`/`Application.cfm`; (5) for `ARGUMENTS.x`, the `<cfargument type>` if it's a dotted path; (6) walking the `extends` chain's own `ComponentRef`s; (7) a `componentResolver` matched against the variable name text; (8) a `componentResolver` matched against the full line text (handles chains like `x.method().prop.func()`). If the call is itself chained (`call.Chain`), each hop then repeats a scaled-down version of this: the hop function's declared `ReturnComponent`/dotted `ReturnType`, falling back to a `componentResolver` matched against `hop()`. Because step (7)/(8) and the per-hop fallback both go through the same substring-prefix matching described below, a broad catch-all resolver (e.g. `get$1()`) can win at *any* of these steps, not just the ones that look like factory-method calls.
+**Component-type resolution order** (`CanResolveCall`, `internal/resolve/resolve.go`): for a
+qualified call `x.method()`, the receiver's component is looked up in this order, stopping at
+the first hit — (1) `call.Component`, if already set at parse time (e.g. a chained
+`new`/`createObject`, or a bare-call site where the tag/script parser resolved the receiver
+inline via `lookupComponentRef`); (2) a function-scoped `ComponentRef` for `x`; (3) a file-level
+(global/`VARIABLES.`/`this.`) `ComponentRef`; (4) a `ComponentRef` on
+`Application.cfc`/`Application.cfm`; (5) for `ARGUMENTS.x`, the `<cfargument type>` if it's a
+dotted path; (6) walking the `extends` chain's own `ComponentRef`s; (7) a `componentResolver`
+matched against the variable name text; (8) a `componentResolver` matched against the full line
+text (handles chains like `x.method().prop.func()`). If the call is itself chained
+(`call.Chain`), each hop repeats a scaled-down version of this: the hop function's declared
+`ReturnComponent`/dotted `ReturnType`, falling back to a `componentResolver` matched against
+`hop()`. Because steps (7)/(8) and the per-hop fallback all go through the same substring-prefix
+matching described below, a broad catch-all resolver (e.g. `get$1()`) can win at *any* of these
+steps, not just the ones that look like factory-method calls.
+
+Two component values short-circuit the method-exists check unconditionally: `$any` (dynamic —
+see "Expression mappings") and `$builtin.<fn>` (a built-in CFML function's return type, from
+`internal/docs/builtin_returns.go`).
 
 **How matching works** (`internal/parser/ast.go: matchResolverWithCache`):
 - Each resolver has a `prefix` (fast-rejection substring) and a `match` pattern.
-- Resolvers are tried in **array order** (`ResolveFromCallFull` iterates `resolvers` and returns on the first successful match) — so when two resolvers could both match the same expression (e.g. a specific `getDirectContent()` entry and a generic `get$1()` catch-all), whichever is listed **earlier** in `componentResolvers` wins, regardless of specificity. To make a specific case win over an existing broad catch-all, add the specific resolver *before* the catch-all in the config array, not after.
-- `ResolveFromCall` finds the prefix inside the expression, takes the substring from that position, and tries to match the full pattern against it.
-- If `match` contains no `\` escapes and no `$N` placeholders → **simple exact match** (or `match()` suffix).
-- If `match` contains `$1` but no `\` → **simple prefix/suffix match**: the text before `$1` and after `$1` are checked as plain strings; the captured value replaces `$1` in `resolve`.
+- Resolvers are tried in **array order** (`ResolveFromCallFull` iterates `resolvers` and returns
+  on the first successful match) — so when two resolvers could both match the same expression
+  (e.g. a specific `getDirectContent()` entry and a generic `get$1()` catch-all), whichever is
+  listed **earlier** wins, regardless of specificity. To make a specific case win over an
+  existing broad catch-all, add it *before* the catch-all in the array, not after.
+- `ResolveFromCall` finds the prefix inside the expression, takes the substring from that
+  position, and tries to match the full pattern against it.
+- If `match` contains no `\` escapes and no `$N` placeholders → **simple exact match** (or
+  `match()` suffix).
+- If `match` contains `$1` but no `\` → **simple prefix/suffix match**: the text before `$1` and
+  after `$1` are checked as plain strings; the captured value replaces `$1` in `resolve`.
 - If `match` contains `\` → **regex match**.
 
-**Pipe-delimited `prefix` alternatives** (`internal/parser/ast.go: splitPrefix`, `findPrefixPos`):
+**Pipe-delimited `prefix` alternatives** (`splitPrefix`, `findPrefixPos`):
 
-`prefix` may list multiple alternatives separated by `|` (e.g. `"createModel|buildModel"`), letting one resolver's `match`/`resolve` pair cover call-site shapes that don't share a common leading substring — without this, each shape needs its own resolver entry even when `match`/`resolve` would otherwise be identical (a regex `match` with its own `|` alternation, or a `$1`-style pattern reused verbatim). `findPrefixPos` tries each alternative via `indexFold` and returns the position of whichever one is found; `BuildResolverSet`'s byte-bucket index registers the resolver under every alternative's first byte so the fast-rejection path still finds it. Which alternative matched has no effect on the subsequent `match`/`resolve` step — only the matched *position* is used to slice the expression, not the matched text — so this is purely a fast-lookup mechanism, not a change to match semantics. Compare to `${N:lower}`/`${N:upper}` above, which shares a resolver across names via a common prefix (`"get"`) rather than across genuinely different prefixes.
+`prefix` may list alternatives separated by `|` (e.g. `"createModel|buildModel"`), letting one
+resolver's `match`/`resolve` pair cover call-site shapes that don't share a common leading
+substring. `findPrefixPos` tries each alternative via `indexFold` and returns the position of
+whichever is found; `BuildResolverSet`'s byte-bucket index registers the resolver under every
+alternative's first byte so fast rejection still finds it. Which alternative matched has no
+effect on the subsequent `match`/`resolve` step — only the matched *position* is used to slice
+the expression — so this is purely a fast-lookup mechanism, not a change to match semantics.
 
-Gotcha when merging plain bare-word entries this way: `match`'s own regex-vs-simple decision (`isRegexPattern`, `internal/parser/ast.go`) is triggered *only* by a literal backslash appearing in `match` — it has nothing to do with `prefix` or with `|` in `match`. A merged pattern like `match: "kernel|_kernel"` has no backslash, so it is compared as one literal string (never equal to either bare word), not as alternation — silently matching nothing. Give merged bare-word alternatives a real anchor that needs escaping, e.g. `"^kernel(?:\\(\\))?$|^_kernel(?:\\(\\))?$"`, which both anchors correctly and supplies the backslash `isRegexPattern` needs.
+Gotcha when merging plain bare-word entries this way: `match`'s regex-vs-simple decision
+(`isRegexPattern`) is triggered *only* by a literal backslash in `match` — it has nothing to do
+with `prefix` or with `|` in `match`. A merged pattern like `match: "kernel|_kernel"` has no
+backslash, so it is compared as one literal string (never equal to either bare word), not as
+alternation — silently matching nothing. Give merged bare-word alternatives a real anchor that
+needs escaping, e.g. `"^kernel(?:\\(\\))?$|^_kernel(?:\\(\\))?$"`.
 
-**Case-folded placeholders in `resolve`** (`internal/parser/ast.go: substitutePlaceholder`):
+**Case-folded placeholders in `resolve`** (`substitutePlaceholder`):
 
-Both the simple prefix/suffix match and regex match substitute captures into `resolve` through the same helper, which supports `${N:lower}` and `${N:upper}` in addition to plain `$N`. Use `${1:lower}` to fold a captured value: `{"match": "get$1()", "resolve": "packages.tass.${1:lower}", "prefix": "get"}` turns `getPageTools()`, `getLockBroker()`, etc. into one resolver instead of one entry per name. `${1:upper}` is the uppercase counterpart. This only helps when the target path is a mechanical case-fold of the captured text — if the target name isn't derived from the captured text at all (e.g. the `itextObj.Foo` family, where `Foo` maps to an unrelated Java class name), each name still needs its own resolver entry. Note: since path resolution (below) is itself fully case-insensitive, `${N:lower}`/`${N:upper}` are for explicitness/consistency in the config, not required for correctness.
+Both simple prefix/suffix and regex matches substitute captures through the same helper, which
+supports `${N:lower}` and `${N:upper}` in addition to plain `$N`. Use `${1:lower}` to fold a
+captured value: `{"match": "get$1()", "resolve": "packages.tass.${1:lower}", "prefix": "get"}`
+turns `getPageTools()`, `getLockBroker()`, etc. into one resolver instead of one entry per name.
+This only helps when the target path is a mechanical case-fold of the captured text — if the
+target name isn't derived from it at all (e.g. an `itextObj.Foo` family mapping to unrelated
+Java class names), each name still needs its own entry. Since path resolution is itself fully
+case-insensitive, `${N:lower}`/`${N:upper}` are for config explicitness, not correctness.
 
-**Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. The final step — turning a resolved dot-path into an actual `.cfc` file — is now also fully case-insensitive at every path segment, not just the filename: `ResolvePath` walks the path one directory at a time via `resolveSegments`, matching each segment against a real directory listing (exact case first, then `EqualFold`), and `mappings` keys are matched case-insensitively too (`lookupFold`). This matters because `os.Stat` alone can't be trusted for this: on a case-insensitive filesystem (APFS, NTFS defaults) `Stat` succeeds for any case variant of an existing name, silently returning the *requested* case rather than the real on-disk case — which breaks on a case-sensitive filesystem (ext4/most Linux) where the mismatch is never accepted at all. Only a directory listing reveals the true on-disk name on every platform.
+**Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
+(`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a
+resolved dot-path into an actual `.cfc` file is also fully case-insensitive at every path
+segment, not just the filename: `ResolvePath` walks the path one directory at a time via
+`resolveSegments`, matching each segment against a real directory listing (exact case first,
+then `EqualFold`), and `mappings` keys are matched case-insensitively too (`lookupFold`). This
+matters because `os.Stat` alone can't be trusted: on a case-insensitive filesystem (APFS, NTFS
+defaults) `Stat` succeeds for any case variant, silently returning the *requested* case rather
+than the real on-disk case — which breaks on ext4 and most Linux filesystems. Only a directory
+listing reveals the true on-disk name on every platform.
 
 **Known resolver false-positive: prefix substring matching**
 
-`ResolveFromCall` finds the resolver's `prefix` *anywhere* in the expression via `indexFold`, not just at position 0. This means a resolver with prefix `"document"` will also fire when the variable name contains "document" as a substring (e.g. `domobject_document`). The sub passed to the pattern matcher starts at the prefix position, so it exactly matches the short pattern and produces a wrong component. There is no anchor mechanism in the current design. If a broad resolver causes false positives on unrelated variable names, the only workarounds are: rename the variable in the CFML source, or add a more-specific resolver for the false-positive variable that overrides with the correct component.
+`ResolveFromCall` finds the resolver's `prefix` *anywhere* in the expression via `indexFold`,
+not just at position 0. A resolver with prefix `"document"` will also fire when the variable
+name merely contains "document" (e.g. `domobject_document`). The sub passed to the pattern
+matcher starts at the prefix position, so it exactly matches the short pattern and produces a
+wrong component. There is no anchor mechanism in the current design. Workarounds: rename the
+variable in the CFML source, or add a more-specific resolver for the false-positive variable
+*earlier* in the array.
 
-The same class of issue can appear *within* a single pipe-delimited `prefix`: `findPrefixPos` (see above) tries alternatives in the order written and returns the position of whichever is found first in that order — not the earliest position in the expression, and not the alternative that would actually let `match` succeed. If one alternative is a substring of another (e.g. `prefix: "File|getFile"` against `getFile()`), the shorter alternative found first fixes the slice position (`sub = "File()"`), and the longer alternative never gets a chance even though it would have matched. Order pipe-delimited alternatives so a shorter one that could be a substring of a longer one comes *after* it.
+The same class of issue can appear *within* a single pipe-delimited `prefix`: `findPrefixPos`
+tries alternatives in the order written and returns the position of whichever is found first in
+that order — not the earliest position in the expression, and not the alternative that would let
+`match` succeed. If one alternative is a substring of another (e.g. `prefix: "File|getFile"`
+against `getFile()`), the shorter one found first fixes the slice position (`sub = "File()"`)
+and the longer never gets a chance. Order alternatives so a shorter potential substring comes
+*after* the longer one.
 
-**Generic catch-all resolvers are the highest-risk case of this**, because they're deliberately broad. A pattern like `{"match": "get$1()", "resolve": "tassweb.packages.tass.${1:lower}", "prefix": "get"}` (see `${N:lower}` above) is meant to cover a family of factory methods (`getPageTools()`, `getLockBroker()`, ...) without one resolver entry per name — but `prefix: "get"` is found inside *any* identifier containing "get" anywhere, including ordinary getters that happen to be named `getXxx()` and have nothing to do with the intended factory family (e.g. a real `PdfWriter.getDirectContent()`/`itext.cfc getDirectContent()` passthrough matched this and silently produced a fabricated `tassweb.packages.tass.directcontent` component — see the `explain` example above). A catch-all this broad will win over a correct-but-absent answer (e.g. a generic `returntype="any"`/no-hint declared return that should fall through to `$any`) essentially every time a same-named `getXxx()` exists anywhere else in the workspace's naming conventions. There is no partial fix short of narrowing the `match` regex to the known name family (e.g. an explicit alternation of the real factory names) or accepting the occasional false positive and overriding it with a more specific resolver, same as the substring-prefix workaround above.
+**Generic catch-all resolvers are the highest-risk case of this**, because they're deliberately
+broad. `{"match": "get$1()", "resolve": "tassweb.packages.tass.${1:lower}", "prefix": "get"}` is
+meant to cover a family of factory methods without one entry per name — but `prefix: "get"` is
+found inside *any* identifier containing "get", including ordinary getters unrelated to the
+intended family. A catch-all this broad will win over a correct-but-absent answer (e.g. a
+generic `returntype="any"` that should fall through to `$any`) essentially every time a
+same-named `getXxx()` exists anywhere in the workspace. There is no partial fix short of
+narrowing the `match` regex to an explicit alternation of the real factory names, or accepting
+the false positive and overriding it with a more specific resolver listed earlier.
 
 ## Expression mappings
 
-`expressionMappings` in `.cfmleditor.json` is a flat `map[string]string` of runtime expression → static value substitutions (e.g. `"#VARIABLES._core#": "packages.tass.core."`), applied to component-path strings before resolution. Unlike `componentResolvers`, there is no `match`/regex support — each key is matched with a plain `strings.Contains` and replaced with `strings.ReplaceAll`.
+`expressionMappings` is a flat `map[string]string` of runtime expression → static value
+substitutions (e.g. `"#VARIABLES._core#": "packages.tass.core."`), applied to component-path
+strings before resolution. Unlike `componentResolvers`, there is no `match`/regex support — each
+key is matched with a plain `strings.Contains` and replaced with `strings.ReplaceAll`.
 
-A key may list multiple alternatives separated by `|` (e.g. `"#ROOT#|#LEGACY_ROOT#": "app."`), so several distinct runtime expressions that should collapse to the same static value don't need separate map entries. Each pipe-delimited alternative is checked and replaced independently — this is plain substring alternation, not regex, so `|` here has no relation to the regex-triggering `\` in `componentResolvers.match`. Implemented in `internal/resolve/resolve.go: ComponentPath` and `internal/parser/result.go: replaceExpressions`.
+A key may list alternatives separated by `|` (e.g. `"#ROOT#|#LEGACY_ROOT#": "app."`), so several
+runtime expressions collapsing to the same static value don't need separate entries. Each
+alternative is checked and replaced independently — plain substring alternation, unrelated to
+the regex-triggering `\` in `componentResolvers.match`. Implemented in
+`internal/resolve/resolve.go: ComponentPath` and `internal/parser/result.go: replaceExpressions`.
 
-**Unmapped `#...#` expressions become `$any`, not literal garbage.** Any component-path string captured from CFML source — `CreateObject("component", "...")`, `<cfinvoke component="...">`, `new "..."()`, etc. — may contain a runtime `#...#` interpolation that isn't covered by any `expressionMappings` entry (e.g. a genuinely dynamic factory path like `CreateObject("component", "tools.templates.#ARGUMENTS.template#.generator")`). `replaceExpressions` (`internal/parser/result.go`) runs its substitution pass unconditionally (even with zero `expressionMappings` configured), and if the result still contains `#` afterward, returns `"$any"` instead — so `CanResolveCall` accepts calls through it silently, the same as any other "genuinely dynamic, don't know" case, rather than surfacing the literal `"#ARGUMENTS.template#"` text as a nonsensical "not found in" component name. This fixup applies to `ComponentRef`s (`pr.ComponentRefs`/`funcRefsMap`) *and* to `CallSite.Component` (`pr.Calls`/`funcCallsMap`) — the latter matters because a bare unassigned call's `CallSite.Component` can be baked in directly at parse time (`tag_parser.go`'s `lookupComponentRef`), before this pass would otherwise run.
+**Unmapped `#...#` expressions become `$any`, not literal garbage.** Any component-path string
+captured from CFML source — `CreateObject("component", "...")`, `<cfinvoke component="...">`,
+`new "..."()` — may contain a runtime `#...#` interpolation no `expressionMappings` entry covers
+(e.g. `CreateObject("component", "tools.templates.#ARGUMENTS.template#.generator")`).
+`replaceExpressions` runs its substitution pass unconditionally (even with zero
+`expressionMappings` configured), and if the result still contains `#`, returns `"$any"` — so
+`CanResolveCall` accepts calls through it silently, the same as any other "genuinely dynamic"
+case, rather than surfacing the literal text as a nonsensical "not found in" component name.
+This applies to `ComponentRef`s (`pr.ComponentRefs`/`funcRefsMap`) *and* to `CallSite.Component`
+(`pr.Calls`/`funcCallsMap`) — the latter matters because a bare unassigned call's
+`CallSite.Component` can be baked in at parse time (`tag_parser.go`'s `lookupComponentRef`),
+before this pass would otherwise run.
 
-**Bracket-indexed chain segments** (`REQUEST['a' & b & 'c'].method()`, `arr[i].method()`): the script parser's chain-walking (`checkVarRHS`, `parseBodyVarDecl`, `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`, `recordBareCallAndChain` in `internal/parser/script_parser.go`) skips a `[...]` group via `skipBracketIndex()` (mirrors `skipParens()`) and, critically, **poisons** the chain text it's building with a literal `"[]"` marker (e.g. `REQUEST['a'&b&'c'].method()` → chain text `"REQUEST[].method"`) instead of silently dropping the bracket and treating the bare identifier before it as the receiver. The marker can't collide with any real identifier or resolver `match` (no CFML identifier or resolver pattern legitimately contains `[]`), so it reliably falls through to an honest `variable 'REQUEST[]' has no component ref` — the alternative (dropping the bracket) would let `REQUEST[dynamicKey].method()` silently resolve as if it were plain `REQUEST.method()`, which is wrong *and* confident if `REQUEST` bare happens to have an unrelated resolver/ref elsewhere. If a project wants these fully silent rather than merely honestly-categorized, add a `noFollow` componentResolver matching the marker, e.g. `{"match": "^REQUEST\\[\\]$", "resolve": "nocheck", "prefix": "REQUEST[]", "noFollow": true}` (same pattern as the `nocheck` example above) — the parser fix does not do this automatically, since suppressing vs. surfacing "genuinely dynamic" is a project-level judgment call.
+**Bracket-indexed chain segments** (`REQUEST['a' & b & 'c'].method()`, `arr[i].method()`): the
+script parser's chain-walking (`checkVarRHS`, `parseBodyVarDecl`, `parseBodyScopedVar`,
+`checkAssignRef`, `checkBareCall`, `recordBareCallAndChain` in `script_parser.go`) skips a
+`[...]` group via `skipBracketIndex()` (mirrors `skipParens()`) and, critically, **poisons** the
+chain text with a literal `"[]"` marker (`REQUEST['a'&b&'c'].method()` → `"REQUEST[].method"`)
+instead of silently dropping the bracket and treating the bare identifier before it as the
+receiver. The marker can't collide with any real identifier or resolver `match`, so it reliably
+falls through to an honest `variable 'REQUEST[]' has no component ref` — the alternative would
+let `REQUEST[dynamicKey].method()` resolve as if it were plain `REQUEST.method()`, which is
+wrong *and* confident. To make these fully silent, add a `noFollow` resolver matching the
+marker, e.g. `{"match": "^REQUEST\\[\\]$", "resolve": "nocheck", "prefix": "REQUEST[]",
+"noFollow": true}` — the parser deliberately does not do this automatically, since suppressing
+vs. surfacing "genuinely dynamic" is a project-level judgment call.
 
 **Known parser limitation: CFML comments containing CFScript**
 
-The tag parser does not fully skip `<!--- ... --->` comment blocks that contain embedded CFScript or `<cfset>` tags. Variables declared in live code but only used inside a comment block will still generate lint errors for the commented-out lines. Affected examples: `tf`/`field` in `reporting/itext.cfc:createTextField`, `communityObj`/`familyObj` in `donor/persist.cfc:saveDonor`. These are false positives; the fix requires improving comment boundary detection in the tag parser.
+The tag parser does not fully skip `<!--- ... --->` comment blocks that contain embedded
+CFScript or `<cfset>` tags. Variables declared in live code but only used inside a comment block
+still generate lint errors for the commented-out lines. These are false positives; the fix
+requires improving comment boundary detection in the tag parser.
 
-**Two resolver shapes for `itextObj.X` struct members:**
+## `noFollow` flag
 
-The CFML iText code stores Java class handles as struct keys (`VARIABLES.itextObj.Foo = getJavaClass("Foo","itext")`). The parser cannot track struct-key component assignments, so two resolver shapes are needed depending on how the handle is used:
+When a resolver has `"noFollow": true`, `CanResolveCall` accepts the call immediately without
+verifying the method exists in the resolved component
+(`config.Resolver.NoFollow`/`parser.Resolver.NoFollow`). Use it for dynamic factory methods
+where the resolved component is approximate, Java objects whose stub coverage is incomplete, or
+any pattern where "this variable came from X" is enough and method checking is noise.
+`CanResolveCall` checks it at three points: the primary variable resolver, the full-line-text
+fallback resolver, and the altComp fallback resolver.
 
-1. **Assignment RHS** — `var local = itextObj.Foo.init(...)`. Use `match: "itextObj.Foo.$1"`. The `$1` matches whatever follows the dot (method name + args); since `resolve` has no `$1` it is discarded. The parser's `resolveCall(rhs)` picks this up and creates a `ComponentRef` for the local variable.
-
-2. **Direct call** — `itextObj.Foo.bar(...)` where the variable is `itextObj.Foo`. Use `match: "itextObj.Foo"` (exact, no `$1`). `CanResolveCall` passes the raw variable name to `ResolveFromCall`, which exact-matches it.
-
-Some handles need both shapes; others only need one depending on how the code uses them.
-
-**`noFollow` flag** (`config.Resolver.NoFollow`, `parser.Resolver.NoFollow`):
-
-When a resolver has `"noFollow": true`, `CanResolveCall` accepts the call immediately without verifying that the method exists in the resolved component. Use this for:
-- Dynamic factory methods where the resolved component is approximate.
-- Java objects accessed via patterns where method coverage in stubs is incomplete.
-- Any pattern where "this variable came from X" is enough and method checking is noise.
-
-`CanResolveCall` checks `noFollow` at three points: the primary variable resolver, the full-line-text fallback resolver, and the altComp fallback resolver.
-
-**Triaging "method not found" / "no component ref" lint errors:**
+## Triaging "method not found" / "no component ref" lint errors
 
 | Error form | Meaning | Fix |
 |---|---|---|
-| `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` whose match covers the RHS of the assignment or the variable name |
-| `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or add `"noFollow": true` to the resolver |
-| `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | The method is genuinely missing from the real CFC — implement it |
+| `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name |
+| `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or `"noFollow": true` on the resolver |
+| `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |
 | Dynamic keys: `x[y].f`, `arr[i].f` | Type can't be tracked through runtime keys | Not fixable with resolvers; suppress with `noFollow` on the resolver that produces `x` |
-| `ARGUMENTS.x` with `type="any"` | Argument has no type annotation | Add `type="pkg.path"` to `<cfargument>`, or add an `ARGUMENTS.x` exact-match resolver as a workaround |
-| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | **Known limitation, not (yet) fixable**: `CanResolveCall`'s global-ref fallback (`internal/resolve/resolve.go`) picks the *first* `ComponentRef` matching the variable name in file order, not the one nearest the call site — a scratch variable reassigned per `<cfcase>`/`<cfif>` branch (e.g. `service = server.kernel.GetStudAdmin()` in case A, `service = server.kernel.GetFinance()` in case B) gets every later `service.X()` call checked against case A's type, regardless of which case it's actually in. **Before triaging a large single-component cluster as N missing methods, check whether the receiver variable is reassigned more than once in the file** (`grep -n "varname\s*="`) — if so, most of the cluster is this bug, not real gaps. The genuinely-missing-method fix (row above) only applies once you've ruled this out. |
-| A resolver match with `"resolve": "nocheck", "noFollow": true` doesn't suppress the check | The resolver's `match` includes `(...)` (a call expression, e.g. `foo.bar(...)`) rather than a bare variable name | `noFollow` only survives when the resolver re-runs live inside `CanResolveCall` (bare-word `ResolveFromCallFull(variable, ...)` lookups). A call-expression match fires once at parse time and gets baked into `ComponentRef.Component`, which has no `NoFollow` field — the flag is lost by check time. Use `"resolve": "$any"` instead (checked unconditionally, regardless of which code path produced it) for any resolver whose `match` contains parens. |
+| `ARGUMENTS.x` with `type="any"` | Argument has no type annotation | Add `type="pkg.path"` to `<cfargument>`, add an `ARGUMENTS.x` exact-match resolver, or document it with a `@serviceproperty` comment if `servicePropertyResolvers` is configured |
+| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | **Known limitation, not (yet) fixable**: `CanResolveCall`'s global-ref fallback picks the *first* `ComponentRef` matching the variable name in file order, not the one nearest the call site — a scratch variable reassigned per `<cfcase>`/`<cfif>` branch gets every later `service.X()` call checked against the first branch's type. **Before triaging a large single-component cluster as N missing methods, check whether the receiver is reassigned more than once in the file** (`grep -n "varname\s*="`) — if so, most of the cluster is this bug, not real gaps. |
+| A resolver with `"resolve": "nocheck", "noFollow": true` doesn't suppress the check | The resolver's `match` includes `(...)` (a call expression) rather than a bare variable name | `noFollow` only survives when the resolver re-runs live inside `CanResolveCall` (bare-word `ResolveFromCallFull(variable, ...)` lookups). A call-expression match fires once at parse time and is baked into `ComponentRef.Component`, which has no `NoFollow` field. Use `"resolve": "$any"` instead (checked unconditionally) for any resolver whose `match` contains parens. |
 
 ## Java stubs
 
-Stubs live in `tassweb/packages/tass/javastubs/` mirroring the Java package path. They are plain CFCs containing empty function stubs so the LSP can verify method calls without running Java.
+Stubs are plain CFCs containing empty function stubs, mirroring the Java package path, so the
+LSP can verify method calls without running Java. Single-line format, matching existing files:
 
-**Stub format** (single-line, matching existing files):
 ```cfml
 // Java stub for com.example.ClassName
 component { function init(...) {} function methodName(required type argName) {} }
 ```
 
-**iText stub coverage** (`com.lowagie.text.*`): Anchor, Chunk, Document, Font, FontFactory, HeaderFooter, Image, Paragraph, Phrase, Rectangle; pdf sub-package: BaseFont, Barcode39, PdfContentByte, PdfPCell, PdfPRow, PdfPTable, PdfPageEventHelper, PdfReader, PdfStamper, PdfWriter.
+Set `"javaStubsPath": "<dot.path.to.stubs>"` to auto-resolve any `createObject("java",
+"some.Class.Name")` to `<javaStubsPath>.some.Class.Name` without hand-writing the equivalent
+regex resolver — it's synthesized and appended alongside your own `componentResolvers`
+(`config.JavaStubResolver`, wired in `config.Resolve`, `daemon.Config.ComponentResolvers`, and
+`cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig`). It covers only the
+`createObject("java", ...)` call site — chained factory calls (e.g. `someJavaObj.getInstance()`
+returning another instance) still need their own resolver entry or a stub method modelling the
+return.
 
-**Existing `getJavaClass` resolver** maps `getJavaClass("pkg.ClassName","itext")` → `tassweb.packages.tass.javastubs.com.lowagie.text.pkg.ClassName`. The `itextObj.*` resolver entries (see above) are needed in addition because the struct-key assignments happen separately from the call-site expressions.
+**Two resolver shapes for struct-member Java handles.** Code that stores handles as struct keys
+(`VARIABLES.itextObj.Foo = getJavaClass("Foo","itext")`) can't be tracked by the parser, so:
 
-**`javaStubsPath` config option** (`internal/config/config.go: JSON.JavaStubsPath`, `config.JavaStubResolver`): set `"javaStubsPath": "tassweb.packages.tass.javastubs"` in `.cfmleditor.json` to auto-resolve any `createObject("java", "some.Class.Name")` call to `<javaStubsPath>.some.Class.Name`, without hand-writing the equivalent `componentResolver` regex. It's synthesized and appended alongside your own `componentResolvers` (`config.Resolve`, `daemon.Config.ComponentResolvers`, `cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig` all wire it in). Only covers the `createObject("java", ...)` call site itself — it does not follow chained factory calls (e.g. `someJavaObj.getInstance(...)` returning another instance of the same Java type); those still need their own resolver entry or a stub method that models the return.
+1. **Assignment RHS** — `var local = itextObj.Foo.init(...)`. Use `match: "itextObj.Foo.$1"`.
+   The `$1` matches whatever follows the dot; since `resolve` has no `$1` it is discarded. The
+   parser's `resolveCall(rhs)` picks this up and creates a `ComponentRef` for the local variable.
+2. **Direct call** — `itextObj.Foo.bar(...)` where the variable *is* `itextObj.Foo`. Use
+   `match: "itextObj.Foo"` (exact, no `$1`); `CanResolveCall` passes the raw variable name to
+   `ResolveFromCall`, which exact-matches it.
+
+Some handles need both shapes; others only one, depending on how the code uses them.
+
+## Testing and lint conventions
+
+- Test fixtures live in `testdata/` (`beans/`, `chain/`, `deps/`, `refs/`, `models/`,
+  `services/`, `includes/`, plus `Application.cfc` and assorted `.cfm`/`.cfc` files). Server,
+  deps, and resolve tests locate them relative to the source file via `runtime.Caller(0)`.
+- Formatter golden-output tests: `make visualtest` (`TestFormatOutput`); comparison fixtures
+  `testdata/comparison.cfm` / `comparison.html`.
+- `.golangci.yml` (v2 config) enables `wsl_v5`, `nlreturn`, `revive`, `gocritic`, `gosec`,
+  `errorlint`, `exhaustive`, `prealloc`, and others. **`wsl_v5` + `nlreturn` demand a blank line
+  before `return` and around block statements** — this is why existing code looks the way it
+  does; match it or `make lint` fails. Test files are exempted from `prealloc`, `unparam`,
+  `gosec`, and `staticcheck`.
+- `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
+  lossy-regeneration warning under Commands before committing any change to it.
+
+## Release
+
+`make release <version>` (`scripts/release.go`) validates, builds, tests, lints, updates
+`CHANGELOG.md` and `VERSION`, commits, tags, and pushes. Use `make release-dry <version>` first.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which cross-compiles
+darwin/linux/windows (amd64 + arm64) with zig as the CGO cross-compiler and embeds the tag as
+`main.version`.
 
 ## Skills
 
 - `/add-parser-test` — patterns and pitfalls for adding tests to `internal/parser/cfparser_test.go`
 - `/run-cfmleditor-lsp` — build, smoke-test, and drive the binary (CLI subcommands + LSP stdio)
-- `/parser-internals` — scanner tokenisation, the two parse loops, call-site extraction, and how the `unresolved` command works
+- `/parser-internals` — scanner tokenisation, the two parse loops, call-site extraction, and how
+  the `unresolved` command works
