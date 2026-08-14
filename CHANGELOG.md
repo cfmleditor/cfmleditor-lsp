@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- `tree-sitter-cfml` grammar updates (v0.26.30 → v0.26.31). This changes formatter output for `throw()` called with named arguments: it previously received tag-attribute spacing (`throw ( type = "x" )`) and now stays close to the source (`throw (type="x")`).
 - Fix formatting not being idempotent: formatting an already-formatted file could change it again, so format-on-save produced a diff for an unchanged file. Two causes — the blank line between cfscript statements was decided from the source span rather than the emitted output, so it only appeared after `function f() {}` had already been expanded into a block; and an unclosed CF tag emitted its synthetic implicit end-tag marker as content, adding a stray blank line that disappeared once the closing tag existed.
 
 ## [0.2.3]
