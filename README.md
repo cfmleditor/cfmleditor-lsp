@@ -211,7 +211,7 @@ sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /u
 |---|---|
 | `make build` | Update grammar, generate docs, and build the binary. |
 | `make test` | Run all tests. |
-| `make lint` | Run golangci-lint. |
+| `make lint` | Run golangci-lint. Currently fails to start: released golangci-lint binaries are built with Go 1.25 and refuse a `go.mod` targeting 1.26. The CI lint job is non-blocking for the same reason. |
 | `make lint-fix` | Run golangci-lint with auto-fix. |
 | `make update-grammar` | Regenerate docs and tree-sitter grammar, clear Go build cache. |
 | `make release <version>` | Full release: validate, build, test, lint, update changelog, commit, tag, push. |

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The generated CFML docs (internal/docs/generated_docs.go) are committed,
+      # so nothing here needs `make docs` and its network fetches.
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # -short skips the wall-clock threshold tests (TestParsePerformance,
+      # TestResolverRegexNotRecompiledPerCall). They assert microsecond budgets
+      # that a shared runner cannot meet, so including them would make CI red
+      # regardless of the change under test. Run the suite without -short
+      # locally to measure performance.
+      - name: Test
+        run: go test -short ./...
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The server's config loading is concurrent (initialize spawns the
+      # workspace index and the linter), so this is worth its own job.
+      - name: Test with -race
+        run: go test -short -race ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    # Non-blocking on purpose: golangci-lint releases are built with Go 1.25 and
+    # refuse a go.mod targeting 1.26 ("the Go language version used to build
+    # golangci-lint is lower than the targeted Go version"), so this job cannot
+    # pass until upstream ships a Go 1.26 build. It runs so the output stays
+    # visible; drop continue-on-error to make it blocking once it goes green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest

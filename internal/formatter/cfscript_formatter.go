@@ -1155,6 +1155,23 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
 	val := n.NamedChild(0)
+
+	// throw(type = "x", message = "y"): the grammar gives this the same
+	// `arguments` node a call expression gets, so render it through the same
+	// helper rather than re-implementing argument layout here. Falling through
+	// to the generic path below emitted the argument list verbatim, which left
+	// throw as the only call in the language whose named arguments were not
+	// spaced like every other call's — `throw (type="x")` beside
+	// `writeLog(text = "x")`. exprArgs also handles splitting long lists, which
+	// the bespoke code below did separately.
+	if val != nil && val.Kind() == "arguments" {
+		f.iLine("throw" + f.exprArgs(val) + ";")
+		f.scriptWrite("\n")
+
+		return
+	}
+
+	// Older grammars modelled the same call as a parenthesized sequence.
 	// For throw(arg, arg, ...) — split args onto new lines if too long.
 	if val != nil && val.Kind() == "parenthesized_expression" {
 		inner := val.NamedChild(0)

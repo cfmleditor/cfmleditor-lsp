@@ -4025,6 +4025,14 @@ func TestIndexingDoesNotExtractLinks(t *testing.T) {
 }
 
 func TestResolverRegexNotRecompiledPerCall(t *testing.T) {
+	// Asserts a per-call time budget, which a loaded machine or the race
+	// detector's instrumentation blows through regardless of whether the regex
+	// cache works. Skipped under -short for the same reason as
+	// TestParsePerformance.
+	if testing.Short() {
+		t.Skip("timing-sensitive; skipped under -short")
+	}
+
 	resolvers := []parser.Resolver{
 		{Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1", Prefix: "kernel.get"},
 	}
