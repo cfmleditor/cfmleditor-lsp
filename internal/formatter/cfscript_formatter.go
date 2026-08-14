@@ -3,6 +3,7 @@ package formatter
 // cfscript_formatter.go — recursive pretty-printer for the cfscript sub-grammar.
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -133,9 +134,24 @@ func (f *Formatter) scriptChildren(n *sitter.Node) {
 			f.scriptWrite("\n")
 		}
 
+		outBefore := f.out.Len()
 		f.formatScriptNode(c)
+
 		prevWasBlock = isScriptBlockStmt(c)
-		prevWasMultiLine = int(c.EndPosition().Row)-int(c.StartPosition().Row) > 0
+		// Judge "was multi-line" from what was actually emitted, not from the
+		// node's span in the source. The formatter expands single-line
+		// statements into blocks (`function f() {}` becomes a braced body), so
+		// reading the source made the separating blank line appear only once
+		// the file had already been formatted — the output was not idempotent.
+		//
+		// The emitted text is trimmed first: every statement starts by opening
+		// a new line, and counting that leading newline would class all of them
+		// as multi-line and insert a blank line between every pair.
+		prevWasMultiLine = false
+		if f.out.Len() > outBefore {
+			prevWasMultiLine = bytes.Contains(bytes.TrimSpace(f.out.Bytes()[outBefore:]), []byte{'\n'})
+		}
+
 		prevWasNamed = true
 		prevEndRow = int(c.EndPosition().Row)
 	}

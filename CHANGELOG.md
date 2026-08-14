@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fix formatting not being idempotent: formatting an already-formatted file could change it again, so format-on-save produced a diff for an unchanged file. Two causes — the blank line between cfscript statements was decided from the source span rather than the emitted output, so it only appeared after `function f() {}` had already been expanded into a block; and an unclosed CF tag emitted its synthetic implicit end-tag marker as content, adding a stray blank line that disappeared once the closing tag existed.
+
 ## [0.2.3]
 
 - Bump Go toolchain to 1.26.5

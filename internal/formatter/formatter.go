@@ -915,8 +915,12 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
-		case "cf_start_tag", "cf_end_tag":
-			// already handled above/below
+		case "cf_start_tag", "cf_end_tag", "implicit_cf_end_tag":
+			// Start and end tags are emitted around this loop. An unclosed tag
+			// yields implicit_cf_end_tag, a synthetic marker whose text is the
+			// trailing whitespace; emitting it added a stray blank line that
+			// disappeared once the closing tag existed, making the output
+			// differ between the first and second format.
 		default:
 			tagKind := f.nodeTagKind(c)
 			if tagKind != "" && prevCFTagKind != "" && !prevCFTagWasComment &&
