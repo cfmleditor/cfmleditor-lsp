@@ -79,6 +79,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: golangci/golangci-lint-action@v6
+      # v8 of the action installs golangci-lint v2. v6 resolves "latest" to a
+      # v1 release (1.64.x), which cannot read this repo's v2 .golangci.yml
+      # even setting the Go version problem aside.
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
