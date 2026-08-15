@@ -12,13 +12,13 @@ func TestResolverMatchWithArgs(t *testing.T) {
 		{Match: "document", Resolve: "tassreporting.packages.reporting.itext", Prefix: "document"},
 	}
 
-	tests := []struct{
+	tests := []struct {
 		expr string
 		want string
 	}{
 		{"_objInit.getWebService(name=\"Foo\")", "tassweb.packages.tass.customobjects.webservice"},
 		{"_objInit.getWebService()", "tassweb.packages.tass.customobjects.webservice"},
-		{"createDocument(writer=foo)", ""},  // should NOT match "document" resolver
+		{"createDocument(writer=foo)", ""}, // should NOT match "document" resolver
 		{"document", "tassreporting.packages.reporting.itext"},
 		{"document()", "tassreporting.packages.reporting.itext"},
 	}

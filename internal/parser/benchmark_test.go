@@ -120,6 +120,14 @@ func BenchmarkGlobalVars(b *testing.B) {
 // TestParsePerformance ensures parsing stays within acceptable time budgets.
 // Thresholds are set at ~3x the baseline to allow for CI variance.
 func TestParsePerformance(t *testing.T) {
+	// Wall-clock thresholds are meaningless on a shared or loaded machine, and
+	// these are tight enough (hundreds of microseconds) that CI runners trip
+	// them routinely. Skipped under -short so automated runs stay meaningful;
+	// run the suite without -short to actually measure.
+	if testing.Short() {
+		t.Skip("timing-sensitive; skipped under -short")
+	}
+
 	const iterations = 100
 
 	tests := []struct {

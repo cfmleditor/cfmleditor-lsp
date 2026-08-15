@@ -128,3 +128,39 @@ func TestConsecutiveSimpleStatementsStayTogether(t *testing.T) {
 		t.Errorf("consecutive single-line properties should not be separated by a blank line, got:\n%s", got)
 	}
 }
+
+// TestThrowArgumentsFormatLikeAnyCall pins throw's named arguments to the same
+// layout every other call gets. The grammar models `throw(...)` with the same
+// `arguments` node as a call expression, but the formatter used to emit that
+// list verbatim, leaving throw the only call whose named arguments were spaced
+// differently from the rest of the language.
+func TestThrowArgumentsFormatLikeAnyCall(t *testing.T) {
+	src := []byte("component {\n\n    function f() {\n" +
+		"        throw(type=\"A\", message=\"B\");\n" +
+		"        writeLog(text=\"C\", type=\"D\");\n" +
+		"    }\n\n}\n")
+
+	got := string(formatOnce(t, src))
+
+	for _, want := range []string{
+		`throw(type = "A", message = "B");`,
+		`writeLog(text = "C", type = "D");`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+}
+
+// TestThrowExpressionFormUnchanged guards the other throw shape: `throw <expr>`
+// is not a call and must keep the space after the keyword.
+func TestThrowExpressionFormUnchanged(t *testing.T) {
+	src := []byte("component {\n\n    function f() {\n" +
+		"        throw new Exception(\"oops\");\n" +
+		"    }\n\n}\n")
+
+	got := string(formatOnce(t, src))
+	if !strings.Contains(got, `throw new Exception("oops");`) {
+		t.Errorf("expression-form throw should be unchanged, got:\n%s", got)
+	}
+}
