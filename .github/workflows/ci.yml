@@ -79,3 +79,54 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+
+  perf:
+    name: Performance (informational)
+    runs-on: ubuntu-latest
+    # Never gates a merge. The threshold tests assert microsecond budgets that a
+    # shared runner cannot reliably meet — the CI workflow removed in May failed
+    # on exactly one of them (TestResolverRegexNotRecompiledPerCall) on every
+    # run, and was deleted rather than fixed. So this job publishes numbers to
+    # the run summary and always exits 0; continue-on-error is belt and braces.
+    # Read it by comparing runs, not by whether it is green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Deliberately no -short here: this is the one place the timing tests and
+      # benchmarks that CI otherwise skips actually run.
+      - name: Timing tests and benchmarks
+        run: |
+          {
+            echo '## Performance'
+            echo
+            echo 'Advisory only — this job never fails. Thresholds are tight enough that a'
+            echo 'shared runner trips them regardless of the change under test, so compare'
+            echo 'these numbers against previous runs rather than reading pass/fail.'
+            echo
+            echo '### Threshold tests'
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # -count=1 defeats the test cache: a cached "ok" would report a
+          # measurement that never ran.
+          go test -count=1 -run 'TestParsePerformance|TestResolverRegexNotRecompiledPerCall' \
+            ./internal/parser/ ./internal/server/ 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+          {
+            echo '```'
+            echo
+            echo '### Benchmarks'
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          go test -bench . -benchtime 100x -run '^$' ./internal/parser/ 2>&1 \
+            | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
