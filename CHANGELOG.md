@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Bump the GitHub Actions in both workflows to their current majors: `actions/checkout` v4 → v7, `actions/setup-go` v5 → v7, `golangci/golangci-lint-action` v8 → v9, `softprops/action-gh-release` v2 → v3. All four majors are Node 20 → Node 24 runtime moves; v9 of the lint action still installs golangci-lint v2, which this repo's v2 config needs.
+- Bump the CFLint fallback version to 1.5.14. It only applies when the releases API cannot be reached — the normal path already downloads whatever is current — but an offline first run no longer starts four releases behind.
+
 - Format `throw()`'s named arguments like every other call's. The grammar gives `throw(type = "x")` the same `arguments` node as a call expression, but the formatter emitted that list verbatim, so `throw (type="x")` sat beside `writeLog(text = "x")` in the same file. Both now render identically. The expression form, `throw new Exception("x")`, is unchanged.
 - Add CI on pull requests (`.github/workflows/ci.yml`): build, vet, gofmt, and the test suite, plus a race-detector job. Previously the only workflow ran on release tags, so pull requests had no automated checks at all.
 - Skip the two wall-clock threshold tests under `-short` (`TestParsePerformance`, `TestResolverRegexNotRecompiledPerCall`). They assert microsecond budgets that a shared CI runner cannot meet; run the suite without `-short` to measure.
