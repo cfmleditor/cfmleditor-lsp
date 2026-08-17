@@ -9,6 +9,7 @@ make build          # generate docs + build binary to target/release/cfmleditor-
 make test           # go test ./...
 make lint           # golangci-lint run ./...
 make lint-fix       # golangci-lint run --fix ./...
+make vuln           # govulncheck ./... (pinned scanner, GOWORK=off)
 make fmt            # gofmt -w . && golangci-lint run --fix ./...
 make install        # build and copy to $GOPATH/bin
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
@@ -56,7 +57,7 @@ regeneration then drops every Lucee-only entry (`cfdistributedlock`, `cfstatic`,
 deletion** — `git checkout -- internal/docs/generated_docs.go`. Only commit a change to that
 file when `make docs` reported both sources staged.
 
-Go toolchain is pinned at **1.26.5** (`go.mod`). CGO is required (tree-sitter grammar).
+Go toolchain is pinned at **1.26.6** (`go.mod`). CGO is required (tree-sitter grammar).
 
 ### CLI subcommands
 
@@ -472,14 +473,27 @@ Some handles need both shapes; others only one, depending on how the code uses t
   `gosec`, and `staticcheck`.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
+- `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go
+  test -short`), `race`, `lint` (golangci-lint), `vuln` (`make vuln`), and an informational
+  `perf` job that never gates a merge. None of them run `make docs`, since
+  `internal/docs/generated_docs.go` is committed.
 
 ## Release
 
-`make release <version>` (`scripts/release.go`) validates, builds, tests, lints, updates
-`CHANGELOG.md` and `VERSION`, commits, tags, and pushes. Use `make release-dry <version>` first.
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which cross-compiles
-darwin/linux/windows (amd64 + arm64) with zig as the CGO cross-compiler and embeds the tag as
-`main.version`.
+`make release <version>` (`scripts/release.go`) validates, builds, tests, lints, scans for
+vulnerabilities, updates `CHANGELOG.md` and `VERSION`, commits, tags, and pushes. Use `make
+release-dry <version>` first. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which
+cross-compiles darwin/linux/windows (amd64 + arm64) with zig as the CGO cross-compiler and
+embeds the tag as `main.version`.
+
+**`make vuln` gates the release.** Every check runs *after* `CHANGELOG.md`/`VERSION` are
+rewritten but before anything is committed, so a failure leaves those two files modified and
+uncommitted — same as an existing test or lint failure. A newly published advisory can therefore
+block a release without any code changing; fix it by bumping the Go patch version in `go.mod`
+(stdlib findings) or the offending dependency, not by skipping the step.
+
+The `vuln` job in `.github/workflows/ci.yml` runs the same `make vuln` target, so CI, the release
+gate, and a local run cannot drift apart.
 
 ## Skills
 

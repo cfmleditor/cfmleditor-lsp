@@ -85,6 +85,7 @@ func main() {
 		fmt.Println("  - Run: make build")
 		fmt.Println("  - Run: go test ./...")
 		fmt.Println("  - Run: make lint")
+		fmt.Println("  - Run: make vuln")
 		fmt.Printf("  - Commit, tag %s, push\n", tag)
 		return
 	}
@@ -117,6 +118,12 @@ func main() {
 	// Lint
 	fmt.Println("Linting...")
 	run("make", "lint")
+
+	// Vulnerability scan. Runs last of the checks and before anything is
+	// committed, so a newly published advisory stops the release rather than
+	// shipping a binary built against a known-vulnerable dependency or stdlib.
+	fmt.Println("Scanning for vulnerabilities...")
+	run("make", "vuln")
 
 	// Commit, tag, push
 	fmt.Println("\nCommitting...")

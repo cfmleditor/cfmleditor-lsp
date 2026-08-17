@@ -80,6 +80,24 @@ jobs:
         with:
           version: latest
 
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # `make vuln` rather than an action, so this matches exactly what
+      # `make release` gates on and what a developer runs locally. Like the
+      # jobs above it needs no `make docs`, since generated_docs.go is
+      # committed — the scan does not depend on cfdocs or docs.lucee.org
+      # being reachable.
+      - name: Run govulncheck
+        run: make vuln
+
   perf:
     name: Performance (informational)
     runs-on: ubuntu-latest
