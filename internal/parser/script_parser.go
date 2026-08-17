@@ -1327,28 +1327,61 @@ func (p *scriptParser) readNewComponent() string {
 		return unquote(tok.Value)
 	}
 
-	if tok.Kind == TokIdent {
-		var comp strings.Builder
-		comp.WriteString(tok.Value)
-
-		for {
-			if p.sc.PeekSkipComments().Kind == TokDot {
-				p.sc.NextSkipComments()
-
-				next := p.sc.NextSkipComments()
-				if next.Kind == TokIdent {
-					comp.WriteByte('.')
-					comp.WriteString(next.Value)
-				}
-			} else {
-				break
-			}
-		}
-
-		return comp.String()
+	if tok.Kind != TokIdent {
+		return ""
 	}
 
-	return ""
+	// Lucee's type prefix: `new java:java.io.File(…)`, `new cfml:models.Base(…)`.
+	// The prefix is not part of the path — reading it as one yields a component
+	// literally named "java", which then fails every method check against it.
+	if (identEq(tok.Value, "java") || identEq(tok.Value, "cfml")) &&
+		p.sc.PeekSkipComments().Kind == TokColon {
+		p.sc.NextSkipComments() // consume the ':'
+
+		path := p.readDottedPath(p.sc.NextSkipComments())
+
+		if identEq(tok.Value, "cfml") {
+			return path
+		}
+
+		// `java:` names a Java class, so it resolves through the same
+		// javaStubsPath machinery as createObject("java", …).
+		if path == "" {
+			return ""
+		}
+
+		return p.resolveCall("createObject(\"java\",\"" + path + "\")")
+	}
+
+	return p.readDottedPath(tok)
+}
+
+// readDottedPath continues a dotted path from an identifier already read,
+// returning "" if that token was not an identifier.
+func (p *scriptParser) readDottedPath(tok Token) string {
+	if tok.Kind != TokIdent {
+		return ""
+	}
+
+	var comp strings.Builder
+
+	comp.WriteString(tok.Value)
+
+	for {
+		if p.sc.PeekSkipComments().Kind == TokDot {
+			p.sc.NextSkipComments()
+
+			next := p.sc.NextSkipComments()
+			if next.Kind == TokIdent {
+				comp.WriteByte('.')
+				comp.WriteString(next.Value)
+			}
+		} else {
+			break
+		}
+	}
+
+	return comp.String()
 }
 
 // readCreateObjectComponent reads the component path from createObject("component","path")
@@ -2079,39 +2112,23 @@ chainWalk:
 }
 
 func (p *scriptParser) parseNewRef(varName string, line int) {
-	tok := p.sc.NextSkipComments()
-
-	var component string
-
-	if tok.Kind == TokString {
-		component = unquote(tok.Value)
-	} else if tok.Kind == TokIdent {
-		component = tok.Value
-
-		for {
-			peek := p.sc.PeekSkipComments()
-			if peek.Kind == TokDot {
-				p.sc.NextSkipComments()
-
-				next := p.sc.NextSkipComments()
-				if next.Kind == TokIdent {
-					component += "." + next.Value
-				}
-			} else {
-				break
-			}
-		}
-	}
+	component := p.readNewComponent()
 
 	if component != "" {
 		p.addRef(ComponentRef{
 			Variable: varName, Component: component,
 			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
+	}
 
-		// Consume constructor args and handle any chained .method() calls
-		if p.sc.PeekSkipComments().Kind == TokLParen {
-			p.skipBalancedParens()
+	// Consume constructor args and handle any chained .method() calls. The
+	// args are consumed even when nothing resolved (an unmapped `new java:…`
+	// with no javaStubsPath, say), or the scanner would be left sitting on
+	// the "(" and the rest of the statement would be read as its own.
+	if p.sc.PeekSkipComments().Kind == TokLParen {
+		p.skipBalancedParens()
+
+		if component != "" {
 			p.scanChainedCalls(component, line)
 		}
 	}
@@ -2677,36 +2694,23 @@ func unquote(s string) string {
 // variable.method() call site. Any chained `.method()` calls after the constructor
 // are recorded as resolved call sites against the instantiated component.
 func (p *scriptParser) parseStandaloneNew(newTok Token) {
-	first := p.sc.PeekSkipComments()
-	if first.Kind != TokIdent {
+	if p.sc.PeekSkipComments().Kind != TokIdent {
 		return
 	}
 
-	p.sc.NextSkipComments()
-
-	var component strings.Builder
-	component.WriteString(first.Value)
-
-	for p.sc.PeekSkipComments().Kind == TokDot {
-		p.sc.NextSkipComments()
-
-		next := p.sc.PeekSkipComments()
-		if next.Kind != TokIdent {
-			break
-		}
-
-		p.sc.NextSkipComments()
-
-		component.WriteByte('.')
-		component.WriteString(next.Value)
-	}
+	component := p.readNewComponent()
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
 		return
 	}
 
 	p.skipBalancedParens()
-	p.scanChainedCalls(component.String(), newTok.Line)
+
+	if component == "" {
+		return
+	}
+
+	p.scanChainedCalls(component, newTok.Line)
 }
 
 func isKeyword(s string) bool {

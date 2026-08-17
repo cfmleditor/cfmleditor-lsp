@@ -419,7 +419,16 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		ctor := n.ChildByFieldName("constructor")
 		args := n.ChildByFieldName("arguments")
 
-		return fmt.Sprintf("new %s%s", f.expr(ctor), f.exprArgs(args))
+		// `new java:java.io.File(p)` — the type prefix is a single token that
+		// already carries its colon, and dropping it changes which object gets
+		// constructed, so it has to be reproduced verbatim.
+		prefix := ""
+
+		if p := n.ChildByFieldName("prefix"); p != nil {
+			prefix = f.text(p)
+		}
+
+		return fmt.Sprintf("new %s%s%s", prefix, f.expr(ctor), f.exprArgs(args))
 
 	case "member_expression":
 		obj := n.ChildByFieldName("object")
@@ -716,6 +725,10 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 	params := n.ChildByFieldName("parameters")
 	body := n.ChildByFieldName("body")
 
+	// Lucee spells a closure `=>` and a lambda `->`; they differ in what they
+	// capture, so the source's own arrow has to survive formatting.
+	arrow := arrowToken(n)
+
 	var paramStr string
 	if params != nil {
 		paramStr = f.exprParams(params)
@@ -730,10 +743,22 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 	if body != nil && (body.Kind() == "statement_block" || body.Kind() == "block") {
 		// Render block inline for arrow functions; full block would need
 		// newlines which aren't valid inside an expression context here.
-		return fmt.Sprintf("%s => %s", paramStr, f.text(body))
+		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.text(body))
 	}
 
-	return fmt.Sprintf("%s => %s", paramStr, f.expr(body))
+	return fmt.Sprintf("%s %s %s", paramStr, arrow, f.expr(body))
+}
+
+// arrowToken returns the arrow an arrow_function was written with, defaulting
+// to `=>` if the grammar ever produces one without an anonymous arrow child.
+func arrowToken(n *sitter.Node) string {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if kind := n.Child(i).Kind(); kind == "=>" || kind == "->" {
+			return kind
+		}
+	}
+
+	return "=>"
 }
 
 func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
@@ -795,6 +820,8 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 				current = append(current, "required")
 			case "parameter_type":
 				current = append(current, f.text(c.Child(0)))
+			case "array_return_suffix":
+				current = appendTypeSuffix(current, f.text(c))
 			case "identifier":
 				current = append(current, f.text(c))
 			case "assignment_pattern":
@@ -889,6 +916,8 @@ func (f *Formatter) flatParams(params *sitter.Node) string {
 			current = append(current, "required")
 		case "parameter_type":
 			current = append(current, f.text(c.Child(0)))
+		case "array_return_suffix":
+			current = appendTypeSuffix(current, f.text(c))
 		case "identifier":
 			current = append(current, f.text(c))
 		case "assignment_pattern":
@@ -907,6 +936,20 @@ func (f *Formatter) flatParams(params *sitter.Node) string {
 	}
 
 	return strings.Join(result, ", ")
+}
+
+// appendTypeSuffix glues an array_return_suffix (`[]`, always exactly that —
+// the grammar lexes it as one token) onto the type token it qualifies, so
+// `string[] v` does not come back as `string [] v`. The parts are joined with
+// spaces, so it cannot simply be appended as another element.
+func appendTypeSuffix(parts []string, suffix string) []string {
+	if len(parts) == 0 {
+		return append(parts, suffix)
+	}
+
+	parts[len(parts)-1] += suffix
+
+	return parts
 }
 
 func (f *Formatter) exprParam(n *sitter.Node) string {
@@ -1049,6 +1092,14 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 		}
 
 		if c.IsNamed() {
+			// `User[] function getUsers()` — the suffix is its own node
+			// sitting beside the return type, not part of it.
+			if c.Kind() == "array_return_suffix" {
+				prefix = appendTypeSuffix(prefix, f.text(c))
+
+				continue
+			}
+
 			prefix = append(prefix, f.text(c))
 		}
 	}
