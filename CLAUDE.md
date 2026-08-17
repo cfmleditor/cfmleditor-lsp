@@ -442,10 +442,17 @@ Set `"javaStubsPath": "<dot.path.to.stubs>"` to auto-resolve any `createObject("
 "some.Class.Name")` to `<javaStubsPath>.some.Class.Name` without hand-writing the equivalent
 regex resolver — it's synthesized and appended alongside your own `componentResolvers`
 (`config.JavaStubResolver`, wired in `config.Resolve`, `daemon.Config.ComponentResolvers`, and
-`cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig`). It covers only the
-`createObject("java", ...)` call site — chained factory calls (e.g. `someJavaObj.getInstance()`
-returning another instance) still need their own resolver entry or a stub method modelling the
-return.
+`cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig`). It covers the `createObject("java",
+...)` call site and Lucee's `new java:some.Class.Name()` — the latter because
+`readNewComponent` recognises the `java:` type prefix and re-spells it as the equivalent
+`createObject` expression before resolving, rather than a second resolver existing for it.
+Chained factory calls (e.g. `someJavaObj.getInstance()` returning another instance) still need
+their own resolver entry or a stub method modelling the return.
+
+`new cfml:a.b.C()` is the sibling case and needs no configuration — the prefix is dropped and
+`a.b.C` resolves as an ordinary CFC path. Both prefixes are handled in one place; the three
+`new`-reading paths (`parseNewRef`, `parseStandaloneNew`, `checkReturnComponent`) all route
+through `readNewComponent`.
 
 **Two resolver shapes for struct-member Java handles.** Code that stores handles as struct keys
 (`VARIABLES.itextObj.Foo = getJavaClass("Foo","itext")`) can't be tracked by the parser, so:

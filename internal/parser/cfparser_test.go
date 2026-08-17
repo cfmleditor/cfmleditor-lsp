@@ -474,6 +474,43 @@ func TestParseComponentRefs_NewQuotedPath(t *testing.T) {
 	assertRef(t, refs, 0, "x", "dir.Entity")
 }
 
+// Lucee's `new <typesystem>:<path>()` prefix. The prefix is not part of the
+// path: reading it as one used to yield a component literally named "java" or
+// "cfml", against which every later method check then failed.
+func TestParseComponentRefs_NewCfmlPrefix(t *testing.T) {
+	refs := ParseComponentRefs(testURI, `component { x = new cfml:models.User() }`)
+	assertRef(t, refs, 0, "x", "models.User")
+}
+
+func TestParseComponentRefs_NewJavaPrefixResolvesLikeCreateObject(t *testing.T) {
+	// The same resolver config.JavaStubResolver("stubs") synthesizes for
+	// javaStubsPath — `new java:` has to reach it just as createObject does.
+	javaStubs := []Resolver{{
+		Match:   `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`,
+		Resolve: "stubs.$1",
+		Prefix:  "createObject",
+	}}
+
+	pr := ParseWithOptions(testURI, `component { f = new java:java.io.File( p ) }`,
+		ParseOptions{Resolvers: javaStubs})
+	assertRef(t, pr.ComponentRefs, 0, "f", "stubs.java.io.File")
+}
+
+func TestParseComponentRefs_NewJavaPrefixWithoutStubs(t *testing.T) {
+	// With no resolver to map it, the honest answer is no ref at all rather
+	// than one named "java" — and the statement after it must still parse,
+	// i.e. the constructor arguments were consumed either way.
+	refs := ParseComponentRefs(testURI,
+		"component {\n\tf = new java:java.io.File( p );\n\tsvc = new models.User();\n}")
+	assertRef(t, refs, 0, "svc", "models.User")
+
+	for _, r := range refs {
+		if r.Component == "java" {
+			t.Errorf("got a ComponentRef for the bare type prefix: %+v", r)
+		}
+	}
+}
+
 func TestParseComponentRefs_CreateObject(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { svc = CreateObject("component", "services.OrderService") }`)
 	assertRef(t, refs, 0, "svc", "services.OrderService")
