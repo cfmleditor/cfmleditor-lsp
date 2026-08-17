@@ -2401,9 +2401,10 @@ func builtinEntries() []Entry {
 		{Name: "ApplicationPathCacheClear", Description: "flush the application.[cfc|cfm] path cache", Syntax: "ApplicationPathCacheClear()", Member: "", Script: "", Returns: "void", Type: "function"},
 		{Name: "ApplicationStartTime", Description: "Provides information about the time when the current application scope was created.", Syntax: "ApplicationStartTime()", Member: "", Script: "", Returns: "date", Type: "function"},
 		{Name: "ApplicationStop", Description: "stops the current application context", Syntax: "ApplicationStop()", Member: "", Script: "", Returns: "void", Type: "function"},
-		{Name: "Argon2CheckHash", Description: "Returns hash of input using Argon2.", Syntax: "Argon2CheckHash( string input, string hash )", Member: "", Script: "", Returns: "boolean", Type: "function", Params: []Param{
+		{Name: "Argon2CheckHash", Description: "Deprecated: renamed to Argon2Verify() for consistency with the {Algorithm}Hash/{Algorithm}Verify naming pattern. Functionally identical.", Syntax: "Argon2CheckHash( string input, string hash, [boolean throwOnError] )", Member: "", Script: "", Returns: "boolean", Type: "function", Params: []Param{
 			{Name: "input", Description: "Input string.", Type: "string", Required: true},
 			{Name: "hash", Description: "Argon2 hash to compare against input string", Type: "string", Required: true},
+			{Name: "throwOnError", Description: "If true, throws an exception on invalid hash format instead of returning false", Type: "boolean", Required: false},
 		}},
 		{Name: "Argon2Hash", Description: "Generates an Argon2 password hash with OWASP-recommended defaults (argon2id, 19 MB memory, 2 iterations). Use this instead of the deprecated GenerateArgon2Hash().", Syntax: "Argon2Hash( string input, [string variant], [numeric parallelismFactor], [numeric memoryCost], [numeric iterations] )", Member: "", Script: "", Returns: "string", Type: "function", Params: []Param{
 			{Name: "input", Description: "Password to hash", Type: "string", Required: true},
@@ -3579,12 +3580,12 @@ func builtinEntries() []Entry {
 		{Name: "generate3DesKey", Description: "Generates a secure key value for use in the encrypt function with the 3DES algorithm.", Syntax: "generate3DesKey( [string input] )", Member: "", Script: "", Returns: "string", Type: "function", Params: []Param{
 			{Name: "input", Description: "A string input off of which the key will be based", Type: "string", Required: false},
 		}},
-		{Name: "GenerateArgon2Hash", Description: "Returns hash of input using Argon2.", Syntax: "GenerateArgon2Hash( string input, [string variant], [number parallelismFactor], [number memoryCost], [number iterations] )", Member: "", Script: "", Returns: "string", Type: "function", Params: []Param{
+		{Name: "GenerateArgon2Hash", Description: "Deprecated: use Argon2Hash() which defaults to OWASP-recommended settings (argon2id, 19 MB memory, 2 iterations). This function retains the weak extension-argon2 defaults (argon2i, 8 KB memory, 1 iteration) for backwards compatibility only.", Syntax: "GenerateArgon2Hash( string input, [string variant], [numeric parallelismFactor], [numeric memoryCost], [numeric iterations] )", Member: "", Script: "", Returns: "string", Type: "function", Params: []Param{
 			{Name: "input", Description: "Input string.", Type: "string", Required: true},
 			{Name: "variant", Description: "Either Argon2i, Argon2d or Argon2id", Type: "string", Required: false},
-			{Name: "parallelismFactor", Description: "Degrees of parallelism, a number between 1 and 10.", Type: "number", Required: false},
-			{Name: "memoryCost", Description: "A number between 8 and 100000.", Type: "number", Required: false},
-			{Name: "iterations", Description: "A number between 1 and 20.", Type: "number", Required: false},
+			{Name: "parallelismFactor", Description: "Degrees of parallelism, a number between 1 and 10.", Type: "numeric", Required: false},
+			{Name: "memoryCost", Description: "A number between 8 and 100000.", Type: "numeric", Required: false},
+			{Name: "iterations", Description: "A number between 1 and 20.", Type: "numeric", Required: false},
 		}},
 		{Name: "GenerateBCryptHash", Description: "Deprecated: renamed to BCryptHash() for consistency with the {Algorithm}Hash/{Algorithm}Verify naming pattern. Same defaults (cost=10), functionally identical.", Syntax: "GenerateBCryptHash( string input, [numeric cost] )", Member: "", Script: "", Returns: "string", Type: "function", Params: []Param{
 			{Name: "input", Description: "Password to hash", Type: "string", Required: true},
