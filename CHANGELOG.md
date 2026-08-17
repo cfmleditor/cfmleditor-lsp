@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Bump the GitHub Actions in both workflows to their current majors: `actions/checkout` v4 → v7, `actions/setup-go` v5 → v7, `golangci/golangci-lint-action` v8 → v9, `softprops/action-gh-release` v2 → v3. All four majors are Node 20 → Node 24 runtime moves; v9 of the lint action still installs golangci-lint v2, which this repo's v2 config needs.
+- Bump the CFLint fallback version to 1.5.14. It only applies when the releases API cannot be reached — the normal path already downloads whatever is current — but an offline first run no longer starts four releases behind.
 - `tree-sitter-cfml` grammar updates (v0.26.31 → v0.26.33). The new release makes five CFML constructs parse that previously produced an `ERROR` node, three of which the formatter then rewrote as soon as it could see them — with `whitespaceOnly` on (the default), that meant the LSP refused to format any file containing one:
   - Lucee's thin-arrow lambda `t -> t.b()` was rewritten to the fat arrow `t => t.b()`. The two are not interchangeable: `->` is a lambda and `=>` a closure, and they differ in what they capture. The source's own arrow is now preserved.
   - `new java:java.io.File(p)` and `new cfml:models.Base()` lost the type prefix entirely, becoming `new java.io.File(p)` — a different object. The prefix is now reproduced.

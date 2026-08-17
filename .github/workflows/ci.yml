@@ -17,9 +17,9 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -52,9 +52,9 @@ jobs:
     name: Race detector
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -67,16 +67,16 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      # v8 of the action installs golangci-lint v2. v6 resolves "latest" to a
-      # v1 release (1.64.x), which cannot read this repo's v2 .golangci.yml
-      # even setting the Go version problem aside.
-      - uses: golangci/golangci-lint-action@v8
+      # v7 and up install golangci-lint v2 only, which is what this repo's v2
+      # .golangci.yml needs. Do not drop to v6 or below: those resolve "latest"
+      # to a v1 release (1.64.x) that cannot read the config at all.
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -109,9 +109,9 @@ jobs:
     # Read it by comparing runs, not by whether it is green.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
