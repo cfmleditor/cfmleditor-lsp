@@ -308,3 +308,80 @@ func TestSingleLineArgsUnchanged(t *testing.T) {
 	got := format(t, src)
 	allIn(t, got, "myFunction(arg1, arg2, arg3);")
 }
+
+// ─── tree-sitter-cfml v0.26.32/33 constructs ─────────────────────────────────
+//
+// Each of these parsed as an ERROR before the grammar bump, so the formatter
+// had never seen the nodes and fell through to a default that quietly rewrote
+// them. All three are semantic, not cosmetic: `->` and `=>` differ in scope
+// capture, and the `new` type prefix picks the type system.
+
+func TestThinArrowLambdaPreserved(t *testing.T) {
+	src := wrap(`var a = t -> t.b();`)
+	got := format(t, src)
+	allIn(t, got, "t -> t.b()")
+	assertNotContains(t, got, "=>")
+}
+
+func TestFatArrowClosureStillPreserved(t *testing.T) {
+	src := wrap(`var a = t => t.b();`)
+	got := format(t, src)
+	allIn(t, got, "t => t.b()")
+	assertNotContains(t, got, "->")
+}
+
+func TestThinArrowLambdaWithBlockBody(t *testing.T) {
+	src := wrap(`var c = t -> { return t.b(); };`)
+	got := format(t, src)
+	allIn(t, got, "t -> {")
+}
+
+func TestNewJavaTypePrefixPreserved(t *testing.T) {
+	src := wrap(`var d = new java:java.io.File(path);`)
+	got := format(t, src)
+	allIn(t, got, "new java:java.io.File(path)")
+}
+
+func TestNewCfmlTypePrefixPreserved(t *testing.T) {
+	src := wrap(`var e = new cfml:models.Base();`)
+	got := format(t, src)
+	allIn(t, got, "new cfml:models.Base()")
+}
+
+func TestNewWithoutTypePrefixUnchanged(t *testing.T) {
+	src := wrap(`var a = new java.util.Properties();`)
+	got := format(t, src)
+	allIn(t, got, "new java.util.Properties()")
+	assertNotContains(t, got, "java:")
+}
+
+func TestArrayTypeInParameterPosition(t *testing.T) {
+	src := wrap(`function f( string[] v, numeric[][] w ) { return v; }`)
+	got := format(t, src)
+	allIn(t, got, "string[] v", "numeric[][] w")
+	assertNotContains(t, got, "string []")
+}
+
+func TestArrayReturnSuffixOnDeclaration(t *testing.T) {
+	src := wrap(`User[] function getUsers() { return []; }`)
+	got := format(t, src)
+	allIn(t, got, "User[] function getUsers()")
+	assertNotContains(t, got, "User []")
+}
+
+// The LSP runs with whitespaceOnly on by default, so before these fixes it did
+// not merely reformat these files — it refused to format them at all.
+func TestNewGrammarConstructsPassWhitespaceOnlyGuard(t *testing.T) {
+	src := wrap(`var a = t -> t.b();
+var d = new java:java.io.File(path);
+var u = getUsers();
+function f( string[] v ) { return v; }
+User[] function getUsers() { return []; }`)
+
+	opts := testOpts()
+	opts.WhitespaceOnly = true
+
+	if _, err := Format([]byte(src), parse(t, src), opts); err != nil {
+		t.Errorf("whitespaceOnly guard rejected the format: %v", err)
+	}
+}

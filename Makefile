@@ -3,7 +3,12 @@ OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar release release-dry
+.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+
+# Pinned so a scanner change never turns an unrelated build red on its own.
+# Bump deliberately; the advisory database itself is always fetched live, so a
+# pinned scanner still sees newly published vulnerabilities.
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
@@ -61,6 +66,13 @@ fmt:
 
 lint:
 	golangci-lint run ./...
+
+# GOWORK=off so the scan resolves dependencies from go.mod rather than from a
+# developer's go.work. A workspace can substitute a local checkout (e.g.
+# ../tree-sitter-cfml) for a pinned module, which would report on source that
+# is not what a release actually builds from.
+vuln:
+	GOWORK=off go run $(GOVULNCHECK) ./...
 
 lint-fix:
 	golangci-lint run --fix ./...

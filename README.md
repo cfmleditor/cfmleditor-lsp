@@ -213,6 +213,7 @@ sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /u
 | `make test` | Run all tests. |
 | `make lint` | Run golangci-lint. Use an official v2 release binary — one built with `go install` is compiled against golangci-lint's own (older) Go toolchain and then refuses this repo's newer `go.mod` target: *"the Go language version used to build golangci-lint is lower than the targeted Go version"*. |
 | `make lint-fix` | Run golangci-lint with auto-fix. |
+| `make vuln` | Scan dependencies and the stdlib for known vulnerabilities (govulncheck). |
 | `make update-grammar` | Regenerate docs and tree-sitter grammar, clear Go build cache. |
 | `make release <version>` | Full release: validate, build, test, lint, update changelog, commit, tag, push. |
 | `make install` | Build and copy binary to `$GOPATH/bin`. |

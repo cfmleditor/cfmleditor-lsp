@@ -7,7 +7,7 @@ description: build, run, smoke-test, and drive cfmleditor-lsp — the CFML LSP s
 
 ## Prerequisites
 
-Go 1.26.5 (pinned in `go.mod`) with CGO enabled — the tree-sitter-cfml grammar is a cgo package. No other runtime deps; the binary is self-contained.
+Go 1.26.6 (pinned in `go.mod`) with CGO enabled — the tree-sitter-cfml grammar is a cgo package. No other runtime deps; the binary is self-contained.
 
 ```bash
 go version   # verify
