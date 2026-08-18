@@ -15,26 +15,45 @@ type preformatEdit struct {
 // into self-closing tags (e.g. <br> → <br />), then re-parses.
 // Body content after the start_tag is moved outside the self-closing tag.
 func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) ([]byte, *sitter.Tree) {
-	var edits []preformatEdit
+	// Converting an element replaces it whole, so collectEdits cannot descend
+	// into its body on the same pass and any void element nested there is left
+	// alone. Repeat until the source stops changing — otherwise the first
+	// format leaves conversions that a second format performs, and an
+	// unchanged file keeps producing a new diff on every save.
+	const maxPasses = 10
 
-	collectEdits(tree.RootNode(), src, &edits)
+	// Only trees parsed here are ours to close; the caller owns the one it
+	// passed in.
+	var owned *sitter.Tree
 
-	if len(edits) == 0 {
-		return src, tree
+	for range maxPasses {
+		var edits []preformatEdit
+
+		collectEdits(tree.RootNode(), src, &edits)
+
+		if len(edits) == 0 {
+			break
+		}
+
+		// Apply edits in reverse order to preserve byte offsets.
+		result := string(src)
+
+		for i := len(edits) - 1; i >= 0; i-- {
+			e := edits[i]
+			result = result[:e.start] + e.replacement + result[e.end:]
+		}
+
+		src = []byte(result)
+
+		if owned != nil {
+			owned.Close()
+		}
+
+		owned = parse(src)
+		tree = owned
 	}
 
-	// Apply edits in reverse order to preserve byte offsets.
-	result := string(src)
-
-	for i := len(edits) - 1; i >= 0; i-- {
-		e := edits[i]
-		result = result[:e.start] + e.replacement + result[e.end:]
-	}
-
-	newSrc := []byte(result)
-	newTree := parse(newSrc)
-
-	return newSrc, newTree
+	return src, tree
 }
 
 func collectEdits(n *sitter.Node, src []byte, edits *[]preformatEdit) {

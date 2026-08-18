@@ -1610,16 +1610,25 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 
 	if body.Kind() == "statement_block" || body.Kind() == "block" {
 		f.scriptBlock(body)
-	} else {
-		f.scriptWrite(" {\n")
 
-		f.level++
-		f.formatScriptNode(body)
-
-		f.level--
-		f.writeIndent()
-		f.scriptWrite("}")
+		return
 	}
+
+	// A single-statement body gains braces here. The padding has to match
+	// scriptBlock's exactly: on a second format the braces are in the source,
+	// so scriptBlock renders the same code and any difference in blank lines
+	// makes formatting non-idempotent — an unchanged file kept producing a
+	// new diff on every save.
+	f.scriptWrite(" {")
+	f.scriptWrite("\n\n")
+
+	f.level++
+	f.formatScriptNode(body)
+	f.scriptWrite("\n")
+
+	f.level--
+	f.writeIndent()
+	f.scriptWrite("}")
 }
 
 // scriptSwitch renders a switch statement.

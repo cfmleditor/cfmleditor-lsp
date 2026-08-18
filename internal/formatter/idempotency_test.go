@@ -208,3 +208,46 @@ func TestThrowExpressionFormUnchanged(t *testing.T) {
 		t.Errorf("expression-form throw should be unchanged, got:\n%s", got)
 	}
 }
+
+// TestFormatIdempotentSynthesizedBraces covers the padding mismatch between
+// the two ways a body reaches the formatter. scriptBlockOf2 wrapped a
+// single-statement body in braces tightly, but on a second format those braces
+// are in the source, so scriptBlock rendered the same code with blank lines
+// inside them — an unchanged file kept producing a new diff on every save.
+func TestFormatIdempotentSynthesizedBraces(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"if without braces", "component {\n\tfunction a() {\n\t\tif (x) return;\n\t\tdirectoryDelete(dir, true);\n\t}\n}\n"},
+		{"for without braces", "component {\n\tfunction a() {\n\t\tfor (i = 1; i <= 10; i++) writeOutput(i);\n\t}\n}\n"},
+		{"while without braces", "component {\n\tfunction a() {\n\t\twhile (y) doThing();\n\t}\n}\n"},
+		{"else without braces", "component {\n\tfunction a() {\n\t\tif (x) one();\n\t\telse two();\n\t}\n}\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertIdempotent(t, tc.name, []byte(tc.src))
+		})
+	}
+}
+
+// TestFormatIdempotentNestedVoidElements covers preformat stopping at the
+// first converted element. Converting one replaces it whole, so void elements
+// nested in its body were not reached until the next format ran.
+func TestFormatIdempotentNestedVoidElements(t *testing.T) {
+	src := "<html>\n<body>\n<div>\n<p>text<br>more</p>\n<hr>\n<input type=\"text\" name=\"a\">\n</div>\n</body>\n</html>\n"
+	assertIdempotent(t, "nested void elements", []byte(src))
+}
+
+// TestFormatConvertsAllVoidElementsInOnePass is the same defect stated
+// directly: one format pass must self-close every void element, not just the
+// outermost.
+func TestFormatConvertsAllVoidElementsInOnePass(t *testing.T) {
+	src := []byte("<html>\n<body>\n<div>\n<p>text<br>more</p>\n<hr>\n</div>\n</body>\n</html>\n")
+
+	out := formatOnce(t, src)
+	if strings.Contains(string(out), "<br>") || strings.Contains(string(out), "<hr>") {
+		t.Errorf("a void element was left unconverted after one pass:\n%s", out)
+	}
+}
