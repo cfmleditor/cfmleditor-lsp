@@ -45,6 +45,25 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 		return
 	}
 
+	// Content written tight against both tags in the source stays on one line.
+	if f.isTightElement(startTag, endTag, bodyNodes) {
+		f.nl()
+		f.writeIndent()
+		f.write(strings.TrimSpace(f.text(startTag)))
+
+		for _, c := range bodyNodes {
+			f.write(f.text(c))
+		}
+
+		if endTag != nil {
+			f.write(strings.TrimSpace(f.text(endTag)))
+		}
+
+		f.write("\n")
+
+		return
+	}
+
 	// Emit start tag
 	f.nl()
 	f.writeIndent()
@@ -68,6 +87,44 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 		f.write(strings.TrimSpace(f.text(endTag)))
 		f.write("\n")
 	}
+}
+
+// isTightElement reports whether an element's content is written flush against
+// both of its tags in the source — no whitespace after the start tag's ">" and
+// none before the end tag's "<", as in <div class="x">Sorry</div>. Such an
+// element is emitted on a single line with its content verbatim, since breaking
+// it introduces whitespace the author deliberately left out (and, for inline
+// elements, whitespace the browser renders).
+//
+// Content spanning more than one line is excluded: it cannot be emitted on a
+// single line without joining lines, which is a larger change than preserving
+// the author's spacing.
+func (f *Formatter) isTightElement(startTag, endTag *sitter.Node, bodyNodes []*sitter.Node) bool {
+	if startTag == nil || endTag == nil {
+		return false
+	}
+
+	// <div></div> — nothing between the tags at all.
+	if len(bodyNodes) == 0 {
+		return startTag.EndByte() == endTag.StartByte()
+	}
+
+	first, last := bodyNodes[0], bodyNodes[len(bodyNodes)-1]
+	if startTag.EndByte() != first.StartByte() || last.EndByte() != endTag.StartByte() {
+		return false
+	}
+
+	var raw strings.Builder
+	for _, c := range bodyNodes {
+		raw.WriteString(f.text(c))
+	}
+
+	body := raw.String()
+	if body == "" || strings.Contains(body, "\n") {
+		return false
+	}
+
+	return strings.TrimLeft(body, " \t\r") == body && strings.TrimRight(body, " \t\r") == body
 }
 
 // isVoidElement checks if a start_tag is for an HTML void element.
