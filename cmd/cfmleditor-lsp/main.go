@@ -95,7 +95,9 @@ Scan usage:
   cfmleditor-lsp scan <file-or-dir> [...]
 
 Format usage:
-  cfmleditor-lsp format [-w] <file> [...]
+  cfmleditor-lsp format [-w] [--allow-non-whitespace] <file> [...]
+    -w                      rewrite the file in place
+    --allow-non-whitespace  permit changes beyond whitespace (off by default)
 
 Explain usage:
   cfmleditor-lsp explain <file> <line> [call-substring]
@@ -293,23 +295,31 @@ func cmdParse(args []string) {
 
 func cmdFormat(args []string) {
 	write := false
+	allowNonWhitespace := false
 
 	var files []string
 
 	for _, arg := range args {
-		if arg == "-w" {
+		switch arg {
+		case "-w":
 			write = true
-		} else {
+		case "--allow-non-whitespace":
+			allowNonWhitespace = true
+		default:
 			files = append(files, arg)
 		}
 	}
 
 	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] <file> [...]\n")
+		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] [--allow-non-whitespace] <file> [...]\n")
 		os.Exit(1)
 	}
 
 	opts := formatter.DefaultOptions()
+	// Match the LSP's default (config.Resolve sets whitespaceOnly true), so a
+	// formatter bug that changes non-whitespace content is reported rather
+	// than written over the user's source. --allow-non-whitespace opts out.
+	opts.WhitespaceOnly = !allowNonWhitespace
 	opts.ParseScript = func(src []byte) *sitter.Tree {
 		return language.Parse(language.CFScript, src, nil)
 	}
@@ -320,31 +330,49 @@ func cmdFormat(args []string) {
 		return language.Parse(language.CFML, src, nil)
 	}
 
+	failed := false
+
 	for _, f := range files {
-		content, err := os.ReadFile(f)
-		if err != nil {
+		if err := formatOneFile(f, opts, write); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", f, err)
-			os.Exit(1)
-		}
 
-		tree := language.Parse(language.CFML, content, nil)
-		out, err := formatter.Format(content, tree, opts)
-		tree.Close()
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error formatting %s: %v\n", f, err)
-			os.Exit(1)
-		}
-
-		if write {
-			if err := os.WriteFile(f, out, 0o644); err != nil {
-				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", f, err)
-				os.Exit(1)
-			}
-
-			fmt.Fprintf(os.Stderr, "formatted %s\n", f)
-		} else {
-			_, _ = os.Stdout.Write(out)
+			failed = true
 		}
 	}
+
+	if failed {
+		os.Exit(1)
+	}
+}
+
+// formatOneFile formats a single file, writing it back in place when write is
+// set. A file is only ever rewritten after Format returned successfully, so a
+// refused format leaves the original untouched.
+func formatOneFile(path string, opts formatter.Options, write bool) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	tree := language.Parse(language.CFML, content, nil)
+	out, err := formatter.Format(content, tree, opts)
+	tree.Close()
+
+	if err != nil {
+		return err
+	}
+
+	if !write {
+		_, _ = os.Stdout.Write(out)
+
+		return nil
+	}
+
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "formatted %s\n", path)
+
+	return nil
 }

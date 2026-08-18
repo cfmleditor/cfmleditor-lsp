@@ -176,6 +176,16 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	f := New(opts)
 	f.src = src
 	root := tree.RootNode()
+
+	// Refuse a tree the grammar could not parse. The node walk has no
+	// meaningful rendering for an ERROR node and falls through to a raw
+	// emit that concatenates its children without separators, producing
+	// output that is not valid CFML. Bailing out here means a parse
+	// failure can never be written over the user's source.
+	if root.HasError() {
+		return nil, parseErrorAt("document", root, src, 0)
+	}
+
 	f.formatNode(root)
 
 	if f.parseErr != nil {
@@ -351,11 +361,15 @@ func (f *Formatter) recordParseError(context string, root *sitter.Node, src []by
 		return
 	}
 
+	f.parseErr = parseErrorAt(context, root, src, baseRow)
+}
+
+// parseErrorAt builds an error describing the first ERROR or MISSING node
+// under root, reported against the source line baseRow is offset from.
+func parseErrorAt(context string, root *sitter.Node, src []byte, baseRow uint) error {
 	errNode := findFirstError(root)
 	if errNode == nil {
-		f.parseErr = fmt.Errorf("parse error in %s block", context)
-
-		return
+		return fmt.Errorf("parse error in %s block", context)
 	}
 
 	pos := errNode.StartPosition()
@@ -366,7 +380,7 @@ func (f *Formatter) recordParseError(context string, root *sitter.Node, src []by
 		snippet = snippet[:50] + "..."
 	}
 
-	f.parseErr = fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
+	return fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
 }
 
 func findFirstError(n *sitter.Node) *sitter.Node {
