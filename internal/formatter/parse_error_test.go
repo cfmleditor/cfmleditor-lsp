@@ -461,3 +461,59 @@ func TestFormatKeepsRealClosingTags(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatCommentAmongCallArguments covers the argument-list twin of the
+// literal bug. exprArgs recognised only "cf_comment", so a cfscript `//`
+// comment among the arguments was given a trailing comma and swallowed every
+// argument after it.
+func TestFormatCommentAmongCallArguments(t *testing.T) {
+	src := "component {\n\tfunction a() {\n\t\tdirectoryList(\n" +
+		"\t\t\ttargetDirectory, // path\n" +
+		"\t\t\ttrue, // recurse\n" +
+		"\t\t\t\"path\", // list info\n" +
+		"\t\t\t\"*.cfc\" // filter\n" +
+		"\t\t);\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		idx := strings.Index(line, "//")
+		if idx < 0 {
+			continue
+		}
+
+		if rest := strings.TrimSpace(line[idx+2:]); strings.Contains(rest, ",") {
+			t.Errorf("a line comment swallowed following arguments: %q\nfull output:\n%s", line, out)
+		}
+	}
+
+	for _, want := range []string{"targetDirectory", "true", "\"path\"", "\"*.cfc\"", "// filter"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// TestFormatCommentInCallChain covers a comment between a chained call and its
+// next hop; joining object and property dropped it.
+func TestFormatCommentInCallChain(t *testing.T) {
+	src := "component {\n\tfunction a() {\n\t\tvar r = directoryList( dir )\n" +
+		"\t\t\t// skip hidden files\n" +
+		"\t\t\t.filter( fn );\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if !strings.Contains(string(out), "// skip hidden files") {
+		t.Errorf("chain comment was dropped:\n%s", out)
+	}
+
+	if !strings.Contains(string(out), ".filter(") {
+		t.Errorf("chain hop was lost:\n%s", out)
+	}
+}

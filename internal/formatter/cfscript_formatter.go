@@ -493,6 +493,32 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		objStr := f.expr(obj)
 		propStr := f.expr(prop)
 		op := memberOperator(n)
+
+		// A comment between a chained call and its next hop belongs to no
+		// field, so joining object and property dropped it.
+		if obj != nil && prop != nil {
+			if comments := f.commentsBetween(n, obj.EndByte(), prop.StartByte()); len(comments) > 0 {
+				indent := f.opts.indent(f.level + 1)
+
+				var b strings.Builder
+
+				b.WriteString(objStr)
+
+				for _, c := range comments {
+					b.WriteString("\n")
+					b.WriteString(indent)
+					b.WriteString(c)
+				}
+
+				b.WriteString("\n")
+				b.WriteString(indent)
+				b.WriteString(op)
+				b.WriteString(propStr)
+
+				return b.String()
+			}
+		}
+
 		inline := objStr + op + propStr
 		// Break if the object part is multi-line or the last line exceeds width.
 		lastLine := inline
@@ -642,15 +668,23 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 
 	var isComment []bool
 
+	hasLineComment := false
+
 	for i := uint(0); i < args.NamedChildCount(); i++ {
 		c := args.NamedChild(i)
 		parts = append(parts, f.expr(c))
-		isComment = append(isComment, c.Kind() == "cf_comment")
+		isComment = append(isComment, isCommentKind(c.Kind()))
+
+		if c.Kind() == "comment" {
+			hasLineComment = true
+		}
 	}
 
 	inline := "(" + strings.Join(parts, ", ") + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
-	shouldBreak := len(parts) > 3 ||
+	// A line comment forces the break unconditionally: joined inline it runs to
+	// end of line and comments out every argument after it.
+	shouldBreak := hasLineComment || len(parts) > 3 ||
 		(len(parts) > 0 && len(inline) > f.opts.LineWidth)
 	if shouldBreak {
 		// Re-evaluate at deeper level so nested splits indent correctly.
@@ -726,6 +760,40 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	}
 
 	return inline
+}
+
+// commentsBetween returns the text of any comment child of n lying strictly
+// between byte offsets from and to.
+func (f *Formatter) commentsBetween(n *sitter.Node, from, to uint) []string {
+	var out []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if !isCommentKind(c.Kind()) {
+			continue
+		}
+
+		if c.StartByte() < from || c.EndByte() > to {
+			continue
+		}
+
+		out = append(out, strings.TrimSpace(f.text(c)))
+	}
+
+	return out
+}
+
+// isCommentKind reports whether a node kind is one of the comment forms that
+// can appear among a call's arguments. Only cf_comment used to be recognised,
+// so a cfscript `//` comment was given a trailing comma and swallowed the
+// arguments that followed it.
+func isCommentKind(kind string) bool {
+	switch kind {
+	case "comment", "block_comment", "cf_comment":
+		return true
+	}
+
+	return false
 }
 
 // collectionItem is one entry of an array or struct literal. Comments are
