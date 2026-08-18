@@ -221,11 +221,37 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	i, j := 0, 0
 
+	// The formatter canonicalises cfscript as it goes: a statement written
+	// without its optional semicolon gains one, and a single-statement body
+	// gains braces. Both are deliberate insertions, so an extra ";", "{" or
+	// "}" on the output side is not a defect. The allowance is one-directional
+	// — a token the formatter *dropped* is still reported — and the braces are
+	// counted, so an unmatched one is still caught below.
+	openedAdded, closedAdded := 0, 0
+
 	for {
 		i = skipWSAndComments(a, i)
 		j = skipWSAndComments(b, j)
 
+		if j < len(b) && isNormalizationToken(b[j]) &&
+			(i >= len(a) || toLower(a[i]) != toLower(b[j])) {
+			switch b[j] {
+			case '{':
+				openedAdded++
+			case '}':
+				closedAdded++
+			}
+
+			j++
+
+			continue
+		}
+
 		if i == len(a) && j == len(b) {
+			if openedAdded != closedAdded {
+				return fmt.Errorf("formatter added %d unmatched brace(s)", openedAdded-closedAdded)
+			}
+
 			return nil
 		}
 
@@ -283,6 +309,12 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 		i++
 		j++
 	}
+}
+
+// isNormalizationToken reports whether c is one of the tokens the formatter
+// inserts as part of canonicalising cfscript.
+func isNormalizationToken(c byte) bool {
+	return c == ';' || c == '{' || c == '}'
 }
 
 func byteOffsetToLine(src []byte, offset int) int {

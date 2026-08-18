@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
@@ -54,21 +55,29 @@ func TestFormatOneFileLeavesUnparseableFileIntact(t *testing.T) {
 	}
 }
 
-// TestFormatOneFileGuardsNonWhitespaceChanges checks the second gate: a file
-// the grammar parses fine, but whose formatting would change non-whitespace
-// content, is refused rather than rewritten.
-func TestFormatOneFileGuardsNonWhitespaceChanges(t *testing.T) {
-	// `return []` gains a semicolon, which is a non-whitespace change.
+// TestFormatOneFileGuardIsWiredUp checks the second gate is actually enabled
+// on the CLI path. The CLI used to build DefaultOptions(), which leaves
+// WhitespaceOnly false, so no guard ran at all.
+func TestFormatOneFileGuardIsWiredUp(t *testing.T) {
+	if !cliOpts(true).WhitespaceOnly {
+		t.Fatal("the CLI option set does not enable the whitespaceOnly guard")
+	}
+}
+
+// TestFormatOneFileAllowsNormalization is the flip side: adding an omitted
+// semicolon is canonicalisation the formatter performs on purpose, so the
+// guard must let it through and the file must actually be rewritten.
+func TestFormatOneFileAllowsNormalization(t *testing.T) {
 	src := "component {\n\tfunction getAll() {\n\t\treturn []\n\t}\n}\n"
 	path := writeTemp(t, "semi.cfc", src)
 
-	if err := formatOneFile(path, cliOpts(true), true); err == nil {
-		t.Fatal("expected the whitespaceOnly guard to refuse the format")
+	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+		t.Fatalf("formatOneFile refused a deliberate normalisation: %v", err)
 	}
 
 	after, _ := os.ReadFile(path)
-	if string(after) != src {
-		t.Errorf("file was modified despite the guard rejecting the output:\n%s", after)
+	if !strings.Contains(string(after), "return [];") {
+		t.Errorf("expected the missing semicolon to be added:\n%s", after)
 	}
 }
 
