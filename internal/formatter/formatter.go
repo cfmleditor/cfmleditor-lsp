@@ -935,7 +935,22 @@ func (f *Formatter) hasCFBodyContent(n *sitter.Node) bool {
 	return false
 }
 
-// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the
+// hasRealCFEndTag reports whether the source actually closed this cf_tag. A
+// tag written without one (`<cfmodule ...>`, `<cffeed ...>`, `<cfadmin ...>`)
+// has either no end-tag child at all or only the grammar's synthetic
+// implicit_cf_end_tag marker — inventing a `</name>` for it re-parents every
+// following sibling into the tag's body.
+func (f *Formatter) hasRealCFEndTag(n *sitter.Node) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.Child(i).Kind() == "cf_end_tag" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the
 // tags that are indented with their enclosing <cftry> rather than inside it.
 func (f *Formatter) isCFTryBranch(n *sitter.Node) bool {
 	if n.Kind() != "cf_tag" {
@@ -968,7 +983,8 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
-	isBlock := true // cf_tag with start+end is always a block
+	closed := f.hasRealCFEndTag(n)
+	isBlock := closed // only a genuinely closed tag brackets an indented body
 
 	// An empty block (e.g. <cfcatch type="any"></cfcatch>) otherwise emits the
 	// padding blank line from both ends, leaving two blank lines around nothing.
@@ -1031,9 +1047,15 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 		f.write("\n")
 	}
 
-	f.nl()
-	f.writeIndent()
-	f.write("</" + name + ">")
+	// Only close what the source closed. Tags legal without a body — cfmodule,
+	// cfhttp, cfinvoke, cffeed, cfadmin — were given a synthesised closing tag,
+	// which swallowed everything after them into the tag's body.
+	if closed {
+		f.nl()
+		f.writeIndent()
+		f.write("</" + name + ">")
+	}
+
 	f.write("\n")
 }
 

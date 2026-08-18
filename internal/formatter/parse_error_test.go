@@ -405,3 +405,59 @@ func TestFormatElseStillAttachedWithoutComment(t *testing.T) {
 		t.Errorf("expected `} else {` to stay on one line:\n%s", out)
 	}
 }
+
+// TestFormatDoesNotInventClosingTags covers CF tags that are legal without a
+// body. formatCFTag closed every cf_tag unconditionally, so `<cfmodule ...>`
+// gained a `</cfmodule>` and every following sibling was re-parented into its
+// body — changing what the tag applies to.
+func TestFormatDoesNotInventClosingTags(t *testing.T) {
+	cases := []struct {
+		name     string
+		src      string
+		unwanted string
+	}{
+		{"cfmodule", "<cfmodule template=\"a.cfm\">\n<p>after</p>\n", "</cfmodule>"},
+		{"cfhttp", "<cfhttp url=\"/a\">\n<p>after</p>\n", "</cfhttp>"},
+		{"cfinvoke", "<cfinvoke component=\"a\" method=\"b\">\n<p>after</p>\n", "</cfinvoke>"},
+		{"cffeed", "<cffeed attributeCollection = #feedAttributes# >\n", "</cffeed>"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := formatSrc(t, tc.src, stdOpts())
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+
+			if strings.Contains(string(out), tc.unwanted) {
+				t.Errorf("invented %s:\n%s", tc.unwanted, out)
+			}
+		})
+	}
+}
+
+// TestFormatKeepsRealClosingTags is the other half: a tag the source did close
+// must still be closed, with its body indented.
+func TestFormatKeepsRealClosingTags(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"<cfoutput>\n<p>x</p>\n</cfoutput>\n", "</cfoutput>"},
+		{"<cfmodule template=\"a.cfm\">\n<p>x</p>\n</cfmodule>\n", "</cfmodule>"},
+		{"<cfif true>\n<cfset x = 1>\n</cfif>\n", "</cfif>"},
+	}
+
+	for _, tc := range cases {
+		out, err := formatSrc(t, tc.src, stdOpts())
+		if err != nil {
+			t.Errorf("format %q: %v", tc.src, err)
+
+			continue
+		}
+
+		if !strings.Contains(string(out), tc.want) {
+			t.Errorf("format %q: lost %s:\n%s", tc.src, tc.want, out)
+		}
+	}
+}
