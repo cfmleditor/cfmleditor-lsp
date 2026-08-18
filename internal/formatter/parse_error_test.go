@@ -186,3 +186,74 @@ func TestFormatKeepsAnonymousReturnTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatKeepsAllCatchClauses covers two defects in scriptTry. Every catch
+// clause carries the same `handler` field name, so ChildByFieldName returned
+// only the first and the rest were deleted along with their bodies; and the
+// exception type is a separate `type` field, so rendering only the parameter
+// turned `catch (java.lang.Exception e)` into `catch (e)`.
+func TestFormatKeepsAllCatchClauses(t *testing.T) {
+	src := "component {\n" +
+		"\tfunction b() {\n" +
+		"\t\ttry { x(); }\n" +
+		"\t\tcatch (java.lang.Exception e) { y(); }\n" +
+		"\t\tcatch (any e2) { z(); }\n" +
+		"\t\tfinally { w(); }\n" +
+		"\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	for _, want := range []string{
+		"catch (java.lang.Exception e)",
+		"catch (any e2)",
+		"y();",
+		"z();",
+		"finally",
+		"w();",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// TestFormatKeepsDeclarationKeyword covers the component header being
+// hardcoded to "component", which rewrote an interface as a component and
+// dropped abstract/final modifiers.
+func TestFormatKeepsDeclarationKeyword(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"interface {\n\tpublic function foo();\n}\n", "interface"},
+		{"interface extends=\"x\" {\n}\n", "interface extends=\"x\""},
+		{"abstract component extends=\"y\" {\n}\n", "abstract component extends=\"y\""},
+		{"component extends=\"z\" {\n}\n", "component extends=\"z\""},
+	}
+
+	for _, tc := range cases {
+		out, err := formatSrc(t, tc.src, stdOpts())
+		if err != nil {
+			t.Errorf("format %q: %v", tc.src, err)
+
+			continue
+		}
+
+		if !strings.Contains(string(out), tc.want) {
+			t.Errorf("format %q: want substring %q, got:\n%s", tc.src, tc.want, out)
+		}
+	}
+
+	// An interface must not be silently turned into a component.
+	out, err := formatSrc(t, "interface {\n\tpublic function foo();\n}\n", stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(string(out)), "component") {
+		t.Errorf("interface was rewritten as a component:\n%s", out)
+	}
+}

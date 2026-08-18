@@ -1024,6 +1024,16 @@ func (f *Formatter) scriptBlockComment(n *sitter.Node) {
 	f.scriptWrite("\n")
 }
 
+// componentKeywords are the declaration keywords that may precede a component
+// body. The grammar emits them as anonymous nodes, so they have to be
+// recognised explicitly rather than picked up as named children.
+var componentKeywords = map[string]bool{
+	"component": true,
+	"interface": true,
+	"abstract":  true,
+	"final":     true,
+}
+
 // scriptComponent renders a CFC component declaration:
 //
 //	component [extends="X"] [implements="Y"] { ... }
@@ -1033,6 +1043,11 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 
 	var body *sitter.Node
 
+	// Declaration keywords are anonymous nodes preceding the body. The header
+	// used to be hardcoded to "component", which rewrote `interface {}` as
+	// `component {}` and dropped `abstract`/`final` modifiers.
+	var keywords []string
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -1041,13 +1056,20 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 		case "identifier":
 			// 'component' keyword itself — skip
 		default:
-			if c.IsNamed() {
+			switch {
+			case c.IsNamed():
 				attrs = append(attrs, f.text(c))
+			case componentKeywords[strings.ToLower(c.Kind())]:
+				keywords = append(keywords, f.text(c))
 			}
 		}
 	}
 
-	header := "component"
+	header := strings.Join(keywords, " ")
+	if header == "" {
+		header = "component"
+	}
+
 	if len(attrs) > 0 {
 		header += " " + strings.Join(attrs, " ")
 	}
@@ -1545,7 +1567,6 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 // scriptTry renders try / catch / finally.
 func (f *Formatter) scriptTry(n *sitter.Node) {
 	body := n.ChildByFieldName("body")
-	handler := n.ChildByFieldName("handler")
 	finalizer := n.ChildByFieldName("finalizer")
 
 	f.iLine("try")
@@ -1554,19 +1575,13 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 		f.scriptBlock(body)
 	}
 
-	if handler != nil {
-		// catch_clause: catch (param) { body }
-		param := handler.ChildByFieldName("parameter")
-		hBody := handler.ChildByFieldName("body")
-
-		if param != nil {
-			f.scriptWrite(fmt.Sprintf(" catch (%s)", f.exprParam(param)))
-		} else {
-			f.scriptWrite(" catch")
-		}
-
-		if hBody != nil {
-			f.scriptBlock(hBody)
+	// Every catch clause carries the same `handler` field name, so
+	// ChildByFieldName returns only the first one — a try with several
+	// catches silently lost all but the first, bodies included. Walk the
+	// children instead.
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); c.Kind() == "catch_clause" {
+			f.scriptCatch(c)
 		}
 	}
 
@@ -1581,6 +1596,36 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 	}
 
 	f.scriptWrite("\n")
+}
+
+// scriptCatch renders one catch clause: `catch (<type> <param>) { ... }`.
+// The exception type is a separate `type` field, not part of the parameter —
+// rendering only the parameter turned `catch (java.lang.Exception e)` into
+// `catch (e)`, widening what the handler catches.
+func (f *Formatter) scriptCatch(n *sitter.Node) {
+	catchType := n.ChildByFieldName("type")
+	param := n.ChildByFieldName("parameter")
+	body := n.ChildByFieldName("body")
+
+	var parts []string
+
+	if catchType != nil {
+		parts = append(parts, f.text(catchType))
+	}
+
+	if param != nil {
+		parts = append(parts, f.exprParam(param))
+	}
+
+	if len(parts) > 0 {
+		f.scriptWrite(fmt.Sprintf(" catch (%s)", strings.Join(parts, " ")))
+	} else {
+		f.scriptWrite(" catch")
+	}
+
+	if body != nil {
+		f.scriptBlock(body)
+	}
 }
 
 // scriptPassthru re-emits a node's text re-indented (last-resort fallback).
