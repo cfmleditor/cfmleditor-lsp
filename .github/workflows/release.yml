@@ -4,30 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  # Lets the whole build be rehearsed on a branch without cutting a tag. The
+  # publish job is tag-only, so a manual run produces artifacts and nothing
+  # else. GitHub only offers the "Run workflow" button for workflows present
+  # on the default branch.
+  workflow_dispatch:
 
+# Only the publish job writes anything; building needs no more than read.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    strategy:
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-            zig_target: aarch64-macos
-          - goos: darwin
-            goarch: amd64
-            zig_target: x86_64-macos
-          - goos: linux
-            goarch: arm64
-            zig_target: aarch64-linux-gnu
-          - goos: linux
-            goarch: amd64
-            zig_target: x86_64-linux-gnu
-          - goos: windows
-            goarch: amd64
-            zig_target: x86_64-windows-gnu
+  docs:
+    name: Generate built-in docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -36,8 +25,9 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: goto-bus-stop/setup-zig@v2
-
+      # Generated once and shared with every build, rather than refetched on
+      # each of the five runners: one set of network fetches to fail instead of
+      # five, and every platform is guaranteed to embed identical docs.
       - name: Fetch and assemble docs sources
         run: make docs
 
@@ -53,30 +43,160 @@ jobs:
       - name: Generate built-in entries
         run: go run scripts/generate_docs.go
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: generated-docs
+          path: internal/docs/generated_docs.go
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: docs
+    strategy:
+      # Without this, the first platform to fail cancels the rest — which is
+      # why even the platforms that built fine never uploaded anything.
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest
+            apt: gcc-aarch64-linux-gnu
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-latest
+            apt: gcc-mingw-w64-x86-64
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+
+          # darwin builds on macOS. CGO there links libresolv and the
+          # CoreFoundation and Security frameworks, which only the real Apple
+          # SDK provides — zig ships macOS libc headers but not those, so
+          # cross-compiling from Linux failed at the link step every release.
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest
+
+          # The macOS SDK is universal, so the x86_64 slice cross-compiles on
+          # an arm64 runner with nothing more than an -arch flag.
+          - goos: darwin
+            goarch: amd64
+            runner: macos-latest
+            cc: clang -arch x86_64
+            cxx: clang++ -arch x86_64
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: generated-docs
+          path: internal/docs
+
+      - name: Install cross compiler
+        if: matrix.apt != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "1"
-          CC: zig cc -target ${{ matrix.zig_target }}
-          CXX: zig c++ -target ${{ matrix.zig_target }}
+          CC_OVERRIDE: ${{ matrix.cc }}
+          CXX_OVERRIDE: ${{ matrix.cxx }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ext=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
-          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "cfmleditor-lsp${ext}" ./cmd/cfmleditor-lsp
+          set -euo pipefail
 
-      - name: Package
-        run: |
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip cfmleditor-lsp.exe
+          # A tag release is versioned from the tag; a manual run is a
+          # rehearsal and is not published, so the exact string only has to be
+          # recognisable.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
           else
-            tar czf cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz cfmleditor-lsp
+            VERSION="$(cat VERSION 2>/dev/null || echo 0.0.0)-dev+${GITHUB_SHA::7}"
+          fi
+          echo "Building ${GOOS}/${GOARCH} version ${VERSION}"
+
+          # Left unset for a native build so Go picks the platform default.
+          if [ -n "${CC_OVERRIDE}" ]; then
+            export CC="${CC_OVERRIDE}"
+            export CXX="${CXX_OVERRIDE}"
           fi
 
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v3
+          ext=""
+          if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
+
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "cfmleditor-lsp${ext}" ./cmd/cfmleditor-lsp
+
+      - name: Verify the binary is for the target platform
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          file "cfmleditor-lsp${ext}"
+          go version -m "cfmleditor-lsp${ext}" | grep -E "GOARCH=${{ matrix.goarch }}$"
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          base="cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            asset="${base}.zip"
+            zip -q "${asset}" cfmleditor-lsp.exe
+          else
+            asset="${base}.tar.gz"
+            # macOS bsdtar otherwise stores AppleDouble "._" resource-fork
+            # entries alongside the binary, which show up when the tarball is
+            # unpacked anywhere else.
+            COPYFILE_DISABLE=1 tar czf "${asset}" cfmleditor-lsp
+          fi
+
+          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
         with:
-          files: |
-            cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
-            cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+          name: ${{ steps.package.outputs.asset }}
+          path: ${{ steps.package.outputs.asset }}
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    # Only a tag produces a release; a manual run stops after building.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # One job publishes every asset, rather than five jobs racing to create
+      # and update the same release.
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -l dist
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
