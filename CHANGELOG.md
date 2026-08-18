@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.5]
+
 - Fix the formatter changing non-whitespace content. Audited by formatting 5620 CFML files from Lucee, ContentBox, ColdBox, FW/1, TestBox and cfmleditor: 1671 were rejected by the `whitespaceOnly` guard, so with the default settings the LSP silently declined to format them and format-on-save did nothing. 5450 now format cleanly and 84 are still rejected. Each of the following was a separate defect, and most of them destroyed or altered code rather than merely tripping the guard:
   - `query` and `function` return types were dropped outright: `public query function GetData()` came back as `public function GetData()`. The signature prefix was gated on `IsNamed()`, but the grammar tokenises those two type names as anonymous keyword nodes. The other fourteen return types, and dotted component paths, were unaffected.
   - A `try` with more than one `catch` kept only the first and deleted the rest *along with their bodies*, because every catch clause carries the same `handler` field name. The exception type was dropped too — `catch (java.lang.Exception e)` became `catch (e)`, silently widening what the handler catches.
