@@ -78,6 +78,31 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 
 // ─── helpers shared by all script formatters ─────────────────────────────────
 
+// memberOperator returns the accessor token joining a member_expression's
+// object and property. It is not always ".": Lucee and BoxLang spell static
+// access `Widget::getData()`, and rendering that as `Widget.getData()` turns a
+// static call into an instance call.
+func memberOperator(n *sitter.Node) string {
+	// `::` is reported as a named `static_chain` node, not an anonymous token.
+	if sc := n.ChildByFieldName("static_chain"); sc != nil {
+		return "::"
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.IsNamed() {
+			continue
+		}
+
+		switch c.Kind() {
+		case ".", "::", "?.":
+			return c.Kind()
+		}
+	}
+
+	return "."
+}
+
 // scriptWrite writes s, prepending indentation if we are at the beginning of
 // a line. This is the primary output primitive for script formatting.
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
@@ -435,7 +460,8 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		prop := n.ChildByFieldName("property")
 		objStr := f.expr(obj)
 		propStr := f.expr(prop)
-		inline := objStr + "." + propStr
+		op := memberOperator(n)
+		inline := objStr + op + propStr
 		// Break if the object part is multi-line or the last line exceeds width.
 		lastLine := inline
 		if idx := strings.LastIndexByte(inline, '\n'); idx >= 0 {
@@ -446,7 +472,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
 			indent := f.opts.indent(f.level + 1)
 
-			return objStr + "\n" + indent + "." + propStr
+			return objStr + "\n" + indent + op + propStr
 		}
 
 		return inline
@@ -670,26 +696,96 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	return inline
 }
 
+// collectionItem is one entry of an array or struct literal. Comments are
+// carried alongside the real elements so they survive formatting, but they
+// never take a trailing comma.
+type collectionItem struct {
+	text      string
+	isComment bool
+}
+
+// collectionItems renders a literal's children, reporting whether any of them
+// is a line comment. A line comment runs to end of line, so a literal holding
+// one can never be emitted inline — doing so commented out every element after
+// it and destroyed the statement.
+func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, hasLineComment bool) {
+	items = make([]collectionItem, 0, n.NamedChildCount())
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+
+		switch c.Kind() {
+		case "comment":
+			hasLineComment = true
+
+			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
+		case "block_comment":
+			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
+		default:
+			items = append(items, collectionItem{text: f.expr(c)})
+		}
+	}
+
+	return items, hasLineComment
+}
+
+// joinCollectionInline joins items for a single-line literal. Only safe when
+// no item is a line comment.
+func joinCollectionInline(items []collectionItem) string {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, it.text)
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// joinCollectionLines lays items out one per line, giving a trailing comma to
+// every element that still has an element after it, and never to a comment.
+func joinCollectionLines(items []collectionItem, indent string) string {
+	lastElement := -1
+
+	for i, it := range items {
+		if !it.isComment {
+			lastElement = i
+		}
+	}
+
+	var b strings.Builder
+
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString("\n")
+			b.WriteString(indent)
+		}
+
+		b.WriteString(it.text)
+
+		if !it.isComment && i < lastElement {
+			b.WriteString(",")
+		}
+	}
+
+	return b.String()
+}
+
 func (f *Formatter) exprArray(n *sitter.Node) string {
 	if n.NamedChildCount() == 0 {
 		return "[]"
 	}
 
-	var parts []string
-	for i := uint(0); i < n.NamedChildCount(); i++ {
-		parts = append(parts, f.expr(n.NamedChild(i)))
-	}
+	items, hasLineComment := f.collectionItems(n)
 
-	inline := "[" + strings.Join(parts, ", ") + "]"
-	if f.lineLen+len(inline) <= f.opts.LineWidth {
-		return inline
+	if !hasLineComment {
+		inline := "[" + joinCollectionInline(items) + "]"
+		if f.lineLen+len(inline) <= f.opts.LineWidth {
+			return inline
+		}
 	}
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "[\n" + indent +
-		strings.Join(parts, ",\n"+indent) +
-		"\n" + f.indented() + "]"
+	return "[\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "]"
 }
 
 func (f *Formatter) exprObject(n *sitter.Node) string {
@@ -697,23 +793,18 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 		return "{}"
 	}
 
-	var parts []string
-	for i := uint(0); i < n.NamedChildCount(); i++ {
-		parts = append(parts, f.expr(n.NamedChild(i)))
-	}
+	items, hasLineComment := f.collectionItems(n)
 
-	joined := strings.Join(parts, ", ")
-
-	inline := "{ " + joined + " }"
-	if f.lineLen+len(inline) <= f.opts.LineWidth {
-		return inline
+	if !hasLineComment {
+		inline := "{ " + joinCollectionInline(items) + " }"
+		if f.lineLen+len(inline) <= f.opts.LineWidth {
+			return inline
+		}
 	}
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "{\n" + indent +
-		strings.Join(parts, ",\n"+indent) +
-		"\n" + f.indented() + "}"
+	return "{\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "}"
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {

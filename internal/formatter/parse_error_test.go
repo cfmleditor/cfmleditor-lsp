@@ -257,3 +257,85 @@ func TestFormatKeepsDeclarationKeyword(t *testing.T) {
 		t.Errorf("interface was rewritten as a component:\n%s", out)
 	}
 }
+
+// TestFormatPreservesStaticAccessor covers `::` being rendered as `.`.
+// member_expression hardcoded the accessor, so Lucee/BoxLang static access
+// `Widget::getData()` came back as the instance call `Widget.getData()`.
+func TestFormatPreservesStaticAccessor(t *testing.T) {
+	src := "component {\n\tfunction a() {\n\t\tvar d = Widget::getData();\n\t\tvar e = Foo::BAR;\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	for _, want := range []string{"Widget::getData()", "Foo::BAR"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// TestFormatCommentInsideLiteral covers the worst of the literal bugs: array
+// and struct literals treated comment children as elements and joined them
+// with ", ". Inlining a `//` comment commented out every element after it, so
+// `[ // note \n a, b ]` became `[// note, a, b]` — the statement was destroyed.
+func TestFormatCommentInsideLiteral(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "leading comment in array",
+			src: "component {\n\tfunction a() {\n\t\tvar routes = [\n\t\t\t// leading comment\n" +
+				"\t\t\t{ pattern: \"/\", handler: \"home\" },\n\t\t\t{ pattern: \"/x\", handler: \"x\" }\n\t\t];\n\t}\n}\n",
+		},
+		{
+			name: "leading comment in struct",
+			src: "component {\n\tfunction a() {\n\t\tvar s = {\n\t\t\t// note\n" +
+				"\t\t\tcustomInterceptionPoints: \"a,b\",\n\t\t\tother: 1\n\t\t};\n\t}\n}\n",
+		},
+		{
+			name: "comment between elements",
+			src:  "component {\n\tfunction a() {\n\t\tvar s = {\n\t\t\ta: 1,\n\t\t\t// why\n\t\t\tb: 2\n\t\t};\n\t}\n}\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := formatSrc(t, tc.src, stdOpts())
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+
+			// Every line comment must be the last thing on its line, otherwise
+			// it has swallowed whatever followed it.
+			for _, line := range strings.Split(string(out), "\n") {
+				idx := strings.Index(line, "//")
+				if idx < 0 {
+					continue
+				}
+
+				if rest := strings.TrimSpace(line[idx+2:]); strings.Contains(rest, ",") {
+					t.Errorf("a line comment swallowed following elements: %q\nfull output:\n%s", line, out)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatCommentInLiteralIsNotDropped checks the comment survives at all —
+// skipping comment children would also have fixed the swallowing, by deleting
+// the comment.
+func TestFormatCommentInLiteralIsNotDropped(t *testing.T) {
+	src := "component {\n\tfunction a() {\n\t\tvar s = {\n\t\t\t// keep me\n\t\t\ta: 1\n\t\t};\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if !strings.Contains(string(out), "// keep me") {
+		t.Errorf("comment was dropped:\n%s", out)
+	}
+}
