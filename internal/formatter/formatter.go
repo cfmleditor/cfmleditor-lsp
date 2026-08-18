@@ -699,6 +699,12 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case "html_text", "text":
 		f.formatText(n)
 
+	case "doctype":
+		f.formatDoctype(n)
+
+	case "style_element", "script_element":
+		f.formatRawTextElement(n)
+
 	case "comment", "cf_comment":
 		f.formatComment(n)
 
@@ -885,6 +891,39 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 
 // formatCFTag handles generic cf_tag nodes (cffunction, cfloop, etc.)
 // Structure: cf_start_tag + body children + cf_end_tag
+// hasCFBodyContent reports whether a cf_tag has any body child with actual
+// content, ignoring the start/end tags emitted around the body loop.
+func (f *Formatter) hasCFBodyContent(n *sitter.Node) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "cf_start_tag", "cf_end_tag", "implicit_cf_end_tag":
+			continue
+		default:
+			if strings.TrimSpace(f.text(c)) != "" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the
+// tags that are indented with their enclosing <cftry> rather than inside it.
+func (f *Formatter) isCFTryBranch(n *sitter.Node) bool {
+	if n.Kind() != "cf_tag" {
+		return false
+	}
+
+	switch strings.ToLower(f.tagName(n)) {
+	case "cfcatch", "cffinally":
+		return true
+	}
+
+	return false
+}
+
 func (f *Formatter) formatCFTag(n *sitter.Node) {
 	// Check if this is a self-closing cf_tag (e.g. <cftransaction action="commit" />)
 	for i := uint(0); i < n.ChildCount(); i++ {
@@ -904,9 +943,17 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	f.write("\n")
 
 	isBlock := true // cf_tag with start+end is always a block
+
+	// An empty block (e.g. <cfcatch type="any"></cfcatch>) otherwise emits the
+	// padding blank line from both ends, leaving two blank lines around nothing.
+	hasBody := f.hasCFBodyContent(n)
+
 	if isBlock {
 		f.level++
-		f.write("\n")
+
+		if hasBody {
+			f.write("\n")
+		}
 	}
 
 	prevCFTagKind := ""
@@ -928,7 +975,19 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 				f.write("\n")
 			}
 
+			// <cfcatch>/<cffinally> line up with their enclosing <cftry>
+			// rather than sitting inside its body, matching the conventional
+			// CFML style (and how <cfelse> is emitted inside <cfif>).
+			dedent := name == "cftry" && f.level > 0 && f.isCFTryBranch(c)
+			if dedent {
+				f.level--
+			}
+
 			f.formatNode(c)
+
+			if dedent {
+				f.level++
+			}
 
 			if tagKind != "" && !f.nodeIsComment(c) {
 				prevCFTagKind = tagKind
@@ -942,7 +1001,10 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 		f.level--
 	}
 
-	f.write("\n")
+	if hasBody {
+		f.write("\n")
+	}
+
 	f.nl()
 	f.writeIndent()
 	f.write("</" + name + ">")
@@ -1577,6 +1639,25 @@ func (f *Formatter) formatText(n *sitter.Node) {
 	}
 	// Collapse all whitespace to single spaces (HTML whitespace rules).
 	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
+}
+
+// formatDoctype emits a <!DOCTYPE ...> declaration verbatim on its own line.
+//
+// The grammar models the declaration body (everything between "DOCTYPE" and
+// ">") as an unnamed pattern token that is not exposed as a child node, so the
+// generic child-walking path in formatNode would silently reconstruct the node
+// as "<!DOCTYPE>" and discard the body. Emitting the node's own source text
+// avoids that and is correct regardless: a doctype has no internal structure
+// worth reformatting.
+func (f *Formatter) formatDoctype(n *sitter.Node) {
+	raw := strings.TrimSpace(f.text(n))
+	if raw == "" {
+		return
+	}
+
+	f.writeIndent()
+	f.write(raw)
+	f.write("\n")
 }
 
 func (f *Formatter) formatComment(n *sitter.Node) {

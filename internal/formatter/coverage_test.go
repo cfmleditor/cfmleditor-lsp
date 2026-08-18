@@ -49,6 +49,9 @@ var handledKinds = map[string]bool{
 	"html_text":                       true,
 	"text":                            true,
 	"comment":                         true,
+	"doctype":                         true,
+	"style_element":                   true,
+	"script_element":                  true,
 }
 
 // TestIdempotencyBroad formats a variety of inputs and asserts that formatting
