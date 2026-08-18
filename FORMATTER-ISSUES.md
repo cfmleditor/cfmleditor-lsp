@@ -1,335 +1,300 @@
 # Formatter: non-whitespace change audit
 
-Findings from formatting every `.cfm`/`.cfc` file in `testdata/` with
-`internal/formatter` and checking the result against the `whitespaceOnly`
-guard (`checkWhitespaceOnly`, `internal/formatter/formatter.go:199`).
+Findings from formatting a corpus of real-world CFML through
+`internal/formatter` and checking each result against the `whitespaceOnly`
+guard (`checkWhitespaceOnly`, `internal/formatter/formatter.go`).
 
-The formatter is supposed to be whitespace-only: `formatting.whitespaceOnly`
-defaults to `true` (`internal/config/config.go:202`), and `Format` rejects its
-own output when the non-whitespace character stream changed
-(`internal/formatter/formatter.go:186`). Everything below is a case where the
-formatter *does* change non-whitespace content, or where the guard fails to
-notice that it did.
+The formatter is meant to be whitespace-only: `formatting.whitespaceOnly`
+defaults to `true` (`internal/config/config.go`), and `Format` rejects its own
+output when the non-whitespace character stream changed. Everything below is a
+case where the formatter *did* change non-whitespace content, or where the
+guard failed to notice that it had.
 
-## Corpus and method
+Most of these are fixed. Section 4 lists what is still outstanding.
 
-39 files under `testdata/` (`.cfm` + `.cfc`). Each was parsed with
-`language.CFML`, formatted with `formatter.DefaultOptions()` plus the three
-sub-parsers and `WhitespaceOnly: true`, and the output compared to the input.
-Files that passed the guard were then formatted a second time to check
-idempotency.
+## 1. Corpus and method
 
-| Result | Count |
+Two corpora. The repository's own fixtures, and 5,620 files from six
+open-source CFML projects:
+
+| Project | Files |
 |---|---|
-| Formatted cleanly (whitespace-only, and idempotent) | 30 |
-| **Rejected by the `whitespaceOnly` guard** | **9** |
-| Non-idempotent (differs between pass 1 and pass 2) | 0 |
+| Lucee (`lucee/Lucee`) | 3,775 |
+| ContentBox (`Ortus-Solutions/ContentBox`) | 724 |
+| ColdBox (`ColdBox/coldbox-platform`) | 655 |
+| FW/1 (`framework-one/fw1`) | 305 |
+| TestBox (`ortus-solutions/testbox`) | 145 |
+| cfmleditor (`cfmleditor/cfmleditor`) | 16 |
 
-The 9 rejected files, and which issue below causes each:
+Each file was parsed with `language.CFML`, formatted with
+`formatter.DefaultOptions()` plus the three sub-parsers and
+`WhitespaceOnly: true`, and compared against its input. Files that formatted
+cleanly were then formatted a second time to check idempotency.
 
-| File | Issue |
-|---|---|
-| `testdata/UserService.cfc` | 1 |
-| `testdata/deps/persist.cfc` | 1 |
-| `testdata/deps/service.cfc` | 1 |
-| `testdata/refs/controller.cfc` | 1 |
-| `testdata/refs/persist.cfc` | 1 |
-| `testdata/refs/service.cfc` | 1 |
-| `testdata/beans/dao/OrderDAO.cfc` | 4 |
-| `testdata/filepath_test.cfm` | 3 |
-| `testdata/DefinitionTestTag.cfc` | 2 |
+### Results
 
-Note the asymmetry that governs how much each issue actually hurts:
+| | Before | After |
+|---|---|---|
+| Formatted cleanly | 3,863 | **5,450** |
+| Rejected by the guard | 1,671 | **84** |
+| Refused: grammar cannot parse | 86 | 86 |
+| Not idempotent | 390 † | **36** |
+| Panics | 0 | 0 |
 
-- The **LSP path** (`internal/server/formatting.go`) is protected twice — it
-  refuses to format a document whose tree has an `ERROR` node
-  (`formatting.go:91`) *before* calling `Format`, and it passes
-  `WhitespaceOnly` through from config (`formatting.go:115`). Symptom there is
-  "format-on-save silently does nothing".
-- The **`format` CLI subcommand** (`cmd/cfmleditor-lsp/main.go:294`) has
-  **neither** check. It calls `formatter.DefaultOptions()`
-  (`main.go:312`), which leaves `WhitespaceOnly` at its zero value `false`, and
-  never inspects the tree for errors. Symptom there is silent file corruption
-  (issue 5).
+† measured at the post-fix corpus size; the pre-fix figure of 50 covered a much
+smaller pool, since a file the guard rejects never reaches the idempotency
+check. Comparing like for like, the same 5,450 files went from 390 unstable to
+36.
 
----
+Per project, after:
 
-## 1. `query` and `function` return types are silently dropped
+| Project | Clean | Parse-refused | Guard-rejected |
+|---|---|---|---|
+| Lucee | 3,626 | 77 | 72 |
+| ContentBox | 720 | 3 | 1 |
+| ColdBox | 642 | 5 | 8 |
+| FW/1 | 303 | 0 | 2 |
+| TestBox | 143 | 1 | 1 |
+| cfmleditor | 16 | 0 | 0 |
 
-**Severity: high — silent semantic change.** Affects 6 of the 9 failing files.
+The repository's own `testdata/` went from 30/39 clean to 38/39, the last being
+`DefinitionTestTag.cfc`, which the grammar cannot parse (see 2.1).
 
-```cfml
-component {
-    public query function GetData(required string id) {
-        return 1;
-    }
-}
-```
+### Why the entry point matters
 
-formats to:
+- The **LSP path** (`internal/server/formatting.go`) refuses a document whose
+  tree has an `ERROR` node before calling `Format`, and passes `WhitespaceOnly`
+  through from config. Symptom of a bug there is "format-on-save silently does
+  nothing".
+- The **`format` CLI** had neither check: it built `formatter.DefaultOptions()`,
+  which leaves `WhitespaceOnly` at `false`, and never inspected the tree.
+  Symptom there was silent file corruption. Fixed — see 2.2.
 
-```cfml
-component {
+## 2. Fixed
 
-	public function GetData(
-		required string id
-	) {
+### 2.1 Corrupt output from unparseable trees
 
-		return 1;
-
-	}
-
-}
-```
-
-The `query` return type is gone. Surveying every CFML return type, two are
-dropped and the rest survive:
-
-| Return type | Result |
-|---|---|
-| `any` `array` `binary` `boolean` `component` `date` `guid` `numeric` `string` `struct` `uuid` `variablename` `void` `xml`, and dotted component paths (`models.User`) | preserved |
-| **`query`** | **dropped** |
-| **`function`** | **dropped** |
-
-It is not tied to the access modifier — `query function A()`,
-`private query function B()`, `remote query function I()` and
-`package query function J()` all lose it. Parameter types are unaffected
-(`function a(query q)` is fine); only the return type is lost.
-
-**Root cause.** The CFML grammar tokenises these two type names as *anonymous*
-keyword nodes rather than as named `identifier` nodes. CST for
-`public query function A(...)`:
+`Format` walked `ERROR` nodes with no rendering for them and fell through to a
+raw emit that concatenated their children without separators. A body-less
+`<cfinvoke>` or `<cfhttp>` inside `<cfcomponent>` — valid CFML the grammar
+cannot parse — came back as:
 
 ```
-function_declaration
-  access_type      named=true   "public"
-  query            named=false  "query"     <-- anonymous
-  function         named=false  "function"
-  identifier       named=true   "A"
-```
-
-versus `public struct function A(...)`, where the type arrives as
-`identifier named=true "struct"`.
-
-`scriptFunction` (`internal/formatter/cfscript_formatter.go:1067`) collects
-signature prefix tokens behind a named-node gate:
-
-```go
-if !c.IsNamed() {
-    t := c.Kind()
-    if t == "function" {
-        // keyword
-        continue
-    }
-}
-
-if c.IsNamed() {
-    ...
-    prefix = append(prefix, f.text(c))     // cfscript_formatter.go:1103
-}
-```
-
-An anonymous child that is not the `function` keyword falls through both
-blocks and is dropped with no diagnostic. `query` is exactly that case.
-
-`function` as a return type is lost to the sibling problem: the two
-`function` tokens (return type and keyword) are both anonymous and both
-skipped by the `t == "function"` branch at `cfscript_formatter.go:1088`, and
-the signature builder then emits a single literal `"function "` at
-`cfscript_formatter.go:1118`.
-
-## 2. `<cfcomponent>` containing a body-less `<cfinvoke>`/`<cfhttp>` produces corrupt output
-
-**Severity: critical — destroys the file via the CLI.** Affects
-`testdata/DefinitionTestTag.cfc`.
-
-```cfml
-<cfcomponent>
-	<cfinvoke component="models.Widget" method="render" returnvariable="r">
-</cfcomponent>
-```
-
-formats to:
-
-```
-<cfcomponent>
-
 <cfinvokecomponent="models.Widget"method="render"returnvariable="r"></cf>
 ```
 
-Three separate corruptions in one output: the tag name and every attribute are
-concatenated with no separating whitespace (`<cfinvokecomponent="…"method="…"`,
-which is not parseable CFML), the `</cfcomponent>` closing tag is discarded,
-and a bogus `</cf>` is emitted.
+Tag name and attributes run together, `</cfcomponent>` dropped, a bogus `</cf>`
+appended. `Format` returned a `nil` error; only the guard caught it, and only
+because the streams ended up different lengths.
 
-The same input with `<cfhttp>` instead of `<cfinvoke>` corrupts identically.
-Closing the tag (`<cfinvoke …></cfinvoke>`) formats correctly, as does the same
-body-less `<cfinvoke>` inside `<cfif>` or at the top level of a `.cfm`.
+`Format` now refuses any tree containing an `ERROR` or `MISSING` node, naming
+the offending line. The construct remains unformattable, but it can no longer
+produce garbage.
 
-**Root cause.** The grammar cannot parse a body-less `<cfinvoke>` inside
-`<cfcomponent>` and emits an `ERROR` node wrapping it:
-
-```
-program
-  cf_component_open_tag  "<cfcomponent>"
-  ERROR                                     <-- parse failure
-    cf_start_tag  "<cfinvoke component=... >"
-    </cf
-    >
-```
-
-`Format` has no handling for `ERROR` nodes in the top-level CFML tree — the
-`parseErr` machinery (`formatter.go:349`) only covers *sub*-parses of script
-and query blocks — so the walk falls through to a raw-emit path that
-concatenates the ERROR node's children without separators.
-
-Note `Format` returns `err == nil` here. Only the `whitespaceOnly` guard
-catches it, and only because the character streams end up different lengths.
-
-**Downstream symptom.** The same mis-nesting cascades into surrounding HTML.
-`<div>\n<cfinvoke component="a" method="b">\n</div>` formats to:
-
-```
-<div />
-<cfinvoke component="a" method="b">
-</div>
-</cfinvoke>
-```
-
-The `<div>` is rewritten as a self-closing `<div />` while its `</div>` is left
-in place, and a `</cfinvoke>` is emitted after the `</div>`.
-
-## 3. Body-less optional-body tags gain a synthesised closing tag
-
-**Severity: medium — re-parents following content.** Affects
-`testdata/filepath_test.cfm`.
-
-```cfml
-<cfmodule template="includes/header.cfm">
-<p>after</p>
-```
-
-formats to:
-
-```cfml
-<cfmodule template="includes/header.cfm">
-	<p>after</p>
-</cfmodule>
-```
-
-`<p>after</p>` was a sibling of the `<cfmodule>` and is now its body. Surveying
-CF tags commonly written without a body:
-
-| Tag | Behaviour |
-|---|---|
-| `cfinclude` `cfset` `cfparam` `cfabort` `cflocation` `cfheader` `cfcookie` `cfdump` `cflog` `cfimport` `cfobject` `cfthrow` `cfexit` `cfflush` `cfrethrow` | correctly treated as void → self-closed, following content untouched |
-| **`cfmodule`** `cfhttp` `cfinvoke` | treated as containers → all following content swallowed, closing tag synthesised |
-
-`cfmodule`, `cfhttp` and `cfinvoke` genuinely *can* take a body
-(`<cfhttpparam>`, `<cfinvokeargument>`, a custom-tag body), so they are not
-void — but they are legal and common without one, and the formatter has no
-handling for that shape.
-
-## 4. Missing statement semicolons are inserted
-
-**Severity: low — benign in CFML, but blocks formatting entirely.** Affects
-`testdata/beans/dao/OrderDAO.cfc`.
-
-```cfml
-component {
-	function a() {
-		return []
-	}
-	function b() {
-		var x = 1
-		return x
-	}
-	function c() {
-		writeOutput("hi")
-	}
-}
-```
-
-Every statement comes back with a `;` appended. Semicolons are optional in
-CFML, so this is semantically harmless and arguably desirable normalisation —
-but it inserts non-whitespace characters, so the guard rejects the whole file.
-With the default `whitespaceOnly: true`, one missing semicolon anywhere makes
-the LSP refuse to format the entire document, with no visible reason.
-
-## 5. The `format` CLI subcommand has no safety net and will corrupt files
-
-**Severity: critical — silent data loss.**
-
-`cmdFormat` (`cmd/cfmleditor-lsp/main.go:294`) uses
-`formatter.DefaultOptions()`, which does not set `WhitespaceOnly`
-(`internal/formatter/formatter.go:104`), and unlike the server path it never
-checks `tree.RootNode().HasError()`. So every issue above is written straight
-to disk by `format -w`:
+### 2.2 The `format` CLI wrote corrupt output and reported success
 
 ```console
 $ wc -c victim.cfc
 1521 victim.cfc
 $ cfmleditor-lsp format -w victim.cfc
-formatted victim.cfc
-$ echo $?
-0
+formatted victim.cfc          # exit 0
 $ wc -c victim.cfc
-1411 victim.cfc
-$ tail -2 victim.cfc
-<cfinvokecomponent="models.Widget"method="render"returnvariable="invokeResult">
-<cfinvokecomponent="services.UserService"method="listUsers"returnvariable="users"></cf>
+1411 victim.cfc               # 110 bytes gone, no longer parses
 ```
 
-110 bytes gone, the file no longer parses, exit status 0, success message
-printed. `internal/server/formatting.go` refuses this same document; the CLI
-does not.
+`cmdFormat` now defaults `WhitespaceOnly` to `true` (matching
+`config.Resolve`), with `--allow-non-whitespace` to opt out, and only rewrites
+a file after `Format` succeeds. A batch run reports every failing file instead
+of exiting on the first.
 
-## 6. Guard blind spot: CFML comments are skipped entirely
+### 2.3 UTF-8 BOM stripped — 554 files
 
-**Severity: medium — the guard under-reports.**
+A leading BOM sits outside every CST node, so the walk never emitted it. Every
+BOM-prefixed file silently lost its encoding preamble. Now carried across
+verbatim, and never invented for files without one.
 
-`skipWSAndComments` (`internal/formatter/formatter.go:291`) advances past
-`<!--- … --->` blocks on both sides before comparing, so comment *content* is
-never part of the compared stream. Every one of these passes the guard:
+### 2.4 Function attributes hoisted before `function` — 108 files
 
-| Source | Output | Guard verdict |
+Attributes written after the parameter list are siblings of the parameters, but
+`scriptFunction` appended every non-field child to the signature *prefix*:
+
+```cfml
+function setup() localmode="true" {}   ->   localmode="true" function setup() {}
+```
+
+The output does not compile. Seen with `localmode`, `skip`, `restpath`,
+`httpmethod`, `output` and `hint`. Attributes are now emitted between the
+parameter list and the body.
+
+### 2.5 `query` and `function` return types dropped
+
+The signature prefix was gated on `IsNamed()`, but the grammar tokenises some
+type and modifier keywords as *anonymous* nodes:
+
+```
+function_declaration
+  access_type  named=true   "public"
+  query        named=false  "query"     <-- dropped
+  function     named=false  "function"
+```
+
+`public query function f()` became `public function f()`. Of the fourteen CFML
+return types plus dotted component paths, only `query` and `function` were
+affected — the rest arrive as named `identifier` nodes. Anonymous children other
+than the `function` keyword are now kept, and only the first `function` token is
+treated as the keyword so `function function f()` survives.
+
+### 2.6 Catch clauses and catch types dropped — 194 files
+
+Two defects in `scriptTry`:
+
+- Every catch clause carries the same `handler` field name, so
+  `ChildByFieldName` returned only the first. A `try` with two catches lost the
+  second **along with its body**.
+- The exception type is a separate `type` field. Rendering only the `parameter`
+  turned `catch (java.lang.Exception e)` into `catch (e)`, silently widening
+  what the handler catches.
+
+Clauses are now walked as children and rendered as `catch (<type> <param>)`.
+
+### 2.7 `interface` rewritten as `component`; `abstract`/`final` dropped
+
+`scriptComponent` hardcoded its header to `"component"`, so `interface {}`
+became `component {}` — changing what the file declares — and the modifiers,
+also anonymous nodes, vanished. Declaration keywords are now emitted in source
+order from an explicit keyword set.
+
+### 2.8 `::` static access rewritten to `.` — 24 files
+
+`member_expression` hardcoded `"."`, so Lucee/BoxLang static access
+`Widget::getData()` became the instance call `Widget.getData()`. The accessor
+now comes from the node; `::` arrives as a named `static_chain` child rather
+than an anonymous token.
+
+### 2.9 Comments commenting out the code around them — 108 files
+
+`exprArray`/`exprObject` walked `NamedChild`, which includes comments, treated
+them as elements, and joined everything with `", "`:
+
+```cfml
+var routes = [                 var routes = [// leading comment, { pattern: "/",
+    // leading comment    ->   handler: "home" }, { pattern: "/x", handler: "x" }];
+    { pattern: "/", ... },
+    { pattern: "/x", ... }
+];
+```
+
+The whole statement is inside a line comment. `exprArgs` had the same defect
+for call arguments, via a comment test that only recognised `cf_comment` and
+not the cfscript `comment` kind.
+
+Literal and argument children are now classified as elements or comments; a
+line comment forces the construct onto several lines and never takes a
+trailing comma. Block comments still inline.
+
+### 2.10 Comments deleted in "between" positions
+
+A comment belonging to no field was skipped past and lost:
+
+- between a block and its `else` / `catch` / `finally`
+- between a chained call and its next `.hop()`
+
+Both are now emitted, with the continuation keyword or chain hop moving to its
+own line. With no comment present, `} else {` still sits on one line.
+
+### 2.11 Invented closing tags — ~100 files
+
+`formatCFTag` closed every `cf_tag`, so a tag legal without a body gained a
+closing tag it never had and every following sibling was re-parented into it:
+
+```cfml
+<cfmodule template="a.cfm">        <cfmodule template="a.cfm">
+<p>after</p>                  ->       <p>after</p>
+                                   </cfmodule>
+```
+
+Affected `cfmodule`, `cfhttp`, `cfinvoke`, `cffeed` and `cfadmin`; the other
+fifteen void-ish CF tags were already correct. `hasRealCFEndTag` now checks for
+an actual `cf_end_tag` child — an unclosed tag has either none or only the
+grammar's synthetic `implicit_cf_end_tag` marker.
+
+### 2.12 The guard vetoing the formatter's own canonicalisation — 527 files
+
+The formatter deliberately adds braces around single-statement bodies and
+semicolons to statements written without them. Both are non-whitespace changes,
+so `whitespaceOnly` rejected them and the LSP silently declined to format 9.4%
+of real-world files with no indication why.
+
+`checkWhitespaceOnly` now skips an inserted `;`, `{` or `}` on the output side,
+in the same spirit as the existing self-closing-slash and quote allowances. Two
+things keep it narrow: the allowance is one-directional, so a token the
+formatter *dropped* still fails; and added braces are counted and must balance.
+
+`guard_test.go` pins this down with the twelve real defects above — all still
+rejected.
+
+### 2.13 Formatting not a fixed point — 390 files
+
+Two cases where one pass left work the next pass performed, so format-on-save
+kept producing a fresh diff for an unchanged file:
+
+- `scriptBlockOf2` wrapped a single-statement body in braces *tightly*, while
+  `scriptBlock` pads the inside of a real block with blank lines. On the second
+  format the braces were in the source, so the same code took the padded path.
+- `preformat` replaces a converted element whole, so `collectEdits` could not
+  descend into its body and any void element nested there survived the pass.
+  `<p>text<br>more</p>` inside a converted parent kept its `<br>` until a later
+  run. `preformat` now repeats until the source stops changing.
+
+## 3. Guard coverage gaps
+
+Both are latent — nothing in the corpus triggers them — but they mean the
+"clean" figures are an upper bound, not a proof.
+
+### 3.1 CFML comments are skipped entirely
+
+`skipWSAndComments` advances past `<!--- … --->` on both sides before
+comparing, so comment *content* is never in the compared stream:
+
+| Source | Output | Verdict |
 |---|---|---|
 | `<cfset a = 1><!--- keep this --->` | `<cfset a = 1><!--- TOTALLY DIFFERENT --->` | passes |
 | `<cfset a = 1><!--- keep --->` | `<cfset a = 1>` | passes |
 | `<cfset a = 1>` | `<cfset a = 1><!--- injected --->` | passes |
 | `<cfset a = 1>// line comment` | `<cfset a = 1>// CHANGED` | **rejected** |
 
-Rewriting, deleting or injecting an entire CFML comment is invisible. Script
-`//` comments are compared normally, so the exposure is specific to `<!--- --->`.
+Rewriting, deleting or injecting a whole CFML comment is invisible. Script
+`//` comments are compared normally.
 
-## 7. Guard blind spot: `selfCloseTags` disables quote checking everywhere
+### 3.2 `selfCloseTags` disables quote checking across the whole file
 
-**Severity: medium — a style option silently widens the guard.**
+When `allowSelfClose` is true the guard skips *any* mismatched `"` or `'` on
+either side. The comment says "around attribute values", but the check is
+unanchored and applies to string literals and SQL too:
 
-When `allowSelfClose` is true, `checkWhitespaceOnly` skips any mismatched `"`
-or `'` on either side (`internal/formatter/formatter.go:228-251`). The intent
-per the comment is "added/removed quotes around attribute values", but the
-check is unanchored — it applies to every quote in the file, including string
-literals and SQL:
-
-| Source | Output | `selfCloseTags: true` | `selfCloseTags: false` |
+| Source | Output | `selfCloseTags: true` | `false` |
 |---|---|---|---|
 | `<cfset msg = "hello world">` | `<cfset msg = hello world>` | passes | rejected |
-| `<cfset a = "x" & "y">` | `<cfset a = x & y>` | passes | rejected |
 | `<cfquery>SELECT 'a' FROM t</cfquery>` | `<cfquery>SELECT a FROM t</cfquery>` | passes | rejected |
 
 `selfCloseTags` defaults to `true`, so by default the guard cannot detect the
-formatter stripping every quote out of a `<cfset>`. This is a latent gap — no
-file in the corpus triggers it — but it means the "30 clean files" figure above
-is an upper bound, not a proof.
+formatter stripping every quote out of a `<cfset>`.
 
----
+## 4. Outstanding
 
-## Reproducing
+| Issue | Files | Notes |
+|---|---|---|
+| Grammar cannot parse | 86 | 61 cfscript, 25 document. Now refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
+| Guard-rejected, long tail | 84 | 72 in Lucee's test suite. Includes a residual leading-comma case in some literals, and assorted one- and two-file buckets. |
+| Not idempotent | 36 | Blank-line and self-close edge cases in tag-based CFCs. |
+| Guard gaps 3.1 / 3.2 | — | Comment content uncompared; quote checking disabled by a style option. |
+| `final component` body not formatted | — | Pre-existing: emitted verbatim as `{ function a() {} }`. Whitespace-only, so it passes the guard. `abstract component` and `interface` go through the normal path. |
 
-The corpus scan is not checked in (it would fail CI while these bugs stand).
-To rebuild it, format each file with `WhitespaceOnly: true` and the three
-sub-parsers wired up, exactly as `internal/server/formatting.go` does:
+## 5. Reproducing
+
+The corpus scanner is not checked in — it is a scratch harness, and pointing it
+at a large tree is a manual step. To rebuild it, format each file exactly as
+`internal/server/formatting.go` does:
 
 ```go
 o := formatter.DefaultOptions()
@@ -339,31 +304,22 @@ o.ParseCFML   = func(s []byte) *sitter.Tree { return language.Parse(language.CFM
 o.WhitespaceOnly = true
 
 tree := language.Parse(language.CFML, src, nil)
-out, err := formatter.Format(src, tree, o)   // err != nil => non-whitespace change
+out, err := formatter.Format(src, tree, o)   // err != nil => refused
 ```
 
-Individual cases reproduce through the CLI, which applies no guard:
+Then format `out` again and compare, to catch non-idempotency.
+
+Individual cases reproduce through the CLI. It applies the guard by default now,
+so `--allow-non-whitespace` is what shows you the damage a bug would do:
 
 ```console
 $ go build -o target/release/cfmleditor-lsp ./cmd/cfmleditor-lsp
 $ printf 'component {\n\tpublic query function A() {}\n}\n' > /tmp/r.cfc
 $ target/release/cfmleditor-lsp format /tmp/r.cfc
+$ target/release/cfmleditor-lsp format --allow-non-whitespace /tmp/r.cfc
 ```
 
-## Suggested order of work
-
-1. **Issue 5** — give `cmdFormat` the same two gates the server has
-   (`HasError()` refusal, `WhitespaceOnly` on). One-line-ish, and it turns
-   every other bug here from data loss into a refusal to format.
-2. **Issue 2** — make `Format` refuse a tree containing an `ERROR` node
-   instead of raw-emitting it, so corrupt output cannot be produced at all.
-3. **Issue 1** — in `scriptFunction`, accept anonymous prefix children that
-   are not the `function` keyword, and track the return-type `function` token
-   separately from the keyword.
-4. **Issue 3** — treat `cfmodule`/`cfhttp`/`cfinvoke` as void when the source
-   has no matching close tag.
-5. **Issues 6 and 7** — tighten the guard: compare comment content, and anchor
-   the quote allowance to attribute values rather than the whole file.
-6. **Issue 4** — decide whether semicolon insertion is intended. If it is, it
-   needs to be exempted from the guard the way self-closing already is;
-   if not, preserve the source's omission.
+Regression coverage for everything in section 2 lives in
+`internal/formatter/parse_error_test.go`, `internal/formatter/guard_test.go`,
+`internal/formatter/idempotency_test.go` and
+`cmd/cfmleditor-lsp/format_test.go`.
