@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*"
+    # TEMPORARY: validate the reworked build on this branch before merging.
+    # Remove before merge — publish is tag-gated, so this releases nothing.
+    branches:
+      - "claude/cfm-cfc-formatting-issues-s3mg6w"
   # Lets the whole build be rehearsed on a branch without cutting a tag. The
   # publish job is tag-only, so a manual run produces artifacts and nothing
   # else. GitHub only offers the "Run workflow" button for workflows present
