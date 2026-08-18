@@ -98,3 +98,91 @@ func TestFormatWellFormedTagsStillFormat(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatPreservesBOM covers a leading UTF-8 BOM being dropped. The BOM sits
+// outside every CST node, so the walk never emitted it and every BOM-prefixed
+// file in the wild (554 of 5620 in a real-world corpus) failed the guard.
+func TestFormatPreservesBOM(t *testing.T) {
+	bom := "\ufeff"
+	src := bom + "component {\n\tfunction a() {\n\t\treturn 1;\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if !strings.HasPrefix(string(out), bom) {
+		t.Errorf("BOM was dropped; output starts %q", string(out)[:min(12, len(out))])
+	}
+
+	if strings.HasPrefix(strings.TrimPrefix(string(out), bom), bom) {
+		t.Error("BOM was duplicated")
+	}
+}
+
+// TestFormatNoBOMAdded checks the BOM is not invented for files without one.
+func TestFormatNoBOMAdded(t *testing.T) {
+	out, err := formatSrc(t, "component {\n}\n", stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if strings.HasPrefix(string(out), "\ufeff") {
+		t.Error("a BOM was added to a file that had none")
+	}
+}
+
+// TestFormatKeepsPostParamAttributes covers attributes written after the
+// parameter list. They are siblings of the parameters, and were being hoisted
+// into the modifier prefix — `function f() localmode="true" {}` came back as
+// `localmode="true" function f() {}`, which does not compile.
+func TestFormatKeepsPostParamAttributes(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"component {\n\tfunction setup() localmode=\"true\" {}\n}\n", "function setup() localmode=\"true\""},
+		{"component {\n\tfunction beforeAll() skip=\"isNotSupported\" {}\n}\n", "function beforeAll() skip=\"isNotSupported\""},
+		{"component {\n\tremote function n() restpath=\"getName\" httpmethod=\"GET\" {}\n}\n", "remote function n() restpath=\"getName\" httpmethod=\"GET\""},
+	}
+
+	for _, tc := range cases {
+		out, err := formatSrc(t, tc.src, stdOpts())
+		if err != nil {
+			t.Errorf("format %q: %v", tc.src, err)
+
+			continue
+		}
+
+		if !strings.Contains(string(out), tc.want) {
+			t.Errorf("format %q:\nwant substring %q\ngot:\n%s", tc.src, tc.want, out)
+		}
+	}
+}
+
+// TestFormatKeepsAnonymousReturnTypes covers return types the grammar
+// tokenises as anonymous keyword nodes rather than named identifiers. Gating
+// the signature prefix on IsNamed dropped them silently.
+func TestFormatKeepsAnonymousReturnTypes(t *testing.T) {
+	types := []string{
+		"any", "array", "binary", "boolean", "component", "date", "guid",
+		"numeric", "query", "string", "struct", "uuid", "variablename",
+		"void", "xml", "function",
+	}
+
+	for _, ty := range types {
+		src := "component {\n\tpublic " + ty + " function f() {}\n}\n"
+
+		out, err := formatSrc(t, src, stdOpts())
+		if err != nil {
+			t.Errorf("format %s: %v", ty, err)
+
+			continue
+		}
+
+		want := "public " + ty + " function f()"
+		if !strings.Contains(string(out), want) {
+			t.Errorf("return type %q lost: want substring %q, got:\n%s", ty, want, out)
+		}
+	}
+}

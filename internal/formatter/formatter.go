@@ -128,6 +128,10 @@ func DefaultOptions() Options {
 // 	"cfdump": true, "cfimage": true, "cfpdf": true,
 // }
 
+// utf8BOM is the UTF-8 byte-order mark. tree-sitter reports it as trivia
+// belonging to no node, so it has to be preserved explicitly.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // Formatter holds state during a single formatting pass.
 type Formatter struct {
 	opts             Options
@@ -193,6 +197,14 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	}
 
 	out = f.out.Bytes()
+
+	// A leading UTF-8 BOM sits outside every CST node, so the walk never
+	// emits it. Carry it across verbatim — dropping it rewrites the file's
+	// encoding preamble, which some CFML engines are sensitive to.
+	if bytes.HasPrefix(src, utf8BOM) && !bytes.HasPrefix(out, utf8BOM) {
+		out = append(append([]byte{}, utf8BOM...), out...)
+	}
+
 	if opts.WhitespaceOnly {
 		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags); err != nil {
 			return nil, err

@@ -1073,6 +1073,21 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	body := n.ChildByFieldName("body")
 	retType := n.ChildByFieldName("return_type")
 
+	// Attributes written after the parameter list — `function f() localmode="true" {}`
+	// — are siblings of the parameters, not of the modifiers. Hoisting one into
+	// the prefix emits `localmode="true" function f() {}`, which does not compile,
+	// so anything starting past the parameter list is kept as a suffix.
+	var attrs []string
+
+	attrsFrom := uint(0)
+	haveParams := params != nil
+
+	if haveParams {
+		attrsFrom = params.EndByte()
+	}
+
+	sawFuncKeyword := false
+
 	// Walk children to pick up access modifiers that have no field name.
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -1083,25 +1098,34 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 			continue
 		}
 
-		if !c.IsNamed() {
-			t := c.Kind()
-			if t == "function" {
-				// keyword
-				continue
-			}
+		// Drop the `function` keyword itself, which the signature re-emits.
+		// Only the first one: `function function f()` declares a function
+		// returning a function, and the second token is the keyword.
+		if !c.IsNamed() && c.Kind() == "function" && !sawFuncKeyword {
+			sawFuncKeyword = true
+
+			continue
 		}
 
-		if c.IsNamed() {
-			// `User[] function getUsers()` — the suffix is its own node
-			// sitting beside the return type, not part of it.
-			if c.Kind() == "array_return_suffix" {
-				prefix = appendTypeSuffix(prefix, f.text(c))
+		if haveParams && c.StartByte() >= attrsFrom {
+			attrs = append(attrs, f.text(c))
 
-				continue
-			}
-
-			prefix = append(prefix, f.text(c))
+			continue
 		}
+
+		// `User[] function getUsers()` — the suffix is its own node
+		// sitting beside the return type, not part of it.
+		if c.Kind() == "array_return_suffix" {
+			prefix = appendTypeSuffix(prefix, f.text(c))
+
+			continue
+		}
+
+		// Anonymous children reach here too. The grammar tokenises some type
+		// and modifier keywords (`query`, `abstract`, `final`) as anonymous
+		// nodes rather than named identifiers; gating on IsNamed dropped them
+		// from the signature entirely.
+		prefix = append(prefix, f.text(c))
 	}
 
 	var sig strings.Builder
@@ -1123,6 +1147,11 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 
 	paramStr := f.exprFuncDefParams(params)
 	sig.WriteString(paramStr)
+
+	if len(attrs) > 0 {
+		sig.WriteString(" ")
+		sig.WriteString(strings.Join(attrs, " "))
+	}
 
 	f.iLine(sig.String())
 
