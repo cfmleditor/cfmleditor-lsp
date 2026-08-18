@@ -78,6 +78,63 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 
 // ─── helpers shared by all script formatters ─────────────────────────────────
 
+// memberOperator returns the accessor token joining a member_expression's
+// object and property. It is not always ".": Lucee and BoxLang spell static
+// access `Widget::getData()`, and rendering that as `Widget.getData()` turns a
+// static call into an instance call.
+func memberOperator(n *sitter.Node) string {
+	// `::` is reported as a named `static_chain` node, not an anonymous token.
+	if sc := n.ChildByFieldName("static_chain"); sc != nil {
+		return "::"
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.IsNamed() {
+			continue
+		}
+
+		switch c.Kind() {
+		case ".", "::", "?.":
+			return c.Kind()
+		}
+	}
+
+	return "."
+}
+
+// writeInterveningComments emits any comment child of n lying strictly between
+// byte offsets from and to, each on its own line. Comments in these positions —
+// between a block and its `else`, or between `try` and its `catch` — belong to
+// no field, so navigating to the continuation by field name skipped straight
+// past them and deleted them. Reports whether anything was written, which tells
+// the caller the continuation keyword can no longer sit on the closing brace.
+func (f *Formatter) writeInterveningComments(n *sitter.Node, from, to uint) bool {
+	wrote := false
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+
+		switch c.Kind() {
+		case "comment", "block_comment":
+		default:
+			continue
+		}
+
+		if c.StartByte() < from || c.EndByte() > to {
+			continue
+		}
+
+		f.scriptWrite("\n")
+		f.writeIndent()
+		f.scriptWrite(strings.TrimSpace(f.text(c)))
+
+		wrote = true
+	}
+
+	return wrote
+}
+
 // scriptWrite writes s, prepending indentation if we are at the beginning of
 // a line. This is the primary output primitive for script formatting.
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
@@ -435,7 +492,34 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		prop := n.ChildByFieldName("property")
 		objStr := f.expr(obj)
 		propStr := f.expr(prop)
-		inline := objStr + "." + propStr
+		op := memberOperator(n)
+
+		// A comment between a chained call and its next hop belongs to no
+		// field, so joining object and property dropped it.
+		if obj != nil && prop != nil {
+			if comments := f.commentsBetween(n, obj.EndByte(), prop.StartByte()); len(comments) > 0 {
+				indent := f.opts.indent(f.level + 1)
+
+				var b strings.Builder
+
+				b.WriteString(objStr)
+
+				for _, c := range comments {
+					b.WriteString("\n")
+					b.WriteString(indent)
+					b.WriteString(c)
+				}
+
+				b.WriteString("\n")
+				b.WriteString(indent)
+				b.WriteString(op)
+				b.WriteString(propStr)
+
+				return b.String()
+			}
+		}
+
+		inline := objStr + op + propStr
 		// Break if the object part is multi-line or the last line exceeds width.
 		lastLine := inline
 		if idx := strings.LastIndexByte(inline, '\n'); idx >= 0 {
@@ -446,7 +530,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
 			indent := f.opts.indent(f.level + 1)
 
-			return objStr + "\n" + indent + "." + propStr
+			return objStr + "\n" + indent + op + propStr
 		}
 
 		return inline
@@ -584,15 +668,23 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 
 	var isComment []bool
 
+	hasLineComment := false
+
 	for i := uint(0); i < args.NamedChildCount(); i++ {
 		c := args.NamedChild(i)
 		parts = append(parts, f.expr(c))
-		isComment = append(isComment, c.Kind() == "cf_comment")
+		isComment = append(isComment, isCommentKind(c.Kind()))
+
+		if c.Kind() == "comment" {
+			hasLineComment = true
+		}
 	}
 
 	inline := "(" + strings.Join(parts, ", ") + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
-	shouldBreak := len(parts) > 3 ||
+	// A line comment forces the break unconditionally: joined inline it runs to
+	// end of line and comments out every argument after it.
+	shouldBreak := hasLineComment || len(parts) > 3 ||
 		(len(parts) > 0 && len(inline) > f.opts.LineWidth)
 	if shouldBreak {
 		// Re-evaluate at deeper level so nested splits indent correctly.
@@ -670,26 +762,130 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	return inline
 }
 
+// commentsBetween returns the text of any comment child of n lying strictly
+// between byte offsets from and to.
+func (f *Formatter) commentsBetween(n *sitter.Node, from, to uint) []string {
+	var out []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if !isCommentKind(c.Kind()) {
+			continue
+		}
+
+		if c.StartByte() < from || c.EndByte() > to {
+			continue
+		}
+
+		out = append(out, strings.TrimSpace(f.text(c)))
+	}
+
+	return out
+}
+
+// isCommentKind reports whether a node kind is one of the comment forms that
+// can appear among a call's arguments. Only cf_comment used to be recognised,
+// so a cfscript `//` comment was given a trailing comma and swallowed the
+// arguments that followed it.
+func isCommentKind(kind string) bool {
+	switch kind {
+	case "comment", "block_comment", "cf_comment":
+		return true
+	}
+
+	return false
+}
+
+// collectionItem is one entry of an array or struct literal. Comments are
+// carried alongside the real elements so they survive formatting, but they
+// never take a trailing comma.
+type collectionItem struct {
+	text      string
+	isComment bool
+}
+
+// collectionItems renders a literal's children, reporting whether any of them
+// is a line comment. A line comment runs to end of line, so a literal holding
+// one can never be emitted inline — doing so commented out every element after
+// it and destroyed the statement.
+func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, hasLineComment bool) {
+	items = make([]collectionItem, 0, n.NamedChildCount())
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+
+		switch c.Kind() {
+		case "comment":
+			hasLineComment = true
+
+			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
+		case "block_comment":
+			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
+		default:
+			items = append(items, collectionItem{text: f.expr(c)})
+		}
+	}
+
+	return items, hasLineComment
+}
+
+// joinCollectionInline joins items for a single-line literal. Only safe when
+// no item is a line comment.
+func joinCollectionInline(items []collectionItem) string {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, it.text)
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// joinCollectionLines lays items out one per line, giving a trailing comma to
+// every element that still has an element after it, and never to a comment.
+func joinCollectionLines(items []collectionItem, indent string) string {
+	lastElement := -1
+
+	for i, it := range items {
+		if !it.isComment {
+			lastElement = i
+		}
+	}
+
+	var b strings.Builder
+
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString("\n")
+			b.WriteString(indent)
+		}
+
+		b.WriteString(it.text)
+
+		if !it.isComment && i < lastElement {
+			b.WriteString(",")
+		}
+	}
+
+	return b.String()
+}
+
 func (f *Formatter) exprArray(n *sitter.Node) string {
 	if n.NamedChildCount() == 0 {
 		return "[]"
 	}
 
-	var parts []string
-	for i := uint(0); i < n.NamedChildCount(); i++ {
-		parts = append(parts, f.expr(n.NamedChild(i)))
-	}
+	items, hasLineComment := f.collectionItems(n)
 
-	inline := "[" + strings.Join(parts, ", ") + "]"
-	if f.lineLen+len(inline) <= f.opts.LineWidth {
-		return inline
+	if !hasLineComment {
+		inline := "[" + joinCollectionInline(items) + "]"
+		if f.lineLen+len(inline) <= f.opts.LineWidth {
+			return inline
+		}
 	}
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "[\n" + indent +
-		strings.Join(parts, ",\n"+indent) +
-		"\n" + f.indented() + "]"
+	return "[\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "]"
 }
 
 func (f *Formatter) exprObject(n *sitter.Node) string {
@@ -697,23 +893,18 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 		return "{}"
 	}
 
-	var parts []string
-	for i := uint(0); i < n.NamedChildCount(); i++ {
-		parts = append(parts, f.expr(n.NamedChild(i)))
-	}
+	items, hasLineComment := f.collectionItems(n)
 
-	joined := strings.Join(parts, ", ")
-
-	inline := "{ " + joined + " }"
-	if f.lineLen+len(inline) <= f.opts.LineWidth {
-		return inline
+	if !hasLineComment {
+		inline := "{ " + joinCollectionInline(items) + " }"
+		if f.lineLen+len(inline) <= f.opts.LineWidth {
+			return inline
+		}
 	}
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "{\n" + indent +
-		strings.Join(parts, ",\n"+indent) +
-		"\n" + f.indented() + "}"
+	return "{\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "}"
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {
@@ -1024,6 +1215,16 @@ func (f *Formatter) scriptBlockComment(n *sitter.Node) {
 	f.scriptWrite("\n")
 }
 
+// componentKeywords are the declaration keywords that may precede a component
+// body. The grammar emits them as anonymous nodes, so they have to be
+// recognised explicitly rather than picked up as named children.
+var componentKeywords = map[string]bool{
+	"component": true,
+	"interface": true,
+	"abstract":  true,
+	"final":     true,
+}
+
 // scriptComponent renders a CFC component declaration:
 //
 //	component [extends="X"] [implements="Y"] { ... }
@@ -1033,6 +1234,11 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 
 	var body *sitter.Node
 
+	// Declaration keywords are anonymous nodes preceding the body. The header
+	// used to be hardcoded to "component", which rewrote `interface {}` as
+	// `component {}` and dropped `abstract`/`final` modifiers.
+	var keywords []string
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -1041,13 +1247,20 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 		case "identifier":
 			// 'component' keyword itself — skip
 		default:
-			if c.IsNamed() {
+			switch {
+			case c.IsNamed():
 				attrs = append(attrs, f.text(c))
+			case componentKeywords[strings.ToLower(c.Kind())]:
+				keywords = append(keywords, f.text(c))
 			}
 		}
 	}
 
-	header := "component"
+	header := strings.Join(keywords, " ")
+	if header == "" {
+		header = "component"
+	}
+
 	if len(attrs) > 0 {
 		header += " " + strings.Join(attrs, " ")
 	}
@@ -1073,6 +1286,21 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	body := n.ChildByFieldName("body")
 	retType := n.ChildByFieldName("return_type")
 
+	// Attributes written after the parameter list — `function f() localmode="true" {}`
+	// — are siblings of the parameters, not of the modifiers. Hoisting one into
+	// the prefix emits `localmode="true" function f() {}`, which does not compile,
+	// so anything starting past the parameter list is kept as a suffix.
+	var attrs []string
+
+	attrsFrom := uint(0)
+	haveParams := params != nil
+
+	if haveParams {
+		attrsFrom = params.EndByte()
+	}
+
+	sawFuncKeyword := false
+
 	// Walk children to pick up access modifiers that have no field name.
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -1083,25 +1311,34 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 			continue
 		}
 
-		if !c.IsNamed() {
-			t := c.Kind()
-			if t == "function" {
-				// keyword
-				continue
-			}
+		// Drop the `function` keyword itself, which the signature re-emits.
+		// Only the first one: `function function f()` declares a function
+		// returning a function, and the second token is the keyword.
+		if !c.IsNamed() && c.Kind() == "function" && !sawFuncKeyword {
+			sawFuncKeyword = true
+
+			continue
 		}
 
-		if c.IsNamed() {
-			// `User[] function getUsers()` — the suffix is its own node
-			// sitting beside the return type, not part of it.
-			if c.Kind() == "array_return_suffix" {
-				prefix = appendTypeSuffix(prefix, f.text(c))
+		if haveParams && c.StartByte() >= attrsFrom {
+			attrs = append(attrs, f.text(c))
 
-				continue
-			}
-
-			prefix = append(prefix, f.text(c))
+			continue
 		}
+
+		// `User[] function getUsers()` — the suffix is its own node
+		// sitting beside the return type, not part of it.
+		if c.Kind() == "array_return_suffix" {
+			prefix = appendTypeSuffix(prefix, f.text(c))
+
+			continue
+		}
+
+		// Anonymous children reach here too. The grammar tokenises some type
+		// and modifier keywords (`query`, `abstract`, `final`) as anonymous
+		// nodes rather than named identifiers; gating on IsNamed dropped them
+		// from the signature entirely.
+		prefix = append(prefix, f.text(c))
 	}
 
 	var sig strings.Builder
@@ -1123,6 +1360,11 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 
 	paramStr := f.exprFuncDefParams(params)
 	sig.WriteString(paramStr)
+
+	if len(attrs) > 0 {
+		sig.WriteString(" ")
+		sig.WriteString(strings.Join(attrs, " "))
+	}
 
 	f.iLine(sig.String())
 
@@ -1282,28 +1524,49 @@ func (f *Formatter) scriptIf(n *sitter.Node) {
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
+		lead := f.elseLead(n, cons, alt)
+
 		switch alt.Kind() {
 		case "else_clause":
 			// else if or else
 			inner := alt.NamedChild(0)
 			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(" else ")
+				f.scriptWrite(lead + " ")
 				// Re-use scriptIf but write inline (no leading newline/indent).
 				f.scriptIfInline(inner)
 			} else {
-				f.scriptWrite(" else")
+				f.scriptWrite(lead)
 				f.scriptBlockOf2(inner)
 			}
 		case "if_statement":
-			f.scriptWrite(" else ")
+			f.scriptWrite(lead + " ")
 			f.scriptIfInline(alt)
 		default:
-			f.scriptWrite(" else")
+			f.scriptWrite(lead)
 			f.scriptBlockOf2(alt)
 		}
 	}
 
 	f.scriptWrite("\n")
+}
+
+// elseLead emits any comments sitting between the consequence and the
+// alternative, and returns the text to introduce the `else` with: attached to
+// the closing brace normally, or starting a fresh line once a comment has
+// been written between them.
+func (f *Formatter) elseLead(n, cons, alt *sitter.Node) string {
+	if cons == nil || alt == nil {
+		return " else"
+	}
+
+	if !f.writeInterveningComments(n, cons.EndByte(), alt.StartByte()) {
+		return " else"
+	}
+
+	f.scriptWrite("\n")
+	f.writeIndent()
+
+	return "else"
 }
 
 // scriptIfInline is like scriptIf but does not prefix a newline+indent
@@ -1317,18 +1580,20 @@ func (f *Formatter) scriptIfInline(n *sitter.Node) {
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
+		lead := f.elseLead(n, cons, alt)
+
 		switch alt.Kind() {
 		case "else_clause":
 			inner := alt.NamedChild(0)
 			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(" else ")
+				f.scriptWrite(lead + " ")
 				f.scriptIfInline(inner)
 			} else {
-				f.scriptWrite(" else")
+				f.scriptWrite(lead)
 				f.scriptBlockOf2(inner)
 			}
 		default:
-			f.scriptWrite(" else")
+			f.scriptWrite(lead)
 			f.scriptBlockOf2(alt)
 		}
 	}
@@ -1345,16 +1610,25 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 
 	if body.Kind() == "statement_block" || body.Kind() == "block" {
 		f.scriptBlock(body)
-	} else {
-		f.scriptWrite(" {\n")
 
-		f.level++
-		f.formatScriptNode(body)
-
-		f.level--
-		f.writeIndent()
-		f.scriptWrite("}")
+		return
 	}
+
+	// A single-statement body gains braces here. The padding has to match
+	// scriptBlock's exactly: on a second format the braces are in the source,
+	// so scriptBlock renders the same code and any difference in blank lines
+	// makes formatting non-idempotent — an unchanged file kept producing a
+	// new diff on every save.
+	f.scriptWrite(" {")
+	f.scriptWrite("\n\n")
+
+	f.level++
+	f.formatScriptNode(body)
+	f.scriptWrite("\n")
+
+	f.level--
+	f.writeIndent()
+	f.scriptWrite("}")
 }
 
 // scriptSwitch renders a switch statement.
@@ -1516,7 +1790,6 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 // scriptTry renders try / catch / finally.
 func (f *Formatter) scriptTry(n *sitter.Node) {
 	body := n.ChildByFieldName("body")
-	handler := n.ChildByFieldName("handler")
 	finalizer := n.ChildByFieldName("finalizer")
 
 	f.iLine("try")
@@ -1525,20 +1798,23 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 		f.scriptBlock(body)
 	}
 
-	if handler != nil {
-		// catch_clause: catch (param) { body }
-		param := handler.ChildByFieldName("parameter")
-		hBody := handler.ChildByFieldName("body")
+	// Every catch clause carries the same `handler` field name, so
+	// ChildByFieldName returns only the first one — a try with several
+	// catches silently lost all but the first, bodies included. Walk the
+	// children instead.
+	prevEnd := uint(0)
+	if body != nil {
+		prevEnd = body.EndByte()
+	}
 
-		if param != nil {
-			f.scriptWrite(fmt.Sprintf(" catch (%s)", f.exprParam(param)))
-		} else {
-			f.scriptWrite(" catch")
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() != "catch_clause" {
+			continue
 		}
 
-		if hBody != nil {
-			f.scriptBlock(hBody)
-		}
+		f.scriptCatch(c, f.clauseLead(n, prevEnd, c, "catch"))
+		prevEnd = c.EndByte()
 	}
 
 	if finalizer != nil {
@@ -1547,11 +1823,59 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 			fBody = finalizer
 		}
 
-		f.scriptWrite(" finally")
+		f.scriptWrite(f.clauseLead(n, prevEnd, finalizer, "finally"))
 		f.scriptBlock(fBody)
 	}
 
 	f.scriptWrite("\n")
+}
+
+// clauseLead emits any comments between the previous clause and this one, and
+// returns the keyword text to introduce it with — attached to the closing
+// brace normally, or on a fresh line once a comment has been written.
+func (f *Formatter) clauseLead(parent *sitter.Node, from uint, clause *sitter.Node, keyword string) string {
+	if clause == nil || from == 0 {
+		return " " + keyword
+	}
+
+	if !f.writeInterveningComments(parent, from, clause.StartByte()) {
+		return " " + keyword
+	}
+
+	f.scriptWrite("\n")
+	f.writeIndent()
+
+	return keyword
+}
+
+// scriptCatch renders one catch clause: `catch (<type> <param>) { ... }`.
+// The exception type is a separate `type` field, not part of the parameter —
+// rendering only the parameter turned `catch (java.lang.Exception e)` into
+// `catch (e)`, widening what the handler catches.
+func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
+	catchType := n.ChildByFieldName("type")
+	param := n.ChildByFieldName("parameter")
+	body := n.ChildByFieldName("body")
+
+	var parts []string
+
+	if catchType != nil {
+		parts = append(parts, f.text(catchType))
+	}
+
+	if param != nil {
+		parts = append(parts, f.exprParam(param))
+	}
+
+	if len(parts) > 0 {
+		f.scriptWrite(fmt.Sprintf("%s (%s)", lead, strings.Join(parts, " ")))
+	} else {
+		f.scriptWrite(lead)
+	}
+
+	if body != nil {
+		f.scriptBlock(body)
+	}
 }
 
 // scriptPassthru re-emits a node's text re-indented (last-resort fallback).

@@ -41,3 +41,4 @@ target/
 /docs/.sha-cfdocs
 /cfparse
 /cfmleditor-lsp
+internal/formatter/zz_*_test.go

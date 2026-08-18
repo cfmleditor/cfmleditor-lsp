@@ -32,6 +32,31 @@ func formatOnce(t *testing.T, src []byte) []byte {
 	return out
 }
 
+// assertRefusesToFormat checks that Format rejects src rather than emitting
+// the raw-emitted garbage an ERROR node would otherwise produce.
+func assertRefusesToFormat(t *testing.T, label string, src []byte, reason string) {
+	t.Helper()
+
+	opts := DefaultOptions()
+	opts.ParseScript = func(s []byte) *sitter.Tree { return language.Parse(language.CFScript, s, nil) }
+	opts.ParseQuery = func(s []byte) *sitter.Tree { return language.Parse(language.CFQuery, s, nil) }
+	opts.ParseCFML = func(s []byte) *sitter.Tree { return language.Parse(language.CFML, s, nil) }
+
+	tree := language.Parse(language.CFML, src, nil)
+	defer tree.Close()
+
+	out, err := Format(src, tree, opts)
+	if err == nil {
+		t.Errorf("%s: expected Format to refuse (%s), got %d bytes of output", label, reason, len(out))
+
+		return
+	}
+
+	if out != nil {
+		t.Errorf("%s: Format returned an error but also %d bytes of output", label, len(out))
+	}
+}
+
 // assertIdempotent checks that formatting already-formatted output is a no-op.
 func assertIdempotent(t *testing.T, label string, src []byte) {
 	t.Helper()
@@ -43,6 +68,19 @@ func assertIdempotent(t *testing.T, label string, src []byte) {
 		t.Errorf("%s: formatting is not idempotent\n--- first pass ---\n%s\n--- second pass ---\n%s",
 			label, first, second)
 	}
+}
+
+// grammarUnparseable lists testdata files the CFML grammar cannot parse, so
+// Format refuses them outright and there is no output to check for
+// idempotency. Keeping it an explicit list rather than a blanket skip means a
+// file that newly stops parsing fails the test instead of silently dropping
+// out of the corpus.
+//
+//   - DefinitionTestTag.cfc: a body-less <cfinvoke> inside <cfcomponent>
+//     parses to an ERROR node. The construct is valid CFML; the grammar just
+//     does not accept it.
+var grammarUnparseable = map[string]string{
+	"DefinitionTestTag.cfc": "body-less <cfinvoke> inside <cfcomponent> parses to an ERROR node",
 }
 
 // TestFormatIsIdempotentOnCorpus formats every CFML file in testdata twice and
@@ -84,6 +122,12 @@ func TestFormatIsIdempotentOnCorpus(t *testing.T) {
 		rel, _ := filepath.Rel(root, f)
 
 		t.Run(rel, func(t *testing.T) {
+			if reason, ok := grammarUnparseable[filepath.ToSlash(rel)]; ok {
+				assertRefusesToFormat(t, rel, src, reason)
+
+				return
+			}
+
 			assertIdempotent(t, rel, src)
 		})
 	}
@@ -162,5 +206,48 @@ func TestThrowExpressionFormUnchanged(t *testing.T) {
 	got := string(formatOnce(t, src))
 	if !strings.Contains(got, `throw new Exception("oops");`) {
 		t.Errorf("expression-form throw should be unchanged, got:\n%s", got)
+	}
+}
+
+// TestFormatIdempotentSynthesizedBraces covers the padding mismatch between
+// the two ways a body reaches the formatter. scriptBlockOf2 wrapped a
+// single-statement body in braces tightly, but on a second format those braces
+// are in the source, so scriptBlock rendered the same code with blank lines
+// inside them — an unchanged file kept producing a new diff on every save.
+func TestFormatIdempotentSynthesizedBraces(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"if without braces", "component {\n\tfunction a() {\n\t\tif (x) return;\n\t\tdirectoryDelete(dir, true);\n\t}\n}\n"},
+		{"for without braces", "component {\n\tfunction a() {\n\t\tfor (i = 1; i <= 10; i++) writeOutput(i);\n\t}\n}\n"},
+		{"while without braces", "component {\n\tfunction a() {\n\t\twhile (y) doThing();\n\t}\n}\n"},
+		{"else without braces", "component {\n\tfunction a() {\n\t\tif (x) one();\n\t\telse two();\n\t}\n}\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertIdempotent(t, tc.name, []byte(tc.src))
+		})
+	}
+}
+
+// TestFormatIdempotentNestedVoidElements covers preformat stopping at the
+// first converted element. Converting one replaces it whole, so void elements
+// nested in its body were not reached until the next format ran.
+func TestFormatIdempotentNestedVoidElements(t *testing.T) {
+	src := "<html>\n<body>\n<div>\n<p>text<br>more</p>\n<hr>\n<input type=\"text\" name=\"a\">\n</div>\n</body>\n</html>\n"
+	assertIdempotent(t, "nested void elements", []byte(src))
+}
+
+// TestFormatConvertsAllVoidElementsInOnePass is the same defect stated
+// directly: one format pass must self-close every void element, not just the
+// outermost.
+func TestFormatConvertsAllVoidElementsInOnePass(t *testing.T) {
+	src := []byte("<html>\n<body>\n<div>\n<p>text<br>more</p>\n<hr>\n</div>\n</body>\n</html>\n")
+
+	out := formatOnce(t, src)
+	if strings.Contains(string(out), "<br>") || strings.Contains(string(out), "<hr>") {
+		t.Errorf("a void element was left unconverted after one pass:\n%s", out)
 	}
 }

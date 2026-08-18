@@ -128,6 +128,10 @@ func DefaultOptions() Options {
 // 	"cfdump": true, "cfimage": true, "cfpdf": true,
 // }
 
+// utf8BOM is the UTF-8 byte-order mark. tree-sitter reports it as trivia
+// belonging to no node, so it has to be preserved explicitly.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // Formatter holds state during a single formatting pass.
 type Formatter struct {
 	opts             Options
@@ -176,6 +180,16 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	f := New(opts)
 	f.src = src
 	root := tree.RootNode()
+
+	// Refuse a tree the grammar could not parse. The node walk has no
+	// meaningful rendering for an ERROR node and falls through to a raw
+	// emit that concatenates its children without separators, producing
+	// output that is not valid CFML. Bailing out here means a parse
+	// failure can never be written over the user's source.
+	if root.HasError() {
+		return nil, parseErrorAt("document", root, src, 0)
+	}
+
 	f.formatNode(root)
 
 	if f.parseErr != nil {
@@ -183,6 +197,14 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	}
 
 	out = f.out.Bytes()
+
+	// A leading UTF-8 BOM sits outside every CST node, so the walk never
+	// emits it. Carry it across verbatim — dropping it rewrites the file's
+	// encoding preamble, which some CFML engines are sensitive to.
+	if bytes.HasPrefix(src, utf8BOM) && !bytes.HasPrefix(out, utf8BOM) {
+		out = append(append([]byte{}, utf8BOM...), out...)
+	}
+
 	if opts.WhitespaceOnly {
 		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags); err != nil {
 			return nil, err
@@ -199,11 +221,37 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	i, j := 0, 0
 
+	// The formatter canonicalises cfscript as it goes: a statement written
+	// without its optional semicolon gains one, and a single-statement body
+	// gains braces. Both are deliberate insertions, so an extra ";", "{" or
+	// "}" on the output side is not a defect. The allowance is one-directional
+	// — a token the formatter *dropped* is still reported — and the braces are
+	// counted, so an unmatched one is still caught below.
+	openedAdded, closedAdded := 0, 0
+
 	for {
 		i = skipWSAndComments(a, i)
 		j = skipWSAndComments(b, j)
 
+		if j < len(b) && isNormalizationToken(b[j]) &&
+			(i >= len(a) || toLower(a[i]) != toLower(b[j])) {
+			switch b[j] {
+			case '{':
+				openedAdded++
+			case '}':
+				closedAdded++
+			}
+
+			j++
+
+			continue
+		}
+
 		if i == len(a) && j == len(b) {
+			if openedAdded != closedAdded {
+				return fmt.Errorf("formatter added %d unmatched brace(s)", openedAdded-closedAdded)
+			}
+
 			return nil
 		}
 
@@ -261,6 +309,12 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 		i++
 		j++
 	}
+}
+
+// isNormalizationToken reports whether c is one of the tokens the formatter
+// inserts as part of canonicalising cfscript.
+func isNormalizationToken(c byte) bool {
+	return c == ';' || c == '{' || c == '}'
 }
 
 func byteOffsetToLine(src []byte, offset int) int {
@@ -351,11 +405,15 @@ func (f *Formatter) recordParseError(context string, root *sitter.Node, src []by
 		return
 	}
 
+	f.parseErr = parseErrorAt(context, root, src, baseRow)
+}
+
+// parseErrorAt builds an error describing the first ERROR or MISSING node
+// under root, reported against the source line baseRow is offset from.
+func parseErrorAt(context string, root *sitter.Node, src []byte, baseRow uint) error {
 	errNode := findFirstError(root)
 	if errNode == nil {
-		f.parseErr = fmt.Errorf("parse error in %s block", context)
-
-		return
+		return fmt.Errorf("parse error in %s block", context)
 	}
 
 	pos := errNode.StartPosition()
@@ -366,7 +424,7 @@ func (f *Formatter) recordParseError(context string, root *sitter.Node, src []by
 		snippet = snippet[:50] + "..."
 	}
 
-	f.parseErr = fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
+	return fmt.Errorf("parse error in %s at line %d, col %d near %q", context, line, pos.Column+1, snippet)
 }
 
 func findFirstError(n *sitter.Node) *sitter.Node {
@@ -909,7 +967,22 @@ func (f *Formatter) hasCFBodyContent(n *sitter.Node) bool {
 	return false
 }
 
-// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the
+// hasRealCFEndTag reports whether the source actually closed this cf_tag. A
+// tag written without one (`<cfmodule ...>`, `<cffeed ...>`, `<cfadmin ...>`)
+// has either no end-tag child at all or only the grammar's synthetic
+// implicit_cf_end_tag marker — inventing a `</name>` for it re-parents every
+// following sibling into the tag's body.
+func (f *Formatter) hasRealCFEndTag(n *sitter.Node) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.Child(i).Kind() == "cf_end_tag" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the// isCFTryBranch reports whether n is a <cfcatch> or <cffinally> block, the
 // tags that are indented with their enclosing <cftry> rather than inside it.
 func (f *Formatter) isCFTryBranch(n *sitter.Node) bool {
 	if n.Kind() != "cf_tag" {
@@ -942,7 +1015,8 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
-	isBlock := true // cf_tag with start+end is always a block
+	closed := f.hasRealCFEndTag(n)
+	isBlock := closed // only a genuinely closed tag brackets an indented body
 
 	// An empty block (e.g. <cfcatch type="any"></cfcatch>) otherwise emits the
 	// padding blank line from both ends, leaving two blank lines around nothing.
@@ -1005,9 +1079,15 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 		f.write("\n")
 	}
 
-	f.nl()
-	f.writeIndent()
-	f.write("</" + name + ">")
+	// Only close what the source closed. Tags legal without a body — cfmodule,
+	// cfhttp, cfinvoke, cffeed, cfadmin — were given a synthesised closing tag,
+	// which swallowed everything after them into the tag's body.
+	if closed {
+		f.nl()
+		f.writeIndent()
+		f.write("</" + name + ">")
+	}
+
 	f.write("\n")
 }
 
