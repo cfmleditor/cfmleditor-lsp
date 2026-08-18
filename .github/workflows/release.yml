@@ -233,3 +233,6 @@ jobs:
         with:
           files: dist/cfmleditor-lsp-*
           fail_on_unmatched_files: true
+          # Semver prerelease convention: v1.2.3-rc1 is flagged a prerelease
+          # and never becomes "Latest"; a plain v1.2.3 does.
+          prerelease: ${{ contains(github.ref_name, '-') }}
