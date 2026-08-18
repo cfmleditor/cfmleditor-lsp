@@ -339,3 +339,69 @@ func TestFormatCommentInLiteralIsNotDropped(t *testing.T) {
 		t.Errorf("comment was dropped:\n%s", out)
 	}
 }
+
+// TestFormatKeepsCommentsBeforeContinuation covers comments sitting between a
+// block and the keyword continuing it. They belong to no field, so navigating
+// to the continuation with ChildByFieldName skipped past and deleted them.
+func TestFormatKeepsCommentsBeforeContinuation(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "comment before else if",
+			src: "component {\n\tfunction a() {\n\t\tif (x) {\n\t\t\tone();\n\t\t}\n" +
+				"\t\t// why we branch\n\t\telse if (y) {\n\t\t\ttwo();\n\t\t}\n\t}\n}\n",
+			want: []string{"// why we branch", "one();", "two();"},
+		},
+		{
+			name: "comment before plain else",
+			src: "component {\n\tfunction a() {\n\t\tif (x) {\n\t\t\tone();\n\t\t}\n" +
+				"\t\t// otherwise\n\t\telse {\n\t\t\ttwo();\n\t\t}\n\t}\n}\n",
+			want: []string{"// otherwise", "one();", "two();"},
+		},
+		{
+			name: "comment before catch",
+			src: "component {\n\tfunction a() {\n\t\ttry {\n\t\t\tone();\n\t\t}\n" +
+				"\t\t// end of try\n\t\tcatch (any e) {\n\t\t\ttwo();\n\t\t}\n\t}\n}\n",
+			want: []string{"// end of try", "catch (any e)", "one();", "two();"},
+		},
+		{
+			name: "comment before finally",
+			src: "component {\n\tfunction a() {\n\t\ttry {\n\t\t\tone();\n\t\t}\n\t\tcatch (any e) {\n\t\t\ttwo();\n\t\t}\n" +
+				"\t\t// always\n\t\tfinally {\n\t\t\tthree();\n\t\t}\n\t}\n}\n",
+			want: []string{"// always", "finally", "three();"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := formatSrc(t, tc.src, stdOpts())
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+
+			for _, w := range tc.want {
+				if !strings.Contains(string(out), w) {
+					t.Errorf("missing %q in output:\n%s", w, out)
+				}
+			}
+		})
+	}
+}
+
+// TestFormatElseStillAttachedWithoutComment checks the usual layout is
+// untouched: with no intervening comment, `else` stays on the closing brace.
+func TestFormatElseStillAttachedWithoutComment(t *testing.T) {
+	src := "component {\n\tfunction a() {\n\t\tif (x) {\n\t\t\tone();\n\t\t} else {\n\t\t\ttwo();\n\t\t}\n\t}\n}\n"
+
+	out, err := formatSrc(t, src, stdOpts())
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	if !strings.Contains(string(out), "} else {") {
+		t.Errorf("expected `} else {` to stay on one line:\n%s", out)
+	}
+}

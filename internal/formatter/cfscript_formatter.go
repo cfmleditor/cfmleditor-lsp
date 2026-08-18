@@ -103,6 +103,38 @@ func memberOperator(n *sitter.Node) string {
 	return "."
 }
 
+// writeInterveningComments emits any comment child of n lying strictly between
+// byte offsets from and to, each on its own line. Comments in these positions —
+// between a block and its `else`, or between `try` and its `catch` — belong to
+// no field, so navigating to the continuation by field name skipped straight
+// past them and deleted them. Reports whether anything was written, which tells
+// the caller the continuation keyword can no longer sit on the closing brace.
+func (f *Formatter) writeInterveningComments(n *sitter.Node, from, to uint) bool {
+	wrote := false
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+
+		switch c.Kind() {
+		case "comment", "block_comment":
+		default:
+			continue
+		}
+
+		if c.StartByte() < from || c.EndByte() > to {
+			continue
+		}
+
+		f.scriptWrite("\n")
+		f.writeIndent()
+		f.scriptWrite(strings.TrimSpace(f.text(c)))
+
+		wrote = true
+	}
+
+	return wrote
+}
+
 // scriptWrite writes s, prepending indentation if we are at the beginning of
 // a line. This is the primary output primitive for script formatting.
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
@@ -1424,28 +1456,49 @@ func (f *Formatter) scriptIf(n *sitter.Node) {
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
+		lead := f.elseLead(n, cons, alt)
+
 		switch alt.Kind() {
 		case "else_clause":
 			// else if or else
 			inner := alt.NamedChild(0)
 			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(" else ")
+				f.scriptWrite(lead + " ")
 				// Re-use scriptIf but write inline (no leading newline/indent).
 				f.scriptIfInline(inner)
 			} else {
-				f.scriptWrite(" else")
+				f.scriptWrite(lead)
 				f.scriptBlockOf2(inner)
 			}
 		case "if_statement":
-			f.scriptWrite(" else ")
+			f.scriptWrite(lead + " ")
 			f.scriptIfInline(alt)
 		default:
-			f.scriptWrite(" else")
+			f.scriptWrite(lead)
 			f.scriptBlockOf2(alt)
 		}
 	}
 
 	f.scriptWrite("\n")
+}
+
+// elseLead emits any comments sitting between the consequence and the
+// alternative, and returns the text to introduce the `else` with: attached to
+// the closing brace normally, or starting a fresh line once a comment has
+// been written between them.
+func (f *Formatter) elseLead(n, cons, alt *sitter.Node) string {
+	if cons == nil || alt == nil {
+		return " else"
+	}
+
+	if !f.writeInterveningComments(n, cons.EndByte(), alt.StartByte()) {
+		return " else"
+	}
+
+	f.scriptWrite("\n")
+	f.writeIndent()
+
+	return "else"
 }
 
 // scriptIfInline is like scriptIf but does not prefix a newline+indent
@@ -1459,18 +1512,20 @@ func (f *Formatter) scriptIfInline(n *sitter.Node) {
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
+		lead := f.elseLead(n, cons, alt)
+
 		switch alt.Kind() {
 		case "else_clause":
 			inner := alt.NamedChild(0)
 			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(" else ")
+				f.scriptWrite(lead + " ")
 				f.scriptIfInline(inner)
 			} else {
-				f.scriptWrite(" else")
+				f.scriptWrite(lead)
 				f.scriptBlockOf2(inner)
 			}
 		default:
-			f.scriptWrite(" else")
+			f.scriptWrite(lead)
 			f.scriptBlockOf2(alt)
 		}
 	}
@@ -1670,10 +1725,19 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 	// ChildByFieldName returns only the first one — a try with several
 	// catches silently lost all but the first, bodies included. Walk the
 	// children instead.
+	prevEnd := uint(0)
+	if body != nil {
+		prevEnd = body.EndByte()
+	}
+
 	for i := uint(0); i < n.ChildCount(); i++ {
-		if c := n.Child(i); c.Kind() == "catch_clause" {
-			f.scriptCatch(c)
+		c := n.Child(i)
+		if c.Kind() != "catch_clause" {
+			continue
 		}
+
+		f.scriptCatch(c, f.clauseLead(n, prevEnd, c, "catch"))
+		prevEnd = c.EndByte()
 	}
 
 	if finalizer != nil {
@@ -1682,18 +1746,36 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 			fBody = finalizer
 		}
 
-		f.scriptWrite(" finally")
+		f.scriptWrite(f.clauseLead(n, prevEnd, finalizer, "finally"))
 		f.scriptBlock(fBody)
 	}
 
 	f.scriptWrite("\n")
 }
 
+// clauseLead emits any comments between the previous clause and this one, and
+// returns the keyword text to introduce it with — attached to the closing
+// brace normally, or on a fresh line once a comment has been written.
+func (f *Formatter) clauseLead(parent *sitter.Node, from uint, clause *sitter.Node, keyword string) string {
+	if clause == nil || from == 0 {
+		return " " + keyword
+	}
+
+	if !f.writeInterveningComments(parent, from, clause.StartByte()) {
+		return " " + keyword
+	}
+
+	f.scriptWrite("\n")
+	f.writeIndent()
+
+	return keyword
+}
+
 // scriptCatch renders one catch clause: `catch (<type> <param>) { ... }`.
 // The exception type is a separate `type` field, not part of the parameter —
 // rendering only the parameter turned `catch (java.lang.Exception e)` into
 // `catch (e)`, widening what the handler catches.
-func (f *Formatter) scriptCatch(n *sitter.Node) {
+func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 	catchType := n.ChildByFieldName("type")
 	param := n.ChildByFieldName("parameter")
 	body := n.ChildByFieldName("body")
@@ -1709,9 +1791,9 @@ func (f *Formatter) scriptCatch(n *sitter.Node) {
 	}
 
 	if len(parts) > 0 {
-		f.scriptWrite(fmt.Sprintf(" catch (%s)", strings.Join(parts, " ")))
+		f.scriptWrite(fmt.Sprintf("%s (%s)", lead, strings.Join(parts, " ")))
 	} else {
-		f.scriptWrite(" catch")
+		f.scriptWrite(lead)
 	}
 
 	if body != nil {
