@@ -66,17 +66,23 @@ jobs:
             goarch: amd64
             runner: ubuntu-latest
 
+          # libc6-dev-arm64-cross is only a Recommends of the compiler, so it
+          # has to be named explicitly alongside --no-install-recommends.
+          # Without the target libc headers gcc silently falls back to the
+          # host's /usr/include and dies on <bits/wordsize.h>.
           - goos: linux
             goarch: arm64
             runner: ubuntu-latest
-            apt: gcc-aarch64-linux-gnu
+            apt: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
             cc: aarch64-linux-gnu-gcc
             cxx: aarch64-linux-gnu-g++
 
+          # mingw-w64-x86-64-dev is a hard dependency of the compiler, but is
+          # named here too so the header requirement is explicit either way.
           - goos: windows
             goarch: amd64
             runner: ubuntu-latest
-            apt: gcc-mingw-w64-x86-64
+            apt: gcc-mingw-w64-x86-64 mingw-w64-x86-64-dev
             cc: x86_64-w64-mingw32-gcc
             cxx: x86_64-w64-mingw32-g++
 
