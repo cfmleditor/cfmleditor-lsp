@@ -699,6 +699,12 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case "html_text", "text":
 		f.formatText(n)
 
+	case "doctype":
+		f.formatDoctype(n)
+
+	case "style_element", "script_element":
+		f.formatRawTextElement(n)
+
 	case "comment", "cf_comment":
 		f.formatComment(n)
 
@@ -1577,6 +1583,25 @@ func (f *Formatter) formatText(n *sitter.Node) {
 	}
 	// Collapse all whitespace to single spaces (HTML whitespace rules).
 	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
+}
+
+// formatDoctype emits a <!DOCTYPE ...> declaration verbatim on its own line.
+//
+// The grammar models the declaration body (everything between "DOCTYPE" and
+// ">") as an unnamed pattern token that is not exposed as a child node, so the
+// generic child-walking path in formatNode would silently reconstruct the node
+// as "<!DOCTYPE>" and discard the body. Emitting the node's own source text
+// avoids that and is correct regardless: a doctype has no internal structure
+// worth reformatting.
+func (f *Formatter) formatDoctype(n *sitter.Node) {
+	raw := strings.TrimSpace(f.text(n))
+	if raw == "" {
+		return
+	}
+
+	f.writeIndent()
+	f.write(raw)
+	f.write("\n")
 }
 
 func (f *Formatter) formatComment(n *sitter.Node) {

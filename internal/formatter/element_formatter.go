@@ -264,3 +264,131 @@ func (f *Formatter) writeWrapped(text string) {
 		text = text[cut+1:]
 	}
 }
+
+// formatRawTextElement emits <script> and <style> elements. Their bodies are
+// raw text (JavaScript / CSS), not CFML, so the content is never reflowed —
+// only its indentation is normalized. The start and end tags are emitted from
+// their own source text rather than reassembled from child tokens, because the
+// generic child-walking path in formatNode drops the whitespace between the
+// tag name and its attributes (producing `<styletype="text/css">`).
+func (f *Formatter) formatRawTextElement(n *sitter.Node) {
+	var startTag, endTag *sitter.Node
+
+	var bodyNodes []*sitter.Node
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "start_tag", "self_closing_tag":
+			startTag = c
+		case "end_tag":
+			endTag = c
+		default:
+			bodyNodes = append(bodyNodes, c)
+		}
+	}
+
+	// No recognizable structure — emit the whole element verbatim.
+	if startTag == nil {
+		f.nl()
+		f.writeIndent()
+		f.write(strings.TrimSpace(f.text(n)))
+		f.write("\n")
+
+		return
+	}
+
+	var raw strings.Builder
+	for _, c := range bodyNodes {
+		raw.WriteString(f.text(c))
+	}
+
+	f.nl()
+	f.writeIndent()
+	f.write(strings.TrimSpace(f.text(startTag)))
+
+	// A non-empty body goes on its own lines; an empty one keeps
+	// <script ...></script> on a single line.
+	if strings.TrimSpace(raw.String()) != "" {
+		f.write("\n")
+		f.write(reindentRawText(raw.String(), f.opts.indent(f.level+1)))
+		f.writeIndent()
+	}
+
+	if endTag != nil {
+		f.write(strings.TrimSpace(f.text(endTag)))
+	}
+
+	f.write("\n")
+}
+
+// reindentRawText strips the common leading whitespace from every non-blank
+// line of raw <script>/<style> content and re-applies indent, preserving the
+// relative indentation within the block. The returned text always ends in a
+// newline.
+func reindentRawText(raw, indent string) string {
+	lines := strings.Split(raw, "\n")
+
+	// Drop leading and trailing blank lines.
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	common := commonLeadingWhitespace(lines)
+
+	var b strings.Builder
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			b.WriteString("\n")
+
+			continue
+		}
+
+		b.WriteString(indent)
+		b.WriteString(strings.TrimRight(strings.TrimPrefix(line, common), " \t\r"))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// commonLeadingWhitespace returns the longest whitespace prefix shared by every
+// non-blank line.
+func commonLeadingWhitespace(lines []string) string {
+	common := ""
+	first := true
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		ws := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		if first {
+			common = ws
+			first = false
+
+			continue
+		}
+
+		common = common[:commonPrefixLen(common, ws)]
+	}
+
+	return common
+}
+
+func commonPrefixLen(a, b string) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+
+	return n
+}
