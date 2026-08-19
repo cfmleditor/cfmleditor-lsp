@@ -15,6 +15,10 @@ make install        # build and copy to $GOPATH/bin
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
+make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]
+                    # format a real-world CFML corpus and report what the formatter did to
+                    # each file (clean / grammar-refused / guard-rejected / not idempotent);
+                    # skipped without CORPUS, so it never runs in CI. See FORMATTER-ISSUES.md
 make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
 make release <ver>  # validate, build, test, lint, changelog, commit, tag, push
 make release-dry <ver>
@@ -489,6 +493,11 @@ Some handles need both shapes; others only one, depending on how the code uses t
   deps, and resolve tests locate them relative to the source file via `runtime.Caller(0)`.
 - Formatter golden-output tests: `make visualtest` (`TestFormatOutput`); comparison fixtures
   `testdata/comparison.cfm` / `comparison.html`.
+- The formatter's whitespace-only claim is checked against external corpora, not fixtures:
+  `make corpus CORPUS=<dir>` (`internal/formatter/corpus_test.go`). It skips without a corpus.
+  Reach for it after any formatter change — a rule that reads as obviously safe has repeatedly
+  turned out to delete code on some construct no fixture contains. `FORMATTER-ISSUES.md` records
+  the current numbers and the six projects they were measured against.
 - `.golangci.yml` (v2 config) enables `wsl_v5`, `nlreturn`, `revive`, `gocritic`, `gosec`,
   `errorlint`, `exhaustive`, `prealloc`, and others. **`wsl_v5` + `nlreturn` demand a blank line
   before `return` and around block statements** — this is why existing code looks the way it
