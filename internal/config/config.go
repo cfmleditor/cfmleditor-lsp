@@ -38,6 +38,10 @@ type Resolver struct {
 	Resolve  string `json:"resolve"`
 	Prefix   string `json:"prefix"`
 	NoFollow bool   `json:"noFollow"`
+	// Anchored requires prefix to appear at the start of the call expression
+	// instead of anywhere inside it, so a resolver cannot claim an unrelated
+	// identifier that merely contains its prefix.
+	Anchored bool `json:"anchored"`
 }
 
 // PropResolver maps a property attribute to a component path.

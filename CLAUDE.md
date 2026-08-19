@@ -279,6 +279,8 @@ see "Expression mappings") and `$builtin.<fn>` (a built-in CFML function's retur
 
 **How matching works** (`internal/parser/ast.go: matchResolverWithCache`):
 - Each resolver has a `prefix` (fast-rejection substring) and a `match` pattern.
+- `prefix` is searched for anywhere in the expression unless the resolver sets `"anchored":
+  true`, which requires it at position 0 (see "Resolver false-positive" below).
 - Resolvers are tried in **array order** (`ResolveFromCallFull` iterates `resolvers` and returns
   on the first successful match) — so when two resolvers could both match the same expression
   (e.g. a specific `getDirectContent()` entry and a generic `get$1()` catch-all), whichever is
@@ -331,33 +333,47 @@ defaults) `Stat` succeeds for any case variant, silently returning the *requeste
 than the real on-disk case — which breaks on ext4 and most Linux filesystems. Only a directory
 listing reveals the true on-disk name on every platform.
 
-**Known resolver false-positive: prefix substring matching**
+**Resolver false-positive: prefix substring matching, and the `anchored` fix**
 
-`ResolveFromCall` finds the resolver's `prefix` *anywhere* in the expression via `indexFold`,
-not just at position 0. A resolver with prefix `"document"` will also fire when the variable
-name merely contains "document" (e.g. `domobject_document`). The sub passed to the pattern
-matcher starts at the prefix position, so it exactly matches the short pattern and produces a
-wrong component. There is no anchor mechanism in the current design. Workarounds: rename the
-variable in the CFML source, or add a more-specific resolver for the false-positive variable
-*earlier* in the array.
+By default `ResolveFromCall` finds the resolver's `prefix` *anywhere* in the expression via
+`indexFold`, not just at position 0. A resolver with prefix `"document"` will also fire when the
+variable name merely contains "document" (e.g. `domobject_document`). The sub passed to the
+pattern matcher starts at the prefix position, so it exactly matches the short pattern and
+produces a wrong component — confidently, rather than declining.
 
-The same class of issue can appear *within* a single pipe-delimited `prefix`: `findPrefixPos`
-tries alternatives in the order written and returns the position of whichever is found first in
-that order — not the earliest position in the expression, and not the alternative that would let
-`match` succeed. If one alternative is a substring of another (e.g. `prefix: "File|getFile"`
-against `getFile()`), the shorter one found first fixes the slice position (`sub = "File()"`)
-and the longer never gets a chance. Order alternatives so a shorter potential substring comes
-*after* the longer one.
+`{"anchored": true}` on a resolver requires the prefix at position 0
+(`config.Resolver.Anchored`/`parser.Resolver.Anchored`, enforced in `findPrefixPos`), so the
+resolver only claims expressions that genuinely start with it. It is off by default because
+unanchored matching is what makes a *call* resolver qualifier-insensitive: `getService("$1")`
+is meant to fire on `VARIABLES._parent.getService("x")` too. Reach for `anchored` when the
+resolver targets a variable name, or when a broad catch-all is producing wrong answers. The
+older workarounds still apply where anchoring doesn't fit: rename the variable in the CFML
+source, or add a more-specific resolver for the false-positive variable *earlier* in the array.
+
+The same class of issue can appear *within* a single pipe-delimited `prefix`: unanchored,
+`findPrefixPos` tries alternatives in the order written and returns the position of whichever is
+found first in that order — not the earliest position in the expression, and not the alternative
+that would let `match` succeed. If one alternative is a substring of another (e.g. `prefix:
+"File|getFile"` against `getFile()`), the shorter one found first fixes the slice position (`sub
+= "File()"`) and the longer never gets a chance. Order alternatives so a shorter potential
+substring comes *after* the longer one — or set `anchored`, which makes the order irrelevant
+since every alternative that matches matches at 0.
 
 **Generic catch-all resolvers are the highest-risk case of this**, because they're deliberately
 broad. `{"match": "get$1()", "resolve": "tassweb.packages.tass.${1:lower}", "prefix": "get"}` is
-meant to cover a family of factory methods without one entry per name — but `prefix: "get"` is
-found inside *any* identifier containing "get", including ordinary getters unrelated to the
-intended family. A catch-all this broad will win over a correct-but-absent answer (e.g. a
-generic `returntype="any"` that should fall through to `$any`) essentially every time a
-same-named `getXxx()` exists anywhere in the workspace. There is no partial fix short of
-narrowing the `match` regex to an explicit alternation of the real factory names, or accepting
-the false positive and overriding it with a more specific resolver listed earlier.
+meant to cover a family of factory methods without one entry per name — but unanchored, `prefix:
+"get"` is found inside *any* identifier containing "get", including ordinary getters unrelated
+to the intended family, and including the `getDirectContent()` at the tail of
+`VARIABLES._document.getDirectContent()`. A catch-all this broad will win over a
+correct-but-absent answer (e.g. a generic `returntype="any"` that should fall through to `$any`)
+essentially every time a same-named `getXxx()` exists anywhere in the workspace. Anchoring it
+is usually the right call: the bare factory calls it was written for (`getPageTools()`) start at
+position 0, and the chained getters it was never meant to claim do not. Otherwise the options
+are narrowing the `match` regex to an explicit alternation of the real factory names, or
+accepting the false positive and overriding it with a more specific resolver listed earlier.
+
+`explain` names the resolver that fired (`match "...", prefix "...")`, so a wrong component can
+be traced to the exact `componentResolvers` entry instead of just "a componentResolver".
 
 ## Expression mappings
 
@@ -425,7 +441,7 @@ fallback resolver, and the altComp fallback resolver.
 | `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |
 | Dynamic keys: `x[y].f`, `arr[i].f` | Type can't be tracked through runtime keys | Not fixable with resolvers; suppress with `noFollow` on the resolver that produces `x` |
 | `ARGUMENTS.x` with `type="any"` | Argument has no type annotation | Add `type="pkg.path"` to `<cfargument>`, add an `ARGUMENTS.x` exact-match resolver, or document it with a `@serviceproperty` comment if `servicePropertyResolvers` is configured |
-| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | **Known limitation, not (yet) fixable**: `CanResolveCall`'s global-ref fallback picks the *first* `ComponentRef` matching the variable name in file order, not the one nearest the call site — a scratch variable reassigned per `<cfcase>`/`<cfif>` branch gets every later `service.X()` call checked against the first branch's type. **Before triaging a large single-component cluster as N missing methods, check whether the receiver is reassigned more than once in the file** (`grep -n "varname\s*="`) — if so, most of the cluster is this bug, not real gaps. |
+| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | `CanResolveCall`'s file-level fallback picks the `ComponentRef` with the highest line number *at or before* the call site (`internal/resolve/resolve.go`), falling back to file order only for a genuine forward reference — so a scratch variable reassigned per `<cfcase>`/`<cfif>` branch is read against the assignment actually in scope. A large single-component cluster is therefore real, unless the reassignments sit inside a construct the parser doesn't line-order the way the runtime does; confirm with `explain`, which prints the line of the ref it chose. |
 | A resolver with `"resolve": "nocheck", "noFollow": true` doesn't suppress the check | The resolver's `match` includes `(...)` (a call expression) rather than a bare variable name | `noFollow` only survives when the resolver re-runs live inside `CanResolveCall` (bare-word `ResolveFromCallFull(variable, ...)` lookups). A call-expression match fires once at parse time and is baked into `ComponentRef.Component`, which has no `NoFollow` field. Use `"resolve": "$any"` instead (checked unconditionally) for any resolver whose `match` contains parens. |
 
 ## Java stubs

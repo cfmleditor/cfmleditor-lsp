@@ -87,7 +87,7 @@ func cmdUnresolved(args []string) {
 
 		servicePropertyResolvers = cfg.ServicePropertyResolvers()
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow})
+			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored})
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)

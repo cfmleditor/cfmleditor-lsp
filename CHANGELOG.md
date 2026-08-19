@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Publish `cfmleditor-lsp-windows-amd64.tar.gz` alongside the existing `.zip`. Editor extensions derive the asset name from the platform alone and ask every platform for the same extension — the Zed extension requests the tarball and failed to install with "no asset found matching cfmleditor-lsp-windows-amd64.tar.gz" (#2). Both archives are published now.
+- Add `"anchored": true` to `componentResolvers`. A resolver's `prefix` is otherwise found *anywhere* in the call expression and matching starts from there, so a resolver with prefix `document` also claims the unrelated variable `domobject_document`, and a deliberately broad catch-all like `{"prefix": "get", "match": "get$1()"}` also claims the `getDirectContent()` at the end of `VARIABLES._document.getDirectContent()`. In both cases the shortened expression matches the pattern exactly, so a wrong component is produced confidently rather than the resolver declining. `anchored` requires the prefix at position 0, which leaves the bare factory calls such a catch-all was written for working while the substring matches stop; it also makes the order of pipe-delimited `prefix` alternatives irrelevant, since every alternative that matches then matches at the same position. Unanchored remains the default, because a resolver aimed at a call normally does want to match through a receiver.
+- `explain` now names the `componentResolvers` entry that claimed an expression (`match "...", prefix "..."`), instead of reporting only that "a componentResolver" matched — the resolved component alone cannot distinguish a correct match from a substring false positive.
+- Fix `refs`, `deps` and `parse` dropping `noFollow` when loading resolvers from `.cfmleditor.json`; those commands built their resolver list without copying the field.
+
 ## [0.2.5]
 
 - Fix the formatter changing non-whitespace content. Audited by formatting 5620 CFML files from Lucee, ContentBox, ColdBox, FW/1, TestBox and cfmleditor: 1671 were rejected by the `whitespaceOnly` guard, so with the default settings the LSP silently declined to format them and format-on-save did nothing. 5450 now format cleanly and 84 are still rejected. Each of the following was a separate defect, and most of them destroyed or altered code rather than merely tripping the guard:

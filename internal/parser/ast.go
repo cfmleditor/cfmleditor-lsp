@@ -126,7 +126,10 @@ type Resolver struct {
 	Match    string
 	Resolve  string
 	Prefix   string
-	NoFollow bool           // if true, skip method verification when this resolver matches
+	NoFollow bool // if true, skip method verification when this resolver matches
+	// Anchored requires Prefix to sit at the very start of the expression rather
+	// than anywhere inside it. See findPrefixPos.
+	Anchored bool
 	re       *regexp.Regexp // compiled regex, lazily initialized
 	simple   bool           // true if pattern is a plain string (no regex, no $N)
 	reOnce   sync.Once
@@ -333,12 +336,31 @@ func prefixEqualFold(expr, prefix string) bool {
 }
 
 // findPrefixPos returns the position of the first matching prefix alternative in expr,
-// or -1 if none match. Semantics are unchanged from a single indexFold call: which
-// alternative matched doesn't affect the subsequent Match/Resolve step, since only the
-// matched position (not the matched text) is used to slice expr for matching.
-func findPrefixPos(expr, prefix string) int {
+// or -1 if none match. Which alternative matched doesn't affect the subsequent
+// Match/Resolve step, since only the matched position (not the matched text) is used
+// to slice expr for matching.
+//
+// Unanchored (the default) finds the prefix anywhere in expr, which is why a resolver
+// with prefix "document" also fires on "domobject_document", and why a catch-all like
+// prefix "get" fires on the "get" inside "VARIABLES._document.getDirectContent()".
+// Both slice expr from the prefix position, so the short pattern then matches exactly
+// and produces a confidently wrong component.
+//
+// Anchored requires an alternative at position 0, so a resolver only ever claims an
+// expression that genuinely starts with its prefix. It also makes the order of
+// pipe-delimited alternatives irrelevant: every alternative that matches matches at 0,
+// so a shorter alternative can no longer fix the slice position ahead of a longer one.
+func findPrefixPos(expr, prefix string, anchored bool) int {
 	for _, alt := range splitPrefix(prefix) {
 		if alt == "" {
+			continue
+		}
+
+		if anchored {
+			if len(expr) >= len(alt) && strings.EqualFold(expr[:len(alt)], alt) {
+				return 0
+			}
+
 			continue
 		}
 
@@ -353,6 +375,16 @@ func findPrefixPos(expr, prefix string) int {
 // ResolveFromCallFull matches an expression against resolvers and returns the component dot-path
 // and whether the matching resolver has NoFollow set.
 func ResolveFromCallFull(expr string, resolvers []Resolver) (string, bool) {
+	comp, noFollow, _ := ResolveFromCallMatch(expr, resolvers)
+
+	return comp, noFollow
+}
+
+// ResolveFromCallMatch is ResolveFromCallFull plus the index of the resolver that matched
+// (-1 when none did). A wrong component produced by a resolver firing on a substring of an
+// unrelated identifier is indistinguishable from a correct one in the result alone, so the
+// explain trace needs to be able to name which entry claimed the expression.
+func ResolveFromCallMatch(expr string, resolvers []Resolver) (string, bool, int) {
 	expr = strings.TrimSpace(expr)
 
 	for i := range resolvers {
@@ -361,7 +393,7 @@ func ResolveFromCallFull(expr string, resolvers []Resolver) (string, bool) {
 			continue
 		}
 		// Find prefix position and only match from there, limited forward
-		idx := findPrefixPos(expr, r.Prefix)
+		idx := findPrefixPos(expr, r.Prefix, r.Anchored)
 		if idx < 0 {
 			continue
 		}
@@ -372,11 +404,23 @@ func ResolveFromCallFull(expr string, resolvers []Resolver) (string, bool) {
 		}
 
 		if resolved := matchResolverWithCache(sub, r); resolved != "" {
-			return resolved, r.NoFollow
+			return resolved, r.NoFollow, i
 		}
 	}
 
-	return "", false
+	return "", false, -1
+}
+
+// Describe renders a resolver as its config fields, for trace output that has to identify
+// which entry of componentResolvers fired.
+func (r *Resolver) Describe() string {
+	desc := fmt.Sprintf("match %q, prefix %q", r.Match, r.Prefix)
+
+	if r.Anchored {
+		desc += ", anchored"
+	}
+
+	return desc
 }
 
 // ResolveFromCall matches an expression against resolvers and returns the component dot-path.
@@ -420,7 +464,7 @@ func (rs *ResolverSet) Resolve(expr string) string {
 	for _, idx := range candidates {
 		r := &rs.resolvers[idx]
 
-		pos := findPrefixPos(expr, r.Prefix)
+		pos := findPrefixPos(expr, r.Prefix, r.Anchored)
 		if pos < 0 {
 			continue
 		}

@@ -87,11 +87,40 @@ Component resolvers teach the LSP how to resolve custom factory patterns to spec
 | `match` | Yes | Pattern to match against the RHS of an assignment. Use `$1` as a capture placeholder. Without `$1`, acts as an exact variable name match. |
 | `resolve` | Yes | Component dot-path or file path template. `$1` is replaced with the captured value. File paths (with `/` or `.cfc`) are normalised to dot-paths. |
 | `prefix` | Yes | Fast-check string. Lines without this prefix are skipped entirely — avoids expensive matching on every line. Pipe-delimit multiple alternatives (e.g. `"createModel\|buildModel"`) to share one `match`/`resolve` pair across call-site shapes that don't start with a common substring. |
+| `anchored` | No (default `false`) | Require `prefix` at the *start* of the expression rather than anywhere inside it. See below. |
+| `noFollow` | No (default `false`) | Accept a call through this resolver without checking that the method exists on the resolved component. Use it for dynamic factories, or Java objects whose stubs are incomplete. |
 
 The match is case-insensitive and works regardless of qualifiers before it. For example, `getService("$1")` matches all of:
 - `getService("timetable")`
 - `_parent.getService("timetable")`
 - `VARIABLES._parent.getService("timetable")`
+
+#### `anchored`
+
+By default `prefix` is searched for *anywhere* in the expression, and matching starts from
+wherever it is found. That is what makes the qualifier-insensitivity above work, but it also
+means a resolver can claim an expression that merely contains its prefix:
+
+- `{"prefix": "document", "match": "document", "resolve": "app.document"}` also fires on the
+  unrelated variable `domobject_document`.
+- A deliberately broad catch-all such as
+  `{"prefix": "get", "match": "get$1()", "resolve": "packages.tass.${1:lower}"}`, written for a
+  family of bare factory calls, also fires on the `getDirectContent()` at the end of
+  `VARIABLES._document.getDirectContent()` — resolving it to `packages.tass.directcontent`.
+
+In both cases the shortened expression matches the pattern exactly, so the wrong component is
+produced confidently rather than the resolver simply declining.
+
+Setting `"anchored": true` requires the prefix at position 0, so the resolver only claims
+expressions that genuinely start with it. Both examples above stop firing, while
+`getPageTools()` — the bare factory call the catch-all was written for — still resolves.
+Anchoring also makes the order of pipe-delimited alternatives irrelevant, since every
+alternative that matches matches at the same position.
+
+Anchoring is off by default because a resolver aimed at a *call* usually does want to match
+through a receiver (`VARIABLES._parent.getService("x")`). Reach for it when a resolver is aimed
+at a variable name, or when a broad catch-all is producing wrong answers — `cfmleditor-lsp
+explain` will name the resolver that fired.
 
 ### Formatting
 
