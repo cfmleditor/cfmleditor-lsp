@@ -150,8 +150,20 @@ func (f *Formatter) allSingleLine(nodes []*sitter.Node) bool {
 		return false
 	}
 	// Concatenate the text of all nodes and check if the trimmed content is single-line.
+	//
+	// Whitespace-only nodes are left out. Whether the gap between two tags is
+	// captured as a node at all depends on stray trailing spaces in the source,
+	// so counting one flipped this answer — and with it the choice between the
+	// inline path and the blank-line-grouping path. The format removed the
+	// trailing space, the next pass then took the other branch, and the file
+	// oscillated between the two layouts.
 	var combined strings.Builder
+
 	for _, n := range nodes {
+		if strings.TrimSpace(f.text(n)) == "" {
+			continue
+		}
+
 		combined.WriteString(f.text(n))
 	}
 
