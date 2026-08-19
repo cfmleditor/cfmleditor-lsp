@@ -1490,6 +1490,10 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 				f.level++
 			}
 
+			if f.isWhitespaceNode(c) {
+				continue
+			}
+
 			if tagKind != "" && !f.nodeIsComment(c) {
 				prevCFTagKind = tagKind
 			}
@@ -2035,6 +2039,10 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevAltTagKind = tagKind
