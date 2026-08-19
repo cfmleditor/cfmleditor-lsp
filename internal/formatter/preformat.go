@@ -58,11 +58,16 @@ func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) (
 
 func collectEdits(n *sitter.Node, src []byte, edits *[]preformatEdit) {
 	if n.Kind() == "element" {
-		if tryConvertToSelfClosing(n, src, edits) {
-			return
-		}
+		tryConvertToSelfClosing(n, src, edits)
 	}
 
+	// Descend even into an element that was just converted. Its edit touches
+	// only its own start tag, so an edit collected inside its body cannot
+	// overlap. Unclosed markup nests each following element inside the last —
+	// a run of unclosed <tr>/<td> is twenty levels deep — and stopping here
+	// converted one level per pass. Deeper nesting than maxPasses was left half
+	// converted, finished by the *next* run of the formatter, so an unchanged
+	// file kept producing a fresh diff.
 	for i := uint(0); i < n.ChildCount(); i++ {
 		collectEdits(n.Child(i), src, edits)
 	}
@@ -73,8 +78,6 @@ func tryConvertToSelfClosing(n *sitter.Node, src []byte, edits *[]preformatEdit)
 
 	hasEndTag := false
 	hasImplicitEnd := false
-
-	var bodyStart, bodyEnd uint
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -92,19 +95,6 @@ func tryConvertToSelfClosing(n *sitter.Node, src []byte, edits *[]preformatEdit)
 		return false
 	}
 
-	// Collect body content (everything between start_tag and implicit_end_tag).
-	bodyStart = startTag.EndByte()
-	bodyEnd = bodyStart
-
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-		if c.Kind() != "start_tag" && c.Kind() != "implicit_end_tag" {
-			if c.EndByte() > bodyEnd {
-				bodyEnd = c.EndByte()
-			}
-		}
-	}
-
 	// Build the self-closing tag: replace ">" with " />"
 	startText := string(src[startTag.StartByte():startTag.EndByte()])
 	if !strings.HasSuffix(startText, ">") {
@@ -113,12 +103,15 @@ func tryConvertToSelfClosing(n *sitter.Node, src []byte, edits *[]preformatEdit)
 
 	selfClosing := startText[:len(startText)-1] + " />"
 
-	// The replacement for the entire element: self-closing tag + body content after it.
-	body := string(src[bodyStart:bodyEnd])
+	// Rewrite the start tag alone and leave the body where it is. Replacing the
+	// whole element and re-appending its body came to the same text, but it
+	// claimed the body's byte range, so no edit could be collected inside it on
+	// the same pass. Keeping the edit narrow is what lets the walk carry on
+	// through nested elements.
 	*edits = append(*edits, preformatEdit{
-		start:       n.StartByte(),
-		end:         n.EndByte(),
-		replacement: selfClosing + body,
+		start:       startTag.StartByte(),
+		end:         startTag.EndByte(),
+		replacement: selfClosing,
 	})
 
 	return true
