@@ -33,29 +33,37 @@ cleanly were then formatted a second time to check idempotency.
 
 ### Results
 
-| | Before | After |
-|---|---|---|
-| Formatted cleanly | 3,863 | **5,450** |
-| Rejected by the guard | 1,671 | **84** |
-| Refused: grammar cannot parse | 86 | 86 |
-| Not idempotent | 390 † | **36** |
-| Panics | 0 | 0 |
+| | Before | After the audit | Current |
+|---|---|---|---|
+| Formatted cleanly | 3,863 | 5,450 | **5,499** |
+| Rejected by the guard | 1,671 | 84 | **32** |
+| Refused: grammar cannot parse | 86 | 86 | **86** |
+| Not idempotent | 390 † | 36 | **3** |
+| Panics | 0 | 0 | **0** |
 
 † measured at the post-fix corpus size; the pre-fix figure of 50 covered a much
 smaller pool, since a file the guard rejects never reaches the idempotency
 check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
-Per project, after:
+The "current" column is what `make corpus` prints today (section 5), against the
+same six projects at their current HEAD. It counts the grammar's 86 refusals in
+two buckets rather than one — 25 documents the CFML grammar cannot parse, and 61
+that parse as documents but whose embedded cfscript or cfquery the sub-grammar
+cannot — because the two are different work and the second is invisible from the
+outside: the document parses, the formatter runs, and whatever it renders for
+that region is a guess.
 
-| Project | Clean | Parse-refused | Guard-rejected |
-|---|---|---|---|
-| Lucee | 3,626 | 77 | 72 |
-| ContentBox | 720 | 3 | 1 |
-| ColdBox | 642 | 5 | 8 |
-| FW/1 | 303 | 0 | 2 |
-| TestBox | 143 | 1 | 1 |
-| cfmleditor | 16 | 0 | 0 |
+Per project, current:
+
+| Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable |
+|---|---|---|---|---|---|---|
+| Lucee | 3,775 | 3,677 | 23 | 54 | 20 | 1 |
+| ContentBox | 724 | 719 | 2 | 1 | 2 | 0 |
+| ColdBox | 655 | 641 | 0 | 5 | 8 | 1 |
+| FW/1 | 305 | 304 | 0 | 0 | 1 | 0 |
+| TestBox | 145 | 142 | 0 | 1 | 1 | 1 |
+| cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 |
 
 The repository's own `testdata/` went from 30/39 clean to 38/39, the last being
 `DefinitionTestTag.cfc`, which the grammar cannot parse (see 2.1).
@@ -282,32 +290,71 @@ formatter stripping every quote out of a `<cfset>`.
 
 ## 4. Outstanding
 
+Counts from the current `make corpus` run (section 5).
+
 | Issue | Files | Notes |
 |---|---|---|
-| Grammar cannot parse | 86 | 61 cfscript, 25 document. Now refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
-| Guard-rejected, long tail | 84 | 72 in Lucee's test suite. Includes a residual leading-comma case in some literals, and assorted one- and two-file buckets. |
-| Not idempotent | 36 | Blank-line and self-close edge cases in tag-based CFCs. |
+| Grammar cannot parse the document | 25 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
+| Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
+| Guard-rejected, long tail | 32 | 20 in Lucee's test suite. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
+| Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | Guard gaps 3.1 / 3.2 | — | Comment content uncompared; quote checking disabled by a style option. |
 | `final component` body not formatted | — | Pre-existing: emitted verbatim as `{ function a() {} }`. Whitespace-only, so it passes the guard. `abstract component` and `interface` go through the normal path. |
 
+Fixed since the audit table above, all three found by re-running the harness:
+
+- `<?xml version="1.0" encoding="utf-8"?>` came back as
+  `<?xmlversion="1.0"encoding="utf-8"?>`. The declaration's parts are children
+  (`<?`, `xml`, `tag_attributes`, `?>`) and the generic child walk joined them
+  with nothing between. **The guard cannot catch this** — only whitespace was
+  removed — so the CLI wrote it to disk and exited 0, leaving a file the grammar
+  can no longer parse. Same class as the doctype bug in 2.1, opposite cause.
+- `new component { ... }`, an anonymous component defined at the point of use,
+  was emitted as `new ()`: the `new_expression` has neither a constructor nor an
+  arguments node, and rendering it from those two fields deleted the keyword and
+  the entire body. 18 files.
+- A CF tag written in script syntax separates its attributes with spaces
+  (`cfdirectory(directory="#dir#" action="create")`), but the grammar hands the
+  list over as an `arguments` node of assignment_expressions — the same shape as
+  a call's arguments — and the formatter joined them with `", "`, inserting
+  commas that were never in the source. 11 files.
+
 ## 5. Reproducing
 
-The corpus scanner is not checked in — it is a scratch harness, and pointing it
-at a large tree is a manual step. To rebuild it, format each file exactly as
-`internal/server/formatting.go` does:
+The corpus scanner is checked in as `TestFormatterCorpus`
+(`internal/formatter/corpus_test.go`). It is skipped unless `CFML_CORPUS` names
+the corpus, so `make test` and CI are unaffected:
 
-```go
-o := formatter.DefaultOptions()
-o.ParseScript = func(s []byte) *sitter.Tree { return language.Parse(language.CFScript, s, nil) }
-o.ParseQuery  = func(s []byte) *sitter.Tree { return language.Parse(language.CFQuery, s, nil) }
-o.ParseCFML   = func(s []byte) *sitter.Tree { return language.Parse(language.CFML, s, nil) }
-o.WhitespaceOnly = true
-
-tree := language.Parse(language.CFML, src, nil)
-out, err := formatter.Format(src, tree, o)   // err != nil => refused
+```console
+$ make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
+    formatting 4499 files from 2 root(s)
+    root                files  clean  parse script  guard unstab  panic
+    Lucee                3775   3677     23     54     20      1      0
+    ContentBox            724    719      2      1      2      0      0
+    TOTAL                4499   4396     25     55     22      1      0
 ```
 
-Then format `out` again and compare, to catch non-idempotency.
+`CORPUS` is a `PATH`-style list of source trees; each is reported separately so a
+regression can be attributed to a project rather than to the pile. `REPORT` is
+optional and writes a TSV of every non-clean file — verdict, path, and the reason
+— to work through individually.
+
+The six projects in the table above are:
+
+```console
+$ git clone --depth 1 https://github.com/lucee/Lucee
+$ git clone --depth 1 https://github.com/Ortus-Solutions/ContentBox
+$ git clone --depth 1 https://github.com/ColdBox/coldbox-platform
+$ git clone --depth 1 https://github.com/framework-one/fw1
+$ git clone --depth 1 https://github.com/ortus-solutions/testbox
+$ git clone --depth 1 https://github.com/cfmleditor/cfmleditor
+```
+
+The harness formats each file exactly as `internal/server/formatting.go` does —
+default options, `WhitespaceOnly: true`, all three sub-parsers wired up — then
+formats its own output again to check idempotency. A panic fails the test; guard
+rejections and instability are reported but do not, since they are the thing
+being measured. Runtime is a few seconds for all 5,620 files.
 
 Individual cases reproduce through the CLI. It applies the guard by default now,
 so `--allow-non-whitespace` is what shows you the damage a bug would do:
@@ -322,4 +369,6 @@ $ target/release/cfmleditor-lsp format --allow-non-whitespace /tmp/r.cfc
 Regression coverage for everything in section 2 lives in
 `internal/formatter/parse_error_test.go`, `internal/formatter/guard_test.go`,
 `internal/formatter/idempotency_test.go` and
-`cmd/cfmleditor-lsp/format_test.go`.
+`cmd/cfmleditor-lsp/format_test.go`; for the three fixes in section 4, in
+`internal/formatter/doctype_test.go` and
+`internal/formatter/script_tag_call_test.go`.

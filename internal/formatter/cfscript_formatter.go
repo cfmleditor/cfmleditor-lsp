@@ -563,6 +563,20 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		ctor := n.ChildByFieldName("constructor")
 		args := n.ChildByFieldName("arguments")
 
+		// An inline component literal — `new component { property name="x"; function
+		// f() {} }` — has neither a constructor nor an argument list: the class is
+		// its body. The field-based rendering below found nothing in either field
+		// and emitted `new ()`, deleting the keyword and the whole body with it
+		// (16 files in the corpus, all rejected by the whitespaceOnly guard, so in
+		// the editor this reads as format-on-save doing nothing).
+		//
+		// Emitted verbatim, in the same spirit as a function_expression's body:
+		// it's a declaration rather than an expression to re-space, and rendering
+		// it properly needs the statement machinery, which does not return a string.
+		if ctor == nil && hasChildOfKind(n, "component_body") {
+			return f.text(n)
+		}
+
 		// `new java:java.io.File(p)` — the type prefix is a single token that
 		// already carries its colon, and dropping it changes which object gets
 		// constructed, so it has to be reproduced verbatim.
@@ -792,6 +806,36 @@ func (f *Formatter) gapOperator(_ *sitter.Node, left, right *sitter.Node) string
 	return gap
 }
 
+// hasChildOfKind reports whether n has a direct child of the given kind.
+func hasChildOfKind(n *sitter.Node, kind string) bool {
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.Child(i).Kind() == kind {
+			return true
+		}
+	}
+
+	return false
+}
+
+// tagStyleArgs reports whether args is a script-syntax CF tag's attribute list —
+// `cfdirectory(directory="x" action="create")` — rather than an ordinary argument
+// list. The grammar models both as an `arguments` node holding assignment_expressions;
+// what separates them is that the attribute form has no comma tokens at all. A single
+// argument is ambiguous and treated as an ordinary call, since nothing is joined.
+func tagStyleArgs(args *sitter.Node) bool {
+	if args == nil || args.NamedChildCount() < 2 {
+		return false
+	}
+
+	for i := uint(0); i < args.ChildCount(); i++ {
+		if args.Child(i).Kind() == "," {
+			return false
+		}
+	}
+
+	return true
+}
+
 // childToken returns the first anonymous token child matching typ.
 func (f *Formatter) childToken(n *sitter.Node, typ string) string {
 	for i := uint(0); i < n.ChildCount(); i++ {
@@ -825,7 +869,19 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		}
 	}
 
-	inline := "(" + strings.Join(parts, ", ") + ")"
+	// A script-syntax CF tag call separates its attributes with spaces, not commas
+	// (`cfdirectory(directory="#dir#" action="create")`), and the grammar hands both
+	// forms over as an `arguments` node full of assignment_expressions. Joining with
+	// ", " regardless inserted commas that were never in the source — a non-whitespace
+	// change, so the guard rejected the file and format-on-save did nothing.
+	useCommas := !tagStyleArgs(args)
+
+	sep := ", "
+	if !useCommas {
+		sep = " "
+	}
+
+	inline := "(" + strings.Join(parts, sep) + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
 	// A line comment forces the break unconditionally: joined inline it runs to
 	// end of line and comments out every argument after it.
@@ -847,6 +903,21 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		var sb strings.Builder
 
 		sb.WriteString("(\n")
+
+		// Space-separated attributes carry no separator to place, so neither comma
+		// position applies to them.
+		if !useCommas {
+			for _, p := range parts {
+				sb.WriteString(indent)
+				sb.WriteString(p)
+				sb.WriteString("\n")
+			}
+
+			sb.WriteString(outerIndent)
+			sb.WriteByte(')')
+
+			return sb.String()
+		}
 
 		leading := f.opts.CommaPosition == "before"
 		for i, p := range parts {
