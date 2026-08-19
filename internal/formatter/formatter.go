@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -144,6 +145,9 @@ type Formatter struct {
 	lastTagMultiLine bool  // last emitted tag had expanded (multi-line) attributes
 	parseErr         error // first sub-parse error encountered
 	pendingComma     bool  // deferred trailing comma to emit after next query item
+	// pendingBlockComments holds comments found between a construct's header
+	// and its body, to be emitted just inside that body once it opens.
+	pendingBlockComments []*sitter.Node
 }
 
 // New creates a Formatter with the given options.
@@ -229,9 +233,16 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	// counted, so an unmatched one is still caught below.
 	openedAdded, closedAdded := 0, 0
 
+	// Comment bodies are gathered as the walk steps over them and compared
+	// once both sides are exhausted. See skipWSAndComments for why comments
+	// cannot be compared in line with the surrounding code.
+	var commentsA, commentsB []byte
+
+	scriptA, scriptB := scriptRegionsOf(a), scriptRegionsOf(b)
+
 	for {
-		i = skipWSAndComments(a, i)
-		j = skipWSAndComments(b, j)
+		i = skipWSAndComments(a, i, &commentsA, scriptA)
+		j = skipWSAndComments(b, j, &commentsB, scriptB)
 
 		if j < len(b) && isNormalizationToken(b[j]) &&
 			(i >= len(a) || toLower(a[i]) != toLower(b[j])) {
@@ -252,7 +263,7 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 				return fmt.Errorf("formatter added %d unmatched brace(s)", openedAdded-closedAdded)
 			}
 
-			return nil
+			return compareCommentBodies(a, commentsA, commentsB)
 		}
 
 		if i == len(a) || j == len(b) {
@@ -341,36 +352,401 @@ func isWS(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
-// skipWSAndComments advances past whitespace and CFML comments (<!--- ... --->).
-func skipWSAndComments(src []byte, pos int) int {
-	for {
-		for pos < len(src) && isWS(src[pos]) {
-			pos++
+// spaceLen returns the byte length of the whitespace character at pos, or 0 if
+// there is none. Unlike isWS it decodes multi-byte runes, because indentation
+// is not always ASCII: source pasted from a word processor or a browser arrives
+// indented with U+2003 EM SPACE and the like. Re-indenting such a line is a
+// whitespace change, but measuring it a byte at a time made it look like the
+// formatter had deleted content, and the file was refused.
+//
+// Only *breaking* spaces count. U+00A0 NO-BREAK SPACE and U+202F NARROW NO-BREAK
+// SPACE render differently from an ordinary space and are load-bearing in
+// markup, so they stay content: losing one has to be reported, not waved through.
+func spaceLen(src []byte, pos int) int {
+	if pos < 0 || pos >= len(src) {
+		return 0
+	}
+
+	if c := src[pos]; c < utf8.RuneSelf {
+		if isWS(c) || c == '\v' || c == '\f' {
+			return 1
 		}
 
-		if pos+4 < len(src) && src[pos] == '<' && src[pos+1] == '!' && src[pos+2] == '-' && src[pos+3] == '-' && src[pos+4] == '-' {
-			end := pos + 5
-			for end+2 < len(src) {
-				if src[end] == '-' && src[end+1] == '-' && src[end+2] == '-' && end+3 < len(src) && src[end+3] == '>' {
-					pos = end + 4
+		return 0
+	}
 
-					break
-				}
+	r, size := utf8.DecodeRune(src[pos:])
 
-				end++
-			}
+	switch {
+	case r >= 0x2000 && r <= 0x200A: // EN QUAD … HAIR SPACE
+		return size
+	case r == 0x0085, // NEXT LINE
+		r == 0x1680, // OGHAM SPACE MARK
+		r == 0x2028, // LINE SEPARATOR
+		r == 0x2029, // PARAGRAPH SEPARATOR
+		r == 0x205F, // MEDIUM MATHEMATICAL SPACE
+		r == 0x3000: // IDEOGRAPHIC SPACE
+		return size
+	}
 
-			if end+2 >= len(src) {
+	return 0
+}
+
+// skipSpace advances past a run of whitespace, ASCII or otherwise.
+func skipSpace(src []byte, pos int) int {
+	for {
+		n := spaceLen(src, pos)
+		if n == 0 {
+			return pos
+		}
+
+		pos += n
+	}
+}
+
+// scriptSpans marks the byte ranges of a document that hold script rather than
+// markup. Only inside those does "//" open a comment: in markup the same two
+// characters are ordinary content, and appear in places as mundane as a
+// DOCTYPE ("-//W3C//DTD XHTML 1.0 Strict//EN"). Reading one of those as a
+// comment would swallow the rest of its line and reject a perfectly good
+// reformat of it.
+type scriptSpans []struct{ start, end int }
+
+func (s scriptSpans) contains(pos int) bool {
+	for _, sp := range s {
+		if pos >= sp.start && pos < sp.end {
+			return true
+		}
+	}
+
+	return false
+}
+
+// scriptRegionsOf locates the <cfscript> and <script> blocks in src, or spans
+// the whole file when it is a script-syntax component.
+func scriptRegionsOf(src []byte) scriptSpans {
+	if isScriptSyntaxComponent(src) {
+		return scriptSpans{{0, len(src)}}
+	}
+
+	var spans scriptSpans
+
+	lower := bytes.ToLower(src)
+
+	for _, tag := range []string{"cfscript", "script"} {
+		open, closeTag := "<"+tag, "</"+tag
+
+		for pos := 0; ; {
+			start := indexBytesFrom(lower, pos, open)
+			if start < 0 {
 				break
 			}
+
+			// Require a tag boundary so <script> does not also match
+			// <scripting> and <cfscript> is not matched twice.
+			after := start + len(open)
+			if after < len(lower) && !isTagNameEnd(lower[after]) {
+				pos = after
+
+				continue
+			}
+
+			body := indexBytesFrom(lower, after, ">")
+			if body < 0 {
+				break
+			}
+
+			end := indexBytesFrom(lower, body+1, closeTag)
+			if end < 0 {
+				end = len(src)
+			}
+
+			spans = append(spans, struct{ start, end int }{body + 1, end})
+			pos = end
+		}
+	}
+
+	return spans
+}
+func isTagNameEnd(c byte) bool {
+	return isWS(c) || c == '>' || c == '/'
+}
+
+// isScriptSyntaxComponent reports whether src is a script-syntax component,
+// which has no <cfscript> tag to key off because the entire file is script.
+func isScriptSyntaxComponent(src []byte) bool {
+	// Probe with the whole file marked as script so a leading /** */ doc block
+	// is stepped over; only the keyword that follows it matters here.
+	all := scriptSpans{{0, len(src)}}
+
+	pos := skipWSAndComments(src, 0, nil, all)
+
+	for _, kw := range []string{"abstract", "final"} {
+		if hasWordAt(src, pos, kw) {
+			pos = skipWSAndComments(src, pos+len(kw), nil, all)
+		}
+	}
+
+	return hasWordAt(src, pos, "component") || hasWordAt(src, pos, "interface")
+}
+
+// hasWordAt reports whether word sits at pos, case-insensitively, and is not
+// merely the prefix of a longer identifier.
+func hasWordAt(src []byte, pos int, word string) bool {
+	if pos < 0 || pos+len(word) > len(src) {
+		return false
+	}
+
+	for k := range len(word) {
+		if toLower(src[pos+k]) != word[k] {
+			return false
+		}
+	}
+
+	after := pos + len(word)
+
+	return after >= len(src) || !isIdentByte(src[after])
+}
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= '0' && c <= '9') ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z')
+}
+func hasBytesAt(src []byte, pos int, lit string) bool {
+	return pos >= 0 && pos+len(lit) <= len(src) && string(src[pos:pos+len(lit)]) == lit
+}
+func indexBytesFrom(src []byte, pos int, lit string) int {
+	if pos < 0 || pos > len(src) {
+		return -1
+	}
+
+	idx := bytes.Index(src[pos:], []byte(lit))
+	if idx < 0 {
+		return -1
+	}
+
+	return pos + idx
+}
+
+// headerEnd returns the offset just past the ">" closing the opening tag that
+// begins at start. Quoted values and comments are stepped over so that a ">"
+// inside either does not end the header early.
+//
+// Node shape cannot answer this on its own: a tag's attributes and its body
+// can be siblings under one node (cf_output_tag holds body comments as direct
+// children), so only the position of the ">" separates the two.
+func headerEnd(src []byte, start int) int {
+	i := start
+	for i < len(src) {
+		switch {
+		case hasBytesAt(src, i, "<!---"):
+			end := indexBytesFrom(src, i+5, "--->")
+			if end < 0 {
+				return len(src)
+			}
+
+			i = end + 4
+		case src[i] == '"' || src[i] == '\'':
+			q := src[i]
+			i++
+
+			for i < len(src) && src[i] != q {
+				i++
+			}
+
+			i++
+		case src[i] == '>':
+			return i + 1
+		default:
+			i++
+		}
+	}
+
+	return len(src)
+}
+
+// hasMultiLineComment reports whether any entry is a comment spanning more than
+// one line. Such a comment cannot share a line with the attributes around it,
+// so the whole list has to go one-per-line.
+func hasMultiLineComment(attrs []cfAttr) bool {
+	for _, a := range attrs {
+		if a.comment && strings.Contains(a.name, "\n") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// collectCommentBody appends body's non-whitespace bytes, folded to lower case,
+// so that reindenting or rewrapping a comment does not register as a change.
+//
+// A "/" directly before a ">" is dropped as well. Commented-out markup is
+// common, and the self-closing pass rewrites "<cfargument ...>" to
+// "<cfargument ... />" wherever it appears, comments included. The code side of
+// the comparison already tolerates that same difference.
+func collectCommentBody(sink *[]byte, body []byte) {
+	if sink == nil {
+		return
+	}
+
+	for k := 0; k < len(body); {
+		if n := spaceLen(body, k); n > 0 {
+			k += n
 
 			continue
 		}
 
-		break
+		c := body[k]
+		k++
+
+		if c == '/' && nextNonWS(body, k) == '>' {
+			continue
+		}
+
+		*sink = append(*sink, toLower(c))
+	}
+}
+
+// nextNonWS returns the first non-whitespace byte at or after pos, or 0.
+func nextNonWS(src []byte, pos int) byte {
+	pos = skipSpace(src, pos)
+	if pos < len(src) {
+		return src[pos]
 	}
 
-	return pos
+	return 0
+}
+
+// isLineCommentStart reports whether a "//" comment opens at pos. The caller
+// has already established that pos sits in script, where "//" is a comment
+// rather than the content it would be in markup.
+func isLineCommentStart(src []byte, pos int) bool {
+	if pos+1 >= len(src) || src[pos] != '/' || src[pos+1] != '/' {
+		return false
+	}
+
+	// A scheme separator immediately before the slashes marks a URL
+	// ("http://host") rather than a comment. Reading it as one would swallow
+	// the rest of the line and turn any reflow of that line into a spurious
+	// rejection.
+	return pos == 0 || src[pos-1] != ':'
+}
+
+// compareCommentBodies reports whether the comment text survived the format
+// unchanged. Both sides arrive stripped of whitespace and folded to lower case,
+// so reindenting and rewrapping are already accounted for; anything left is a
+// real edit to what a comment says.
+func compareCommentBodies(src, a, b []byte) error {
+	if bytes.Equal(a, b) {
+		return nil
+	}
+
+	at := 0
+	for at < len(a) && at < len(b) && a[at] == b[at] {
+		at++
+	}
+
+	// Locate the divergence in the original so the message points somewhere
+	// the reader can actually look.
+	line := byteOffsetToLine(src, commentBodyOffset(src, at))
+
+	return fmt.Errorf("formatter changed comment text near line %d (%q became %q)",
+		line, commentSnippet(a, at), commentSnippet(b, at))
+}
+
+// commentBodyOffset maps an index into the collected comment bytes back to a
+// byte offset in src, by re-walking src and counting comment body bytes.
+func commentBodyOffset(src []byte, target int) int {
+	script := scriptRegionsOf(src)
+	seen, pos := 0, 0
+
+	for pos < len(src) {
+		var body []byte
+
+		next := skipWSAndComments(src, pos, &body, script)
+		if next == pos {
+			pos++
+
+			continue
+		}
+
+		if seen+len(body) > target {
+			return next
+		}
+
+		seen += len(body)
+		pos = next
+	}
+
+	return len(src)
+}
+func commentSnippet(s []byte, at int) string {
+	start := max(at-10, 0)
+
+	end := min(at+20, len(s))
+
+	return string(s[start:end])
+}
+
+// skipWSAndComments advances past whitespace and comments, appending the
+// non-whitespace body of every comment it skips to sink when that is non-nil.
+//
+// Comments are stepped over rather than compared character by character
+// because a comment's *extent* is what carries meaning. A "//" comment runs to
+// the end of its line, so deleting that newline silently pulls whatever
+// followed on the next line into the comment. A raw character walk cannot see
+// that — joining two lines only removes whitespace, leaving the non-whitespace
+// sequence identical — whereas skipping each comment and then requiring the
+// surrounding code to line up catches it on the spot. The bodies collected in
+// sink are compared separately, so a comment whose text was mangled is still
+// reported even though its characters no longer take part in the walk.
+func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
+	for {
+		pos = skipSpace(src, pos)
+
+		switch {
+		case hasBytesAt(src, pos, "<!---"):
+			end := indexBytesFrom(src, pos+5, "--->")
+			if end < 0 {
+				return pos
+			}
+
+			collectCommentBody(sink, src[pos+5:end])
+			pos = end + 4
+		case hasBytesAt(src, pos, "<!--"):
+			// An HTML comment. It has to be recognised in its own right, not
+			// left to the "//" rule below, because its body routinely contains
+			// slashes ("<!-- // end-of-template -->") that would otherwise be
+			// read as a line comment and swallow the rest of the line.
+			end := indexBytesFrom(src, pos+4, "-->")
+			if end < 0 {
+				return pos
+			}
+
+			collectCommentBody(sink, src[pos+4:end])
+			pos = end + 3
+		case script.contains(pos) && hasBytesAt(src, pos, "/*"):
+			end := indexBytesFrom(src, pos+2, "*/")
+			if end < 0 {
+				return pos
+			}
+
+			collectCommentBody(sink, src[pos+2:end])
+			pos = end + 2
+		case script.contains(pos) && isLineCommentStart(src, pos):
+			end := pos + 2
+			for end < len(src) && src[end] != '\n' {
+				end++
+			}
+
+			collectCommentBody(sink, src[pos+2:end])
+			pos = end
+		default:
+			return pos
+		}
+	}
 }
 
 func toLower(c byte) byte {
@@ -574,6 +950,10 @@ func (f *Formatter) writeIndent() {
 type cfAttr struct {
 	name  string
 	value string // empty = boolean attribute
+	// comment marks an entry that is a CFML comment sitting among the
+	// attributes rather than an attribute of its own. It carries its whole
+	// text in name and is re-emitted verbatim.
+	comment bool
 }
 
 // collectAttrs gathers all cf_attribute children from a tag node,
@@ -581,17 +961,24 @@ type cfAttr struct {
 func (f *Formatter) collectAttrs(tag *sitter.Node) []cfAttr {
 	var attrs []cfAttr
 
-	f.walkAttrs(tag, &attrs)
+	f.walkAttrs(tag, &attrs, headerEnd(f.src, int(tag.StartByte())))
 
 	return attrs
 }
 
-func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
+func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr, hdrEnd int) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_start_tag_with_selfclose", "cf_tag_attributes":
-			f.walkAttrs(c, attrs)
+			f.walkAttrs(c, attrs, hdrEnd)
+		case "cf_comment":
+			// A comment among the attributes. Commenting an attribute out is
+			// how a setting gets parked without losing it, so dropping the
+			// comment throws that away silently. Carry it through in place.
+			if int(c.StartByte()) < hdrEnd {
+				*attrs = append(*attrs, cfAttr{name: f.text(c), comment: true})
+			}
 		case "cf_attribute":
 			attr := cfAttr{}
 
@@ -627,14 +1014,28 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 }
 
 // normaliseAttrValue ensures the value is wrapped in double quotes.
+//
+// The quote characters *inside* the value are never rewritten. Swapping them
+// corrupts the value whenever the delimiter it would swap to already appears
+// within: `to="#listLen(temp,"'")#"` became `to="#listLen(temp,”')#"`, an
+// unbalanced literal the grammar then rejects. Re-quoting is therefore only
+// applied when the value carries no double quote of its own; otherwise the
+// original delimiters are kept as-is.
 func (f *Formatter) normaliseAttrValue(v string) string {
 	v = strings.TrimSpace(v)
 	if len(v) >= 2 {
 		q := v[0]
 		if (q == '"' || q == '\'') && v[len(v)-1] == q {
-			// already quoted — normalise to double quotes
+			if q == '"' {
+				return v
+			}
+
 			inner := v[1 : len(v)-1]
-			inner = strings.ReplaceAll(inner, `"`, `'`)
+			if strings.Contains(inner, `"`) {
+				// Converting would need the inner quotes rewritten. Leave the
+				// single quotes in place rather than change the value.
+				return v
+			}
 
 			return `"` + inner + `"`
 		}
@@ -667,7 +1068,8 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 	// Should we expand?
 	oneLiner := "<" + tagName + inline.String()
 	expand := len(attrs) > f.opts.AttrBreakThreshold ||
-		f.lineLen+len(oneLiner) > f.opts.LineWidth
+		f.lineLen+len(oneLiner) > f.opts.LineWidth ||
+		hasMultiLineComment(attrs)
 
 	if !expand {
 		return inline.String()
@@ -794,6 +1196,17 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	}
 }
 
+// isWhitespaceNode reports whether n contributes nothing but whitespace.
+//
+// Whitespace between two siblings is not itself a sibling. Letting one update
+// the grouping state made trailing spaces after a comment look like a
+// non-comment neighbour, so the tag after it gained a blank line — which the
+// same format then stripped, flipping the answer on the next pass. Files
+// oscillated between the two forms forever.
+func (f *Formatter) isWhitespaceNode(n *sitter.Node) bool {
+	return strings.TrimSpace(f.text(n)) == ""
+}
+
 func (f *Formatter) formatChildren(n *sitter.Node) {
 	prevTagKind := ""
 	prevWasComment := false
@@ -808,6 +1221,10 @@ func (f *Formatter) formatChildren(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if kind != "" && !f.nodeIsComment(c) {
 			prevTagKind = kind
@@ -872,6 +1289,12 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 
 // firstBodyChildIsArg returns true if the first meaningful body child of a
 // block tag is a cfargument tag.
+//
+// Whitespace-only text counts as nothing. Trailing spaces after a tag's ">"
+// become a text node, so `<cffunction ...>   ` followed by a <cfargument> used
+// to answer false and gain a blank line — which the format then removed,
+// leaving the file to answer true and lose the blank line on the next pass.
+// Formatting oscillated between the two forever.
 func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -880,6 +1303,10 @@ func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 		if kind == "<cf" || kind == "</cf" || kind == ">" || kind == "cf_tag_name" ||
 			kind == "cf_tag_attributes" || kind == "cf_end_tag" ||
 			kind == "cf_attribute" || kind == "cf_start_tag" {
+			continue
+		}
+
+		if strings.TrimSpace(f.text(c)) == "" {
 			continue
 		}
 
@@ -1206,6 +1633,12 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 				f.formatNode(c)
 			}
 
+			if f.isWhitespaceNode(c) {
+				i++
+
+				continue
+			}
+
 			if tagKind != "" && kind != "comment" && kind != "cf_comment" {
 				prevTagKind = tagKind
 			}
@@ -1235,23 +1668,64 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 	f.writeIndent()
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 
-	// Find the body node and emit it verbatim
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-
-		kind := c.Kind()
-		switch kind {
-		case "cf_savecontent_body", "cf_savecontent_body_html",
-			"cf_savecontent_body_script", "cf_savecontent_body_css",
-			"cf_savecontent_body_xml", "cf_savecontent_body_sql",
-			"cf_savecontent_body_raw":
-			f.write(string(f.src[c.StartByte():c.EndByte()]))
-		}
-	}
+	// Emit everything between the tags verbatim. Collecting only the known
+	// cf_savecontent_body* node kinds missed content the grammar places
+	// outside them: a body consisting purely of comments parses as an *empty*
+	// cf_savecontent_body with the comments following it as siblings, so the
+	// entire body was dropped. Slicing the source spans whatever shape the
+	// grammar chose.
+	f.write(f.savecontentBody(n, name))
 
 	// Emit closing tag
 	f.write("</" + name + ">")
 	f.write("\n")
+}
+
+// savecontentBody returns the raw source between a savecontent tag's opening
+// ">" and its closing tag.
+func (f *Formatter) savecontentBody(n *sitter.Node, name string) string {
+	start := headerEnd(f.src, int(n.StartByte()))
+
+	end := int(n.EndByte())
+	if end > len(f.src) {
+		end = len(f.src)
+	}
+
+	if closeAt := lastIndexFold(f.src[:end], "</"+name); closeAt >= start {
+		end = closeAt
+	}
+
+	if start < 0 || start > end {
+		return ""
+	}
+
+	return string(f.src[start:end])
+}
+
+// lastIndexFold returns the offset of the final case-insensitive occurrence of
+// lit in src, or -1.
+func lastIndexFold(src []byte, lit string) int {
+	for i := len(src) - len(lit); i >= 0; i-- {
+		if hasBytesAtFold(src, i, lit) {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func hasBytesAtFold(src []byte, pos int, lit string) bool {
+	if pos < 0 || pos+len(lit) > len(src) {
+		return false
+	}
+
+	for k := range len(lit) {
+		if toLower(src[pos+k]) != toLower(lit[k]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // normalizeCond collapses internal newlines and leading whitespace in a
@@ -1271,6 +1745,24 @@ func (f *Formatter) normalizeCond(raw string) string {
 		}
 	}
 
+	// Break at logical operators, indenting by paren depth.
+	baseIndent := f.indented() + f.opts.indent(1)
+
+	// A "//" comment runs to the end of its line, so folding the following
+	// line up onto it turns that code into part of the comment. Collapsing a
+	// condition like
+	//
+	//	if ( a          // first
+	//	    or b )      // second
+	//
+	// onto one line leaves everything after the first "//" commented out, and
+	// because joining lines only removes whitespace the change slips past a
+	// character-level comparison. Keep the author's line structure instead and
+	// re-indent it.
+	if anyHasLineComment(parts) {
+		return strings.Join(parts, "\n"+baseIndent)
+	}
+
 	single := strings.Join(parts, " ")
 
 	// Check if it fits on one line.
@@ -1278,9 +1770,6 @@ func (f *Formatter) normalizeCond(raw string) string {
 	if tagPrefix+len(single) <= f.opts.LineWidth {
 		return single
 	}
-
-	// Break at logical operators, indenting by paren depth.
-	baseIndent := f.indented() + f.opts.indent(1)
 
 	var result strings.Builder
 
@@ -1305,6 +1794,42 @@ func (f *Formatter) normalizeCond(raw string) string {
 	}
 
 	return result.String()
+}
+
+// anyHasLineComment reports whether any part carries a "//" comment, which
+// makes the remainder of that part's line uncollapsible.
+func anyHasLineComment(parts []string) bool {
+	for _, p := range parts {
+		if hasLineComment(p) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasLineComment reports whether s opens a "//" comment outside a string
+// literal. Unlike the document-wide scan the guard performs, s here is a single
+// expression, so its quotes are balanced and tracking them is reliable.
+func hasLineComment(s string) bool {
+	var quote byte
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '/' && i+1 < len(s) && s[i+1] == '/':
+			return true
+		}
+	}
+
+	return false
 }
 
 // condBreakOperators are CFML logical operators where long conditions should break.
@@ -1398,6 +1923,10 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevTagKind2 = tagKind
