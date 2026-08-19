@@ -256,37 +256,53 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Both are latent — nothing in the corpus triggers them — but they mean the
-"clean" figures are an upper bound, not a proof.
+Both were latent — nothing in the corpus triggered either — but they meant the
+"clean" figures were an upper bound rather than a proof. Both are closed now.
 
-### 3.1 CFML comments are skipped entirely
+### 3.1 CFML comments were skipped entirely — fixed
 
-`skipWSAndComments` advances past `<!--- … --->` on both sides before
-comparing, so comment *content* is never in the compared stream:
+`skipWSAndComments` advanced past `<!--- … --->` on both sides before
+comparing, so comment *content* never entered the compared stream: rewriting,
+deleting or injecting a whole CFML comment was invisible.
 
-| Source | Output | Verdict |
+It now collects each comment body as it steps over it and compares the two
+sinks once both sides are exhausted (`compareCommentBodies`), which is why a
+comment cannot be compared in line — the formatter is allowed to *move* one.
+Rewriting, deleting and injecting are all rejected.
+
+### 3.2 `selfCloseTags` disabled quote checking across the whole file — fixed
+
+The allowance was written as "any mismatched `"` or `'` on either side", gated
+on `allowSelfClose`. Two things were wrong with that.
+
+The check was unanchored, so it applied to string literals and SQL, not just
+attribute values. With `selfCloseTags` at its default of `true`:
+
+| Source | Output | Verdict (before) |
 |---|---|---|
-| `<cfset a = 1><!--- keep this --->` | `<cfset a = 1><!--- TOTALLY DIFFERENT --->` | passes |
-| `<cfset a = 1><!--- keep --->` | `<cfset a = 1>` | passes |
-| `<cfset a = 1>` | `<cfset a = 1><!--- injected --->` | passes |
-| `<cfset a = 1>// line comment` | `<cfset a = 1>// CHANGED` | **rejected** |
+| `<cfset msg = "hello world">` | `<cfset msg = hello world>` | passed |
+| `<cfquery>SELECT 'a' FROM t</cfquery>` | `<cfquery>SELECT a FROM t</cfquery>` | passed |
 
-Rewriting, deleting or injecting a whole CFML comment is invisible. Script
-`//` comments are compared normally.
+The formatter stripping every quote out of a `<cfset>` was invisible to the
+guard by default.
 
-### 3.2 `selfCloseTags` disables quote checking across the whole file
+The fix follows from what the formatter actually does. `normaliseAttrValue`
+produces exactly two shapes: an unquoted value *gains* quotes, and a
+single-quoted one is *upgraded* to double. Neither removes a quote. So the
+allowance is now:
 
-When `allowSelfClose` is true the guard skips *any* mismatched `"` or `'` on
-either side. The comment says "around attribute values", but the check is
-unanchored and applies to string literals and SQL too:
+- a quote on the output side where the source has none — an addition;
+- a quote on each side that differ — a substitution, consumed on both sides.
 
-| Source | Output | `selfCloseTags: true` | `false` |
-|---|---|---|---|
-| `<cfset msg = "hello world">` | `<cfset msg = hello world>` | passes | rejected |
-| `<cfquery>SELECT 'a' FROM t</cfquery>` | `<cfquery>SELECT a FROM t</cfquery>` | passes | rejected |
+A quote the formatter dropped is compared like any other byte. The allowance
+also moved off `selfCloseTags` onto `doubleQuoteAttributes`, the option that
+performs the re-quoting; `selfCloseTags` still governs the `/>` rule alone.
 
-`selfCloseTags` defaults to `true`, so by default the guard cannot detect the
-formatter stripping every quote out of a `<cfset>`.
+Re-running the corpus after the change moved no file between categories —
+nothing in 5,620 real files relied on the removal allowance, confirming it was
+pure blind spot rather than a load-bearing exception. Covered by
+`TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
+`TestGuardRequoteGatedOnItsOwnOption`.
 
 ## 4. Outstanding
 
@@ -298,8 +314,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 32 | 20 in Lucee's test suite. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
-| Guard gaps 3.1 / 3.2 | — | Comment content uncompared; quote checking disabled by a style option. |
-| `final component` body not formatted | — | Pre-existing: emitted verbatim as `{ function a() {} }`. Whitespace-only, so it passes the guard. `abstract component` and `interface` go through the normal path. |
+| `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all three found by re-running the harness:
 
@@ -372,3 +387,68 @@ Regression coverage for everything in section 2 lives in
 `cmd/cfmleditor-lsp/format_test.go`; for the three fixes in section 4, in
 `internal/formatter/doctype_test.go` and
 `internal/formatter/script_tag_call_test.go`.
+
+## 6. Grammar gaps behind the refused counts
+
+The 86 refusals in section 4 are the largest bucket left, and "the grammar
+cannot parse it" is not something anyone can act on. This section reduces them
+to constructs. All of it is `tree-sitter-cfml` work, not formatter work.
+
+### 6.1 Confirmed cfscript gaps
+
+Each was reduced from a failing file and then re-checked **standalone** against
+`language.CFScript`, because the ERROR node marks where the parser gave up
+rather than what defeated it — most constructs the raw error text pointed at
+turned out to parse fine on their own.
+
+| Construct | Minimal repro | Seen in |
+|---|---|---|
+| `access:` function annotation | `component { function f(String x) access:remote { } }` (and `access:"remote"`) | Lucee LDEV3963 |
+| `final` member in a `static` block | `component { static { public final MEMBER = "v"; } }` | Lucee LDEV0600 |
+| Component with parenthesised settings | `component( javasettings = { } ) { public function test() { } }` | Lucee LDEV5763 |
+| `default` method in an `interface` | `interface { public default any function f(any obj){ } }` | Lucee LDEV1835 |
+| Bare `param` statement | `param url.number;` | Lucee Jira2605 |
+| Body-less tag-in-script | `query name="local.q2" dbtype="query";` | Lucee LDEV1750 |
+| Inline Java class | `classInstance = java { public class C { } };` | Lucee LDEV4001 |
+| Arrow function with a statement body | `list.each((value) => if (value < 0) throw(message = "x"));` | Lucee LDEV1819 |
+
+Two neighbouring constructs do parse, and are recorded here so they are not
+re-filed by mistake: a plain `static { }` block, and the ordered-struct literal
+`$[ key : "value" ]`. `param name="url.x" type="numeric";` also parses — it is
+only the bare `param url.number;` form that fails.
+
+### 6.2 A document-grammar gap that does not produce an ERROR
+
+`final component { … }` at the top of a `.cfc` is not recognised by the CFML
+document grammar — not in any position (`final abstract component`) and not in
+any case (`FINAL component`). Rather than producing an `ERROR` node it degrades
+to `html_text` + `text`, so nothing downstream can tell that parsing failed:
+the formatter emits the body verbatim, the change is whitespace-only, the guard
+passes it, and the corpus scores the file **clean**. `component` and
+`abstract component` are accepted.
+
+This is worth separating from the ERROR-node cases: a refusal is visible and
+safe, while a silent degradation to text is neither.
+
+### 6.3 What the remaining files are
+
+Not all 61 script-refused files are grammar gaps, and this matters before any
+of them is filed:
+
+- **Deliberately invalid fixtures.** Lucee's suite includes negative tests that
+  are *meant* not to parse — `test/general/Struct/invalid1.cfm` through
+  `invalid3.cfm` (`var x = {susi.sorglos, peter};`),
+  `LDEV3060/invalidcomponent.cfc`, `LDEV4062` (`testLambda = () => ;`).
+- **Fixture junk.** `LDEV4157.cfm` contains literal ``` ``` ``` markdown fences
+  inside the CFML.
+- **Genuinely malformed source.** `coldbox-platform/system/web/Controller.cfc`
+  is missing a comma between two arguments in a `relocate()` signature.
+
+About 40 of the 61 did not reduce to anything short enough to be conclusive,
+and are not characterised here. Line-level shrinking has to hold two invariants
+at once — the region must still fail to parse *and* stay structurally whole
+(balanced braces, no cut into a block comment) — and even then it can produce
+an artefact: a ColdBox repro that appeared to show a missing comma between
+parameters turned out to be two unrelated lines pulled together by the
+shrinker, not what the file contains. Every entry in 6.1 was re-verified
+standalone for exactly that reason.

@@ -23,7 +23,7 @@ func TestGuardTreatsBreakingUnicodeSpacesAsWhitespace(t *testing.T) {
 			src := "<cfset a = 1>" + sp + sp + "<cfset b = 2>"
 			out := "<cfset a = 1 />\n\t<cfset b = 2 />"
 
-			if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err != nil {
+			if err := checkWhitespaceOnly([]byte(src), []byte(out), true, true); err != nil {
 				t.Errorf("guard rejected re-indentation of a breaking space: %v", err)
 			}
 		})
@@ -43,7 +43,7 @@ func TestGuardKeepsNonBreakingSpacesAsContent(t *testing.T) {
 			src := `<cfset x = "a` + sp + `b" />`
 			out := `<cfset x = "ab" />`
 
-			if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err == nil {
+			if err := checkWhitespaceOnly([]byte(src), []byte(out), true, true); err == nil {
 				t.Error("guard accepted the loss of a non-breaking space")
 			}
 		})
