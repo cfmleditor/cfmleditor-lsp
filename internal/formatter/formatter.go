@@ -871,9 +871,47 @@ func (f *Formatter) write(s string) {
 }
 
 func (f *Formatter) nl() {
-	if !f.lastNL {
-		f.write("\n")
+	if f.lastNL {
+		return
 	}
+
+	if f.dropWhitespaceOnlyLine() {
+		return
+	}
+
+	f.write("\n")
+}
+
+// dropWhitespaceOnlyLine removes a partial trailing line holding nothing but
+// whitespace, reporting whether it removed one.
+//
+// Content emitted verbatim — a <cfxml> or <cfscript> body, say — ends with the
+// indentation that preceded its closing tag. Starting a new line after it
+// committed that indentation as a whitespace-only line, and the next format did
+// the same to the line it had just created. Files grew by one line every time
+// they were formatted, without limit.
+func (f *Formatter) dropWhitespaceOnlyLine() bool {
+	b := f.out.Bytes()
+
+	cut := len(b)
+	for cut > 0 && b[cut-1] != '\n' {
+		if !isWS(b[cut-1]) {
+			return false
+		}
+
+		cut--
+	}
+
+	if cut == len(b) {
+		return false
+	}
+
+	f.out.Truncate(cut)
+	f.lineLen = 0
+	f.lastNL = true
+	f.atBOL = true
+
+	return true
 }
 
 // appendTrailingComma inserts a comma before the trailing newline(s) in the
@@ -1490,6 +1528,10 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 				f.level++
 			}
 
+			if f.isWhitespaceNode(c) {
+				continue
+			}
+
 			if tagKind != "" && !f.nodeIsComment(c) {
 				prevCFTagKind = tagKind
 			}
@@ -2035,6 +2077,10 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevAltTagKind = tagKind
