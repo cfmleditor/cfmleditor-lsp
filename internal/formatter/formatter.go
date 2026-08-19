@@ -144,6 +144,9 @@ type Formatter struct {
 	lastTagMultiLine bool  // last emitted tag had expanded (multi-line) attributes
 	parseErr         error // first sub-parse error encountered
 	pendingComma     bool  // deferred trailing comma to emit after next query item
+	// pendingBlockComments holds comments found between a construct's header
+	// and its body, to be emitted just inside that body once it opens.
+	pendingBlockComments []*sitter.Node
 }
 
 // New creates a Formatter with the given options.
@@ -1615,6 +1618,24 @@ func (f *Formatter) normalizeCond(raw string) string {
 		}
 	}
 
+	// Break at logical operators, indenting by paren depth.
+	baseIndent := f.indented() + f.opts.indent(1)
+
+	// A "//" comment runs to the end of its line, so folding the following
+	// line up onto it turns that code into part of the comment. Collapsing a
+	// condition like
+	//
+	//	if ( a          // first
+	//	    or b )      // second
+	//
+	// onto one line leaves everything after the first "//" commented out, and
+	// because joining lines only removes whitespace the change slips past a
+	// character-level comparison. Keep the author's line structure instead and
+	// re-indent it.
+	if anyHasLineComment(parts) {
+		return strings.Join(parts, "\n"+baseIndent)
+	}
+
 	single := strings.Join(parts, " ")
 
 	// Check if it fits on one line.
@@ -1622,9 +1643,6 @@ func (f *Formatter) normalizeCond(raw string) string {
 	if tagPrefix+len(single) <= f.opts.LineWidth {
 		return single
 	}
-
-	// Break at logical operators, indenting by paren depth.
-	baseIndent := f.indented() + f.opts.indent(1)
 
 	var result strings.Builder
 
@@ -1649,6 +1667,42 @@ func (f *Formatter) normalizeCond(raw string) string {
 	}
 
 	return result.String()
+}
+
+// anyHasLineComment reports whether any part carries a "//" comment, which
+// makes the remainder of that part's line uncollapsible.
+func anyHasLineComment(parts []string) bool {
+	for _, p := range parts {
+		if hasLineComment(p) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasLineComment reports whether s opens a "//" comment outside a string
+// literal. Unlike the document-wide scan the guard performs, s here is a single
+// expression, so its quotes are balanced and tracking them is reliable.
+func hasLineComment(s string) bool {
+	var quote byte
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '/' && i+1 < len(s) && s[i+1] == '/':
+			return true
+		}
+	}
+
+	return false
 }
 
 // condBreakOperators are CFML logical operators where long conditions should break.

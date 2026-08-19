@@ -135,6 +135,76 @@ func (f *Formatter) writeInterveningComments(n *sitter.Node, from, to uint) bool
 	return wrote
 }
 
+// deferBlockComments queues the comments of n lying strictly between from and
+// to for emission inside the next block that opens. A comment between a
+// condition and an Allman-style brace belongs to no field, so navigating from
+// the condition straight to the body skipped past it and deleted it. It cannot
+// be emitted where it sits either: a "//" comment printed before the "{" would
+// swallow the brace, so it is carried into the body instead.
+func (f *Formatter) deferBlockComments(n, from, to *sitter.Node) {
+	if n == nil || from == nil || to == nil {
+		return
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+
+		switch c.Kind() {
+		case "comment", "block_comment", "cf_comment":
+		default:
+			continue
+		}
+
+		if c.StartByte() >= from.EndByte() && c.EndByte() <= to.StartByte() {
+			f.pendingBlockComments = append(f.pendingBlockComments, c)
+		}
+	}
+}
+
+// elseBody returns the else clause's body, queueing any comments that precede
+// it for emission inside that body. Such a comment is a named child like any
+// other, so taking the first named child picked the comment as the body and
+// rendered it in the body's place:
+//
+//	else //we have summary
+//	{ ... }
+//
+// It cannot be left where it sits either — a "//" comment printed before the
+// "{" swallows the brace.
+func (f *Formatter) elseBody(alt *sitter.Node) *sitter.Node {
+	var lead []*sitter.Node
+
+	for i := uint(0); i < alt.NamedChildCount(); i++ {
+		c := alt.NamedChild(i)
+
+		switch c.Kind() {
+		case "comment", "block_comment", "cf_comment":
+			lead = append(lead, c)
+
+			continue
+		}
+
+		f.pendingBlockComments = append(f.pendingBlockComments, lead...)
+
+		return c
+	}
+
+	return nil
+}
+
+// flushBlockComments emits any comments queued by deferBlockComments. It is
+// called just inside an opened block, so they land at the body's indentation
+// exactly as a comment written there would — which is where a second format
+// pass finds them, keeping the output stable.
+func (f *Formatter) flushBlockComments() {
+	pending := f.pendingBlockComments
+	f.pendingBlockComments = nil
+
+	for _, c := range pending {
+		f.formatScriptNode(c)
+	}
+}
+
 // scriptWrite writes s, prepending indentation if we are at the beginning of
 // a line. This is the primary output primitive for script formatting.
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
@@ -230,6 +300,7 @@ func (f *Formatter) scriptBlock(n *sitter.Node) {
 	f.scriptWrite("\n\n")
 
 	f.level++
+	f.flushBlockComments()
 	f.scriptChildren(n)
 	f.scriptWrite("\n")
 
@@ -548,9 +619,39 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		return fmt.Sprintf("%s[%s]", f.expr(obj), f.expr(idx))
 
 	case "parenthesized_expression":
-		inner := n.NamedChild(0)
+		// Every named child is rendered, not just the first. A comment inside
+		// the parens — commonly a commented-out clause parked at the end of a
+		// long condition — is a named child like any other, so taking child 0
+		// dropped it, or worse rendered it as the expression itself.
+		var sb strings.Builder
 
-		return fmt.Sprintf("( %s )", f.expr(inner))
+		sb.WriteString("( ")
+
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			c := n.NamedChild(i)
+
+			if i > 0 {
+				sb.WriteString(" ")
+			}
+
+			switch c.Kind() {
+			case "comment", "block_comment", "cf_comment":
+				text := strings.TrimSpace(f.text(c))
+				sb.WriteString(text)
+
+				// A "//" comment runs to end of line, so without a break it
+				// would swallow the rest of the condition and the ")".
+				if strings.HasPrefix(text, "//") {
+					sb.WriteString("\n")
+				}
+			default:
+				sb.WriteString(f.expr(c))
+			}
+		}
+
+		sb.WriteString(" )")
+
+		return sb.String()
 
 	case "sequence_expression":
 		// comma-separated list
@@ -1555,6 +1656,7 @@ func (f *Formatter) scriptIf(n *sitter.Node) {
 	alt := n.ChildByFieldName("alternative")
 
 	f.iLine(fmt.Sprintf("if %s", f.parenExpr(cond)))
+	f.deferBlockComments(n, cond, cons)
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
@@ -1563,7 +1665,7 @@ func (f *Formatter) scriptIf(n *sitter.Node) {
 		switch alt.Kind() {
 		case "else_clause":
 			// else if or else
-			inner := alt.NamedChild(0)
+			inner := f.elseBody(alt)
 			if inner != nil && inner.Kind() == "if_statement" {
 				f.scriptWrite(lead + " ")
 				// Re-use scriptIf but write inline (no leading newline/indent).
@@ -1611,6 +1713,7 @@ func (f *Formatter) scriptIfInline(n *sitter.Node) {
 	alt := n.ChildByFieldName("alternative")
 
 	f.scriptWrite(fmt.Sprintf("if %s", f.parenExpr(cond)))
+	f.deferBlockComments(n, cond, cons)
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
@@ -1618,7 +1721,7 @@ func (f *Formatter) scriptIfInline(n *sitter.Node) {
 
 		switch alt.Kind() {
 		case "else_clause":
-			inner := alt.NamedChild(0)
+			inner := f.elseBody(alt)
 			if inner != nil && inner.Kind() == "if_statement" {
 				f.scriptWrite(lead + " ")
 				f.scriptIfInline(inner)
@@ -1657,6 +1760,7 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	f.scriptWrite("\n\n")
 
 	f.level++
+	f.flushBlockComments()
 	f.formatScriptNode(body)
 	f.scriptWrite("\n")
 
