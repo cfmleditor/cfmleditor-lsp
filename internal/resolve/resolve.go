@@ -29,6 +29,17 @@ type Resolver struct {
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
 }
 
+// describeResolver names the resolver at idx for trace output, so a wrong component can be
+// traced back to the exact componentResolvers entry that produced it rather than just to
+// "a componentResolver".
+func (r *Resolver) describeResolver(idx int) string {
+	if idx < 0 || idx >= len(r.Resolvers) {
+		return "unknown resolver"
+	}
+
+	return r.Resolvers[idx].Describe()
+}
+
 // ComponentPath resolves a component dot-path to an absolute .cfc file path
 // using the standard fallback chain: baseDir → Application.cfc root → workspace folders.
 // If component contains pipe characters, each alternative is tried left-to-right.
@@ -646,11 +657,15 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	if comp == "" {
 		// Try component resolvers
-		var noFollow bool
+		var (
+			noFollow bool
+			idx      int
+		)
 
-		comp, noFollow = parser.ResolveFromCallFull(variable, r.Resolvers)
+		comp, noFollow, idx = parser.ResolveFromCallMatch(variable, r.Resolvers)
 		if comp != "" {
-			tr.add("resolved %q to %q via componentResolver matching the variable name (noFollow=%v)", variable, comp, noFollow)
+			tr.add("resolved %q to %q via componentResolver matching the variable name [%s] (noFollow=%v)",
+				variable, comp, r.describeResolver(idx), noFollow)
 		}
 
 		if noFollow && comp != "" {
@@ -660,11 +675,15 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	if comp == "" && call.Text != "" {
 		// Try resolvers against the full line text (handles chained calls like x.method().prop.func())
-		var noFollow bool
+		var (
+			noFollow bool
+			idx      int
+		)
 
-		comp, noFollow = parser.ResolveFromCallFull(call.Text, r.Resolvers)
+		comp, noFollow, idx = parser.ResolveFromCallMatch(call.Text, r.Resolvers)
 		if comp != "" {
-			tr.add("resolved %q to %q via componentResolver matching the full line text %q (noFollow=%v)", variable, comp, call.Text, noFollow)
+			tr.add("resolved %q to %q via componentResolver matching the full line text %q [%s] (noFollow=%v)",
+				variable, comp, call.Text, r.describeResolver(idx), noFollow)
 		}
 
 		if noFollow && comp != "" {

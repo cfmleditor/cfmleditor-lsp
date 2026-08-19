@@ -164,22 +164,29 @@ jobs:
           base="cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}"
 
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            asset="${base}.zip"
-            zip -q "${asset}" cfmleditor-lsp.exe
+            # Both formats, deliberately. A zip is what someone unpacking the
+            # asset by hand on Windows expects, but editor extensions derive
+            # the asset name from the platform alone and ask every platform
+            # for the same extension: the Zed extension requests
+            # cfmleditor-lsp-windows-amd64.tar.gz and fails to install without
+            # it. Publishing both costs 5MB and satisfies each.
+            zip -q "${base}.zip" cfmleditor-lsp.exe
+            tar czf "${base}.tar.gz" cfmleditor-lsp.exe
           else
-            asset="${base}.tar.gz"
             # macOS bsdtar otherwise stores AppleDouble "._" resource-fork
             # entries alongside the binary, which show up when the tarball is
             # unpacked anywhere else.
-            COPYFILE_DISABLE=1 tar czf "${asset}" cfmleditor-lsp
+            COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" cfmleditor-lsp
           fi
 
-          echo "asset=${asset}" >> "$GITHUB_OUTPUT"
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
 
+      # One artifact per platform holding every archive built for it, rather
+      # than one per archive, so the windows entry can carry two.
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.asset }}
-          path: ${{ steps.package.outputs.asset }}
+          name: ${{ steps.package.outputs.base }}
+          path: ${{ steps.package.outputs.base }}.*
           retention-days: 7
           if-no-files-found: error
 
@@ -211,7 +218,8 @@ jobs:
           cfmleditor-lsp-darwin-arm64.tar.gz
           cfmleditor-lsp-linux-amd64.tar.gz
           cfmleditor-lsp-linux-arm64.tar.gz
-          cfmleditor-lsp-windows-amd64.zip"
+          cfmleditor-lsp-windows-amd64.zip
+          cfmleditor-lsp-windows-amd64.tar.gz"
 
           missing=0
           while read -r asset; do

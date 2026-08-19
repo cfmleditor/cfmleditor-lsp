@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -274,5 +275,36 @@ func TestResolve_FormattingPresentAppliesFieldDefaults(t *testing.T) {
 
 	if r2.Formatting.LineWidth != 120 {
 		t.Errorf("expected explicit LineWidth=120 to override the default, got %d", r2.Formatting.LineWidth)
+	}
+}
+
+// TestResolve_AnchoredSurvivesJSONAndResolve checks the `anchored` flag decodes from
+// .cfmleditor.json and is still set after Resolve, which rebuilds the resolver list.
+// A dropped flag here reverts the resolver to unanchored matching silently — the
+// resolver keeps working, it just starts claiming expressions it should not.
+func TestResolve_AnchoredSurvivesJSONAndResolve(t *testing.T) {
+	var cfg JSON
+
+	raw := `{"componentResolvers":[
+		{"match":"document","resolve":"app.document","prefix":"document","anchored":true},
+		{"match":"getFoo()","resolve":"app.foo","prefix":"getFoo"}
+	]}`
+
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	r := Resolve(&cfg, "/proj")
+
+	if len(r.ComponentResolvers) != 2 {
+		t.Fatalf("expected both resolvers to survive filtering, got %d", len(r.ComponentResolvers))
+	}
+
+	if !r.ComponentResolvers[0].Anchored {
+		t.Error("expected anchored:true to survive Resolve")
+	}
+
+	if r.ComponentResolvers[1].Anchored {
+		t.Error("expected a resolver without the field to default to unanchored")
 	}
 }

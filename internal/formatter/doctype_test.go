@@ -3,6 +3,8 @@ package formatter
 import (
 	"strings"
 	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 // TestDoctypePreserved covers the declaration body being dropped: the grammar
@@ -106,5 +108,58 @@ func TestRawTextElementRelativeIndentPreserved(t *testing.T) {
 
 	if !strings.Contains(out, "    return 1;\n") {
 		t.Errorf("expected relative indent of body line preserved\ngot:\n%s", out)
+	}
+}
+
+// TestXMLDeclPreserved covers the sibling failure to the doctype one above, found by
+// the corpus harness in fw1's beans.xml.cfm. An xml_decl's parts are children ("<?",
+// "xml", tag_attributes, "?>"), and the generic child-walking path joined them with
+// nothing between, so <?xml version="1.0"?> came back as <?xmlversion="1.0"?>. Only
+// whitespace was removed, so the whitespaceOnly guard passed it and the CLI wrote it
+// to disk — leaving a file the grammar can no longer parse.
+func TestXMLDeclPreserved(t *testing.T) {
+	tests := []struct {
+		name string
+		decl string
+	}{
+		{
+			name: "version only",
+			decl: `<?xml version="1.0"?>`,
+		},
+		{
+			name: "version and encoding",
+			decl: `<?xml version="1.0" encoding="utf-8"?>`,
+		},
+		{
+			name: "standalone",
+			decl: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := tt.decl + "\n<beans>\n\t<bean id=\"a\" />\n</beans>\n"
+
+			out := format(t, src)
+			if !strings.HasPrefix(out, tt.decl+"\n") {
+				t.Errorf("xml declaration not preserved verbatim\n got: %q\nwant prefix: %q", out, tt.decl)
+			}
+
+			assertReparses(t, out)
+		})
+	}
+}
+
+// assertReparses checks the formatter's output is still parseable. A file that only
+// lost whitespace passes the whitespaceOnly guard, so nothing else notices when that
+// whitespace was the only thing holding a construct together.
+func assertReparses(t *testing.T, out string) {
+	t.Helper()
+
+	tree := language.Parse(language.CFML, []byte(out), nil)
+	defer tree.Close()
+
+	if tree.RootNode().HasError() {
+		t.Errorf("formatted output no longer parses:\n%s", out)
 	}
 }

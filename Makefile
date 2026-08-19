@@ -3,7 +3,7 @@ OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build build-wasm test install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test corpus install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -59,6 +59,19 @@ test:
 
 visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
+
+# Formats a corpus of real-world CFML and reports what the formatter did to each
+# file: clean, refused by the grammar, rejected by the whitespaceOnly guard, or not
+# idempotent. Every defect in FORMATTER-ISSUES.md was found this way. The corpus is
+# far too large to vendor, so CORPUS points at it and the test skips without one:
+#
+#   make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
+#
+# REPORT is optional and names a TSV of every non-clean file to work through.
+corpus:
+	@test -n "$(CORPUS)" || { echo "usage: make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]" >&2; exit 2; }
+	CFML_CORPUS="$(CORPUS)" CFML_CORPUS_REPORT="$(REPORT)" \
+		go test -v -count=1 -timeout 30m -run TestFormatterCorpus ./internal/formatter/
 
 fmt:
 	gofmt -w .

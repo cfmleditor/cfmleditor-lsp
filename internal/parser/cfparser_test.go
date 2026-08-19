@@ -3940,3 +3940,88 @@ func TestServiceProperty_BracketWithInternalDot(t *testing.T) {
 		t.Errorf("expected Component %q, got %q", want, found.Component)
 	}
 }
+
+// TestResolverMatch_Anchored covers the `anchored` flag, which requires a resolver's
+// prefix to sit at the start of the call expression instead of anywhere inside it.
+// Unanchored is the historical behaviour and is unchanged: indexFold finds the prefix
+// at any position and expr is sliced from there, so a short pattern matches exactly and
+// produces a confidently wrong component. Both false positives below are the ones
+// documented in CLAUDE.md.
+func TestResolverMatch_Anchored(t *testing.T) {
+	// The variable merely contains the prefix.
+	unanchored := []Resolver{
+		{Match: "document", Resolve: "app.document", Prefix: "document"},
+	}
+	if got := ResolveFromCall("domobject_document", unanchored); got != "app.document" {
+		t.Errorf("unanchored ResolveFromCall(domobject_document) = %q, want app.document (the documented false positive)", got)
+	}
+
+	anchored := []Resolver{
+		{Match: "document", Resolve: "app.document", Prefix: "document", Anchored: true},
+	}
+
+	if got := ResolveFromCall("domobject_document", anchored); got != "" {
+		t.Errorf("anchored ResolveFromCall(domobject_document) = %q, want empty", got)
+	}
+
+	// The genuine receiver still resolves, and case still doesn't matter.
+	for _, expr := range []string{"document", "DOCUMENT"} {
+		if got := ResolveFromCall(expr, anchored); got != "app.document" {
+			t.Errorf("anchored ResolveFromCall(%q) = %q, want app.document", expr, got)
+		}
+	}
+
+	// A broad catch-all matching a getter buried in a longer chain.
+	catchAll := []Resolver{
+		{Match: "get$1()", Resolve: "packages.tass.${1:lower}", Prefix: "get"},
+	}
+	if got := ResolveFromCall("VARIABLES._document.getDirectContent()", catchAll); got != "packages.tass.directcontent" {
+		t.Errorf("unanchored catch-all = %q, want packages.tass.directcontent (the documented false positive)", got)
+	}
+
+	catchAllAnchored := []Resolver{
+		{Match: "get$1()", Resolve: "packages.tass.${1:lower}", Prefix: "get", Anchored: true},
+	}
+
+	if got := ResolveFromCall("VARIABLES._document.getDirectContent()", catchAllAnchored); got != "" {
+		t.Errorf("anchored catch-all on a chained call = %q, want empty", got)
+	}
+
+	// The factory calls the catch-all was written for are bare, so they still resolve.
+	if got := ResolveFromCall("getPageTools()", catchAllAnchored); got != "packages.tass.pagetools" {
+		t.Errorf("anchored catch-all on a bare factory call = %q, want packages.tass.pagetools", got)
+	}
+}
+
+// TestResolverMatch_Anchored_PipeAlternativeOrderIrrelevant pairs with
+// TestResolverMatch_PipeDelimitedPrefix_OverlappingAlternatives: when one alternative is
+// a substring of another, unanchored matching lets the shorter one fix the slice position
+// and the longer never gets a chance, so the order matters. Anchoring removes that — every
+// alternative that matches, matches at position 0.
+func TestResolverMatch_Anchored_PipeAlternativeOrderIrrelevant(t *testing.T) {
+	for _, prefix := range []string{"File|getFile", "getFile|File"} {
+		resolvers := []Resolver{
+			{Match: `getFile\([^)]*\)`, Resolve: "customobjects.file", Prefix: prefix, Anchored: true},
+		}
+		if got := ResolveFromCall(`getFile()`, resolvers); got != "customobjects.file" {
+			t.Errorf("anchored ResolveFromCall(getFile()) with prefix %q = %q, want customobjects.file", prefix, got)
+		}
+	}
+}
+
+// TestResolverSet_Anchored checks the ResolverSet path applies anchoring too. It has its
+// own prefix lookup (a first-byte bucket index) alongside ResolveFromCallFull's linear
+// scan, so the flag has to be honoured in both.
+func TestResolverSet_Anchored(t *testing.T) {
+	rs := BuildResolverSet([]Resolver{
+		{Match: "document", Resolve: "app.document", Prefix: "document", Anchored: true},
+	})
+
+	if got := rs.Resolve("domobject_document"); got != "" {
+		t.Errorf("ResolverSet.Resolve(domobject_document) = %q, want empty", got)
+	}
+
+	if got := rs.Resolve("document"); got != "app.document" {
+		t.Errorf("ResolverSet.Resolve(document) = %q, want app.document", got)
+	}
+}

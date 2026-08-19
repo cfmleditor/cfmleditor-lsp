@@ -1198,7 +1198,7 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	case "html_text", "text":
 		f.formatText(n)
 
-	case "doctype":
+	case "doctype", "xml_decl":
 		f.formatDoctype(n)
 
 	case "style_element", "script_element":
@@ -2387,14 +2387,22 @@ func (f *Formatter) formatText(n *sitter.Node) {
 	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
 }
 
-// formatDoctype emits a <!DOCTYPE ...> declaration verbatim on its own line.
+// formatDoctype emits a <!DOCTYPE ...> or <?xml ...?> declaration verbatim on its
+// own line.
 //
-// The grammar models the declaration body (everything between "DOCTYPE" and
-// ">") as an unnamed pattern token that is not exposed as a child node, so the
-// generic child-walking path in formatNode would silently reconstruct the node
-// as "<!DOCTYPE>" and discard the body. Emitting the node's own source text
-// avoids that and is correct regardless: a doctype has no internal structure
-// worth reformatting.
+// The grammar models the doctype body (everything between "DOCTYPE" and ">") as an
+// unnamed pattern token that is not exposed as a child node, so the generic
+// child-walking path in formatNode would silently reconstruct the node as
+// "<!DOCTYPE>" and discard the body. An xml_decl fails there differently but just as
+// badly: its parts *are* children ("<?", "xml", tag_attributes..., "?>"), and the
+// generic path concatenates them with no separator, turning
+// <?xml version="1.0" encoding="utf-8"?> into <?xmlversion="1.0"encoding="utf-8"?>.
+// The whitespaceOnly guard cannot catch that — only whitespace was removed — but it
+// destroys the declaration and leaves the file unparseable.
+//
+// Emitting the node's own source text avoids both, and is correct regardless:
+// neither declaration has internal structure worth reformatting, and an XML
+// declaration is specified down to its spacing.
 func (f *Formatter) formatDoctype(n *sitter.Node) {
 	raw := strings.TrimSpace(f.text(n))
 	if raw == "" {
