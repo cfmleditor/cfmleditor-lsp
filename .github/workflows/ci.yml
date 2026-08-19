@@ -73,20 +73,31 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # v7 and up install golangci-lint v2 only, which is what this repo's v2
-      # .golangci.yml needs. Do not drop to v6 or below: those resolve "latest"
-      # to a v1 release (1.64.x) that cannot read the config at all.
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
+      # `make lint` rather than golangci-lint-action, for the same reason the
+      # vuln job below runs `make vuln`: one pinned version, shared by CI, the
+      # release gate and a developer's machine, so they cannot drift apart and
+      # report different findings on the same code.
+      #
+      # It also sidesteps a failure that has nothing to do with the code under
+      # test. golangci-lint refuses to load a config whose module targets a
+      # newer Go than the linter binary was itself built with, and released
+      # binaries lag the Go release by weeks — so every Go bump here is a
+      # coin toss on whether the published binary can start at all. The
+      # Makefile builds it from source under this module's own toolchain,
+      # where the mismatch cannot happen.
+      #
+      # What this gives up is the action's inline PR annotations: findings
+      # appear in the job log rather than on the diff.
+      - name: Run golangci-lint
+        run: make lint
 
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 

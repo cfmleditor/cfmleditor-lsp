@@ -187,9 +187,9 @@ func firstDifferingLine(a, b []byte) string {
 }
 
 func trimForReport(s string) string {
-	const max = 60
-	if len(s) > max {
-		return s[:max] + "..."
+	const limit = 60
+	if len(s) > limit {
+		return s[:limit] + "..."
 	}
 
 	return s

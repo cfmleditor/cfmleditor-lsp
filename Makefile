@@ -10,6 +10,20 @@ WASI_SDK ?= /opt/wasi-sdk
 # pinned scanner still sees newly published vulnerabilities.
 GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
+# Pinned for the same reason, and built from source rather than taken from PATH.
+# golangci-lint refuses to load a config whose module targets a newer Go than the
+# linter itself was built with — "the Go language version (go1.25) used to build
+# golangci-lint is lower than the targeted Go version (1.26.6)" — which is not a
+# lint failure but a flat refusal to start, and it is what any distro or Homebrew
+# binary does for a while after each Go bump. Building it here under this module's
+# own toolchain makes that mismatch impossible by construction.
+#
+# GOTOOLCHAIN has to be forced: resolving a pkg@version picks the toolchain the
+# *tool* module asks for (golangci-lint asks for 1.25.x), not the one this module
+# targets, which lands straight back on the refusal above.
+GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+GOLANGCI_RUN = GOTOOLCHAIN=go$(shell go list -m -f '{{.GoVersion}}') go run $(GOLANGCI)
+
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
 # assemble step before both fetches have finished.
@@ -75,10 +89,10 @@ corpus:
 
 fmt:
 	gofmt -w .
-	golangci-lint run --fix ./...
+	$(GOLANGCI_RUN) run --fix ./...
 
 lint:
-	golangci-lint run ./...
+	$(GOLANGCI_RUN) run ./...
 
 # GOWORK=off so the scan resolves dependencies from go.mod rather than from a
 # developer's go.work. A workspace can substitute a local checkout (e.g.
@@ -88,7 +102,7 @@ vuln:
 	GOWORK=off go run $(GOVULNCHECK) ./...
 
 lint-fix:
-	golangci-lint run --fix ./...
+	$(GOLANGCI_RUN) run --fix ./...
 
 install: build
 	cp $(OUT) $(GOPATH)/bin/$(BINARY)

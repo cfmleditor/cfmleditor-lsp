@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 make build          # generate docs + build binary to target/release/cfmleditor-lsp
 make test           # go test ./...
-make lint           # golangci-lint run ./...
+make lint           # golangci-lint run ./... (pinned scanner, built from source)
 make lint-fix       # golangci-lint run --fix ./...
 make vuln           # govulncheck ./... (pinned scanner, GOWORK=off)
 make fmt            # gofmt -w . && golangci-lint run --fix ./...
@@ -35,8 +35,9 @@ go test ./internal/parser/ -bench . -run '^$'
 **`make build` requires network access.** `build` depends on `generate` → `docs` →
 `scripts/fetch-docs-cfdocs.sh`, which git-clones the cfdocs repo into the gitignored
 `docs/data/`. The *generated* Go file (`internal/docs/generated_docs.go`) is committed, so plain
-`go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `golangci-lint run ./...` all work offline
-— use those when the fetch step can't run.
+`go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `make lint` all work offline
+— use those when the fetch step can't run. (`make lint`'s first run needs the network once, to
+fetch and build the pinned linter; after that it is served from the build cache.)
 
 **The docs pipeline has two sources and both must be staged.** `internal/docs/generated_docs.go`
 is generated from `docs/data/*.json`, which is *assembled* from per-source staging directories:
@@ -501,12 +502,18 @@ Some handles need both shapes; others only one, depending on how the code uses t
 - `.golangci.yml` (v2 config) enables `wsl_v5`, `nlreturn`, `revive`, `gocritic`, `gosec`,
   `errorlint`, `exhaustive`, `prealloc`, and others. **`wsl_v5` + `nlreturn` demand a blank line
   before `return` and around block statements** — this is why existing code looks the way it
-  does; match it or `make lint` fails. Test files are exempted from `prealloc`, `unparam`,
+  does; match it or `make lint` fails. **Lint via `make lint`, never a `golangci-lint` on
+  `PATH`.** The Makefile pins the version (`GOLANGCI`) and builds it from source under this
+  module's toolchain, because golangci-lint refuses to load a config whose module targets a newer
+  Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
+  used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
+  to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
+  bump. Test files are exempted from `prealloc`, `unparam`,
   `gosec`, and `staticcheck`.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
 - `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go
-  test -short`), `race`, `lint` (golangci-lint), `vuln` (`make vuln`), and an informational
+  test -short`), `race`, `lint` (`make lint`), `vuln` (`make vuln`), and an informational
   `perf` job that never gates a merge. None of them run `make docs`, since
   `internal/docs/generated_docs.go` is committed.
 

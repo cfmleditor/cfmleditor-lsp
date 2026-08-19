@@ -11,6 +11,9 @@
 - Fix `new component { ... }` — an anonymous component defined at the point of use — being emitted as `new ()`. The `new_expression` has neither a constructor nor an arguments node, since the class *is* its body, and rendering it from those two fields dropped the keyword and every property and method. 18 files in the corpus.
 - Fix commas being inserted into a CF tag written in script syntax. `cfdirectory(directory="#dir#" action="create")` separates its attributes with spaces, but the grammar hands the list over as an `arguments` node of assignment expressions — the same shape as a call's arguments — so the formatter joined them with `", "`. 11 files.
 - Across the six-project, 5,620-file corpus this takes files that format cleanly from 5,470 to 5,499 and guard rejections from 61 to 32.
+- Pin golangci-lint and build it from source in `make lint`, `make lint-fix` and `make fmt`, the way `make vuln` already handles govulncheck. Any `golangci-lint` on `PATH` that was built with an older Go than `go.mod` targets refuses to start at all — `can't load config: the Go language version (go1.25) used to build golangci-lint is lower than the targeted Go version (1.26.6)` — which is what a distro or Homebrew binary does for weeks after each Go bump, and it reads as a broken repo rather than a stale tool. Building the pinned version under this module's own toolchain makes the mismatch impossible; `GOTOOLCHAIN` has to be forced, since resolving a `pkg@version` otherwise picks the toolchain the *tool* module asks for.
+- CI's lint job runs `make lint` instead of `golangci-lint-action`, so CI, the release gate and a local run share one pinned version and cannot report different findings on the same code. Findings appear in the job log rather than as inline PR annotations.
+- Bump the `vuln` job's `actions/checkout` v4 → v7 and `actions/setup-go` v5 → v7. The 0.2.4 action bump covered every other job in both workflows and missed this one.
 
 ## [0.2.5]
 
