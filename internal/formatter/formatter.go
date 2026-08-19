@@ -15,6 +15,7 @@ package formatter
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -1234,6 +1235,83 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	}
 }
 
+// formatterState is the mutable output state a trial render has to leave
+// exactly as it found it.
+type formatterState struct {
+	outLen           int
+	level            int
+	atBOL            bool
+	lastNL           bool
+	lineLen          int
+	lastTagMultiLine bool
+	pendingComma     bool
+	parseErr         error
+	pendingComments  []*sitter.Node
+}
+
+func (f *Formatter) saveState() formatterState {
+	return formatterState{
+		outLen:           f.out.Len(),
+		level:            f.level,
+		atBOL:            f.atBOL,
+		lastNL:           f.lastNL,
+		lineLen:          f.lineLen,
+		lastTagMultiLine: f.lastTagMultiLine,
+		pendingComma:     f.pendingComma,
+		parseErr:         f.parseErr,
+		pendingComments:  slices.Clone(f.pendingBlockComments),
+	}
+}
+
+func (f *Formatter) restoreState(s formatterState) {
+	f.out.Truncate(s.outLen)
+	f.level = s.level
+	f.atBOL = s.atBOL
+	f.lastNL = s.lastNL
+	f.lineLen = s.lineLen
+	f.lastTagMultiLine = s.lastTagMultiLine
+	f.pendingComma = s.pendingComma
+	f.parseErr = s.parseErr
+	f.pendingBlockComments = s.pendingComments
+}
+
+// rendersOnOneLine reports whether what emit writes lands on a single line
+// inside LineWidth, by running it, measuring the result and discarding it.
+//
+// The question has to be asked of the text that will actually be emitted, not
+// of the source. The formatter rewrites as it goes — a tag written ">" comes out
+// " />", attribute values gain quotes, spacing is normalised — so measuring the
+// source ran a couple of characters per tag short of the truth. Once a file had
+// been formatted the measurement changed, borderline bodies crossed the limit
+// and took the other branch, and formatting alternated between two layouts.
+// Approximating the difference textually does not help: it only moves the
+// boundary, so a different set of borderline cases flips instead.
+//
+// Note that the width alone cannot answer this. The emitters soft-wrap, so a
+// body that is too long comes back inside LineWidth by being split across
+// lines — the tell is the split itself, not the width. Both are checked.
+func (f *Formatter) rendersOnOneLine(emit func()) bool {
+	saved := f.saveState()
+	col := f.lineLen
+
+	emit()
+
+	rendered := f.out.Bytes()[saved.outLen:]
+
+	// The emitters open their own line; that first newline is expected, and
+	// resets the column. Any further one means the content was wrapped.
+	if len(rendered) > 0 && rendered[0] == '\n' {
+		rendered = rendered[1:]
+		col = 0
+	}
+
+	fits := !bytes.ContainsRune(rendered, '\n') && col+len(rendered) <= f.opts.LineWidth
+
+	f.restoreState(saved)
+
+	return fits
+}
+
 // isWhitespaceNode reports whether n contributes nothing but whitespace.
 //
 // Whitespace between two siblings is not itself a sibling. Letting one update
@@ -1620,26 +1698,9 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	}
 
 	// If all body nodes are on a single line, emit them inline.
-	if f.allSingleLine(bodyNodes) && !f.hasBlockChild(bodyNodes) && f.fitsOnLine(bodyNodes) {
-		// Separate CF tags from inline text — CF tags get formatNode, text stays inline
-		var textRun []*sitter.Node
-
-		for _, c := range bodyNodes {
-			if strings.HasPrefix(c.Kind(), "cf_") {
-				if len(textRun) > 0 {
-					f.formatInlineRun(textRun)
-					textRun = nil
-				}
-
-				f.formatNode(c)
-			} else {
-				textRun = append(textRun, c)
-			}
-		}
-
-		if len(textRun) > 0 {
-			f.formatInlineRun(textRun)
-		}
+	inline := func() { f.emitBodyInline(bodyNodes) }
+	if f.allSingleLine(bodyNodes) && !f.hasBlockChild(bodyNodes) && f.rendersOnOneLine(inline) {
+		inline()
 	} else {
 		for i := 0; i < len(bodyNodes); {
 			c := bodyNodes[i]
@@ -1698,6 +1759,29 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	f.writeIndent()
 	f.write("</" + name + ">")
 	f.write("\n")
+}
+
+// emitBodyInline writes a block tag's body without blank-line grouping: CF tags
+// go through formatNode, and runs of text stay inline.
+func (f *Formatter) emitBodyInline(bodyNodes []*sitter.Node) {
+	var textRun []*sitter.Node
+
+	for _, c := range bodyNodes {
+		if strings.HasPrefix(c.Kind(), "cf_") {
+			if len(textRun) > 0 {
+				f.formatInlineRun(textRun)
+				textRun = nil
+			}
+
+			f.formatNode(c)
+		} else {
+			textRun = append(textRun, c)
+		}
+	}
+
+	if len(textRun) > 0 {
+		f.formatInlineRun(textRun)
+	}
 }
 
 // formatCFSavecontent emits the opening tag with proper indentation

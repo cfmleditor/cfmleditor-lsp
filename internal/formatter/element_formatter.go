@@ -72,8 +72,11 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 
 	// Indent and format body children
 	f.level++
-	if f.allSingleLine(bodyNodes) && f.fitsOnLine(bodyNodes) {
-		f.formatInlineRun(bodyNodes)
+
+	inline := func() { f.formatInlineRun(bodyNodes) }
+
+	if f.allSingleLine(bodyNodes) && f.rendersOnOneLine(inline) {
+		inline()
 	} else {
 		f.formatBodyRuns(bodyNodes)
 	}
@@ -173,19 +176,6 @@ func (f *Formatter) allSingleLine(nodes []*sitter.Node) bool {
 	}
 
 	return !strings.Contains(trimmed, "\n")
-}
-
-// fitsOnLine returns true if the collapsed content of nodes fits within the line width.
-func (f *Formatter) fitsOnLine(nodes []*sitter.Node) bool {
-	var combined strings.Builder
-	for _, n := range nodes {
-		combined.WriteString(f.text(n))
-	}
-
-	collapsed := collapseWhitespace(strings.TrimSpace(combined.String()))
-	indent := len(f.opts.indent(f.level))
-
-	return indent+len(collapsed) <= f.opts.LineWidth
 }
 
 // hasBlockChild returns true if any node in the list is a block-level tag.
