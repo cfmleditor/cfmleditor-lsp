@@ -22,7 +22,15 @@ GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 # *tool* module asks for (golangci-lint asks for 1.25.x), not the one this module
 # targets, which lands straight back on the refusal above.
 GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-GOLANGCI_RUN = GOTOOLCHAIN=go$(shell go list -m -f '{{.GoVersion}}') go run $(GOLANGCI)
+
+# The version is read out of go.mod directly rather than with `go list -m`.
+# Inside a workspace that lists every module in go.work, one per line, and
+# $(shell) folds those lines into a single space-separated value — the recipe
+# then expands to `GOTOOLCHAIN=go1.26.6 1.23 go run ...` and sh tries to run
+# "1.23" as a command. A developer with a go.work alongside the grammar repo
+# is the normal case here, so `go list -m` cannot be used for this.
+GO_VERSION = $(shell awk '/^go /{print $$2; exit}' go.mod)
+GOLANGCI_RUN = GOTOOLCHAIN=go$(GO_VERSION) go run $(GOLANGCI)
 
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
