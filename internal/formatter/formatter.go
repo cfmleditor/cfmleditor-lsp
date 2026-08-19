@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -351,6 +352,58 @@ func isWS(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
+// spaceLen returns the byte length of the whitespace character at pos, or 0 if
+// there is none. Unlike isWS it decodes multi-byte runes, because indentation
+// is not always ASCII: source pasted from a word processor or a browser arrives
+// indented with U+2003 EM SPACE and the like. Re-indenting such a line is a
+// whitespace change, but measuring it a byte at a time made it look like the
+// formatter had deleted content, and the file was refused.
+//
+// Only *breaking* spaces count. U+00A0 NO-BREAK SPACE and U+202F NARROW NO-BREAK
+// SPACE render differently from an ordinary space and are load-bearing in
+// markup, so they stay content: losing one has to be reported, not waved through.
+func spaceLen(src []byte, pos int) int {
+	if pos < 0 || pos >= len(src) {
+		return 0
+	}
+
+	if c := src[pos]; c < utf8.RuneSelf {
+		if isWS(c) || c == '\v' || c == '\f' {
+			return 1
+		}
+
+		return 0
+	}
+
+	r, size := utf8.DecodeRune(src[pos:])
+
+	switch {
+	case r >= 0x2000 && r <= 0x200A: // EN QUAD … HAIR SPACE
+		return size
+	case r == 0x0085, // NEXT LINE
+		r == 0x1680, // OGHAM SPACE MARK
+		r == 0x2028, // LINE SEPARATOR
+		r == 0x2029, // PARAGRAPH SEPARATOR
+		r == 0x205F, // MEDIUM MATHEMATICAL SPACE
+		r == 0x3000: // IDEOGRAPHIC SPACE
+		return size
+	}
+
+	return 0
+}
+
+// skipSpace advances past a run of whitespace, ASCII or otherwise.
+func skipSpace(src []byte, pos int) int {
+	for {
+		n := spaceLen(src, pos)
+		if n == 0 {
+			return pos
+		}
+
+		pos += n
+	}
+}
+
 // scriptSpans marks the byte ranges of a document that hold script rather than
 // markup. Only inside those does "//" open a comment: in markup the same two
 // characters are ordinary content, and appear in places as mundane as a
@@ -538,12 +591,17 @@ func collectCommentBody(sink *[]byte, body []byte) {
 		return
 	}
 
-	for k, c := range body {
-		if isWS(c) {
+	for k := 0; k < len(body); {
+		if n := spaceLen(body, k); n > 0 {
+			k += n
+
 			continue
 		}
 
-		if c == '/' && nextNonWS(body, k+1) == '>' {
+		c := body[k]
+		k++
+
+		if c == '/' && nextNonWS(body, k) == '>' {
 			continue
 		}
 
@@ -553,10 +611,9 @@ func collectCommentBody(sink *[]byte, body []byte) {
 
 // nextNonWS returns the first non-whitespace byte at or after pos, or 0.
 func nextNonWS(src []byte, pos int) byte {
-	for ; pos < len(src); pos++ {
-		if !isWS(src[pos]) {
-			return src[pos]
-		}
+	pos = skipSpace(src, pos)
+	if pos < len(src) {
+		return src[pos]
 	}
 
 	return 0
@@ -647,9 +704,7 @@ func commentSnippet(s []byte, at int) string {
 // reported even though its characters no longer take part in the walk.
 func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
 	for {
-		for pos < len(src) && isWS(src[pos]) {
-			pos++
-		}
+		pos = skipSpace(src, pos)
 
 		switch {
 		case hasBytesAt(src, pos, "<!---"):
