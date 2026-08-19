@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Force the pinned toolchain for `make vuln` too. `go run golang.org/x/vuln/...@v1.7.0` resolves the toolchain the *scanner* module asks for rather than the one this module targets — "requires go >= 1.25.0; switching to go1.25.13" — and a govulncheck built with 1.25 cannot load a 1.26 module's packages: it reports every package as "requires newer Go version" and scans nothing, while still exiting non-zero as though it had found something. CI never saw it, because `setup-go` installs the version from `go.mod` as the local toolchain and no switch happens; anyone whose own Go is older than the target hits it on the release gate. Same one-line fix as the linter got, reusing the `GO_VERSION` the linter already reads out of `go.mod`.
+
 ## [0.2.6]
 
 - Publish `cfmleditor-lsp-windows-amd64.tar.gz` alongside the existing `.zip`. Editor extensions derive the asset name from the platform alone and ask every platform for the same extension — the Zed extension requests the tarball and failed to install with "no asset found matching cfmleditor-lsp-windows-amd64.tar.gz" (#2). Both archives are published now.
