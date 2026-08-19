@@ -1331,7 +1331,7 @@ func (f *Formatter) formatChildren(n *sitter.Node) {
 		c := n.Child(i)
 		kind := f.nodeTagKind(c)
 
-		if kind != "" && prevTagKind != "" && !prevWasComment &&
+		if kind != "" && prevTagKind != "" && !prevWasComment && !f.nodeIsComment(c) &&
 			(kind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}
@@ -1373,8 +1373,15 @@ func (f *Formatter) nodeTagKind(n *sitter.Node) string {
 	}
 }
 
-// nodeIsComment returns true if the node is a comment (used to avoid
-// updating prevTagKind so comments don't cause blank lines after them).
+// nodeIsComment returns true if the node is a comment. Comments are transparent
+// to blank-line grouping in both directions: they neither end the run they sit
+// in nor start a new one.
+//
+// The symmetry is what makes the output stable. Whether the grammar hands a
+// comment to a tag's body or to the siblings after it depends on stray trailing
+// whitespace, and only the body is grouped — so a comment gained a blank line
+// before it, the format removed the whitespace, the re-parse moved the comment
+// out of the body, and the blank line went away again.
 func (f *Formatter) nodeIsComment(n *sitter.Node) bool {
 	kind := n.Kind()
 
@@ -1587,7 +1594,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 			// differ between the first and second format.
 		default:
 			tagKind := f.nodeTagKind(c)
-			if tagKind != "" && prevCFTagKind != "" && !prevCFTagWasComment &&
+			if tagKind != "" && prevCFTagKind != "" && !prevCFTagWasComment && !f.nodeIsComment(c) &&
 				(tagKind != prevCFTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 				f.write("\n")
 			}
@@ -1725,7 +1732,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 			// Insert blank line between groups of different tag types.
 			tagKind := f.nodeTagKind(c)
-			if tagKind != "" && prevTagKind != "" && !prevWasComment &&
+			if tagKind != "" && prevTagKind != "" && !prevWasComment && !f.nodeIsComment(c) &&
 				(tagKind != prevTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 				f.write("\n")
 			}
@@ -2043,7 +2050,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 
 	for _, c := range bodyNodes {
 		tagKind := f.nodeTagKind(c)
-		if tagKind != "" && prevTagKind2 != "" && !prevWasComment2 &&
+		if tagKind != "" && prevTagKind2 != "" && !prevWasComment2 && !f.nodeIsComment(c) &&
 			(tagKind != prevTagKind2 || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}
@@ -2155,7 +2162,7 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 
 	for _, c := range bodyNodes {
 		tagKind := f.nodeTagKind(c)
-		if tagKind != "" && prevAltTagKind != "" && !prevAltWasComment &&
+		if tagKind != "" && prevAltTagKind != "" && !prevAltWasComment && !f.nodeIsComment(c) &&
 			(tagKind != prevAltTagKind || f.isBlockTagKind(c) || f.lastTagMultiLine) {
 			f.write("\n")
 		}

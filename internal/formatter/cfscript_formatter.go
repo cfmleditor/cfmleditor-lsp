@@ -196,13 +196,15 @@ func (f *Formatter) elseBody(alt *sitter.Node) *sitter.Node {
 // called just inside an opened block, so they land at the body's indentation
 // exactly as a comment written there would — which is where a second format
 // pass finds them, keeping the output stable.
-func (f *Formatter) flushBlockComments() {
+func (f *Formatter) flushBlockComments() bool {
 	pending := f.pendingBlockComments
 	f.pendingBlockComments = nil
 
 	for _, c := range pending {
 		f.formatScriptNode(c)
 	}
+
+	return len(pending) > 0
 }
 
 // scriptWrite writes s, prepending indentation if we are at the beginning of
@@ -242,10 +244,18 @@ func (f *Formatter) iLine(s string) {
 }
 
 // scriptChildren iterates named statement-level children and dispatches each.
-func (f *Formatter) scriptChildren(n *sitter.Node) {
+//
+// leadEmitted says whether something was already written into this body — a
+// comment carried in from the construct's header by flushBlockComments. That
+// comment is a sibling of the statements that follow and has to count as one:
+// on the first format it was emitted outside this loop, so the statement after
+// it saw no predecessor and got no blank line, while on the second format the
+// comment had become an ordinary child and the blank line appeared. The file
+// alternated between the two.
+func (f *Formatter) scriptChildren(n *sitter.Node, leadEmitted bool) {
 	prevWasBlock := false
 	prevWasMultiLine := false
-	prevWasNamed := false
+	prevWasNamed := leadEmitted
 	prevEndRow := int(n.StartPosition().Row)
 
 	for i := uint(0); i < n.ChildCount(); i++ {
@@ -300,8 +310,8 @@ func (f *Formatter) scriptBlock(n *sitter.Node) {
 	f.scriptWrite("\n\n")
 
 	f.level++
-	f.flushBlockComments()
-	f.scriptChildren(n)
+	lead := f.flushBlockComments()
+	f.scriptChildren(n, lead)
 	f.scriptWrite("\n")
 
 	f.level--
@@ -1788,7 +1798,11 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	f.scriptWrite("\n\n")
 
 	f.level++
-	f.flushBlockComments()
+
+	if f.flushBlockComments() && isScriptBlockStmt(body) {
+		f.scriptWrite("\n")
+	}
+
 	f.formatScriptNode(body)
 	f.scriptWrite("\n")
 
