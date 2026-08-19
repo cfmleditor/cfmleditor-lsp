@@ -473,6 +473,56 @@ func indexBytesFrom(src []byte, pos int, lit string) int {
 	return pos + idx
 }
 
+// headerEnd returns the offset just past the ">" closing the opening tag that
+// begins at start. Quoted values and comments are stepped over so that a ">"
+// inside either does not end the header early.
+//
+// Node shape cannot answer this on its own: a tag's attributes and its body
+// can be siblings under one node (cf_output_tag holds body comments as direct
+// children), so only the position of the ">" separates the two.
+func headerEnd(src []byte, start int) int {
+	i := start
+	for i < len(src) {
+		switch {
+		case hasBytesAt(src, i, "<!---"):
+			end := indexBytesFrom(src, i+5, "--->")
+			if end < 0 {
+				return len(src)
+			}
+
+			i = end + 4
+		case src[i] == '"' || src[i] == '\'':
+			q := src[i]
+			i++
+
+			for i < len(src) && src[i] != q {
+				i++
+			}
+
+			i++
+		case src[i] == '>':
+			return i + 1
+		default:
+			i++
+		}
+	}
+
+	return len(src)
+}
+
+// hasMultiLineComment reports whether any entry is a comment spanning more than
+// one line. Such a comment cannot share a line with the attributes around it,
+// so the whole list has to go one-per-line.
+func hasMultiLineComment(attrs []cfAttr) bool {
+	for _, a := range attrs {
+		if a.comment && strings.Contains(a.name, "\n") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // collectCommentBody appends body's non-whitespace bytes, folded to lower case,
 // so that reindenting or rewrapping a comment does not register as a change.
 //
@@ -842,6 +892,10 @@ func (f *Formatter) writeIndent() {
 type cfAttr struct {
 	name  string
 	value string // empty = boolean attribute
+	// comment marks an entry that is a CFML comment sitting among the
+	// attributes rather than an attribute of its own. It carries its whole
+	// text in name and is re-emitted verbatim.
+	comment bool
 }
 
 // collectAttrs gathers all cf_attribute children from a tag node,
@@ -849,17 +903,24 @@ type cfAttr struct {
 func (f *Formatter) collectAttrs(tag *sitter.Node) []cfAttr {
 	var attrs []cfAttr
 
-	f.walkAttrs(tag, &attrs)
+	f.walkAttrs(tag, &attrs, headerEnd(f.src, int(tag.StartByte())))
 
 	return attrs
 }
 
-func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
+func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr, hdrEnd int) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_start_tag_with_selfclose", "cf_tag_attributes":
-			f.walkAttrs(c, attrs)
+			f.walkAttrs(c, attrs, hdrEnd)
+		case "cf_comment":
+			// A comment among the attributes. Commenting an attribute out is
+			// how a setting gets parked without losing it, so dropping the
+			// comment throws that away silently. Carry it through in place.
+			if int(c.StartByte()) < hdrEnd {
+				*attrs = append(*attrs, cfAttr{name: f.text(c), comment: true})
+			}
 		case "cf_attribute":
 			attr := cfAttr{}
 
@@ -949,7 +1010,8 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 	// Should we expand?
 	oneLiner := "<" + tagName + inline.String()
 	expand := len(attrs) > f.opts.AttrBreakThreshold ||
-		f.lineLen+len(oneLiner) > f.opts.LineWidth
+		f.lineLen+len(oneLiner) > f.opts.LineWidth ||
+		hasMultiLineComment(attrs)
 
 	if !expand {
 		return inline.String()

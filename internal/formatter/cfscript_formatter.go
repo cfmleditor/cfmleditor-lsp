@@ -300,7 +300,8 @@ func (f *Formatter) expr(n *sitter.Node) string {
 
 		leftStr := f.expr(left)
 		rightStr := f.expr(right)
-		result := fmt.Sprintf("%s %s %s", leftStr, op, rightStr)
+		cmts := f.delimitedComments(n)
+		result := fmt.Sprintf("%s %s%s %s", leftStr, op, cmts, rightStr)
 
 		if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
 			f.level++
@@ -310,7 +311,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			if strings.Contains(rightStr, "\n") {
 				indent := f.opts.indent(f.level + 1)
 
-				return fmt.Sprintf("%s %s\n%s%s", leftStr, op, indent, rightStr)
+				return fmt.Sprintf("%s %s%s\n%s%s", leftStr, op, cmts, indent, rightStr)
 			}
 		}
 
@@ -321,18 +322,23 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
 
-		return fmt.Sprintf("%s %s %s", f.expr(left), op, f.expr(right))
+		return fmt.Sprintf("%s %s%s %s", f.expr(left), op, f.delimitedComments(n), f.expr(right))
 
 	case "binary_expression":
 		left := n.ChildByFieldName("left")
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
+		cmts := f.delimitedComments(n)
 
 		if op == "" {
+			// gapOperator lifts the raw source between the operands, so
+			// anything sitting in that gap — comments included — is already
+			// carried across. Adding them again would emit them twice.
 			op = f.gapOperator(n, left, right)
+			cmts = ""
 		}
 
-		return fmt.Sprintf("%s %s %s", f.expr(left), op, f.expr(right))
+		return fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
 
 	case "unary_expression":
 		op := n.ChildByFieldName("operator")
@@ -608,6 +614,34 @@ func (f *Formatter) expr(n *sitter.Node) string {
 }
 
 // ─── helpers for expr ────────────────────────────────────────────────────────
+
+// delimitedComments returns the text of any delimited comment sitting directly
+// inside n, prefixed with a space, or "" when there is none. Rendering an
+// expression from its named fields alone drops these, and commenting an operand
+// out mid-expression is a common way to park it:
+//
+//	<cfset cols = "a," &
+//	    "b," &
+//	<!---    "c," & --->
+//	    "d">
+//
+// Only delimited forms are re-emitted. A "//" comment cannot be moved onto the
+// same line as the operand that follows it without swallowing it, so it is left
+// for the whitespace-only guard to report.
+func (f *Formatter) delimitedComments(n *sitter.Node) string {
+	var sb strings.Builder
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "cf_comment", "block_comment":
+			sb.WriteString(" ")
+			sb.WriteString(strings.TrimSpace(f.text(c)))
+		}
+	}
+
+	return sb.String()
+}
 
 func isWordOp(op string) bool {
 	switch op {
