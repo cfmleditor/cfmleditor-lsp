@@ -1274,6 +1274,12 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 
 // firstBodyChildIsArg returns true if the first meaningful body child of a
 // block tag is a cfargument tag.
+//
+// Whitespace-only text counts as nothing. Trailing spaces after a tag's ">"
+// become a text node, so `<cffunction ...>   ` followed by a <cfargument> used
+// to answer false and gain a blank line — which the format then removed,
+// leaving the file to answer true and lose the blank line on the next pass.
+// Formatting oscillated between the two forever.
 func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -1282,6 +1288,10 @@ func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 		if kind == "<cf" || kind == "</cf" || kind == ">" || kind == "cf_tag_name" ||
 			kind == "cf_tag_attributes" || kind == "cf_end_tag" ||
 			kind == "cf_attribute" || kind == "cf_start_tag" {
+			continue
+		}
+
+		if strings.TrimSpace(f.text(c)) == "" {
 			continue
 		}
 
