@@ -79,3 +79,60 @@ func TestBodyCommentsStayInTheBody(t *testing.T) {
 		t.Errorf("body comment was hoisted into the opening tag\ngot:\n%s", out)
 	}
 }
+
+// TestSavecontentBodyPreserved covers a body being deleted outright. Emitting
+// only the children whose kind is a known cf_savecontent_body* missed content
+// the grammar places elsewhere: a body made purely of comments parses as an
+// *empty* cf_savecontent_body with the comments following it as siblings, so
+// nothing at all was written between the tags.
+func TestSavecontentBodyPreserved(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"body of only an HTML comment",
+			"<cfsavecontent variable=\"d\">\n<!-- note -->\n</cfsavecontent>",
+			"<!-- note -->",
+		},
+		{
+			"body of only a CFML comment",
+			"<cfsavecontent variable=\"d\">\n<!--- note --->\n</cfsavecontent>",
+			"<!--- note --->",
+		},
+		{
+			"comments around interpolated output",
+			"<cfsavecontent variable=\"debug\">\n<!--=====-->\n<!-- t: <cfoutput>#x#</cfoutput> -->\n<!--=====-->\n</cfsavecontent>",
+			"<!-- t: <cfoutput>#x#</cfoutput> -->",
+		},
+		{
+			"uppercase tag name",
+			"<CFSAVECONTENT VARIABLE=\"d\">\n<!-- note -->\n</CFSAVECONTENT>",
+			"<!-- note -->",
+		},
+		{
+			"ordinary text body still survives",
+			"<cfsavecontent variable=\"d\">\nhello\n</cfsavecontent>",
+			"hello",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := format(t, tc.src)
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("savecontent body was dropped\nwant to contain: %s\ngot:\n%s", tc.want, out)
+			}
+		})
+	}
+}
+
+// TestSavecontentEmptyBodyStaysEmpty checks the slice does not invent content
+// for a genuinely empty tag.
+func TestSavecontentEmptyBodyStaysEmpty(t *testing.T) {
+	out := format(t, `<cfsavecontent variable="d"></cfsavecontent>`)
+	if !strings.Contains(out, `<cfsavecontent variable="d"></cfsavecontent>`) {
+		t.Errorf("empty savecontent not preserved\ngot:\n%s", out)
+	}
+}

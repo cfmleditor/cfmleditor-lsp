@@ -1582,23 +1582,64 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 	f.writeIndent()
 	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
 
-	// Find the body node and emit it verbatim
-	for i := uint(0); i < n.ChildCount(); i++ {
-		c := n.Child(i)
-
-		kind := c.Kind()
-		switch kind {
-		case "cf_savecontent_body", "cf_savecontent_body_html",
-			"cf_savecontent_body_script", "cf_savecontent_body_css",
-			"cf_savecontent_body_xml", "cf_savecontent_body_sql",
-			"cf_savecontent_body_raw":
-			f.write(string(f.src[c.StartByte():c.EndByte()]))
-		}
-	}
+	// Emit everything between the tags verbatim. Collecting only the known
+	// cf_savecontent_body* node kinds missed content the grammar places
+	// outside them: a body consisting purely of comments parses as an *empty*
+	// cf_savecontent_body with the comments following it as siblings, so the
+	// entire body was dropped. Slicing the source spans whatever shape the
+	// grammar chose.
+	f.write(f.savecontentBody(n, name))
 
 	// Emit closing tag
 	f.write("</" + name + ">")
 	f.write("\n")
+}
+
+// savecontentBody returns the raw source between a savecontent tag's opening
+// ">" and its closing tag.
+func (f *Formatter) savecontentBody(n *sitter.Node, name string) string {
+	start := headerEnd(f.src, int(n.StartByte()))
+
+	end := int(n.EndByte())
+	if end > len(f.src) {
+		end = len(f.src)
+	}
+
+	if closeAt := lastIndexFold(f.src[:end], "</"+name); closeAt >= start {
+		end = closeAt
+	}
+
+	if start < 0 || start > end {
+		return ""
+	}
+
+	return string(f.src[start:end])
+}
+
+// lastIndexFold returns the offset of the final case-insensitive occurrence of
+// lit in src, or -1.
+func lastIndexFold(src []byte, lit string) int {
+	for i := len(src) - len(lit); i >= 0; i-- {
+		if hasBytesAtFold(src, i, lit) {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func hasBytesAtFold(src []byte, pos int, lit string) bool {
+	if pos < 0 || pos+len(lit) > len(src) {
+		return false
+	}
+
+	for k := range len(lit) {
+		if toLower(src[pos+k]) != toLower(lit[k]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // normalizeCond collapses internal newlines and leading whitespace in a
