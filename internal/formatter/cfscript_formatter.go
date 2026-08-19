@@ -954,7 +954,12 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 			hasLineComment = true
 
 			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
-		case "block_comment":
+		case "block_comment", "cf_comment":
+			// A CFML comment reaches here from a tag-context struct literal
+			// (`<cfset x = { ... }>`). Left in the default branch it counted as
+			// an element and was given a trailing comma. Both forms are
+			// delimited, so unlike "//" they do not force the literal
+			// multi-line.
 			items = append(items, collectionItem{text: strings.TrimSpace(f.text(c)), isComment: true})
 		default:
 			items = append(items, collectionItem{text: f.expr(c)})
@@ -964,15 +969,38 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 	return items, hasLineComment
 }
 
-// joinCollectionInline joins items for a single-line literal. Only safe when
-// no item is a line comment.
+// joinCollectionInline joins items for a single-line literal. Only safe when no
+// item is a line comment, which would swallow the rest of the line.
+//
+// Commas follow the same rule as the multi-line form: they separate elements,
+// and a comment is not one. Comma-joining every item turned an interleaved
+// comment into a list entry — `[1, 2, <!--- why --->, 3]`. The comma owed to the
+// element before the comment still gets written, so the elements either side
+// stay separated.
 func joinCollectionInline(items []collectionItem) string {
-	parts := make([]string, 0, len(items))
-	for _, it := range items {
-		parts = append(parts, it.text)
+	lastElement := -1
+
+	for i, it := range items {
+		if !it.isComment {
+			lastElement = i
+		}
 	}
 
-	return strings.Join(parts, ", ")
+	var b strings.Builder
+
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+
+		b.WriteString(it.text)
+
+		if !it.isComment && i < lastElement {
+			b.WriteString(",")
+		}
+	}
+
+	return b.String()
 }
 
 // joinCollectionLines lays items out one per line, giving a trailing comma to
