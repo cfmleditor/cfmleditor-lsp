@@ -387,3 +387,68 @@ Regression coverage for everything in section 2 lives in
 `cmd/cfmleditor-lsp/format_test.go`; for the three fixes in section 4, in
 `internal/formatter/doctype_test.go` and
 `internal/formatter/script_tag_call_test.go`.
+
+## 6. Grammar gaps behind the refused counts
+
+The 86 refusals in section 4 are the largest bucket left, and "the grammar
+cannot parse it" is not something anyone can act on. This section reduces them
+to constructs. All of it is `tree-sitter-cfml` work, not formatter work.
+
+### 6.1 Confirmed cfscript gaps
+
+Each was reduced from a failing file and then re-checked **standalone** against
+`language.CFScript`, because the ERROR node marks where the parser gave up
+rather than what defeated it — most constructs the raw error text pointed at
+turned out to parse fine on their own.
+
+| Construct | Minimal repro | Seen in |
+|---|---|---|
+| `access:` function annotation | `component { function f(String x) access:remote { } }` (and `access:"remote"`) | Lucee LDEV3963 |
+| `final` member in a `static` block | `component { static { public final MEMBER = "v"; } }` | Lucee LDEV0600 |
+| Component with parenthesised settings | `component( javasettings = { } ) { public function test() { } }` | Lucee LDEV5763 |
+| `default` method in an `interface` | `interface { public default any function f(any obj){ } }` | Lucee LDEV1835 |
+| Bare `param` statement | `param url.number;` | Lucee Jira2605 |
+| Body-less tag-in-script | `query name="local.q2" dbtype="query";` | Lucee LDEV1750 |
+| Inline Java class | `classInstance = java { public class C { } };` | Lucee LDEV4001 |
+| Arrow function with a statement body | `list.each((value) => if (value < 0) throw(message = "x"));` | Lucee LDEV1819 |
+
+Two neighbouring constructs do parse, and are recorded here so they are not
+re-filed by mistake: a plain `static { }` block, and the ordered-struct literal
+`$[ key : "value" ]`. `param name="url.x" type="numeric";` also parses — it is
+only the bare `param url.number;` form that fails.
+
+### 6.2 A document-grammar gap that does not produce an ERROR
+
+`final component { … }` at the top of a `.cfc` is not recognised by the CFML
+document grammar — not in any position (`final abstract component`) and not in
+any case (`FINAL component`). Rather than producing an `ERROR` node it degrades
+to `html_text` + `text`, so nothing downstream can tell that parsing failed:
+the formatter emits the body verbatim, the change is whitespace-only, the guard
+passes it, and the corpus scores the file **clean**. `component` and
+`abstract component` are accepted.
+
+This is worth separating from the ERROR-node cases: a refusal is visible and
+safe, while a silent degradation to text is neither.
+
+### 6.3 What the remaining files are
+
+Not all 61 script-refused files are grammar gaps, and this matters before any
+of them is filed:
+
+- **Deliberately invalid fixtures.** Lucee's suite includes negative tests that
+  are *meant* not to parse — `test/general/Struct/invalid1.cfm` through
+  `invalid3.cfm` (`var x = {susi.sorglos, peter};`),
+  `LDEV3060/invalidcomponent.cfc`, `LDEV4062` (`testLambda = () => ;`).
+- **Fixture junk.** `LDEV4157.cfm` contains literal ``` ``` ``` markdown fences
+  inside the CFML.
+- **Genuinely malformed source.** `coldbox-platform/system/web/Controller.cfc`
+  is missing a comma between two arguments in a `relocate()` signature.
+
+About 40 of the 61 did not reduce to anything short enough to be conclusive,
+and are not characterised here. Line-level shrinking has to hold two invariants
+at once — the region must still fail to parse *and* stay structurally whole
+(balanced braces, no cut into a block comment) — and even then it can produce
+an artefact: a ColdBox repro that appeared to show a missing comma between
+parameters turned out to be two unrelated lines pulled together by the
+shrinker, not what the file contains. Every entry in 6.1 was re-verified
+standalone for exactly that reason.
