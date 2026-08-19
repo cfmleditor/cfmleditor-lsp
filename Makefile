@@ -5,6 +5,12 @@ WASI_SDK ?= /opt/wasi-sdk
 
 .PHONY: build build-wasm test corpus install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
+# The Go version this module targets. Tools below are built with it explicitly:
+# resolving a pkg@version otherwise picks the toolchain the *tool* module asks
+# for, which is the oldest one it supports, and a tool built with an older Go
+# than this module targets cannot load its packages at all.
+GOVERSION = $(shell go list -m -f '{{.GoVersion}}')
+
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
 # pinned scanner still sees newly published vulnerabilities.
@@ -18,11 +24,11 @@ GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 # binary does for a while after each Go bump. Building it here under this module's
 # own toolchain makes that mismatch impossible by construction.
 #
-# GOTOOLCHAIN has to be forced: resolving a pkg@version picks the toolchain the
-# *tool* module asks for (golangci-lint asks for 1.25.x), not the one this module
-# targets, which lands straight back on the refusal above.
+# GOTOOLCHAIN has to be forced — see GOVERSION above. govulncheck fails the same
+# way, less legibly: built with 1.25 against a 1.26 module it reports every
+# package as "requires newer Go version" and scans nothing.
 GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-GOLANGCI_RUN = GOTOOLCHAIN=go$(shell go list -m -f '{{.GoVersion}}') go run $(GOLANGCI)
+GOLANGCI_RUN = GOTOOLCHAIN=go$(GOVERSION) go run $(GOLANGCI)
 
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
@@ -99,7 +105,7 @@ lint:
 # ../tree-sitter-cfml) for a pinned module, which would report on source that
 # is not what a release actually builds from.
 vuln:
-	GOWORK=off go run $(GOVULNCHECK) ./...
+	GOWORK=off GOTOOLCHAIN=go$(GOVERSION) go run $(GOVULNCHECK) ./...
 
 lint-fix:
 	$(GOLANGCI_RUN) run --fix ./...
