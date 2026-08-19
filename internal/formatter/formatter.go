@@ -211,7 +211,7 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	}
 
 	if opts.WhitespaceOnly {
-		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags); err != nil {
+		if err := checkWhitespaceOnly(src, out, opts.SelfCloseTags, opts.DoubleQuoteAttributes); err != nil {
 			return nil, err
 		}
 	}
@@ -221,9 +221,10 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 
 // checkWhitespaceOnly walks both byte slices skipping whitespace, comparing
 // non-whitespace characters case-insensitively. If allowSelfClose is true,
-// a "/" immediately before ">" in either side is also skipped.
+// a "/" immediately before ">" in either side is also skipped; if allowRequote
+// is true, the attribute re-quoting described below is skipped too.
 // Returns nil if only whitespace differs, or an error describing the first mismatch.
-func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
+func checkWhitespaceOnly(a, b []byte, allowSelfClose, allowRequote bool) error {
 	i, j := 0, 0
 
 	// The formatter canonicalises cfscript as it goes: a statement written
@@ -285,26 +286,29 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 
 				continue
 			}
-			// Allow added/removed quotes around attribute values
-			if a[i] == '"' && b[j] != '"' {
+		}
+
+		// Attribute re-quoting is a deliberate canonicalisation, and only ever
+		// runs in one of two shapes (normaliseAttrValue): an unquoted value
+		// gains quotes, or a single-quoted one is upgraded to double. Those are
+		// a quote the output has and the source does not, and a quote on each
+		// side that differ.
+		//
+		// A quote the formatter *dropped* is neither, and allowing it is what
+		// blinded the guard: the allowance was written as "any mismatched quote
+		// on either side", so the formatter stripping the quotes off a CFML
+		// string — `<cfset msg = "hello world">` coming back as
+		// `<cfset msg = hello world>`, or `SELECT 'a'` as `SELECT a` — passed
+		// as whitespace-only. A removal is compared like any other byte now.
+		if allowRequote {
+			if isQuoteByte(a[i]) && isQuoteByte(b[j]) && a[i] != b[j] {
 				i++
-
-				continue
-			}
-
-			if b[j] == '"' && a[i] != '"' {
 				j++
 
 				continue
 			}
 
-			if a[i] == '\'' && b[j] != '\'' {
-				i++
-
-				continue
-			}
-
-			if b[j] == '\'' && a[i] != '\'' {
+			if isQuoteByte(b[j]) && !isQuoteByte(a[i]) {
 				j++
 
 				continue
@@ -703,6 +707,11 @@ func commentSnippet(s []byte, at int) string {
 // surrounding code to line up catches it on the spot. The bodies collected in
 // sink are compared separately, so a comment whose text was mangled is still
 // reported even though its characters no longer take part in the walk.
+// isQuoteByte reports whether c delimits an attribute value or string literal.
+func isQuoteByte(c byte) bool {
+	return c == '"' || c == '\''
+}
+
 func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
 	for {
 		pos = skipSpace(src, pos)

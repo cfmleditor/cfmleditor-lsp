@@ -256,37 +256,53 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Both are latent — nothing in the corpus triggers them — but they mean the
-"clean" figures are an upper bound, not a proof.
+Both were latent — nothing in the corpus triggered either — but they meant the
+"clean" figures were an upper bound rather than a proof. Both are closed now.
 
-### 3.1 CFML comments are skipped entirely
+### 3.1 CFML comments were skipped entirely — fixed
 
-`skipWSAndComments` advances past `<!--- … --->` on both sides before
-comparing, so comment *content* is never in the compared stream:
+`skipWSAndComments` advanced past `<!--- … --->` on both sides before
+comparing, so comment *content* never entered the compared stream: rewriting,
+deleting or injecting a whole CFML comment was invisible.
 
-| Source | Output | Verdict |
+It now collects each comment body as it steps over it and compares the two
+sinks once both sides are exhausted (`compareCommentBodies`), which is why a
+comment cannot be compared in line — the formatter is allowed to *move* one.
+Rewriting, deleting and injecting are all rejected.
+
+### 3.2 `selfCloseTags` disabled quote checking across the whole file — fixed
+
+The allowance was written as "any mismatched `"` or `'` on either side", gated
+on `allowSelfClose`. Two things were wrong with that.
+
+The check was unanchored, so it applied to string literals and SQL, not just
+attribute values. With `selfCloseTags` at its default of `true`:
+
+| Source | Output | Verdict (before) |
 |---|---|---|
-| `<cfset a = 1><!--- keep this --->` | `<cfset a = 1><!--- TOTALLY DIFFERENT --->` | passes |
-| `<cfset a = 1><!--- keep --->` | `<cfset a = 1>` | passes |
-| `<cfset a = 1>` | `<cfset a = 1><!--- injected --->` | passes |
-| `<cfset a = 1>// line comment` | `<cfset a = 1>// CHANGED` | **rejected** |
+| `<cfset msg = "hello world">` | `<cfset msg = hello world>` | passed |
+| `<cfquery>SELECT 'a' FROM t</cfquery>` | `<cfquery>SELECT a FROM t</cfquery>` | passed |
 
-Rewriting, deleting or injecting a whole CFML comment is invisible. Script
-`//` comments are compared normally.
+The formatter stripping every quote out of a `<cfset>` was invisible to the
+guard by default.
 
-### 3.2 `selfCloseTags` disables quote checking across the whole file
+The fix follows from what the formatter actually does. `normaliseAttrValue`
+produces exactly two shapes: an unquoted value *gains* quotes, and a
+single-quoted one is *upgraded* to double. Neither removes a quote. So the
+allowance is now:
 
-When `allowSelfClose` is true the guard skips *any* mismatched `"` or `'` on
-either side. The comment says "around attribute values", but the check is
-unanchored and applies to string literals and SQL too:
+- a quote on the output side where the source has none — an addition;
+- a quote on each side that differ — a substitution, consumed on both sides.
 
-| Source | Output | `selfCloseTags: true` | `false` |
-|---|---|---|---|
-| `<cfset msg = "hello world">` | `<cfset msg = hello world>` | passes | rejected |
-| `<cfquery>SELECT 'a' FROM t</cfquery>` | `<cfquery>SELECT a FROM t</cfquery>` | passes | rejected |
+A quote the formatter dropped is compared like any other byte. The allowance
+also moved off `selfCloseTags` onto `doubleQuoteAttributes`, the option that
+performs the re-quoting; `selfCloseTags` still governs the `/>` rule alone.
 
-`selfCloseTags` defaults to `true`, so by default the guard cannot detect the
-formatter stripping every quote out of a `<cfset>`.
+Re-running the corpus after the change moved no file between categories —
+nothing in 5,620 real files relied on the removal allowance, confirming it was
+pure blind spot rather than a load-bearing exception. Covered by
+`TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
+`TestGuardRequoteGatedOnItsOwnOption`.
 
 ## 4. Outstanding
 
@@ -298,8 +314,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 32 | 20 in Lucee's test suite. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
-| Guard gaps 3.1 / 3.2 | — | Comment content uncompared; quote checking disabled by a style option. |
-| `final component` body not formatted | — | Pre-existing: emitted verbatim as `{ function a() {} }`. Whitespace-only, so it passes the guard. `abstract component` and `interface` go through the normal path. |
+| `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all three found by re-running the harness:
 

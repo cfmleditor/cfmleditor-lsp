@@ -21,7 +21,7 @@ func TestGuardAllowsNormalizationInsertions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err != nil {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err != nil {
 				t.Errorf("guard rejected a deliberate normalisation: %v", err)
 			}
 		})
@@ -52,7 +52,7 @@ func TestGuardStillCatchesRealChanges(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err == nil {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err == nil {
 				t.Errorf("guard accepted a real change: %q -> %q", tc.src, tc.out)
 			}
 		})
@@ -62,11 +62,11 @@ func TestGuardStillCatchesRealChanges(t *testing.T) {
 // TestGuardBraceBalance checks the counting half of the allowance: a matched
 // pair is fine, a stray brace is not.
 func TestGuardBraceBalance(t *testing.T) {
-	if err := checkWhitespaceOnly([]byte("if (x) f();"), []byte("if (x) { f(); }"), true); err != nil {
+	if err := checkWhitespaceOnly([]byte("if (x) f();"), []byte("if (x) { f(); }"), true, true); err != nil {
 		t.Errorf("matched pair rejected: %v", err)
 	}
 
-	err := checkWhitespaceOnly([]byte("if (x) f();"), []byte("if (x) { f();"), true)
+	err := checkWhitespaceOnly([]byte("if (x) f();"), []byte("if (x) { f();"), true, true)
 	if err == nil {
 		t.Error("unmatched opening brace accepted")
 	} else if !strings.Contains(err.Error(), "unmatched") {
@@ -82,7 +82,7 @@ func TestGuardCatchesCommentSwallowingCode(t *testing.T) {
 	src := "<cfscript>\nif ( a // one\n\tor b ) { f(); }\n</cfscript>"
 	out := "<cfscript>\nif ( a // one or b ) { f(); }\n</cfscript>"
 
-	if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err == nil {
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), true, true); err == nil {
 		t.Error("guard accepted a line comment that swallowed the rest of the condition")
 	}
 }
@@ -93,7 +93,7 @@ func TestGuardCatchesDroppedComment(t *testing.T) {
 	src := `<cfmail to="a" <!--- server="x" ---> from="b">`
 	out := `<cfmail to="a" from="b">`
 
-	if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err == nil {
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), true, true); err == nil {
 		t.Error("guard accepted a dropped comment")
 	}
 }
@@ -127,7 +127,7 @@ func TestGuardAllowsCommentMovement(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err != nil {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err != nil {
 				t.Errorf("guard rejected a legitimate comment move: %v", err)
 			}
 		})
@@ -162,7 +162,7 @@ func TestGuardTreatsSlashesInMarkupAsContent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err != nil {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err != nil {
 				t.Errorf("guard rejected markup containing slashes: %v", err)
 			}
 		})
@@ -192,5 +192,91 @@ func TestScriptSyntaxComponentDetected(t *testing.T) {
 				t.Errorf("isScriptSyntaxComponent(%q) = %v, want %v", tc.src, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGuardRejectsDroppedQuotes covers the hole recorded as 3.2 in
+// FORMATTER-ISSUES.md. The re-quoting allowance was written as "any mismatched
+// quote on either side", which also excused a quote the formatter *dropped* —
+// so with the default options the guard could not see the formatter stripping
+// the quotes off a CFML string or a SQL literal. Neither is a shape
+// normaliseAttrValue produces, and neither appears anywhere in the 5,620-file
+// corpus, so the allowance was pure blind spot.
+func TestGuardRejectsDroppedQuotes(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		out  string
+	}{
+		{
+			name: "cfset string literal loses its quotes",
+			src:  `<cfset msg = "hello world">`,
+			out:  `<cfset msg = hello world>`,
+		},
+		{
+			name: "sql string literal loses its quotes",
+			src:  `<cfquery>SELECT 'a' FROM t</cfquery>`,
+			out:  `<cfquery>SELECT a FROM t</cfquery>`,
+		},
+		{
+			name: "attribute value loses its quotes",
+			src:  `<cfinclude template="foo.cfm">`,
+			out:  `<cfinclude template=foo.cfm>`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err == nil {
+				t.Errorf("guard accepted a dropped quote:\n src: %s\n out: %s", tc.src, tc.out)
+			}
+		})
+	}
+}
+
+// TestGuardAllowsAttributeRequoting is the other half: the two shapes
+// normaliseAttrValue really does produce must still pass, or the formatter
+// would be in conflict with its own defaults.
+func TestGuardAllowsAttributeRequoting(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		out  string
+	}{
+		{
+			name: "unquoted value gains quotes",
+			src:  `<cfinclude template=foo.cfm>`,
+			out:  `<cfinclude template="foo.cfm">`,
+		},
+		{
+			name: "single quoted value upgraded to double",
+			src:  `<cfquery name='q' datasource='ds'>x</cfquery>`,
+			out:  `<cfquery name="q" datasource="ds">x</cfquery>`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true, true); err != nil {
+				t.Errorf("guard rejected a deliberate re-quoting: %v\n src: %s\n out: %s", err, tc.src, tc.out)
+			}
+		})
+	}
+}
+
+// TestGuardRequoteGatedOnItsOwnOption pins the knob. The allowance used to ride
+// on selfCloseTags, which has nothing to do with quoting: turning self-closing
+// tags on disabled quote checking for the whole file. It is gated on
+// doubleQuoteAttributes now — the option that actually performs the re-quoting.
+func TestGuardRequoteGatedOnItsOwnOption(t *testing.T) {
+	src := `<cfinclude template=foo.cfm>`
+	out := `<cfinclude template="foo.cfm">`
+
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), false, true); err != nil {
+		t.Errorf("re-quoting should be allowed with selfCloseTags off: %v", err)
+	}
+
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), true, false); err == nil {
+		t.Error("re-quoting should be reported with doubleQuoteAttributes off")
 	}
 }

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Stop the `whitespaceOnly` guard excusing a quote the formatter dropped. The re-quoting allowance was written as "any mismatched `"` or `'` on either side", so with the default settings the guard could not see the formatter stripping the quotes off a CFML string or a SQL literal — `<cfset msg = "hello world">` coming back as `<cfset msg = hello world>` passed as whitespace-only. `normaliseAttrValue` only ever *adds* quotes to an unquoted value or *upgrades* single to double, so the allowance is now limited to those two shapes and a dropped quote is compared like any other byte. Re-running the six-project corpus moved no file between categories, confirming nothing relied on the old exception. The allowance also moved off `selfCloseTags` — which has nothing to do with quoting and was disabling the check for whole files — onto `doubleQuoteAttributes`, the option that performs the re-quoting.
+
 - Force the pinned toolchain for `make vuln` too. `go run golang.org/x/vuln/...@v1.7.0` resolves the toolchain the *scanner* module asks for rather than the one this module targets — "requires go >= 1.25.0; switching to go1.25.13" — and a govulncheck built with 1.25 cannot load a 1.26 module's packages: it reports every package as "requires newer Go version" and scans nothing, while still exiting non-zero as though it had found something. CI never saw it, because `setup-go` installs the version from `go.mod` as the local toolchain and no switch happens; anyone whose own Go is older than the target hits it on the release gate. Same one-line fix as the linter got, reusing the `GO_VERSION` the linter already reads out of `go.mod`.
 
 ## [0.2.6]
