@@ -73,3 +73,124 @@ func TestGuardBraceBalance(t *testing.T) {
 		t.Errorf("expected an unmatched-brace error, got %v", err)
 	}
 }
+
+// TestGuardCatchesCommentSwallowingCode covers the defect the comment handling
+// exists for: a "//" comment runs to the end of its line, so deleting that
+// newline pulls the code that followed into the comment. Joining lines removes
+// only whitespace, which is exactly why a plain character walk cannot see it.
+func TestGuardCatchesCommentSwallowingCode(t *testing.T) {
+	src := "<cfscript>\nif ( a // one\n\tor b ) { f(); }\n</cfscript>"
+	out := "<cfscript>\nif ( a // one or b ) { f(); }\n</cfscript>"
+
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err == nil {
+		t.Error("guard accepted a line comment that swallowed the rest of the condition")
+	}
+}
+
+// TestGuardCatchesDroppedComment pins the other half: a comment the formatter
+// removed outright is a silent loss of what the code says about itself.
+func TestGuardCatchesDroppedComment(t *testing.T) {
+	src := `<cfmail to="a" <!--- server="x" ---> from="b">`
+	out := `<cfmail to="a" from="b">`
+
+	if err := checkWhitespaceOnly([]byte(src), []byte(out), true); err == nil {
+		t.Error("guard accepted a dropped comment")
+	}
+}
+
+// TestGuardAllowsCommentMovement covers what the formatter legitimately does to
+// comments: reindenting them, rewrapping them, and lifting a trailing comment
+// onto its own line. None of these change what the comment says or what the
+// code does.
+func TestGuardAllowsCommentMovement(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		out  string
+	}{
+		{
+			"trailing line comment lifted onto its own line",
+			"<cfscript>\nif ( a ) { // note\n\tf();\n}\n</cfscript>",
+			"<cfscript>\nif ( a ) {\n\t// note\n\tf();\n}\n</cfscript>",
+		},
+		{
+			"tag comment reindented",
+			"<cfif x>\n<!---  spaced   out  --->\n</cfif>",
+			"<cfif x>\n\t<!--- spaced out --->\n</cfif>",
+		},
+		{
+			"commented-out markup gains a self-closing slash",
+			`<cfif x><!--- <cfargument name="a"> ---></cfif>`,
+			`<cfif x><!--- <cfargument name="a" /> ---></cfif>`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err != nil {
+				t.Errorf("guard rejected a legitimate comment move: %v", err)
+			}
+		})
+	}
+}
+
+// TestGuardTreatsSlashesInMarkupAsContent covers the false positives that a
+// naive "//" rule produces. Outside script these are ordinary characters, and
+// reading one as a comment would swallow its line and reject a good reformat.
+func TestGuardTreatsSlashesInMarkupAsContent(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		out  string
+	}{
+		{
+			"doctype in a string literal",
+			`<cfset x = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN">'><cfset y = 1>`,
+			"<cfset x = '<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0//EN\">' />\n<cfset y = 1 />",
+		},
+		{
+			"slashes inside an HTML comment",
+			`<!-- // end-of-template --><cfset y = 1>`,
+			"<!-- // end-of-template -->\n<cfset y = 1 />",
+		},
+		{
+			"url in markup",
+			`<a href="http://example.com/a">x</a><cfset y = 1>`,
+			"<a href=\"http://example.com/a\">x</a>\n<cfset y = 1 />",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkWhitespaceOnly([]byte(tc.src), []byte(tc.out), true); err != nil {
+				t.Errorf("guard rejected markup containing slashes: %v", err)
+			}
+		})
+	}
+}
+
+// TestScriptSyntaxComponentDetected checks that a script-syntax component,
+// which has no <cfscript> tag to key off, still counts as script throughout —
+// including when a doc block precedes the keyword.
+func TestScriptSyntaxComponentDetected(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"plain", "component { }", true},
+		{"after doc block", "/**\n * docs\n */\ncomponent { }", true},
+		{"interface", "interface { }", true},
+		{"modifier", "final component { }", true},
+		{"tag based", "<cfcomponent></cfcomponent>", false},
+		{"not a keyword prefix", "componentry = 1", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isScriptSyntaxComponent([]byte(tc.src)); got != tc.want {
+				t.Errorf("isScriptSyntaxComponent(%q) = %v, want %v", tc.src, got, tc.want)
+			}
+		})
+	}
+}

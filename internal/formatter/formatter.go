@@ -229,9 +229,16 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 	// counted, so an unmatched one is still caught below.
 	openedAdded, closedAdded := 0, 0
 
+	// Comment bodies are gathered as the walk steps over them and compared
+	// once both sides are exhausted. See skipWSAndComments for why comments
+	// cannot be compared in line with the surrounding code.
+	var commentsA, commentsB []byte
+
+	scriptA, scriptB := scriptRegionsOf(a), scriptRegionsOf(b)
+
 	for {
-		i = skipWSAndComments(a, i)
-		j = skipWSAndComments(b, j)
+		i = skipWSAndComments(a, i, &commentsA, scriptA)
+		j = skipWSAndComments(b, j, &commentsB, scriptB)
 
 		if j < len(b) && isNormalizationToken(b[j]) &&
 			(i >= len(a) || toLower(a[i]) != toLower(b[j])) {
@@ -252,7 +259,7 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose bool) error {
 				return fmt.Errorf("formatter added %d unmatched brace(s)", openedAdded-closedAdded)
 			}
 
-			return nil
+			return compareCommentBodies(a, commentsA, commentsB)
 		}
 
 		if i == len(a) || j == len(b) {
@@ -341,36 +348,297 @@ func isWS(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
-// skipWSAndComments advances past whitespace and CFML comments (<!--- ... --->).
-func skipWSAndComments(src []byte, pos int) int {
+// scriptSpans marks the byte ranges of a document that hold script rather than
+// markup. Only inside those does "//" open a comment: in markup the same two
+// characters are ordinary content, and appear in places as mundane as a
+// DOCTYPE ("-//W3C//DTD XHTML 1.0 Strict//EN"). Reading one of those as a
+// comment would swallow the rest of its line and reject a perfectly good
+// reformat of it.
+type scriptSpans []struct{ start, end int }
+
+func (s scriptSpans) contains(pos int) bool {
+	for _, sp := range s {
+		if pos >= sp.start && pos < sp.end {
+			return true
+		}
+	}
+
+	return false
+}
+
+// scriptRegionsOf locates the <cfscript> and <script> blocks in src, or spans
+// the whole file when it is a script-syntax component.
+func scriptRegionsOf(src []byte) scriptSpans {
+	if isScriptSyntaxComponent(src) {
+		return scriptSpans{{0, len(src)}}
+	}
+
+	var spans scriptSpans
+
+	lower := bytes.ToLower(src)
+
+	for _, tag := range []string{"cfscript", "script"} {
+		open, closeTag := "<"+tag, "</"+tag
+
+		for pos := 0; ; {
+			start := indexBytesFrom(lower, pos, open)
+			if start < 0 {
+				break
+			}
+
+			// Require a tag boundary so <script> does not also match
+			// <scripting> and <cfscript> is not matched twice.
+			after := start + len(open)
+			if after < len(lower) && !isTagNameEnd(lower[after]) {
+				pos = after
+
+				continue
+			}
+
+			body := indexBytesFrom(lower, after, ">")
+			if body < 0 {
+				break
+			}
+
+			end := indexBytesFrom(lower, body+1, closeTag)
+			if end < 0 {
+				end = len(src)
+			}
+
+			spans = append(spans, struct{ start, end int }{body + 1, end})
+			pos = end
+		}
+	}
+
+	return spans
+}
+func isTagNameEnd(c byte) bool {
+	return isWS(c) || c == '>' || c == '/'
+}
+
+// isScriptSyntaxComponent reports whether src is a script-syntax component,
+// which has no <cfscript> tag to key off because the entire file is script.
+func isScriptSyntaxComponent(src []byte) bool {
+	// Probe with the whole file marked as script so a leading /** */ doc block
+	// is stepped over; only the keyword that follows it matters here.
+	all := scriptSpans{{0, len(src)}}
+
+	pos := skipWSAndComments(src, 0, nil, all)
+
+	for _, kw := range []string{"abstract", "final"} {
+		if hasWordAt(src, pos, kw) {
+			pos = skipWSAndComments(src, pos+len(kw), nil, all)
+		}
+	}
+
+	return hasWordAt(src, pos, "component") || hasWordAt(src, pos, "interface")
+}
+
+// hasWordAt reports whether word sits at pos, case-insensitively, and is not
+// merely the prefix of a longer identifier.
+func hasWordAt(src []byte, pos int, word string) bool {
+	if pos < 0 || pos+len(word) > len(src) {
+		return false
+	}
+
+	for k := range len(word) {
+		if toLower(src[pos+k]) != word[k] {
+			return false
+		}
+	}
+
+	after := pos + len(word)
+
+	return after >= len(src) || !isIdentByte(src[after])
+}
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= '0' && c <= '9') ||
+		(c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z')
+}
+func hasBytesAt(src []byte, pos int, lit string) bool {
+	return pos >= 0 && pos+len(lit) <= len(src) && string(src[pos:pos+len(lit)]) == lit
+}
+func indexBytesFrom(src []byte, pos int, lit string) int {
+	if pos < 0 || pos > len(src) {
+		return -1
+	}
+
+	idx := bytes.Index(src[pos:], []byte(lit))
+	if idx < 0 {
+		return -1
+	}
+
+	return pos + idx
+}
+
+// collectCommentBody appends body's non-whitespace bytes, folded to lower case,
+// so that reindenting or rewrapping a comment does not register as a change.
+//
+// A "/" directly before a ">" is dropped as well. Commented-out markup is
+// common, and the self-closing pass rewrites "<cfargument ...>" to
+// "<cfargument ... />" wherever it appears, comments included. The code side of
+// the comparison already tolerates that same difference.
+func collectCommentBody(sink *[]byte, body []byte) {
+	if sink == nil {
+		return
+	}
+
+	for k, c := range body {
+		if isWS(c) {
+			continue
+		}
+
+		if c == '/' && nextNonWS(body, k+1) == '>' {
+			continue
+		}
+
+		*sink = append(*sink, toLower(c))
+	}
+}
+
+// nextNonWS returns the first non-whitespace byte at or after pos, or 0.
+func nextNonWS(src []byte, pos int) byte {
+	for ; pos < len(src); pos++ {
+		if !isWS(src[pos]) {
+			return src[pos]
+		}
+	}
+
+	return 0
+}
+
+// isLineCommentStart reports whether a "//" comment opens at pos. The caller
+// has already established that pos sits in script, where "//" is a comment
+// rather than the content it would be in markup.
+func isLineCommentStart(src []byte, pos int) bool {
+	if pos+1 >= len(src) || src[pos] != '/' || src[pos+1] != '/' {
+		return false
+	}
+
+	// A scheme separator immediately before the slashes marks a URL
+	// ("http://host") rather than a comment. Reading it as one would swallow
+	// the rest of the line and turn any reflow of that line into a spurious
+	// rejection.
+	return pos == 0 || src[pos-1] != ':'
+}
+
+// compareCommentBodies reports whether the comment text survived the format
+// unchanged. Both sides arrive stripped of whitespace and folded to lower case,
+// so reindenting and rewrapping are already accounted for; anything left is a
+// real edit to what a comment says.
+func compareCommentBodies(src, a, b []byte) error {
+	if bytes.Equal(a, b) {
+		return nil
+	}
+
+	at := 0
+	for at < len(a) && at < len(b) && a[at] == b[at] {
+		at++
+	}
+
+	// Locate the divergence in the original so the message points somewhere
+	// the reader can actually look.
+	line := byteOffsetToLine(src, commentBodyOffset(src, at))
+
+	return fmt.Errorf("formatter changed comment text near line %d (%q became %q)",
+		line, commentSnippet(a, at), commentSnippet(b, at))
+}
+
+// commentBodyOffset maps an index into the collected comment bytes back to a
+// byte offset in src, by re-walking src and counting comment body bytes.
+func commentBodyOffset(src []byte, target int) int {
+	script := scriptRegionsOf(src)
+	seen, pos := 0, 0
+
+	for pos < len(src) {
+		var body []byte
+
+		next := skipWSAndComments(src, pos, &body, script)
+		if next == pos {
+			pos++
+
+			continue
+		}
+
+		if seen+len(body) > target {
+			return next
+		}
+
+		seen += len(body)
+		pos = next
+	}
+
+	return len(src)
+}
+func commentSnippet(s []byte, at int) string {
+	start := max(at-10, 0)
+
+	end := min(at+20, len(s))
+
+	return string(s[start:end])
+}
+
+// skipWSAndComments advances past whitespace and comments, appending the
+// non-whitespace body of every comment it skips to sink when that is non-nil.
+//
+// Comments are stepped over rather than compared character by character
+// because a comment's *extent* is what carries meaning. A "//" comment runs to
+// the end of its line, so deleting that newline silently pulls whatever
+// followed on the next line into the comment. A raw character walk cannot see
+// that — joining two lines only removes whitespace, leaving the non-whitespace
+// sequence identical — whereas skipping each comment and then requiring the
+// surrounding code to line up catches it on the spot. The bodies collected in
+// sink are compared separately, so a comment whose text was mangled is still
+// reported even though its characters no longer take part in the walk.
+func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
 	for {
 		for pos < len(src) && isWS(src[pos]) {
 			pos++
 		}
 
-		if pos+4 < len(src) && src[pos] == '<' && src[pos+1] == '!' && src[pos+2] == '-' && src[pos+3] == '-' && src[pos+4] == '-' {
-			end := pos + 5
-			for end+2 < len(src) {
-				if src[end] == '-' && src[end+1] == '-' && src[end+2] == '-' && end+3 < len(src) && src[end+3] == '>' {
-					pos = end + 4
+		switch {
+		case hasBytesAt(src, pos, "<!---"):
+			end := indexBytesFrom(src, pos+5, "--->")
+			if end < 0 {
+				return pos
+			}
 
-					break
-				}
+			collectCommentBody(sink, src[pos+5:end])
+			pos = end + 4
+		case hasBytesAt(src, pos, "<!--"):
+			// An HTML comment. It has to be recognised in its own right, not
+			// left to the "//" rule below, because its body routinely contains
+			// slashes ("<!-- // end-of-template -->") that would otherwise be
+			// read as a line comment and swallow the rest of the line.
+			end := indexBytesFrom(src, pos+4, "-->")
+			if end < 0 {
+				return pos
+			}
 
+			collectCommentBody(sink, src[pos+4:end])
+			pos = end + 3
+		case script.contains(pos) && hasBytesAt(src, pos, "/*"):
+			end := indexBytesFrom(src, pos+2, "*/")
+			if end < 0 {
+				return pos
+			}
+
+			collectCommentBody(sink, src[pos+2:end])
+			pos = end + 2
+		case script.contains(pos) && isLineCommentStart(src, pos):
+			end := pos + 2
+			for end < len(src) && src[end] != '\n' {
 				end++
 			}
 
-			if end+2 >= len(src) {
-				break
-			}
-
-			continue
+			collectCommentBody(sink, src[pos+2:end])
+			pos = end
+		default:
+			return pos
 		}
-
-		break
 	}
-
-	return pos
 }
 
 func toLower(c byte) byte {
