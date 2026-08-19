@@ -14,6 +14,7 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // The formatter's correctness claim — that it only ever changes whitespace — is not
@@ -59,6 +60,10 @@ const (
 	verdictUnstable
 	// verdictPanic crashed the formatter. In the LSP this takes down the daemon.
 	verdictPanic
+	// verdictSkipped is not CFML at all — a file whose extension claims it is
+	// and whose bytes say otherwise. Counted apart so it cannot be mistaken for
+	// a grammar gap.
+	verdictSkipped
 )
 
 func (v corpusVerdict) String() string {
@@ -75,6 +80,8 @@ func (v corpusVerdict) String() string {
 		return "unstable"
 	case verdictPanic:
 		return "panic"
+	case verdictSkipped:
+		return "skipped"
 	default:
 		return "unknown"
 	}
@@ -204,7 +211,7 @@ type corpusResult struct {
 }
 
 // corpusTally counts verdicts for one root (or for everything).
-type corpusTally [verdictPanic + 1]int
+type corpusTally [verdictSkipped + 1]int
 
 func (t *corpusTally) total() int {
 	n := 0
@@ -310,6 +317,17 @@ func runCorpus(t *testing.T, files []corpusResult) []corpusResult {
 					continue
 				}
 
+				// Real trees contain files whose extension says CFML and whose
+				// contents are not — Lucee ships two GIFs named *.gif.cfm.
+				// Feeding those to the parser produces a refusal that is
+				// indistinguishable from a grammar gap in the report.
+				if path.IsBinary(src) {
+					files[i].verdict = verdictSkipped
+					files[i].detail = "binary content"
+
+					continue
+				}
+
 				files[i].verdict, files[i].detail = classifyCorpusFile(src)
 			}
 		}()
@@ -352,7 +370,7 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 		}
 	}
 
-	t.Logf("%-18s %6s %6s %6s %6s %6s %6s %6s", "root", "files", "clean", "parse", "script", "guard", "unstab", "panic")
+	t.Logf("%-18s %6s %6s %6s %6s %6s %6s %6s %6s", "root", "files", "clean", "parse", "script", "guard", "unstab", "panic", "skip")
 
 	for _, root := range roots {
 		tally, ok := byRoot[root]
@@ -360,14 +378,16 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 			continue
 		}
 
-		t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d", filepath.Base(root), tally.total(),
+		t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d", filepath.Base(root), tally.total(),
 			tally[verdictClean], tally[verdictParseRefused], tally[verdictScriptRefused],
-			tally[verdictGuardRejected], tally[verdictUnstable], tally[verdictPanic])
+			tally[verdictGuardRejected], tally[verdictUnstable], tally[verdictPanic],
+			tally[verdictSkipped])
 	}
 
-	t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d", "TOTAL", overall.total(),
+	t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d", "TOTAL", overall.total(),
 		overall[verdictClean], overall[verdictParseRefused], overall[verdictScriptRefused],
-		overall[verdictGuardRejected], overall[verdictUnstable], overall[verdictPanic])
+		overall[verdictGuardRejected], overall[verdictUnstable], overall[verdictPanic],
+		overall[verdictSkipped])
 
 	if path := os.Getenv("CFML_CORPUS_REPORT"); path != "" {
 		if err := writeCorpusReport(path, results); err != nil {

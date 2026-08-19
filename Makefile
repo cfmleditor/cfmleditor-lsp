@@ -3,7 +3,7 @@ OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build build-wasm test corpus install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test corpus shrink install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -97,6 +97,22 @@ corpus:
 	@test -n "$(CORPUS)" || { echo "usage: make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]" >&2; exit 2; }
 	CFML_CORPUS="$(CORPUS)" CFML_CORPUS_REPORT="$(REPORT)" \
 		go test -v -count=1 -timeout 30m -run TestFormatterCorpus ./internal/formatter/
+
+# Reduces the parse-refused and script-refused entries in a corpus report to
+# the smallest contiguous fragment that still fails, so "the grammar cannot
+# parse this file" becomes a construct that can be filed against
+# tree-sitter-cfml. Takes the TSV `make corpus REPORT=...` writes:
+#
+#   make corpus CORPUS=/src/Lucee REPORT=/tmp/corpus.tsv
+#   make shrink REPORT=/tmp/corpus.tsv
+#
+# Fragments are a starting point, not a verdict — see the comment at the top of
+# internal/formatter/shrink_test.go.
+shrink:
+	@test -n "$(REPORT)" || { echo "usage: make shrink REPORT=<corpus report>" >&2; exit 2; }
+	@CFML_SHRINK_REPORT="$(REPORT)" \
+		go test -v -count=1 -timeout 30m -run TestShrinkRefusals ./internal/formatter/ \
+		| grep -vE "^(=== RUN|--- PASS|--- SKIP|PASS|ok  )"
 
 fmt:
 	gofmt -w .
