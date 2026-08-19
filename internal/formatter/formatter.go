@@ -627,14 +627,28 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr) {
 }
 
 // normaliseAttrValue ensures the value is wrapped in double quotes.
+//
+// The quote characters *inside* the value are never rewritten. Swapping them
+// corrupts the value whenever the delimiter it would swap to already appears
+// within: `to="#listLen(temp,"'")#"` became `to="#listLen(temp,”')#"`, an
+// unbalanced literal the grammar then rejects. Re-quoting is therefore only
+// applied when the value carries no double quote of its own; otherwise the
+// original delimiters are kept as-is.
 func (f *Formatter) normaliseAttrValue(v string) string {
 	v = strings.TrimSpace(v)
 	if len(v) >= 2 {
 		q := v[0]
 		if (q == '"' || q == '\'') && v[len(v)-1] == q {
-			// already quoted — normalise to double quotes
+			if q == '"' {
+				return v
+			}
+
 			inner := v[1 : len(v)-1]
-			inner = strings.ReplaceAll(inner, `"`, `'`)
+			if strings.Contains(inner, `"`) {
+				// Converting would need the inner quotes rewritten. Leave the
+				// single quotes in place rather than change the value.
+				return v
+			}
 
 			return `"` + inner + `"`
 		}
