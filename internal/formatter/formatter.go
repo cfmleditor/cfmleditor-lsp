@@ -1196,6 +1196,17 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 	}
 }
 
+// isWhitespaceNode reports whether n contributes nothing but whitespace.
+//
+// Whitespace between two siblings is not itself a sibling. Letting one update
+// the grouping state made trailing spaces after a comment look like a
+// non-comment neighbour, so the tag after it gained a blank line — which the
+// same format then stripped, flipping the answer on the next pass. Files
+// oscillated between the two forms forever.
+func (f *Formatter) isWhitespaceNode(n *sitter.Node) bool {
+	return strings.TrimSpace(f.text(n)) == ""
+}
+
 func (f *Formatter) formatChildren(n *sitter.Node) {
 	prevTagKind := ""
 	prevWasComment := false
@@ -1210,6 +1221,10 @@ func (f *Formatter) formatChildren(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if kind != "" && !f.nodeIsComment(c) {
 			prevTagKind = kind
@@ -1618,6 +1633,12 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 				f.formatNode(c)
 			}
 
+			if f.isWhitespaceNode(c) {
+				i++
+
+				continue
+			}
+
 			if tagKind != "" && kind != "comment" && kind != "cf_comment" {
 				prevTagKind = tagKind
 			}
@@ -1902,6 +1923,10 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 		}
 
 		f.formatNode(c)
+
+		if f.isWhitespaceNode(c) {
+			continue
+		}
 
 		if tagKind != "" && !f.nodeIsComment(c) {
 			prevTagKind2 = tagKind
