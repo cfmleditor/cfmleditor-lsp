@@ -5,12 +5,6 @@ WASI_SDK ?= /opt/wasi-sdk
 
 .PHONY: build build-wasm test corpus install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
-# The Go version this module targets. Tools below are built with it explicitly:
-# resolving a pkg@version otherwise picks the toolchain the *tool* module asks
-# for, which is the oldest one it supports, and a tool built with an older Go
-# than this module targets cannot load its packages at all.
-GOVERSION = $(shell go list -m -f '{{.GoVersion}}')
-
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
 # pinned scanner still sees newly published vulnerabilities.
@@ -24,11 +18,22 @@ GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 # binary does for a while after each Go bump. Building it here under this module's
 # own toolchain makes that mismatch impossible by construction.
 #
-# GOTOOLCHAIN has to be forced — see GOVERSION above. govulncheck fails the same
-# way, less legibly: built with 1.25 against a 1.26 module it reports every
-# package as "requires newer Go version" and scans nothing.
+# GOTOOLCHAIN has to be forced: resolving a pkg@version otherwise picks the
+# toolchain the *tool* module asks for, which is the oldest one it supports, and
+# a tool built with an older Go than this module targets cannot load its packages
+# at all. govulncheck fails the same way, less legibly: built with 1.25 against a
+# 1.26 module it reports every package as "requires newer Go version" and scans
+# nothing, while still exiting non-zero.
 GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-GOLANGCI_RUN = GOTOOLCHAIN=go$(GOVERSION) go run $(GOLANGCI)
+
+# The version is read out of go.mod directly rather than with `go list -m`.
+# Inside a workspace that lists every module in go.work, one per line, and
+# $(shell) folds those lines into a single space-separated value — the recipe
+# then expands to `GOTOOLCHAIN=go1.26.6 1.23 go run ...` and sh tries to run
+# "1.23" as a command. A developer with a go.work alongside the grammar repo
+# is the normal case here, so `go list -m` cannot be used for this.
+GO_VERSION = $(shell awk '/^go /{print $$2; exit}' go.mod)
+GOLANGCI_RUN = GOTOOLCHAIN=go$(GO_VERSION) go run $(GOLANGCI)
 
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
@@ -105,7 +110,7 @@ lint:
 # ../tree-sitter-cfml) for a pinned module, which would report on source that
 # is not what a release actually builds from.
 vuln:
-	GOWORK=off GOTOOLCHAIN=go$(GOVERSION) go run $(GOVULNCHECK) ./...
+	GOWORK=off GOTOOLCHAIN=go$(GO_VERSION) go run $(GOVULNCHECK) ./...
 
 lint-fix:
 	$(GOLANGCI_RUN) run --fix ./...
