@@ -310,7 +310,7 @@ Counts from the current `make corpus` run (section 5).
 
 | Issue | Files | Notes |
 |---|---|---|
-| Grammar cannot parse the document | 25 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
+| Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 32 | 20 in Lucee's test suite. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
@@ -403,7 +403,7 @@ turned out to parse fine on their own.
 
 | Construct | Minimal repro | Seen in |
 |---|---|---|
-| `access:` function annotation | `component { function f(String x) access:remote { } }` (and `access:"remote"`) | Lucee LDEV3963 |
+| `name:value` function annotations | `component { function f(String x) access:remote { } }` — also `access:"remote"` and `secured:api`, so the gap is the annotation form, not one keyword | Lucee LDEV3963, LDEV5763 |
 | `final` member in a `static` block | `component { static { public final MEMBER = "v"; } }` | Lucee LDEV0600 |
 | Component with parenthesised settings | `component( javasettings = { } ) { public function test() { } }` | Lucee LDEV5763 |
 | `default` method in an `interface` | `interface { public default any function f(any obj){ } }` | Lucee LDEV1835 |
@@ -411,6 +411,8 @@ turned out to parse fine on their own.
 | Body-less tag-in-script | `query name="local.q2" dbtype="query";` | Lucee LDEV1750 |
 | Inline Java class | `classInstance = java { public class C { } };` | Lucee LDEV4001 |
 | Arrow function with a statement body | `list.each((value) => if (value < 0) throw(message = "x"));` | Lucee LDEV1819 |
+| Tag-form `throw` in script | `throw message="Access Denied" type="MyCustomError";` (the `throw(...)` call form parses) | Lucee LDEV1819 |
+| Component-level constructs in a `<cfscript>` inside a **tag-based** component | `static { static3 = 3; }` as a whole `<cfscript>` body. `static { }` parses inside `component { }`, but a tag-based `<cfcomponent>` gives the region no such wrapper | Lucee Issue0275 |
 
 Two neighbouring constructs do parse, and are recorded here so they are not
 re-filed by mistake: a plain `static { }` block, and the ordered-struct literal
@@ -441,14 +443,35 @@ of them is filed:
   `LDEV3060/invalidcomponent.cfc`, `LDEV4062` (`testLambda = () => ;`).
 - **Fixture junk.** `LDEV4157.cfm` contains literal ``` ``` ``` markdown fences
   inside the CFML.
+- **Not CFML at all.** Lucee ships three files whose extension claims CFML and
+  whose bytes are a GIF (`arrow-down.gif.cfm`). The corpus harness skips binary
+  content now and counts it in its own column, so it cannot be read as a
+  grammar gap; that alone moved parse-refused from 25 to 22.
 - **Genuinely malformed source.** `coldbox-platform/system/web/Controller.cfc`
   is missing a comma between two arguments in a `relocate()` signature.
 
-About 40 of the 61 did not reduce to anything short enough to be conclusive,
-and are not characterised here. Line-level shrinking has to hold two invariants
-at once — the region must still fail to parse *and* stay structurally whole
-(balanced braces, no cut into a block comment) — and even then it can produce
-an artefact: a ColdBox repro that appeared to show a missing comma between
-parameters turned out to be two unrelated lines pulled together by the
-shrinker, not what the file contains. Every entry in 6.1 was re-verified
-standalone for exactly that reason.
+The reduction is automated now: `make shrink REPORT=<corpus report>`
+(`internal/formatter/shrink_test.go`) takes a report written by `make corpus`
+and reduces every parse-refused and script-refused entry to the smallest
+contiguous fragment that still fails the same way. Of the 83 refusals it
+reduces 81; 18 come out under 150 characters and 28 under 400, which is where
+the entries above came from. The rest stay large because the reduction is
+deliberately conservative, and finishing those is still manual work.
+
+Two invariants are what make the output trustworthy, and both were learned the
+hard way:
+
+- **Contiguity.** Deleting interior lines reduces harder but invents syntax. A
+  ColdBox signature reduced that way read `function href( target ="" struct
+  data = {} )` — an apparent missing comma between parameters that is not in
+  the file, just two unrelated lines pushed together.
+- **The same failure, not any failure.** Nearly every fragment of CFML fails to
+  parse, so reducing against "still errors" converges on whatever scrap is
+  left: a lone `}`, a stray `</cfoutput>`, a line of backticks. The tool
+  requires the first ERROR node's text to match the one the whole region
+  produced.
+
+Even with both, a fragment is a starting point rather than a verdict — every
+construct in 6.1 was re-checked standalone before being written down, and that
+check is what caught `static { }` (fails alone, parses inside `component { }`)
+being a subtler gap than it first appeared.
