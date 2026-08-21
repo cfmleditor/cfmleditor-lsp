@@ -304,6 +304,41 @@ pure blind spot rather than a load-bearing exception. Covered by
 `TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
 `TestGuardRequoteGatedOnItsOwnOption`.
 
+### 3.3 Whitespace-only is not a sufficient invariant for `<pre>` — fixed
+
+The two gaps above were the guard failing to notice a change. This one is the
+opposite: the guard worked exactly as specified, and the specification was
+wrong.
+
+`<pre>` and `<textarea>` went through the generic element path and had their
+bodies collapsed onto one line:
+
+```
+<pre>              ->  <pre>
+line one                   line one indented line three
+    indented           </pre>
+line three
+</pre>
+```
+
+Nothing but whitespace changed, so `checkWhitespaceOnly` passed it — correctly,
+by its own definition. But in these two elements the whitespace *is* the
+content, and the rendered page is destroyed. No amount of guard work can catch
+this, because the guard's entire premise is that whitespace is free.
+
+The fix is a carve-out rather than a guard change: an element whose tag is in
+`htmlPreformattedElements` is reproduced from source instead of walked
+(`isPreformattedElement`, `internal/formatter/element_formatter.go`). Covered by
+`TestPreformattedElementsKeepTheirWhitespace` and, in the other direction,
+`TestOrdinaryElementStillCollapses` — a `<div>` must still be reflowed or the
+carve-out is too wide.
+
+Worth remembering as a class: "the guard passed" means "no non-whitespace
+character changed", which is only equivalent to "nothing was destroyed" where
+whitespace carries no meaning. `<pre>` is the case where that does not hold;
+another would be any construct the grammar exposes as text but a runtime treats
+as significant.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).

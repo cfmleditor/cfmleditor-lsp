@@ -17,6 +17,15 @@ var htmlVoidElements = map[string]bool{
 	"wbr": true,
 }
 
+// htmlPreformattedElements hold content whose whitespace is significant. They
+// are the one place where the formatter's usual assumption — that whitespace is
+// free to rearrange — is false, and where the whitespaceOnly guard cannot help:
+// collapsing the body of a <pre> destroys the rendered output while changing
+// nothing the guard compares.
+var htmlPreformattedElements = map[string]bool{
+	"pre": true, "textarea": true,
+}
+
 // formatElement re-indents HTML elements, stripping original indentation.
 func (f *Formatter) formatElement(n *sitter.Node) {
 	// If the element has structured children (start_tag, content, end_tag),
@@ -35,6 +44,23 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 		default:
 			bodyNodes = append(bodyNodes, c)
 		}
+	}
+
+	// <pre> and <textarea> render their body exactly as written, so the element
+	// is reproduced from source rather than walked. Sending it down the generic
+	// path below collapsed the body onto one line —
+	//
+	//	<pre>\nline one\n    indented\n</pre>  ->  <pre>\n    line one indented\n</pre>
+	//
+	// which the whitespaceOnly guard passes, because only whitespace changed.
+	// In these two elements whitespace *is* the content.
+	if f.isPreformattedElement(startTag) {
+		f.nl()
+		f.writeIndent()
+		f.write(f.text(n))
+		f.write("\n")
+
+		return
 	}
 
 	// Self-closing HTML tag, void element, or element with no recognizable structure: emit verbatim
@@ -131,6 +157,23 @@ func (f *Formatter) isTightElement(startTag, endTag *sitter.Node, bodyNodes []*s
 }
 
 // isVoidElement checks if a start_tag is for an HTML void element.
+// isPreformattedElement reports whether startTag opens an element whose body
+// must be reproduced byte for byte.
+func (f *Formatter) isPreformattedElement(startTag *sitter.Node) bool {
+	if startTag == nil {
+		return false
+	}
+
+	for i := uint(0); i < startTag.ChildCount(); i++ {
+		c := startTag.Child(i)
+		if c.Kind() == "tag_name" {
+			return htmlPreformattedElements[strings.ToLower(f.text(c))]
+		}
+	}
+
+	return false
+}
+
 func (f *Formatter) isVoidElement(startTag *sitter.Node) bool {
 	if startTag == nil {
 		return false
