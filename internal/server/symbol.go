@@ -17,6 +17,8 @@ func (s *Server) handleDocumentSymbol(_ context.Context, rawParams []byte) (any,
 
 	docURI := params.TextDocument.URI
 
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
