@@ -57,6 +57,27 @@ func (idx *Index) AllFunctions() []*parser.FunctionDef {
 	return all
 }
 
+// ownFunc and ownRef copy an entry into storage the index alone owns.
+//
+// Indexing used to file `&funcs[i]` — a pointer into the caller's slice, which
+// for the LSP server is the live ParseResult for an open document. That gave
+// the entries two writers. ParseResult.ApplyEdit shifts line numbers on every
+// in-function keystroke (internal/parser/incremental.go), holding the server's
+// per-document lock and knowing nothing about this index; meanwhile another
+// editor's connection could be reading the same struct through Lookup. In
+// daemon mode one Index is shared by every connection, so those are genuinely
+// concurrent, and neither lock covers the other's writer.
+//
+// Copying on the way in makes the index the only writer, which is what lets
+// ShiftLines below fix the remaining half.
+func ownFunc(d parser.FunctionDef) *parser.FunctionDef {
+	return &d
+}
+
+func ownRef(r parser.ComponentRef) *parser.ComponentRef {
+	return &r
+}
+
 // keepFuncs and keepRefs return a *new* slice of the entries satisfying keep.
 //
 // The obvious in-place form — `filtered := entries[:0]` followed by appends —
@@ -109,27 +130,108 @@ func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 }
 
 // ShiftLines adjusts line numbers for all entries in a file where Line > afterLine.
+//
+// It replaces the affected entries rather than writing through the pointers it
+// handed out. Every accessor here returns those pointers and then releases the
+// read lock, so a caller reading def.Line is doing so unsynchronised; writing
+// the field in place raced it, which `go test -race` reports as a write in
+// ShiftLines against the caller's read. A caller cannot hold the index lock for
+// as long as it holds the entry, so the write has to move instead.
+//
+// The replacement is threaded through all four maps at once: funcs and
+// fileFuncs hold the same pointers, as do comprefs and fileRefs, and updating
+// one without the other would leave a file's entries disagreeing about where
+// its functions are.
+//
+// A caller that captured an entry before the shift keeps reading the old line
+// number, which is what it would have read had it looked a moment earlier. It
+// is a snapshot, not a torn value.
 func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	key := uriKey(fileURI)
 
+	newFuncs := make(map[*parser.FunctionDef]*parser.FunctionDef)
+
 	for _, defs := range idx.funcs {
 		for _, d := range defs {
-			if uriKey(d.URI) == key && int(d.Line) > afterLine {
-				d.Line = uint32(int(d.Line) + delta)
+			if uriKey(d.URI) == key && int(d.Line) > afterLine && newFuncs[d] == nil {
+				shifted := *d
+				shifted.Line = uint32(int(shifted.Line) + delta)
+				newFuncs[d] = &shifted
 			}
 		}
 	}
 
+	newRefs := make(map[*parser.ComponentRef]*parser.ComponentRef)
+
 	for _, refs := range idx.comprefs {
 		for _, r := range refs {
-			if uriKey(r.URI) == key && int(r.Line) > afterLine {
-				r.Line = uint32(int(r.Line) + delta)
+			if uriKey(r.URI) == key && int(r.Line) > afterLine && newRefs[r] == nil {
+				shifted := *r
+				shifted.Line = uint32(int(shifted.Line) + delta)
+				newRefs[r] = &shifted
 			}
 		}
 	}
+
+	if len(newFuncs) == 0 && len(newRefs) == 0 {
+		return
+	}
+
+	for k, defs := range idx.funcs {
+		idx.funcs[k] = remapFuncs(defs, newFuncs)
+	}
+
+	for k, defs := range idx.fileFuncs {
+		idx.fileFuncs[k] = remapFuncs(defs, newFuncs)
+	}
+
+	for k, refs := range idx.comprefs {
+		idx.comprefs[k] = remapRefs(refs, newRefs)
+	}
+
+	for k, refs := range idx.fileRefs {
+		idx.fileRefs[k] = remapRefs(refs, newRefs)
+	}
+
+	for fk, scopes := range idx.scopeRefs {
+		for sk, refs := range scopes {
+			idx.scopeRefs[fk][sk] = remapRefs(refs, newRefs)
+		}
+	}
+}
+
+// remapFuncs and remapRefs rebuild a slice with replaced entries substituted in.
+// The slice is rebuilt rather than written through for the same reason
+// ShiftLines replaces rather than mutates: a caller may still be walking it.
+func remapFuncs(entries []*parser.FunctionDef, replaced map[*parser.FunctionDef]*parser.FunctionDef) []*parser.FunctionDef {
+	out := make([]*parser.FunctionDef, len(entries))
+
+	for i, e := range entries {
+		if n := replaced[e]; n != nil {
+			out[i] = n
+		} else {
+			out[i] = e
+		}
+	}
+
+	return out
+}
+
+func remapRefs(entries []*parser.ComponentRef, replaced map[*parser.ComponentRef]*parser.ComponentRef) []*parser.ComponentRef {
+	out := make([]*parser.ComponentRef, len(entries))
+
+	for i, e := range entries {
+		if n := replaced[e]; n != nil {
+			out[i] = n
+		} else {
+			out[i] = e
+		}
+	}
+
+	return out
 }
 
 // IndexFile parses the given CFC content and updates the index for that file URI.
@@ -146,9 +248,10 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
 
 	for i := range pr.Funcs {
-		key := strings.ToLower(pr.Funcs[i].Name)
-		idx.funcs[key] = append(idx.funcs[key], &pr.Funcs[i])
-		fileDefs = append(fileDefs, &pr.Funcs[i])
+		d := ownFunc(pr.Funcs[i])
+		key := strings.ToLower(d.Name)
+		idx.funcs[key] = append(idx.funcs[key], d)
+		fileDefs = append(fileDefs, d)
 	}
 
 	idx.fileFuncs[fk] = fileDefs
@@ -156,9 +259,10 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.ComponentRefs))
 
 	for i := range pr.ComponentRefs {
-		key := strings.ToLower(pr.ComponentRefs[i].Variable)
-		idx.comprefs[key] = append(idx.comprefs[key], &pr.ComponentRefs[i])
-		fileRefsList = append(fileRefsList, &pr.ComponentRefs[i])
+		r := ownRef(pr.ComponentRefs[i])
+		key := strings.ToLower(r.Variable)
+		idx.comprefs[key] = append(idx.comprefs[key], r)
+		fileRefsList = append(fileRefsList, r)
 	}
 
 	idx.fileRefs[fk] = fileRefsList
@@ -175,9 +279,10 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
 
 	for i := range funcs {
-		key := strings.ToLower(funcs[i].Name)
-		idx.funcs[key] = append(idx.funcs[key], &funcs[i])
-		fileDefs = append(fileDefs, &funcs[i])
+		d := ownFunc(funcs[i])
+		key := strings.ToLower(d.Name)
+		idx.funcs[key] = append(idx.funcs[key], d)
+		fileDefs = append(fileDefs, d)
 	}
 
 	idx.fileFuncs[fk] = fileDefs
@@ -185,9 +290,10 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 
 	for i := range refs {
-		key := strings.ToLower(refs[i].Variable)
-		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
-		fileRefsList = append(fileRefsList, &refs[i])
+		r := ownRef(refs[i])
+		key := strings.ToLower(r.Variable)
+		idx.comprefs[key] = append(idx.comprefs[key], r)
+		fileRefsList = append(fileRefsList, r)
 	}
 
 	idx.fileRefs[fk] = fileRefsList
@@ -346,11 +452,12 @@ func (idx *Index) SetFuncRefs(fileURI uri.URI, scopeKey string, refs []parser.Co
 	// Each ref is filed under its own URI, as the append this replaced did;
 	// fileURI identifies only the scope whose refs are being replaced.
 	for i := range refs {
-		key := strings.ToLower(refs[i].Variable)
-		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
-		rk := uriKey(refs[i].URI)
-		idx.fileRefs[rk] = append(idx.fileRefs[rk], &refs[i])
-		added = append(added, &refs[i])
+		r := ownRef(refs[i])
+		key := strings.ToLower(r.Variable)
+		idx.comprefs[key] = append(idx.comprefs[key], r)
+		rk := uriKey(r.URI)
+		idx.fileRefs[rk] = append(idx.fileRefs[rk], r)
+		added = append(added, r)
 	}
 
 	if idx.scopeRefs[fk] == nil {
