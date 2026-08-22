@@ -37,7 +37,7 @@ cleanly were then formatted a second time to check idempotency.
 |---|---|---|---|
 | Formatted cleanly | 3,863 | 5,450 | **5,499** |
 | Rejected by the guard | 1,671 | 84 | **32** |
-| Refused: grammar cannot parse | 86 | 86 | **86** |
+| Refused: grammar cannot parse | 86 | 86 | **83** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
 
@@ -47,8 +47,8 @@ check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
 The "current" column is what `make corpus` prints today (section 5), against the
-same six projects at their current HEAD. It counts the grammar's 86 refusals in
-two buckets rather than one — 25 documents the CFML grammar cannot parse, and 61
+same six projects at their current HEAD. It counts the grammar's 83 refusals in
+two buckets rather than one — 22 documents the CFML grammar cannot parse, and 61
 that parse as documents but whose embedded cfscript or cfquery the sub-grammar
 cannot — because the two are different work and the second is invisible from the
 outside: the document parses, the formatter runs, and whatever it renders for
@@ -343,10 +343,10 @@ the corpus, so `make test` and CI are unaffected:
 ```console
 $ make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
     formatting 4499 files from 2 root(s)
-    root                files  clean  parse script  guard unstab  panic
-    Lucee                3775   3677     23     54     20      1      0
-    ContentBox            724    719      2      1      2      0      0
-    TOTAL                4499   4396     25     55     22      1      0
+    root                files  clean  parse script  guard unstab  panic   skip
+    Lucee                3775   3677     20     54     20      1      0      3
+    ContentBox            724    719      2      1      2      0      0      0
+    TOTAL                4499   4396     22     55     22      1      0      3
 ```
 
 `CORPUS` is a `PATH`-style list of source trees; each is reported separately so a
@@ -390,7 +390,7 @@ Regression coverage for everything in section 2 lives in
 
 ## 6. Grammar gaps behind the refused counts
 
-The 86 refusals in section 4 are the largest bucket left, and "the grammar
+The 83 refusals in section 4 are the largest bucket left, and "the grammar
 cannot parse it" is not something anyone can act on. This section reduces them
 to constructs. All of it is `tree-sitter-cfml` work, not formatter work.
 
@@ -453,9 +453,9 @@ of them is filed:
 The reduction is automated now: `make shrink REPORT=<corpus report>`
 (`internal/formatter/shrink_test.go`) takes a report written by `make corpus`
 and reduces every parse-refused and script-refused entry to the smallest
-contiguous fragment that still fails the same way. Of the 83 refusals it
-reduces 81; 18 come out under 150 characters and 28 under 400, which is where
-the entries above came from. The rest stay large because the reduction is
+contiguous fragment that still fails the same way. It reduces all 83 refusals;
+17 come out under 150 characters and 30 under 400, which is where the entries
+above came from. The rest stay large because the reduction is
 deliberately conservative, and finishing those is still manual work.
 
 Two invariants are what make the output trustworthy, and both were learned the
