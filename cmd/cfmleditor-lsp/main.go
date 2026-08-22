@@ -135,14 +135,6 @@ func runServer() {
 
 		sharedIndex := index.New()
 		ct := daemon.NewConnTracker()
-		folders := cfg.WorkspaceFolders()
-		globs := cfg.IndexGlobs()
-		mappings := cfg.Mappings()
-		resolverPairs := cfg.ComponentResolvers()
-		propResolverPairs := cfg.PropertyResolvers()
-		beanPaths := cfg.BeanPaths()
-
-		// Serve the socket listener in the background
 		fmtCfg := config.ResolvedFormatting{
 			Enabled:                cfg.FormattingEnabled(),
 			Debug:                  cfg.FormattingDebug(),
@@ -160,8 +152,31 @@ func runServer() {
 			AttrBreakThreshold:     cfg.FormattingAttrBreakThreshold(),
 			IndentWidth:            cfg.FormattingIndentWidth(),
 		}
+
+		propResolvers := make([]config.PropResolver, 0, len(cfg.PropertyResolvers()))
+		for _, p := range cfg.PropertyResolvers() {
+			propResolvers = append(propResolvers, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+		}
+
+		// One settings value configures every session, whether it arrives over
+		// stdio here or over the socket later. Keeping the two in step by hand
+		// is what dropped expressionMappings and servicePropertyResolvers from
+		// every editor after the first.
+		settings := server.Settings{
+			WorkspaceFolders:         cfg.WorkspaceFolders(),
+			IndexGlobs:               cfg.IndexGlobs(),
+			Mappings:                 cfg.Mappings(),
+			ExpressionMappings:       cfg.ExpressionMappings(),
+			ServicePropertyResolvers: cfg.ServicePropertyResolvers(),
+			ComponentResolvers:       cfg.ComponentResolvers(),
+			PropertyResolvers:        propResolvers,
+			BeanPaths:                cfg.BeanPaths(),
+			Formatting:               fmtCfg,
+			Linting:                  cfg.Linting(),
+		}
+
 		go func() {
-			_ = daemon.Serve(ctx, sock, log, sharedIndex, ct, folders, globs, mappings, resolverPairs, propResolverPairs, beanPaths, fmtCfg)
+			_ = daemon.Serve(ctx, sock, log, sharedIndex, ct, settings)
 		}()
 
 		// Serve this editor session over stdio with the shared index
@@ -171,21 +186,7 @@ func runServer() {
 		conn := jsonrpc2.NewConn(stream)
 		srv := server.NewServer(conn, log, sharedIndex)
 		srv.Version = version
-		srv.WorkspaceFolders = folders
-		srv.IndexGlobs = globs
-		srv.Mappings = mappings
-		srv.ExpressionMappings = cfg.ExpressionMappings()
-		srv.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
-
-		srv.ComponentResolvers = append(srv.ComponentResolvers, resolverPairs...)
-
-		for _, p := range propResolverPairs {
-			srv.PropertyResolvers = append(srv.PropertyResolvers, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
-		}
-
-		srv.BeanPaths = beanPaths
-		srv.Formatting = fmtCfg
-		srv.Linting = cfg.Linting()
+		settings.Apply(srv)
 		conn.Go(ctx, srv.Handler())
 
 		go func() {
