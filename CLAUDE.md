@@ -286,11 +286,21 @@ see "Expression mappings") and `$builtin.<fn>` (a built-in CFML function's retur
 - Each resolver has a `prefix` (fast-rejection substring) and a `match` pattern.
 - `prefix` is searched for anywhere in the expression unless the resolver sets `"anchored":
   true`, which requires it at position 0 (see "Resolver false-positive" below).
-- Resolvers are tried in **array order** (`ResolveFromCallFull` iterates `resolvers` and returns
-  on the first successful match) — so when two resolvers could both match the same expression
-  (e.g. a specific `getDirectContent()` entry and a generic `get$1()` catch-all), whichever is
-  listed **earlier** wins, regardless of specificity. To make a specific case win over an
-  existing broad catch-all, add it *before* the catch-all in the array, not after.
+- Resolvers are tried in **array order** — so when two resolvers could both match the same
+  expression (e.g. a specific `getDirectContent()` entry and a generic `get$1()` catch-all),
+  whichever is listed **earlier** wins, regardless of specificity. To make a specific case win
+  over an existing broad catch-all, add it *before* the catch-all in the array, not after.
+
+  Two implementations honour this and must stay in agreement: `ResolveFromCallMatch` (behind
+  `ResolveFromCall`/`ResolveFromCallFull`, and so behind `CanResolveCall`) walks the slice
+  directly, while `ResolverSet.Resolve` (behind completion and hover) first narrows candidates
+  through a first-byte index and then sorts them back into array order. The byte index decides
+  only *which* resolvers are worth trying, never which one wins — it used to leak its own order
+  through, so for resolvers whose prefixes start with different letters the winner was decided by
+  where each prefix happened to appear in the call-site text, and the two paths could return
+  different components for the same expression. `TestResolverSetMatchesArrayOrder`
+  (`internal/parser/resolver_order_test.go`) pins the two paths together; add a case there rather
+  than to only one path.
 - `ResolveFromCall` finds the prefix inside the expression, takes the substring from that
   position, and tries to match the full pattern against it.
 - If `match` contains no `\` escapes and no `$N` placeholders → **simple exact match** (or

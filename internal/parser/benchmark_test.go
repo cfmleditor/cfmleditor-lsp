@@ -176,3 +176,31 @@ func TestParsePerformance(t *testing.T) {
 		})
 	}
 }
+
+// ResolverSet.Resolve is on the completion and hover path, with a realistic
+// config of a few dozen resolvers. It is also where the first-byte index has to
+// narrow the candidates without reordering them, so it is worth watching: the
+// sort that restores configuration order also collapses the duplicates a
+// pipe-delimited prefix used to contribute, which is why it is not a slowdown.
+func BenchmarkResolverSetResolve(b *testing.B) {
+	resolvers := []Resolver{
+		{Prefix: "getDirectContent", Match: "getDirectContent()", Resolve: "pdf.passthrough"},
+		{Prefix: "get", Match: "get$1()", Resolve: "packages.tass.${1:lower}"},
+		{Prefix: "kernel", Match: `kernel\.get([A-Za-z0-9_]+)\(\)`, Resolve: "packages.$1"},
+	}
+
+	for i := range 37 {
+		name := string(rune('a'+i%26)) + "svc"
+		resolvers = append(resolvers, Resolver{Prefix: name, Match: name + ".$1", Resolve: "app.svc"})
+	}
+
+	rs := BuildResolverSet(resolvers)
+
+	b.ResetTimer()
+
+	for range b.N {
+		_ = rs.Resolve("VARIABLES._document.getDirectContent()")
+		_ = rs.Resolve("kernel.getFoo()")
+		_ = rs.Resolve("nothing.matches.here()")
+	}
+}
