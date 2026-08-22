@@ -12,13 +12,14 @@ import (
 // Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
 	mu        sync.RWMutex
-	funcs     map[string][]*parser.FunctionDef  // lowercase name -> definitions
-	fileFuncs map[string][]*parser.FunctionDef  // lowercase URI -> definitions in that file
-	comprefs  map[string][]*parser.ComponentRef // lowercase variable -> refs
-	fileRefs  map[string][]*parser.ComponentRef // lowercase URI -> refs in that file
-	thisVars  map[string][]string               // lowercase URI -> this-scoped var names
-	beans     map[string]string                 // lowercase bean name -> dot-path
-	entities  map[string]uri.URI                // lowercase entity name -> file URI
+	funcs     map[string][]*parser.FunctionDef             // lowercase name -> definitions
+	fileFuncs map[string][]*parser.FunctionDef             // lowercase URI -> definitions in that file
+	comprefs  map[string][]*parser.ComponentRef            // lowercase variable -> refs
+	fileRefs  map[string][]*parser.ComponentRef            // lowercase URI -> refs in that file
+	thisVars  map[string][]string                          // lowercase URI -> this-scoped var names
+	scopeRefs map[string]map[string][]*parser.ComponentRef // lowercase URI -> function scope key -> refs
+	beans     map[string]string                            // lowercase bean name -> dot-path
+	entities  map[string]uri.URI                           // lowercase entity name -> file URI
 }
 
 // New creates an empty Index.
@@ -29,6 +30,7 @@ func New() *Index {
 		comprefs:  make(map[string][]*parser.ComponentRef),
 		fileRefs:  make(map[string][]*parser.ComponentRef),
 		thisVars:  make(map[string][]string),
+		scopeRefs: make(map[string]map[string][]*parser.ComponentRef),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
 	}
@@ -53,6 +55,44 @@ func (idx *Index) AllFunctions() []*parser.FunctionDef {
 	}
 
 	return all
+}
+
+// keepFuncs and keepRefs return a *new* slice of the entries satisfying keep.
+//
+// The obvious in-place form — `filtered := entries[:0]` followed by appends —
+// writes over the backing array the map's slice already points at, and every
+// accessor here (Lookup, FunctionsForFile, LookupComponentRef, RefsForFile)
+// hands that same array straight out to the caller and then releases the read
+// lock. A caller still walking the slice it was given is reading the array a
+// concurrent IndexFile is compacting: `go test -race` reports it, and even with
+// the timing on its side the caller silently sees another file's entries
+// shifted into place. Allocating means the entries a caller was handed stay the
+// entries it was handed.
+//
+// Appending to a map's slice is fine by contrast: it only ever writes at or
+// past the length a caller can see.
+func keepFuncs(entries []*parser.FunctionDef, keep func(*parser.FunctionDef) bool) []*parser.FunctionDef {
+	var filtered []*parser.FunctionDef
+
+	for _, e := range entries {
+		if keep(e) {
+			filtered = append(filtered, e)
+		}
+	}
+
+	return filtered
+}
+
+func keepRefs(entries []*parser.ComponentRef, keep func(*parser.ComponentRef) bool) []*parser.ComponentRef {
+	var filtered []*parser.ComponentRef
+
+	for _, e := range entries {
+		if keep(e) {
+			filtered = append(filtered, e)
+		}
+	}
+
+	return filtered
 }
 
 // uriKey returns a lowercase URI for case-insensitive comparison on case-insensitive filesystems.
@@ -159,13 +199,9 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 	defer idx.mu.Unlock()
 
 	for key, entries := range idx.funcs {
-		filtered := entries[:0]
-
-		for _, e := range entries {
-			if !strings.HasPrefix(string(e.URI), prefix) {
-				filtered = append(filtered, e)
-			}
-		}
+		filtered := keepFuncs(entries, func(e *parser.FunctionDef) bool {
+			return !strings.HasPrefix(string(e.URI), prefix)
+		})
 
 		if len(filtered) == 0 {
 			delete(idx.funcs, key)
@@ -175,13 +211,9 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 	}
 
 	for key, entries := range idx.comprefs {
-		filtered := entries[:0]
-
-		for _, e := range entries {
-			if !strings.HasPrefix(string(e.URI), prefix) {
-				filtered = append(filtered, e)
-			}
-		}
+		filtered := keepRefs(entries, func(e *parser.ComponentRef) bool {
+			return !strings.HasPrefix(string(e.URI), prefix)
+		})
 
 		if len(filtered) == 0 {
 			delete(idx.comprefs, key)
@@ -196,15 +228,12 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	delete(idx.thisVars, key)
 	delete(idx.fileFuncs, key)
 	delete(idx.fileRefs, key)
+	delete(idx.scopeRefs, key)
 
 	for k, entries := range idx.funcs {
-		filtered := entries[:0]
-
-		for _, e := range entries {
-			if uriKey(e.URI) != key {
-				filtered = append(filtered, e)
-			}
-		}
+		filtered := keepFuncs(entries, func(e *parser.FunctionDef) bool {
+			return uriKey(e.URI) != key
+		})
 
 		if len(filtered) == 0 {
 			delete(idx.funcs, k)
@@ -214,13 +243,9 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	}
 
 	for k, entries := range idx.comprefs {
-		filtered := entries[:0]
-
-		for _, e := range entries {
-			if uriKey(e.URI) != key {
-				filtered = append(filtered, e)
-			}
-		}
+		filtered := keepRefs(entries, func(e *parser.ComponentRef) bool {
+			return uriKey(e.URI) != key
+		})
 
 		if len(filtered) == 0 {
 			delete(idx.comprefs, k)
@@ -261,17 +286,78 @@ func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 	idx.mu.Unlock()
 }
 
-// AddRefs appends additional component refs to the index.
-func (idx *Index) AddRefs(refs []parser.ComponentRef) {
+// SetFuncRefs records the component refs found inside one function scope,
+// replacing whatever was recorded for that scope before.
+//
+// These arrive lazily: the server indexes a function's refs the first time a
+// hover or a definition lookup lands inside it. The plain append this replaced
+// had no way to tell a first indexing from a re-indexing, so every such lookup
+// added another copy. Refs are memoised per function and invalidated when that
+// function is edited, so an editing session alternating edits and hovers grew
+// comprefs without bound — with duplicate refs at identical lines, which
+// LookupComponentRefInFile then had to scan through on every subsequent call.
+//
+// scopeKey identifies the function within the file; the caller's line range is
+// the natural choice.
+func (idx *Index) SetFuncRefs(fileURI uri.URI, scopeKey string, refs []parser.ComponentRef) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
+	fk := uriKey(fileURI)
+
+	if prev := idx.scopeRefs[fk][scopeKey]; len(prev) > 0 {
+		drop := make(map[*parser.ComponentRef]bool, len(prev))
+		for _, r := range prev {
+			drop[r] = true
+		}
+
+		keep := func(e *parser.ComponentRef) bool { return !drop[e] }
+
+		// Sweep each affected bucket once. Several refs in a scope routinely
+		// share a variable name or a file, and filtering per ref would rebuild
+		// the same bucket once per ref in it.
+		varKeys := make(map[string]bool, len(prev))
+		fileKeys := make(map[string]bool, len(prev))
+
+		for _, r := range prev {
+			varKeys[strings.ToLower(r.Variable)] = true
+			fileKeys[uriKey(r.URI)] = true
+		}
+
+		for key := range varKeys {
+			if kept := keepRefs(idx.comprefs[key], keep); len(kept) == 0 {
+				delete(idx.comprefs, key)
+			} else {
+				idx.comprefs[key] = kept
+			}
+		}
+
+		for rk := range fileKeys {
+			if kept := keepRefs(idx.fileRefs[rk], keep); len(kept) == 0 {
+				delete(idx.fileRefs, rk)
+			} else {
+				idx.fileRefs[rk] = kept
+			}
+		}
+	}
+
+	added := make([]*parser.ComponentRef, 0, len(refs))
+
+	// Each ref is filed under its own URI, as the append this replaced did;
+	// fileURI identifies only the scope whose refs are being replaced.
 	for i := range refs {
 		key := strings.ToLower(refs[i].Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], &refs[i])
-		fk := uriKey(refs[i].URI)
-		idx.fileRefs[fk] = append(idx.fileRefs[fk], &refs[i])
+		rk := uriKey(refs[i].URI)
+		idx.fileRefs[rk] = append(idx.fileRefs[rk], &refs[i])
+		added = append(added, &refs[i])
 	}
+
+	if idx.scopeRefs[fk] == nil {
+		idx.scopeRefs[fk] = make(map[string][]*parser.ComponentRef)
+	}
+
+	idx.scopeRefs[fk][scopeKey] = added
 }
 
 // LookupComponentRefInFile returns the component ref for a variable in a specific file

@@ -18,6 +18,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 		return nil, err
 	}
 
+	defer s.lockDoc(params.TextDocument.URI)()
+
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return nil, nil

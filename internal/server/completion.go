@@ -122,6 +122,8 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		return nil, err
 	}
 
+	defer s.lockDoc(params.TextDocument.URI)()
+
 	items := []protocol.CompletionItem(nil)
 
 	content, hasDoc := s.getDocument(params.TextDocument.URI)
@@ -612,6 +614,8 @@ func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.Comple
 func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine int) {
 	start := time.Now()
 
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	funcs := s.funcRanges[docURI]
 	pr := s.parseResults[docURI]
@@ -655,6 +659,8 @@ func (s *Server) rebuildCompletionCache(docURI uri.URI, content string, editLine
 // Called on didOpen and didSave. Builtins are included here since this only runs
 // on open/save, avoiding per-request copies.
 func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
@@ -678,8 +684,15 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 }
 
 // rebuildFileCompletionCacheFromPR rebuilds file-level completion from an existing ParseResult.
+//
+// The caller must hold the document's lock: pr.VariablesVars and pr.ThisVars
+// memoise in place. It is not taken here because rebuildFileCompletionCache
+// already holds it by the time it calls this, and lockDoc hands out plain
+// sync.Mutexes — taking it twice on one goroutine deadlocks rather than
+// nesting.
 func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.ParseResult) {
 	start := time.Now()
+
 	builtins := getBuiltinFuncItems()
 	globals := pr.VariablesVars()
 	thisVarNames := pr.ThisVars()

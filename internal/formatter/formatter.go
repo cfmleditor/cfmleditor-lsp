@@ -179,7 +179,15 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	}()
 
 	if opts.SelfCloseTags && opts.ParseCFML != nil {
-		src, tree = preformat(src, tree, opts.ParseCFML)
+		var owned *sitter.Tree
+
+		src, tree, owned = preformat(src, tree, opts.ParseCFML)
+		if owned != nil {
+			// preformat re-parses after each conversion pass and hands back the
+			// last tree it made. Nobody else can free it: the caller only knows
+			// about the tree it passed in, which preformat left untouched.
+			defer owned.Close()
+		}
 	}
 
 	f := New(opts)
