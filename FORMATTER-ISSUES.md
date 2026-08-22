@@ -447,16 +447,55 @@ of them is filed:
   whose bytes are a GIF (`arrow-down.gif.cfm`). The corpus harness skips binary
   content now and counts it in its own column, so it cannot be read as a
   grammar gap; that alone moved parse-refused from 25 to 22.
-- **Genuinely malformed source.** `coldbox-platform/system/web/Controller.cfc`
-  is missing a comma between two arguments in a `relocate()` signature.
+- **Comma-less function parameters.** `coldbox-platform/system/web/Controller.cfc`
+  and `MockController.cfc` omit a comma between two arguments in a `relocate()`
+  signature. This was recorded here as malformed source; it is not — the form
+  parses in CFML and the gap is already filed as tree-sitter-cfml #49.
+  `function f(string a, string b boolean c)` fails while the comma-separated
+  version parses.
 
 The reduction is automated now: `make shrink REPORT=<corpus report>`
 (`internal/formatter/shrink_test.go`) takes a report written by `make corpus`
 and reduces every parse-refused and script-refused entry to the smallest
-contiguous fragment that still fails the same way. Of the 83 refusals it
-reduces 81; 18 come out under 150 characters and 28 under 400, which is where
-the entries above came from. The rest stay large because the reduction is
-deliberately conservative, and finishing those is still manual work.
+contiguous fragment that still fails the same way. It reduces all 83 refusals;
+17 come out under 150 characters and 30 under 400, which is where the entries
+above came from. The rest stay large because the reduction is deliberately
+conservative — see 6.4 for how those were finished.
+
+### 6.4 The rest of the refusals, characterised
+
+Working through the fragments the reducer left large. As in 6.1, every
+construct below was lifted from a failing file and then **re-parsed standalone**
+against `language.CFScript`, with a control that does parse — the ERROR node
+marks where the parser gave up, not what defeated it, and roughly a third of
+the candidates turned out to parse fine on their own.
+
+| Construct | Minimal repro | Control that parses | Filed |
+|---|---|---|---|
+| Subscripted static access | `x = Test::["m"]()` (and `::[m]()`) | `x = Test::m()` | #79 |
+| `${ }` ordered-struct literal | `animals = ${ a: "x" }` | `animals = $[ a: "x" ]` | #80 |
+| `exit` with a string argument | `exit "exitTemplate";` | `exit;` / `exit method="t";` | #81 |
+| `savecontent` as an expression | `g = savecontent { … };` | `savecontent variable="g" { … }` | #82 |
+| `new` as a tag-in-script attribute value | `query name="q" listener=new Foo() { … }` | `listener=makeIt()` / `listener=someVar` | #83 |
+| Colon-separated tag-call attributes | `cfparam (name:"d" default:"D");` | all-comma or all-space list | #84 |
+| Commas and spaces mixed in one attribute list | `cfimap( a="1", b="2" c="3" )` | either separator used uniformly | #84 |
+| Brace-less `try` | `try x = y; catch (any e) { }` | `try { x = y; } catch (any e) { }` | #85 |
+| Numeric struct key by dot, **assigned** | `myNumb.4 = "4";` | `x = myNumb.4;` and `myNumb[4] = "4";` | #86 |
+| `call():function(…){ }` listener form | `var t = mySuccess():function(r, e) { };` | — | #87 |
+| Return type before the access modifiers | `struct public function f() { }` | `public struct function f() { }` | #88 |
+| `pageencoding` before a component | `pageencoding "utf-8"; component { }` | — | #89 |
+| `name: value;` colon assignment | `msSQL.class: 'org.x.Driver';` | `msSQL.class = 'org.x.Driver';` | #90 |
+
+Constructs that were candidates and **do** parse, recorded so they are not
+re-filed: an array literal with keys (`[ cow: [1,2] ]`), a bare `include "x.cfm";`,
+a CFML comment inside cfscript, nested tag-in-script bodies
+(`cfchart(…) { cfchartseries(…) { … } }`), a dotted named argument
+(`g( formstruct.name="test" )`), `savecontent` in statement form, and a
+tag-in-script statement with a body and only literal attributes.
+
+Two more went to existing issues rather than new ones: `() => return r` is the
+same gap as #75 (a statement as an arrow-function body), and `param url.n 45;`
+is a fourth `param` spelling noted on #70.
 
 Two invariants are what make the output trustworthy, and both were learned the
 hard way:
