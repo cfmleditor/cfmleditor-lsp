@@ -88,6 +88,13 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	src := []byte(content)
 	tree := language.Parse(language.CFML, src, nil)
 
+	// The tree owns C memory that the Go GC does not account for, so it has to
+	// be released explicitly. Without this every format request — including the
+	// two Format calls the idempotency check makes — leaks one whole CST, which
+	// on a long editing session with format-on-save is the server's largest
+	// source of unexplained memory growth.
+	defer tree.Close()
+
 	if tree.RootNode().HasError() {
 		errNode := findErrorNode(tree.RootNode())
 		if errNode != nil {

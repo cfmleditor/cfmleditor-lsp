@@ -6,6 +6,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type Server struct {
 	ServicePropertyResolvers map[string]string         // "@serviceproperty" annotation kind → dot-path template
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
+	resolverMu               sync.Mutex                // guards resolver, cachedResolvers, cachedResolverSet
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
@@ -62,6 +64,8 @@ type Server struct {
 	compCache                *cache.Cache
 	funcRanges               map[uri.URI][]cache.FuncRange   // cached function line ranges per file
 	cacheTimers              map[uri.URI]*time.Timer         // debounce timers for completion cache rebuild
+	reindexTimers            map[uri.URI]*time.Timer         // deferred-reindex timers armed by a rapid-change burst
+	docLocks                 map[uri.URI]*sync.Mutex         // serialises access to each document's ParseResult
 	parseResults             map[uri.URI]*parser.ParseResult // cached parse results per file
 	lastResolveKey           string                          // dedup key for hover/definition (uri:line:char)
 	lastResolveDef           *parser.FunctionDef             // cached result
@@ -85,6 +89,8 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		compCache:         cache.New(),
 		funcRanges:        make(map[uri.URI][]cache.FuncRange),
 		cacheTimers:       make(map[uri.URI]*time.Timer),
+		reindexTimers:     make(map[uri.URI]*time.Timer),
+		docLocks:          make(map[uri.URI]*sync.Mutex),
 		parseResults:      make(map[uri.URI]*parser.ParseResult),
 		changeCount:       make(map[uri.URI]int),
 		changeWindowStart: make(map[uri.URI]time.Time),
@@ -149,9 +155,10 @@ func (s *Server) initLinter() {
 	s.log.Info("cflint ready")
 }
 
-// getResolver returns the shared resolver, creating it if needed.
 // ensureFuncRefsIndexed lazily indexes resolver refs for the function enclosing the given line.
 // Called when LookupComponentRefInFile returns nil and the cursor is inside a function.
+//
+// Callers hold the document's lock (see lockDoc): pr.FuncRefs memoises in place.
 func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
@@ -165,7 +172,7 @@ func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 		if line > sc.Start && line < sc.End {
 			refs, _ := pr.FuncRefs(sc.Start, sc.End)
 			if len(refs) > 0 {
-				s.index.AddRefs(refs)
+				s.index.SetFuncRefs(docURI, strconv.Itoa(sc.Start)+":"+strconv.Itoa(sc.End), refs)
 			}
 
 			return
@@ -173,8 +180,63 @@ func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 	}
 }
 
+// lockDoc serialises every access to one document's *parser.ParseResult, and
+// returns the function that releases it.
+//
+// A ParseResult is not a value that gets swapped in and out — it is mutated in
+// place by ApplyEdit/ApplyFullReplace, and even its read accessors (ThisVars,
+// FuncRefs, FuncCalls) mutate, because each memoises lazily on first use. One
+// pointer therefore cannot be shared across goroutines at all, and the server
+// has several: the LSP read goroutine, the rapid-change reindex timer, the
+// completion-cache debounce timer, and the background cache rebuild. A burst of
+// typing arms the reindex timer, and 200ms later it calls ApplyFullReplace on
+// exactly the ParseResult the next keystroke is reading — `go test -race`
+// reports the pair as reparseShallow against computeScopedVars.
+//
+// The lock is per document rather than global so that work on one file never
+// waits on another. Within a connection the LSP requests are already serialised
+// (the handler never calls jsonrpc2.Async), so in practice this contends only
+// between a handler and one of the timers — which is the point.
+//
+// Lock ordering: acquire a doc lock without holding s.mu; s.mu may be taken
+// while holding one. Doc locks are not reentrant, so take one only at the entry
+// points — an LSP handler, a timer body, a background goroutine — never in a
+// helper that those call.
+func (s *Server) lockDoc(docURI uri.URI) func() {
+	s.mu.Lock()
+
+	mu, ok := s.docLocks[docURI]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.docLocks[docURI] = mu
+	}
+
+	s.mu.Unlock()
+	mu.Lock()
+
+	return mu.Unlock
+}
+
+// getResolver returns the shared resolver, building it on first use.
+//
+// The resolver and the two cached resolver forms below are rebuilt lazily and
+// discarded wholesale by invalidateResolver when config changes, so they are
+// written from whichever goroutine happens to ask first. That is not only the
+// LSP read goroutine: indexWorkspace reaches one through isOrmPath, and
+// didSave's cache rebuild reaches one through parseContent, both on their own
+// goroutines. Unguarded, two of them build competing resolvers, and a rebuild
+// racing invalidateResolver can hand back the nil it just stored. safeGo's
+// recover() turns the resulting nil dereference into a logged panic rather
+// than a crash, which means the visible symptom is a workspace that quietly
+// stops indexing partway through.
+//
+// resolverMu covers exactly these three fields and is never held across a
+// parse or an index call, so it cannot participate in a lock cycle with s.mu.
 // Call invalidateResolver() when config changes.
 func (s *Server) getResolver() *resolve.Resolver {
+	s.resolverMu.Lock()
+	defer s.resolverMu.Unlock()
+
 	if s.resolver == nil {
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
@@ -182,15 +244,27 @@ func (s *Server) getResolver() *resolve.Resolver {
 			Mappings:           s.Mappings,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
-			Resolvers:          s.cfResolvers(),
+			Resolvers:          s.buildResolvers(),
 		}
 	}
 
 	return s.resolver
 }
 
+// invalidateResolver drops the resolver and both cached resolver forms, so the
+// next caller rebuilds all three from the current configuration.
+//
+// The caches have to go too, not just the resolver: applyConfig invalidates and
+// then appends the config file's componentResolvers to s.ComponentResolvers. If
+// cachedResolvers survived that, the appended entries would never be converted
+// and every resolver a .cfmleditor.json contributed would be silently ignored
+// for the rest of the session.
 func (s *Server) invalidateResolver() {
+	s.resolverMu.Lock()
 	s.resolver = nil
+	s.cachedResolvers = nil
+	s.cachedResolverSet = nil
+	s.resolverMu.Unlock()
 }
 
 // ensureBeansLoaded lazily builds the bean map on first access.
@@ -303,6 +377,31 @@ func (s *Server) invalidateResolveCache() {
 }
 
 func (s *Server) cfResolvers() []parser.Resolver {
+	s.resolverMu.Lock()
+	defer s.resolverMu.Unlock()
+
+	return s.buildResolvers()
+}
+
+func (s *Server) cfResolverSet() *parser.ResolverSet {
+	s.resolverMu.Lock()
+	defer s.resolverMu.Unlock()
+
+	s.buildResolvers() // ensure built
+
+	return s.cachedResolverSet
+}
+
+// buildResolvers converts the configured resolvers once and memoises both the
+// slice and the pre-grouped set. Callers must hold resolverMu.
+//
+// cachedResolvers is published last so that it alone signals "both are built".
+// resolverMu already makes the order unobservable; the point is that the
+// "already cached?" check keys off the field written second, so the invariant
+// survives if anyone later reaches for these without the lock. Publishing the
+// slice first was how a concurrent cfResolverSet came to see the slice present,
+// skip the build, and return a still-nil set.
+func (s *Server) buildResolvers() []parser.Resolver {
 	if len(s.ComponentResolvers) == 0 {
 		return nil
 	}
@@ -316,16 +415,10 @@ func (s *Server) cfResolvers() []parser.Resolver {
 		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix, NoFollow: cr.NoFollow, Anchored: cr.Anchored}
 	}
 
-	s.cachedResolvers = r
 	s.cachedResolverSet = parser.BuildResolverSet(r)
+	s.cachedResolvers = r
 
 	return r
-}
-
-func (s *Server) cfResolverSet() *parser.ResolverSet {
-	s.cfResolvers() // ensure built
-
-	return s.cachedResolverSet
 }
 
 func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {

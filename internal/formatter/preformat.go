@@ -14,17 +14,15 @@ type preformatEdit struct {
 // preformat rewrites the source to convert elements with implicit_end_tag
 // into self-closing tags (e.g. <br> → <br />), then re-parses.
 // Body content after the start_tag is moved outside the self-closing tag.
-func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) ([]byte, *sitter.Tree) {
+// The returned owned tree, when non-nil, is the caller's to Close; the tree
+// passed in stays the caller's own either way.
+func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) (outSrc []byte, outTree *sitter.Tree, owned *sitter.Tree) {
 	// Converting an element replaces it whole, so collectEdits cannot descend
 	// into its body on the same pass and any void element nested there is left
 	// alone. Repeat until the source stops changing — otherwise the first
 	// format leaves conversions that a second format performs, and an
 	// unchanged file keeps producing a new diff on every save.
 	const maxPasses = 10
-
-	// Only trees parsed here are ours to close; the caller owns the one it
-	// passed in.
-	var owned *sitter.Tree
 
 	for range maxPasses {
 		var edits []preformatEdit
@@ -53,7 +51,7 @@ func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) (
 		tree = owned
 	}
 
-	return src, tree
+	return src, tree, owned
 }
 
 func collectEdits(n *sitter.Node, src []byte, edits *[]preformatEdit) {

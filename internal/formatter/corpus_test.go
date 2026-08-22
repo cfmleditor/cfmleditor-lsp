@@ -318,7 +318,7 @@ func runCorpus(t *testing.T, files []corpusResult) []corpusResult {
 				}
 
 				// Real trees contain files whose extension says CFML and whose
-				// contents are not — Lucee ships two GIFs named *.gif.cfm.
+				// contents are not — Lucee ships three GIFs named *.gif.cfm.
 				// Feeding those to the parser produces a refusal that is
 				// indistinguishable from a grammar gap in the report.
 				if path.IsBinary(src) {

@@ -17,6 +17,8 @@ func (s *Server) handleDocumentSymbol(_ context.Context, rawParams []byte) (any,
 
 	docURI := params.TextDocument.URI
 
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
@@ -85,6 +87,15 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 
 // containsFoldStr reports whether s contains substr (case-insensitive, ASCII).
 // substr must already be lowercase.
+// lowerASCII lowercases an ASCII letter and leaves every other byte alone.
+func lowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+
+	return c
+}
+
 func containsFoldStr(s, substr string) bool {
 	n := len(substr)
 	if n == 0 {
@@ -96,7 +107,14 @@ func containsFoldStr(s, substr string) bool {
 		match := true
 
 		for j := range n {
-			if s[i+j]|0x20 != substr[j] {
+			// Both sides go through the same fold, and the fold only touches
+			// A-Z. The old code folded the haystack with |0x20 and compared
+			// against a raw needle byte, so anything outside a-z never matched
+			// its own fold: '_' is 0x5F and 0x5F|0x20 is 0x7F, which meant any
+			// workspace-symbol query containing an underscore silently returned
+			// nothing. Folding both sides with |0x20 would fix that but make
+			// '@' match '`' and '[' match '{', so the fold is explicit.
+			if lowerASCII(s[i+j]) != lowerASCII(substr[j]) {
 				match = false
 
 				break

@@ -19,6 +19,8 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 		return nil, err
 	}
 
+	defer s.lockDoc(params.TextDocument.URI)()
+
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
