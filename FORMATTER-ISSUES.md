@@ -304,6 +304,40 @@ pure blind spot rather than a load-bearing exception. Covered by
 `TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
 `TestGuardRequoteGatedOnItsOwnOption`.
 
+### 3.3 Line wrapping broke inside quoted attribute values — 43 files
+
+`writeWrapped` reflows a long line by breaking at the last space before
+`lineWidth`. It is handed whole elements *verbatim* — the "emit this element
+as-is" path in `formatElement` passes `f.text(n)`, markup and attributes
+included — so the space it picked was often inside an attribute value:
+
+| Source | Output (before) |
+|---|---|
+| `<img src="x.png" alt="a fairly long alternative text describing the picture">` | `alt="a fairly long`<br>`alternative text describing the`<br>`picture" />` |
+
+The guard cannot see this: only whitespace changed, which is exactly what the
+guard permits. But the attribute's *value* changed, and for a CFML tag whose
+attribute carries a string the runtime uses — a `cfhttpparam` value, a `cfmail`
+subject — the injected newline and indentation are in the data.
+
+Break points are now computed once over the whole string (`safeBreaks`),
+skipping any space inside a tag's quoted value. Two details matter:
+
+- **Once, not per line.** The offsets depend on tag and quote state a per-line
+  scan cannot reconstruct: slicing the first line off `<img src="a" alt="b c">`
+  leaves `alt="b c">`, which no longer starts inside a tag. The first version of
+  the fix did it per line and kept breaking inside values.
+- **Quotes only count inside a tag.** The same text stream carries ordinary
+  prose, where an apostrophe is a letter. Tracking quotes everywhere made
+  `I won't display because…` unbreakable from the apostrophe onward — wrapping
+  silently switching off for ordinary English. That regression is pinned by
+  `TestWrapStillWrapsProseContainingApostrophes`.
+
+Measured by formatting all 5,504 formattable corpus files and looking for a
+quoted attribute value that gained a newline: 43 before, 0 after. Per-file
+corpus verdicts are byte-identical to the baseline, so nothing moved category.
+Covered by `internal/formatter/wrap_test.go`.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).

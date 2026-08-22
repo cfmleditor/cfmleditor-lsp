@@ -292,36 +292,120 @@ func (f *Formatter) writeWrapped(text string) {
 		return
 	}
 
-	for len(text) > 0 {
-		if len(text) <= maxContent {
+	// Computed once over the whole string, not per line: the offsets depend on
+	// tag and quote state that a per-line scan of the remaining text cannot
+	// see. Slicing off the first line of `<img src="a" alt="b c">` leaves
+	// `alt="b c">`, which no longer starts inside a tag.
+	breaks := safeBreaks(text)
+	bi, start := 0, 0
+
+	for {
+		rest := text[start:]
+		if len(rest) <= maxContent {
 			f.writeIndent()
-			f.write(text)
+			f.write(rest)
 			f.write("\n")
 
-			break
+			return
 		}
-		// Find last space at or before maxContent.
-		cut := strings.LastIndexByte(text[:maxContent], ' ')
-		if cut <= 0 {
-			// No space found; find next space after maxContent.
-			cut = strings.IndexByte(text[maxContent:], ' ')
-			if cut < 0 {
+
+		for bi < len(breaks) && breaks[bi] <= start {
+			bi++
+		}
+
+		limit := start + maxContent
+		cut, j := -1, bi
+
+		for j < len(breaks) && breaks[j] < limit {
+			cut = breaks[j]
+			j++
+		}
+
+		if cut < 0 {
+			// Nothing fits; take the first break past the limit, or if there is
+			// none, let the long line stand — LineWidth is a soft limit.
+			if j >= len(breaks) {
 				f.writeIndent()
-				f.write(text)
+				f.write(rest)
 				f.write("\n")
 
-				break
+				return
 			}
 
-			cut += maxContent
+			cut = breaks[j]
+			j++
 		}
 
 		f.writeIndent()
-		f.write(text[:cut])
+		f.write(text[start:cut])
 		f.write("\n")
 
-		text = text[cut+1:]
+		start, bi = cut+1, j
 	}
+}
+
+// safeBreaks returns the offsets of every space in text at which a line break
+// is safe.
+//
+// A space inside a tag's quoted attribute value is not one. writeWrapped is
+// handed whole elements verbatim — the "emit this element as-is" path passes
+// f.text(n), markup and attributes included — so a plain "last space before the
+// limit" search happily broke a line in the middle of an attribute value:
+//
+//	<img src="x.png" alt="a fairly long alternative text describing the picture">
+//
+// became three lines with newlines and indentation inside the alt="…". The
+// whitespace-only guard cannot catch that, because only whitespace changed; but
+// the attribute's value did change, and for a CFML tag whose attribute carries a
+// string the runtime uses — a cfhttpparam value, a cfmail subject — the injected
+// newline and indent are in the data. It fired on 43 of the 5,504 formattable
+// files across the six corpus projects.
+//
+// Quotes only delimit anything inside a tag. The same text stream carries
+// ordinary prose, where an apostrophe is a letter: tracking quotes everywhere
+// made "I won't display because…" unbreakable from the apostrophe onward,
+// quietly disabling wrapping for the most ordinary English there is. A doubled
+// quote is CFML's escape for a quote within a value, so it does not end one.
+//
+// An unmatched "<" in text — a stray literal rather than a tag — leaves this
+// believing it is inside a tag for the rest of the string, so quotes past it
+// start counting and fewer spaces qualify. That direction is safe: the cost is
+// a wider line, never a break somewhere it does not belong.
+func safeBreaks(text string) []int {
+	var (
+		out   []int
+		inTag bool
+		quote byte
+	)
+
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+
+		switch {
+		case quote != 0:
+			if c != quote {
+				continue
+			}
+
+			if i+1 < len(text) && text[i+1] == quote {
+				i++ // escaped quote; the value continues
+
+				continue
+			}
+
+			quote = 0
+		case c == '<':
+			inTag = true
+		case c == '>':
+			inTag = false
+		case inTag && (c == '"' || c == '\''):
+			quote = c
+		case c == ' ':
+			out = append(out, i)
+		}
+	}
+
+	return out
 }
 
 // formatRawTextElement emits <script> and <style> elements. Their bodies are
