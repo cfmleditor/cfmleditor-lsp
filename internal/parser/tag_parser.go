@@ -205,8 +205,13 @@ func (p *tagParser) parse() {
 			tag := p.src[idx:tagEnd]
 			line := p.lineAt(idx)
 
-			// Detect </cffunction> to exit function scope
-			if len(tag) > 13 && tag[1] == '/' && strings.EqualFold(tag[2:13], "cffunction") {
+			// Detect </cffunction> to exit function scope.
+			//
+			// This was dead code twice over: "</cffunction>" is exactly 13
+			// bytes so `len(tag) > 13` was false, and tag[2:13] is
+			// "cffunction>" — 11 bytes — which never equals the 10-byte
+			// "cffunction". Function scope was therefore never exited.
+			if isCloseTagFor(tag, "cffunction") {
 				p.inFunc = ""
 				p.localVarSet = nil
 				p.forceGlobal = false
@@ -845,6 +850,19 @@ func getAttr(tag, attr string) string {
 
 		i += searchFrom
 
+		// The name has to start a word. Only the text *after* the match used to
+		// be checked, so a plain substring hit inside a longer attribute name
+		// counted: "name" matched the tail of "displayname=", and
+		// <cffunction displayname="Donor Lookup" name="getDonor"> was indexed
+		// as a function literally called "Donor Lookup". Same for "type"
+		// inside "returntype=" and any other attribute ending in the one being
+		// looked up.
+		if i > 0 && isAttrNameByte(tag[i-1]) {
+			searchFrom = i + 1
+
+			continue
+		}
+
 		j := i + len(attrLower)
 		for j < len(tag) && isWhitespace(tag[j]) {
 			j++
@@ -1262,6 +1280,33 @@ func (p *tagParser) extractAllLinks() {
 }
 
 // isWhitespace returns true if the byte is any whitespace character.
+// isCloseTagFor reports whether tag is the closing tag for name, e.g.
+// "</cffunction>" or "</cffunction >" for "cffunction". The name must be
+// followed by whitespace or ">", so "</cffunctionfoo>" does not match.
+func isCloseTagFor(tag, name string) bool {
+	if len(tag) < len(name)+3 || tag[0] != '<' || tag[1] != '/' {
+		return false
+	}
+
+	if !strings.EqualFold(tag[2:2+len(name)], name) {
+		return false
+	}
+
+	rest := tag[2+len(name):]
+
+	return rest[0] == '>' || isWhitespace(rest[0])
+}
+
+// isAttrNameByte reports whether c can appear inside a tag attribute name.
+// Used to require that a name match starts a word rather than landing in the
+// middle of a longer attribute.
+func isAttrNameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' ||
+		c >= 'A' && c <= 'Z' ||
+		c >= '0' && c <= '9' ||
+		c == '_' || c == '-' || c == ':' || c == '.'
+}
+
 func isWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
 }
