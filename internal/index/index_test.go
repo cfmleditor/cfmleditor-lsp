@@ -149,7 +149,7 @@ func TestLookupComponentRefInFile_PicksClosestPrecedingLine(t *testing.T) {
 	fileURI := uri.URI("file:///a.cfc")
 	otherURI := uri.URI("file:///b.cfc")
 
-	idx.AddRefs([]parser.ComponentRef{
+	idx.SetFuncRefs(fileURI, "1:30", []parser.ComponentRef{
 		{Variable: "svc", Component: "early", URI: fileURI, Line: 5},
 		{Variable: "svc", Component: "late", URI: fileURI, Line: 20},
 		{Variable: "svc", Component: "wrongFile", URI: otherURI, Line: 8},
@@ -240,4 +240,52 @@ func TestIndex_ConcurrentAccess(_ *testing.T) {
 	}
 
 	<-done
+}
+
+// A function's refs are indexed lazily, on the first hover or definition lookup
+// that lands inside it, and re-indexed after every edit to that function. The
+// plain append this replaced had no way to tell those apart, so each lookup
+// left another copy behind and comprefs grew for as long as the session ran.
+func TestSetFuncRefs_ReplacesRatherThanAccumulates(t *testing.T) {
+	idx := New()
+	fileURI := uri.URI("file:///svc.cfc")
+
+	refs := []parser.ComponentRef{
+		{Variable: "svc", Component: "models.User", URI: fileURI, Line: 7},
+	}
+
+	for range 5 {
+		idx.SetFuncRefs(fileURI, "3:12", refs)
+	}
+
+	if got := len(idx.LookupComponentRef("svc")); got != 1 {
+		t.Errorf("re-indexing one scope five times left %d refs, want 1", got)
+	}
+
+	if got := len(idx.RefsForFile(fileURI)); got != 1 {
+		t.Errorf("file refs grew to %d, want 1", got)
+	}
+
+	// A second scope in the same file is additive, not a replacement.
+	idx.SetFuncRefs(fileURI, "20:30", []parser.ComponentRef{
+		{Variable: "dao", Component: "models.UserDAO", URI: fileURI, Line: 22},
+	})
+
+	if got := len(idx.RefsForFile(fileURI)); got != 2 {
+		t.Errorf("second scope gave %d file refs, want 2", got)
+	}
+
+	// Replacing a scope drops the refs it contributed and nothing else.
+	idx.SetFuncRefs(fileURI, "3:12", []parser.ComponentRef{
+		{Variable: "svc", Component: "models.Account", URI: fileURI, Line: 7},
+	})
+
+	got := idx.LookupComponentRef("svc")
+	if len(got) != 1 || got[0].Component != "models.Account" {
+		t.Errorf("expected the scope's single ref to be replaced, got %+v", got)
+	}
+
+	if n := len(idx.LookupComponentRef("dao")); n != 1 {
+		t.Errorf("replacing one scope disturbed another: dao has %d refs, want 1", n)
+	}
 }

@@ -37,7 +37,7 @@ cleanly were then formatted a second time to check idempotency.
 |---|---|---|---|
 | Formatted cleanly | 3,863 | 5,450 | **5,499** |
 | Rejected by the guard | 1,671 | 84 | **32** |
-| Refused: grammar cannot parse | 86 | 86 | **86** |
+| Refused: grammar cannot parse | 86 | 86 | **83** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
 
@@ -47,8 +47,8 @@ check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
 The "current" column is what `make corpus` prints today (section 5), against the
-same six projects at their current HEAD. It counts the grammar's 86 refusals in
-two buckets rather than one — 25 documents the CFML grammar cannot parse, and 61
+same six projects at their current HEAD. It counts the grammar's 83 refusals in
+two buckets rather than one — 22 documents the CFML grammar cannot parse, and 61
 that parse as documents but whose embedded cfscript or cfquery the sub-grammar
 cannot — because the two are different work and the second is invisible from the
 outside: the document parses, the formatter runs, and whatever it renders for
@@ -256,8 +256,12 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Both were latent — nothing in the corpus triggered either — but they meant the
-"clean" figures were an upper bound rather than a proof. Both are closed now.
+Cases the `whitespaceOnly` guard passed and should not have. The first two were
+latent — nothing in the corpus triggered either — but they meant the "clean"
+figures were an upper bound rather than a proof. The last two were not latent:
+each was destroying real files while the guard reported success, because a
+change can be whitespace-only and still change what the file means. All four
+are closed.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -304,6 +308,75 @@ pure blind spot rather than a load-bearing exception. Covered by
 `TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
 `TestGuardRequoteGatedOnItsOwnOption`.
 
+### 3.3 Whitespace-only is not a sufficient invariant for `<pre>` — fixed
+
+The two gaps above were the guard failing to notice a change. This one is the
+opposite: the guard worked exactly as specified, and the specification was
+wrong.
+
+`<pre>` and `<textarea>` went through the generic element path and had their
+bodies collapsed onto one line:
+
+```
+<pre>              ->  <pre>
+line one                   line one indented line three
+    indented           </pre>
+line three
+</pre>
+```
+
+Nothing but whitespace changed, so `checkWhitespaceOnly` passed it — correctly,
+by its own definition. But in these two elements the whitespace *is* the
+content, and the rendered page is destroyed. No amount of guard work can catch
+this, because the guard's entire premise is that whitespace is free.
+
+The fix is a carve-out rather than a guard change: an element whose tag is in
+`htmlPreformattedElements` is reproduced from source instead of walked
+(`isPreformattedElement`, `internal/formatter/element_formatter.go`). Covered by
+`TestPreformattedElementsKeepTheirWhitespace` and, in the other direction,
+`TestOrdinaryElementStillCollapses` — a `<div>` must still be reflowed or the
+carve-out is too wide.
+
+Worth remembering as a class: "the guard passed" means "no non-whitespace
+character changed", which is only equivalent to "nothing was destroyed" where
+whitespace carries no meaning. `<pre>` is the case where that does not hold;
+another would be any construct the grammar exposes as text but a runtime treats
+as significant.
+
+### 3.4 Line wrapping broke inside quoted attribute values — 43 files
+
+`writeWrapped` reflows a long line by breaking at the last space before
+`lineWidth`. It is handed whole elements *verbatim* — the "emit this element
+as-is" path in `formatElement` passes `f.text(n)`, markup and attributes
+included — so the space it picked was often inside an attribute value:
+
+| Source | Output (before) |
+|---|---|
+| `<img src="x.png" alt="a fairly long alternative text describing the picture">` | `alt="a fairly long`<br>`alternative text describing the`<br>`picture" />` |
+
+The guard cannot see this: only whitespace changed, which is exactly what the
+guard permits. But the attribute's *value* changed, and for a CFML tag whose
+attribute carries a string the runtime uses — a `cfhttpparam` value, a `cfmail`
+subject — the injected newline and indentation are in the data.
+
+Break points are now computed once over the whole string (`safeBreaks`),
+skipping any space inside a tag's quoted value. Two details matter:
+
+- **Once, not per line.** The offsets depend on tag and quote state a per-line
+  scan cannot reconstruct: slicing the first line off `<img src="a" alt="b c">`
+  leaves `alt="b c">`, which no longer starts inside a tag. The first version of
+  the fix did it per line and kept breaking inside values.
+- **Quotes only count inside a tag.** The same text stream carries ordinary
+  prose, where an apostrophe is a letter. Tracking quotes everywhere made
+  `I won't display because…` unbreakable from the apostrophe onward — wrapping
+  silently switching off for ordinary English. That regression is pinned by
+  `TestWrapStillWrapsProseContainingApostrophes`.
+
+Measured by formatting all 5,504 formattable corpus files and looking for a
+quoted attribute value that gained a newline: 43 before, 0 after. Per-file
+corpus verdicts are byte-identical to the baseline, so nothing moved category.
+Covered by `internal/formatter/wrap_test.go`.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).
@@ -343,10 +416,10 @@ the corpus, so `make test` and CI are unaffected:
 ```console
 $ make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
     formatting 4499 files from 2 root(s)
-    root                files  clean  parse script  guard unstab  panic
-    Lucee                3775   3677     23     54     20      1      0
-    ContentBox            724    719      2      1      2      0      0
-    TOTAL                4499   4396     25     55     22      1      0
+    root                files  clean  parse script  guard unstab  panic   skip
+    Lucee                3775   3677     20     54     20      1      0      3
+    ContentBox            724    719      2      1      2      0      0      0
+    TOTAL                4499   4396     22     55     22      1      0      3
 ```
 
 `CORPUS` is a `PATH`-style list of source trees; each is reported separately so a
@@ -390,7 +463,7 @@ Regression coverage for everything in section 2 lives in
 
 ## 6. Grammar gaps behind the refused counts
 
-The 86 refusals in section 4 are the largest bucket left, and "the grammar
+The 83 refusals in section 4 are the largest bucket left, and "the grammar
 cannot parse it" is not something anyone can act on. This section reduces them
 to constructs. All of it is `tree-sitter-cfml` work, not formatter work.
 
