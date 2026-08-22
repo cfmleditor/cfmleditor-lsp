@@ -120,6 +120,14 @@ func (s *Server) applyConfig(r *config.Resolved) {
 		s.Mappings = r.Mappings
 	}
 
+	if len(r.ExpressionMappings) > 0 && len(s.ExpressionMappings) == 0 {
+		s.ExpressionMappings = r.ExpressionMappings
+	}
+
+	if len(r.ServicePropertyResolvers) > 0 && len(s.ServicePropertyResolvers) == 0 {
+		s.ServicePropertyResolvers = r.ServicePropertyResolvers
+	}
+
 	s.ComponentResolvers = append(s.ComponentResolvers, r.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, r.PropertyResolvers...)
 

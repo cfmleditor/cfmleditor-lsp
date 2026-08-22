@@ -123,6 +123,7 @@ func IntDefault(p *int, def int) int {
 // Resolved holds fully resolved configuration ready for use by the server.
 type Resolved struct {
 	Mappings                 map[string]string
+	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
@@ -158,6 +159,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	r := &Resolved{}
 	if len(cfg.Mappings) > 0 {
 		r.Mappings = ResolvePaths(cfg.Mappings, dir)
+	}
+
+	if len(cfg.ExpressionMappings) > 0 {
+		r.ExpressionMappings = cfg.ExpressionMappings
 	}
 
 	if len(cfg.ServicePropertyResolvers) > 0 {
