@@ -942,10 +942,15 @@ func (f *Formatter) appendTrailingComma() bool { //nolint:unparam // return used
 	// Insert comma after position i (after the last non-whitespace char)
 	insertPos := i + 1
 
-	f.out.Reset()
-	f.out.Write(b[:insertPos])
+	// b aliases the buffer's backing array, so the tail has to be copied out
+	// before anything is written back. Reset() keeps that array, WriteByte then
+	// overwrites the very byte the following Write re-reads, and "SELECT a\n"
+	// came back as "SELECT a,,".
+	tail := append([]byte(nil), b[insertPos:]...)
+
+	f.out.Truncate(insertPos)
 	f.out.WriteByte(',')
-	f.out.Write(b[insertPos:])
+	f.out.Write(tail)
 
 	return true
 }
