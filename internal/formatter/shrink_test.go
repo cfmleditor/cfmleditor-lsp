@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -66,19 +67,37 @@ func shrinkErrs(g language.Grammar, src []byte) bool {
 	return tree.RootNode().HasError()
 }
 
-// shrinkSignature identifies *which* failure a fragment has, as the text of its
-// first ERROR node. Reducing against "still fails" alone is not enough: almost
+// shrinkSignature identifies *which* failure a fragment has, as the text of the
+// node that failed. Reducing against "still fails" alone is not enough: almost
 // any fragment of CFML fails to parse, so the reduction converges on whatever
 // scrap happens to be last — a lone "}", a stray "</cfoutput>", a line of
 // backticks — none of which is the construct being hunted. Requiring the
 // signature to survive keeps the reduction on the original failure.
+//
+// The empty string means "parses", and nothing else may return it. tree-sitter
+// reports a failure in two shapes — an ERROR node covering text it could not
+// fit, and a MISSING node marking a token it expected and inserted — and only
+// the first has a `Kind()` of "ERROR". Reading the ERROR node alone therefore
+// gave "" for every MISSING-node failure, which made the invariant collapse
+// back into "has no ERROR node": a fragment that parses cleanly compared equal
+// to one that failed, and the reduction trimmed away the failing line. That is
+// the third time this same trap has been walked into while building this tool,
+// hence the sentinel below rather than another bare "".
 func shrinkSignature(g language.Grammar, src []byte) string {
 	tree := language.Parse(g, src, nil)
 	defer tree.Close()
 
-	node := firstErrorNode(tree.RootNode())
-	if node == nil {
+	root := tree.RootNode()
+	if !root.HasError() {
 		return ""
+	}
+
+	node := firstFailingNode(root)
+	if node == nil {
+		// The tree reports an error the walk cannot locate. Distinct from both
+		// "parses" and any real signature, so it can never compare equal to
+		// another fragment's failure.
+		return "\x00unlocated"
 	}
 
 	sig := strings.Join(strings.Fields(string(src[node.StartByte():node.EndByte()])), " ")
@@ -86,17 +105,19 @@ func shrinkSignature(g language.Grammar, src []byte) string {
 		sig = sig[:160]
 	}
 
-	return sig
+	// A MISSING node is zero-width, so its text is empty; the kind keeps the
+	// signature non-empty and distinguishes one missing token from another.
+	return node.Kind() + "\x00" + sig
 }
 
-// firstErrorNode returns the first ERROR node in document order, or nil.
-func firstErrorNode(n *sitter.Node) *sitter.Node {
-	if n.Kind() == "ERROR" {
+// firstFailingNode returns the first ERROR or MISSING node in document order.
+func firstFailingNode(n *sitter.Node) *sitter.Node {
+	if n.IsError() || n.IsMissing() {
 		return n
 	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
-		if e := firstErrorNode(n.Child(i)); e != nil {
+		if e := firstFailingNode(n.Child(i)); e != nil {
 			return e
 		}
 	}
@@ -171,7 +192,7 @@ func shrinkWindow(g language.Grammar, src []byte) (frag []byte, first, last int)
 	keeps := func(a, b int) bool {
 		cand := []byte(strings.Join(lines[a:b], "\n"))
 
-		return shrinkWhole(cand) && shrinkSignature(g, cand) == sig
+		return shrinkWhole(cand) && shrinkErrs(g, cand) && shrinkSignature(g, cand) == sig
 	}
 
 	for chunk := (hi - lo) / 2; chunk >= 1; chunk /= 2 {
@@ -185,6 +206,18 @@ func shrinkWindow(g language.Grammar, src []byte) (frag []byte, first, last int)
 	}
 
 	return []byte(strings.Join(lines[lo:hi], "\n")), lo + 1, hi
+}
+
+// escapeFragment renders a fragment as one TSV field without destroying it.
+// Collapsing the whitespace was wrong: a fragment containing a cfscript "//"
+// comment then swallowed everything after it on the joined line, so the repro
+// pasted into a grammar issue no longer reproduced. Newlines and tabs become
+// their two-character escapes, which keeps one row per fragment and leaves the
+// text recoverable.
+func escapeFragment(frag []byte) string {
+	r := strings.NewReplacer("\\", "\\\\", "\n", "\\n", "\r", "", "\t", "\\t")
+
+	return r.Replace(string(frag))
 }
 
 // failingRegion returns the source the grammar choked on, and which grammar it
@@ -278,10 +311,25 @@ func TestShrinkRefusals(t *testing.T) {
 			continue
 		}
 
+		// Line ranges are counted within the region the grammar was handed. For
+		// an embedded cfscript or cfquery region that is not the file, so the
+		// region is located in the source and the offset added — printing a
+		// region-relative number next to a file path invites opening the wrong
+		// line. Regions the formatter rewrote before parsing will not be found
+		// verbatim; those stay region-relative and say so.
+		lineRange := fmt.Sprintf("%d-%d", first, last)
+
+		if off := bytes.Index(src, region); off >= 0 {
+			base := bytes.Count(src[:off], []byte("\n"))
+			lineRange = fmt.Sprintf("%d-%d", first+base, last+base)
+		} else if name != "cfml" {
+			lineRange += " (region-relative)"
+		}
+
 		out = append(out, row{
 			grammar:  name,
-			lines:    fmt.Sprintf("%d-%d", first, last),
-			fragment: strings.Join(strings.Fields(string(frag)), " "),
+			lines:    lineRange,
+			fragment: escapeFragment(frag),
 			path:     path,
 		})
 	}
@@ -305,4 +353,42 @@ func TestShrinkRefusals(t *testing.T) {
 	}
 
 	t.Logf("reduced %d file(s), %d not reduced", len(out), len(unsolved))
+}
+
+// TestShrinkSignatureDistinguishesFailures pins the invariant the reduction
+// rests on. It has been broken three times: first by reducing against "still
+// fails" (every fragment fails, so it converged on a lone "}"), then by
+// bracket-balancing alone (which says nothing about tags, so it converged on a
+// stray "</cfoutput>"), and then by reading only ERROR nodes — tree-sitter
+// reports a missing token as a MISSING node instead, so the signature came back
+// "" and compared equal to a fragment that parses cleanly.
+func TestShrinkSignatureDistinguishesFailures(t *testing.T) {
+	clean := []byte(`component { function f() { return 1; } }`)
+	if sig := shrinkSignature(language.CFScript, clean); sig != "" {
+		t.Errorf("source that parses should have an empty signature, got %q", sig)
+	}
+
+	// Fails via a MISSING node rather than an ERROR node.
+	missing := []byte(`component { function f() { if (x) { return 1; } }`)
+	if !shrinkErrs(language.CFScript, missing) {
+		t.Fatal("fixture no longer fails to parse; pick another")
+	}
+
+	missingSig := shrinkSignature(language.CFScript, missing)
+	if missingSig == "" {
+		t.Error("a fragment that fails must never share the empty signature with one that parses")
+	}
+
+	if missingSig == shrinkSignature(language.CFScript, clean) {
+		t.Error("a failing fragment and a clean one must not compare equal")
+	}
+
+	// Two unrelated failures must not compare equal either, or the reduction
+	// is free to wander from one to the other.
+	a := shrinkSignature(language.CFScript, []byte(`component { function f() access:remote {} }`))
+	b := shrinkSignature(language.CFScript, []byte(`param url.number;`))
+
+	if a == "" || b == "" || a == b {
+		t.Errorf("unrelated failures share a signature: %q vs %q", a, b)
+	}
 }

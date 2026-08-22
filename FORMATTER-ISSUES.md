@@ -37,7 +37,7 @@ cleanly were then formatted a second time to check idempotency.
 |---|---|---|---|
 | Formatted cleanly | 3,863 | 5,450 | **5,499** |
 | Rejected by the guard | 1,671 | 84 | **32** |
-| Refused: grammar cannot parse | 86 | 86 | **86** |
+| Refused: grammar cannot parse | 86 | 86 | **83** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
 
@@ -47,8 +47,8 @@ check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
 The "current" column is what `make corpus` prints today (section 5), against the
-same six projects at their current HEAD. It counts the grammar's 86 refusals in
-two buckets rather than one — 25 documents the CFML grammar cannot parse, and 61
+same six projects at their current HEAD. It counts the grammar's 83 refusals in
+two buckets rather than one — 22 documents the CFML grammar cannot parse, and 61
 that parse as documents but whose embedded cfscript or cfquery the sub-grammar
 cannot — because the two are different work and the second is invisible from the
 outside: the document parses, the formatter runs, and whatever it renders for
@@ -256,8 +256,12 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Both were latent — nothing in the corpus triggered either — but they meant the
-"clean" figures were an upper bound rather than a proof. Both are closed now.
+Cases the `whitespaceOnly` guard passed and should not have. The first two were
+latent — nothing in the corpus triggered either — but they meant the "clean"
+figures were an upper bound rather than a proof. The last two were not latent:
+each was destroying real files while the guard reported success, because a
+change can be whitespace-only and still change what the file means. All four
+are closed.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -304,6 +308,75 @@ pure blind spot rather than a load-bearing exception. Covered by
 `TestGuardRejectsDroppedQuotes`, `TestGuardAllowsAttributeRequoting` and
 `TestGuardRequoteGatedOnItsOwnOption`.
 
+### 3.3 Whitespace-only is not a sufficient invariant for `<pre>` — fixed
+
+The two gaps above were the guard failing to notice a change. This one is the
+opposite: the guard worked exactly as specified, and the specification was
+wrong.
+
+`<pre>` and `<textarea>` went through the generic element path and had their
+bodies collapsed onto one line:
+
+```
+<pre>              ->  <pre>
+line one                   line one indented line three
+    indented           </pre>
+line three
+</pre>
+```
+
+Nothing but whitespace changed, so `checkWhitespaceOnly` passed it — correctly,
+by its own definition. But in these two elements the whitespace *is* the
+content, and the rendered page is destroyed. No amount of guard work can catch
+this, because the guard's entire premise is that whitespace is free.
+
+The fix is a carve-out rather than a guard change: an element whose tag is in
+`htmlPreformattedElements` is reproduced from source instead of walked
+(`isPreformattedElement`, `internal/formatter/element_formatter.go`). Covered by
+`TestPreformattedElementsKeepTheirWhitespace` and, in the other direction,
+`TestOrdinaryElementStillCollapses` — a `<div>` must still be reflowed or the
+carve-out is too wide.
+
+Worth remembering as a class: "the guard passed" means "no non-whitespace
+character changed", which is only equivalent to "nothing was destroyed" where
+whitespace carries no meaning. `<pre>` is the case where that does not hold;
+another would be any construct the grammar exposes as text but a runtime treats
+as significant.
+
+### 3.4 Line wrapping broke inside quoted attribute values — 43 files
+
+`writeWrapped` reflows a long line by breaking at the last space before
+`lineWidth`. It is handed whole elements *verbatim* — the "emit this element
+as-is" path in `formatElement` passes `f.text(n)`, markup and attributes
+included — so the space it picked was often inside an attribute value:
+
+| Source | Output (before) |
+|---|---|
+| `<img src="x.png" alt="a fairly long alternative text describing the picture">` | `alt="a fairly long`<br>`alternative text describing the`<br>`picture" />` |
+
+The guard cannot see this: only whitespace changed, which is exactly what the
+guard permits. But the attribute's *value* changed, and for a CFML tag whose
+attribute carries a string the runtime uses — a `cfhttpparam` value, a `cfmail`
+subject — the injected newline and indentation are in the data.
+
+Break points are now computed once over the whole string (`safeBreaks`),
+skipping any space inside a tag's quoted value. Two details matter:
+
+- **Once, not per line.** The offsets depend on tag and quote state a per-line
+  scan cannot reconstruct: slicing the first line off `<img src="a" alt="b c">`
+  leaves `alt="b c">`, which no longer starts inside a tag. The first version of
+  the fix did it per line and kept breaking inside values.
+- **Quotes only count inside a tag.** The same text stream carries ordinary
+  prose, where an apostrophe is a letter. Tracking quotes everywhere made
+  `I won't display because…` unbreakable from the apostrophe onward — wrapping
+  silently switching off for ordinary English. That regression is pinned by
+  `TestWrapStillWrapsProseContainingApostrophes`.
+
+Measured by formatting all 5,504 formattable corpus files and looking for a
+quoted attribute value that gained a newline: 43 before, 0 after. Per-file
+corpus verdicts are byte-identical to the baseline, so nothing moved category.
+Covered by `internal/formatter/wrap_test.go`.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).
@@ -343,10 +416,10 @@ the corpus, so `make test` and CI are unaffected:
 ```console
 $ make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
     formatting 4499 files from 2 root(s)
-    root                files  clean  parse script  guard unstab  panic
-    Lucee                3775   3677     23     54     20      1      0
-    ContentBox            724    719      2      1      2      0      0
-    TOTAL                4499   4396     25     55     22      1      0
+    root                files  clean  parse script  guard unstab  panic   skip
+    Lucee                3775   3677     20     54     20      1      0      3
+    ContentBox            724    719      2      1      2      0      0      0
+    TOTAL                4499   4396     22     55     22      1      0      3
 ```
 
 `CORPUS` is a `PATH`-style list of source trees; each is reported separately so a
@@ -390,7 +463,7 @@ Regression coverage for everything in section 2 lives in
 
 ## 6. Grammar gaps behind the refused counts
 
-The 86 refusals in section 4 are the largest bucket left, and "the grammar
+The 83 refusals in section 4 are the largest bucket left, and "the grammar
 cannot parse it" is not something anyone can act on. This section reduces them
 to constructs. All of it is `tree-sitter-cfml` work, not formatter work.
 
@@ -447,16 +520,55 @@ of them is filed:
   whose bytes are a GIF (`arrow-down.gif.cfm`). The corpus harness skips binary
   content now and counts it in its own column, so it cannot be read as a
   grammar gap; that alone moved parse-refused from 25 to 22.
-- **Genuinely malformed source.** `coldbox-platform/system/web/Controller.cfc`
-  is missing a comma between two arguments in a `relocate()` signature.
+- **Comma-less function parameters.** `coldbox-platform/system/web/Controller.cfc`
+  and `MockController.cfc` omit a comma between two arguments in a `relocate()`
+  signature. This was recorded here as malformed source; it is not — the form
+  parses in CFML and the gap is already filed as tree-sitter-cfml #49.
+  `function f(string a, string b boolean c)` fails while the comma-separated
+  version parses.
 
 The reduction is automated now: `make shrink REPORT=<corpus report>`
 (`internal/formatter/shrink_test.go`) takes a report written by `make corpus`
 and reduces every parse-refused and script-refused entry to the smallest
-contiguous fragment that still fails the same way. Of the 83 refusals it
-reduces 81; 18 come out under 150 characters and 28 under 400, which is where
-the entries above came from. The rest stay large because the reduction is
-deliberately conservative, and finishing those is still manual work.
+contiguous fragment that still fails the same way. It reduces all 83 refusals;
+17 come out under 150 characters and 30 under 400, which is where the entries
+above came from. The rest stay large because the reduction is deliberately
+conservative — see 6.4 for how those were finished.
+
+### 6.4 The rest of the refusals, characterised
+
+Working through the fragments the reducer left large. As in 6.1, every
+construct below was lifted from a failing file and then **re-parsed standalone**
+against `language.CFScript`, with a control that does parse — the ERROR node
+marks where the parser gave up, not what defeated it, and roughly a third of
+the candidates turned out to parse fine on their own.
+
+| Construct | Minimal repro | Control that parses | Filed |
+|---|---|---|---|
+| Subscripted static access | `x = Test::["m"]()` (and `::[m]()`) | `x = Test::m()` | #79 |
+| `${ }` ordered-struct literal | `animals = ${ a: "x" }` | `animals = $[ a: "x" ]` | #80 |
+| `exit` with a string argument | `exit "exitTemplate";` | `exit;` / `exit method="t";` | #81 |
+| `savecontent` as an expression | `g = savecontent { … };` | `savecontent variable="g" { … }` | #82 |
+| `new` as a tag-in-script attribute value | `query name="q" listener=new Foo() { … }` | `listener=makeIt()` / `listener=someVar` | #83 |
+| Colon-separated tag-call attributes | `cfparam (name:"d" default:"D");` | all-comma or all-space list | #84 |
+| Commas and spaces mixed in one attribute list | `cfimap( a="1", b="2" c="3" )` | either separator used uniformly | #84 |
+| Brace-less `try` | `try x = y; catch (any e) { }` | `try { x = y; } catch (any e) { }` | #85 |
+| Numeric struct key by dot, **assigned** | `myNumb.4 = "4";` | `x = myNumb.4;` and `myNumb[4] = "4";` | #86 |
+| `call():function(…){ }` listener form | `var t = mySuccess():function(r, e) { };` | — | #87 |
+| Return type before the access modifiers | `struct public function f() { }` | `public struct function f() { }` | #88 |
+| `pageencoding` before a component | `pageencoding "utf-8"; component { }` | — | #89 |
+| `name: value;` colon assignment | `msSQL.class: 'org.x.Driver';` | `msSQL.class = 'org.x.Driver';` | #90 |
+
+Constructs that were candidates and **do** parse, recorded so they are not
+re-filed: an array literal with keys (`[ cow: [1,2] ]`), a bare `include "x.cfm";`,
+a CFML comment inside cfscript, nested tag-in-script bodies
+(`cfchart(…) { cfchartseries(…) { … } }`), a dotted named argument
+(`g( formstruct.name="test" )`), `savecontent` in statement form, and a
+tag-in-script statement with a body and only literal attributes.
+
+Two more went to existing issues rather than new ones: `() => return r` is the
+same gap as #75 (a statement as an arrow-function body), and `param url.n 45;`
+is a fourth `param` spelling noted on #70.
 
 Two invariants are what make the output trustworthy, and both were learned the
 hard way:

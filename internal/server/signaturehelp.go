@@ -18,6 +18,8 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 		return nil, err
 	}
 
+	defer s.lockDoc(params.TextDocument.URI)()
+
 	s.log.Debug("signatureHelp: request",
 		cflog.String("uri", string(params.TextDocument.URI)),
 		cflog.Uint32("line", params.Position.Line),

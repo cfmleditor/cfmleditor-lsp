@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -461,7 +462,35 @@ func (rs *ResolverSet) Resolve(expr string) string {
 		candidates = append(candidates, rs.byByte[b]...)
 	}
 
+	// Back into configuration order. The byte index is a fast-rejection
+	// mechanism — it decides which resolvers are worth trying, and must not
+	// decide which one wins. Collected as above, candidates come out ordered by
+	// where each resolver's prefix first byte happens to appear in expr, so for
+	// resolvers whose prefixes start with different letters the array order
+	// documented in CLAUDE.md ("whichever is listed earlier wins") was decided
+	// by the call site's spelling instead. Given
+	//
+	//	[{prefix "svc", match "svc.$1"}, {prefix "app", match "app$1"}]
+	//
+	// the expression "appsvc.foo()" resolved through the array-order path
+	// (ResolveFromCallMatch, behind CanResolveCall) but through this one — the
+	// path completion and hover use — it resolved to the second. Same
+	// expression, same config, two different components depending on which
+	// feature asked.
+	//
+	// Sorting also collapses the duplicates a pipe-delimited prefix produces:
+	// alternatives with different first bytes register the resolver in two
+	// buckets, and an expression containing both bytes collected it twice.
+	slices.Sort(candidates)
+
+	prev := -1
+
 	for _, idx := range candidates {
+		if idx == prev {
+			continue
+		}
+
+		prev = idx
 		r := &rs.resolvers[idx]
 
 		pos := findPrefixPos(expr, r.Prefix, r.Anchored)

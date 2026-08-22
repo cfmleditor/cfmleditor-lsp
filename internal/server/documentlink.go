@@ -25,6 +25,8 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 	// Use cached parse result for global-scope links; scan function bodies on demand
 	docURI := params.TextDocument.URI
 
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()

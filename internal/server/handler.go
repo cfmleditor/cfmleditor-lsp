@@ -146,6 +146,8 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 		return nil, nil
 	}
 
+	defer s.lockDoc(docURI)()
+
 	s.setDocument(docURI, params.TextDocument.Text)
 
 	pr := s.parseContent(docURI, params.TextDocument.Text)
@@ -166,7 +168,11 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 
 	s.reindexFromParseResult(docURI, pr)
 
-	s.safeGo("rebuildFileCompletionCacheFromPR", func() { s.rebuildFileCompletionCacheFromPR(docURI, pr) })
+	s.safeGo("rebuildFileCompletionCacheFromPR", func() {
+		defer s.lockDoc(docURI)()
+
+		s.rebuildFileCompletionCacheFromPR(docURI, pr)
+	})
 	s.log.Debug("document opened", cflog.String("uri", string(docURI)))
 
 	return nil, nil
@@ -188,6 +194,8 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 		return nil, nil
 	}
 
+	defer s.lockDoc(docURI)()
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
@@ -206,7 +214,8 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 	}
 
 	s.changeCount[docURI]++
-	rapidChanges := s.changeCount[docURI] > 5 || len(params.ContentChanges) > 50
+	changeCount := s.changeCount[docURI]
+	rapidChanges := changeCount > 5 || len(params.ContentChanges) > 50
 	s.mu.Unlock()
 
 	totalBytes := 0
@@ -218,7 +227,7 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 
 	s.log.Debug("didChange",
 		cflog.String("uri", string(docURI)),
-		cflog.Int("changeCount", s.changeCount[docURI]),
+		cflog.Int("changeCount", changeCount),
 		cflog.Int("edits", len(params.ContentChanges)),
 		cflog.Int("bytes", totalBytes),
 	)
@@ -239,17 +248,26 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 		}
 
 		s.setDocument(docURI, content)
+
+		// Deferred reindex gets its own timer map. Sharing cacheTimers with
+		// debounceCacheRebuild meant the two kinds of pending work occupied one
+		// slot per document: the first non-rapid keystroke after a burst armed a
+		// cache rebuild, which Stop()ped the reindex sitting in the slot and
+		// dropped it. The paste that triggered the burst then never made it into
+		// the index at all.
 		s.mu.Lock()
-		if timer, ok := s.cacheTimers[docURI]; ok {
+		if timer, ok := s.reindexTimers[docURI]; ok {
 			timer.Stop()
 		}
 
-		s.cacheTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
+		s.reindexTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
 			defer func() {
 				if r := recover(); r != nil {
 					s.log.Error("goroutine panic", cflog.String("label", "rapidChangeTimer"), cflog.Any("panic", r))
 				}
 			}()
+
+			defer s.lockDoc(docURI)()
 
 			s.mu.Lock()
 			delete(s.changeCount, docURI)
@@ -377,10 +395,37 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	}
 
 	docURI := params.TextDocument.URI
+
+	release := s.lockDoc(docURI)
+
 	s.removeDocument(docURI)
 	s.mu.Lock()
 	delete(s.parseResults, docURI)
+	delete(s.funcRanges, docURI)
+	delete(s.changeCount, docURI)
+	delete(s.changeWindowStart, docURI)
+
+	// Both timers reach for this document's ParseResult, which is about to stop
+	// existing. Stopping them is also the only thing that bounds these maps: a
+	// long session that opens and closes many files otherwise keeps a timer and
+	// a mutex per file it has ever seen.
+	for _, timers := range []map[uri.URI]*time.Timer{s.cacheTimers, s.reindexTimers} {
+		if t, ok := timers[docURI]; ok {
+			t.Stop()
+			delete(timers, docURI)
+		}
+	}
+
 	s.mu.Unlock()
+
+	release()
+
+	// s.docLocks deliberately keeps its entry. Stop() reports false for a timer
+	// whose goroutine has already started, and that goroutine is by then
+	// holding or waiting on this document's mutex; dropping the entry would let
+	// a later didOpen mint a fresh mutex and run alongside it, which is the
+	// exact race the lock exists to prevent. One sync.Mutex per file the
+	// session has opened is the cheaper side of that trade.
 	s.log.Debug("document closed", cflog.String("uri", string(docURI)))
 
 	// Clear diagnostics on close
@@ -934,6 +979,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		}
 
 		fileURI := uri.URI(docURI)
+
+		defer s.lockDoc(fileURI)()
 
 		var depsCalls []parser.CallSite
 
