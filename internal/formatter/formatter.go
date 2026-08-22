@@ -179,7 +179,15 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 	}()
 
 	if opts.SelfCloseTags && opts.ParseCFML != nil {
-		src, tree = preformat(src, tree, opts.ParseCFML)
+		var owned *sitter.Tree
+
+		src, tree, owned = preformat(src, tree, opts.ParseCFML)
+		if owned != nil {
+			// preformat re-parses after each conversion pass and hands back the
+			// last tree it made. Nobody else can free it: the caller only knows
+			// about the tree it passed in, which preformat left untouched.
+			defer owned.Close()
+		}
 	}
 
 	f := New(opts)
@@ -224,6 +232,11 @@ func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error)
 // a "/" immediately before ">" in either side is also skipped; if allowRequote
 // is true, the attribute re-quoting described below is skipped too.
 // Returns nil if only whitespace differs, or an error describing the first mismatch.
+// isQuoteByte reports whether c delimits an attribute value or string literal.
+func isQuoteByte(c byte) bool {
+	return c == '"' || c == '\''
+}
+
 func checkWhitespaceOnly(a, b []byte, allowSelfClose, allowRequote bool) error {
 	i, j := 0, 0
 
@@ -707,11 +720,6 @@ func commentSnippet(s []byte, at int) string {
 // surrounding code to line up catches it on the spot. The bodies collected in
 // sink are compared separately, so a comment whose text was mangled is still
 // reported even though its characters no longer take part in the walk.
-// isQuoteByte reports whether c delimits an attribute value or string literal.
-func isQuoteByte(c byte) bool {
-	return c == '"' || c == '\''
-}
-
 func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
 	for {
 		pos = skipSpace(src, pos)
@@ -942,10 +950,15 @@ func (f *Formatter) appendTrailingComma() bool { //nolint:unparam // return used
 	// Insert comma after position i (after the last non-whitespace char)
 	insertPos := i + 1
 
-	f.out.Reset()
-	f.out.Write(b[:insertPos])
+	// b aliases the buffer's backing array, so the tail has to be copied out
+	// before anything is written back. Reset() keeps that array, WriteByte then
+	// overwrites the very byte the following Write re-reads, and "SELECT a\n"
+	// came back as "SELECT a,,".
+	tail := append([]byte(nil), b[insertPos:]...)
+
+	f.out.Truncate(insertPos)
 	f.out.WriteByte(',')
-	f.out.Write(b[insertPos:])
+	f.out.Write(tail)
 
 	return true
 }

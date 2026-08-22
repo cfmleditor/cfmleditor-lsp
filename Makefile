@@ -108,11 +108,18 @@ corpus:
 #
 # Fragments are a starting point, not a verdict — see the comment at the top of
 # internal/formatter/shrink_test.go.
+# The output goes through a file rather than a pipe. Piping `go test` into
+# `grep` hands the pipeline grep's exit status, so a build error or a failing
+# test came back as success and `make shrink` printed nothing and exited 0.
 shrink:
 	@test -n "$(REPORT)" || { echo "usage: make shrink REPORT=<corpus report>" >&2; exit 2; }
-	@CFML_SHRINK_REPORT="$(REPORT)" \
-		go test -v -count=1 -timeout 30m -run TestShrinkRefusals ./internal/formatter/ \
-		| grep -vE "^(=== RUN|--- PASS|--- SKIP|PASS|ok  )"
+	@log=$$(mktemp); \
+	CFML_SHRINK_REPORT="$(REPORT)" \
+		go test -v -count=1 -timeout 30m -run TestShrinkRefusals ./internal/formatter/ >$$log 2>&1; \
+	status=$$?; \
+	grep -vE "^(=== RUN|--- PASS|--- SKIP|PASS|ok  )" $$log || true; \
+	rm -f $$log; \
+	exit $$status
 
 fmt:
 	gofmt -w .
