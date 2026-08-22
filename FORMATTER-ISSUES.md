@@ -256,8 +256,12 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Both were latent — nothing in the corpus triggered either — but they meant the
-"clean" figures were an upper bound rather than a proof. Both are closed now.
+Cases the `whitespaceOnly` guard passed and should not have. The first two were
+latent — nothing in the corpus triggered either — but they meant the "clean"
+figures were an upper bound rather than a proof. The last two were not latent:
+each was destroying real files while the guard reported success, because a
+change can be whitespace-only and still change what the file means. All four
+are closed.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -338,6 +342,40 @@ character changed", which is only equivalent to "nothing was destroyed" where
 whitespace carries no meaning. `<pre>` is the case where that does not hold;
 another would be any construct the grammar exposes as text but a runtime treats
 as significant.
+
+### 3.4 Line wrapping broke inside quoted attribute values — 43 files
+
+`writeWrapped` reflows a long line by breaking at the last space before
+`lineWidth`. It is handed whole elements *verbatim* — the "emit this element
+as-is" path in `formatElement` passes `f.text(n)`, markup and attributes
+included — so the space it picked was often inside an attribute value:
+
+| Source | Output (before) |
+|---|---|
+| `<img src="x.png" alt="a fairly long alternative text describing the picture">` | `alt="a fairly long`<br>`alternative text describing the`<br>`picture" />` |
+
+The guard cannot see this: only whitespace changed, which is exactly what the
+guard permits. But the attribute's *value* changed, and for a CFML tag whose
+attribute carries a string the runtime uses — a `cfhttpparam` value, a `cfmail`
+subject — the injected newline and indentation are in the data.
+
+Break points are now computed once over the whole string (`safeBreaks`),
+skipping any space inside a tag's quoted value. Two details matter:
+
+- **Once, not per line.** The offsets depend on tag and quote state a per-line
+  scan cannot reconstruct: slicing the first line off `<img src="a" alt="b c">`
+  leaves `alt="b c">`, which no longer starts inside a tag. The first version of
+  the fix did it per line and kept breaking inside values.
+- **Quotes only count inside a tag.** The same text stream carries ordinary
+  prose, where an apostrophe is a letter. Tracking quotes everywhere made
+  `I won't display because…` unbreakable from the apostrophe onward — wrapping
+  silently switching off for ordinary English. That regression is pinned by
+  `TestWrapStillWrapsProseContainingApostrophes`.
+
+Measured by formatting all 5,504 formattable corpus files and looking for a
+quoted attribute value that gained a newline: 43 before, 0 after. Per-file
+corpus verdicts are byte-identical to the baseline, so nothing moved category.
+Covered by `internal/formatter/wrap_test.go`.
 
 ## 4. Outstanding
 
