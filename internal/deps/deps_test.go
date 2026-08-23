@@ -57,8 +57,15 @@ func buildIndex(t *testing.T, dir string) *index.Index {
 	return idx
 }
 
-// TestBuild_FunctionDeps verifies that BuildReport's graph labels correctly
-// and includes transitive deps through service to persist.
+// TestBuild_FunctionDeps verifies that BuildReport's graph labels correctly.
+//
+// It does not reach persist, and its comment used to say it did: function-level
+// tracing is one hop deep, because getFuncCalls has never been implemented (the
+// index stores definitions and refs, not call sites). File-level tracing through
+// buildFromRefs *is* transitive — TestTransitiveDepsResolveAgainstTheirOwnDirectory
+// walks two hops. The substring assertions below are satisfied by an unresolved
+// edge too, so TestFunctionDepsFollowScopePrefixedReceivers checks the labels
+// and the dashed flag instead.
 func TestBuild_FunctionDeps(t *testing.T) {
 	dir := testdataDir()
 	idx := buildIndex(t, dir)

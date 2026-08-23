@@ -80,12 +80,23 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 	type node struct {
 		label   string
 		calls   []parser.CallSite
+		refs    []parser.ComponentRef
 		baseDir string
 	}
 
 	var edges []graph.Edge
 
-	queue := []node{{label: startLabel, calls: opts.Calls, baseDir: baseDir}}
+	// The refs for the file the calls came from, used to resolve a scope-
+	// qualified receiver. Options.Refs cannot be relied on here: its only
+	// caller fills it *instead of* Calls, never alongside, so it is empty in
+	// exactly the case this function runs. Reading them from the index keeps
+	// the resolution working regardless of how the caller populated Options.
+	startRefs := opts.Refs
+	if len(startRefs) == 0 && opts.Index != nil {
+		startRefs = derefRefs(opts.Index.RefsForFile(uri.URI(opts.DocURI)))
+	}
+
+	queue := []node{{label: startLabel, calls: opts.Calls, refs: startRefs, baseDir: baseDir}}
 
 	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
 		var next []node
@@ -99,9 +110,14 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 				resolved := ""
 				toLabel := call.FuncName
 
-				if call.Component != "" {
-					resolved = opts.Resolver.ComponentPath(call.Component, current.baseDir)
-					toLabel = call.Component + "." + call.FuncName
+				component := call.Component
+				if component == "" && call.Variable != "" {
+					component = componentForReceiver(call.Variable, current.refs)
+				}
+
+				if component != "" {
+					resolved = opts.Resolver.ComponentPath(component, current.baseDir)
+					toLabel = component + "." + call.FuncName
 
 					if resolved != "" {
 						toLabel = filepath.Base(resolved) + "::" + call.FuncName
@@ -132,7 +148,12 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 
 				targetCalls := getFuncCalls(opts.Index, targetURI, call.FuncName)
 				if len(targetCalls) > 0 {
-					next = append(next, node{label: toLabel, calls: targetCalls, baseDir: filepath.Dir(resolved)})
+					next = append(next, node{
+						label:   toLabel,
+						calls:   targetCalls,
+						refs:    derefRefs(opts.Index.RefsForFile(targetURI)),
+						baseDir: filepath.Dir(resolved),
+					})
 				}
 			}
 		}
@@ -141,6 +162,41 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 	}
 
 	return edges
+}
+
+// componentForReceiver resolves a call's receiver to a component using the refs
+// of the file the call lives in.
+//
+// The two are recorded under different keys on purpose: a receiver written
+// `VARIABLES.svc` is stored on the call as "VARIABLES.svc", while the ref that
+// identifies it is stored as "svc". Refs are keyed by bare name and it is the
+// caller's job to strip the scope, which is what resolve.CanResolveCall does
+// through the same helper. Reading call.Component directly — as this traversal
+// did — sees an empty string for every scope-qualified receiver, which is how
+// most CFML is written, so every edge came out dashed and the walk stopped at
+// depth 0.
+func componentForReceiver(variable string, refs []parser.ComponentRef) string {
+	lookup := parser.StripReceiverScope(variable)
+	if lookup == "" {
+		return ""
+	}
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, lookup) {
+			return refs[i].Component
+		}
+	}
+
+	return ""
+}
+
+func derefRefs(ptrs []*parser.ComponentRef) []parser.ComponentRef {
+	out := make([]parser.ComponentRef, 0, len(ptrs))
+	for _, p := range ptrs {
+		out = append(out, *p)
+	}
+
+	return out
 }
 
 // buildFromRefs traces component-level dependencies using ComponentRef data.
@@ -187,17 +243,10 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 				}
 
 				seen[targetURI] = true
-				ptrs := opts.Index.RefsForFile(uri.URI(targetURI))
-
-				var nextRefs []parser.ComponentRef
-
-				for _, p := range ptrs {
-					nextRefs = append(nextRefs, *p)
-				}
 
 				next = append(next, node{
 					label:   filepath.Base(resolved),
-					refs:    nextRefs,
+					refs:    derefRefs(opts.Index.RefsForFile(uri.URI(targetURI))),
 					baseDir: filepath.Dir(resolved),
 				})
 			}
@@ -209,11 +258,18 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 	return edges
 }
 
-// getFuncCalls retrieves CallSite data for a function. This requires the file
-// to be parsed — we check if the index has the function, then return empty
-// (the caller should provide parsed data for deeper tracing).
+// getFuncCalls would return the calls made by funcName inside the target file,
+// letting buildFromCalls walk past the first hop. It returns nothing: the Index
+// stores function definitions and component refs, not call sites, so there is
+// nowhere to read them from. Function-level dependency graphs are therefore one
+// hop deep.
+//
+// File-level tracing does not share the limitation — buildFromRefs walks as far
+// as MaxDepth through Index.RefsForFile.
+//
+// Implementing this means either recording call sites in the index or giving
+// this package a way to read and parse the target file; both are a change to
+// the package's interface rather than something to slip in here.
 func getFuncCalls(_ Index, _ uri.URI, _ string) []parser.CallSite {
-	// TODO: For deeper recursive tracing, the handler should provide a callback
-	// or pre-parse target files. For now, we stop at one level of call resolution.
 	return nil
 }
