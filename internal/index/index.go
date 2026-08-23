@@ -167,54 +167,70 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 
 	key := uriKey(fileURI)
 
+	// Only the edited file's entries can move, and fileFuncs/fileRefs already
+	// index exactly those. This used to walk every bucket of funcs and comprefs
+	// to find them and then rebuild all five maps wholesale — on a 5,000-file
+	// workspace, 18ms of write-locked work per line-changing keystroke,
+	// blocking every other session's lookups for the duration. Measured by
+	// BenchmarkShiftLines, that becomes 6µs where method names differ between
+	// files.
+	//
+	// What remains proportional to workspace size is the name buckets: funcs is
+	// keyed by lowercased name, so a workspace where every component defines
+	// `init` has one bucket holding an entry per file, and replacing this
+	// file's few entries still rebuilds that whole slice. Rebuilding rather
+	// than writing in place is not optional — callers hold the slice after the
+	// read lock is released (see keepFuncs) — so the worst case, every file
+	// sharing every method name, stays at ~0.9ms rather than going flat.
 	newFuncs := make(map[*parser.FunctionDef]*parser.FunctionDef)
+	funcBuckets := make(map[string]bool)
 
-	for _, defs := range idx.funcs {
-		for _, d := range defs {
-			if uriKey(d.URI) == key && int(d.Line) > afterLine && newFuncs[d] == nil {
-				shifted := *d
-				shifted.Line = uint32(int(shifted.Line) + delta)
-				newFuncs[d] = &shifted
-			}
+	for _, d := range idx.fileFuncs[key] {
+		if uriKey(d.URI) != key || int(d.Line) <= afterLine || newFuncs[d] != nil {
+			continue
 		}
+
+		shifted := *d
+		shifted.Line = uint32(int(shifted.Line) + delta)
+		newFuncs[d] = &shifted
+		funcBuckets[strings.ToLower(d.Name)] = true
 	}
 
 	newRefs := make(map[*parser.ComponentRef]*parser.ComponentRef)
+	refBuckets := make(map[string]bool)
 
-	for _, refs := range idx.comprefs {
-		for _, r := range refs {
-			if uriKey(r.URI) == key && int(r.Line) > afterLine && newRefs[r] == nil {
-				shifted := *r
-				shifted.Line = uint32(int(shifted.Line) + delta)
-				newRefs[r] = &shifted
-			}
+	for _, r := range idx.fileRefs[key] {
+		if uriKey(r.URI) != key || int(r.Line) <= afterLine || newRefs[r] != nil {
+			continue
 		}
+
+		shifted := *r
+		shifted.Line = uint32(int(shifted.Line) + delta)
+		newRefs[r] = &shifted
+		refBuckets[strings.ToLower(r.Variable)] = true
 	}
 
 	if len(newFuncs) == 0 && len(newRefs) == 0 {
 		return
 	}
 
-	for k, defs := range idx.funcs {
-		idx.funcs[k] = remapFuncs(defs, newFuncs)
+	// Only the buckets holding a replaced entry need rebuilding. A definition
+	// lives under its lowercased name and a ref under its lowercased variable,
+	// so the affected keys are known without searching for them.
+	for k := range funcBuckets {
+		idx.funcs[k] = remapFuncs(idx.funcs[k], newFuncs)
 	}
 
-	for k, defs := range idx.fileFuncs {
-		idx.fileFuncs[k] = remapFuncs(defs, newFuncs)
+	idx.fileFuncs[key] = remapFuncs(idx.fileFuncs[key], newFuncs)
+
+	for k := range refBuckets {
+		idx.comprefs[k] = remapRefs(idx.comprefs[k], newRefs)
 	}
 
-	for k, refs := range idx.comprefs {
-		idx.comprefs[k] = remapRefs(refs, newRefs)
-	}
+	idx.fileRefs[key] = remapRefs(idx.fileRefs[key], newRefs)
 
-	for k, refs := range idx.fileRefs {
-		idx.fileRefs[k] = remapRefs(refs, newRefs)
-	}
-
-	for fk, scopes := range idx.scopeRefs {
-		for sk, refs := range scopes {
-			idx.scopeRefs[fk][sk] = remapRefs(refs, newRefs)
-		}
+	for sk, refs := range idx.scopeRefs[key] {
+		idx.scopeRefs[key][sk] = remapRefs(refs, newRefs)
 	}
 }
 
