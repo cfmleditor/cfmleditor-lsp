@@ -440,6 +440,28 @@ func (s scriptSpans) contains(pos int) bool {
 	return false
 }
 
+// lowerASCIIBytes lowercases A-Z and copies every other byte through.
+//
+// bytes.ToLower cannot be used here: it folds by Unicode rune, and some runes
+// change byte length doing so — "İ" (U+0130, two bytes) lowercases to one. The
+// offsets found in the lowered copy are used to slice the *original*, so a
+// single such character anywhere earlier in the file shifts every subsequent
+// span, and the whitespace-only guard then compares the wrong regions. Tag
+// names are ASCII, so folding only A-Z loses nothing.
+func lowerASCIIBytes(src []byte) []byte {
+	out := make([]byte, len(src))
+
+	for i, c := range src {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+
+		out[i] = c
+	}
+
+	return out
+}
+
 // scriptRegionsOf locates the <cfscript> and <script> blocks in src, or spans
 // the whole file when it is a script-syntax component.
 func scriptRegionsOf(src []byte) scriptSpans {
@@ -449,7 +471,7 @@ func scriptRegionsOf(src []byte) scriptSpans {
 
 	var spans scriptSpans
 
-	lower := bytes.ToLower(src)
+	lower := lowerASCIIBytes(src)
 
 	for _, tag := range []string{"cfscript", "script"} {
 		open, closeTag := "<"+tag, "</"+tag

@@ -71,14 +71,21 @@ func Build(opts Options) Result {
 
 // buildFromCalls traces function-level dependencies using CallSite data.
 func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+	// baseDir travels with each node. It is what ComponentPath resolves a
+	// component against — relative paths and the governing Application.cfc both
+	// depend on it — and carrying the *start* file's directory through the whole
+	// traversal meant every transitive hop was resolved as though it lived
+	// beside the file the graph started from. Dependencies one hop out in
+	// another directory came back unresolved and were drawn as dashed edges.
 	type node struct {
-		label string
-		calls []parser.CallSite
+		label   string
+		calls   []parser.CallSite
+		baseDir string
 	}
 
 	var edges []graph.Edge
 
-	queue := []node{{label: startLabel, calls: opts.Calls}}
+	queue := []node{{label: startLabel, calls: opts.Calls, baseDir: baseDir}}
 
 	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
 		var next []node
@@ -93,7 +100,7 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 				toLabel := call.FuncName
 
 				if call.Component != "" {
-					resolved = opts.Resolver.ComponentPath(call.Component, baseDir)
+					resolved = opts.Resolver.ComponentPath(call.Component, current.baseDir)
 					toLabel = call.Component + "." + call.FuncName
 
 					if resolved != "" {
@@ -125,7 +132,7 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 
 				targetCalls := getFuncCalls(opts.Index, targetURI, call.FuncName)
 				if len(targetCalls) > 0 {
-					next = append(next, node{label: toLabel, calls: targetCalls})
+					next = append(next, node{label: toLabel, calls: targetCalls, baseDir: filepath.Dir(resolved)})
 				}
 			}
 		}
@@ -138,14 +145,16 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 
 // buildFromRefs traces component-level dependencies using ComponentRef data.
 func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+	// baseDir travels with each node, for the reason given in buildFromCalls.
 	type node struct {
-		label string
-		refs  []parser.ComponentRef
+		label   string
+		refs    []parser.ComponentRef
+		baseDir string
 	}
 
 	var edges []graph.Edge
 
-	queue := []node{{label: startLabel, refs: opts.Refs}}
+	queue := []node{{label: startLabel, refs: opts.Refs, baseDir: baseDir}}
 
 	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
 		var next []node
@@ -156,7 +165,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 					continue
 				}
 
-				resolved := opts.Resolver.ComponentPath(ref.Component, baseDir)
+				resolved := opts.Resolver.ComponentPath(ref.Component, current.baseDir)
 				toLabel := ref.Component
 
 				if resolved != "" {
@@ -187,8 +196,9 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 				}
 
 				next = append(next, node{
-					label: filepath.Base(resolved),
-					refs:  nextRefs,
+					label:   filepath.Base(resolved),
+					refs:    nextRefs,
+					baseDir: filepath.Dir(resolved),
 				})
 			}
 		}

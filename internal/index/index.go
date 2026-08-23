@@ -2,6 +2,7 @@
 package index
 
 import (
+	"net/url"
 	"strings"
 	"sync"
 
@@ -118,7 +119,21 @@ func keepRefs(entries []*parser.ComponentRef, keep func(*parser.ComponentRef) bo
 
 // uriKey returns a lowercase URI for case-insensitive comparison on case-insensitive filesystems.
 func uriKey(u uri.URI) string {
-	return strings.ToLower(string(u))
+	s := string(u)
+
+	// Percent-escapes are decoded so that the two ways this codebase builds a
+	// file URI land on one key. Indexing goes through uri.File, which escapes:
+	// a workspace under "/My Documents" is stored as "file:///My%20Documents/…".
+	// Several lookups build "file://" + path by hand instead, so they ask for
+	// "file:///My Documents/…" and miss every entry — this-scope completions
+	// simply stopped appearing for anyone whose path contained a space, with no
+	// error anywhere. Normalising here fixes both directions at once, which the
+	// alternative — rewriting all 37 URI conversions in one go — does not.
+	if dec, err := url.PathUnescape(s); err == nil {
+		s = dec
+	}
+
+	return strings.ToLower(s)
 }
 
 // FunctionsForFile returns all indexed function definitions for a specific file.
