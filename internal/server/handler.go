@@ -383,6 +383,58 @@ func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine i
 	s.mu.Unlock()
 }
 
+// depsCallLoader supplies deps.Build with the calls a function makes inside a
+// file it has resolved to, so a dependency graph can continue past the first
+// hop. The index cannot answer this — it stores definitions and refs, not call
+// sites — so the file is read and parsed on demand.
+//
+// The returned closure memoises per file, since one traversal asks about
+// several functions in the same component and each parse is the expensive part.
+// It is short-lived: a fresh one per command, discarded when the graph is
+// built, so it never becomes a second cache to invalidate.
+//
+// Parsing here does not touch s.parseResults and so needs no document lock: the
+// ParseResult it makes is private to this call.
+func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []parser.ComponentRef) {
+	parsed := make(map[uri.URI]*parser.ParseResult)
+
+	return func(fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef) {
+		pr, ok := parsed[fileURI]
+		if !ok {
+			data, err := s.FS.ReadFile(strings.TrimPrefix(string(fileURI), "file://"))
+			if err != nil {
+				parsed[fileURI] = nil
+
+				return nil, nil
+			}
+
+			pr = s.parseContent(fileURI, string(data))
+			parsed[fileURI] = pr
+		}
+
+		if pr == nil {
+			return nil, nil
+		}
+
+		for _, sc := range pr.Scopes {
+			for _, f := range pr.Funcs {
+				if !strings.EqualFold(f.Name, funcName) || int(f.Line) != sc.Start {
+					continue
+				}
+
+				// File-level refs plus this function's own locals: a receiver
+				// may be either `variables.svc` or a `var svc = new Foo()`.
+				refs := append([]parser.ComponentRef{}, pr.ComponentRefs...)
+				refs = append(refs, pr.FuncComponentRefs(sc.Start, sc.End)...)
+
+				return pr.FuncCalls(sc.Start, sc.End), refs
+			}
+		}
+
+		return nil, nil
+	}
+}
+
 // applyEdit replaces the text in the given range with newText.
 func applyEdit(content string, r protocol.Range, newText string) string {
 	return parser.ApplyEdit(content, int(r.Start.Line), int(r.Start.Character), int(r.End.Line), int(r.End.Character), newText)
@@ -1023,13 +1075,14 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		}
 
 		result := deps.Build(deps.Options{
-			DocURI:   docURI,
-			FuncName: funcName,
-			Calls:    depsCalls,
-			Refs:     depsRefs,
-			Index:    s.index,
-			Resolver: s.getResolver(),
-			MaxDepth: 10,
+			DocURI:    docURI,
+			FuncName:  funcName,
+			Calls:     depsCalls,
+			Refs:      depsRefs,
+			Index:     s.index,
+			Resolver:  s.getResolver(),
+			LoadCalls: s.depsCallLoader(),
+			MaxDepth:  10,
 		})
 
 		filePath := strings.TrimPrefix(docURI, "file://")

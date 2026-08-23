@@ -130,7 +130,7 @@ Editor document change
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI and `cfmleditor.findRefs` |
-| `internal/deps` | Transitive dependency graph builder for the `deps` CLI and `cfmleditor.exportDeps` |
+| `internal/deps` | Transitive dependency graph builder for the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
 | `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment` |
