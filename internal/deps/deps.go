@@ -30,6 +30,19 @@ type Options struct {
 	Refs     []parser.ComponentRef // file-level refs (fallback when Calls is empty)
 	Index    Index
 	Resolver Resolver
+
+	// LoadCalls returns the calls made inside funcName in the given file, and
+	// the refs that resolve those calls' receivers. It is what lets
+	// buildFromCalls walk past the first hop: the Index stores definitions and
+	// refs, never call sites, so there is nothing there to continue from.
+	//
+	// Refs come back alongside the calls rather than being read from the Index
+	// because a receiver may be a function-local `var x = new Foo()`, which is
+	// not a file-level ComponentRef and so never reaches the index at all.
+	//
+	// Leaving it nil keeps the previous behaviour: one hop, then stop.
+	LoadCalls func(fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef)
+
 	MaxDepth int
 }
 
@@ -126,9 +139,16 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 					toLabel = call.Variable + "." + call.FuncName
 				}
 
+				// The node the edge points at and the node any onward edge
+				// starts from have to be the same string, or the rendered graph
+				// is a set of disconnected pairs instead of a path — the target
+				// carried a " (line N)" suffix that the queued child's label
+				// did not.
+				target := fmt.Sprintf("%s (line %d)", toLabel, call.Line)
+
 				edges = append(edges, graph.Edge{
 					From:   current.label,
-					To:     fmt.Sprintf("%s (line %d)", toLabel, call.Line),
+					To:     target,
 					Dashed: resolved == "",
 				})
 
@@ -146,15 +166,21 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 				// Get calls for the target function from the index
 				targetURI := uri.URI("file://" + resolved)
 
-				targetCalls := getFuncCalls(opts.Index, targetURI, call.FuncName)
-				if len(targetCalls) > 0 {
-					next = append(next, node{
-						label:   toLabel,
-						calls:   targetCalls,
-						refs:    derefRefs(opts.Index.RefsForFile(targetURI)),
-						baseDir: filepath.Dir(resolved),
-					})
+				targetCalls, targetRefs := getFuncCalls(opts, targetURI, call.FuncName)
+				if len(targetCalls) == 0 {
+					continue
 				}
+
+				if len(targetRefs) == 0 && opts.Index != nil {
+					targetRefs = derefRefs(opts.Index.RefsForFile(targetURI))
+				}
+
+				next = append(next, node{
+					label:   target,
+					calls:   targetCalls,
+					refs:    targetRefs,
+					baseDir: filepath.Dir(resolved),
+				})
 			}
 		}
 
@@ -228,9 +254,12 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 					toLabel = filepath.Base(resolved)
 				}
 
+				// Same node-identity requirement as in buildFromCalls.
+				target := fmt.Sprintf("%s (line %d)", toLabel, ref.Line)
+
 				edges = append(edges, graph.Edge{
 					From: current.label,
-					To:   fmt.Sprintf("%s (line %d)", toLabel, ref.Line),
+					To:   target,
 				})
 
 				if resolved == "" {
@@ -245,7 +274,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 				seen[targetURI] = true
 
 				next = append(next, node{
-					label:   filepath.Base(resolved),
+					label:   target,
 					refs:    derefRefs(opts.Index.RefsForFile(uri.URI(targetURI))),
 					baseDir: filepath.Dir(resolved),
 				})
@@ -258,18 +287,18 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 	return edges
 }
 
-// getFuncCalls would return the calls made by funcName inside the target file,
-// letting buildFromCalls walk past the first hop. It returns nothing: the Index
-// stores function definitions and component refs, not call sites, so there is
-// nowhere to read them from. Function-level dependency graphs are therefore one
-// hop deep.
+// getFuncCalls returns the calls funcName makes inside the target file, and the
+// refs that resolve their receivers, by asking the caller. Without a LoadCalls
+// hook it returns nothing and the traversal stops after one hop — which is what
+// it always did, because the Index it used to consult holds definitions and
+// refs but no call sites.
 //
-// File-level tracing does not share the limitation — buildFromRefs walks as far
-// as MaxDepth through Index.RefsForFile.
-//
-// Implementing this means either recording call sites in the index or giving
-// this package a way to read and parse the target file; both are a change to
-// the package's interface rather than something to slip in here.
-func getFuncCalls(_ Index, _ uri.URI, _ string) []parser.CallSite {
-	return nil
+// File-level tracing through buildFromRefs never had the limitation: refs *are*
+// in the index, so it walks as far as MaxDepth on its own.
+func getFuncCalls(opts Options, fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef) {
+	if opts.LoadCalls == nil {
+		return nil, nil
+	}
+
+	return opts.LoadCalls(fileURI, funcName)
 }
