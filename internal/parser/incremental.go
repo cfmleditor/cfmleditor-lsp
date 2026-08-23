@@ -155,13 +155,33 @@ func (pr *ParseResult) reparseShallow() {
 	pr.Scopes = pr.Scopes[:0]
 	pr.extractSignatures()
 	pr.resetGlobalCaches()
-	pr.funcVarsMu.Lock()
-	pr.funcVars = make(map[string][]string)
-	pr.funcVarsMu.Unlock()
+	pr.resetFuncCaches()
 	pr.logDebug("reparseShallow", "uri", string(pr.URI), "funcs", len(pr.Funcs), "dur", time.Since(start))
 }
 
 // resetGlobalCaches resets the lazily-computed global/variables/this var caches.
+// resetFuncCaches drops every lazily-memoised per-function result, so the next
+// FuncVars/FuncRefs/FuncCalls/FuncLinks call re-derives from current content.
+//
+// Only funcVars used to be cleared here. The other three kept serving pre-edit
+// answers after a full replace — which the rapid-change path takes on every
+// large paste — so a hover could report the component a variable held before
+// the edit, and the server would faithfully re-index that stale ref. The keys
+// are line ranges, so they also silently point at the wrong function once lines
+// move; clearing is the only correct response to content that has been
+// wholesale replaced.
+func (pr *ParseResult) resetFuncCaches() {
+	pr.funcVarsMu.Lock()
+	pr.funcVars = make(map[string][]string)
+	pr.funcVarsMu.Unlock()
+
+	pr.funcRefsMu.Lock()
+	pr.funcRefsMap = nil
+	pr.funcLinksMap = nil
+	pr.funcCallsMap = nil
+	pr.funcRefsMu.Unlock()
+}
+
 func (pr *ParseResult) resetGlobalCaches() {
 	pr.mu.Lock()
 	pr.globalDone = false
