@@ -171,13 +171,34 @@ func (s *Server) ensureFuncRefsIndexed(docURI uri.URI, line int) {
 	for _, sc := range pr.Scopes {
 		if line > sc.Start && line < sc.End {
 			refs, _ := pr.FuncRefs(sc.Start, sc.End)
-			if len(refs) > 0 {
-				s.index.SetFuncRefs(docURI, strconv.Itoa(sc.Start)+":"+strconv.Itoa(sc.End), refs)
-			}
+			s.index.SetFuncRefs(docURI, funcScopeKey(sc), refs)
 
 			return
 		}
 	}
+}
+
+// funcScopeKey identifies a function within its file for SetFuncRefs, using the
+// function's name because that survives editing.
+//
+// The line range does not. It was the original key, and it moves the moment a
+// line is inserted anywhere above the function — so the next indexing wrote to a
+// new key instead of replacing the old entry, the refs accumulated exactly as
+// they had before SetFuncRefs existed, and the *stale* one won
+// LookupComponentRefInFile's tie-break. Hover and definition then answered with
+// the component the variable held before the edit.
+//
+// An unnamed scope falls back to the range: worth nothing across edits, but no
+// worse than what every scope used to get, and better than letting every
+// anonymous function share one key and evict each other. Two functions sharing
+// a name in one file — not legal CFML — collide and replace one another, which
+// is still bounded.
+func funcScopeKey(sc parser.FuncScope) string {
+	if sc.Name == "" {
+		return strconv.Itoa(sc.Start) + ":" + strconv.Itoa(sc.End)
+	}
+
+	return strings.ToLower(sc.Name)
 }
 
 // lockDoc serialises every access to one document's *parser.ParseResult, and
