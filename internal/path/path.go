@@ -264,6 +264,36 @@ func ResolveMappings(raw map[string]string, baseDir string) map[string]string {
 	return out
 }
 
+// matchGlobSuffix reports whether the trailing segments of path match the
+// segment pattern suffix — the part of a glob that follows "**".
+//
+// Both callers used to match suffix against filepath.Base(path) alone, which
+// works for the common "**/*.cfc" and silently matches nothing the moment the
+// suffix has more than one segment: "src/**/models/*.cfc" compares
+// "models/*.cfc" against "User.cfc" and never fires, so a workspaceIndexGlobs
+// entry written that way indexes no files and reports no error.
+//
+// filepath.Match is applied per segment, so a "*" still does not cross a
+// separator; it is only the "**" that spans depth.
+func matchGlobSuffix(suffix, path string) bool {
+	want := strings.Split(suffix, string(filepath.Separator))
+	got := strings.Split(path, string(filepath.Separator))
+
+	if len(got) < len(want) {
+		return false
+	}
+
+	got = got[len(got)-len(want):]
+
+	for i, w := range want {
+		if matched, _ := filepath.Match(w, got[i]); !matched {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ExpandGlob expands a glob pattern, supporting ** for recursive matching.
 func ExpandGlob(pattern string) []string {
 	if !strings.Contains(pattern, "**") {
@@ -297,7 +327,7 @@ func ExpandGlob(pattern string) []string {
 			return nil
 		}
 
-		if matched, _ := filepath.Match(suffix, filepath.Base(path)); matched {
+		if matchGlobSuffix(suffix, path) {
 			out = append(out, path)
 		}
 
@@ -377,7 +407,7 @@ func MatchesGlob(filePath string, globs []string) bool {
 			return true
 		}
 
-		if matched, _ := filepath.Match(suffix, filepath.Base(filePath)); matched {
+		if matchGlobSuffix(suffix, filePath) {
 			return true
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"go.lsp.dev/protocol"
 )
@@ -170,8 +171,13 @@ func cacheDir(version string) (string, error) {
 	return p, os.MkdirAll(p, 0o755)
 }
 
+// downloadClient replaces http.DefaultClient, which has no timeout at all: a
+// server that accepts the connection and then stalls leaves the goroutine — and
+// the linting it was setting up — hung for the life of the process.
+var downloadClient = &http.Client{Timeout: 5 * time.Minute}
+
 func latestVersion() string {
-	resp, err := http.Get(releasesAPI) //nolint:gosec // trusted URL
+	resp, err := downloadClient.Get(releasesAPI) //nolint:gosec // trusted URL
 	if err != nil {
 		return fallbackVersion
 	}
@@ -218,7 +224,7 @@ func ensureBinary() (string, error) {
 
 	url := downloadBase + version + "/" + name
 
-	resp, err := http.Get(url) //nolint:gosec // trusted URL
+	resp, err := downloadClient.Get(url) //nolint:gosec // trusted URL
 	if err != nil {
 		return "", fmt.Errorf("downloading cflint: %w", err)
 	}
@@ -229,16 +235,37 @@ func ensureBinary() (string, error) {
 		return "", fmt.Errorf("downloading cflint: HTTP %d", resp.StatusCode)
 	}
 
-	f, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	// Download beside the target and rename into place. Writing binPath directly
+	// meant an interruption — the process killed, the machine losing power, two
+	// sessions downloading at once — left a truncated file at exactly the path
+	// the Stat above accepts as a cached binary, so linting stayed broken for
+	// every later run until someone deleted it by hand. Rename is atomic within
+	// a directory, so binPath either does not exist or is a complete download.
+	tmp, err := os.CreateTemp(dir, name+".part-*")
 	if err != nil {
 		return "", err
 	}
 
-	defer func() { _ = f.Close() }()
+	tmpPath := tmp.Name()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		_ = os.Remove(binPath)
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) // no-op once the rename below has succeeded
+	}()
 
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		return "", err
+	}
+
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return "", err
+	}
+
+	if err := os.Rename(tmpPath, binPath); err != nil {
 		return "", err
 	}
 
