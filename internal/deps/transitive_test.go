@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/uri"
@@ -154,4 +155,71 @@ func TestFunctionDepsTerminateOnACycle(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Build did not terminate on a cycle")
 	}
+}
+
+// Every node an edge points at must be the same node any onward edge starts
+// from, or the rendered graph is a set of disconnected pairs rather than a
+// path. The edge target carried a " (line N)" suffix that the queued child's
+// label did not, so `service.cfc::GetData (line 4)` and `service.cfc::GetData`
+// were two different nodes in the Mermaid output.
+func assertConnected(t *testing.T, root string, edges []graph.Edge) {
+	t.Helper()
+
+	targets := map[string]bool{root: true}
+	for _, e := range edges {
+		targets[e.To] = true
+	}
+
+	for _, e := range edges {
+		if !targets[e.From] {
+			t.Errorf("edge starts at %q, which nothing points at; edges: %+v", e.From, edges)
+		}
+	}
+}
+
+func TestFunctionDepsGraphIsConnected(t *testing.T) {
+	dir := testdataDir()
+	idx := buildIndex(t, dir)
+	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
+	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
+
+	var calls []parser.CallSite
+
+	for _, sc := range pr.Scopes {
+		for _, f := range pr.Funcs {
+			if strings.EqualFold(f.Name, "BuildReport") && int(f.Line) == sc.Start {
+				calls = pr.FuncCalls(sc.Start, sc.End)
+			}
+		}
+	}
+
+	result := Build(Options{
+		DocURI:    "file://" + controllerPath,
+		FuncName:  "BuildReport",
+		Calls:     calls,
+		Index:     idx,
+		Resolver:  &testResolver{dir: dir},
+		LoadCalls: fileLoader(t),
+		MaxDepth:  10,
+	})
+
+	assertConnected(t, "controller.cfc::BuildReport", result.Graph.Edges)
+}
+
+// The refs traversal has always recursed, so it had the same defect for longer.
+func TestFileDepsGraphIsConnected(t *testing.T) {
+	dir := testdataDir()
+	idx := buildIndex(t, dir)
+	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
+	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
+
+	result := Build(Options{
+		DocURI:   "file://" + controllerPath,
+		Refs:     pr.ComponentRefs,
+		Index:    idx,
+		Resolver: &testResolver{dir: dir},
+		MaxDepth: 10,
+	})
+
+	assertConnected(t, "controller.cfc", result.Graph.Edges)
 }

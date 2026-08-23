@@ -139,9 +139,16 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 					toLabel = call.Variable + "." + call.FuncName
 				}
 
+				// The node the edge points at and the node any onward edge
+				// starts from have to be the same string, or the rendered graph
+				// is a set of disconnected pairs instead of a path — the target
+				// carried a " (line N)" suffix that the queued child's label
+				// did not.
+				target := fmt.Sprintf("%s (line %d)", toLabel, call.Line)
+
 				edges = append(edges, graph.Edge{
 					From:   current.label,
-					To:     fmt.Sprintf("%s (line %d)", toLabel, call.Line),
+					To:     target,
 					Dashed: resolved == "",
 				})
 
@@ -169,7 +176,7 @@ func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen
 				}
 
 				next = append(next, node{
-					label:   toLabel,
+					label:   target,
 					calls:   targetCalls,
 					refs:    targetRefs,
 					baseDir: filepath.Dir(resolved),
@@ -247,9 +254,12 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 					toLabel = filepath.Base(resolved)
 				}
 
+				// Same node-identity requirement as in buildFromCalls.
+				target := fmt.Sprintf("%s (line %d)", toLabel, ref.Line)
+
 				edges = append(edges, graph.Edge{
 					From: current.label,
-					To:   fmt.Sprintf("%s (line %d)", toLabel, ref.Line),
+					To:   target,
 				})
 
 				if resolved == "" {
@@ -264,7 +274,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 				seen[targetURI] = true
 
 				next = append(next, node{
-					label:   filepath.Base(resolved),
+					label:   target,
 					refs:    derefRefs(opts.Index.RefsForFile(uri.URI(targetURI))),
 					baseDir: filepath.Dir(resolved),
 				})

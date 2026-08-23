@@ -422,10 +422,13 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 					continue
 				}
 
-				// File-level refs plus this function's own locals: a receiver
-				// may be either `variables.svc` or a `var svc = new Foo()`.
-				refs := append([]parser.ComponentRef{}, pr.ComponentRefs...)
-				refs = append(refs, pr.FuncComponentRefs(sc.Start, sc.End)...)
+				// This function's own locals first, then the file-level refs.
+				// A `var svc = new Foo()` shadows a `variables.svc` of the same
+				// name, and the consumer takes the first match — the other
+				// order made the graph follow the shadowed component.
+				// resolve.CanResolveCall resolves in this order too.
+				refs := append([]parser.ComponentRef{}, pr.FuncComponentRefs(sc.Start, sc.End)...)
+				refs = append(refs, pr.ComponentRefs...)
 
 				return pr.FuncCalls(sc.Start, sc.End), refs
 			}
