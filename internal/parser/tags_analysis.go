@@ -19,6 +19,25 @@ func TextBeforeCursor(content string, line, char int) string {
 	return content[:end]
 }
 
+// PositionAt converts a byte offset in content to a zero-based LSP line and
+// character.
+func PositionAt(content string, offset int) (line, char int) {
+	if offset > len(content) {
+		offset = len(content)
+	}
+
+	lastNL := -1
+
+	for i := range offset {
+		if content[i] == '\n' {
+			line++
+			lastNL = i
+		}
+	}
+
+	return line, offset - lastNL - 1
+}
+
 // FindCurrentAttr returns the attribute name the cursor is currently inside
 // (i.e., after name="...|...) within an open tag.
 func FindCurrentAttr(content string, line, char int) string {

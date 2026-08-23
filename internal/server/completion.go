@@ -318,6 +318,20 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			s.log.Debug("completion: attributes", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName == "cfelse":
+		// Replace from the "<" that opened the tag to the cursor. The "<" is not
+		// necessarily on the cursor's line — `<cfelse` with the cursor on the
+		// following line is an ordinary mid-edit state — so its position has to
+		// be computed rather than derived by subtracting a length from the
+		// cursor's column. Doing the latter underflowed uint32 and produced a
+		// range starting at character 4294967288, after its own end.
+		textBefore := parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))
+		openLine, openChar := params.Position.Line, params.Position.Character
+
+		if open := strings.LastIndex(textBefore, "<"); open >= 0 {
+			l, c := parser.PositionAt(content, open)
+			openLine, openChar = uint32(l), uint32(c)
+		}
+
 		items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
 			Label:  "if",
 			Kind:   protocol.CompletionItemKindKeyword,
@@ -328,7 +342,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			TextEdit: &protocol.TextEdit{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: params.Position.Line, Character: uint32(int(params.Position.Character) - (len(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))) - strings.LastIndex(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<")))},
+					Start: protocol.Position{Line: openLine, Character: openChar},
 					End:   params.Position,
 				},
 				NewText: "<cfelseif $1",

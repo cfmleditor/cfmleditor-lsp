@@ -84,11 +84,11 @@ func cmdScan(args []string) {
 		}
 
 		if tree.RootNode().HasError() {
-			printErrors(f, label, tree.RootNode(), content)
+			totalErrors += printErrors(f, label, tree.RootNode(), content)
 		}
 
 		// Scan injection languages based on injections.scm rules
-		scanInjections(f, tree, content)
+		totalErrors += scanInjections(f, tree, content)
 		tree.Close()
 	}
 
@@ -97,11 +97,15 @@ func cmdScan(args []string) {
 	}
 }
 
-func printErrors(file string, lang string, n *sitter.Node, src []byte) {
-	printErrorNodes(file, lang, n, src)
+// printErrors reports every error node under n and returns how many it found,
+// so the caller can tell "clean" from "reported problems" — the count it kept
+// was never incremented, so `scan` printed each error and then finished with
+// "No parse errors found in N files."
+func printErrors(file string, lang string, n *sitter.Node, src []byte) int {
+	return printErrorNodes(file, lang, n, src)
 }
 
-func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) {
+func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) int {
 	if n.IsError() || n.IsMissing() {
 		pos := n.StartPosition()
 
@@ -118,15 +122,20 @@ func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) {
 			fmt.Printf("%s:%d:%d: [%s] parse error near %q\n", file, pos.Row+1, pos.Column+1, lang, snippet)
 		}
 
-		return
+		return 1
 	}
 
+	count := 0
 	for i := uint(0); i < n.ChildCount(); i++ {
-		printErrorNodes(file, lang, n.Child(i), src)
+		count += printErrorNodes(file, lang, n.Child(i), src)
 	}
+
+	return count
 }
 
-func scanInjections(file string, tree *sitter.Tree, src []byte) {
+func scanInjections(file string, tree *sitter.Tree, src []byte) int {
+	count := 0
+
 	for _, inj := range language.FindInjections(tree, src) {
 		grammar := language.GrammarForLanguage(inj.Language)
 		if grammar < 0 {
@@ -138,15 +147,19 @@ func scanInjections(file string, tree *sitter.Tree, src []byte) {
 		injTree := language.Parse(grammar, content, nil)
 		if injTree != nil {
 			if injTree.RootNode().HasError() {
-				printErrorsOffset(file, inj.Language, injTree.RootNode(), content, inj.Node.StartPosition().Row)
+				count += printErrorsOffset(file, inj.Language, injTree.RootNode(), content, inj.Node.StartPosition().Row)
 			}
 
 			injTree.Close()
 		}
 	}
+
+	return count
 }
 
-func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lineOffset uint) {
+func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lineOffset uint) int {
+	count := 0
+
 	var walk func(*sitter.Node)
 
 	walk = func(n *sitter.Node) {
@@ -166,6 +179,8 @@ func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lin
 				fmt.Printf("%s:%d:%d: [%s] parse error near %q\n", file, pos.Row+lineOffset+1, pos.Column+1, lang, snippet)
 			}
 
+			count++
+
 			return
 		}
 
@@ -173,5 +188,8 @@ func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lin
 			walk(n.Child(i))
 		}
 	}
+
 	walk(n)
+
+	return count
 }
