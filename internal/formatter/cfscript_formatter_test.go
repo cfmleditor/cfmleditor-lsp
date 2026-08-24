@@ -41,6 +41,31 @@ func TestLocalDeclaration(t *testing.T) {
 	allIn(t, got, "local.result = getSomething();")
 }
 
+// variable_declaration's leading keyword is any of "var", "final", or the
+// combined "final var" / "var final" (cfscript/grammar.js), each its own
+// anonymous child. declKeyword's predecessor stopped at the first "var" it
+// saw — which "final" alone never is — and defaulted to "var" regardless,
+// silently rewriting a Lucee/BoxLang immutable declaration as an ordinary
+// local and discarding the immutability it declares.
+func TestFinalDeclaration(t *testing.T) {
+	src := wrap(`final x = 1;`)
+	got := format(t, src)
+	allIn(t, got, "final x = 1;")
+}
+
+func TestFinalVarDeclaration(t *testing.T) {
+	src := wrap(`final var x = 1;
+var final y = 2;`)
+	got := format(t, src)
+	allIn(t, got, "final var x = 1;", "var final y = 2;")
+}
+
+func TestFinalMemberDeclaration(t *testing.T) {
+	src := wrap(`final this.x = "value";`)
+	got := format(t, src)
+	allIn(t, got, `final this.x = "value";`)
+}
+
 // ─── function definitions ────────────────────────────────────────────────────
 
 func TestFunctionNoParams(t *testing.T) {

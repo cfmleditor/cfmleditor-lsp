@@ -1648,22 +1648,40 @@ func (f *Formatter) scriptProperty(n *sitter.Node) {
 	f.scriptWrite("\n")
 }
 
-// scriptVarDecl renders: var/local name [= expr][, name [= expr]];
-func (f *Formatter) scriptVarDecl(n *sitter.Node) {
-	// keyword: var or local
-	keyword := "var"
+// declKeyword returns the leading keyword(s) of a variable_declaration node.
+// The grammar's variable_declaration accepts "var", "final", or the combined
+// "final var" / "var final" (cfscript/grammar.js), each spelled as its own
+// anonymous child rather than one token — a loop that stops at the first
+// "var" it sees, or that only recognises "var", silently drops "final" and
+// renders it as an ordinary local, discarding the immutability it declares.
+// Every keyword actually present is kept, in the order it was written;
+// "var" is the fallback only when the loop finds none, which should not
+// happen for a real variable_declaration node.
+func declKeyword(n *sitter.Node) string {
+	var kws []string
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
-		if !c.IsNamed() {
-			t := c.Kind()
-			if t == "var" || t == "local" {
-				keyword = t
+		if c.IsNamed() {
+			continue
+		}
 
-				break
-			}
+		switch c.Kind() {
+		case "var", "local", "final":
+			kws = append(kws, c.Kind())
 		}
 	}
+
+	if len(kws) == 0 {
+		return "var"
+	}
+
+	return strings.Join(kws, " ")
+}
+
+// scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];
+func (f *Formatter) scriptVarDecl(n *sitter.Node) {
+	keyword := declKeyword(n)
 
 	var decls []string
 
@@ -2026,17 +2044,7 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 		return ""
 	case "variable_declaration":
 		// Inline version: var i = 0
-		keyword := "var"
-
-		for i := uint(0); i < n.ChildCount(); i++ {
-			c := n.Child(i)
-			if !c.IsNamed() {
-				t := c.Kind()
-				if t == "var" || t == "local" {
-					keyword = t
-				}
-			}
-		}
+		keyword := declKeyword(n)
 
 		var decls []string
 

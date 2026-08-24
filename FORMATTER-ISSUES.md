@@ -35,8 +35,8 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,506** |
-| Rejected by the guard | 1,671 | 84 | **25** |
+| Formatted cleanly | 3,863 | 5,450 | **5,508** |
+| Rejected by the guard | 1,671 | 84 | **23** |
 | Refused: grammar cannot parse | 86 | 86 | **83** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
@@ -58,7 +58,7 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable |
 |---|---|---|---|---|---|---|
-| Lucee | 3,775 | 3,680 | 23 | 54 | 17 | 1 |
+| Lucee | 3,775 | 3,682 | 23 | 54 | 15 | 1 |
 | ContentBox | 724 | 719 | 2 | 1 | 2 | 0 |
 | ColdBox | 655 | 644 | 0 | 5 | 5 | 1 |
 | FW/1 | 305 | 304 | 0 | 0 | 1 | 0 |
@@ -385,12 +385,22 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 25 | 13 in Lucee's `test/` directory. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
+| Guard-rejected, long tail | 23 | 11 in Lucee's `test/` directory. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
 
+- `final susi = "foo";` (a Lucee/BoxLang immutable declaration) came back as
+  `var susi = "foo";`, and `var final y = 2;` came back as `var y = 2;` — the
+  keyword silently replaced rather than dropped, in the second case. The
+  grammar's `variable_declaration` accepts `var`, `final`, or the combined
+  `final var`/`var final` as its leading keyword, each its own anonymous
+  child, but the renderer's keyword-detection loop only recognised `var` (and
+  a dead `local`, which the grammar has never produced here), so it walked
+  past `final` every time and fell back to its `"var"` default. Shared between
+  the statement-level renderer and the `for (...)` inline-declaration
+  renderer, which had the identical bug. 2 files.
 - `required timeUnit = "milliseconds"` — a `required` parameter with no type
   annotation — lost the `required`. `required_parameter`/`optional_parameter`,
   the wrapper node types the non-flat parameter path was written to handle,
