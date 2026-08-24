@@ -1326,11 +1326,24 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	return sb.String()
 }
 
-// hasFlatParams returns true if formal_parameters uses the flat structure
-// (parameter_type as a direct child rather than wrapped in required_parameter).
+// hasFlatParams returns true if formal_parameters uses the flat structure:
+// required/type/name/default as direct siblings of the params node rather
+// than wrapped in a single per-parameter node. required_parameter and
+// optional_parameter, which the non-flat path below was written for, do not
+// exist anywhere in the current grammar (cfscript/grammar.js's
+// _formal_parameter never wraps a parameter in one) — every parameter is flat.
+//
+// A typed parameter always has a parameter_type sibling, so that alone used
+// to gate this. An untyped parameter does not, but "required" on one is
+// exactly as flat: `required timeUnit = "milliseconds"` parses as the
+// anonymous token "required" followed by an assignment_pattern sibling, not a
+// single wrapping node — so without this check, a formal_parameters made up
+// entirely of untyped parameters took the non-flat path, which iterates named
+// children only and silently dropped every "required" it found.
 func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
 	for i := uint(0); i < params.ChildCount(); i++ {
-		if params.Child(i).Kind() == "parameter_type" {
+		switch params.Child(i).Kind() {
+		case "parameter_type", "required":
 			return true
 		}
 	}

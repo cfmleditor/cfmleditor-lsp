@@ -55,6 +55,25 @@ func TestFunctionWithParams(t *testing.T) {
 	allIn(t, got, "function add(\n", "a,\n", "b\n", "return a + b;")
 }
 
+// An untyped parameter has no per-parameter wrapper node in the grammar — it
+// is just an anonymous "required" token followed by its assignment_pattern
+// or identifier as a sibling, exactly as a typed parameter's "required" sits
+// beside its parameter_type. hasFlatParams only checked for parameter_type,
+// so a parameter list with no typed member at all (like this one) took a
+// different path that iterated named children only and silently dropped
+// every "required" it found.
+func TestFunctionWithRequiredUntypedParam(t *testing.T) {
+	src := wrap(`function get(required timeUnit = "milliseconds") { return timeUnit; }`)
+	got := format(t, src)
+	allIn(t, got, `required timeUnit = "milliseconds"`)
+}
+
+func TestFunctionWithMixedRequiredParams(t *testing.T) {
+	src := wrap(`function get(required a, b = 1, required string c) { return a; }`)
+	got := format(t, src)
+	allIn(t, got, "required a,", "b = 1,", "required string c")
+}
+
 func TestFunctionWithAccessModifier(t *testing.T) {
 	src := wrap(`public string function getName() { return variables.name; }`)
 	got := format(t, src)
