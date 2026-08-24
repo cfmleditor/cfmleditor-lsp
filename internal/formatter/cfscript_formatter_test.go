@@ -41,6 +41,31 @@ func TestLocalDeclaration(t *testing.T) {
 	allIn(t, got, "local.result = getSomething();")
 }
 
+// variable_declaration's leading keyword is any of "var", "final", or the
+// combined "final var" / "var final" (cfscript/grammar.js), each its own
+// anonymous child. declKeyword's predecessor stopped at the first "var" it
+// saw — which "final" alone never is — and defaulted to "var" regardless,
+// silently rewriting a Lucee/BoxLang immutable declaration as an ordinary
+// local and discarding the immutability it declares.
+func TestFinalDeclaration(t *testing.T) {
+	src := wrap(`final x = 1;`)
+	got := format(t, src)
+	allIn(t, got, "final x = 1;")
+}
+
+func TestFinalVarDeclaration(t *testing.T) {
+	src := wrap(`final var x = 1;
+var final y = 2;`)
+	got := format(t, src)
+	allIn(t, got, "final var x = 1;", "var final y = 2;")
+}
+
+func TestFinalMemberDeclaration(t *testing.T) {
+	src := wrap(`final this.x = "value";`)
+	got := format(t, src)
+	allIn(t, got, `final this.x = "value";`)
+}
+
 // ─── function definitions ────────────────────────────────────────────────────
 
 func TestFunctionNoParams(t *testing.T) {
@@ -53,6 +78,25 @@ func TestFunctionWithParams(t *testing.T) {
 	src := wrap(`function add(a, b) { return a + b; }`)
 	got := format(t, src)
 	allIn(t, got, "function add(\n", "a,\n", "b\n", "return a + b;")
+}
+
+// An untyped parameter has no per-parameter wrapper node in the grammar — it
+// is just an anonymous "required" token followed by its assignment_pattern
+// or identifier as a sibling, exactly as a typed parameter's "required" sits
+// beside its parameter_type. hasFlatParams only checked for parameter_type,
+// so a parameter list with no typed member at all (like this one) took a
+// different path that iterated named children only and silently dropped
+// every "required" it found.
+func TestFunctionWithRequiredUntypedParam(t *testing.T) {
+	src := wrap(`function get(required timeUnit = "milliseconds") { return timeUnit; }`)
+	got := format(t, src)
+	allIn(t, got, `required timeUnit = "milliseconds"`)
+}
+
+func TestFunctionWithMixedRequiredParams(t *testing.T) {
+	src := wrap(`function get(required a, b = 1, required string c) { return a; }`)
+	got := format(t, src)
+	allIn(t, got, "required a,", "b = 1,", "required string c")
 }
 
 func TestFunctionWithAccessModifier(t *testing.T) {

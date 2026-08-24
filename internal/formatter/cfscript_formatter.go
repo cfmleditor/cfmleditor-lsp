@@ -1326,11 +1326,24 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	return sb.String()
 }
 
-// hasFlatParams returns true if formal_parameters uses the flat structure
-// (parameter_type as a direct child rather than wrapped in required_parameter).
+// hasFlatParams returns true if formal_parameters uses the flat structure:
+// required/type/name/default as direct siblings of the params node rather
+// than wrapped in a single per-parameter node. required_parameter and
+// optional_parameter, which the non-flat path below was written for, do not
+// exist anywhere in the current grammar (cfscript/grammar.js's
+// _formal_parameter never wraps a parameter in one) — every parameter is flat.
+//
+// A typed parameter always has a parameter_type sibling, so that alone used
+// to gate this. An untyped parameter does not, but "required" on one is
+// exactly as flat: `required timeUnit = "milliseconds"` parses as the
+// anonymous token "required" followed by an assignment_pattern sibling, not a
+// single wrapping node — so without this check, a formal_parameters made up
+// entirely of untyped parameters took the non-flat path, which iterates named
+// children only and silently dropped every "required" it found.
 func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
 	for i := uint(0); i < params.ChildCount(); i++ {
-		if params.Child(i).Kind() == "parameter_type" {
+		switch params.Child(i).Kind() {
+		case "parameter_type", "required":
 			return true
 		}
 	}
@@ -1635,22 +1648,40 @@ func (f *Formatter) scriptProperty(n *sitter.Node) {
 	f.scriptWrite("\n")
 }
 
-// scriptVarDecl renders: var/local name [= expr][, name [= expr]];
-func (f *Formatter) scriptVarDecl(n *sitter.Node) {
-	// keyword: var or local
-	keyword := "var"
+// declKeyword returns the leading keyword(s) of a variable_declaration node.
+// The grammar's variable_declaration accepts "var", "final", or the combined
+// "final var" / "var final" (cfscript/grammar.js), each spelled as its own
+// anonymous child rather than one token — a loop that stops at the first
+// "var" it sees, or that only recognises "var", silently drops "final" and
+// renders it as an ordinary local, discarding the immutability it declares.
+// Every keyword actually present is kept, in the order it was written;
+// "var" is the fallback only when the loop finds none, which should not
+// happen for a real variable_declaration node.
+func declKeyword(n *sitter.Node) string {
+	var kws []string
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
-		if !c.IsNamed() {
-			t := c.Kind()
-			if t == "var" || t == "local" {
-				keyword = t
+		if c.IsNamed() {
+			continue
+		}
 
-				break
-			}
+		switch c.Kind() {
+		case "var", "local", "final":
+			kws = append(kws, c.Kind())
 		}
 	}
+
+	if len(kws) == 0 {
+		return "var"
+	}
+
+	return strings.Join(kws, " ")
+}
+
+// scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];
+func (f *Formatter) scriptVarDecl(n *sitter.Node) {
+	keyword := declKeyword(n)
 
 	var decls []string
 
@@ -2013,17 +2044,7 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 		return ""
 	case "variable_declaration":
 		// Inline version: var i = 0
-		keyword := "var"
-
-		for i := uint(0); i < n.ChildCount(); i++ {
-			c := n.Child(i)
-			if !c.IsNamed() {
-				t := c.Kind()
-				if t == "var" || t == "local" {
-					keyword = t
-				}
-			}
-		}
+		keyword := declKeyword(n)
 
 		var decls []string
 
