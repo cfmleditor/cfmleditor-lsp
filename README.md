@@ -228,11 +228,40 @@ Without a config file the server runs in standalone mode — a single session wi
 
 ## Local Development
 
-Add cfmleditor-lsp to your path
+### Using a local build in an editor
+
+`make link` builds this working tree and symlinks it onto your `PATH`:
 
 ```bash
-sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /usr/local/bin/cfmleditor-lsp
+make link          # symlink into `go env GOPATH`/bin
+make link-status   # show what the link points at, and what PATH actually resolves
+make unlink        # remove it
 ```
+
+The link points at `target/release/cfmleditor-lsp`, so a later `make build` takes
+effect without re-linking.
+
+This is how the [zed-cfml](https://github.com/cfmleditor/zed-cfml) extension picks
+up a local build. It resolves its server in three steps: a path it has already
+cached, then a `cfmleditor-lsp` found on `PATH`, and only then a download of a
+GitHub release. A symlink on `PATH` wins at the second step, so no release is
+downloaded. Restart the editor after linking or unlinking — the resolved path is
+cached for the life of the session.
+
+Symlinking into the extension's own directory instead would not survive: that
+directory is named after the release version, and the extension removes the
+versions it is not using.
+
+If `go env GOPATH`/bin is not on your `PATH`, point the link somewhere that is:
+
+```bash
+make link LINK_DIR=$HOME/.local/bin
+make unlink LINK_DIR=$HOME/.local/bin   # same LINK_DIR to remove it
+```
+
+`make link` refuses to overwrite a real file at that path — normally a `make
+install` copy — rather than silently replacing it, and warns when the link it
+just made is shadowed by another `cfmleditor-lsp` earlier on `PATH`.
 
 ### Make commands
 
@@ -245,5 +274,8 @@ sudo ln -sf ~/development/github/cfmleditor-lsp/target/release/cfmleditor-lsp /u
 | `make vuln` | Scan dependencies and the stdlib for known vulnerabilities (govulncheck). |
 | `make update-grammar` | Regenerate docs and tree-sitter grammar, clear Go build cache. |
 | `make release <version>` | Full release: validate, build, test, lint, update changelog, commit, tag, push. |
-| `make install` | Build and copy binary to `$GOPATH/bin`. |
+| `make install` | Build and copy binary to `go env GOPATH`/bin. |
+| `make link` | Build, then symlink the binary onto `PATH` for local editor use. Override the directory with `LINK_DIR=<dir>`. |
+| `make unlink` | Remove that symlink. |
+| `make link-status` | Show the link, the build, and what `PATH` resolves `cfmleditor-lsp` to. |
 | `make clean` | Remove build artifacts. |

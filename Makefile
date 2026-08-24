@@ -3,7 +3,17 @@ OUT := target/release/$(BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
-.PHONY: build build-wasm test corpus shrink install clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+# `go env GOPATH`, not $(GOPATH): the latter reads the *environment* variable,
+# which is normally unset because Go computes the default itself — so it
+# expanded to an empty string and `make install` wrote to /bin/cfmleditor-lsp.
+GOBIN_DIR := $(shell go env GOPATH)/bin
+
+# Where `make link` puts the symlink the Zed extension picks up. Override to
+# somewhere else on PATH: make link LINK_DIR=$$HOME/.local/bin
+LINK_DIR ?= $(GOBIN_DIR)
+LINK := $(LINK_DIR)/$(BINARY)
+
+.PHONY: build build-wasm test corpus shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -139,7 +149,75 @@ lint-fix:
 	$(GOLANGCI_RUN) run --fix ./...
 
 install: build
-	cp $(OUT) $(GOPATH)/bin/$(BINARY)
+	@mkdir -p $(GOBIN_DIR)
+	cp $(OUT) $(GOBIN_DIR)/$(BINARY)
+
+# Point the zed-cfml extension at this working tree's build.
+#
+# The extension resolves its server in three steps (src/cfml.rs): a cached path,
+# then worktree.which("cfmleditor-lsp"), and only then a GitHub release download
+# into a cfmleditor-lsp-<version>/ directory. So the hook for local use is the
+# PATH lookup — a symlink named cfmleditor-lsp anywhere on PATH wins and no
+# download happens. Symlinking into the extension's own directory would not
+# survive: that path is named after the release version, and the extension
+# prunes the versions it is not using.
+#
+# Restart Zed after linking or unlinking; the extension caches the path it
+# resolved for the life of the session.
+link: build
+	@mkdir -p $(LINK_DIR)
+	@if [ -e "$(LINK)" ] && [ ! -L "$(LINK)" ]; then \
+		echo "refusing to replace $(LINK): it is a real file, not a symlink." >&2; \
+		echo 'A `make install` copy lives there. Remove it, or: make link LINK_DIR=<dir>' >&2; \
+		exit 1; \
+	fi
+	@ln -sfn "$(CURDIR)/$(OUT)" "$(LINK)"
+	@echo "linked $(LINK) -> $(CURDIR)/$(OUT)"
+	@resolved=$$(command -v $(BINARY) 2>/dev/null); \
+	if [ -z "$$resolved" ]; then \
+		echo "warning: $(LINK_DIR) is not on this shell's PATH; Zed will not find the link either" >&2; \
+	elif [ "$$resolved" != "$(LINK)" ]; then \
+		echo "warning: PATH resolves $(BINARY) to $$resolved, which shadows the link just made" >&2; \
+	fi
+
+unlink:
+	@if [ -L "$(LINK)" ]; then \
+		target=$$(readlink "$(LINK)"); \
+		rm -f "$(LINK)"; \
+		echo "removed $(LINK) (was -> $$target)"; \
+	elif [ -e "$(LINK)" ]; then \
+		echo "leaving $(LINK) alone: it is a real file, not a symlink." >&2; \
+		echo 'It is most likely a `make install` copy; remove it by hand if you meant to.' >&2; \
+		exit 1; \
+	else \
+		echo "nothing to remove at $(LINK)"; \
+	fi
+
+# What the extension's PATH lookup would actually find, which is not always the
+# link you just made: a real binary earlier in PATH shadows it, and a GUI-
+# launched editor may not share this shell's PATH at all.
+link-status:
+	@echo "link:     $(LINK)"
+	@if [ -L "$(LINK)" ]; then \
+		echo "          -> $$(readlink "$(LINK)")"; \
+	elif [ -e "$(LINK)" ]; then \
+		echo "          (a real file, not a symlink)"; \
+	else \
+		echo "          (absent)"; \
+	fi
+	@echo "build:    $(CURDIR)/$(OUT)"
+	@if [ -x "$(CURDIR)/$(OUT)" ]; then \
+		echo "          (built)"; \
+	else \
+		echo "          (not built — run: make build)"; \
+	fi
+	@resolved=$$(command -v $(BINARY) 2>/dev/null); \
+	if [ -n "$$resolved" ]; then \
+		echo "on PATH:  $$resolved"; \
+		[ "$$resolved" = "$(LINK)" ] || echo "          note: this shadows $(LINK)" >&2; \
+	else \
+		echo "on PATH:  not found — the extension would download a release instead"; \
+	fi
 
 cfparse-build:
 	@mkdir -p target/release

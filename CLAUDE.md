@@ -11,7 +11,10 @@ make lint           # golangci-lint run ./... (pinned scanner, built from source
 make lint-fix       # golangci-lint run --fix ./...
 make vuln           # govulncheck ./... (pinned scanner, GOWORK=off)
 make fmt            # gofmt -w . && golangci-lint run --fix ./...
-make install        # build and copy to $GOPATH/bin
+make install        # build and copy to `go env GOPATH`/bin
+make link           # build + symlink onto PATH for local editor use (LINK_DIR=<dir> to override)
+make unlink         # remove that symlink
+make link-status    # show the link, the build, and what PATH resolves cfmleditor-lsp to
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
