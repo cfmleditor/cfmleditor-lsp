@@ -35,8 +35,8 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,499** |
-| Rejected by the guard | 1,671 | 84 | **32** |
+| Formatted cleanly | 3,863 | 5,450 | **5,503** |
+| Rejected by the guard | 1,671 | 84 | **28** |
 | Refused: grammar cannot parse | 86 | 86 | **83** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
@@ -58,9 +58,9 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable |
 |---|---|---|---|---|---|---|
-| Lucee | 3,775 | 3,677 | 23 | 54 | 20 | 1 |
+| Lucee | 3,775 | 3,680 | 23 | 54 | 17 | 1 |
 | ContentBox | 724 | 719 | 2 | 1 | 2 | 0 |
-| ColdBox | 655 | 641 | 0 | 5 | 8 | 1 |
+| ColdBox | 655 | 642 | 0 | 5 | 7 | 1 |
 | FW/1 | 305 | 304 | 0 | 0 | 1 | 0 |
 | TestBox | 145 | 142 | 0 | 1 | 1 | 1 |
 | cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 |
@@ -385,12 +385,19 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 61 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 32 | 20 in Lucee's test suite. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
+| Guard-rejected, long tail | 28 | 13 in Lucee's `test/` directory. No bucket larger than three files left; the remainder are one- and two-file causes, five of them comment-text changes and one a content-length mismatch. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
-Fixed since the audit table above, all three found by re-running the harness:
+Fixed since the audit table above, all found by re-running the harness:
 
+- `a?.b?.c?.d` (Lucee/BoxLang's null-safe member access) came back as `a.b.c.d`
+  — the `?` silently dropped, turning a chain that tolerates a nil receiver into
+  one that throws on it. The grammar wraps `?.` in a named `optional_chain`
+  node, exactly as it wraps `::` in a named `static_chain` node, but
+  `memberOperator` only special-cased the latter; its fallback loop walks only
+  *anonymous* children, so the operator fell through to the default `"."`.
+  4 files.
 - `<?xml version="1.0" encoding="utf-8"?>` came back as
   `<?xmlversion="1.0"encoding="utf-8"?>`. The declaration's parts are children
   (`<?`, `xml`, `tag_attributes`, `?>`) and the generic child walk joined them

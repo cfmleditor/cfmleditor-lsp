@@ -88,6 +88,14 @@ func memberOperator(n *sitter.Node) string {
 		return "::"
 	}
 
+	// Likewise `?.` is a named `optional_chain` node wrapping the anonymous
+	// token, not a bare "?." child — the loop below skips every named child,
+	// so without this check it fell through to the default "." and silently
+	// turned a null-safe chain into one that throws.
+	if oc := n.ChildByFieldName("optional_chain"); oc != nil {
+		return "?."
+	}
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		if c.IsNamed() {
