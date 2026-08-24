@@ -193,6 +193,29 @@ func TestMemberExpression(t *testing.T) {
 	allIn(t, got, "obj.method()")
 }
 
+// The grammar wraps "?." in a named optional_chain node rather than an
+// anonymous token, the same way it wraps "::" in a named static_chain node.
+// memberOperator's fallback loop skips every named child, so without an
+// explicit optional_chain check it silently dropped the "?" and turned a
+// null-safe chain into one that throws on a nil receiver.
+func TestOptionalChainExpression(t *testing.T) {
+	src := wrap(`var z = a?.b?.c?.d;`)
+	got := format(t, src)
+	allIn(t, got, "a?.b?.c?.d")
+}
+
+func TestOptionalChainWithCalls(t *testing.T) {
+	src := wrap(`var z = a()?.b?.c()?.d();`)
+	got := format(t, src)
+	allIn(t, got, "a()?.b?.c()?.d()")
+}
+
+func TestStaticChainExpression(t *testing.T) {
+	src := wrap(`var w = Widget::getData();`)
+	got := format(t, src)
+	allIn(t, got, "Widget::getData()")
+}
+
 func TestTernary(t *testing.T) {
 	src := wrap(`var r = x > 0 ? "pos" : "neg";`)
 	got := format(t, src)
