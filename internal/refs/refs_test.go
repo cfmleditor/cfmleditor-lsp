@@ -502,3 +502,73 @@ func TestFind_UnresolvedEntryCarriesReason(t *testing.T) {
 		t.Errorf("expected Summary to contain reason marker, got:\n%s", result.Summary)
 	}
 }
+
+// TestFindCounted_ReportsFileSetSize pins the count the `refs` CLI reports as
+// "filesScanned". It was declared and never assigned there, so every response
+// said 0 even when it carried references.
+//
+// The count is the size of the walked file set, so it must include a CFML file
+// that cannot contain the target (findInFiles skips parsing those) and exclude
+// anything that is not CFML.
+func TestFindCounted_ReportsFileSetSize(t *testing.T) {
+	dir := t.TempDir()
+
+	files := map[string]string{
+		"hit.cfm":       "<cfset svc.GetReport()>",
+		"alsohit.cfc":   "<cfcomponent><cffunction name=\"a\"><cfset x.GetReport()></cffunction></cfcomponent>",
+		"nomention.cfm": "<cfoutput>nothing of interest here</cfoutput>",
+		"notes.txt":     "GetReport is mentioned but this is not CFML",
+		"styles.css":    "body { color: red }",
+	}
+
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, scanned := FindCalls(vfs.OS{}, []string{dir}, "GetReport", nil)
+
+	if scanned != 3 {
+		t.Errorf("expected 3 CFML files counted (including the one with no mention, excluding .txt/.css), got %d", scanned)
+	}
+
+	if len(entries) == 0 {
+		t.Error("expected the search to still return its references")
+	}
+}
+
+// TestFindCounted_CountsAnEmptyResultToo is the case the bug hid behind: a
+// search that finds nothing must still say how much ground it covered, so
+// "nothing found" can be told apart from "nothing searched".
+func TestFindCounted_CountsAnEmptyResultToo(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "a.cfm"), []byte("<cfoutput>x</cfoutput>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, scanned := FindComponentRefs(vfs.OS{}, []string{dir}, "app.models.Nothing", nil)
+
+	if len(entries) != 0 {
+		t.Fatalf("expected no entries, got %d", len(entries))
+	}
+
+	if scanned != 1 {
+		t.Errorf("expected 1 file counted, got %d", scanned)
+	}
+}
+
+// TestFindStillReturnsEntriesOnly guards the wrapper that drops the count, so
+// the existing Find callers keep their single-value signature.
+func TestFindStillReturnsEntriesOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, "a.cfm"), []byte("<cfset svc.GetReport()>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if entries := Find(vfs.OS{}, []string{dir}, Options{FuncName: "GetReport"}); len(entries) != 1 {
+		t.Errorf("expected 1 entry from Find, got %d", len(entries))
+	}
+}
