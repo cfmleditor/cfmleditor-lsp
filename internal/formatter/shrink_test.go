@@ -385,8 +385,16 @@ func TestShrinkSignatureDistinguishesFailures(t *testing.T) {
 
 	// Two unrelated failures must not compare equal either, or the reduction
 	// is free to wander from one to the other.
-	a := shrinkSignature(language.CFScript, []byte(`component { function f() access:remote {} }`))
-	b := shrinkSignature(language.CFScript, []byte(`param url.number;`))
+	//
+	// These have to be malformed CFML, not merely CFML the grammar does not
+	// support yet. The originals were `component { function f() access:remote
+	// {} }` and `param url.number;` — both valid, both unparsed at the time,
+	// and both parsing cleanly as of grammar v0.26.34, which added name:value
+	// annotations and untyped param. Two fixtures chosen for failing then
+	// returned the empty signature of success and compared equal, and the test
+	// failed for a grammar improvement rather than a defect in what it covers.
+	a := shrinkSignature(language.CFScript, []byte(`x = = ;`))
+	b := shrinkSignature(language.CFScript, []byte(`y = 1 + ;`))
 
 	if a == "" || b == "" || a == b {
 		t.Errorf("unrelated failures share a signature: %q vs %q", a, b)

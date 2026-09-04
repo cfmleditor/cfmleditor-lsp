@@ -1504,6 +1504,13 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	// `component {}` and dropped `abstract`/`final` modifiers.
 	var keywords []string
 
+	// v0.26.34 parses `component (extends="A") {}` — the attribute list wrapped
+	// in parens. The parens are anonymous children, so the walk below dropped
+	// them and re-emitted the header unparenthesised. That is a non-whitespace
+	// change, which the whitespaceOnly guard rejects, so the file became
+	// unformattable rather than merely reformatted.
+	parenthesised := false
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -1511,6 +1518,10 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 			body = c
 		case "identifier":
 			// 'component' keyword itself — skip
+		case "(":
+			parenthesised = true
+		case ")":
+			// closing half of the same pair; reproduced with the opening one
 		default:
 			switch {
 			case c.IsNamed():
@@ -1527,7 +1538,11 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	}
 
 	if len(attrs) > 0 {
-		header += " " + strings.Join(attrs, " ")
+		if parenthesised {
+			header += " (" + strings.Join(attrs, " ") + ")"
+		} else {
+			header += " " + strings.Join(attrs, " ")
+		}
 	}
 
 	f.iLine(header)
@@ -2075,7 +2090,7 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 	f.iLine("try")
 
 	if body != nil {
-		f.scriptBlock(body)
+		f.scriptBodyOrStatement(body)
 	}
 
 	// Every catch clause carries the same `handler` field name, so
@@ -2104,10 +2119,33 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 		}
 
 		f.scriptWrite(f.clauseLead(n, prevEnd, finalizer, "finally"))
-		f.scriptBlock(fBody)
+		f.scriptBodyOrStatement(fBody)
 	}
 
 	f.scriptWrite("\n")
+}
+
+// scriptBodyOrStatement renders a clause body that may or may not be braced.
+//
+// v0.26.34 of the grammar parses a brace-less try body — `try doIt(); catch
+// (any e) {}` — so this receives the statement itself rather than a
+// statement_block. Feeding that to scriptBlock wrapped it in braces the source
+// never had and dropped its semicolon, because the `;` is an anonymous child
+// that the named-children walk skips. Both are non-whitespace changes, so with
+// the whitespaceOnly guard on (the default) the LSP simply refused to format
+// any file containing one.
+//
+// A brace-less body is a single statement, so it is emitted verbatim: there is
+// nothing to re-indent, and reproducing the source exactly is what keeps the
+// guard satisfied.
+func (f *Formatter) scriptBodyOrStatement(body *sitter.Node) {
+	switch body.Kind() {
+	case "statement_block", "block":
+		f.scriptBlock(body)
+	default:
+		f.scriptWrite(" ")
+		f.scriptWrite(strings.TrimSpace(f.text(body)))
+	}
 }
 
 // clauseLead emits any comments between the previous clause and this one, and
