@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.7]
+
 - `tree-sitter-cfml` grammar updates (v0.26.33 → v0.26.34), and handle two of the cfscript constructs it now parses. The release adds a batch of them — `name:value` annotations, untyped `param`, `final component`, a brace-less `try` body, parenthesised component attributes, inline `java {}` blocks, subscripted static access, a top-level `static {}` initialiser — and anything newly visible to the CST walk is rendered by the formatter for the first time:
   - A brace-less `try` body, `try doIt(); catch (any e) {}`, was wrapped in braces the source never had *and* lost its trailing semicolon. The body is an `expression_statement` rather than a `statement_block`, and the block renderer walks named children only, so the `;` — an anonymous child — was never emitted. It is now emitted verbatim, since a brace-less body is a single statement with nothing to re-indent.
   - `component (extends="A") {}` came back as `component extends="A" {}`. The parens are anonymous children and the attribute walk collected only named ones, so they were dropped.
