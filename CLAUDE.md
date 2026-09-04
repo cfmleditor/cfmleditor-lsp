@@ -91,7 +91,7 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml` grammar.
 
 **Two runtime modes**, selected at startup by whether `daemon.FindConfig(cwd)` finds a
-`.cfmleditor.json` (current dir or one level up):
+`.cfmleditor.json` (walking from the current directory up to the filesystem root):
 
 - **Daemon mode** — the first LSP client becomes the daemon: it listens on a Unix socket (path
   derived from `workspaceName`) *and* serves that first client over stdio, sharing one
