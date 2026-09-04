@@ -55,19 +55,35 @@ type Options struct {
 
 // Find scans all CFML files under roots and returns matching references.
 func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
-	files := collectFiles(fsys, roots)
+	entries, _ := FindCounted(fsys, roots, opts)
 
-	return findInFiles(fsys, files, opts)
+	return entries
 }
 
-// FindCalls is a convenience wrapper for finding function calls.
-func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []parser.Resolver) []Entry {
-	return Find(fsys, roots, Options{FuncName: funcName, Resolvers: resolvers})
+// FindCounted is [Find] plus the size of the file set it searched.
+//
+// The count is how many CFML files the walk of roots turned up, which is the
+// scope of the search and so what a caller reporting "files scanned" means. It
+// is deliberately not the number of files parsed: findInFiles skips parsing any
+// file whose text cannot contain the target at all, and reporting that smaller
+// number would describe an implementation detail instead of the search.
+func FindCounted(fsys vfs.FS, roots []string, opts Options) ([]Entry, int) {
+	files := collectFiles(fsys, roots)
+
+	return findInFiles(fsys, files, opts), len(files)
+}
+
+// FindCalls is a convenience wrapper for finding function calls. It returns the
+// entries and the number of files searched, as [FindCounted] defines it.
+func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []parser.Resolver) ([]Entry, int) {
+	return FindCounted(fsys, roots, Options{FuncName: funcName, Resolvers: resolvers})
 }
 
 // FindComponentRefs is a convenience wrapper for finding component references.
-func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []parser.Resolver) []Entry {
-	return Find(fsys, roots, Options{Component: component, Resolvers: resolvers})
+// It returns the entries and the number of files searched, as [FindCounted]
+// defines it.
+func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []parser.Resolver) ([]Entry, int) {
+	return FindCounted(fsys, roots, Options{Component: component, Resolvers: resolvers})
 }
 
 func collectFiles(fsys vfs.FS, roots []string) []string {

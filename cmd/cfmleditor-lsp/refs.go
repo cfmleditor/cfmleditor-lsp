@@ -13,9 +13,12 @@ import (
 
 // RefResult holds all references to a target.
 type RefResult struct {
-	Target string       `json:"target"`
-	Files  int          `json:"filesScanned"`
-	Refs   []refs.Entry `json:"refs"`
+	Target string `json:"target"`
+	// Files is how many CFML files the search covered. It was declared and
+	// never assigned, so every response reported 0 - including ones that
+	// returned references, which made the field read as a failed scan.
+	Files int          `json:"filesScanned"`
+	Refs  []refs.Entry `json:"refs"`
 }
 
 func cmdRefs(args []string) {
@@ -57,16 +60,20 @@ func cmdRefs(args []string) {
 
 	isComponentTarget := strings.Contains(target, ".")
 
-	var entries []refs.Entry
+	var (
+		entries []refs.Entry
+		scanned int
+	)
 
 	if isComponentTarget {
-		entries = refs.FindComponentRefs(fsys, dirs, target, resolvers)
+		entries, scanned = refs.FindComponentRefs(fsys, dirs, target, resolvers)
 	} else {
-		entries = refs.FindCalls(fsys, dirs, target, resolvers)
+		entries, scanned = refs.FindCalls(fsys, dirs, target, resolvers)
 	}
 
 	result := RefResult{
 		Target: target,
+		Files:  scanned,
 		Refs:   entries,
 	}
 
