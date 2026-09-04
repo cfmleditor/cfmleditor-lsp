@@ -13,7 +13,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
-	"go.lsp.dev/uri"
 )
 
 // Resolver resolves component dot-paths to files and functions.
@@ -150,7 +149,7 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 
 // EnsureIndexed ensures a CFC file is indexed, loading from disk if needed.
 func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
-	cfcURI := uri.URI("file://" + cfcPath)
+	cfcURI := cfpath.ToURI(cfcPath)
 
 	defs := r.Index.FunctionsForFile(cfcURI)
 	if len(defs) == 0 {
@@ -171,7 +170,7 @@ func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.Funct
 	seen := make(map[string]bool)
 	for cfcPath != "" && !seen[cfcPath] {
 		seen[cfcPath] = true
-		cfcURI := uri.URI("file://" + cfcPath)
+		cfcURI := cfpath.ToURI(cfcPath)
 
 		defs := r.EnsureIndexed(cfcPath)
 		for _, d := range defs {
@@ -555,7 +554,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		if comp == "" {
 			if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
 				for _, appName := range []string{"Application.cfc", "Application.cfm"} {
-					appURI := uri.URI("file://" + filepath.Join(appDir, appName))
+					appURI := cfpath.ToURI(filepath.Join(appDir, appName))
 					for _, ref := range r.Index.RefsForFile(appURI) {
 						if strings.EqualFold(ref.Variable, lookupVar) {
 							comp = ref.Component
@@ -623,7 +622,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 					break
 				}
 
-				parentURI := uri.URI("file://" + cfcPath)
+				parentURI := cfpath.ToURI(cfcPath)
 
 				// Ensure the parent is indexed so RefsForFile returns its component refs.
 				// (EnsureIndexed is a fast no-op if already indexed.)

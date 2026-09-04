@@ -401,7 +401,7 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 	return func(fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef) {
 		pr, ok := parsed[fileURI]
 		if !ok {
-			data, err := s.FS.ReadFile(strings.TrimPrefix(string(fileURI), "file://"))
+			data, err := s.FS.ReadFile(cfpath.FromURI(string(fileURI)))
 			if err != nil {
 				parsed[fileURI] = nil
 
@@ -757,7 +757,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		if len(params.Arguments) > 1 {
 			if docURI, ok := argString(params.Arguments, 1); ok {
-				baseDir = filepath.Dir(strings.TrimPrefix(docURI, "file://"))
+				baseDir = filepath.Dir(cfpath.FromURI(docURI))
 			}
 		}
 
@@ -883,7 +883,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return nil, nil
 		}
 
-		baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
+		baseDir := filepath.Dir(cfpath.FromURI(docURI))
 
 		appDir := s.getResolver().FindApplicationRoot(baseDir)
 		if appDir == "" {
@@ -897,7 +897,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// Find the actual file
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
 			if _, err := s.FS.Stat(filepath.Join(appDir, name)); err == nil {
-				target := "file://" + filepath.Join(appDir, name)
+				target := string(cfpath.ToURI(filepath.Join(appDir, name)))
 				s.call(ctx, "window/showDocument", map[string]any{
 					"uri":       target,
 					"takeFocus": true,
@@ -951,7 +951,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return nil, nil
 		}
 
-		filePath := strings.TrimPrefix(docURI, "file://")
+		filePath := cfpath.FromURI(docURI)
 		dotPath := s.fileToPackage(filePath)
 
 		return dotPath, nil
@@ -1088,7 +1088,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			MaxDepth:  10,
 		})
 
-		filePath := strings.TrimPrefix(docURI, "file://")
+		filePath := cfpath.FromURI(docURI)
 
 		suffix := funcName
 		if suffix == "" {
