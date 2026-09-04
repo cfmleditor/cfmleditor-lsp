@@ -215,9 +215,12 @@ func funcScopeKey(sc parser.FuncScope) string {
 // reports the pair as reparseShallow against computeScopedVars.
 //
 // The lock is per document rather than global so that work on one file never
-// waits on another. Within a connection the LSP requests are already serialised
-// (the handler never calls jsonrpc2.Async), so in practice this contends only
-// between a handler and one of the timers — which is the point.
+// waits on another. LSP requests are nearly always serialised within a
+// connection, since handlers run inline on the read goroutine; the exception is
+// a handler that has made a server->client request, because Server.call
+// releases the read loop via jsonrpc2.Async to avoid deadlocking on the reply.
+// So this contends between a handler and one of the timers, and between a
+// handler and anything that starts while a client round-trip is outstanding.
 //
 // Lock ordering: acquire a doc lock without holding s.mu; s.mu may be taken
 // while holding one. Doc locks are not reentrant, so take one only at the entry
@@ -338,10 +341,37 @@ func (s *Server) notify(ctx context.Context, method string, params any) {
 	}
 }
 
+// call makes a request to the client and waits for its reply.
+//
+// jsonrpc2.Async is what makes that safe. Handlers run inline on the read
+// goroutine, so while one is running the connection reads nothing — and a
+// server->client Call parks that same goroutine waiting for a reply only a
+// read could deliver. The client answers, nobody is listening, and the session
+// is wedged for good: not just this request, every later one too, because the
+// reader never comes back. Async hands the reader role to a successor
+// goroutine first, so the reply can actually arrive.
+//
+// It is deliberately here rather than at the call sites. The deadlock is
+// invisible in review — the handler looks like ordinary sequential code, and
+// the request it sends does reach the client and get applied, so the symptom
+// shows up as the editor going silent some time after an operation that
+// appeared to work.
+//
+// Async is a documented no-op on a context that carries no release token, so
+// this is safe for a non-request ctx, and it is idempotent per request.
+//
+// Note this releases ordering: requests arriving after this one may now run
+// concurrently with the rest of the handler. Shared state is already guarded
+// (s.mu, resolverMu, and the per-document locks), which is what makes that
+// acceptable.
 func (s *Server) call(ctx context.Context, method string, params, result any) {
-	if s.conn != nil {
-		_, _ = s.conn.Call(ctx, method, params, result)
+	if s.conn == nil {
+		return
 	}
+
+	jsonrpc2.Async(ctx)
+
+	_, _ = s.conn.Call(ctx, method, params, result)
 }
 
 func (s *Server) getDocument(docURI uri.URI) (string, bool) {
