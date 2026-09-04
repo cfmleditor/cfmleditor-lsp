@@ -84,10 +84,36 @@ func (g *Graph) DOT() string {
 	return strings.Join(lines, "\n")
 }
 
+// nodeID turns a node label into a Mermaid node identifier.
+//
+// Everything outside [A-Za-z0-9_] is replaced, rather than the handful of
+// characters this used to list. Mermaid reads several of the others as shape
+// delimiters, so leaving them in produced a diagram that would not render at
+// all: every dependency label carries a "(line N)" suffix, and an ID like
+// UserService_cfc_(line_0) ends at the "(", leaving the ["label"] that follows
+// it as a syntax error. The label itself was already escaped by
+// [escapeMermaid]; only the identifier was not.
 func nodeID(name string) string {
-	r := strings.NewReplacer(".", "_", "/", "_", ":", "_", " ", "_", "-", "_")
+	var b strings.Builder
 
-	return r.Replace(name)
+	b.Grow(len(name))
+
+	for _, c := range name {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_':
+			b.WriteRune(c)
+		default:
+			b.WriteByte('_')
+		}
+	}
+
+	// A label made entirely of punctuation would otherwise yield an empty
+	// identifier, which is a syntax error rather than an unnamed node.
+	if b.Len() == 0 {
+		return "node"
+	}
+
+	return b.String()
 }
 
 func escapeMermaid(s string) string {

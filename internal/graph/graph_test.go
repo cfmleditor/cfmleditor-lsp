@@ -137,3 +137,84 @@ func TestNodeID(t *testing.T) {
 		}
 	}
 }
+
+// TestNodeIDIsMermaidSafe pins the identifier sanitiser against the characters
+// Mermaid reads as shape delimiters. Every dependency node label carries a
+// "(line N)" suffix, so leaving parentheses in the identifier made the whole
+// diagram fail to parse.
+func TestNodeIDIsMermaidSafe(t *testing.T) {
+	cases := map[string]string{
+		"UserService.cfc (line 0)":      "UserService_cfc__line_0_",
+		"svc.cfc::getAll":               "svc_cfc__getAll",
+		"a[0].b":                        "a_0__b",
+		"fn{x}":                         "fn_x_",
+		"a<b>c":                         "a_b_c",
+		"quote\"d":                      "quote_d",
+		"semi;colon":                    "semi_colon",
+		"hash#tag":                      "hash_tag",
+		"amp&pipe|":                     "amp_pipe_",
+		"comma,dot.":                    "comma_dot_",
+		"back`tick":                     "back_tick",
+		"paren(only)":                   "paren_only_",
+		"keeps_underscores_and_digits9": "keeps_underscores_and_digits9",
+	}
+
+	for input, want := range cases {
+		if got := nodeID(input); got != want {
+			t.Errorf("nodeID(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	if got := nodeID("(...)"); got == "" {
+		t.Error("an all-punctuation label must not produce an empty identifier")
+	}
+}
+
+// TestMermaidEmitsParseableIDs is the end-to-end shape check: no identifier in
+// the rendered output may contain a character Mermaid treats as syntax. Both
+// identifiers on each edge line are checked, since only the left one was ever
+// visible in a spot check.
+func TestMermaidEmitsParseableIDs(t *testing.T) {
+	g := &Graph{Edges: []Edge{
+		{From: "definition_test.cfm", To: "UserService.cfc (line 0)"},
+		{From: "UserService.cfc (line 0)", To: "User.cfc (line 8)", Dashed: true},
+	}}
+
+	out := g.Mermaid()
+
+	ids := 0
+
+	for _, line := range strings.Split(out, "\n")[1:] {
+		// Every identifier is the run of non-space characters immediately
+		// preceding a `["` label opener.
+		for rest := line; ; {
+			at := strings.Index(rest, `["`)
+			if at < 0 {
+				break
+			}
+
+			id := rest[:at]
+			if sp := strings.LastIndexAny(id, " \t"); sp >= 0 {
+				id = id[sp+1:]
+			}
+
+			ids++
+
+			if strings.ContainsAny(id, "()[]{}<>\"'`#;,&|:. ") {
+				t.Errorf("node identifier %q in %q contains Mermaid syntax", id, line)
+			}
+
+			// Skip past this label so the next iteration sees the right-hand node.
+			closed := strings.Index(rest[at:], `"]`)
+			if closed < 0 {
+				break
+			}
+
+			rest = rest[at+closed+2:]
+		}
+	}
+
+	if ids != 4 {
+		t.Errorf("expected 4 identifiers across 2 edges, checked %d\n%s", ids, out)
+	}
+}

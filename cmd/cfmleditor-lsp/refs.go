@@ -43,6 +43,15 @@ func cmdRefs(args []string) {
 
 	target := args[0]
 	dirs := args[1:]
+
+	// An empty target is what an editor sends when there is no symbol under the
+	// cursor. Searching for it scans nothing and reports {"refs": null}, which
+	// reads as "no references found" rather than "you selected nothing".
+	if strings.TrimSpace(target) == "" {
+		fmt.Fprintf(os.Stderr, "error: no component or function name given (no symbol at the cursor?)\n")
+		os.Exit(1)
+	}
+
 	resolvers := loadResolversFromConfig(dirs)
 	fsys := vfs.OS{}
 
