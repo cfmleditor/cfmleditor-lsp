@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	json "github.com/go-json-experiment/json"
 	"time"
 
@@ -95,50 +94,17 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	// source of unexplained memory growth.
 	defer tree.Close()
 
-	if tree.RootNode().HasError() {
-		errNode := findErrorNode(tree.RootNode())
-		if errNode != nil {
-			pos := errNode.StartPosition()
-
-			snippet := string(src[errNode.StartByte():errNode.EndByte()])
-			if len(snippet) > 50 {
-				snippet = snippet[:50] + "..."
-			}
-
-			return content, fmt.Errorf("parse error at line %d, col %d near %q", pos.Row+1, pos.Column+1, snippet)
-		}
-
-		return content, fmt.Errorf("parse error in document, cannot format")
+	if err := formatter.ParseError(tree, src); err != nil {
+		return content, err
 	}
 
-	fmtOpts := formatter.DefaultOptions()
+	fmtOpts := cfg.FormatterOptions()
 	fmtOpts.UseTabs = !opts.InsertSpaces
 
-	if opts.TabSize > 0 {
+	// A workspace indentWidth is authoritative; the editor's tabSize only fills
+	// in when the workspace has not set one.
+	if cfg.IndentWidth == 0 && opts.TabSize > 0 {
 		fmtOpts.IndentWidth = int(opts.TabSize)
-	}
-
-	fmtOpts.SelfCloseTags = cfg.SelfCloseTags
-	fmtOpts.WhitespaceOnly = cfg.WhitespaceOnly
-	fmtOpts.QueryFormat = cfg.QueryFormat
-	fmtOpts.LowercaseTags = cfg.LowercaseTags
-	fmtOpts.LowercaseAttributes = cfg.LowercaseAttributes
-	fmtOpts.DoubleQuoteAttributes = cfg.DoubleQuoteAttributes
-	fmtOpts.QueryUppercaseKeywords = cfg.QueryUppercaseKeywords
-	fmtOpts.ScopeCase = cfg.ScopeCase
-	fmtOpts.CommaPosition = cfg.CommaPosition
-	fmtOpts.QueryCommaPosition = cfg.QueryCommaPosition
-
-	if cfg.LineWidth > 0 {
-		fmtOpts.LineWidth = cfg.LineWidth
-	}
-
-	if cfg.AttrBreakThreshold > 0 {
-		fmtOpts.AttrBreakThreshold = cfg.AttrBreakThreshold
-	}
-
-	if cfg.IndentWidth > 0 {
-		fmtOpts.IndentWidth = cfg.IndentWidth
 	}
 
 	fmtOpts.ParseScript = func(s []byte) *sitter.Tree {
@@ -159,18 +125,4 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 	result := string(out)
 
 	return result, nil
-}
-
-func findErrorNode(n *sitter.Node) *sitter.Node {
-	if n.IsError() || n.IsMissing() {
-		return n
-	}
-
-	for i := uint(0); i < n.ChildCount(); i++ {
-		if found := findErrorNode(n.Child(i)); found != nil {
-			return found
-		}
-	}
-
-	return nil
 }

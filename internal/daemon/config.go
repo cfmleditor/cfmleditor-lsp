@@ -369,3 +369,26 @@ func (c *Config) IndexGlobs() []string {
 func expandGlob(pattern string) []string {
 	return cfpath.ExpandGlob(pattern)
 }
+
+// ResolvedFormatting collects every formatting accessor into one resolved
+// struct, so the daemon startup path and the `format` subcommand read the same
+// settings without each restating the field list.
+func (c *Config) ResolvedFormatting() config.ResolvedFormatting {
+	return config.ResolvedFormatting{
+		Enabled:                c.FormattingEnabled(),
+		Debug:                  c.FormattingDebug(),
+		SelfCloseTags:          c.FormattingSelfCloseTags(),
+		WhitespaceOnly:         c.FormattingWhitespaceOnly(),
+		QueryFormat:            c.FormattingQueryFormat(),
+		LowercaseTags:          c.FormattingLowercaseTags(),
+		LowercaseAttributes:    c.FormattingLowercaseAttributes(),
+		DoubleQuoteAttributes:  c.FormattingDoubleQuoteAttributes(),
+		QueryUppercaseKeywords: c.FormattingQueryUppercaseKeywords(),
+		ScopeCase:              c.FormattingScopeCase(),
+		CommaPosition:          c.FormattingCommaPosition(),
+		QueryCommaPosition:     c.FormattingQueryCommaPosition(),
+		LineWidth:              c.FormattingLineWidth(),
+		AttrBreakThreshold:     c.FormattingAttrBreakThreshold(),
+		IndentWidth:            c.FormattingIndentWidth(),
+	}
+}
