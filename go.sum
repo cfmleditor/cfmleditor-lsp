@@ -1,5 +1,5 @@
-github.com/cfmleditor/tree-sitter-cfml v0.26.33 h1:pJS/tOw2OPdalGU8fvu0gw22u6wCTj8K+KW0n2JXSXQ=
-github.com/cfmleditor/tree-sitter-cfml v0.26.33/go.mod h1:FVkHOYoHBpLeoueIUVK9jnOy5nrI0rQpGNzn2PLisTg=
+github.com/cfmleditor/tree-sitter-cfml v0.26.34 h1:qmefgaPYfjuNeU8x0mfWdXyJg8Jjm3/UkuoIIzq1H/U=
+github.com/cfmleditor/tree-sitter-cfml v0.26.34/go.mod h1:FVkHOYoHBpLeoueIUVK9jnOy5nrI0rQpGNzn2PLisTg=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 h1:KZaTBSyshWX3MP5jukJcNSuXDQTO+rNpt0J564dX/eg=
