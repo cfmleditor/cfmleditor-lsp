@@ -77,7 +77,7 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 | *(none)* | Run the LSP server over stdio (JSON-RPC 2.0, Content-Length framing) |
 | `parse` | `parse <file-or-dir> [...]` — parse and report per-file timing/counts |
 | `scan` | `scan <file-or-dir> [...]` — report parse errors |
-| `format` | `format [-w] <file> [...]` — format to stdout, or in place with `-w` |
+| `format` | `format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]` — format to stdout, or in place with `-w`. Reads `formatting` from each file's governing `.cfmleditor.json`, or from `--root`'s |
 | `unresolved` | `unresolved [--json] [--verbose] [--global-defs] <dir> [...]` — batch scan for unresolvable component/method calls |
 | `refs` | `refs [--mermaid] <component-or-function> <dir> [...]` — find references |
 | `deps` | `deps [--mermaid] <dir-or-file> [...]` — transitive dependency graph, built through `deps.Build` so the CLI and `cfmleditor.exportDeps` answer alike |
@@ -91,7 +91,7 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml` grammar.
 
 **Two runtime modes**, selected at startup by whether `daemon.FindConfig(cwd)` finds a
-`.cfmleditor.json` (current dir or one level up):
+`.cfmleditor.json` (walking from the current directory up to the filesystem root):
 
 - **Daemon mode** — the first LSP client becomes the daemon: it listens on a Unix socket (path
   derived from `workspaceName`) *and* serves that first client over stdio, sharing one
@@ -163,6 +163,32 @@ Walks the tree-sitter CST. All rules (tag/attribute case, indentation, quotes, c
 SQL keyword casing, line width, attribute break threshold) come from `formatting` config. The
 `whitespaceOnly` guard rejects any result that changes non-whitespace characters. `queryFormat`
 is off by default — `<cfquery>` bodies are emitted verbatim unless opted in.
+
+**Two entry points format a whole file and they must not drift**: the LSP's
+`textDocument/formatting` handler (`internal/server/formatting.go`) and the `format` subcommand
+(`cmd/cfmleditor-lsp/main.go`). Both go through the same two shared pieces, and new behaviour
+belongs in them rather than at either call site:
+
+- `config.ResolvedFormatting.FormatterOptions()` (`internal/config/formatting.go`) maps config
+  onto `formatter.Options`, starting from `formatter.DefaultOptions()`. Zero-valued int fields
+  mean "unset", so a partial `formatting` block keeps defaults for the rest. It deliberately
+  leaves the three parse hooks nil, since those need `internal/language`; each caller installs
+  them. When the CLI built its own option struct instead, `format -w` ignored every `formatting`
+  key and emitted different bytes than the editor did for the same file.
+- `formatter.ParseError(tree, src)` (`internal/formatter/parse_error.go`) refuses a file the
+  grammar could not parse, so a CST gap can't be written back as deleted source. The
+  `whitespaceOnly` guard is a second line of defence, not a substitute — it does not catch every
+  shape of loss (see `FORMATTER-ISSUES.md`).
+
+`UseTabs` is the one setting with no config key: the LSP derives it from the editor's
+`insertSpaces`, and the CLI keeps the `formatter.DefaultOptions()` value (tabs). A workspace
+`indentWidth` outranks the editor's `tabSize`.
+
+The `-w` write path (`writeFileInPlace`) writes a sibling temp file, fsyncs, restores the
+replaced file's permission bits, re-checks that the file on disk still matches what was read,
+and renames over the target — following a symlink to its target rather than replacing the link.
+Unchanged output is not written at all, so formatting an already-clean file leaves its mtime
+alone.
 
 ## Key structural notes
 

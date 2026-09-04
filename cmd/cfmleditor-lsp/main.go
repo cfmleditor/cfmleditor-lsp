@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -95,9 +96,11 @@ Scan usage:
   cfmleditor-lsp scan <file-or-dir> [...]
 
 Format usage:
-  cfmleditor-lsp format [-w] [--allow-non-whitespace] <file> [...]
+  cfmleditor-lsp format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]
     -w                      rewrite the file in place
     --allow-non-whitespace  permit changes beyond whitespace (off by default)
+    --root <dir>            read formatting config from this directory's
+                            .cfmleditor.json instead of each file's own
 
 Explain usage:
   cfmleditor-lsp explain <file> <line> [call-substring]
@@ -135,23 +138,7 @@ func runServer() {
 
 		sharedIndex := index.New()
 		ct := daemon.NewConnTracker()
-		fmtCfg := config.ResolvedFormatting{
-			Enabled:                cfg.FormattingEnabled(),
-			Debug:                  cfg.FormattingDebug(),
-			SelfCloseTags:          cfg.FormattingSelfCloseTags(),
-			WhitespaceOnly:         cfg.FormattingWhitespaceOnly(),
-			QueryFormat:            cfg.FormattingQueryFormat(),
-			LowercaseTags:          cfg.FormattingLowercaseTags(),
-			LowercaseAttributes:    cfg.FormattingLowercaseAttributes(),
-			DoubleQuoteAttributes:  cfg.FormattingDoubleQuoteAttributes(),
-			QueryUppercaseKeywords: cfg.FormattingQueryUppercaseKeywords(),
-			ScopeCase:              cfg.FormattingScopeCase(),
-			CommaPosition:          cfg.FormattingCommaPosition(),
-			QueryCommaPosition:     cfg.FormattingQueryCommaPosition(),
-			LineWidth:              cfg.FormattingLineWidth(),
-			AttrBreakThreshold:     cfg.FormattingAttrBreakThreshold(),
-			IndentWidth:            cfg.FormattingIndentWidth(),
-		}
+		fmtCfg := cfg.ResolvedFormatting()
 
 		propResolvers := make([]config.PropResolver, 0, len(cfg.PropertyResolvers()))
 		for _, p := range cfg.PropertyResolvers() {
@@ -295,46 +282,43 @@ func cmdParse(args []string) {
 }
 
 func cmdFormat(args []string) {
-	write := false
-	allowNonWhitespace := false
+	var (
+		write              bool
+		allowNonWhitespace bool
+		configRoot         string
+		files              []string
+	)
 
-	var files []string
-
-	for _, arg := range args {
-		switch arg {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
 		case "-w":
 			write = true
 		case "--allow-non-whitespace":
 			allowNonWhitespace = true
+		case "--root":
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "error: --root needs a directory\n")
+				os.Exit(1)
+			}
+
+			configRoot = args[i+1]
+			i++
 		default:
-			files = append(files, arg)
+			files = append(files, args[i])
 		}
 	}
 
 	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] [--allow-non-whitespace] <file> [...]\n")
+		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]\n")
 		os.Exit(1)
 	}
 
-	opts := formatter.DefaultOptions()
-	// Match the LSP's default (config.Resolve sets whitespaceOnly true), so a
-	// formatter bug that changes non-whitespace content is reported rather
-	// than written over the user's source. --allow-non-whitespace opts out.
-	opts.WhitespaceOnly = !allowNonWhitespace
-	opts.ParseScript = func(src []byte) *sitter.Tree {
-		return language.Parse(language.CFScript, src, nil)
-	}
-	opts.ParseQuery = func(src []byte) *sitter.Tree {
-		return language.Parse(language.CFQuery, src, nil)
-	}
-	opts.ParseCFML = func(src []byte) *sitter.Tree {
-		return language.Parse(language.CFML, src, nil)
-	}
+	optionsFor := formatOptionsFor(configRoot, allowNonWhitespace)
 
 	failed := false
 
 	for _, f := range files {
-		if err := formatOneFile(f, opts, write); err != nil {
+		if err := formatOneFile(f, optionsFor(f), write); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", f, err)
 
 			failed = true
@@ -343,6 +327,62 @@ func cmdFormat(args []string) {
 
 	if failed {
 		os.Exit(1)
+	}
+}
+
+// formatOptionsFor returns a lookup that maps a file to the formatter options
+// its governing .cfmleditor.json asks for, memoised per config directory.
+//
+// The subcommand used to format from formatter.DefaultOptions() alone, so it
+// ignored every key under "formatting" and produced different bytes than the
+// editor did for the same file. Config is discovered from each file's own
+// directory upwards, matching how the LSP picks a config, unless --root names
+// one explicitly (same semantics as `explain --root`).
+func formatOptionsFor(configRoot string, allowNonWhitespace bool) func(path string) formatter.Options {
+	cache := make(map[string]formatter.Options)
+
+	return func(path string) formatter.Options {
+		dir := configRoot
+
+		if dir == "" {
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				abs = path
+			}
+
+			dir = filepath.Dir(abs)
+		}
+
+		if opts, ok := cache[dir]; ok {
+			return opts
+		}
+
+		fmtCfg := config.DefaultResolvedFormatting()
+		if cfg, err := daemon.FindConfig(dir); err == nil && cfg != nil {
+			fmtCfg = cfg.ResolvedFormatting()
+		}
+
+		opts := fmtCfg.FormatterOptions()
+
+		// The flag can only loosen the guard, never tighten it away: a config
+		// that turns whitespaceOnly off has already accepted the risk.
+		if allowNonWhitespace {
+			opts.WhitespaceOnly = false
+		}
+
+		opts.ParseScript = func(src []byte) *sitter.Tree {
+			return language.Parse(language.CFScript, src, nil)
+		}
+		opts.ParseQuery = func(src []byte) *sitter.Tree {
+			return language.Parse(language.CFQuery, src, nil)
+		}
+		opts.ParseCFML = func(src []byte) *sitter.Tree {
+			return language.Parse(language.CFML, src, nil)
+		}
+
+		cache[dir] = opts
+
+		return opts
 	}
 }
 
@@ -356,9 +396,17 @@ func formatOneFile(path string, opts formatter.Options, write bool) error {
 	}
 
 	tree := language.Parse(language.CFML, content, nil)
-	out, err := formatter.Format(content, tree, opts)
-	tree.Close()
+	defer tree.Close()
 
+	// Refuse a file the grammar could not parse, exactly as the LSP handler
+	// does. Formatting an incomplete CST is how a grammar gap turns into
+	// deleted source, and the whitespaceOnly guard does not catch every shape
+	// of that (see FORMATTER-ISSUES.md).
+	if err := formatter.ParseError(tree, content); err != nil {
+		return err
+	}
+
+	out, err := formatter.Format(content, tree, opts)
 	if err != nil {
 		return err
 	}
@@ -369,11 +417,89 @@ func formatOneFile(path string, opts formatter.Options, write bool) error {
 		return nil
 	}
 
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	// Rewriting a file the formatter left alone costs nothing but a bumped
+	// mtime, which is enough to wake every file watcher and rebuild watching
+	// the tree.
+	if bytes.Equal(content, out) {
+		return nil
+	}
+
+	if err := writeFileInPlace(path, content, out); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(os.Stderr, "formatted %s\n", path)
 
 	return nil
+}
+
+// writeFileInPlace replaces path's contents with out, preserving the file's
+// permission bits and leaving the original intact if the write fails partway.
+//
+// os.WriteFile would do neither: it hardcodes the new mode, so a 0600 or 0755
+// file silently became 0644, and it truncates in place, so an error partway
+// through leaves a half-written source file with no copy of the original
+// anywhere. Writing a sibling temp file and renaming it over the target makes
+// the replacement atomic for any concurrent reader.
+func writeFileInPlace(path string, original, out []byte) error {
+	// A symlinked file should have its target rewritten; renaming onto the link
+	// itself would replace the link with a regular file.
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".fmt-*")
+	if err != nil {
+		return err
+	}
+
+	tmpName := tmp.Name()
+
+	// Harmless once the rename succeeded, and the only cleanup on every path
+	// that does not.
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if err := writeAndSync(tmp, out); err != nil {
+		return err
+	}
+
+	// CreateTemp always makes the file 0600, so the mode has to be restored
+	// from the file being replaced rather than inherited.
+	if err := os.Chmod(tmpName, info.Mode().Perm()); err != nil {
+		return err
+	}
+
+	// Re-read rather than trusting the content from before Format ran: a write
+	// landing on top of an edit made in the meantime would discard it silently.
+	if current, err := os.ReadFile(target); err == nil && !bytes.Equal(current, original) {
+		return fmt.Errorf("file changed on disk while formatting, not overwriting")
+	}
+
+	return os.Rename(tmpName, target)
+}
+
+// writeAndSync writes out to f and flushes it to disk before closing.
+//
+// Without the fsync, a crash shortly after the rename can leave the target
+// visible but empty, since the rename is durable before the data is.
+func writeAndSync(f *os.File, out []byte) error {
+	if _, err := f.Write(out); err != nil {
+		_ = f.Close()
+
+		return err
+	}
+
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+
+		return err
+	}
+
+	return f.Close()
 }
