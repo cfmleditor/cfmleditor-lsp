@@ -405,7 +405,7 @@ func (s *Server) isWorkspaceFolder(root string) bool {
 
 // isIncludedPath checks whether a file URI should be indexed based on config.
 func (s *Server) isIncludedPath(rawURI string) bool {
-	filePath := strings.TrimPrefix(rawURI, "file://")
+	filePath := cfpath.FromURI(rawURI)
 	// If index globs are defined, match against them
 	if len(s.IndexGlobs) > 0 {
 		return cfpath.MatchesGlob(filePath, s.IndexGlobs)
@@ -489,7 +489,7 @@ func (s *Server) cfPropertyResolvers() []parser.PropertyResolver {
 func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResult {
 	s.ensureBeansLoaded()
 
-	baseDir := filepath.Dir(strings.TrimPrefix(string(fileURI), "file://"))
+	baseDir := filepath.Dir(cfpath.FromURI(string(fileURI)))
 	resolver := s.getResolver()
 
 	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{

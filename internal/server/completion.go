@@ -14,6 +14,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -1036,7 +1037,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	}
 
 	// Get function defs from the index (already cached), fall back to parsing
-	cfcURI := uri.URI("file://" + cfcPath)
+	cfcURI := cfpath.ToURI(cfcPath)
 	defs := s.getResolver().EnsureIndexed(cfcPath)
 
 	thisVars := s.index.ThisVarsForFile(cfcURI)

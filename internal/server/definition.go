@@ -8,6 +8,7 @@ import (
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -216,7 +217,7 @@ func (s *Server) resolveComponentFileDef(component string, docURI uri.URI) *prot
 	}
 
 	return &protocol.Location{
-		URI:   uri.URI("file://" + cfcPath),
+		URI:   cfpath.ToURI(cfcPath),
 		Range: protocol.Range{Start: protocol.Position{Line: 0}, End: protocol.Position{Line: 0}},
 	}
 }
@@ -232,7 +233,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	candidate := filepath.Join(baseDir, filePath)
 	if _, err := s.FS.Stat(candidate); err == nil {
 		return &protocol.Location{
-			URI:   uri.URI("file://" + candidate),
+			URI:   cfpath.ToURI(candidate),
 			Range: protocol.Range{},
 		}
 	}
@@ -242,7 +243,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		candidate = filepath.Join(appDir, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
-				URI:   uri.URI("file://" + candidate),
+				URI:   cfpath.ToURI(candidate),
 				Range: protocol.Range{},
 			}
 		}
@@ -258,7 +259,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 					candidate = filepath.Join(dir, rest)
 					if _, err := s.FS.Stat(candidate); err == nil {
 						return &protocol.Location{
-							URI:   uri.URI("file://" + candidate),
+							URI:   cfpath.ToURI(candidate),
 							Range: protocol.Range{},
 						}
 					}
@@ -272,7 +273,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		candidate = filepath.Join(root, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{
-				URI:   uri.URI("file://" + candidate),
+				URI:   cfpath.ToURI(candidate),
 				Range: protocol.Range{},
 			}
 		}

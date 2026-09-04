@@ -4,11 +4,10 @@ import (
 	"context"
 	json "github.com/go-json-experiment/json"
 	"path/filepath"
-	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, error) {
@@ -86,11 +85,11 @@ func (s *Server) handleDocumentLinkResolve(_ context.Context, rawParams []byte) 
 		return link, nil
 	}
 
-	baseDir := filepath.Dir(strings.TrimPrefix(docURI, "file://"))
+	baseDir := filepath.Dir(cfpath.FromURI(docURI))
 
 	target := s.resolveLink(filePath, baseDir)
 	if target != "" {
-		targetURI := uri.URI("file://" + target)
+		targetURI := cfpath.ToURI(target)
 		link.Target = &targetURI
 	}
 
