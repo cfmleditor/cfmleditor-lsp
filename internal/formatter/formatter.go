@@ -77,7 +77,19 @@ type Options struct {
 	WhitespaceOnly bool
 }
 
+// indent renders the indentation for a nesting level. A negative level is
+// column zero rather than a panic: roughly thirty sites decrement f.level, each
+// paired with an increment somewhere else, and a document that closes a
+// construct it never opened unbalances that pairing. strings.Repeat panics on a
+// negative count, so `</cfcomponent>` on its own — an ordinary mid-edit state,
+// and a real file in the corpus — took the formatter down rather than emitting
+// the tag. Clamping keeps this function total for every caller; the individual
+// level counters are still kept balanced at their own sites.
 func (o Options) indent(level int) string {
+	if level <= 0 {
+		return ""
+	}
+
 	if o.UseTabs {
 		return strings.Repeat("\t", level)
 	}
@@ -1701,8 +1713,17 @@ func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
 }
 
 // formatCFComponentClose handles cf_component_close_tag (a sibling node in the tree).
+//
+// The open and close tags are siblings rather than parent and child, so the
+// level is incremented by one and decremented by the other. A close tag with no
+// open tag before it is accepted by the grammar without an ERROR node, and
+// decrementing for it would leave the level negative for everything that
+// follows, so the decrement is skipped when there is nothing to close.
 func (f *Formatter) formatCFComponentClose(_ *sitter.Node) {
-	f.level--
+	if f.level > 0 {
+		f.level--
+	}
+
 	f.write("\n")
 	f.nl()
 	f.writeIndent()

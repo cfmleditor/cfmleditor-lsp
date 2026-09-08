@@ -889,7 +889,17 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		sep = " "
 	}
 
-	inline := "(" + strings.Join(parts, sep) + ")"
+	// Space-separated tag-style attributes have no comma to preserve.
+	trailing := useCommas && hasTrailingComma(args)
+
+	inlineJoined := strings.Join(parts, sep)
+	// Only when the final entry is the final argument: a comma written after a
+	// trailing comment lands inside it, or turns it into an empty argument.
+	if last := lastArgument(isComment); trailing && last >= 0 && last == len(parts)-1 {
+		inlineJoined += ","
+	}
+
+	inline := "(" + inlineJoined + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
 	// A line comment forces the break unconditionally: joined inline it runs to
 	// end of line and comments out every argument after it.
@@ -953,6 +963,10 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 					sb.WriteString(indent)
 					sb.WriteString(p)
 				}
+
+				if trailing && !isComment[i] && i == lastArgument(isComment) {
+					sb.WriteString(",")
+				}
 			} else {
 				sb.WriteString(indent)
 				sb.WriteString(p)
@@ -968,7 +982,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 						}
 					}
 
-					if hasMore {
+					if hasMore || trailing {
 						sb.WriteString(",")
 					}
 				}
@@ -984,6 +998,19 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	}
 
 	return inline
+}
+
+// lastArgument returns the index of the final non-comment entry, or -1 when
+// every entry is a comment. A trailing comma belongs after that entry, not
+// after a comment that happens to follow it.
+func lastArgument(isComment []bool) int {
+	for i := len(isComment) - 1; i >= 0; i-- {
+		if !isComment[i] {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // commentsBetween returns the text of any comment child of n lying strictly
@@ -1058,6 +1085,42 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 	return items, hasLineComment
 }
 
+// hasTrailingComma reports whether n's last separator is a comma with no
+// element after it — `[1, 2, ]`, `{ a: 1, }`, `f(1, 2, )`, `function f(a, )`.
+//
+// Lucee, Adobe CF and BoxLang all accept the form, and it is common in
+// hand-maintained lists because adding an entry then touches one line rather
+// than two. Every renderer below builds its output by collecting elements and
+// re-joining them with ", ", which reconstructs the separators from scratch and
+// so silently dropped the final comma. That is a non-whitespace change, so the
+// guard rejected the file and format-on-save did nothing to it at all.
+//
+// The comma is an anonymous child, and comments may follow it
+// (`[1, 2, /* why */]`), so the scan runs backwards over the closing bracket and
+// any trailing comments and reports on the first separator it reaches.
+func hasTrailingComma(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	for i := int(n.ChildCount()) - 1; i >= 0; i-- {
+		switch kind := n.Child(uint(i)).Kind(); kind {
+		case "]", "}", ")":
+			continue
+		case ",":
+			return true
+		default:
+			if isCommentKind(kind) {
+				continue
+			}
+
+			return false
+		}
+	}
+
+	return false
+}
+
 // joinCollectionInline joins items for a single-line literal. Only safe when no
 // item is a line comment, which would swallow the rest of the line.
 //
@@ -1066,7 +1129,7 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 // comment into a list entry — `[1, 2, <!--- why --->, 3]`. The comma owed to the
 // element before the comment still gets written, so the elements either side
 // stay separated.
-func joinCollectionInline(items []collectionItem) string {
+func joinCollectionInline(items []collectionItem, trailing bool) string {
 	lastElement := -1
 
 	for i, it := range items {
@@ -1084,7 +1147,7 @@ func joinCollectionInline(items []collectionItem) string {
 
 		b.WriteString(it.text)
 
-		if !it.isComment && i < lastElement {
+		if !it.isComment && (i < lastElement || (trailing && i == lastElement)) {
 			b.WriteString(",")
 		}
 	}
@@ -1094,7 +1157,7 @@ func joinCollectionInline(items []collectionItem) string {
 
 // joinCollectionLines lays items out one per line, giving a trailing comma to
 // every element that still has an element after it, and never to a comment.
-func joinCollectionLines(items []collectionItem, indent string) string {
+func joinCollectionLines(items []collectionItem, indent string, trailing bool) string {
 	lastElement := -1
 
 	for i, it := range items {
@@ -1113,7 +1176,7 @@ func joinCollectionLines(items []collectionItem, indent string) string {
 
 		b.WriteString(it.text)
 
-		if !it.isComment && i < lastElement {
+		if !it.isComment && (i < lastElement || (trailing && i == lastElement)) {
 			b.WriteString(",")
 		}
 	}
@@ -1127,9 +1190,10 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 	}
 
 	items, hasLineComment := f.collectionItems(n)
+	trailing := hasTrailingComma(n)
 
 	if !hasLineComment {
-		inline := "[" + joinCollectionInline(items) + "]"
+		inline := "[" + joinCollectionInline(items, trailing) + "]"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
@@ -1137,7 +1201,7 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "[\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "]"
+	return "[\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "]"
 }
 
 func (f *Formatter) exprObject(n *sitter.Node) string {
@@ -1146,9 +1210,10 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 	}
 
 	items, hasLineComment := f.collectionItems(n)
+	trailing := hasTrailingComma(n)
 
 	if !hasLineComment {
-		inline := "{ " + joinCollectionInline(items) + " }"
+		inline := "{ " + joinCollectionInline(items, trailing) + " }"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
@@ -1156,7 +1221,7 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "{\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "}"
+	return "{\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "}"
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {
@@ -1230,11 +1295,23 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	}
 
 	var parts []string
+
+	var isComment []bool
+
 	for i := uint(0); i < params.NamedChildCount(); i++ {
-		parts = append(parts, f.exprParam(params.NamedChild(i)))
+		c := params.NamedChild(i)
+		parts = append(parts, f.exprParam(c))
+		isComment = append(isComment, isCommentKind(c.Kind()))
 	}
 
-	return "(" + strings.Join(parts, ", ") + ")"
+	joined := strings.Join(parts, ", ")
+	// The comma belongs after the last parameter, never after a trailing
+	// comment — writing it there puts the separator inside the comment.
+	if last := lastArgument(isComment); last >= 0 && last == len(parts)-1 && hasTrailingComma(params) {
+		joined += ","
+	}
+
+	return "(" + joined + ")"
 }
 
 // exprFuncDefParams renders function definition parameters, each on its own line.
@@ -1245,45 +1322,14 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 
 	var parts []string
 
+	var isComment []bool
+
 	if f.hasFlatParams(params) {
-		// Parse flat params into individual param strings.
-		var current []string
-
-		for i := uint(0); i < params.ChildCount(); i++ {
-			c := params.Child(i)
-			switch c.Kind() {
-			case "(", ")":
-				continue
-			case ",":
-				if len(current) > 0 {
-					parts = append(parts, strings.Join(current, " "))
-					current = nil
-				}
-			case "required":
-				current = append(current, "required")
-			case "parameter_type":
-				current = append(current, f.text(c.Child(0)))
-			case "array_return_suffix":
-				current = appendTypeSuffix(current, f.text(c))
-			case "identifier":
-				current = append(current, f.text(c))
-			case "assignment_pattern":
-				left := c.ChildByFieldName("left")
-				right := c.ChildByFieldName("right")
-				current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
-			default:
-				if c.IsNamed() {
-					current = append(current, f.text(c))
-				}
-			}
-		}
-
-		if len(current) > 0 {
-			parts = append(parts, strings.Join(current, " "))
-		}
+		parts, isComment = f.flatParamParts(params)
 	} else {
 		for i := uint(0); i < params.NamedChildCount(); i++ {
 			parts = append(parts, f.exprParam(params.NamedChild(i)))
+			isComment = append(isComment, isCommentKind(params.NamedChild(i).Kind()))
 		}
 	}
 
@@ -1292,6 +1338,8 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	}
 
 	indent := f.opts.indent(f.level + 1)
+	trailing := hasTrailingComma(params)
+	last := lastArgument(isComment)
 
 	var sb strings.Builder
 
@@ -1308,11 +1356,15 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 				sb.WriteString(indent)
 				sb.WriteString(p)
 			}
+
+			if trailing && !isComment[i] && i == last {
+				sb.WriteString(",")
+			}
 		} else {
 			sb.WriteString(indent)
 			sb.WriteString(p)
 
-			if i < len(parts)-1 {
+			if !isComment[i] && (i < last || (trailing && i == last)) {
 				sb.WriteString(",")
 			}
 		}
@@ -1351,23 +1403,50 @@ func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
 	return false
 }
 
-// flatParams renders parameters from the flat formal_parameters structure
-// used by function_declaration: [required] [type] name [= default], ...
-func (f *Formatter) flatParams(params *sitter.Node) string {
-	var result []string
-
+// flatParamParts splits the flat formal_parameters structure used by
+// function_declaration — `[required] [type] name [= default]` as direct
+// siblings, comma-separated — into one rendered string per parameter, and
+// reports for each whether it is nothing but a comment.
+//
+// A comment can sit anywhere a parameter can, including after the list's final
+// comma (`f(a, b, // note\n)`), and it is not an element: a separator placed
+// after one would be inside the comment rather than after the parameter it
+// belongs to. The two callers below rendered this walk identically, so they now
+// share it rather than each carrying a copy to keep in step.
+func (f *Formatter) flatParamParts(params *sitter.Node) (parts []string, isComment []bool) {
 	var current []string
+
+	currentAllComments := true
+
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+
+		parts = append(parts, strings.Join(current, " "))
+		isComment = append(isComment, currentAllComments)
+		current = nil
+		currentAllComments = true
+	}
 
 	for i := uint(0); i < params.ChildCount(); i++ {
 		c := params.Child(i)
-		switch c.Kind() {
-		case "(", ")":
+
+		// The parentheses delimit the list rather than belonging to any entry
+		// in it, so they are skipped before the flag below is touched — marking
+		// the pending entry non-comment for the opening paren made every list
+		// look as though it ended in a parameter.
+		if c.Kind() == "(" || c.Kind() == ")" {
 			continue
+		}
+
+		if c.Kind() != "," && !isCommentKind(c.Kind()) {
+			currentAllComments = false
+		}
+
+		switch c.Kind() {
 		case ",":
-			if len(current) > 0 {
-				result = append(result, strings.Join(current, " "))
-				current = nil
-			}
+			flush()
 		case "required":
 			current = append(current, "required")
 		case "parameter_type":
@@ -1387,11 +1466,33 @@ func (f *Formatter) flatParams(params *sitter.Node) string {
 		}
 	}
 
-	if len(current) > 0 {
-		result = append(result, strings.Join(current, " "))
+	flush()
+
+	return parts, isComment
+}
+
+// flatParams renders parameters from the flat formal_parameters structure
+// used by function_declaration: [required] [type] name [= default], ...
+func (f *Formatter) flatParams(params *sitter.Node) string {
+	result, isComment := f.flatParamParts(params)
+
+	var b strings.Builder
+
+	last := lastArgument(isComment)
+
+	for i, p := range result {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+
+		b.WriteString(p)
+
+		if !isComment[i] && (i < last || (hasTrailingComma(params) && i == last)) {
+			b.WriteString(",")
+		}
 	}
 
-	return strings.Join(result, ", ")
+	return b.String()
 }
 
 // appendTypeSuffix glues an array_return_suffix (`[]`, always exactly that —
