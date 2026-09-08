@@ -220,6 +220,47 @@ func (f *Formatter) flushBlockComments() bool {
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
 func (f *Formatter) scriptNL()            { f.nl() }
 
+// lineComments returns the text of every `//` comment in n's subtree, so a
+// rendering can be checked for the ones it dropped.
+func (f *Formatter) lineComments(n *sitter.Node) []string {
+	if n == nil {
+		return nil
+	}
+
+	var out []string
+
+	if n.Kind() == "comment" {
+		return append(out, strings.TrimSpace(f.text(n)))
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		out = append(out, f.lineComments(n.Child(i))...)
+	}
+
+	return out
+}
+
+// containsLineComment reports whether n's subtree holds a `//` comment. Only the
+// line form counts: a delimited comment can be moved and re-inlined, while a
+// line comment runs to end of line and takes whatever follows it with it.
+func containsLineComment(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	if n.Kind() == "comment" {
+		return true
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if containsLineComment(n.Child(i)) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // parenExpr renders an expression wrapped in parens, avoiding double-wrapping
 // when the node is already a parenthesized_expression.
 // Long conditions are broken at logical operators.
@@ -230,6 +271,28 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	} else {
 		inner = "( " + f.expr(n) + " )"
 	}
+
+	verbatim := func() string {
+		if n.Kind() == "parenthesized_expression" {
+			return f.text(n)
+		}
+
+		return "( " + f.text(n) + " )"
+	}
+
+	// A `//` comment between two operands is neither the left nor the right
+	// field of the binary_expression holding them, so rebuilding the condition
+	// from those fields drops it — silently, and only for some shapes, which is
+	// why a condition written with `or` keeps its comments while the same
+	// condition written with `&&` loses all but the last. Rather than guess
+	// which shapes are safe, the rendered condition is checked against the
+	// source's own comments and reproduced as written when any went missing.
+	for _, c := range f.lineComments(n) {
+		if !strings.Contains(inner, c) {
+			return verbatim()
+		}
+	}
+
 	// If the condition is too long, break at logical operators.
 	// Use the larger of lineLen or indent estimate for the check.
 	col := f.lineLen
@@ -237,8 +300,20 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 		col = len(f.opts.indent(f.level))
 	}
 
+	// A condition too long for the line is reflowed at its logical operators,
+	// which keeps each surviving `//` comment at the end of the line it was
+	// written on.
 	if col+len(inner) > f.opts.LineWidth {
 		return f.normalizeCond(inner)
+	}
+
+	// A short condition is emitted on one line, which a `//` comment makes
+	// unsafe however well it survived above: everything after it on that line
+	// becomes part of the comment, the closing paren included. A line comment is
+	// only safe where the source already put it — the same reasoning that gives
+	// collection literals their hasLineComment rule.
+	if containsLineComment(n) {
+		return verbatim()
 	}
 
 	return inner
@@ -1291,7 +1366,14 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	// where required/type/name are siblings separated by commas, rather than
 	// being wrapped in required_parameter/optional_parameter nodes.
 	if f.hasFlatParams(params) {
-		return "(" + f.flatParams(params) + ")"
+		if inline, ok := f.flatParams(params); ok {
+			return "(" + inline + ")"
+		}
+
+		// A list this path cannot lay out on one line without breaking it —
+		// see flatParams. The source already holds a form that parses, so it is
+		// reproduced as written rather than reconstructed.
+		return f.text(params)
 	}
 
 	var parts []string
@@ -1320,16 +1402,27 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 		return "()"
 	}
 
-	var parts []string
-
-	var isComment []bool
+	var parts []paramPart
 
 	if f.hasFlatParams(params) {
-		parts, isComment = f.flatParamParts(params)
+		parts = f.flatParamParts(params)
 	} else {
+		trailing := hasTrailingComma(params)
+
 		for i := uint(0); i < params.NamedChildCount(); i++ {
-			parts = append(parts, f.exprParam(params.NamedChild(i)))
-			isComment = append(isComment, isCommentKind(params.NamedChild(i).Kind()))
+			c := params.NamedChild(i)
+			parts = append(parts, paramPart{
+				text:      f.exprParam(c),
+				isComment: isCommentKind(c.Kind()),
+			})
+		}
+
+		// This structure carries no comma children to read the separators from,
+		// so they follow the usual rule: one after every parameter that has
+		// another after it, and one after the last only if the source wrote it.
+		last := lastParameter(parts)
+		for i := range parts {
+			parts[i].commaAfter = !parts[i].isComment && (i < last || (trailing && i == last))
 		}
 	}
 
@@ -1338,35 +1431,34 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	}
 
 	indent := f.opts.indent(f.level + 1)
-	trailing := hasTrailingComma(params)
-	last := lastArgument(isComment)
 
 	var sb strings.Builder
 
 	sb.WriteString("(\n")
 
 	leading := f.opts.CommaPosition == "before"
+
 	for i, p := range parts {
-		if leading {
-			if i > 0 {
-				sb.WriteString(indent)
-				sb.WriteString(", ")
-				sb.WriteString(p)
-			} else {
-				sb.WriteString(indent)
-				sb.WriteString(p)
-			}
+		sb.WriteString(indent)
 
-			if trailing && !isComment[i] && i == last {
-				sb.WriteString(",")
-			}
-		} else {
-			sb.WriteString(indent)
-			sb.WriteString(p)
+		// In leading-comma style the separator is written before the parameter
+		// it follows, so it is the *previous* entry's comma that decides
+		// whether one appears here. A pair the source left comma-less has none
+		// to move, and stays separated by the newline that makes it parse.
+		if leading && i > 0 && parts[i-1].commaAfter {
+			sb.WriteString(", ")
+		}
 
-			if !isComment[i] && (i < last || (trailing && i == last)) {
-				sb.WriteString(",")
-			}
+		sb.WriteString(p.text)
+
+		if !leading && p.commaAfter {
+			sb.WriteString(",")
+		}
+
+		// A trailing comma has nowhere to go in leading style but after the
+		// final parameter, which is where the source put it.
+		if leading && i == len(parts)-1 && p.commaAfter {
+			sb.WriteString(",")
 		}
 
 		sb.WriteString("\n")
@@ -1376,6 +1468,18 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	sb.WriteString(")")
 
 	return sb.String()
+}
+
+// lastParameter returns the index of the final entry that is a parameter rather
+// than a comment, or -1 when there is none.
+func lastParameter(parts []paramPart) int {
+	for i := len(parts) - 1; i >= 0; i-- {
+		if !parts[i].isComment {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // hasFlatParams returns true if formal_parameters uses the flat structure:
@@ -1403,50 +1507,87 @@ func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
 	return false
 }
 
+// paramPart is one entry of a flat formal_parameters list: its rendered text,
+// whether it is nothing but a comment, and whether the source wrote a comma
+// after it. The separator is recorded per entry rather than assumed, because
+// CFML does not require one — see flatParamParts.
+type paramPart struct {
+	text       string
+	isComment  bool
+	commaAfter bool
+}
+
 // flatParamParts splits the flat formal_parameters structure used by
 // function_declaration — `[required] [type] name [= default]` as direct
-// siblings, comma-separated — into one rendered string per parameter, and
-// reports for each whether it is nothing but a comment.
+// siblings — into one entry per parameter.
+//
+// Two entries need care, and both come from the separator not being reliable:
 //
 // A comment can sit anywhere a parameter can, including after the list's final
-// comma (`f(a, b, // note\n)`), and it is not an element: a separator placed
-// after one would be inside the comment rather than after the parameter it
-// belongs to. The two callers below rendered this walk identically, so they now
-// share it rather than each carrying a copy to keep in step.
-func (f *Formatter) flatParamParts(params *sitter.Node) (parts []string, isComment []bool) {
+// comma (`f(a, b, // note\n)`), and it is not a parameter: a separator placed
+// after one lands inside the comment rather than after the parameter it belongs
+// to.
+//
+// And the comma between two parameters is optional — `f(struct s = structNew()
+// boolean ssl)` is valid CFML, which tree-sitter-cfml has parsed since v0.26.35
+// (#49). Splitting on commas alone merged such a pair into a single entry whose
+// two halves were then rejoined with a space; the grammar accepts a newline
+// between them but not a space, so the formatter's own output no longer parsed.
+// A parameter that already has a name therefore ends where the next one's first
+// token begins, comma or not, and whether a comma followed is recorded so the
+// renderers can reproduce the source's separator instead of inventing one.
+//
+// The two callers below rendered this walk identically, so they now share it
+// rather than each carrying a copy to keep in step.
+func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
+	var parts []paramPart
+
 	var current []string
 
 	currentAllComments := true
+	currentHasName := false
 
-	flush := func() {
+	flush := func(commaAfter bool) {
 		if len(current) == 0 {
 			return
 		}
 
-		parts = append(parts, strings.Join(current, " "))
-		isComment = append(isComment, currentAllComments)
+		parts = append(parts, paramPart{
+			text:       strings.Join(current, " "),
+			isComment:  currentAllComments,
+			commaAfter: commaAfter,
+		})
 		current = nil
 		currentAllComments = true
+		currentHasName = false
 	}
 
 	for i := uint(0); i < params.ChildCount(); i++ {
 		c := params.Child(i)
+		kind := c.Kind()
 
 		// The parentheses delimit the list rather than belonging to any entry
-		// in it, so they are skipped before the flag below is touched — marking
-		// the pending entry non-comment for the opening paren made every list
-		// look as though it ended in a parameter.
-		if c.Kind() == "(" || c.Kind() == ")" {
+		// in it, so they are skipped before the flags below are touched —
+		// marking the pending entry non-comment for the opening paren made
+		// every list look as though it ended in a parameter.
+		if kind == "(" || kind == ")" {
 			continue
 		}
 
-		if c.Kind() != "," && !isCommentKind(c.Kind()) {
+		// A parameter carries at most one name, so a token that can only open a
+		// parameter, seen once this entry already has its name, is the next
+		// parameter beginning with no comma in between.
+		if currentHasName && startsParameter(kind) {
+			flush(false)
+		}
+
+		if kind != "," && !isCommentKind(kind) {
 			currentAllComments = false
 		}
 
-		switch c.Kind() {
+		switch kind {
 		case ",":
-			flush()
+			flush(true)
 		case "required":
 			current = append(current, "required")
 		case "parameter_type":
@@ -1455,10 +1596,12 @@ func (f *Formatter) flatParamParts(params *sitter.Node) (parts []string, isComme
 			current = appendTypeSuffix(current, f.text(c))
 		case "identifier":
 			current = append(current, f.text(c))
+			currentHasName = true
 		case "assignment_pattern":
 			left := c.ChildByFieldName("left")
 			right := c.ChildByFieldName("right")
 			current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
+			currentHasName = true
 		default:
 			if c.IsNamed() {
 				current = append(current, f.text(c))
@@ -1466,33 +1609,67 @@ func (f *Formatter) flatParamParts(params *sitter.Node) (parts []string, isComme
 		}
 	}
 
-	flush()
+	// Nothing is pending when the list ended with a comma, so the trailing
+	// comma is already recorded against the entry before it.
+	flush(false)
 
-	return parts, isComment
+	return parts
+}
+
+// startsParameter reports whether a child kind can only appear at the start of
+// a parameter, which is what makes it a boundary when one is already in hand.
+func startsParameter(kind string) bool {
+	switch kind {
+	case "required", "parameter_type", "identifier", "assignment_pattern":
+		return true
+	default:
+		return false
+	}
+}
+
+// commaLessBoundary reports whether any parameter is followed by another with no
+// comma between them. Such a pair is separated by a newline in the source and
+// only parses that way, so a renderer that lays the list out on one line has to
+// reproduce it verbatim instead.
+func commaLessBoundary(parts []paramPart) bool {
+	for i, p := range parts {
+		if i < len(parts)-1 && !p.commaAfter && !p.isComment {
+			return true
+		}
+	}
+
+	return false
 }
 
 // flatParams renders parameters from the flat formal_parameters structure
 // used by function_declaration: [required] [type] name [= default], ...
-func (f *Formatter) flatParams(params *sitter.Node) string {
-	result, isComment := f.flatParamParts(params)
+// on a single line. It reports ok=false for a list it cannot lay out that way,
+// which the caller renders verbatim instead.
+func (f *Formatter) flatParams(params *sitter.Node) (string, bool) {
+	parts := f.flatParamParts(params)
+
+	// Two parameters with no comma between them are separated by a newline in
+	// the source, and the grammar accepts only a newline there — joining them
+	// with a space produces output it can no longer read.
+	if commaLessBoundary(parts) {
+		return "", false
+	}
 
 	var b strings.Builder
 
-	last := lastArgument(isComment)
-
-	for i, p := range result {
+	for i, p := range parts {
 		if i > 0 {
 			b.WriteString(" ")
 		}
 
-		b.WriteString(p)
+		b.WriteString(p.text)
 
-		if !isComment[i] && (i < last || (hasTrailingComma(params) && i == last)) {
+		if p.commaAfter {
 			b.WriteString(",")
 		}
 	}
 
-	return b.String()
+	return b.String(), true
 }
 
 // appendTypeSuffix glues an array_return_suffix (`[]`, always exactly that —

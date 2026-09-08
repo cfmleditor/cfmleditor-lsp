@@ -45,6 +45,28 @@ func TestLineCommentDoesNotSwallowCode(t *testing.T) {
 			[]string{"// 1 is in 2", "y = 2;"},
 		},
 		{
+			// The same shape as the first case but joined with `&&`, which the
+			// grammar gives a different tree: the comments between the operands
+			// are neither the left nor the right field of the binary_expression
+			// holding them, so rebuilding the condition from those fields
+			// dropped all but the last, and that survivor ended up in front of
+			// the closing paren. tree-sitter-cfml v0.26.35 is the first release
+			// to parse testbox's BaseSpec.cfc, where this was found.
+			"condition joined with && keeps every comment",
+			"<cfscript>\n" +
+				"if (\n" +
+				"\t!arguments.spec.skip && // Not skipping\n" +
+				"\tisSpecFocused( arguments.suite.name ) && // Is the spec focused\n" +
+				"\tcanRunLabel( labels ) // In label list\n" +
+				") {\n\tdoIt();\n}\n</cfscript>",
+			[]string{
+				"// Not skipping",
+				"// Is the spec focused",
+				"// In label list",
+				"doIt();",
+			},
+		},
+		{
 			"comment parked at the end of a condition",
 			"<cfscript>\nif ( a EQ 1\n\tAND b EQ 2\n\t/* TODO: AND (c EQ 3) */\n) {\n\tf();\n}\n</cfscript>",
 			[]string{"/* TODO: AND (c EQ 3) */", "f();"},
@@ -71,4 +93,25 @@ func TestLineCommentDoesNotSwallowCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConditionWithLineCommentsFormatsUnderTheGuard is the same defect seen from
+// the entry point that matters: with the whitespace-only guard on, as the LSP
+// runs it, a dropped comment is a refusal — so format-on-save silently did
+// nothing to any file with a `&&` condition commented operand by operand.
+func TestConditionWithLineCommentsFormatsUnderTheGuard(t *testing.T) {
+	src := "<cfscript>\n" +
+		"if (\n" +
+		"\t!arguments.spec.skip && // Not skipping\n" +
+		"\tisSpecFocused( arguments.suite.name ) && // Is the spec focused\n" +
+		"\tcanRunLabel( labels ) // In label or no labels\n" +
+		") {\n\tdoIt();\n}\n</cfscript>\n"
+
+	out := formatGuarded(t, src)
+
+	for _, want := range []string{"// Not skipping", "// Is the spec focused", "// In label or no labels"} {
+		assertContains(t, out, want)
+	}
+
+	assertReparses(t, out)
 }

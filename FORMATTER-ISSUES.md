@@ -35,9 +35,9 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,531** |
-| Rejected by the guard | 1,671 | 84 | **25** |
-| Refused: grammar cannot parse | 86 | 86 | **62** |
+| Formatted cleanly | 3,863 | 5,450 | **5,540** |
+| Rejected by the guard | 1,671 | 84 | **24** |
+| Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
 
@@ -47,8 +47,8 @@ check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
 The "current" column is what `make corpus` prints today (section 5), against the
-same six projects at their current HEAD. It counts the grammar's 62 refusals in
-two buckets rather than one — 22 documents the CFML grammar cannot parse, and 40
+same six projects at their current HEAD. It counts the grammar's 54 refusals in
+two buckets rather than one — 22 documents the CFML grammar cannot parse, and 32
 that parse as documents but whose embedded cfscript or cfquery the sub-grammar
 cannot — because the two are different work and the second is invisible from the
 outside: the document parses, the formatter runs, and whatever it renders for
@@ -56,20 +56,22 @@ that region is a guess.
 
 The corpus is six upstream repositories at *their* HEAD, not a pinned snapshot,
 so the "current" column moves when they do and is not a like-for-like comparison
-with the two columns beside it. Re-measured at 5,624 files, the run before the
-two fixes in section 4 stood at 5,527 clean and 29 guard-rejected; the
-script-refused count had fallen from 61 to 40 on grammar and upstream changes
-alone, with no work here.
+with the two columns beside it. Re-measured at 5,624 files on
+tree-sitter-cfml v0.26.34, the run before the fixes in section 4 stood at 5,527
+clean and 29 guard-rejected, with script-refused already down from 61 to 40 on
+grammar and upstream changes alone. The v0.26.35 bump then took script-refused to
+32 — and moved five of those files into the formatter's own defect columns, since
+a construct the grammar starts parsing is one the formatter starts rendering.
 
 Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
 |---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,701 | 20 | 33 | 18 | 1 | 3 |
-| ContentBox | 724 | 719 | 2 | 1 | 2 | 0 | 0 |
-| ColdBox | 657 | 647 | 0 | 5 | 4 | 1 | 0 |
+| Lucee | 3,776 | 3,704 | 20 | 30 | 18 | 1 | 3 |
+| ContentBox | 724 | 720 | 2 | 1 | 1 | 0 | 0 |
+| ColdBox | 657 | 651 | 0 | 1 | 4 | 1 | 0 |
 | FW/1 | 305 | 304 | 0 | 0 | 1 | 0 | 0 |
-| TestBox | 146 | 144 | 0 | 1 | 0 | 1 | 0 |
+| TestBox | 146 | 145 | 0 | 0 | 0 | 1 | 0 |
 | cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 | 0 |
 
 The repository's own `testdata/` went from 30/39 clean to 38/39, the last being
@@ -391,12 +393,35 @@ Counts from the current `make corpus` run (section 5).
 | Issue | Files | Notes |
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
-| Grammar cannot parse embedded cfscript/cfquery | 40 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 25 | 14 in Lucee's `test/` directory. No bucket larger than two files left. Characterised in 4.1: six are comment-text changes, one a content-length mismatch, and seven are constructs the grammar has started parsing since the audit, which turns each from a safe refusal into a formatter defect. |
+| Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
+| Guard-rejected, long tail | 24 | 14 in Lucee's `test/` directory. No bucket larger than two files left. Characterised in 4.1: five are comment-text changes, one a content-length mismatch, and seven are constructs the grammar has started parsing since the audit, which turns each from a safe refusal into a formatter defect. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
+
+- Two function parameters with no comma between them —
+  `f(struct s = structNew()\n  boolean ssl)`, valid CFML that tree-sitter-cfml
+  has parsed since v0.26.35 (#49, recorded as malformed source in 6.3 until
+  then) — were merged into a single parameter and rejoined with a space. The
+  grammar accepts a newline between such a pair but not a space, so the
+  formatter's own output no longer parsed and the file came back **unstable**
+  rather than guard-rejected: the guard sees only whitespace change, because
+  that is all it is. The parameter walk now ends a parameter where the next
+  one's first token begins, comma or not, and records whether a comma followed
+  so the renderers reproduce the source's separator instead of assuming one.
+  The single-line renderer cannot express the newline the pair needs and
+  reproduces such a list verbatim. 4 files, all ColdBox and TestBox.
+- A `//` comment on each operand of a condition joined with `&&` — every one
+  but the last dropped, and that survivor left in front of the closing paren
+  where it comments out the rest of the line. A comment between two operands is
+  neither the `left` nor the `right` field of the binary_expression holding
+  them, so rebuilding the condition from those fields loses it; the same
+  condition written with `or` keeps its comments, which is why this survived the
+  audit. Rather than enumerate the safe shapes, the rendered condition is now
+  checked against the source's own comments and reproduced as written when any
+  went missing, and a short condition carrying a line comment is never collapsed
+  onto one line. 2 files, exposed by the same v0.26.35 bump.
 
 - A trailing comma — `[1, 2, ]`, `{ a: 1, }`, `f(1, 2, )`,
   `function init(required wirebox, )` — was silently deleted. Legal in Lucee,
@@ -496,16 +521,16 @@ damaged file. Each is a formatter bug now, not grammar work:
 | Function annotations | `function f() labels="query"`, `function f() localmode="true"` | changed | LDEV4137, fw1 `one.cfc` |
 | `param` with a struct-style argument list | `param (name:"local.d" ...)` | changed | Jira2916 |
 
-Six are comment-text changes, where the guard's `compareCommentBodies` (3.1)
+Five are comment-text changes, where the guard's `compareCommentBodies` (3.1)
 reports the two sides' comment streams differing. One is an outright deletion —
 a `//` comment between the branches of a ternary
-(`LDEV5352/ternary.cfm`) is not emitted at all. The other five are a
+(`LDEV5352/ternary.cfm`) is not emitted at all. The other four are a
 *misalignment* rather than a loss: the two streams differ by one inserted `;`
 or `{`, which is the formatter's own cfscript canonicalisation (2.x) landing
 inside a region the guard is treating as comment text, so what is reported as
 changed comment text may be the comparison rather than the output. Worth
-resolving before any of them is treated as a rendering bug: `CBRequest.cfc`,
-`Query.cfc`, `Comment.cfc`, `Build.cfc`, `Router.cfc`.
+resolving before any of them is treated as a rendering bug: `Query.cfc`,
+`Comment.cfc`, `Build.cfc`, `Router.cfc`.
 
 The remaining twelve are one- and two-file causes, including one content-length
 mismatch (`eventCachingCollisions/handlers/general.cfc`) and two CRLF files
@@ -630,9 +655,10 @@ of them is filed:
 - **Comma-less function parameters.** `coldbox-platform/system/web/Controller.cfc`
   and `MockController.cfc` omit a comma between two arguments in a `relocate()`
   signature. This was recorded here as malformed source; it is not — the form
-  parses in CFML and the gap is already filed as tree-sitter-cfml #49.
-  `function f(string a, string b boolean c)` fails while the comma-separated
-  version parses.
+  parses in CFML, and the gap was filed as tree-sitter-cfml #49. **Fixed in
+  v0.26.35**: `function f(string a, string b boolean c)` now parses, which moved
+  these four files out of script-refused and straight into the formatter's own
+  defect column — see the comma-less parameter entry in section 4.
 
 The reduction is automated now: `make shrink REPORT=<corpus report>`
 (`internal/formatter/shrink_test.go`) takes a report written by `make corpus`
