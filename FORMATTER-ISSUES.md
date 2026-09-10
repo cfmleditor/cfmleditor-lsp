@@ -35,8 +35,8 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,547** |
-| Rejected by the guard | 1,671 | 84 | **17** |
+| Formatted cleanly | 3,863 | 5,450 | **5,554** |
+| Rejected by the guard | 1,671 | 84 | **10** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
@@ -67,9 +67,9 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
 |---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,711 | 20 | 30 | 11 | 1 | 3 |
+| Lucee | 3,776 | 3,715 | 20 | 30 | 7 | 1 | 3 |
 | ContentBox | 724 | 720 | 2 | 1 | 1 | 0 | 0 |
-| ColdBox | 657 | 651 | 0 | 1 | 4 | 1 | 0 |
+| ColdBox | 657 | 653 | 0 | 1 | 2 | 1 | 0 |
 | FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 |
 | TestBox | 146 | 145 | 0 | 0 | 0 | 1 | 0 |
 | cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 | 0 |
@@ -265,12 +265,13 @@ kept producing a fresh diff for an unchanged file:
 
 ## 3. Guard coverage gaps
 
-Cases the `whitespaceOnly` guard passed and should not have. The first two were
-latent — nothing in the corpus triggered either — but they meant the "clean"
-figures were an upper bound rather than a proof. The last two were not latent:
-each was destroying real files while the guard reported success, because a
-change can be whitespace-only and still change what the file means. All four
-are closed.
+Cases the `whitespaceOnly` guard got wrong. The first two were latent — nothing
+in the corpus triggered either — but they meant the "clean" figures were an
+upper bound rather than a proof. The next two were not latent: each was
+destroying real files while the guard reported success, because a change can be
+whitespace-only and still change what the file means. 3.5 is the mirror image,
+and the only one of the five where the guard was too strict rather than too
+lax — it refused correct output. All five are closed.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -386,6 +387,39 @@ quoted attribute value that gained a newline: 43 before, 0 after. Per-file
 corpus verdicts are byte-identical to the baseline, so nothing moved category.
 Covered by `internal/formatter/wrap_test.go`.
 
+### 3.5 A string literal's `/*` opened a comment — 7 files
+
+The four cases above are the guard failing to notice a change, or noticing one
+it should have allowed. This one is the guard refusing a *correct* format, and
+it is worth separating because the symptom points nowhere near the cause.
+
+`skipWSAndComments` decides where a comment starts by looking at the bytes, and
+a string literal is allowed to hold the bytes that open one. CFML code is full
+of globs that do — ColdBox's own build script has
+`path = "/#libBuildDir#/**"`, and `"#target#/*.zip"` a few lines later. The `/*`
+inside the quotes was taken as a block-comment open, and everything to the next
+`*/` — some forty lines of code below — was collected as comment body.
+
+The swallowed code is still compared, which is why this is a false rejection
+rather than a blind spot. But it is compared as *comment text*, and that
+comparison is the stricter of the two: `compareCommentBodies` folds whitespace
+and case exactly as the main loop does, and has none of the main loop's
+allowances for the canonicalisation the formatter performs on purpose. So a
+semicolon deliberately added to a `.run()` forty lines further down landed
+inside a "comment body", the two sinks diverged, and a correct format was
+refused — reported as changed comment text, naming neither the string that
+caused it nor the statement that tripped it. Four of the seven files reported
+exactly that, with "comment bodies" that were plainly code.
+
+`stringSpansOf` now locates the string literals in each script region up front,
+and no comment may open inside one. Both forms of embedded quote are stepped
+over, since ending a literal early would leave its remainder looking like code
+and reopen the same hole. Quotes are tracked only in script regions: in markup
+the same bytes are attribute delimiters and ordinary prose. Covered by
+`internal/formatter/guard_string_test.go`, in both directions — the deliberate
+insertion is accepted, and a statement deleted in the region that used to be
+swallowed is still caught.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).
@@ -394,7 +428,7 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 17 | 9 in Lucee's `test/` directory. No bucket larger than two files left. Characterised in 4.1: four are comment-text changes that may be guard bugs rather than rendering bugs, one is a grammar gap that produces no ERROR node, and the rest are one- and two-file causes. |
+| Guard-rejected, long tail | 10 | 6 in Lucee's `test/` directory. No bucket larger than two files left, and every one is characterised in 4.1: one is a grammar gap that produces no ERROR node, the rest are one- and two-file causes. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
@@ -532,19 +566,6 @@ line range that still fails *with the same verdict*, which matters because
 cutting a component in half turns a guard rejection into a parse refusal and
 reads as a much smaller repro than it is.
 
-**Four are comment-text changes**, where the guard's `compareCommentBodies`
-(3.1) reports the two sides' comment streams differing by one inserted `;` or
-`{` — the formatter's own cfscript canonicalisation (2.x) landing inside a
-region the guard is treating as comment text. That makes them as likely to be a
-comparison bug as a rendering one, and worth settling before any is treated as
-the latter: `Query.cfc`, `Comment.cfc`, `Build.cfc`, `Router.cfc`.
-
-The outright comment *deletions* that sat in this bucket are fixed — a `//`
-comment on the operands of an `&&` condition, and one parked before a ternary's
-`:`. Both were the same root cause, and the fix that closed them (check the
-rendering against the source's own comments, reproduce verbatim when any went
-missing) is the one to reach for if another turns up.
-
 **One is a grammar gap that produces no ERROR node**, the class 6.2 describes.
 `<cfcomponent output="false" javasettings={ maven: [...] }>` — an unquoted
 struct as a tag attribute — is not parsed as one value. The grammar shreds it
@@ -564,17 +585,25 @@ The formatter renders that faithfully and the result is garbage —
 `javasettings="{"` followed by `maven:` and `[` as separate attributes, with the
 array's contents dropped. There is nothing to fix downstream: any reconstruction
 is a reconstruction of a wrong parse. `tree-sitter-cfml` work, and worth filing
-with the tree above, since the bogus self-close marker is the part that makes it
-invisible. `Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
+with the tree above, since the bogus self-close marker is the part that makes
+the failure invisible from the outside.
+`Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
 
-**The remaining twelve** are one- and two-file causes:
+**The remaining nine** are one- and two-file causes:
 
 | Cause | Files |
 |---|---|
-| `param (name:"local.d" …)` — the struct-style argument list form | `Jira2916.cfc` |
+| A block comment *before* an expression in `<cfset>` — `<cfset x = /* why */ function(){} >` — is dropped; the one after it survives | `Jira2828.cfc` |
+| `param (name:"local.d" …)`, the struct-style argument list form | `Jira2916.cfc` |
 | A `//,` line comment inside a struct literal, in CRLF files | `test/cache/ehcache/Application.cfc`, `test/datasource/mongodb/Application.cfc` |
 | Content-length mismatch, cause not yet reduced | `eventCachingCollisions/handlers/general.cfc` |
-| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm`, `ListRest.cfc`, `Jira2682.cfc`, `Jira2828.cfc`, `LDEV4637.cfc`, `LDEV5790.cfc`, `Renderer.cfc` |
+| Comment text, not yet reduced — the last of the bucket 3.5 emptied | `Router.cfc` |
+| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm`, `LDEV5790.cfc` |
+
+Two causes that were in this list are now fixed and are recorded above rather
+than here: the outright comment *deletions* (a `//` on the operands of an `&&`
+condition, and one parked before a ternary's `:`) in section 4, and the
+string-literal misread that accounted for seven files in 3.5.
 
 ## 5. Reproducing
 
@@ -628,8 +657,10 @@ Regression coverage for everything in section 2 lives in
 `internal/formatter/idempotency_test.go` and
 `cmd/cfmleditor-lsp/format_test.go`; for the fixes in section 4, in
 `internal/formatter/doctype_test.go`,
-`internal/formatter/script_tag_call_test.go` and
-`internal/formatter/trailing_comma_test.go`.
+`internal/formatter/script_tag_call_test.go`,
+`internal/formatter/trailing_comma_test.go` and
+`internal/formatter/grammar_v26_35_test.go`; for 3.5, in
+`internal/formatter/guard_string_test.go`.
 
 ## 6. Grammar gaps behind the refused counts
 
