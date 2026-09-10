@@ -35,8 +35,8 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,559** |
-| Rejected by the guard | 1,671 | 84 | **7** |
+| Formatted cleanly | 3,863 | 5,450 | **5,562** |
+| Rejected by the guard | 1,671 | 84 | **4** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **1** |
 | Panics | 0 | 0 | **0** |
@@ -67,7 +67,7 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
 |---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,717 | 20 | 30 | 5 | 1 | 3 |
+| Lucee | 3,776 | 3,720 | 20 | 30 | 2 | 1 | 3 |
 | ContentBox | 724 | 720 | 2 | 1 | 1 | 0 | 0 |
 | ColdBox | 657 | 655 | 0 | 1 | 1 | 0 | 0 |
 | FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 |
@@ -460,11 +460,32 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 7 | 4 in Lucee's `test/` directory. Every one is a single-file cause, characterised in 4.1; one of them is a grammar gap that produces no ERROR node rather than a formatter defect. |
+| Guard-rejected, long tail | 4 | Every one is a single-file cause, characterised in 4.1; one of them is a grammar gap that produces no ERROR node rather than a formatter defect. |
 | Not idempotent | 1 | `jquery.blockUI.js.cfm` — JavaScript in a `.cfm`, whose formatted output no longer parses. The two whose second pass was refused by the cfscript sub-parser are fixed: both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
+
+- Three comment and separator defects in the tail, each a single file:
+  - `<cfset x = /* why */ f()>` lost the comment, while the identical one
+    written *after* the value survived — that one is a child of the tag rather
+    than of the assignment. `delimitedComments` existed for exactly this but
+    matched on node kind, and the document grammar gives a `/* … */` in this
+    position the plain `comment` kind, the same one it gives `//`. The text is
+    what tells the two apart; only the line form cannot be re-emitted inline.
+  - `cfparam (name:"local.d" default:"DDD")` — a CF tag in script separating
+    attribute from value with a colon, which Lucee accepts — came back with
+    every colon rewritten to `=`. The grammar gives both spellings the same
+    node with the operator as an anonymous child, and the helper asked for `=`
+    returned it whether or not the node had one.
+  - `var colTypes = [ "a", "b" ]// note`, a declaration with no semicolon of its
+    own, gained a comma after the array and put its semicolon *after* the
+    comment, where the comment swallowed it: the comment is a named child of the
+    variable_declaration and every named child went into the declarator list.
+    Comments are carried separately now, each on a line of its own — trailing
+    the semicolon is not a fixed point, because once the semicolon is emitted a
+    second pass parses the comment as a statement-level comment and moves it
+    down anyway.
 
 - A function declaration's annotations were joined with a space, so a `//`
   comment among them — how ColdBox's own test handlers say what each cache
@@ -636,19 +657,17 @@ with the tree above, since the bogus self-close marker is the part that makes
 the failure invisible from the outside.
 `Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
 
-**The remaining six** are single-file causes:
+**The remaining three** are single-file causes:
 
 | Cause | File |
 |---|---|
-| A block comment *before* an expression in `<cfset>` — `<cfset x = /* why */ function(){} >` — is dropped; the one after it survives | `Jira2828.cfc` |
-| `param (name:"local.d" …)`, the struct-style argument list form | `Jira2916.cfc` |
 | Comment text, not yet reduced — the last of the bucket 3.5 emptied | `Router.cfc` |
-| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm`, `LDEV5790.cfc` |
+| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm` |
 
 Causes that were in this list and are now fixed are recorded above rather than
 here: the outright comment *deletions* (a `//` on the operands of an `&&`
-condition, and one parked before a ternary's `:`) and the folded signature
-annotations in section 4; the string-literal misread that accounted for seven
+condition, and one parked before a ternary's `:`), the folded signature
+annotations, and the three comment and separator defects in section 4; the string-literal misread that accounted for seven
 files in 3.5; and the two missing-script-region defects in 3.6.
 
 ## 5. Reproducing

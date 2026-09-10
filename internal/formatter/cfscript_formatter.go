@@ -266,7 +266,7 @@ func (f *Formatter) lineComments(n *sitter.Node) []string {
 
 	var out []string
 
-	if n.Kind() == "comment" {
+	if f.isLineCommentNode(n) {
 		return append(out, strings.TrimSpace(f.text(n)))
 	}
 
@@ -280,22 +280,37 @@ func (f *Formatter) lineComments(n *sitter.Node) []string {
 // containsLineComment reports whether n's subtree holds a `//` comment. Only the
 // line form counts: a delimited comment can be moved and re-inlined, while a
 // line comment runs to end of line and takes whatever follows it with it.
-func containsLineComment(n *sitter.Node) bool {
+func (f *Formatter) containsLineComment(n *sitter.Node) bool {
 	if n == nil {
 		return false
 	}
 
-	if n.Kind() == "comment" {
+	if f.isLineCommentNode(n) {
 		return true
 	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
-		if containsLineComment(n.Child(i)) {
+		if f.containsLineComment(n.Child(i)) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// isLineCommentNode reports whether n is a `//` comment.
+//
+// The kind alone does not say: the document grammar reports a `/* … */` inside
+// a <cfset> as a plain "comment" too, the same kind it gives "//". Only the
+// line form is unmovable — a delimited comment can be re-emitted inline, and
+// treating one as unmovable would send perfectly ordinary expressions down the
+// reproduce-verbatim path for no reason.
+func (f *Formatter) isLineCommentNode(n *sitter.Node) bool {
+	if n.Kind() != "comment" {
+		return false
+	}
+
+	return strings.HasPrefix(strings.TrimSpace(f.text(n)), "//")
 }
 
 // parenExpr renders an expression wrapped in parens, avoiding double-wrapping
@@ -347,7 +362,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	// becomes part of the comment, the closing paren included. A line comment is
 	// only safe where the source already put it — the same reasoning that gives
 	// collection literals their hasLineComment rule.
-	if containsLineComment(n) {
+	if f.containsLineComment(n) {
 		return verbatim()
 	}
 
@@ -494,7 +509,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "assignment_expression":
 		left := n.ChildByFieldName("left")
 		right := n.ChildByFieldName("right")
-		op := f.childToken(n, "=") // default
+		op := f.assignmentOperator(n)
 
 		for i := uint(0); i < n.ChildCount(); i++ {
 			c := n.Child(i)
@@ -509,7 +524,15 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		leftStr := f.expr(left)
 		rightStr := f.expr(right)
 		cmts := f.delimitedComments(n)
-		result := fmt.Sprintf("%s %s%s %s", leftStr, op, cmts, rightStr)
+
+		// A colon binds to the name it follows, the way a struct literal's
+		// `key: value` does; only "=" takes a space on both sides.
+		sep := " " + op
+		if op == ":" {
+			sep = op
+		}
+
+		result := fmt.Sprintf("%s%s%s %s", leftStr, sep, cmts, rightStr)
 
 		if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
 			f.level++
@@ -519,7 +542,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			if strings.Contains(rightStr, "\n") {
 				indent := f.opts.indent(f.level + 1)
 
-				return fmt.Sprintf("%s %s%s\n%s%s", leftStr, op, cmts, indent, rightStr)
+				return fmt.Sprintf("%s%s%s\n%s%s", leftStr, sep, cmts, indent, rightStr)
 			}
 		}
 
@@ -907,10 +930,23 @@ func (f *Formatter) delimitedComments(n *sitter.Node) string {
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		switch c.Kind() {
 		case "cf_comment", "block_comment":
 			sb.WriteString(" ")
 			sb.WriteString(strings.TrimSpace(f.text(c)))
+		case "comment":
+			// The document grammar gives a `/* … */` inside a <cfset> this
+			// kind rather than block_comment, so matching on kind alone
+			// dropped it: `<cfset x = /* why */ f()>` lost the comment while
+			// the identical one written after the value survived, because that
+			// one is a child of the tag rather than of the assignment. The
+			// text is what distinguishes the two forms; a "//" still cannot be
+			// re-emitted inline and is left to the guard.
+			if text := strings.TrimSpace(f.text(c)); !strings.HasPrefix(text, "//") {
+				sb.WriteString(" ")
+				sb.WriteString(text)
+			}
 		}
 	}
 
@@ -986,15 +1022,27 @@ func tagStyleArgs(args *sitter.Node) bool {
 }
 
 // childToken returns the first anonymous token child matching typ.
-func (f *Formatter) childToken(n *sitter.Node, typ string) string {
+// assignmentOperator returns the token joining an assignment_expression's two
+// sides. It is not always "=": a CF tag written in script may separate an
+// attribute from its value with a colon — `cfparam (name:"local.d"
+// default:"DDD")` — and the grammar gives both spellings the same node, with
+// the operator as an anonymous child. The previous helper took the token it was
+// asked for and returned it whether or not the node had one, so every colon
+// came back as "=" and the file was refused.
+func (f *Formatter) assignmentOperator(n *sitter.Node) string {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
-		if !c.IsNamed() && c.Kind() == typ {
-			return typ
+		if c.IsNamed() {
+			continue
+		}
+
+		switch c.Kind() {
+		case "=", ":":
+			return c.Kind()
 		}
 	}
 
-	return typ
+	return "="
 }
 
 func (f *Formatter) exprArgs(args *sitter.Node) string {
@@ -2144,8 +2192,22 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 	var decls []string
 
+	// A comment among the declarators is not one of them. Left in the list it
+	// was comma-joined like a declaration — `var x = [1], // note` — and the
+	// terminating semicolon then went after it, where the comment swallowed it.
+	// Comments are carried across separately and placed after the semicolon,
+	// which is where a trailing one was written in the first place.
+	var comments []string
+
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		d := n.NamedChild(i)
+
+		if isCommentKind(d.Kind()) {
+			comments = append(comments, strings.TrimSpace(f.text(d)))
+
+			continue
+		}
+
 		switch d.Kind() {
 		case "variable_declarator":
 			vname := d.ChildByFieldName("name")
@@ -2164,6 +2226,16 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 	f.iLine(fmt.Sprintf("%s %s;", keyword, strings.Join(decls, ", ")))
 	f.scriptWrite("\n")
+
+	// Each comment goes on a line of its own rather than trailing the
+	// semicolon. Once the semicolon is emitted the comment is no longer part of
+	// the declaration — a second pass parses it as a statement-level comment
+	// and renders it on its own line — so trailing it here would make the
+	// formatter's output differ from its own output on that output.
+	for _, c := range comments {
+		f.iLine(c)
+		f.scriptWrite("\n")
+	}
 }
 
 func (f *Formatter) scriptExprStmt(n *sitter.Node) {

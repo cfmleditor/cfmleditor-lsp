@@ -136,3 +136,81 @@ func TestSavecontentEmptyBodyStaysEmpty(t *testing.T) {
 		t.Errorf("empty savecontent not preserved\ngot:\n%s", out)
 	}
 }
+
+// TestCFSetKeepsACommentBeforeItsValue covers `<cfset x = /* why */ f()>`. The
+// comment is a child of the assignment_expression, between the left and right
+// fields, so rendering the node from those fields alone dropped it — while the
+// identical comment written *after* the value survived, because that one is a
+// child of the tag rather than of the assignment. delimitedComments existed for
+// exactly this, but matched on node kind, and the document grammar gives a
+// `/* … */` in this position the plain "comment" kind rather than
+// "block_comment" — the same kind it gives "//". The text is what tells the two
+// apart, and only the line form is unmovable.
+func TestCFSetKeepsACommentBeforeItsValue(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfcomponent>\n\t<cffunction name=\"test\">\n" +
+		"\t\t<cfset local.foo = /* hello world */ function(){return true;} /* bye */ >\n" +
+		"\t</cffunction>\n</cfcomponent>\n"
+
+	out := formatGuarded(t, src)
+
+	assertContains(t, out, "/* hello world */")
+	assertContains(t, out, "/* bye */")
+}
+
+// TestCFSetWithoutCommentsIsUnchanged is the boundary — nothing is inserted
+// where there was no comment to carry across.
+func TestCFSetWithoutCommentsIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	out := formatGuarded(t, "<cfcomponent>\n\t<cfset local.foo = 1>\n</cfcomponent>\n")
+
+	assertContains(t, out, "<cfset local.foo = 1")
+	assertNotContains(t, out, "/*")
+}
+
+// TestDeclarationCommentIsNotTreatedAsADeclarator covers a comment sitting
+// inside a `var` declaration — `var colTypes = [ "a", "b" ]// note`, where the
+// statement has no semicolon of its own. The comment is a named child of the
+// variable_declaration, and the renderer appended every named child to the
+// declarator list: the comment was comma-joined as though it were a second
+// declaration, and the terminating semicolon then went after it, where the
+// comment swallowed it.
+func TestDeclarationCommentIsNotTreatedAsADeclarator(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tvar colTypes = [ \"varchar\", \"bigint\" ]//, \"double\"] // more\n\t\treturn 1;\n\t}\n}\n</cfscript>\n"
+
+	out := formatGuarded(t, src)
+
+	assertContains(t, out, `var colTypes = ["varchar", "bigint"];`)
+	assertContains(t, out, `//, "double"] // more`)
+	assertNotContains(t, out, `"bigint"],`)
+	assertReparses(t, out)
+
+	// The semicolon must not end up inside the comment.
+	for _, line := range strings.Split(out, "\n") {
+		if at := strings.Index(line, "//"); at >= 0 && strings.Contains(line[at:], ";") {
+			t.Errorf("the terminating semicolon was folded into a comment: %q", line)
+		}
+	}
+}
+
+// TestDeclarationCommentPlacementIsStable pins why the comment goes on a line
+// of its own rather than trailing the semicolon: once the semicolon is emitted
+// the comment is no longer part of the declaration, so a second pass parses it
+// as a statement-level comment and puts it on its own line. Trailing it on the
+// first pass made the formatter's output differ from its output on that output.
+func TestDeclarationCommentPlacementIsStable(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tvar x = [ 1, 2 ]// note\n\t\treturn 1;\n\t}\n}\n</cfscript>\n"
+
+	once := formatGuarded(t, src)
+	twice := formatGuarded(t, once)
+
+	if once != twice {
+		t.Errorf("formatting is not a fixed point:\nfirst:\n%s\nsecond:\n%s", once, twice)
+	}
+}
