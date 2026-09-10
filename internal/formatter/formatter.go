@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -77,7 +78,19 @@ type Options struct {
 	WhitespaceOnly bool
 }
 
+// indent renders the indentation for a nesting level. A negative level is
+// column zero rather than a panic: roughly thirty sites decrement f.level, each
+// paired with an increment somewhere else, and a document that closes a
+// construct it never opened unbalances that pairing. strings.Repeat panics on a
+// negative count, so `</cfcomponent>` on its own — an ordinary mid-edit state,
+// and a real file in the corpus — took the formatter down rather than emitting
+// the tag. Clamping keeps this function total for every caller; the individual
+// level counters are still kept balanced at their own sites.
 func (o Options) indent(level int) string {
+	if level <= 0 {
+		return ""
+	}
+
 	if o.UseTabs {
 		return strings.Repeat("\t", level)
 	}
@@ -254,10 +267,11 @@ func checkWhitespaceOnly(a, b []byte, allowSelfClose, allowRequote bool) error {
 	var commentsA, commentsB []byte
 
 	scriptA, scriptB := scriptRegionsOf(a), scriptRegionsOf(b)
+	strsA, strsB := stringSpansOf(a, scriptA), stringSpansOf(b, scriptB)
 
 	for {
-		i = skipWSAndComments(a, i, &commentsA, scriptA)
-		j = skipWSAndComments(b, j, &commentsB, scriptB)
+		i = skipWSAndComments(a, i, &commentsA, scriptA, strsA)
+		j = skipWSAndComments(b, j, &commentsB, scriptB, strsB)
 
 		if j < len(b) && isNormalizationToken(b[j]) &&
 			(i >= len(a) || toLower(a[i]) != toLower(b[j])) {
@@ -440,6 +454,140 @@ func (s scriptSpans) contains(pos int) bool {
 	return false
 }
 
+// containsSorted is contains for a slice built in ascending order, which the
+// string spans are. The guard consults them once per byte of the file, and the
+// linear scan above is O(spans) per call — fine for the handful of script
+// regions a file has, but a large component holds hundreds of string literals.
+func (s scriptSpans) containsSorted(pos int) bool {
+	i := sort.Search(len(s), func(i int) bool { return s[i].end > pos })
+
+	return i < len(s) && pos >= s[i].start
+}
+
+// stringSpansOf locates the quoted string literals inside src's script regions.
+//
+// The guard has to know about them because a string is allowed to contain the
+// characters that open a comment, and CFML code is full of globs that do.
+// ColdBox's own build script has `path = "/#libBuildDir#/**"`, whose `/*` was
+// taken as the start of a block comment: everything from there to the next
+// `*/`, some forty lines of code below, was collected as comment body.
+//
+// The effect is a false rejection rather than a blind spot, which is worth
+// being precise about. Code swallowed this way is still compared — as comment
+// text — and that comparison is the stricter of the two: it folds whitespace
+// and case exactly as the main loop does, but it has none of the main loop's
+// allowances for the canonicalisation the formatter performs on purpose. So a
+// semicolon the formatter legitimately adds to `.run()` forty lines down lands
+// inside a "comment body", the two sinks differ, and a correct format is
+// refused with a message about comment text that names neither the string nor
+// the statement. Seven files in the corpus, four of them reporting changed
+// comment text whose reported bodies were plainly code.
+//
+// Quotes are only tracked inside script regions. In markup the same bytes are
+// attribute delimiters and ordinary prose, and `//` and an apostrophe carry no
+// such meaning there.
+func stringSpansOf(src []byte, script scriptSpans) scriptSpans {
+	var spans scriptSpans
+
+	for _, region := range script {
+		pos := max(region.start, 0)
+		for pos < region.end && pos < len(src) {
+			switch {
+			case hasBytesAt(src, pos, "<!---"):
+				end := indexBytesFrom(src, pos+5, "--->")
+				if end < 0 {
+					pos = region.end
+
+					continue
+				}
+
+				pos = end + 4
+			case hasBytesAt(src, pos, "/*"):
+				end := indexBytesFrom(src, pos+2, "*/")
+				if end < 0 {
+					pos = region.end
+
+					continue
+				}
+
+				pos = end + 2
+			case isLineCommentStart(src, pos):
+				for pos < len(src) && src[pos] != '\n' && src[pos] != '\r' {
+					pos++
+				}
+			case src[pos] == '"' || src[pos] == '\'':
+				start := pos
+				pos = endOfString(src, pos)
+
+				spans = append(spans, struct{ start, end int }{start, pos})
+			default:
+				pos++
+			}
+		}
+	}
+
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+
+	return spans
+}
+
+// endOfString returns the offset just past the string literal opening at pos.
+//
+// CFML escapes a quote by doubling it ("say ""hi"""), and *only* that way — a
+// backslash is an ordinary character. Treating "\\" as an escape, the way most
+// C-family languages would, runs the literal past its own closing quote and on
+// to the next one: ContentBox has `replace( inPath, "\\", "/", "all" )`, a string
+// holding one backslash, and every Windows path written `"C:\\dir\\"` ends the
+// same way. The span would then cover code, and no comment could be recognised
+// inside it.
+func endOfString(src []byte, pos int) int {
+	quote := src[pos]
+	pos++
+
+	for pos < len(src) {
+		switch {
+		// "##" is a literal hash; a single "#" opens an interpolation, which
+		// may hold strings of its own in either quote style. Lucee's admin has
+		// `"timezone:'#replace(ds.timezone,"'","''","all")#' // ..."` — a
+		// double-quoted string whose interpolation contains three more of them.
+		// Ending the outer literal at the first of those put the rest of the
+		// line outside any string, where its "//" was read as a comment.
+		case src[pos] == '#' && pos+1 < len(src) && src[pos+1] == '#':
+			pos += 2
+		case src[pos] == '#':
+			pos = endOfInterpolation(src, pos)
+		case src[pos] == quote && pos+1 < len(src) && src[pos+1] == quote:
+			pos += 2
+		case src[pos] == quote:
+			return pos + 1
+		default:
+			pos++
+		}
+	}
+
+	return pos
+}
+
+// endOfInterpolation returns the offset just past the #...# opening at pos. It
+// and endOfString call each other, since either may nest inside the other; both
+// always advance, so the pair terminates on any input.
+func endOfInterpolation(src []byte, pos int) int {
+	pos++ // the opening #
+
+	for pos < len(src) {
+		switch src[pos] {
+		case '"', '\'':
+			pos = endOfString(src, pos)
+		case '#':
+			return pos + 1
+		default:
+			pos++
+		}
+	}
+
+	return pos
+}
+
 // lowerASCIIBytes lowercases A-Z and copies every other byte through.
 //
 // bytes.ToLower cannot be used here: it folds by Unicode rune, and some runes
@@ -519,11 +667,27 @@ func isScriptSyntaxComponent(src []byte) bool {
 	// is stepped over; only the keyword that follows it matters here.
 	all := scriptSpans{{0, len(src)}}
 
-	pos := skipWSAndComments(src, 0, nil, all)
+	// A UTF-8 BOM is not whitespace, so skipWSAndComments stops on it and the
+	// keyword check below then fails on a file that is plainly a script
+	// component. Everything downstream keys off this answer: with no script
+	// region the guard stops recognising `//` as a comment anywhere in the
+	// file, and compares comment text as though it were code. That is how a
+	// leading-comma struct with a commented-out entry — `//, bundleVersion:
+	// '3.2.2.54'` — came back as a non-whitespace change, reported against the
+	// entry before it. Two files in the corpus; 554 in it carry a BOM.
+	start := 0
+	if bytes.HasPrefix(src, utf8BOM) {
+		start = len(utf8BOM)
+	}
+
+	// No string spans: this probe only steps over a leading doc block, before
+	// any string literal can appear, and computing them would recurse — string
+	// spans need the script regions this function is being called to determine.
+	pos := skipWSAndComments(src, start, nil, all, nil)
 
 	for _, kw := range []string{"abstract", "final"} {
 		if hasWordAt(src, pos, kw) {
-			pos = skipWSAndComments(src, pos+len(kw), nil, all)
+			pos = skipWSAndComments(src, pos+len(kw), nil, all, nil)
 		}
 	}
 
@@ -700,12 +864,13 @@ func compareCommentBodies(src, a, b []byte) error {
 // byte offset in src, by re-walking src and counting comment body bytes.
 func commentBodyOffset(src []byte, target int) int {
 	script := scriptRegionsOf(src)
+	strs := stringSpansOf(src, script)
 	seen, pos := 0, 0
 
 	for pos < len(src) {
 		var body []byte
 
-		next := skipWSAndComments(src, pos, &body, script)
+		next := skipWSAndComments(src, pos, &body, script, strs)
 		if next == pos {
 			pos++
 
@@ -742,9 +907,17 @@ func commentSnippet(s []byte, at int) string {
 // surrounding code to line up catches it on the spot. The bodies collected in
 // sink are compared separately, so a comment whose text was mangled is still
 // reported even though its characters no longer take part in the walk.
-func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) int {
+func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans, strs scriptSpans) int {
 	for {
 		pos = skipSpace(src, pos)
+
+		// A comment cannot open inside a string literal. Without this the
+		// guard reads a glob like "/#dir#/**" as a block comment and compares
+		// everything up to the next "*/" as comment text — which refuses the
+		// formatter's own deliberate insertions. See stringSpansOf.
+		if strs.containsSorted(pos) {
+			return pos
+		}
 
 		switch {
 		case hasBytesAt(src, pos, "<!---"):
@@ -776,8 +949,15 @@ func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans) in
 			collectCommentBody(sink, src[pos+2:end])
 			pos = end + 2
 		case script.contains(pos) && isLineCommentStart(src, pos):
+			// A "//" comment ends at the end of its line, and a line does not
+			// always end in "\n": classic Mac files separate lines with a bare
+			// "\r", and CFML written on one is not rare — TestBox ships a
+			// fixture with 81 of them and no newline at all. Scanning for "\n"
+			// alone ran the comment to end of file and collected every
+			// remaining line as its body. CRLF is unaffected either way, since
+			// stopping at the "\r" leaves the "\n" as the whitespace it is.
 			end := pos + 2
-			for end < len(src) && src[end] != '\n' {
+			for end < len(src) && src[end] != '\n' && src[end] != '\r' {
 				end++
 			}
 
@@ -1701,8 +1881,17 @@ func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
 }
 
 // formatCFComponentClose handles cf_component_close_tag (a sibling node in the tree).
+//
+// The open and close tags are siblings rather than parent and child, so the
+// level is incremented by one and decremented by the other. A close tag with no
+// open tag before it is accepted by the grammar without an ERROR node, and
+// decrementing for it would leave the level negative for everything that
+// follows, so the decrement is skipped when there is nothing to close.
 func (f *Formatter) formatCFComponentClose(_ *sitter.Node) {
-	f.level--
+	if f.level > 0 {
+		f.level--
+	}
+
 	f.write("\n")
 	f.nl()
 	f.writeIndent()

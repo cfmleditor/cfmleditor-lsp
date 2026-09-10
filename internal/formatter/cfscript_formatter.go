@@ -220,6 +220,99 @@ func (f *Formatter) flushBlockComments() bool {
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
 func (f *Formatter) scriptNL()            { f.nl() }
 
+// keptLineComments reports whether rendered treats every `//` comment in n's
+// subtree the way a line comment has to be treated: still present, and still
+// the last thing on its line.
+//
+// Both halves are needed, and both come from the same cause. An expression is
+// rebuilt from its named fields, and a comment sitting between two of them is
+// not one of those fields — so depending on the shape it is either dropped, or
+// kept and the operand that followed it in the source is folded up onto its
+// line, where the comment swallows it. The second is the more dangerous of the
+// two, because only whitespace changed and a character-level comparison cannot
+// see it.
+//
+// Which shapes are safe is not worth enumerating: `a && b` loses its comments
+// where `a or b` keeps them, and a nested parenthesised operand folds where a
+// flat one does not. Checking the result against the source catches all of
+// them, including the ones nobody has hit yet. Callers reproduce the source
+// when this returns false.
+func (f *Formatter) keptLineComments(n *sitter.Node, rendered string) bool {
+	for _, c := range f.lineComments(n) {
+		at := strings.Index(rendered, c)
+		if at < 0 {
+			return false
+		}
+
+		rest := rendered[at+len(c):]
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[:nl]
+		}
+
+		if strings.TrimSpace(rest) != "" {
+			return false
+		}
+	}
+
+	return true
+}
+
+// lineComments returns the text of every `//` comment in n's subtree, so a
+// rendering can be checked for the ones it dropped.
+func (f *Formatter) lineComments(n *sitter.Node) []string {
+	if n == nil {
+		return nil
+	}
+
+	var out []string
+
+	if f.isLineCommentNode(n) {
+		return append(out, strings.TrimSpace(f.text(n)))
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		out = append(out, f.lineComments(n.Child(i))...)
+	}
+
+	return out
+}
+
+// containsLineComment reports whether n's subtree holds a `//` comment. Only the
+// line form counts: a delimited comment can be moved and re-inlined, while a
+// line comment runs to end of line and takes whatever follows it with it.
+func (f *Formatter) containsLineComment(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	if f.isLineCommentNode(n) {
+		return true
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if f.containsLineComment(n.Child(i)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isLineCommentNode reports whether n is a `//` comment.
+//
+// The kind alone does not say: the document grammar reports a `/* … */` inside
+// a <cfset> as a plain "comment" too, the same kind it gives "//". Only the
+// line form is unmovable — a delimited comment can be re-emitted inline, and
+// treating one as unmovable would send perfectly ordinary expressions down the
+// reproduce-verbatim path for no reason.
+func (f *Formatter) isLineCommentNode(n *sitter.Node) bool {
+	if n.Kind() != "comment" {
+		return false
+	}
+
+	return strings.HasPrefix(strings.TrimSpace(f.text(n)), "//")
+}
+
 // parenExpr renders an expression wrapped in parens, avoiding double-wrapping
 // when the node is already a parenthesized_expression.
 // Long conditions are broken at logical operators.
@@ -230,6 +323,26 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	} else {
 		inner = "( " + f.expr(n) + " )"
 	}
+
+	verbatim := func() string {
+		if n.Kind() == "parenthesized_expression" {
+			return f.text(n)
+		}
+
+		return "( " + f.text(n) + " )"
+	}
+
+	// A `//` comment between two operands is neither the left nor the right
+	// field of the binary_expression holding them, so rebuilding the condition
+	// from those fields drops it — silently, and only for some shapes, which is
+	// why a condition written with `or` keeps its comments while the same
+	// condition written with `&&` loses all but the last. Rather than guess
+	// which shapes are safe, the rendered condition is checked against the
+	// source's own comments and reproduced as written when any went missing.
+	if !f.keptLineComments(n, inner) {
+		return verbatim()
+	}
+
 	// If the condition is too long, break at logical operators.
 	// Use the larger of lineLen or indent estimate for the check.
 	col := f.lineLen
@@ -237,8 +350,20 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 		col = len(f.opts.indent(f.level))
 	}
 
+	// A condition too long for the line is reflowed at its logical operators,
+	// which keeps each surviving `//` comment at the end of the line it was
+	// written on.
 	if col+len(inner) > f.opts.LineWidth {
 		return f.normalizeCond(inner)
+	}
+
+	// A short condition is emitted on one line, which a `//` comment makes
+	// unsafe however well it survived above: everything after it on that line
+	// becomes part of the comment, the closing paren included. A line comment is
+	// only safe where the source already put it — the same reasoning that gives
+	// collection literals their hasLineComment rule.
+	if f.containsLineComment(n) {
+		return verbatim()
 	}
 
 	return inner
@@ -314,7 +439,16 @@ func isScriptBlockStmt(n *sitter.Node) bool {
 
 // scriptBlock renders a `{ ... }` block, indenting its contents.
 func (f *Formatter) scriptBlock(n *sitter.Node) {
-	f.scriptWrite(" {")
+	f.scriptBlockWith(n, " ")
+}
+
+// scriptBlockWith renders a block, writing beforeBrace before the opening
+// brace. Every caller wants a space there — the brace follows the construct's
+// header on the same line — except a header ending in a `//` annotation
+// comment, which has already had to break the line and needs the brace at the
+// start of the next one rather than one column into it.
+func (f *Formatter) scriptBlockWith(n *sitter.Node, beforeBrace string) {
+	f.scriptWrite(beforeBrace + "{")
 	f.scriptWrite("\n\n")
 
 	f.level++
@@ -375,7 +509,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "assignment_expression":
 		left := n.ChildByFieldName("left")
 		right := n.ChildByFieldName("right")
-		op := f.childToken(n, "=") // default
+		op := f.assignmentOperator(n)
 
 		for i := uint(0); i < n.ChildCount(); i++ {
 			c := n.Child(i)
@@ -390,7 +524,15 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		leftStr := f.expr(left)
 		rightStr := f.expr(right)
 		cmts := f.delimitedComments(n)
-		result := fmt.Sprintf("%s %s%s %s", leftStr, op, cmts, rightStr)
+
+		// A colon binds to the name it follows, the way a struct literal's
+		// `key: value` does; only "=" takes a space on both sides.
+		sep := " " + op
+		if op == ":" {
+			sep = op
+		}
+
+		result := fmt.Sprintf("%s%s%s %s", leftStr, sep, cmts, rightStr)
 
 		if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
 			f.level++
@@ -400,7 +542,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			if strings.Contains(rightStr, "\n") {
 				indent := f.opts.indent(f.level + 1)
 
-				return fmt.Sprintf("%s %s%s\n%s%s", leftStr, op, cmts, indent, rightStr)
+				return fmt.Sprintf("%s%s%s\n%s%s", leftStr, sep, cmts, indent, rightStr)
 			}
 		}
 
@@ -464,6 +606,16 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		altStr := f.expr(alt)
 
 		inline := fmt.Sprintf("%s ? %s : %s", condStr, consStr, altStr)
+
+		// A `//` comment parked before the `:` — a common way to say why the
+		// alternative is what it is — belongs to none of the three fields above
+		// and was dropped outright. Reproduce the expression as written rather
+		// than lose it; a line comment could not be re-inlined into either
+		// branch anyway, since it runs to end of line.
+		if !f.keptLineComments(n, inline) {
+			return f.text(n)
+		}
+
 		if len(inline) > f.opts.LineWidth {
 			indent := f.opts.indent(f.level + 1)
 
@@ -648,7 +800,19 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		obj := n.ChildByFieldName("object")
 		idx := n.ChildByFieldName("index")
 
-		return fmt.Sprintf("%s[%s]", f.expr(obj), f.expr(idx))
+		// A subscript can be reached statically — `Test::["f"]()`, the
+		// subscripted form of `Test::f()` — and the grammar reports the `::` as
+		// a named static_chain field, exactly as it does on a member_expression
+		// (see memberOperator). Rendering the node from object and index alone
+		// dropped it and turned a static call into an instance call. The
+		// grammar has only parsed this form since v0.26.35 (#79), so until then
+		// the file was refused rather than mis-rendered.
+		accessor := ""
+		if sc := n.ChildByFieldName("static_chain"); sc != nil {
+			accessor = "::"
+		}
+
+		return fmt.Sprintf("%s%s[%s]", f.expr(obj), accessor, f.expr(idx))
 
 	case "parenthesized_expression":
 		// Every named child is rendered, not just the first. A comment inside
@@ -766,10 +930,23 @@ func (f *Formatter) delimitedComments(n *sitter.Node) string {
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
+
 		switch c.Kind() {
 		case "cf_comment", "block_comment":
 			sb.WriteString(" ")
 			sb.WriteString(strings.TrimSpace(f.text(c)))
+		case "comment":
+			// The document grammar gives a `/* … */` inside a <cfset> this
+			// kind rather than block_comment, so matching on kind alone
+			// dropped it: `<cfset x = /* why */ f()>` lost the comment while
+			// the identical one written after the value survived, because that
+			// one is a child of the tag rather than of the assignment. The
+			// text is what distinguishes the two forms; a "//" still cannot be
+			// re-emitted inline and is left to the guard.
+			if text := strings.TrimSpace(f.text(c)); !strings.HasPrefix(text, "//") {
+				sb.WriteString(" ")
+				sb.WriteString(text)
+			}
 		}
 	}
 
@@ -845,15 +1022,27 @@ func tagStyleArgs(args *sitter.Node) bool {
 }
 
 // childToken returns the first anonymous token child matching typ.
-func (f *Formatter) childToken(n *sitter.Node, typ string) string {
+// assignmentOperator returns the token joining an assignment_expression's two
+// sides. It is not always "=": a CF tag written in script may separate an
+// attribute from its value with a colon — `cfparam (name:"local.d"
+// default:"DDD")` — and the grammar gives both spellings the same node, with
+// the operator as an anonymous child. The previous helper took the token it was
+// asked for and returned it whether or not the node had one, so every colon
+// came back as "=" and the file was refused.
+func (f *Formatter) assignmentOperator(n *sitter.Node) string {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
-		if !c.IsNamed() && c.Kind() == typ {
-			return typ
+		if c.IsNamed() {
+			continue
+		}
+
+		switch c.Kind() {
+		case "=", ":":
+			return c.Kind()
 		}
 	}
 
-	return typ
+	return "="
 }
 
 func (f *Formatter) exprArgs(args *sitter.Node) string {
@@ -889,7 +1078,17 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		sep = " "
 	}
 
-	inline := "(" + strings.Join(parts, sep) + ")"
+	// Space-separated tag-style attributes have no comma to preserve.
+	trailing := useCommas && hasTrailingComma(args)
+
+	inlineJoined := strings.Join(parts, sep)
+	// Only when the final entry is the final argument: a comma written after a
+	// trailing comment lands inside it, or turns it into an empty argument.
+	if last := lastArgument(isComment); trailing && last >= 0 && last == len(parts)-1 {
+		inlineJoined += ","
+	}
+
+	inline := "(" + inlineJoined + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
 	// A line comment forces the break unconditionally: joined inline it runs to
 	// end of line and comments out every argument after it.
@@ -953,6 +1152,10 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 					sb.WriteString(indent)
 					sb.WriteString(p)
 				}
+
+				if trailing && !isComment[i] && i == lastArgument(isComment) {
+					sb.WriteString(",")
+				}
 			} else {
 				sb.WriteString(indent)
 				sb.WriteString(p)
@@ -968,7 +1171,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 						}
 					}
 
-					if hasMore {
+					if hasMore || trailing {
 						sb.WriteString(",")
 					}
 				}
@@ -984,6 +1187,54 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	}
 
 	return inline
+}
+
+// joinSignatureAttrs lays out a function declaration's annotations — the
+// `cache="true" cacheTimeout="10"` a ColdBox handler carries between its
+// parameter list and its body.
+//
+// They are normally joined with a space. That is wrong the moment one of them
+// is a `//` comment, which CFML allows between annotations and which ColdBox's
+// own test handlers use to say what each one is for: joined onto one line, the
+// first comment swallows every annotation after it *and* the brace that opens
+// the body, leaving code that no longer parses. A comment therefore ends its
+// line, and the annotations that follow continue on the next.
+func joinSignatureAttrs(attrs []string, indent string) string {
+	var b strings.Builder
+
+	for i, a := range attrs {
+		if i > 0 {
+			if isLineCommentText(attrs[i-1]) {
+				b.WriteString("\n")
+				b.WriteString(indent)
+			} else {
+				b.WriteString(" ")
+			}
+		}
+
+		b.WriteString(a)
+	}
+
+	return b.String()
+}
+
+// isLineCommentText reports whether s is a `//` comment, which runs to the end
+// of the line it is written on and so cannot have anything placed after it.
+func isLineCommentText(s string) bool {
+	return strings.HasPrefix(strings.TrimSpace(s), "//")
+}
+
+// lastArgument returns the index of the final non-comment entry, or -1 when
+// every entry is a comment. A trailing comma belongs after that entry, not
+// after a comment that happens to follow it.
+func lastArgument(isComment []bool) int {
+	for i := len(isComment) - 1; i >= 0; i-- {
+		if !isComment[i] {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // commentsBetween returns the text of any comment child of n lying strictly
@@ -1058,6 +1309,42 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 	return items, hasLineComment
 }
 
+// hasTrailingComma reports whether n's last separator is a comma with no
+// element after it — `[1, 2, ]`, `{ a: 1, }`, `f(1, 2, )`, `function f(a, )`.
+//
+// Lucee, Adobe CF and BoxLang all accept the form, and it is common in
+// hand-maintained lists because adding an entry then touches one line rather
+// than two. Every renderer below builds its output by collecting elements and
+// re-joining them with ", ", which reconstructs the separators from scratch and
+// so silently dropped the final comma. That is a non-whitespace change, so the
+// guard rejected the file and format-on-save did nothing to it at all.
+//
+// The comma is an anonymous child, and comments may follow it
+// (`[1, 2, /* why */]`), so the scan runs backwards over the closing bracket and
+// any trailing comments and reports on the first separator it reaches.
+func hasTrailingComma(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	for i := int(n.ChildCount()) - 1; i >= 0; i-- {
+		switch kind := n.Child(uint(i)).Kind(); kind {
+		case "]", "}", ")":
+			continue
+		case ",":
+			return true
+		default:
+			if isCommentKind(kind) {
+				continue
+			}
+
+			return false
+		}
+	}
+
+	return false
+}
+
 // joinCollectionInline joins items for a single-line literal. Only safe when no
 // item is a line comment, which would swallow the rest of the line.
 //
@@ -1066,7 +1353,7 @@ func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, has
 // comment into a list entry — `[1, 2, <!--- why --->, 3]`. The comma owed to the
 // element before the comment still gets written, so the elements either side
 // stay separated.
-func joinCollectionInline(items []collectionItem) string {
+func joinCollectionInline(items []collectionItem, trailing bool) string {
 	lastElement := -1
 
 	for i, it := range items {
@@ -1084,7 +1371,7 @@ func joinCollectionInline(items []collectionItem) string {
 
 		b.WriteString(it.text)
 
-		if !it.isComment && i < lastElement {
+		if !it.isComment && (i < lastElement || (trailing && i == lastElement)) {
 			b.WriteString(",")
 		}
 	}
@@ -1094,7 +1381,7 @@ func joinCollectionInline(items []collectionItem) string {
 
 // joinCollectionLines lays items out one per line, giving a trailing comma to
 // every element that still has an element after it, and never to a comment.
-func joinCollectionLines(items []collectionItem, indent string) string {
+func joinCollectionLines(items []collectionItem, indent string, trailing bool) string {
 	lastElement := -1
 
 	for i, it := range items {
@@ -1113,7 +1400,7 @@ func joinCollectionLines(items []collectionItem, indent string) string {
 
 		b.WriteString(it.text)
 
-		if !it.isComment && i < lastElement {
+		if !it.isComment && (i < lastElement || (trailing && i == lastElement)) {
 			b.WriteString(",")
 		}
 	}
@@ -1127,9 +1414,10 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 	}
 
 	items, hasLineComment := f.collectionItems(n)
+	trailing := hasTrailingComma(n)
 
 	if !hasLineComment {
-		inline := "[" + joinCollectionInline(items) + "]"
+		inline := "[" + joinCollectionInline(items, trailing) + "]"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
@@ -1137,7 +1425,7 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "[\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "]"
+	return "[\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "]"
 }
 
 func (f *Formatter) exprObject(n *sitter.Node) string {
@@ -1146,9 +1434,10 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 	}
 
 	items, hasLineComment := f.collectionItems(n)
+	trailing := hasTrailingComma(n)
 
 	if !hasLineComment {
-		inline := "{ " + joinCollectionInline(items) + " }"
+		inline := "{ " + joinCollectionInline(items, trailing) + " }"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
@@ -1156,7 +1445,7 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 
 	indent := f.indented() + f.opts.indent(1)
 
-	return "{\n" + indent + joinCollectionLines(items, indent) + "\n" + f.indented() + "}"
+	return "{\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "}"
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {
@@ -1214,7 +1503,33 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		nameStr = " " + f.text(name)
 	}
 
-	return fmt.Sprintf("function%s%s %s", nameStr, f.exprParams(params), f.text(body))
+	// A function expression can carry annotations between its parameters and
+	// its body — `describe("x", function() labels="query" { … })`, which is how
+	// TestBox and Lucee's own suite label a spec. They are children with no
+	// field name, so rendering the node from name/parameters/body alone deleted
+	// them. The declaration path already collects them this way; this one did
+	// not, so the same annotation survived on a declaration and vanished inside
+	// an argument list.
+	var attrs []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		switch n.FieldNameForChild(uint32(i)) {
+		case "name", "parameters", "body", "return_type":
+			continue
+		}
+
+		c := n.Child(i)
+		if c.IsNamed() {
+			attrs = append(attrs, f.text(c))
+		}
+	}
+
+	attrStr := ""
+	if len(attrs) > 0 {
+		attrStr = " " + strings.Join(attrs, " ")
+	}
+
+	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.text(body))
 }
 
 // exprParams renders a formal_parameters / parameter_list node.
@@ -1226,15 +1541,34 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	// where required/type/name are siblings separated by commas, rather than
 	// being wrapped in required_parameter/optional_parameter nodes.
 	if f.hasFlatParams(params) {
-		return "(" + f.flatParams(params) + ")"
+		if inline, ok := f.flatParams(params); ok {
+			return "(" + inline + ")"
+		}
+
+		// A list this path cannot lay out on one line without breaking it —
+		// see flatParams. The source already holds a form that parses, so it is
+		// reproduced as written rather than reconstructed.
+		return f.text(params)
 	}
 
 	var parts []string
+
+	var isComment []bool
+
 	for i := uint(0); i < params.NamedChildCount(); i++ {
-		parts = append(parts, f.exprParam(params.NamedChild(i)))
+		c := params.NamedChild(i)
+		parts = append(parts, f.exprParam(c))
+		isComment = append(isComment, isCommentKind(c.Kind()))
 	}
 
-	return "(" + strings.Join(parts, ", ") + ")"
+	joined := strings.Join(parts, ", ")
+	// The comma belongs after the last parameter, never after a trailing
+	// comment — writing it there puts the separator inside the comment.
+	if last := lastArgument(isComment); last >= 0 && last == len(parts)-1 && hasTrailingComma(params) {
+		joined += ","
+	}
+
+	return "(" + joined + ")"
 }
 
 // exprFuncDefParams renders function definition parameters, each on its own line.
@@ -1243,47 +1577,27 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 		return "()"
 	}
 
-	var parts []string
+	var parts []paramPart
 
 	if f.hasFlatParams(params) {
-		// Parse flat params into individual param strings.
-		var current []string
-
-		for i := uint(0); i < params.ChildCount(); i++ {
-			c := params.Child(i)
-			switch c.Kind() {
-			case "(", ")":
-				continue
-			case ",":
-				if len(current) > 0 {
-					parts = append(parts, strings.Join(current, " "))
-					current = nil
-				}
-			case "required":
-				current = append(current, "required")
-			case "parameter_type":
-				current = append(current, f.text(c.Child(0)))
-			case "array_return_suffix":
-				current = appendTypeSuffix(current, f.text(c))
-			case "identifier":
-				current = append(current, f.text(c))
-			case "assignment_pattern":
-				left := c.ChildByFieldName("left")
-				right := c.ChildByFieldName("right")
-				current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
-			default:
-				if c.IsNamed() {
-					current = append(current, f.text(c))
-				}
-			}
-		}
-
-		if len(current) > 0 {
-			parts = append(parts, strings.Join(current, " "))
-		}
+		parts = f.flatParamParts(params)
 	} else {
+		trailing := hasTrailingComma(params)
+
 		for i := uint(0); i < params.NamedChildCount(); i++ {
-			parts = append(parts, f.exprParam(params.NamedChild(i)))
+			c := params.NamedChild(i)
+			parts = append(parts, paramPart{
+				text:      f.exprParam(c),
+				isComment: isCommentKind(c.Kind()),
+			})
+		}
+
+		// This structure carries no comma children to read the separators from,
+		// so they follow the usual rule: one after every parameter that has
+		// another after it, and one after the last only if the source wrote it.
+		last := lastParameter(parts)
+		for i := range parts {
+			parts[i].commaAfter = !parts[i].isComment && (i < last || (trailing && i == last))
 		}
 	}
 
@@ -1298,23 +1612,28 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	sb.WriteString("(\n")
 
 	leading := f.opts.CommaPosition == "before"
-	for i, p := range parts {
-		if leading {
-			if i > 0 {
-				sb.WriteString(indent)
-				sb.WriteString(", ")
-				sb.WriteString(p)
-			} else {
-				sb.WriteString(indent)
-				sb.WriteString(p)
-			}
-		} else {
-			sb.WriteString(indent)
-			sb.WriteString(p)
 
-			if i < len(parts)-1 {
-				sb.WriteString(",")
-			}
+	for i, p := range parts {
+		sb.WriteString(indent)
+
+		// In leading-comma style the separator is written before the parameter
+		// it follows, so it is the *previous* entry's comma that decides
+		// whether one appears here. A pair the source left comma-less has none
+		// to move, and stays separated by the newline that makes it parse.
+		if leading && i > 0 && parts[i-1].commaAfter {
+			sb.WriteString(", ")
+		}
+
+		sb.WriteString(p.text)
+
+		if !leading && p.commaAfter {
+			sb.WriteString(",")
+		}
+
+		// A trailing comma has nowhere to go in leading style but after the
+		// final parameter, which is where the source put it.
+		if leading && i == len(parts)-1 && p.commaAfter {
+			sb.WriteString(",")
 		}
 
 		sb.WriteString("\n")
@@ -1324,6 +1643,18 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	sb.WriteString(")")
 
 	return sb.String()
+}
+
+// lastParameter returns the index of the final entry that is a parameter rather
+// than a comment, or -1 when there is none.
+func lastParameter(parts []paramPart) int {
+	for i := len(parts) - 1; i >= 0; i-- {
+		if !parts[i].isComment {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // hasFlatParams returns true if formal_parameters uses the flat structure:
@@ -1351,23 +1682,87 @@ func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
 	return false
 }
 
-// flatParams renders parameters from the flat formal_parameters structure
-// used by function_declaration: [required] [type] name [= default], ...
-func (f *Formatter) flatParams(params *sitter.Node) string {
-	var result []string
+// paramPart is one entry of a flat formal_parameters list: its rendered text,
+// whether it is nothing but a comment, and whether the source wrote a comma
+// after it. The separator is recorded per entry rather than assumed, because
+// CFML does not require one — see flatParamParts.
+type paramPart struct {
+	text       string
+	isComment  bool
+	commaAfter bool
+}
+
+// flatParamParts splits the flat formal_parameters structure used by
+// function_declaration — `[required] [type] name [= default]` as direct
+// siblings — into one entry per parameter.
+//
+// Two entries need care, and both come from the separator not being reliable:
+//
+// A comment can sit anywhere a parameter can, including after the list's final
+// comma (`f(a, b, // note\n)`), and it is not a parameter: a separator placed
+// after one lands inside the comment rather than after the parameter it belongs
+// to.
+//
+// And the comma between two parameters is optional — `f(struct s = structNew()
+// boolean ssl)` is valid CFML, which tree-sitter-cfml has parsed since v0.26.35
+// (#49). Splitting on commas alone merged such a pair into a single entry whose
+// two halves were then rejoined with a space; the grammar accepts a newline
+// between them but not a space, so the formatter's own output no longer parsed.
+// A parameter that already has a name therefore ends where the next one's first
+// token begins, comma or not, and whether a comma followed is recorded so the
+// renderers can reproduce the source's separator instead of inventing one.
+//
+// The two callers below rendered this walk identically, so they now share it
+// rather than each carrying a copy to keep in step.
+func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
+	var parts []paramPart
 
 	var current []string
 
+	currentAllComments := true
+	currentHasName := false
+
+	flush := func(commaAfter bool) {
+		if len(current) == 0 {
+			return
+		}
+
+		parts = append(parts, paramPart{
+			text:       strings.Join(current, " "),
+			isComment:  currentAllComments,
+			commaAfter: commaAfter,
+		})
+		current = nil
+		currentAllComments = true
+		currentHasName = false
+	}
+
 	for i := uint(0); i < params.ChildCount(); i++ {
 		c := params.Child(i)
-		switch c.Kind() {
-		case "(", ")":
+		kind := c.Kind()
+
+		// The parentheses delimit the list rather than belonging to any entry
+		// in it, so they are skipped before the flags below are touched —
+		// marking the pending entry non-comment for the opening paren made
+		// every list look as though it ended in a parameter.
+		if kind == "(" || kind == ")" {
 			continue
+		}
+
+		// A parameter carries at most one name, so a token that can only open a
+		// parameter, seen once this entry already has its name, is the next
+		// parameter beginning with no comma in between.
+		if currentHasName && startsParameter(kind) {
+			flush(false)
+		}
+
+		if kind != "," && !isCommentKind(kind) {
+			currentAllComments = false
+		}
+
+		switch kind {
 		case ",":
-			if len(current) > 0 {
-				result = append(result, strings.Join(current, " "))
-				current = nil
-			}
+			flush(true)
 		case "required":
 			current = append(current, "required")
 		case "parameter_type":
@@ -1376,10 +1771,12 @@ func (f *Formatter) flatParams(params *sitter.Node) string {
 			current = appendTypeSuffix(current, f.text(c))
 		case "identifier":
 			current = append(current, f.text(c))
+			currentHasName = true
 		case "assignment_pattern":
 			left := c.ChildByFieldName("left")
 			right := c.ChildByFieldName("right")
 			current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
+			currentHasName = true
 		default:
 			if c.IsNamed() {
 				current = append(current, f.text(c))
@@ -1387,11 +1784,67 @@ func (f *Formatter) flatParams(params *sitter.Node) string {
 		}
 	}
 
-	if len(current) > 0 {
-		result = append(result, strings.Join(current, " "))
+	// Nothing is pending when the list ended with a comma, so the trailing
+	// comma is already recorded against the entry before it.
+	flush(false)
+
+	return parts
+}
+
+// startsParameter reports whether a child kind can only appear at the start of
+// a parameter, which is what makes it a boundary when one is already in hand.
+func startsParameter(kind string) bool {
+	switch kind {
+	case "required", "parameter_type", "identifier", "assignment_pattern":
+		return true
+	default:
+		return false
+	}
+}
+
+// commaLessBoundary reports whether any parameter is followed by another with no
+// comma between them. Such a pair is separated by a newline in the source and
+// only parses that way, so a renderer that lays the list out on one line has to
+// reproduce it verbatim instead.
+func commaLessBoundary(parts []paramPart) bool {
+	for i, p := range parts {
+		if i < len(parts)-1 && !p.commaAfter && !p.isComment {
+			return true
+		}
 	}
 
-	return strings.Join(result, ", ")
+	return false
+}
+
+// flatParams renders parameters from the flat formal_parameters structure
+// used by function_declaration: [required] [type] name [= default], ...
+// on a single line. It reports ok=false for a list it cannot lay out that way,
+// which the caller renders verbatim instead.
+func (f *Formatter) flatParams(params *sitter.Node) (string, bool) {
+	parts := f.flatParamParts(params)
+
+	// Two parameters with no comma between them are separated by a newline in
+	// the source, and the grammar accepts only a newline there — joining them
+	// with a space produces output it can no longer read.
+	if commaLessBoundary(parts) {
+		return "", false
+	}
+
+	var b strings.Builder
+
+	for i, p := range parts {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+
+		b.WriteString(p.text)
+
+		if p.commaAfter {
+			b.WriteString(",")
+		}
+	}
+
+	return b.String(), true
 }
 
 // appendTypeSuffix glues an array_return_suffix (`[]`, always exactly that —
@@ -1511,6 +1964,14 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	// unformattable rather than merely reformatted.
 	parenthesised := false
 
+	// The parenthesised form separates its attributes with commas
+	// (`component( output=false, javasettings={...} )`) while the bare form
+	// separates them with spaces. The commas are anonymous children, so joining
+	// everything with a space dropped them — a non-whitespace change that made
+	// the file unformattable. Which attribute carried one is recorded rather
+	// than inferred from the form, so neither is imposed on the other.
+	var commaAfter []bool
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -1522,10 +1983,15 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 			parenthesised = true
 		case ")":
 			// closing half of the same pair; reproduced with the opening one
+		case ",":
+			if len(commaAfter) > 0 {
+				commaAfter[len(commaAfter)-1] = true
+			}
 		default:
 			switch {
 			case c.IsNamed():
 				attrs = append(attrs, f.text(c))
+				commaAfter = append(commaAfter, false)
 			case componentKeywords[strings.ToLower(c.Kind())]:
 				keywords = append(keywords, f.text(c))
 			}
@@ -1538,10 +2004,24 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	}
 
 	if len(attrs) > 0 {
+		var list strings.Builder
+
+		for i, a := range attrs {
+			if i > 0 {
+				list.WriteString(" ")
+			}
+
+			list.WriteString(a)
+
+			if commaAfter[i] {
+				list.WriteString(",")
+			}
+		}
+
 		if parenthesised {
-			header += " (" + strings.Join(attrs, " ") + ")"
+			header += " (" + list.String() + ")"
 		} else {
-			header += " " + strings.Join(attrs, " ")
+			header += " " + list.String()
 		}
 	}
 
@@ -1641,15 +2121,27 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	paramStr := f.exprFuncDefParams(params)
 	sig.WriteString(paramStr)
 
+	braceLead := " "
+
 	if len(attrs) > 0 {
 		sig.WriteString(" ")
-		sig.WriteString(strings.Join(attrs, " "))
+		sig.WriteString(joinSignatureAttrs(attrs, f.opts.indent(f.level+1)))
+
+		// The body's opening brace is written straight after the signature. A
+		// trailing `//` annotation comment would swallow it, so it starts a
+		// line of its own instead.
+		if isLineCommentText(attrs[len(attrs)-1]) {
+			sig.WriteString("\n")
+			sig.WriteString(f.opts.indent(f.level))
+
+			braceLead = ""
+		}
 	}
 
 	f.iLine(sig.String())
 
 	if body != nil {
-		f.scriptBlock(body)
+		f.scriptBlockWith(body, braceLead)
 	}
 
 	f.scriptWrite("\n")
@@ -1700,8 +2192,22 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 	var decls []string
 
+	// A comment among the declarators is not one of them. Left in the list it
+	// was comma-joined like a declaration — `var x = [1], // note` — and the
+	// terminating semicolon then went after it, where the comment swallowed it.
+	// Comments are carried across separately and placed after the semicolon,
+	// which is where a trailing one was written in the first place.
+	var comments []string
+
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		d := n.NamedChild(i)
+
+		if isCommentKind(d.Kind()) {
+			comments = append(comments, strings.TrimSpace(f.text(d)))
+
+			continue
+		}
+
 		switch d.Kind() {
 		case "variable_declarator":
 			vname := d.ChildByFieldName("name")
@@ -1720,6 +2226,16 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 	f.iLine(fmt.Sprintf("%s %s;", keyword, strings.Join(decls, ", ")))
 	f.scriptWrite("\n")
+
+	// Each comment goes on a line of its own rather than trailing the
+	// semicolon. Once the semicolon is emitted the comment is no longer part of
+	// the declaration — a second pass parses it as a statement-level comment
+	// and renders it on its own line — so trailing it here would make the
+	// formatter's output differ from its own output on that output.
+	for _, c := range comments {
+		f.iLine(c)
+		f.scriptWrite("\n")
+	}
 }
 
 func (f *Formatter) scriptExprStmt(n *sitter.Node) {
@@ -1746,6 +2262,32 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
 	val := n.NamedChild(0)
+
+	// throw message="Access Denied" type="MyCustomError"; — the tag form
+	// written in script, whose attributes are space-separated rather than a
+	// comma-separated argument list. The grammar reports each as its own
+	// parameter_attribute child, and every path below reads NamedChild(0)
+	// alone, so a throw with more than one attribute silently lost all but the
+	// first — deleting the `type` a catch block dispatches on. The attributes
+	// are emitted as written: the shape inside one is the tag spelling
+	// (`name="value"`), not the `name = value` this formatter gives a call's
+	// named arguments, and rewriting it here would be a change no config asked
+	// for. Parsed only since grammar v0.26.35; before that the file was refused.
+	if val != nil && val.Kind() == "parameter_attribute" {
+		var attrs []string
+
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			c := n.NamedChild(i)
+			if c.Kind() == "parameter_attribute" {
+				attrs = append(attrs, strings.TrimSpace(f.text(c)))
+			}
+		}
+
+		f.iLine("throw " + strings.Join(attrs, " ") + ";")
+		f.scriptWrite("\n")
+
+		return
+	}
 
 	// throw(type = "x", message = "y"): the grammar gives this the same
 	// `arguments` node a call expression gets, so render it through the same

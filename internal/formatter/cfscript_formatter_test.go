@@ -452,3 +452,31 @@ User[] function getUsers() { return []; }`)
 		t.Errorf("whitespaceOnly guard rejected the format: %v", err)
 	}
 }
+
+// TestTagCallKeepsAColonSeparator covers a CF tag written in script whose
+// attributes are separated from their values by a colon rather than an equals —
+// `cfparam (name:"local.d" default:"DDD")`, which Lucee accepts. The grammar
+// gives both spellings the same assignment_expression node with the operator as
+// an anonymous child, and the renderer asked a helper for "=" that returned it
+// whether or not the node had one. Every colon therefore came back as "=", a
+// non-whitespace change, and the file was refused.
+func TestTagCallKeepsAColonSeparator(t *testing.T) {
+	t.Parallel()
+
+	out := format(t, "<cfscript>\ncfparam (name:\"local.d\" default:\"DDD\");\n</cfscript>\n")
+
+	assertContains(t, out, `name: "local.d"`)
+	assertContains(t, out, `default: "DDD"`)
+	assertNotContains(t, out, "name =")
+}
+
+// TestTagCallKeepsAnEqualsSeparator is the boundary — the equals form is
+// untouched, and keeps the spaces this formatter gives a named argument.
+func TestTagCallKeepsAnEqualsSeparator(t *testing.T) {
+	t.Parallel()
+
+	out := format(t, "<cfscript>\ncfparam (name=\"local.d\" default=\"DDD\");\n</cfscript>\n")
+
+	assertContains(t, out, `name = "local.d"`)
+	assertNotContains(t, out, "name:")
+}
