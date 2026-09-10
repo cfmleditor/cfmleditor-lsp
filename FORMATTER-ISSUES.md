@@ -271,7 +271,8 @@ upper bound rather than a proof. The next two were not latent: each was
 destroying real files while the guard reported success, because a change can be
 whitespace-only and still change what the file means. 3.5 and 3.6 are the mirror
 image, and the only ones where the guard was too strict rather than too lax —
-each refused correct output. All six are closed.
+each refused correct output. Six of the seven are closed; 3.7 is open, and is
+the one case here where a file is silently destroyed rather than refused.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -452,6 +453,66 @@ one line, so a `//` comment among them swallowed every annotation after it and
 the brace opening the body (section 4). Three files were being formatted into
 code that no longer parsed, and the guard had had no way to say so.
 
+### 3.7 Template text that is JavaScript — open
+
+3.3 is the case where the guard's premise does not hold: whitespace is not free
+in a `<pre>`, so a whitespace-only change destroyed the content and the guard
+passed it, correctly, by its own definition. This is a second instance of the
+same class, it is **not fixed**, and unlike 3.3 it is reached by an ordinary
+file rather than a rare element.
+
+A `.cfm` may be JavaScript. Lucee ships one:
+
+```cfml
+<cfcontent type="text/javascript"><cfsetting showdebugoutput="no">/*!
+ * jQuery blockUI plugin
+ …
+```
+
+To the CFML grammar that body is template text, so it goes through
+`collapseWhitespace` and `writeWrapped` and is reflowed as prose. JavaScript's
+`//` comment has no meaning to CFML, so nothing stops a following line being
+folded up onto one:
+
+```js
+    msg = msg === undefined ? opts.message : msg;      // source
+
+    // remove the current block (if there is one)
+    if (full && pageBlock)
+        remove(window, {fadeOut:0});
+```
+
+```js
+    msg = msg ===                                      // output
+    undefined ? opts.message : msg; // remove the current block (if there is one) if (full
+    && pageBlock) remove(window,
+```
+
+The `if` is now inside the comment, and the file is no longer the program it
+was. **The guard passes this** — only whitespace changed — so the formatter
+writes it, and `format -w` or format-on-save silently destroys the file. That
+makes it the most damaging case in this document; everything else here is either
+caught by the guard or produces a file that is still valid CFML.
+
+It is also long-standing rather than new: `jquery.blockUI.js.cfm` has been on
+the not-idempotent list since the original audit, recorded there as "formatted
+output no longer parses". That description was accurate and buried the point —
+the output not parsing is a *symptom*, and the disease is that the content was
+wrecked before anyone re-parsed it.
+
+Two candidate fixes, neither taken here:
+
+- **Pin the line ends.** Stop `collapseWhitespace` folding the newline that
+  terminates a `//` in template text, and stop `writeWrapped` joining across it.
+  Narrow — reflow is unchanged everywhere else — but both helpers have to become
+  line-aware, and they are currently deliberately not.
+- **A carve-out, as 3.3 took.** Reproduce a text run containing a `//` comment
+  from source instead of collapsing and re-wrapping it. Simple and obviously
+  safe, at the cost of no longer reflowing any prose containing `//`.
+
+`isLineCommentStart` already declines to read `://` as a comment, so a bare URL
+in prose does not trip either version.
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).
@@ -461,7 +522,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
-| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, though the guard confirmed the output is whitespace-only — so the file itself is unharmed and only a re-format is refused. `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; `filelisting.cfm` is characterised in 4.1. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
+| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read. For `filelisting.cfm` the guard confirmed the output is whitespace-only and the file is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is the exception in this whole document: it is JavaScript in a `.cfm`, and the formatter reflows it as prose and folds code into a `//` comment — whitespace-only, so the guard passes, so the file is written and destroyed. **Open**, see 3.7. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
@@ -688,7 +749,10 @@ the file itself is unharmed. What fails is the *second* parse — tree-sitter
 cannot read back a file it could read before, so a re-format is refused.
 
 `jquery.blockUI.js.cfm` is JavaScript in a `.cfm` and has been on this list
-since the audit.
+since the audit. It does not belong in this section, and is left counted here
+only because that is what the harness reports: the second parse failing is a
+symptom, and the cause — the formatter reflowing JavaScript as prose and folding
+code into a `//` comment — is a corruption the guard cannot see. See 3.7.
 
 `filelisting.cfm` reduces to two lines, and the cause is a literal `<-` used as
 a back-arrow glyph in body text:
