@@ -532,20 +532,53 @@ func stringSpansOf(src []byte, script scriptSpans) scriptSpans {
 }
 
 // endOfString returns the offset just past the string literal opening at pos.
-// CFML escapes a quote by doubling it ("say ""hi"""), and also accepts a
-// backslash escape, so both forms have to be stepped over rather than read as
-// the end of the literal.
+//
+// CFML escapes a quote by doubling it ("say ""hi"""), and *only* that way — a
+// backslash is an ordinary character. Treating "\\" as an escape, the way most
+// C-family languages would, runs the literal past its own closing quote and on
+// to the next one: ContentBox has `replace( inPath, "\\", "/", "all" )`, a string
+// holding one backslash, and every Windows path written `"C:\\dir\\"` ends the
+// same way. The span would then cover code, and no comment could be recognised
+// inside it.
 func endOfString(src []byte, pos int) int {
 	quote := src[pos]
 	pos++
 
 	for pos < len(src) {
 		switch {
-		case src[pos] == '\\' && pos+1 < len(src):
+		// "##" is a literal hash; a single "#" opens an interpolation, which
+		// may hold strings of its own in either quote style. Lucee's admin has
+		// `"timezone:'#replace(ds.timezone,"'","''","all")#' // ..."` — a
+		// double-quoted string whose interpolation contains three more of them.
+		// Ending the outer literal at the first of those put the rest of the
+		// line outside any string, where its "//" was read as a comment.
+		case src[pos] == '#' && pos+1 < len(src) && src[pos+1] == '#':
 			pos += 2
+		case src[pos] == '#':
+			pos = endOfInterpolation(src, pos)
 		case src[pos] == quote && pos+1 < len(src) && src[pos+1] == quote:
 			pos += 2
 		case src[pos] == quote:
+			return pos + 1
+		default:
+			pos++
+		}
+	}
+
+	return pos
+}
+
+// endOfInterpolation returns the offset just past the #...# opening at pos. It
+// and endOfString call each other, since either may nest inside the other; both
+// always advance, so the pair terminates on any input.
+func endOfInterpolation(src []byte, pos int) int {
+	pos++ // the opening #
+
+	for pos < len(src) {
+		switch src[pos] {
+		case '"', '\'':
+			pos = endOfString(src, pos)
+		case '#':
 			return pos + 1
 		default:
 			pos++

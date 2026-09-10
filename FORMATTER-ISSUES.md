@@ -35,10 +35,10 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,562** |
-| Rejected by the guard | 1,671 | 84 | **4** |
+| Formatted cleanly | 3,863 | 5,450 | **5,563** |
+| Rejected by the guard | 1,671 | 84 | **2** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
-| Not idempotent | 390 † | 36 | **1** |
+| Not idempotent | 390 † | 36 | **2** |
 | Panics | 0 | 0 | **0** |
 
 † measured at the post-fix corpus size; the pre-fix figure of 50 covered a much
@@ -67,8 +67,8 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
 |---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,720 | 20 | 30 | 2 | 1 | 3 |
-| ContentBox | 724 | 720 | 2 | 1 | 1 | 0 | 0 |
+| Lucee | 3,776 | 3,721 | 20 | 30 | 1 | 1 | 3 |
+| ContentBox | 724 | 720 | 2 | 1 | 0 | 1 | 0 |
 | ColdBox | 657 | 655 | 0 | 1 | 1 | 0 | 0 |
 | FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 |
 | TestBox | 146 | 146 | 0 | 0 | 0 | 0 | 0 |
@@ -460,11 +460,27 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 4 | Every one is a single-file cause, characterised in 4.1; one of them is a grammar gap that produces no ERROR node rather than a formatter defect. |
-| Not idempotent | 1 | `jquery.blockUI.js.cfm` — JavaScript in a `.cfm`, whose formatted output no longer parses. The two whose second pass was refused by the cfscript sub-parser are fixed: both were the comment defects in 3.6. |
+| Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
+| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, though the guard confirmed the output is whitespace-only — so the file itself is unharmed and only a re-format is refused. `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; `filelisting.cfm` is characterised in 4.1. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
+
+- Two mistakes in how the guard's string scanner reads a CFML literal, both of
+  which ran a literal past its own closing quote so that the span covered code —
+  where no comment could then be recognised. Each cost one file, and each is a
+  general defect rather than a quirk of the file that surfaced it:
+  - **A backslash is an ordinary character in CFML.** A quote is escaped by
+    doubling it and in no other way, so `"\"` is a string holding one
+    backslash — ContentBox has `replace( inPath, "\", "/", "all" )`, and every
+    Windows path written `"C:\dir\"` ends the same way. The scanner treated
+    `\"` as an escape, the way most C-family languages would.
+  - **An interpolation may hold strings of its own.** Lucee's admin has
+    `"timezone:'#replace(ds.timezone,"'","''","all")#' // …"` — a double-quoted
+    string whose `#…#` contains three more of them. The scanner ended the outer
+    literal at the first, leaving the rest of the line outside any string, where
+    its `//` was read as a comment. `##` is a literal hash and is stepped over
+    rather than read as an empty interpolation.
 
 - Three comment and separator defects in the tail, each a single file:
   - `<cfset x = /* why */ f()>` lost the comment, while the identical one
@@ -657,17 +673,45 @@ with the tree above, since the bogus self-close marker is the part that makes
 the failure invisible from the outside.
 `Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
 
-**The remaining three** are single-file causes:
+**The remaining two** are single-file causes:
 
 | Cause | File |
 |---|---|
+| Grammar gap producing no ERROR node, described above | `LDEV5763_tag_unquoted_struct.cfc` |
 | Comment text, not yet reduced — the last of the bucket 3.5 emptied | `Router.cfc` |
-| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm` |
+
+### 4.2 The two files whose output the grammar cannot re-read
+
+Counted as **not idempotent**, and worth separating from the rejections: in both
+the guard passed, so the output differs from the source in whitespace only and
+the file itself is unharmed. What fails is the *second* parse — tree-sitter
+cannot read back a file it could read before, so a re-format is refused.
+
+`jquery.blockUI.js.cfm` is JavaScript in a `.cfm` and has been on this list
+since the audit.
+
+`filelisting.cfm` reduces to two lines, and the cause is a literal `<-` used as
+a back-arrow glyph in body text:
+
+```cfml
+<a href="x"> <- back</a>    <!--- parses --->
+
+<a href="x">
+    <- back                 <!--- does not: MISSING ">" --->
+</a>
+```
+
+The `<` is read as opening a tag wherever it starts a line. ContentBox writes
+the glyph on the same line as the `<a>` tag, so the source parses; the formatter
+puts body text on its own line, and the result does not. Grammar work — the
+formatter's output is correct CFML, and re-indenting body text is not something
+it can reasonably avoid.
 
 Causes that were in this list and are now fixed are recorded above rather than
 here: the outright comment *deletions* (a `//` on the operands of an `&&`
 condition, and one parked before a ternary's `:`), the folded signature
-annotations, and the three comment and separator defects in section 4; the string-literal misread that accounted for seven
+annotations, the three comment and separator defects, and the two string-scanner
+mistakes in section 4; the string-literal misread that accounted for seven
 files in 3.5; and the two missing-script-region defects in 3.6.
 
 ## 5. Reproducing

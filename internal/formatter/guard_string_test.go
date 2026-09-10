@@ -191,3 +191,74 @@ func TestStringSpansIgnoreQuotesInComments(t *testing.T) {
 		t.Error("guard accepted a deleted statement after comments containing apostrophes")
 	}
 }
+
+// TestEndOfStringHandlesCFMLLiterals pins the scanner behind the string spans
+// directly. The two defects below only reproduce end-to-end in files of several
+// thousand lines — where the runaway span eventually swallows a comment the
+// formatter moves — so they are pinned at the level where the mistake is made.
+func TestEndOfStringHandlesCFMLLiterals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			// A quote is escaped by doubling it, and nothing else.
+			"plain literal",
+			`"abc" rest`,
+			`"abc"`,
+		},
+		{
+			"doubled quote",
+			`"say ""hi""" rest`,
+			`"say ""hi"""`,
+		},
+		{
+			// CFML has no backslash escape: `"\"` is a string holding one
+			// backslash. Reading `\"` as an escape ran the literal past its own
+			// closing quote and on to the next one — ContentBox's
+			// `replace( inPath, "\", "/", "all" )`, and every Windows path
+			// written `"C:\dir\"`.
+			"backslash is an ordinary character",
+			`"\", "/" rest`,
+			`"\"`,
+		},
+		{
+			"windows path ending in a separator",
+			`"C:\dir\" rest`,
+			`"C:\dir\"`,
+		},
+		{
+			// An interpolation may hold strings of its own, in either style.
+			// Lucee's admin nests three double-quoted strings one level down.
+			"interpolation holding nested strings",
+			`"timezone:'#replace(ds.tz,"'","''","all")#' // default" rest`,
+			`"timezone:'#replace(ds.tz,"'","''","all")#' // default"`,
+		},
+		{
+			// "##" is a literal hash, not an empty interpolation; reading it as
+			// one leaves the scan hunting for a close through the whole file.
+			"doubled hash",
+			`"a ## b" rest`,
+			`"a ## b"`,
+		},
+		{
+			"unterminated literal stops at end of input",
+			`"no close`,
+			`"no close`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.src[:endOfString([]byte(tc.src), 0)]
+			if got != tc.want {
+				t.Errorf("endOfString(%q) = %q, want %q", tc.src, got, tc.want)
+			}
+		})
+	}
+}
