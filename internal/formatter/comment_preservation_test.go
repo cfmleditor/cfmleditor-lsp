@@ -214,3 +214,37 @@ func TestDeclarationCommentPlacementIsStable(t *testing.T) {
 		t.Errorf("formatting is not a fixed point:\nfirst:\n%s\nsecond:\n%s", once, twice)
 	}
 }
+
+// TestLineCommentAmongParametersIsNotInlined covers a `//` comment inside a
+// function *expression*'s parameter list. The declaration path breaks the line
+// so the comment ends it (joinSignatureAttrs); this path renders on one line,
+// where the comment swallows the closing paren and the body's opening brace.
+// An expression has nowhere to break to, so the list is reproduced as written.
+func TestLineCommentAmongParametersIsNotInlined(t *testing.T) {
+	t.Parallel()
+
+	out := formatGuarded(t, "<cfscript>\nx = function( required string a, // why\n) { return 1; };\n</cfscript>\n")
+
+	assertContains(t, out, "// why")
+	assertNotContains(t, out, "// why)")
+	assertReparses(t, out)
+}
+
+// TestLineCommentAmongFunctionExpressionAnnotationsIsNotInlined is the same
+// defect one node up — a comment among a function expression's annotations,
+// where the swallowed token is the brace opening the closure.
+func TestLineCommentAmongFunctionExpressionAnnotationsIsNotInlined(t *testing.T) {
+	t.Parallel()
+
+	out := formatGuarded(t, "<cfscript>\ndescribe(\"x\", function() // note\n{ y = 1; });\n</cfscript>\n")
+
+	assertContains(t, out, "// note")
+
+	for _, line := range strings.Split(out, "\n") {
+		if at := strings.Index(line, "// note"); at >= 0 && strings.Contains(line[at:], "{") {
+			t.Errorf("the closure's opening brace was folded into a comment: %q", line)
+		}
+	}
+
+	assertReparses(t, out)
+}
