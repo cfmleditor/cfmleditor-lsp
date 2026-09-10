@@ -512,7 +512,7 @@ func stringSpansOf(src []byte, script scriptSpans) scriptSpans {
 
 				pos = end + 2
 			case isLineCommentStart(src, pos):
-				for pos < len(src) && src[pos] != '\n' {
+				for pos < len(src) && src[pos] != '\n' && src[pos] != '\r' {
 					pos++
 				}
 			case src[pos] == '"' || src[pos] == '\'':
@@ -634,10 +634,23 @@ func isScriptSyntaxComponent(src []byte) bool {
 	// is stepped over; only the keyword that follows it matters here.
 	all := scriptSpans{{0, len(src)}}
 
+	// A UTF-8 BOM is not whitespace, so skipWSAndComments stops on it and the
+	// keyword check below then fails on a file that is plainly a script
+	// component. Everything downstream keys off this answer: with no script
+	// region the guard stops recognising `//` as a comment anywhere in the
+	// file, and compares comment text as though it were code. That is how a
+	// leading-comma struct with a commented-out entry — `//, bundleVersion:
+	// '3.2.2.54'` — came back as a non-whitespace change, reported against the
+	// entry before it. Two files in the corpus; 554 in it carry a BOM.
+	start := 0
+	if bytes.HasPrefix(src, utf8BOM) {
+		start = len(utf8BOM)
+	}
+
 	// No string spans: this probe only steps over a leading doc block, before
 	// any string literal can appear, and computing them would recurse — string
 	// spans need the script regions this function is being called to determine.
-	pos := skipWSAndComments(src, 0, nil, all, nil)
+	pos := skipWSAndComments(src, start, nil, all, nil)
 
 	for _, kw := range []string{"abstract", "final"} {
 		if hasWordAt(src, pos, kw) {
@@ -903,8 +916,15 @@ func skipWSAndComments(src []byte, pos int, sink *[]byte, script scriptSpans, st
 			collectCommentBody(sink, src[pos+2:end])
 			pos = end + 2
 		case script.contains(pos) && isLineCommentStart(src, pos):
+			// A "//" comment ends at the end of its line, and a line does not
+			// always end in "\n": classic Mac files separate lines with a bare
+			// "\r", and CFML written on one is not rare — TestBox ships a
+			// fixture with 81 of them and no newline at all. Scanning for "\n"
+			// alone ran the comment to end of file and collected every
+			// remaining line as its body. CRLF is unaffected either way, since
+			// stopping at the "\r" leaves the "\n" as the whitespace it is.
 			end := pos + 2
-			for end < len(src) && src[end] != '\n' {
+			for end < len(src) && src[end] != '\n' && src[end] != '\r' {
 				end++
 			}
 

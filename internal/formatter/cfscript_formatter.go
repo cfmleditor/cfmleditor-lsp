@@ -220,18 +220,36 @@ func (f *Formatter) flushBlockComments() bool {
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
 func (f *Formatter) scriptNL()            { f.nl() }
 
-// keptLineComments reports whether rendered still carries every `//` comment
-// n's subtree holds.
+// keptLineComments reports whether rendered treats every `//` comment in n's
+// subtree the way a line comment has to be treated: still present, and still
+// the last thing on its line.
 //
-// An expression is rebuilt from its named fields, and a comment sitting between
-// two of them is not one of those fields, so it is dropped — silently, and only
-// for some shapes, which makes enumerating the safe ones unreliable. Checking
-// the result against the source instead catches every shape, including the ones
-// nobody has hit yet. Callers fall back to reproducing the source when this
-// returns false.
+// Both halves are needed, and both come from the same cause. An expression is
+// rebuilt from its named fields, and a comment sitting between two of them is
+// not one of those fields — so depending on the shape it is either dropped, or
+// kept and the operand that followed it in the source is folded up onto its
+// line, where the comment swallows it. The second is the more dangerous of the
+// two, because only whitespace changed and a character-level comparison cannot
+// see it.
+//
+// Which shapes are safe is not worth enumerating: `a && b` loses its comments
+// where `a or b` keeps them, and a nested parenthesised operand folds where a
+// flat one does not. Checking the result against the source catches all of
+// them, including the ones nobody has hit yet. Callers reproduce the source
+// when this returns false.
 func (f *Formatter) keptLineComments(n *sitter.Node, rendered string) bool {
 	for _, c := range f.lineComments(n) {
-		if !strings.Contains(rendered, c) {
+		at := strings.Index(rendered, c)
+		if at < 0 {
+			return false
+		}
+
+		rest := rendered[at+len(c):]
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[:nl]
+		}
+
+		if strings.TrimSpace(rest) != "" {
 			return false
 		}
 	}
@@ -406,7 +424,16 @@ func isScriptBlockStmt(n *sitter.Node) bool {
 
 // scriptBlock renders a `{ ... }` block, indenting its contents.
 func (f *Formatter) scriptBlock(n *sitter.Node) {
-	f.scriptWrite(" {")
+	f.scriptBlockWith(n, " ")
+}
+
+// scriptBlockWith renders a block, writing beforeBrace before the opening
+// brace. Every caller wants a space there — the brace follows the construct's
+// header on the same line — except a header ending in a `//` annotation
+// comment, which has already had to break the line and needs the brace at the
+// start of the next one rather than one column into it.
+func (f *Formatter) scriptBlockWith(n *sitter.Node, beforeBrace string) {
+	f.scriptWrite(beforeBrace + "{")
 	f.scriptWrite("\n\n")
 
 	f.level++
@@ -1112,6 +1139,41 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	}
 
 	return inline
+}
+
+// joinSignatureAttrs lays out a function declaration's annotations — the
+// `cache="true" cacheTimeout="10"` a ColdBox handler carries between its
+// parameter list and its body.
+//
+// They are normally joined with a space. That is wrong the moment one of them
+// is a `//` comment, which CFML allows between annotations and which ColdBox's
+// own test handlers use to say what each one is for: joined onto one line, the
+// first comment swallows every annotation after it *and* the brace that opens
+// the body, leaving code that no longer parses. A comment therefore ends its
+// line, and the annotations that follow continue on the next.
+func joinSignatureAttrs(attrs []string, indent string) string {
+	var b strings.Builder
+
+	for i, a := range attrs {
+		if i > 0 {
+			if isLineCommentText(attrs[i-1]) {
+				b.WriteString("\n")
+				b.WriteString(indent)
+			} else {
+				b.WriteString(" ")
+			}
+		}
+
+		b.WriteString(a)
+	}
+
+	return b.String()
+}
+
+// isLineCommentText reports whether s is a `//` comment, which runs to the end
+// of the line it is written on and so cannot have anything placed after it.
+func isLineCommentText(s string) bool {
+	return strings.HasPrefix(strings.TrimSpace(s), "//")
 }
 
 // lastArgument returns the index of the final non-comment entry, or -1 when
@@ -2011,15 +2073,27 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	paramStr := f.exprFuncDefParams(params)
 	sig.WriteString(paramStr)
 
+	braceLead := " "
+
 	if len(attrs) > 0 {
 		sig.WriteString(" ")
-		sig.WriteString(strings.Join(attrs, " "))
+		sig.WriteString(joinSignatureAttrs(attrs, f.opts.indent(f.level+1)))
+
+		// The body's opening brace is written straight after the signature. A
+		// trailing `//` annotation comment would swallow it, so it starts a
+		// line of its own instead.
+		if isLineCommentText(attrs[len(attrs)-1]) {
+			sig.WriteString("\n")
+			sig.WriteString(f.opts.indent(f.level))
+
+			braceLead = ""
+		}
 	}
 
 	f.iLine(sig.String())
 
 	if body != nil {
-		f.scriptBlock(body)
+		f.scriptBlockWith(body, braceLead)
 	}
 
 	f.scriptWrite("\n")

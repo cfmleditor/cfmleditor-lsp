@@ -1,6 +1,9 @@
 package formatter
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Grammar v0.26.35 made another batch of cfscript constructs parse that
 // previously produced an ERROR node, and as with v0.26.33 and v0.26.34 the
@@ -158,4 +161,84 @@ func TestV2635OrdinaryTernaryStillCollapses(t *testing.T) {
 	out := format(t, "<cfscript>\nx = ( a==1 )\n\t? \"yes\"\n\t: \"no\";\n</cfscript>\n")
 
 	assertContains(t, out, `x = ( a == 1 ) ? "yes" : "no";`)
+}
+
+// TestSignatureAnnotationCommentsAreNotFolded covers a function declaration
+// whose annotations carry `//` comments — how ColdBox's own test handlers say
+// what each cache setting is for. The annotations were joined with a space, so
+// the first comment swallowed every annotation after it *and* the brace that
+// opens the body, leaving code that no longer parses. The guard rejected it, so
+// nothing was written; the file simply stopped responding to format-on-save.
+func TestSignatureAnnotationCommentsAreNotFolded(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfscript>\ncomponent {\n" +
+		"\tfunction withAllFilters( event, rc, prc )\n" +
+		"\t\tcache        =\"true\"\n" +
+		"\t\tcacheFilter  =\"filterMutateParams\" // mutate params\n" +
+		"\t\tcacheInclude =\"slug,id\" // include slug and id\n" +
+		"\t{\n\t\tparam rc.slug = \"\";\n\t}\n}\n</cfscript>\n"
+
+	out := formatGuarded(t, src)
+
+	assertContains(t, out, "// mutate params")
+	assertContains(t, out, `cacheInclude ="slug,id"`)
+	assertContains(t, out, "// include slug and id")
+	assertReparses(t, out)
+
+	// Nothing may sit after a line comment on its own line — not the next
+	// annotation, and not the brace that opens the body.
+	for _, line := range strings.Split(out, "\n") {
+		if at := strings.Index(line, "//"); at >= 0 {
+			if rest := strings.TrimSpace(line[at:]); strings.HasSuffix(rest, "{") {
+				t.Errorf("the body's opening brace was folded into a comment: %q", line)
+			}
+		}
+	}
+}
+
+// TestSignatureAnnotationsWithoutCommentsStayOnOneLine is the boundary: only a
+// comment forces the break, so an ordinary annotated signature is unchanged.
+func TestSignatureAnnotationsWithoutCommentsStayOnOneLine(t *testing.T) {
+	t.Parallel()
+
+	out := formatGuarded(t, "<cfscript>\ncomponent {\n\tfunction f() cache=\"true\" cacheTimeout=\"10\" {\n\t\tx = 1;\n\t}\n}\n</cfscript>\n")
+
+	assertContains(t, out, `cache="true" cacheTimeout="10" {`)
+}
+
+// TestConditionOperandNotFoldedOntoItsComment is the other half of the check
+// that keeps the two cases above honest. A comment can survive a rendering and
+// still be broken by it: the operand that followed it in the source gets folded
+// up onto its line, where the comment swallows it. Only whitespace changed, so
+// a character-level comparison cannot see it — which is why the rendering is
+// checked against the source's comments for position as well as presence.
+// TestBox's MockBox.cfc, whose nested parenthesised operand folded where a flat
+// one did not.
+func TestConditionOperandNotFoldedOntoItsComment(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfscript>\n" +
+		"if (\n" +
+		"\tisObject( tree[ arg ] ) and\n" +
+		"\t// Find out if object, sometimes of course, on Adobe, is instance does not work\n" +
+		"\t(\n" +
+		"\t\tisInstanceOf( tree[ arg ], \"Component\" ) OR structKeyExists( getMetadata( tree[ arg ] ), \"extends\" )\n" +
+		"\t)\n" +
+		") {\n\tf();\n}\n</cfscript>\n"
+
+	out := formatGuarded(t, src)
+
+	for _, line := range strings.Split(out, "\n") {
+		at := strings.Index(line, "// Find out if object")
+		if at < 0 {
+			continue
+		}
+
+		if rest := strings.TrimSpace(line[at:]); !strings.HasSuffix(rest, "work") {
+			t.Errorf("an operand was folded onto the comment's line: %q", line)
+		}
+	}
+
+	assertReparses(t, out)
 }
