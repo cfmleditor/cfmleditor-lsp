@@ -35,8 +35,8 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,540** |
-| Rejected by the guard | 1,671 | 84 | **24** |
+| Formatted cleanly | 3,863 | 5,450 | **5,547** |
+| Rejected by the guard | 1,671 | 84 | **17** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **3** |
 | Panics | 0 | 0 | **0** |
@@ -67,10 +67,10 @@ Per project, current:
 
 | Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
 |---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,704 | 20 | 30 | 18 | 1 | 3 |
+| Lucee | 3,776 | 3,711 | 20 | 30 | 11 | 1 | 3 |
 | ContentBox | 724 | 720 | 2 | 1 | 1 | 0 | 0 |
 | ColdBox | 657 | 651 | 0 | 1 | 4 | 1 | 0 |
-| FW/1 | 305 | 304 | 0 | 0 | 1 | 0 | 0 |
+| FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 |
 | TestBox | 146 | 145 | 0 | 0 | 0 | 1 | 0 |
 | cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 | 0 |
 
@@ -394,11 +394,37 @@ Counts from the current `make corpus` run (section 5).
 |---|---|---|
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 24 | 14 in Lucee's `test/` directory. No bucket larger than two files left. Characterised in 4.1: five are comment-text changes, one a content-length mismatch, and seven are constructs the grammar has started parsing since the audit, which turns each from a safe refusal into a formatter defect. |
+| Guard-rejected, long tail | 17 | 9 in Lucee's `test/` directory. No bucket larger than two files left. Characterised in 4.1: four are comment-text changes that may be guard bugs rather than rendering bugs, one is a grammar gap that produces no ERROR node, and the rest are one- and two-file causes. |
 | Not idempotent | 3 | One file whose formatted output no longer parses (`jquery.blockUI.js.cfm` — JavaScript in a `.cfm`), and two whose second pass is refused by the cfscript sub-parser. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
+
+- Five constructs that v0.26.35 brought into view, each of which deleted
+  something the source had. The grammar refused all five before the bump, so
+  every one is a defect the release created rather than revealed a fix for:
+  - `Test::["f"]()`, the subscripted form of static access (#79), came back as
+    `Test["f"]()` — the `::` dropped, turning a static call into an instance
+    call. The grammar reports it as a named `static_chain` field on the
+    `subscript_expression`, exactly as it does on a `member_expression`, and
+    only the latter was special-cased.
+  - `throw message="Access Denied" type="MyCustomError";` — the tag form in
+    script — lost every attribute but the first, deleting the `type` a catch
+    block dispatches on. Each attribute is its own `parameter_attribute` child
+    and every rendering path read `NamedChild(0)` alone.
+  - `component( output=false, javasettings={…} )` lost the commas between its
+    attributes. The parenthesised form separates them with commas while the
+    bare form separates them with spaces; the commas are anonymous children, so
+    joining everything with a space dropped them. Which attribute carried one is
+    recorded now rather than inferred from the form, so neither is imposed on
+    the other.
+  - `describe("x", function() labels="query" { … })` lost the annotation — the
+    way TestBox and Lucee's suite label a spec. It is a child with no field
+    name, and the function-*expression* renderer built its output from name,
+    parameters and body alone, so the same annotation survived on a declaration
+    and vanished inside an argument list.
+  - A `//` comment parked before a ternary's `:` was dropped outright. Same root
+    cause as the `&&` condition above, and the same fix.
 
 - Two function parameters with no comma between them —
   `f(struct s = structNew()\n  boolean ssl)`, valid CFML that tree-sitter-cfml
@@ -506,37 +532,49 @@ line range that still fails *with the same verdict*, which matters because
 cutting a component in half turns a guard rejection into a parse refusal and
 reads as a much smaller repro than it is.
 
-Seven of them are constructs `tree-sitter-cfml` has started parsing since the
-audit. That is not a neutral change: while the grammar refused them the file was
-declined safely, and now that it parses them the formatter renders them, gets
-them wrong, and the guard is the only thing standing between the user and a
-damaged file. Each is a formatter bug now, not grammar work:
+**Four are comment-text changes**, where the guard's `compareCommentBodies`
+(3.1) reports the two sides' comment streams differing by one inserted `;` or
+`{` — the formatter's own cfscript canonicalisation (2.x) landing inside a
+region the guard is treating as comment text. That makes them as likely to be a
+comparison bug as a rendering one, and worth settling before any is treated as
+the latter: `Query.cfc`, `Comment.cfc`, `Build.cfc`, `Router.cfc`.
 
-| Construct | Repro | Formatter emits | Files |
-|---|---|---|---|
-| Tag-form `throw` in script | `throw message="Access Denied" type="MyCustomError";` | `throw message="Access Denied";` — every attribute after the first dropped | LDEV2693 |
-| Subscripted static access | `LDEV0255.Test::["f"]()` | `LDEV0255.Test["f"]()` — `::` dropped, static access becomes member access | LDEV0255 |
-| Parenthesised component settings | `component( output=false, javasettings = {...} )` | `component (output=false javasettings = {...})` — the separating commas dropped | LDEV5763 ×2 |
-| Unquoted struct as a tag attribute | `<cfcomponent javasettings={ maven: ["..."] }>` | `javasettings="{" maven: [ ] }>` — the value torn into separate attributes | LDEV5763 |
-| Function annotations | `function f() labels="query"`, `function f() localmode="true"` | changed | LDEV4137, fw1 `one.cfc` |
-| `param` with a struct-style argument list | `param (name:"local.d" ...)` | changed | Jira2916 |
+The outright comment *deletions* that sat in this bucket are fixed — a `//`
+comment on the operands of an `&&` condition, and one parked before a ternary's
+`:`. Both were the same root cause, and the fix that closed them (check the
+rendering against the source's own comments, reproduce verbatim when any went
+missing) is the one to reach for if another turns up.
 
-Five are comment-text changes, where the guard's `compareCommentBodies` (3.1)
-reports the two sides' comment streams differing. One is an outright deletion —
-a `//` comment between the branches of a ternary
-(`LDEV5352/ternary.cfm`) is not emitted at all. The other four are a
-*misalignment* rather than a loss: the two streams differ by one inserted `;`
-or `{`, which is the formatter's own cfscript canonicalisation (2.x) landing
-inside a region the guard is treating as comment text, so what is reported as
-changed comment text may be the comparison rather than the output. Worth
-resolving before any of them is treated as a rendering bug: `Query.cfc`,
-`Comment.cfc`, `Build.cfc`, `Router.cfc`.
+**One is a grammar gap that produces no ERROR node**, the class 6.2 describes.
+`<cfcomponent output="false" javasettings={ maven: [...] }>` — an unquoted
+struct as a tag attribute — is not parsed as one value. The grammar shreds it
+into a run of bogus attributes and ends the tag with a
+`cf_selfclose_void_tag_end` it never had:
 
-The remaining twelve are one- and two-file causes, including one content-length
-mismatch (`eventCachingCollisions/handlers/general.cfc`) and two CRLF files
-whose `//,` line comment inside a struct literal is mishandled
-(`test/cache/ehcache/Application.cfc`,
-`test/datasource/mongodb/Application.cfc`).
+```
+(cf_component_open_tag
+  (cf_tag_attributes (cf_attribute (cf_attribute_name) (quoted_cf_attribute_value …)))
+  (cf_tag_attributes (cf_attribute (cf_attribute_name) (cf_attribute_value …)))   ; javasettings={
+  (cf_tag_attributes (cf_attribute (cf_attribute_name)))                          ; maven:
+  …
+  (cf_selfclose_void_tag_end))
+```
+
+The formatter renders that faithfully and the result is garbage —
+`javasettings="{"` followed by `maven:` and `[` as separate attributes, with the
+array's contents dropped. There is nothing to fix downstream: any reconstruction
+is a reconstruction of a wrong parse. `tree-sitter-cfml` work, and worth filing
+with the tree above, since the bogus self-close marker is the part that makes it
+invisible. `Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
+
+**The remaining twelve** are one- and two-file causes:
+
+| Cause | Files |
+|---|---|
+| `param (name:"local.d" …)` — the struct-style argument list form | `Jira2916.cfc` |
+| A `//,` line comment inside a struct literal, in CRLF files | `test/cache/ehcache/Application.cfc`, `test/datasource/mongodb/Application.cfc` |
+| Content-length mismatch, cause not yet reduced | `eventCachingCollisions/handlers/general.cfc` |
+| Not yet characterised | `filelisting.cfm`, `services.datasource.create.cfm`, `ListRest.cfc`, `Jira2682.cfc`, `Jira2828.cfc`, `LDEV4637.cfc`, `LDEV5790.cfc`, `Renderer.cfc` |
 
 ## 5. Reproducing
 

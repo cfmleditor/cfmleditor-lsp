@@ -220,6 +220,25 @@ func (f *Formatter) flushBlockComments() bool {
 func (f *Formatter) scriptWrite(s string) { f.write(s) }
 func (f *Formatter) scriptNL()            { f.nl() }
 
+// keptLineComments reports whether rendered still carries every `//` comment
+// n's subtree holds.
+//
+// An expression is rebuilt from its named fields, and a comment sitting between
+// two of them is not one of those fields, so it is dropped — silently, and only
+// for some shapes, which makes enumerating the safe ones unreliable. Checking
+// the result against the source instead catches every shape, including the ones
+// nobody has hit yet. Callers fall back to reproducing the source when this
+// returns false.
+func (f *Formatter) keptLineComments(n *sitter.Node, rendered string) bool {
+	for _, c := range f.lineComments(n) {
+		if !strings.Contains(rendered, c) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // lineComments returns the text of every `//` comment in n's subtree, so a
 // rendering can be checked for the ones it dropped.
 func (f *Formatter) lineComments(n *sitter.Node) []string {
@@ -287,10 +306,8 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	// condition written with `&&` loses all but the last. Rather than guess
 	// which shapes are safe, the rendered condition is checked against the
 	// source's own comments and reproduced as written when any went missing.
-	for _, c := range f.lineComments(n) {
-		if !strings.Contains(inner, c) {
-			return verbatim()
-		}
+	if !f.keptLineComments(n, inner) {
+		return verbatim()
 	}
 
 	// If the condition is too long, break at logical operators.
@@ -539,6 +556,16 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		altStr := f.expr(alt)
 
 		inline := fmt.Sprintf("%s ? %s : %s", condStr, consStr, altStr)
+
+		// A `//` comment parked before the `:` — a common way to say why the
+		// alternative is what it is — belongs to none of the three fields above
+		// and was dropped outright. Reproduce the expression as written rather
+		// than lose it; a line comment could not be re-inlined into either
+		// branch anyway, since it runs to end of line.
+		if !f.keptLineComments(n, inline) {
+			return f.text(n)
+		}
+
 		if len(inline) > f.opts.LineWidth {
 			indent := f.opts.indent(f.level + 1)
 
@@ -723,7 +750,19 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		obj := n.ChildByFieldName("object")
 		idx := n.ChildByFieldName("index")
 
-		return fmt.Sprintf("%s[%s]", f.expr(obj), f.expr(idx))
+		// A subscript can be reached statically — `Test::["f"]()`, the
+		// subscripted form of `Test::f()` — and the grammar reports the `::` as
+		// a named static_chain field, exactly as it does on a member_expression
+		// (see memberOperator). Rendering the node from object and index alone
+		// dropped it and turned a static call into an instance call. The
+		// grammar has only parsed this form since v0.26.35 (#79), so until then
+		// the file was refused rather than mis-rendered.
+		accessor := ""
+		if sc := n.ChildByFieldName("static_chain"); sc != nil {
+			accessor = "::"
+		}
+
+		return fmt.Sprintf("%s%s[%s]", f.expr(obj), accessor, f.expr(idx))
 
 	case "parenthesized_expression":
 		// Every named child is rendered, not just the first. A comment inside
@@ -1354,7 +1393,33 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		nameStr = " " + f.text(name)
 	}
 
-	return fmt.Sprintf("function%s%s %s", nameStr, f.exprParams(params), f.text(body))
+	// A function expression can carry annotations between its parameters and
+	// its body — `describe("x", function() labels="query" { … })`, which is how
+	// TestBox and Lucee's own suite label a spec. They are children with no
+	// field name, so rendering the node from name/parameters/body alone deleted
+	// them. The declaration path already collects them this way; this one did
+	// not, so the same annotation survived on a declaration and vanished inside
+	// an argument list.
+	var attrs []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		switch n.FieldNameForChild(uint32(i)) {
+		case "name", "parameters", "body", "return_type":
+			continue
+		}
+
+		c := n.Child(i)
+		if c.IsNamed() {
+			attrs = append(attrs, f.text(c))
+		}
+	}
+
+	attrStr := ""
+	if len(attrs) > 0 {
+		attrStr = " " + strings.Join(attrs, " ")
+	}
+
+	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.text(body))
 }
 
 // exprParams renders a formal_parameters / parameter_list node.
@@ -1789,6 +1854,14 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	// unformattable rather than merely reformatted.
 	parenthesised := false
 
+	// The parenthesised form separates its attributes with commas
+	// (`component( output=false, javasettings={...} )`) while the bare form
+	// separates them with spaces. The commas are anonymous children, so joining
+	// everything with a space dropped them — a non-whitespace change that made
+	// the file unformattable. Which attribute carried one is recorded rather
+	// than inferred from the form, so neither is imposed on the other.
+	var commaAfter []bool
+
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		switch c.Kind() {
@@ -1800,10 +1873,15 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 			parenthesised = true
 		case ")":
 			// closing half of the same pair; reproduced with the opening one
+		case ",":
+			if len(commaAfter) > 0 {
+				commaAfter[len(commaAfter)-1] = true
+			}
 		default:
 			switch {
 			case c.IsNamed():
 				attrs = append(attrs, f.text(c))
+				commaAfter = append(commaAfter, false)
 			case componentKeywords[strings.ToLower(c.Kind())]:
 				keywords = append(keywords, f.text(c))
 			}
@@ -1816,10 +1894,24 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	}
 
 	if len(attrs) > 0 {
+		var list strings.Builder
+
+		for i, a := range attrs {
+			if i > 0 {
+				list.WriteString(" ")
+			}
+
+			list.WriteString(a)
+
+			if commaAfter[i] {
+				list.WriteString(",")
+			}
+		}
+
 		if parenthesised {
-			header += " (" + strings.Join(attrs, " ") + ")"
+			header += " (" + list.String() + ")"
 		} else {
-			header += " " + strings.Join(attrs, " ")
+			header += " " + list.String()
 		}
 	}
 
@@ -2024,6 +2116,32 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
 	val := n.NamedChild(0)
+
+	// throw message="Access Denied" type="MyCustomError"; — the tag form
+	// written in script, whose attributes are space-separated rather than a
+	// comma-separated argument list. The grammar reports each as its own
+	// parameter_attribute child, and every path below reads NamedChild(0)
+	// alone, so a throw with more than one attribute silently lost all but the
+	// first — deleting the `type` a catch block dispatches on. The attributes
+	// are emitted as written: the shape inside one is the tag spelling
+	// (`name="value"`), not the `name = value` this formatter gives a call's
+	// named arguments, and rewriting it here would be a change no config asked
+	// for. Parsed only since grammar v0.26.35; before that the file was refused.
+	if val != nil && val.Kind() == "parameter_attribute" {
+		var attrs []string
+
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			c := n.NamedChild(i)
+			if c.Kind() == "parameter_attribute" {
+				attrs = append(attrs, strings.TrimSpace(f.text(c)))
+			}
+		}
+
+		f.iLine("throw " + strings.Join(attrs, " ") + ";")
+		f.scriptWrite("\n")
+
+		return
+	}
 
 	// throw(type = "x", message = "y"): the grammar gives this the same
 	// `arguments` node a call expression gets, so render it through the same
