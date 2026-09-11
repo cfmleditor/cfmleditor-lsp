@@ -1519,9 +1519,20 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		}
 
 		c := n.Child(i)
-		if c.IsNamed() {
-			attrs = append(attrs, f.text(c))
+		if !c.IsNamed() {
+			continue
 		}
+
+		// A `//` comment can sit among the annotations, and this path renders
+		// the whole expression on one line — the body's opening brace included,
+		// which the comment would then swallow. The declaration path breaks the
+		// line instead (joinSignatureAttrs); an expression has nowhere to break
+		// to, so it is reproduced as written.
+		if f.isLineCommentNode(c) {
+			return f.text(n)
+		}
+
+		attrs = append(attrs, f.text(c))
 	}
 
 	attrStr := ""
@@ -1559,6 +1570,12 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 		c := params.NamedChild(i)
 		parts = append(parts, f.exprParam(c))
 		isComment = append(isComment, isCommentKind(c.Kind()))
+
+		// As in the flat path above: a line comment cannot be joined onto a
+		// single line, because it would swallow the rest of it.
+		if f.isLineCommentNode(c) {
+			return f.text(params)
+		}
 	}
 
 	joined := strings.Join(parts, ", ")
@@ -1828,6 +1845,17 @@ func (f *Formatter) flatParams(params *sitter.Node) (string, bool) {
 	// with a space produces output it can no longer read.
 	if commaLessBoundary(parts) {
 		return "", false
+	}
+
+	// A `//` comment among the parameters cannot go on a single line either:
+	// everything after it — the remaining parameters, the closing paren, and
+	// the brace opening the body — becomes part of the comment. flatParamParts
+	// collects comments as entries of their own, so this path has to say no to
+	// them rather than join them.
+	for _, p := range parts {
+		if p.isComment && isLineCommentText(p.text) {
+			return "", false
+		}
 	}
 
 	var b strings.Builder

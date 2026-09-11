@@ -271,7 +271,10 @@ upper bound rather than a proof. The next two were not latent: each was
 destroying real files while the guard reported success, because a change can be
 whitespace-only and still change what the file means. 3.5 and 3.6 are the mirror
 image, and the only ones where the guard was too strict rather than too lax —
-each refused correct output. All six are closed.
+each refused correct output. 3.7 is the second instance of 3.3's class — the
+guard working as specified against a premise that does not hold — and is the
+only entry not fully closed: its main defect is fixed and a narrow residue is
+described there.
 
 ### 3.1 CFML comments were skipped entirely — fixed
 
@@ -452,6 +455,96 @@ one line, so a `//` comment among them swallowed every annotation after it and
 the brace opening the body (section 4). Three files were being formatted into
 code that no longer parsed, and the guard had had no way to say so.
 
+### 3.7 Template text that is JavaScript — mostly fixed
+
+3.3 is the case where the guard's premise does not hold: whitespace is not free
+in a `<pre>`, so a whitespace-only change destroyed the content and the guard
+passed it, correctly, by its own definition. This is a second instance of the
+same class, and until this change it was the only entry in this document where a
+file was **silently destroyed** rather than refused.
+
+A `.cfm` may be JavaScript. Lucee ships one:
+
+```cfml
+<cfcontent type="text/javascript"><cfsetting showdebugoutput="no">/*!
+ * jQuery blockUI plugin
+ …
+```
+
+To the CFML grammar that body is template text, so it went through
+`collapseWhitespace` and `writeWrapped` and was reflowed as prose. JavaScript's
+`//` comment means nothing to CFML, so nothing stopped a following line being
+folded up onto one:
+
+```js
+    msg = msg === undefined ? opts.message : msg;      // source
+
+    // remove the current block (if there is one)
+    if (full && pageBlock)
+        remove(window, {fadeOut:0});
+```
+
+```js
+    msg = msg ===                                      // before the fix
+    undefined ? opts.message : msg; // remove the current block (if there is one) if (full
+    && pageBlock) remove(window,
+```
+
+The `if` is inside the comment, and the file is no longer the program it was.
+The guard passes — only whitespace changed — so the formatter writes it.
+
+#### The fix
+
+`writeText` (`element_formatter.go`) replaces the
+`writeWrapped(collapseWhitespace(…))` pair at all four text call sites. A run
+holding a `//` comment keeps the line structure it was written with; everything
+else is collapsed and reflowed as before. It is the carve-out 3.3 took for
+`<pre>`, for the same reason — the guard's premise is that whitespace is free,
+and in text whose line breaks terminate comments it is not.
+
+Reflowing is given up for such a run rather than taught to break safely. Doing
+the latter needs two invariants, not one: `collapseWhitespace` has to keep the
+newline that ends a comment, *and* `safeBreaks` has to stop offering break
+positions after a `//` on its line — otherwise wrapping splits the comment and
+the tail becomes code again. A run that is JavaScript wants its own line
+structure kept regardless, so the simpler rule is also the better one here.
+
+`isLineCommentStart` already declines to read the `//` of a URL scheme as a
+comment, so a link in prose does not pin a line.
+
+Measured on `jquery.blockUI.js.cfm`: source comments still ending their own line
+in the output go from **4 of 81 to 78 of 81**.
+
+#### What is still wrong — the remaining 3 of 81
+
+The three that stay broken are a different mechanism, and the carve-out cannot
+reach them. Each is a comment whose *text* the CFML grammar tokenises, so it
+arrives as several CST nodes rather than one, and each node's run is emitted on
+its own line — putting the tail of the comment on a new line, as code:
+
+| Source | Output |
+|---|---|
+| `centerX: true, // <-- only effects element blocking (…)` | `centerX: true, //` ⏎ `<-- only effects element blocking (…)` |
+| `// $.blockUI.defaults.css = {};` | `// $.blockUI.defaults.css =` ⏎ `{};` |
+| `// … browse_thread/thread/36640a8730503595/2f6a79a77a78e493#2f6a79a77a78e493` | `// …/2f6a79a77a78e493` ⏎ `#2f6a79a77a78e493` |
+
+`<--` is read as markup, and `#…#` as an interpolation. Both are reasonable
+readings of a `.cfm`; they are only wrong because the surrounding text is a
+JavaScript comment, which CFML has no concept of.
+
+Fixing these means keeping a run together across node boundaries whenever a `//`
+is open — and that is where it stops being safe. `//` is **not** a comment in
+HTML, so a rule that absorbs following nodes into a verbatim run would stop
+formatting real elements whenever a `//` appears in adjacent prose:
+`<p>a // b <b>bold</b></p>` would emit the `<b>` verbatim. That is a genuine
+over-reach for the common case in order to serve the rare one, so it is left
+undone deliberately rather than overlooked.
+
+The file therefore stays on the not-idempotent list. What changed is the
+severity: it is no longer a file the formatter destroys, but one it leaves three
+comments wrong in.
+
+
 ## 4. Outstanding
 
 Counts from the current `make corpus` run (section 5).
@@ -461,7 +554,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
-| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, though the guard confirmed the output is whitespace-only — so the file itself is unharmed and only a re-format is refused. `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; `filelisting.cfm` is characterised in 4.1. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
+| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
@@ -688,7 +781,11 @@ the file itself is unharmed. What fails is the *second* parse — tree-sitter
 cannot read back a file it could read before, so a re-format is refused.
 
 `jquery.blockUI.js.cfm` is JavaScript in a `.cfm` and has been on this list
-since the audit.
+since the audit. The second parse failing was always a symptom rather than the
+problem: the cause was the formatter reflowing JavaScript as prose and folding
+code into `//` comments, which the guard cannot see. That is fixed in 3.7, bar a
+residue of three comments described there, and the file stays counted here
+because the residue still leaves the output unparseable.
 
 `filelisting.cfm` reduces to two lines, and the cause is a literal `<-` used as
 a back-arrow glyph in body text:

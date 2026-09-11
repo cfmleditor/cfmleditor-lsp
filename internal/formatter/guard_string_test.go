@@ -262,3 +262,49 @@ func TestEndOfStringHandlesCFMLLiterals(t *testing.T) {
 		})
 	}
 }
+
+// TestLoneHashIsNotAnInterpolation covers a `#` with no closing `#`. CFML
+// itself requires `##` for a literal hash, so inside CFML every `#` is paired —
+// but a `<script>` region is JavaScript, where CFML's rules do not apply and
+// `var s = "#id"` is an ordinary CSS selector.
+//
+// Treating that `#` as an interpolation opener sent the scan hunting for a
+// close that never comes, and the enclosing literal then ran to end of file.
+// That is the one shape in this file that is a real blind spot rather than a
+// false rejection: with every later position looking like it is inside a
+// string, no comment is recognised in the rest of the file and the guard stops
+// checking comment extents at all.
+func TestLoneHashIsNotAnInterpolation(t *testing.T) {
+	t.Parallel()
+
+	src := "<script>\nvar s = \"#id\";\n// note\nvar y = 2;\n</script>\n"
+
+	// Joining the statement onto the comment line comments it out. Only
+	// whitespace changed, so the extent check is the only thing that can see it.
+	damaged := "<script>\nvar s = \"#id\";\n// note var y = 2;\n</script>\n"
+
+	if err := checkWhitespaceOnly([]byte(src), []byte(damaged), true, true); err == nil {
+		t.Error("guard accepted a statement folded into a comment: the lone # ran the string span to end of file, so nothing after it was checked")
+	}
+
+	spans := stringSpansOf([]byte(src), scriptRegionsOf([]byte(src)))
+	if len(spans) != 1 || spans[0].end >= len(src) {
+		t.Errorf("string span should cover only %q, got %v over %d bytes", `"#id"`, spans, len(src))
+	}
+}
+
+// TestBalancedHashIsStillAnInterpolation is the boundary: the fix must not stop
+// recognising a real interpolation, or the nested-string case above regresses.
+func TestBalancedHashIsStillAnInterpolation(t *testing.T) {
+	t.Parallel()
+
+	got := `"a#b#c" rest`[:endOfString([]byte(`"a#b#c" rest`), 0)]
+	if got != `"a#b#c"` {
+		t.Errorf("endOfString = %q, want %q", got, `"a#b#c"`)
+	}
+
+	src := `"timezone:'#replace(ds.tz,"'","''","all")#' // default" rest`
+	if got := src[:endOfString([]byte(src), 0)]; got != `"timezone:'#replace(ds.tz,"'","''","all")#' // default"` {
+		t.Errorf("nested interpolation: endOfString = %q", got)
+	}
+}

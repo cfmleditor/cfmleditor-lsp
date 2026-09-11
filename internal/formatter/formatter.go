@@ -555,7 +555,11 @@ func endOfString(src []byte, pos int) int {
 		case src[pos] == '#' && pos+1 < len(src) && src[pos+1] == '#':
 			pos += 2
 		case src[pos] == '#':
-			pos = endOfInterpolation(src, pos)
+			if end, ok := endOfInterpolation(src, pos); ok {
+				pos = end
+			} else {
+				pos++
+			}
 		case src[pos] == quote && pos+1 < len(src) && src[pos+1] == quote:
 			pos += 2
 		case src[pos] == quote:
@@ -568,24 +572,56 @@ func endOfString(src []byte, pos int) int {
 	return pos
 }
 
-// endOfInterpolation returns the offset just past the #...# opening at pos. It
-// and endOfString call each other, since either may nest inside the other; both
-// always advance, so the pair terminates on any input.
-func endOfInterpolation(src []byte, pos int) int {
-	pos++ // the opening #
+// endOfInterpolation returns the offset just past the #...# opening at pos, and
+// whether pos opened one at all. It and endOfString call each other, since
+// either may nest inside the other; both always advance, so the pair terminates
+// on any input.
+//
+// A lone "#" is not an interpolation. CFML itself requires the escaped "##" for
+// a literal hash, but a <script> region is JavaScript, where CFML's rules do not
+// apply and `var s = "#id"` — a CSS selector — is ordinary. Treating that "#" as
+// an opener sent the scan hunting for a close that never comes, and the
+// enclosing literal then ran to end of file: every later position looked like it
+// was inside a string, so no comment was recognised in the rest of the file and
+// the guard stopped checking comment extents entirely.
+func endOfInterpolation(src []byte, pos int) (int, bool) {
+	if !closingHashOnLine(src, pos+1) {
+		return pos, false
+	}
 
-	for pos < len(src) {
-		switch src[pos] {
+	p := pos + 1
+
+	for p < len(src) {
+		switch src[p] {
 		case '"', '\'':
-			pos = endOfString(src, pos)
+			p = endOfString(src, p)
 		case '#':
-			return pos + 1
+			return p + 1, true
+		case '\n':
+			// An interpolation closes on the line it opened on. Bounding the
+			// walk here keeps a nested literal that runs away from taking the
+			// rest of the file with it.
+			return pos, false
 		default:
-			pos++
+			p++
 		}
 	}
 
-	return pos
+	return pos, false
+}
+
+// closingHashOnLine reports whether a "#" appears before the end of the line
+// starting at pos. It is a flat scan, deliberately: the nested walk above can
+// step over a newline through a string literal, so the cheap bound has to be
+// taken before that walk starts.
+func closingHashOnLine(src []byte, pos int) bool {
+	for ; pos < len(src) && src[pos] != '\n'; pos++ {
+		if src[pos] == '#' {
+			return true
+		}
+	}
+
+	return false
 }
 
 // lowerASCIIBytes lowercases A-Z and copies every other byte through.
@@ -2616,8 +2652,9 @@ func (f *Formatter) formatText(n *sitter.Node) {
 	if strings.TrimSpace(raw) == "" {
 		return
 	}
-	// Collapse all whitespace to single spaces (HTML whitespace rules).
-	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
+	// Collapse all whitespace to single spaces (HTML whitespace rules) — unless
+	// the text holds a `//` comment, whose line break is load-bearing.
+	f.writeText(strings.TrimSpace(raw))
 }
 
 // formatDoctype emits a <!DOCTYPE ...> or <?xml ...?> declaration verbatim on its
