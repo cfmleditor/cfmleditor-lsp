@@ -66,7 +66,7 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 	// Self-closing HTML tag, void element, or element with no recognizable structure: emit verbatim
 	if startTag == nil || (endTag == nil && len(bodyNodes) == 0) || f.isVoidElement(startTag) {
 		f.nl()
-		f.writeWrapped(collapseWhitespace(strings.TrimSpace(f.text(n))))
+		f.writeText(strings.TrimSpace(f.text(n)))
 
 		return
 	}
@@ -239,7 +239,7 @@ func (f *Formatter) formatInlineRun(nodes []*sitter.Node) {
 		return
 	}
 
-	f.writeWrapped(collapseWhitespace(trimmed))
+	f.writeText(trimmed)
 }
 
 // formatBodyRuns processes body nodes by grouping consecutive inline nodes
@@ -293,7 +293,51 @@ func (f *Formatter) formatTextRun(nodes []*sitter.Node) {
 		return
 	}
 
-	f.writeWrapped(collapseWhitespace(trimmed))
+	f.writeText(trimmed)
+}
+
+// writeText emits a run of template text: collapsed to HTML whitespace rules and
+// reflowed to the line width, unless it holds a `//` line comment.
+//
+// A `.cfm` may be JavaScript — Lucee ships one, opening
+// `<cfcontent type="text/javascript">`. To the CFML grammar that body is
+// template text like any other, so it went through collapseWhitespace and
+// writeWrapped and was reflowed as prose. JavaScript's `//` means nothing to
+// CFML, so nothing stopped the next line being folded up onto a comment, and the
+// code after it became part of the comment. Only whitespace changed, so the
+// whitespaceOnly guard passed and the file was written: this is the one defect
+// in FORMATTER-ISSUES.md that silently destroyed a file rather than refusing it.
+//
+// The carve-out is the one 3.3 took for `<pre>`, and for the same reason: the
+// guard's premise is that whitespace is free, and in text whose line breaks
+// terminate comments it is not. Reflowing is given up for such a run rather than
+// taught to break safely — the break points would have to exclude every position
+// after a `//` on its line as well, and a run that is JavaScript wants its own
+// line structure kept regardless.
+func (f *Formatter) writeText(text string) {
+	if holdsLineComment(text) {
+		f.writeIndent()
+		f.write(text)
+		f.write("\n")
+
+		return
+	}
+
+	f.writeWrapped(collapseWhitespace(text))
+}
+
+// holdsLineComment reports whether text contains a `//` that opens a comment.
+// isLineCommentStart already declines to read the "//" of a URL scheme as one,
+// so a bare link in prose does not pin the line.
+func holdsLineComment(text string) bool {
+	b := []byte(text)
+	for i := range b {
+		if isLineCommentStart(b, i) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // collapseWhitespace replaces runs of whitespace with a single space.

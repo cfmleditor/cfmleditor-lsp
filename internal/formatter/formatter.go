@@ -2652,8 +2652,9 @@ func (f *Formatter) formatText(n *sitter.Node) {
 	if strings.TrimSpace(raw) == "" {
 		return
 	}
-	// Collapse all whitespace to single spaces (HTML whitespace rules).
-	f.writeWrapped(collapseWhitespace(strings.TrimSpace(raw)))
+	// Collapse all whitespace to single spaces (HTML whitespace rules) — unless
+	// the text holds a `//` comment, whose line break is load-bearing.
+	f.writeText(strings.TrimSpace(raw))
 }
 
 // formatDoctype emits a <!DOCTYPE ...> or <?xml ...?> declaration verbatim on its
