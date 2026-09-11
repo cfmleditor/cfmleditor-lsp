@@ -51,6 +51,7 @@ type Server struct {
 	Formatting               config.ResolvedFormatting // formatting settings
 	Linting                  bool                      // enable cflint diagnostics
 	References               bool                      // answer textDocument/references (opt-in; see config.References)
+	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
 	TagSnippets              bool                      // insert snippets for tags
 	FunctionSnippets         bool                      // insert snippets for functions
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index

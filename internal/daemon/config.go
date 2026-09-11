@@ -408,6 +408,7 @@ func SettingsFrom(c *Config) server.Settings {
 	comp := c.ResolvedCompletions()
 
 	return server.Settings{
+		ConfigPath:               c.Path,
 		WorkspaceFolders:         c.WorkspaceFolders(),
 		IndexGlobs:               c.IndexGlobs(),
 		Mappings:                 c.Mappings(),

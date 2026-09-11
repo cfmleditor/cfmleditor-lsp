@@ -218,7 +218,7 @@ Precedence, when both are present:
 | | Result |
 |---|---|
 | Key set in `.cfmleditor.json` | The file's value wins |
-| Key set only in editor settings | The editor's value applies |
+| Key set only in editor settings, with no config file found | The editor's value applies |
 | `mappings`, `beanPaths`, and other maps | Merged per key; the file wins on conflicts |
 | `componentResolvers`, `propertyResolvers` | Both apply, with the file's entries tried first |
 
@@ -226,6 +226,7 @@ Relative paths resolve against the directory of whichever source declared them â
 
 Two caveats:
 
+- Editor settings configure a session that has no `.cfmleditor.json` of its own. When a config file is found, it is the sole source: the editor's payload is not merged on top of it.
 - Settings are read once, at `initialize`. Changing them requires restarting the language server.
 - `debug` is ignored here, because the logger is constructed before the client connects. Use `.cfmleditor.json` for that one.
 

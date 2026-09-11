@@ -111,14 +111,33 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
 	}
 
-	// In standalone mode, load config from workspace roots if not already
-	// configured. This MUST happen before the goroutines below are spawned:
-	// applyConfig is what sets s.Linting, and initLinter returns early when it
-	// reads that field as false, which would leave s.linter nil and silently
-	// disable diagnostics for the rest of the session. Spawning after the
-	// writes also gives the goroutines a happens-before edge to them, so no
-	// locking is needed for config that is only written here.
-	if len(s.ComponentResolvers) == 0 {
+	// Find and apply the workspace config, unless the daemon already did.
+	//
+	// s.ConfigPath is the file the daemon read before this session existed; it
+	// hands every session the same settings, so there is nothing left to look
+	// for. It is empty when the daemon's own walk — upwards from the process's
+	// working directory — found nothing, and that is not the same question as
+	// this one: the walk below starts from the workspace roots the editor
+	// reported, which can sit under a config the first walk never passed. So
+	// an empty path means discovery still has to happen here, and it is also
+	// the only path on which the editor's initializationOptions are read.
+	//
+	// The condition used to be "has this session no component resolvers yet",
+	// standing in for "has it been configured". That made everything else here
+	// depend on an unrelated config key: adding one resolver to a working
+	// .cfmleditor.json silently changed what a session did at startup, which is
+	// how the completions defaults came to be dropped for some workspaces and
+	// not others. The re-read it allowed was what repaired them, by accident;
+	// now that NewServer and Settings carry those defaults properly, it has
+	// nothing left to contribute.
+	//
+	// This MUST happen before the goroutines below are spawned: applyConfig is
+	// what sets s.Linting, and initLinter returns early when it reads that
+	// field as false, which would leave s.linter nil and silently disable
+	// diagnostics for the rest of the session. Spawning after the writes also
+	// gives the goroutines a happens-before edge to them, so no locking is
+	// needed for config that is only written here.
+	if s.ConfigPath == "" {
 		s.loadWorkspaceConfig(s.editorConfig(params.InitializationOptions))
 	}
 
