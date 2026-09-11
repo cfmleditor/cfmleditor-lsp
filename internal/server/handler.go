@@ -118,9 +118,11 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// for. It is empty when the daemon's own walk — upwards from the process's
 	// working directory — found nothing, and that is not the same question as
 	// this one: the walk below starts from the workspace roots the editor
-	// reported, which can sit under a config the first walk never passed. So
-	// an empty path means discovery still has to happen here, and it is also
-	// the only path on which the editor's initializationOptions are read.
+	// reported, which can sit under a config the first walk never passed.
+	//
+	// The editor's initializationOptions are per-session and the daemon never
+	// saw them, so they are merged either way — see overlayEditorConfig for why
+	// that cannot be a second partial application.
 	//
 	// The condition used to be "has this session no component resolvers yet",
 	// standing in for "has it been configured". That made everything else here
@@ -137,8 +139,10 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// diagnostics for the rest of the session. Spawning after the writes also
 	// gives the goroutines a happens-before edge to them, so no locking is
 	// needed for config that is only written here.
-	if s.ConfigPath == "" {
-		s.loadWorkspaceConfig(s.editorConfig(params.InitializationOptions))
+	if editorCfg := s.editorConfig(params.InitializationOptions); s.ConfigPath == "" {
+		s.loadWorkspaceConfig(editorCfg)
+	} else if editorCfg != nil {
+		s.overlayEditorConfig(editorCfg)
 	}
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)

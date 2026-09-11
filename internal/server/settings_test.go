@@ -224,3 +224,139 @@ func TestEditorSettingsReachASessionWithNoConfigPath(t *testing.T) {
 		t.Error("initializationOptions were never applied")
 	}
 }
+
+// initializeServerWith drives handleInitialize on an existing Server, so a
+// caller can apply Settings to it first the way a daemon session does.
+// lintinit_test.go's initializeWith builds its own Server, which cannot.
+func initializeServerWith(t *testing.T, s *Server, dir, initOptions string) {
+	t.Helper()
+
+	params := map[string]any{
+		"processId":        nil,
+		"rootUri":          "file://" + dir,
+		"capabilities":     map[string]any{},
+		"workspaceFolders": []map[string]any{{"uri": "file://" + dir, "name": "w"}},
+	}
+
+	if initOptions != "" {
+		var opts any
+		if err := json.Unmarshal([]byte(initOptions), &opts); err != nil {
+			t.Fatalf("test initOptions is not valid JSON: %v", err)
+		}
+
+		params["initializationOptions"] = opts
+	}
+
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshalling params: %v", err)
+	}
+
+	if _, err := s.handleInitialize(context.Background(), raw); err != nil {
+		t.Fatalf("handleInitialize: %v", err)
+	}
+}
+
+// TestEditorSettingsMergeWithTheDaemonsConfig is the IntelliLucee case. That
+// plugin has no .cfmleditor.json to write to: it sends every formatter setting
+// from the IDE's settings UI as initializationOptions, and starts the server
+// with no working directory of its own. Whether the daemon's walk finds a
+// config file therefore depends on where the IDE process happens to have been
+// started — and must not decide whether the IDE's settings are honoured.
+func TestEditorSettingsMergeWithTheDaemonsConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	if err := os.WriteFile(cfgPath, []byte(`{
+		"mappings": {"models": "./models"},
+		"formatting": {"enabled": true, "lineWidth": 100}
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{
+		ConfigPath: cfgPath,
+		Mappings:   map[string]string{"models": filepath.Join(dir, "models")},
+		Formatting: config.ResolvedFormatting{Enabled: true, LineWidth: 100},
+	}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true, "lineWidth": 100, "attrBreakThreshold": 7}}`)
+
+	if got := s.Formatting.AttrBreakThreshold; got != 7 {
+		t.Errorf("attrBreakThreshold from the editor = %d, want 7 — initializationOptions were dropped", got)
+	}
+
+	if got := s.Formatting.LineWidth; got != 100 {
+		t.Errorf("lineWidth = %d, want 100 from the config file", got)
+	}
+
+	if got := s.Mappings["models"]; got != filepath.Join(dir, "models") {
+		t.Errorf("the config file's mappings were lost in the merge: %q", got)
+	}
+}
+
+// TestConfigFileStillWinsOverEditorSettings keeps the documented precedence
+// through the merge: the file wins on every key it sets.
+func TestConfigFileStillWinsOverEditorSettings(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	if err := os.WriteFile(cfgPath, []byte(`{"formatting": {"enabled": true, "lineWidth": 100}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{ConfigPath: cfgPath, Formatting: config.ResolvedFormatting{Enabled: true, LineWidth: 100}}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true, "lineWidth": 40}}`)
+
+	if got := s.Formatting.LineWidth; got != 100 {
+		t.Errorf("lineWidth = %d, want the config file's 100", got)
+	}
+}
+
+// TestOverlayDoesNotDuplicateResolvers is why the overlay clears before it
+// applies. applyConfig appends resolvers, so re-applying the same file on top
+// of what the daemon already put there would list every one of them twice.
+func TestOverlayDoesNotDuplicateResolvers(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	if err := os.WriteFile(cfgPath, []byte(`{
+		"componentResolvers": [{"match": "getService(\"$1\")", "resolve": "svc.$1", "prefix": "getService"}]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{
+		ConfigPath:         cfgPath,
+		ComponentResolvers: []config.Resolver{{Match: `getService("$1")`, Resolve: "svc.$1", Prefix: "getService"}},
+	}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true}}`)
+
+	if got := len(s.ComponentResolvers); got != 1 {
+		t.Errorf("component resolvers = %d, want 1: %+v", got, s.ComponentResolvers)
+	}
+}
+
+// TestNoEditorSettingsMeansNoOverlay keeps the previous behaviour where there
+// is nothing to merge: a session the daemon configured is left alone.
+func TestNoEditorSettingsMeansNoOverlay(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	if err := os.WriteFile(cfgPath, []byte(`{"linting": {"enabled": false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{ConfigPath: cfgPath, Linting: true}.Apply(s)
+	initializeIn(t, s, dir)
+
+	if !s.Linting {
+		t.Error("the config was re-applied with nothing to merge into it")
+	}
+}

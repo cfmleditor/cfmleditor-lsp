@@ -149,7 +149,7 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 
 | Field | Default | Description |
 |---|---|---|
-| `enabled` | `false` | Enable the formatter. When false, formatting requests are ignored. |
+| `enabled` | `false` | Enable the formatter. When false, formatting requests are ignored. Omitting it leaves whatever the editor's settings said, rather than switching the formatter off. |
 | `selfCloseTags` | `true` | Convert void/implicit-end HTML tags to self-closing form (e.g. `<br>` → `<br />`). |
 | `whitespaceOnly` | `true` | Reject formatting results that change non-whitespace content (safety guard). |
 | `queryFormat` | `false` | Format `<cfquery>` content (SQL re-indentation, keyword casing). When false, query content is emitted verbatim. |
@@ -218,7 +218,8 @@ Precedence, when both are present:
 | | Result |
 |---|---|
 | Key set in `.cfmleditor.json` | The file's value wins |
-| Key set only in editor settings, with no config file found | The editor's value applies |
+| Key set only in editor settings | The editor's value applies |
+| `formatting` set on both | Merged key by key — the file wins on the keys it names, the editor's other keys stand |
 | `mappings`, `beanPaths`, and other maps | Merged per key; the file wins on conflicts |
 | `componentResolvers`, `propertyResolvers` | Both apply, with the file's entries tried first |
 
@@ -226,7 +227,6 @@ Relative paths resolve against the directory of whichever source declared them �
 
 Two caveats:
 
-- Editor settings configure a session that has no `.cfmleditor.json` of its own. When a config file is found, it is the sole source: the editor's payload is not merged on top of it.
 - Settings are read once, at `initialize`. Changing them requires restarting the language server.
 - `debug` is ignored here, because the logger is constructed before the client connects. Use `.cfmleditor.json` for that one.
 

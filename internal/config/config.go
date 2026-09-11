@@ -126,8 +126,13 @@ func ResolveCompletions(c *Completions) ResolvedCompletions {
 
 // Formatting holds formatter configuration.
 type Formatting struct {
-	Enabled                bool   `json:"enabled"`
-	Debug                  bool   `json:"debug"`
+	// Enabled and Debug are pointers for the same reason every other flag here
+	// is: Merge has to tell "the file turned this off" from "the file did not
+	// mention it". As plain bools, a config file naming any formatting key at
+	// all silently switched formatting off for a client that had enabled it
+	// through initializationOptions.
+	Enabled                *bool  `json:"enabled"`
+	Debug                  *bool  `json:"debug"`
 	SelfCloseTags          *bool  `json:"selfCloseTags"`
 	WhitespaceOnly         *bool  `json:"whitespaceOnly"`
 	QueryFormat            *bool  `json:"queryFormat"`
@@ -246,8 +251,8 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{
-			Enabled:                f.Enabled,
-			Debug:                  f.Debug,
+			Enabled:                BoolDefault(f.Enabled, false),
+			Debug:                  BoolDefault(f.Debug, false),
 			SelfCloseTags:          BoolDefault(f.SelfCloseTags, true),
 			WhitespaceOnly:         BoolDefault(f.WhitespaceOnly, true),
 			QueryFormat:            BoolDefault(f.QueryFormat, false),
@@ -338,9 +343,7 @@ func Merge(base, over *JSON) *JSON {
 	out.ComponentResolvers = append(append([]Resolver{}, over.ComponentResolvers...), base.ComponentResolvers...)
 	out.PropertyResolvers = append(append([]PropResolver{}, over.PropertyResolvers...), base.PropertyResolvers...)
 
-	if over.Formatting != nil {
-		out.Formatting = over.Formatting
-	}
+	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
 
 	if over.Linting != nil {
 		out.Linting = over.Linting
@@ -355,6 +358,66 @@ func Merge(base, over *JSON) *JSON {
 	}
 
 	out.Debug = base.Debug || over.Debug
+
+	return &out
+}
+
+// mergeFormatting unions two formatting blocks key by key, with over's value
+// winning wherever over states one.
+//
+// It used to replace the whole block, which reads as "the file wins" but means
+// something much stronger: a config file naming a single formatting key
+// discarded every other formatting setting the editor had sent. That is how an
+// IDE configures the formatter when it has no config file of its own to write
+// — IntelliLucee sends all fourteen settings from its settings UI this way —
+// so one `"formatting": {"lineWidth": 120}` in a project reverted the other
+// thirteen to their defaults and switched the formatter off entirely.
+func mergeFormatting(base, over *Formatting) *Formatting {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+
+	for _, f := range []struct{ dst, src **bool }{
+		{&out.Enabled, &over.Enabled},
+		{&out.Debug, &over.Debug},
+		{&out.SelfCloseTags, &over.SelfCloseTags},
+		{&out.WhitespaceOnly, &over.WhitespaceOnly},
+		{&out.QueryFormat, &over.QueryFormat},
+		{&out.LowercaseTags, &over.LowercaseTags},
+		{&out.LowercaseAttributes, &over.LowercaseAttributes},
+		{&out.DoubleQuoteAttributes, &over.DoubleQuoteAttributes},
+		{&out.QueryUppercaseKeywords, &over.QueryUppercaseKeywords},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
+	}
+
+	for _, f := range []struct{ dst, src **int }{
+		{&out.LineWidth, &over.LineWidth},
+		{&out.AttrBreakThreshold, &over.AttrBreakThreshold},
+		{&out.IndentWidth, &over.IndentWidth},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
+	}
+
+	for _, f := range []struct{ dst, src *string }{
+		{&out.ScopeCase, &over.ScopeCase},
+		{&out.CommaPosition, &over.CommaPosition},
+		{&out.QueryCommaPosition, &over.QueryCommaPosition},
+	} {
+		if *f.src != "" {
+			*f.dst = *f.src
+		}
+	}
 
 	return &out
 }

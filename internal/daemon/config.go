@@ -143,14 +143,14 @@ func (c *Config) References() bool {
 func (c *Config) FormattingEnabled() bool {
 	raw := c.raw()
 
-	return raw != nil && raw.Formatting != nil && raw.Formatting.Enabled
+	return raw != nil && raw.Formatting != nil && config.BoolDefault(raw.Formatting.Enabled, false)
 }
 
 // FormattingDebug returns whether formatting debug checks are enabled.
 func (c *Config) FormattingDebug() bool {
 	raw := c.raw()
 
-	return raw != nil && raw.Formatting != nil && raw.Formatting.Debug
+	return raw != nil && raw.Formatting != nil && config.BoolDefault(raw.Formatting.Debug, false)
 }
 
 // FormattingSelfCloseTags returns whether void/implicit-end HTML tags should be self-closed.
