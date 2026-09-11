@@ -50,6 +50,7 @@ type Server struct {
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
 	Formatting               config.ResolvedFormatting // formatting settings
 	Linting                  bool                      // enable cflint diagnostics
+	References               bool                      // answer textDocument/references (opt-in; see config.References)
 	TagSnippets              bool                      // insert snippets for tags
 	FunctionSnippets         bool                      // insert snippets for functions
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
@@ -117,6 +118,11 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			FirstTriggerCharacter: ">",
 		},
 		DefinitionProvider: protocol.Boolean(true),
+		// Advertised only when opted in. A client that is told the server has
+		// no references provider does not offer "Find All References" at all,
+		// which is what keeps the flag from being a capability the editor
+		// exposes and the server then declines to answer.
+		ReferencesProvider: protocol.Boolean(s.References),
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: []string{"(", ","},
 		},

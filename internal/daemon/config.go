@@ -131,6 +131,13 @@ func (c *Config) Linting() bool {
 	return raw != nil && raw.Linting != nil && raw.Linting.Enabled
 }
 
+// References returns whether textDocument/references is enabled in config.
+func (c *Config) References() bool {
+	raw := c.raw()
+
+	return raw != nil && raw.References != nil && raw.References.Enabled
+}
+
 // FormattingEnabled returns whether formatting is enabled in config.
 func (c *Config) FormattingEnabled() bool {
 	raw := c.raw()

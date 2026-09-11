@@ -136,6 +136,7 @@ func (s *Server) applyConfig(r *config.Resolved) {
 	}
 
 	s.Linting = r.Linting
+	s.References = r.References
 	s.TagSnippets = r.TagSnippets
 	s.FunctionSnippets = r.FunctionSnippets
 	s.GlobalFunctionResolution = r.GlobalFunctionResolution

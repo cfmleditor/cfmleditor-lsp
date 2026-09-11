@@ -57,6 +57,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
 | `formatting` | No | Formatter configuration object. See below. |
+| `references` | No | `textDocument/references` support, off by default. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 
 ### Mappings
@@ -164,6 +165,31 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `debug` | `false` | Enable formatter debug checks. |
 
 Note: `useTabs` and `tabSize` are taken from the editor's formatting options (sent with each formatting request), not from this config.
+
+### References
+
+`textDocument/references` — the editor's "Find All References" — is off by default and enabled per workspace:
+
+```json
+{
+  "references": { "enabled": true }
+}
+```
+
+The capability is advertised to the editor only when it is on, so a workspace that has not opted in does not see the command at all.
+
+It is opt-in because of what one request costs. Answering it walks and parses every CFML file under the workspace roots, the same scan the `refs` CLI and the `cfmleditor.findRefs` command already do; there is no incremental index of call sites to answer from. On a few hundred files that is imperceptible, and on a few thousand it is a noticeable pause during which the server is busy. Whether that trade is worth making by default is the thing the flag exists to find out.
+
+What it answers depends on what the cursor is on:
+
+| Cursor on | Returns |
+|---|---|
+| A function name, declared or called | Every call site that resolves to that function, with calls to same-named functions on other components excluded |
+| A component dot-path (`new models.UserDAO()`, `extends`, `<cfinvoke component>`) | Every place that path is written |
+
+The search is scoped by the file that *declares* the function, which is resolved first by the same rules go-to-definition uses. That is what makes the request work with the cursor on a call site rather than only on the declaration.
+
+`includeDeclaration` is honoured. A function the server cannot pin to a single declaration — several same-named functions across the workspace, none of them in the current file — falls back to scoping the search by the requesting document rather than picking one of them, so the answer is narrow rather than wrong.
 
 ### Editor settings
 

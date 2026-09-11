@@ -27,6 +27,7 @@ type Settings struct {
 	BeanPaths                map[string]string
 	Formatting               config.ResolvedFormatting
 	Linting                  bool
+	References               bool
 }
 
 // Apply copies the settings onto a freshly created Server.
@@ -41,4 +42,5 @@ func (set Settings) Apply(s *Server) {
 	s.BeanPaths = set.BeanPaths
 	s.Formatting = set.Formatting
 	s.Linting = set.Linting
+	s.References = set.References
 }

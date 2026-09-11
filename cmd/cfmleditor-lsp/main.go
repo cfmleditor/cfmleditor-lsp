@@ -160,6 +160,7 @@ func runServer() {
 			BeanPaths:                cfg.BeanPaths(),
 			Formatting:               fmtCfg,
 			Linting:                  cfg.Linting(),
+			References:               cfg.References(),
 		}
 
 		go func() {

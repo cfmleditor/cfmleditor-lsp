@@ -29,6 +29,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		BeanPaths:                map[string]string{"svc": "/w/services"},
 		Formatting:               config.ResolvedFormatting{Enabled: true, LineWidth: 123},
 		Linting:                  true,
+		References:               true,
 	}
 
 	srv := NewServer(nil, cflog.NewLogger(false))

@@ -29,6 +29,7 @@ type JSON struct {
 	Formatting    *Formatting  `json:"formatting"`
 	Linting       *Linting     `json:"linting"`
 	Completions   *Completions `json:"completions"`
+	References    *References  `json:"references"`
 	Debug         bool         `json:"debug"`
 }
 
@@ -73,6 +74,19 @@ func JavaStubResolver(javaStubsPath string) Resolver {
 
 // Linting holds linting configuration.
 type Linting struct {
+	Enabled bool `json:"enabled"`
+}
+
+// References holds textDocument/references configuration.
+//
+// Off by default, and advertised to the client only when enabled, so a session
+// that has not opted in behaves exactly as before: the editor never offers
+// "Find All References" and never sends the request. It is a flag rather than
+// a plain capability because answering one request walks and parses every CFML
+// file under the workspace roots — the same scan `cfmleditor.findRefs` and the
+// `refs` CLI do — and how that feels on a large workspace is the thing being
+// tried out.
+type References struct {
 	Enabled bool `json:"enabled"`
 }
 
@@ -130,6 +144,7 @@ type Resolved struct {
 	BeanPaths                map[string]string
 	Formatting               ResolvedFormatting
 	Linting                  bool
+	References               bool
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
@@ -191,6 +206,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 
 	if cfg.Linting != nil {
 		r.Linting = cfg.Linting.Enabled
+	}
+
+	if cfg.References != nil {
+		r.References = cfg.References.Enabled
 	}
 
 	if cfg.Completions != nil {
@@ -307,6 +326,10 @@ func Merge(base, over *JSON) *JSON {
 
 	if over.Completions != nil {
 		out.Completions = over.Completions
+	}
+
+	if over.References != nil {
+		out.References = over.References
 	}
 
 	out.Debug = base.Debug || over.Debug

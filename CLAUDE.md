@@ -229,6 +229,19 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
   actions, document formatting, on-type formatting (`>`), workspace folders.
+- `textDocument/references` (`internal/server/references.go`) is **opt-in**: off unless
+  `"references": {"enabled": true}`, and `capabilities()` advertises `referencesProvider` only
+  when the flag is on, so a client that has not opted in never offers the command. It is gated
+  because one request walks and parses every CFML file under `searchRoots()` — the same scan
+  `cfmleditor.findRefs` and the `refs` CLI do — with no incremental call-site index to answer
+  from. A dot-path under the cursor searches `refs.Options.Component`; anything else is a
+  function name and searches `refs.Options.FuncName`. The search is scoped by the file that
+  *declares* the function (`declarationOf`, which follows go-to-definition's order of
+  preference), not by the requesting document, so it works from a call site. `refs.Entry` has a
+  line and no column, so `entryRange` recovers the column by finding the identifier on the line;
+  component entries whose line does not name the component are dropped rather than reported as a
+  whole-line match, because the parser also records the variables a component ref flows into
+  (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
@@ -254,6 +267,7 @@ the user-facing view and all `formatting` defaults.
 | `javaStubsPath` | Auto-synthesizes a `createObject("java", "X")` → `<javaStubsPath>.X` resolver |
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
+| `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr |
 
