@@ -689,6 +689,35 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 }
 
 // safeGo runs fn in a goroutine with panic recovery.
+// writeRefsReport writes the reference report for funcName beside the file the
+// request came from, as markdown and as DOT, and tells the client where it
+// went. Only cfmleditor.findRefs' explicit export argument reaches here.
+func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result refs.TraceResult) {
+	outDir := filepath.Dir(sourceFile)
+	if outDir == "" || outDir == "." {
+		outDir = os.TempDir()
+	}
+
+	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
+
+	outFile := filepath.Join(outDir, "refs-"+funcName+".md")
+	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
+
+		return
+	}
+
+	dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
+	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
+	}
+
+	s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		Type:    protocol.MessageTypeInfo,
+		Message: "Wrote " + outFile,
+	})
+}
+
 func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) {
 	var params protocol.ExecuteCommandParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
@@ -997,27 +1026,17 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
 
-		output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
-
-		outDir := filepath.Dir(sourceFile)
-		if outDir == "" || outDir == "." {
-			outDir = os.TempDir()
+		// Writing the report is opt-in, via a third argument. It used to be
+		// unconditional, and the caller that fires most often is a code action
+		// on an ordinary editor gesture — so asking "find all references" left
+		// refs-<name>.md and refs-<name>.dot beside the file being read, inside
+		// the user's source tree, ready to be committed by accident. The
+		// summary is returned to the client either way, so the files duplicate
+		// something the caller already has; only a caller that wants them on
+		// disk asks for them.
+		if argBool(params.Arguments, 2) {
+			s.writeRefsReport(ctx, funcName, sourceFile, result)
 		}
-
-		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
-		if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
-			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
-		}
-
-		dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
-			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
-		}
-
-		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
-			Type:    protocol.MessageTypeInfo,
-			Message: "Wrote " + outFile,
-		})
 
 		return result.Summary, nil
 	case "cfmleditor.exportDeps":

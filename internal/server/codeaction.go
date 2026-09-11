@@ -73,6 +73,20 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 		})
 	}
 
+	// Writing the report is its own action, because the two above are ordinary
+	// editor gestures and this one puts files in the user's source tree. It is
+	// also the only way to reach the export from a client that cannot pass
+	// command arguments of its own.
+	actions = append(actions, protocol.CodeAction{
+		Title: "Export references to " + word + " to a file",
+
+		Command: protocol.Command{
+			Title:     "Export references to " + word + " to a file",
+			Command:   "cfmleditor.findRefs",
+			Arguments: lspAnyArgs(word, docURI, true),
+		},
+	})
+
 	return actions, nil
 }
 
