@@ -21,7 +21,7 @@ const (
 	// Only used when the releases API cannot be reached; the normal path
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
-	fallbackVersion = "1.5.14"
+	fallbackVersion = "1.5.16"
 	releasesAPI     = "https://api.github.com/repos/cfmleditor/CFLint/releases/latest"
 	downloadBase    = "https://github.com/cfmleditor/CFLint/releases/download/"
 )
