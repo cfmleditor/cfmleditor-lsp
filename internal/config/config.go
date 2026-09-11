@@ -97,6 +97,33 @@ type Completions struct {
 	GlobalFunctionResolution bool `json:"globalFunctionResolution"`
 }
 
+// ResolvedCompletions holds completion settings with defaults applied.
+type ResolvedCompletions struct {
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
+}
+
+// ResolveCompletions applies the defaults for a `completions` block: an absent
+// block means all three are on, which is not what their zero value says.
+//
+// It exists so that the defaults are written down once. They used to live
+// inside Resolve alone, and every path to a Server that did not run Resolve —
+// a daemon session, or a standalone session with no config file and no editor
+// settings — got the zero value instead, silently turning off global function
+// resolution and both kinds of snippet.
+func ResolveCompletions(c *Completions) ResolvedCompletions {
+	if c == nil {
+		return ResolvedCompletions{TagSnippets: true, FunctionSnippets: true, GlobalFunctionResolution: true}
+	}
+
+	return ResolvedCompletions{
+		TagSnippets:              c.TagSnippets,
+		FunctionSnippets:         c.FunctionSnippets,
+		GlobalFunctionResolution: c.GlobalFunctionResolution,
+	}
+}
+
 // Formatting holds formatter configuration.
 type Formatting struct {
 	Enabled                bool   `json:"enabled"`
@@ -212,15 +239,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 		r.References = cfg.References.Enabled
 	}
 
-	if cfg.Completions != nil {
-		r.TagSnippets = cfg.Completions.TagSnippets
-		r.FunctionSnippets = cfg.Completions.FunctionSnippets
-		r.GlobalFunctionResolution = cfg.Completions.GlobalFunctionResolution
-	} else {
-		r.TagSnippets = true
-		r.FunctionSnippets = true
-		r.GlobalFunctionResolution = true
-	}
+	comp := ResolveCompletions(cfg.Completions)
+	r.TagSnippets = comp.TagSnippets
+	r.FunctionSnippets = comp.FunctionSnippets
+	r.GlobalFunctionResolution = comp.GlobalFunctionResolution
 
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{

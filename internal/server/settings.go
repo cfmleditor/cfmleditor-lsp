@@ -28,6 +28,9 @@ type Settings struct {
 	Formatting               config.ResolvedFormatting
 	Linting                  bool
 	References               bool
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
 }
 
 // Apply copies the settings onto a freshly created Server.
@@ -43,4 +46,7 @@ func (set Settings) Apply(s *Server) {
 	s.Formatting = set.Formatting
 	s.Linting = set.Linting
 	s.References = set.References
+	s.TagSnippets = set.TagSnippets
+	s.FunctionSnippets = set.FunctionSnippets
+	s.GlobalFunctionResolution = set.GlobalFunctionResolution
 }

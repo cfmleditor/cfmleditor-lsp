@@ -310,3 +310,34 @@ func TestRunDiagnosticsWithoutLinterIsNoop(t *testing.T) {
 	// Must return promptly rather than panicking on the nil linter or conn.
 	s.runDiagnostics(context.Background(), "file:///nonexistent.cfc")
 }
+
+// TestCompletionDefaultsWithoutAnyConfig covers the path that reaches a Server
+// without ever running config.Resolve: no .cfmleditor.json anywhere above the
+// workspace root, and no initializationOptions either. loadWorkspaceConfig
+// returns before it reaches applyConfig in that case, so nothing writes these
+// three — and their zero value is the opposite of their documented default,
+// which left global function resolution and both kinds of snippet off.
+func TestCompletionDefaultsWithoutAnyConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	s := NewServer(nil, cflog.NewLogger(false))
+
+	raw, err := json.Marshal(map[string]any{
+		"processId":        nil,
+		"rootUri":          "file://" + dir,
+		"capabilities":     map[string]any{},
+		"workspaceFolders": []map[string]any{{"uri": "file://" + dir, "name": "w"}},
+	})
+	if err != nil {
+		t.Fatalf("marshalling params: %v", err)
+	}
+
+	if _, err := s.handleInitialize(context.Background(), raw); err != nil {
+		t.Fatalf("handleInitialize: %v", err)
+	}
+
+	if !s.GlobalFunctionResolution || !s.TagSnippets || !s.FunctionSnippets {
+		t.Errorf("completion defaults lost with no config at all: tagSnippets=%v functionSnippets=%v globalFunctionResolution=%v",
+			s.TagSnippets, s.FunctionSnippets, s.GlobalFunctionResolution)
+	}
+}

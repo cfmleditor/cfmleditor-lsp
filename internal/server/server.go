@@ -80,21 +80,31 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		idx = sharedIndex[0]
 	}
 
+	// The documented defaults for the `completions` block, so that a session
+	// which never runs config.Resolve still behaves as documented rather than
+	// as the zero value says. Standalone mode with neither a config file nor
+	// editor settings is one such session: loadWorkspaceConfig returns before
+	// it reaches applyConfig, and nothing else ever writes these.
+	comp := config.ResolveCompletions(nil)
+
 	return &Server{
-		conn:              conn,
-		log:               log,
-		FS:                vfs.OS{},
-		documents:         make(map[uri.URI]string),
-		index:             idx,
-		lintCancels:       make(map[uri.URI]context.CancelFunc),
-		compCache:         cache.New(),
-		funcRanges:        make(map[uri.URI][]cache.FuncRange),
-		cacheTimers:       make(map[uri.URI]*time.Timer),
-		reindexTimers:     make(map[uri.URI]*time.Timer),
-		docLocks:          make(map[uri.URI]*sync.Mutex),
-		parseResults:      make(map[uri.URI]*parser.ParseResult),
-		changeCount:       make(map[uri.URI]int),
-		changeWindowStart: make(map[uri.URI]time.Time),
+		conn:                     conn,
+		log:                      log,
+		FS:                       vfs.OS{},
+		TagSnippets:              comp.TagSnippets,
+		FunctionSnippets:         comp.FunctionSnippets,
+		GlobalFunctionResolution: comp.GlobalFunctionResolution,
+		documents:                make(map[uri.URI]string),
+		index:                    idx,
+		lintCancels:              make(map[uri.URI]context.CancelFunc),
+		compCache:                cache.New(),
+		funcRanges:               make(map[uri.URI][]cache.FuncRange),
+		cacheTimers:              make(map[uri.URI]*time.Timer),
+		reindexTimers:            make(map[uri.URI]*time.Timer),
+		docLocks:                 make(map[uri.URI]*sync.Mutex),
+		parseResults:             make(map[uri.URI]*parser.ParseResult),
+		changeCount:              make(map[uri.URI]int),
+		changeWindowStart:        make(map[uri.URI]time.Time),
 	}
 }
 

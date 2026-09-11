@@ -138,30 +138,12 @@ func runServer() {
 
 		sharedIndex := index.New()
 		ct := daemon.NewConnTracker()
-		fmtCfg := cfg.ResolvedFormatting()
-
-		propResolvers := make([]config.PropResolver, 0, len(cfg.PropertyResolvers()))
-		for _, p := range cfg.PropertyResolvers() {
-			propResolvers = append(propResolvers, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
-		}
-
 		// One settings value configures every session, whether it arrives over
 		// stdio here or over the socket later. Keeping the two in step by hand
 		// is what dropped expressionMappings and servicePropertyResolvers from
-		// every editor after the first.
-		settings := server.Settings{
-			WorkspaceFolders:         cfg.WorkspaceFolders(),
-			IndexGlobs:               cfg.IndexGlobs(),
-			Mappings:                 cfg.Mappings(),
-			ExpressionMappings:       cfg.ExpressionMappings(),
-			ServicePropertyResolvers: cfg.ServicePropertyResolvers(),
-			ComponentResolvers:       cfg.ComponentResolvers(),
-			PropertyResolvers:        propResolvers,
-			BeanPaths:                cfg.BeanPaths(),
-			Formatting:               fmtCfg,
-			Linting:                  cfg.Linting(),
-			References:               cfg.References(),
-		}
+		// every editor after the first; building it in daemon.SettingsFrom
+		// rather than here is what lets a test check that nothing is missing.
+		settings := daemon.SettingsFrom(cfg)
 
 		go func() {
 			_ = daemon.Serve(ctx, sock, log, sharedIndex, ct, settings)

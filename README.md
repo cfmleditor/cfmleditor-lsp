@@ -57,6 +57,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
 | `formatting` | No | Formatter configuration object. See below. |
+| `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 

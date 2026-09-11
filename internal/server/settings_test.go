@@ -30,6 +30,9 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		Formatting:               config.ResolvedFormatting{Enabled: true, LineWidth: 123},
 		Linting:                  true,
 		References:               true,
+		TagSnippets:              true,
+		FunctionSnippets:         true,
+		GlobalFunctionResolution: true,
 	}
 
 	srv := NewServer(nil, cflog.NewLogger(false))
