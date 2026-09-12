@@ -360,3 +360,67 @@ func TestNoEditorSettingsMeansNoOverlay(t *testing.T) {
 		t.Error("the config was re-applied with nothing to merge into it")
 	}
 }
+
+// TestOverlayKeepsTheDaemonsFormatting covers what config.Resolve does with an
+// absent formatting block: it leaves the zero value on purpose, which is not
+// the same as the defaults daemon.Config resolves for the same file. Applying
+// that zero value over the daemon's settings turned the formatter's
+// whitespace-only guard off, and cfmleditor.format reaches the formatter
+// without consulting Enabled first.
+func TestOverlayKeepsTheDaemonsFormatting(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	// Neither side says anything about formatting.
+	if err := os.WriteFile(cfgPath, []byte(`{"linting": {"enabled": true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{
+		ConfigPath: cfgPath,
+		Linting:    true,
+		Formatting: config.ResolvedFormatting{Enabled: true, WhitespaceOnly: true, SelfCloseTags: true, LineWidth: 100},
+	}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"mappings": {"models": "./models"}}`)
+
+	if !s.Formatting.WhitespaceOnly {
+		t.Error("the whitespace-only guard was switched off by the overlay")
+	}
+
+	if !s.Formatting.Enabled || s.Formatting.LineWidth != 100 {
+		t.Errorf("the daemon's formatting was replaced with a zero value: %+v", s.Formatting)
+	}
+}
+
+// TestOverlayStillTakesAStatedFormattingBlock is the boundary: preserving the
+// daemon's settings must not mean ignoring a block either side does state.
+func TestOverlayStillTakesAStatedFormattingBlock(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+	if err := os.WriteFile(cfgPath, []byte(`{"formatting": {"enabled": true, "lineWidth": 120}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{
+		ConfigPath: cfgPath,
+		Formatting: config.ResolvedFormatting{Enabled: true, WhitespaceOnly: true, LineWidth: 120},
+	}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"formatting": {"attrBreakThreshold": 7}}`)
+
+	if s.Formatting.AttrBreakThreshold != 7 {
+		t.Errorf("the editor's attrBreakThreshold was lost: %+v", s.Formatting)
+	}
+
+	if s.Formatting.LineWidth != 120 {
+		t.Errorf("the file's lineWidth was lost: %+v", s.Formatting)
+	}
+
+	if !s.Formatting.WhitespaceOnly {
+		t.Error("the whitespace-only default was lost")
+	}
+}

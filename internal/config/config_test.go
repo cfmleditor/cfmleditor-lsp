@@ -206,10 +206,34 @@ func TestResolve_CompletionsDefaults(t *testing.T) {
 		t.Errorf("expected all completions to default true when section is absent, got %+v", r)
 	}
 
-	// An explicit, all-false Completions section must not be overridden by the defaults.
-	allFalse := Resolve(&JSON{Completions: &Completions{}}, "/proj")
-	if allFalse.TagSnippets || allFalse.FunctionSnippets || allFalse.GlobalFunctionResolution {
-		t.Errorf("expected explicit all-false completions to be respected, got %+v", allFalse)
+	// An empty block states nothing, so the defaults still apply. This used to
+	// mean all-false, because the fields were plain bools and a block that was
+	// present could not be told apart from one that set every field to false.
+	empty := Resolve(&JSON{Completions: &Completions{}}, "/proj")
+	if !empty.TagSnippets || !empty.FunctionSnippets || !empty.GlobalFunctionResolution {
+		t.Errorf("an empty completions block should state nothing, got %+v", empty)
+	}
+
+	// Turning one off leaves the other two alone. As plain bools it did not:
+	// naming any single setting switched off the two it did not name, so
+	// {"tagSnippets": false} also disabled global function resolution.
+	one := Resolve(&JSON{Completions: &Completions{TagSnippets: boolPtr(false)}}, "/proj")
+	if one.TagSnippets {
+		t.Error("an explicit tagSnippets:false was not respected")
+	}
+
+	if !one.FunctionSnippets || !one.GlobalFunctionResolution {
+		t.Errorf("turning off tagSnippets also turned off its neighbours: %+v", one)
+	}
+
+	// And each can still be turned off explicitly.
+	off := Resolve(&JSON{Completions: &Completions{
+		TagSnippets:              boolPtr(false),
+		FunctionSnippets:         boolPtr(false),
+		GlobalFunctionResolution: boolPtr(false),
+	}}, "/proj")
+	if off.TagSnippets || off.FunctionSnippets || off.GlobalFunctionResolution {
+		t.Errorf("explicit all-false completions were not respected, got %+v", off)
 	}
 }
 

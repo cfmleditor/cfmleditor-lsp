@@ -76,16 +76,6 @@ func (s *Server) editorConfig(raw protocol.LSPAny) *config.JSON {
 	return &cfg
 }
 
-// findConfigUpwards walks from dir towards the filesystem root, returning the
-// first readable, parseable .cfmleditor.json it finds along with its path. A
-// file that exists but does not parse is skipped rather than aborting the
-// walk, so one malformed config cannot mask a valid one further up.
-//
-// Walking upwards matches what daemon.FindConfig does for the daemon-mode
-// startup path. Checking only the root directory itself meant a config that
-// daemon mode picks up happily was invisible in standalone mode, which
-// silently dropped mappings, resolvers, and linting depending only on which
-// mode the editor happened to start.
 // readConfigFile parses one .cfmleditor.json, or returns nil if it is missing
 // or unreadable as config.
 func (s *Server) readConfigFile(path string) *config.JSON {
@@ -145,10 +135,35 @@ func (s *Server) overlayEditorConfig(editorCfg *config.JSON) {
 	s.PropertyResolvers = nil
 	s.BeanPaths = nil
 
+	merged := config.Merge(editorCfg, fileCfg)
+
+	// Resolve leaves an absent formatting block at its zero value on purpose
+	// (see config.DefaultResolvedFormatting), which is not what the daemon
+	// resolved for the same file: daemon.Config's accessors apply each field's
+	// default whether or not the block exists. Applying the zero value here
+	// would replace the daemon's settings with WhitespaceOnly=false — the
+	// formatter's safety guard, off — for any session whose config file and
+	// editor payload both stay silent about formatting.
+	prevFormatting := s.Formatting
+
 	s.log.Info("merging editor initializationOptions with the daemon's config", cflog.String("path", s.ConfigPath))
-	s.applyConfig(config.Resolve(config.Merge(editorCfg, fileCfg), dir))
+	s.applyConfig(config.Resolve(merged, dir))
+
+	if merged.Formatting == nil {
+		s.Formatting = prevFormatting
+	}
 }
 
+// findConfigUpwards walks from dir towards the filesystem root, returning the
+// first readable, parseable .cfmleditor.json it finds along with its path. A
+// file that exists but does not parse is skipped rather than aborting the
+// walk, so one malformed config cannot mask a valid one further up.
+//
+// Walking upwards matches what daemon.FindConfig does for the daemon-mode
+// startup path. Checking only the root directory itself meant a config that
+// daemon mode picks up happily was invisible in standalone mode, which
+// silently dropped mappings, resolvers, and linting depending only on which
+// mode the editor happened to start.
 func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 	d, err := filepath.Abs(dir)
 	if err != nil {

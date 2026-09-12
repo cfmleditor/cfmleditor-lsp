@@ -91,10 +91,16 @@ type References struct {
 }
 
 // Completions holds completion configuration.
+//
+// Pointers for the same reason the formatting flags are: all three default to
+// true, so a plain bool cannot tell "the config turned this off" from "the
+// config did not mention it". As plain bools, `{"completions": {"tagSnippets":
+// false}}` also switched off global function resolution — the exact
+// go-to-definition breakage this package was fixed for elsewhere.
 type Completions struct {
-	TagSnippets              bool `json:"tagSnippets"`
-	FunctionSnippets         bool `json:"functionSnippets"`
-	GlobalFunctionResolution bool `json:"globalFunctionResolution"`
+	TagSnippets              *bool `json:"tagSnippets"`
+	FunctionSnippets         *bool `json:"functionSnippets"`
+	GlobalFunctionResolution *bool `json:"globalFunctionResolution"`
 }
 
 // ResolvedCompletions holds completion settings with defaults applied.
@@ -114,13 +120,13 @@ type ResolvedCompletions struct {
 // resolution and both kinds of snippet.
 func ResolveCompletions(c *Completions) ResolvedCompletions {
 	if c == nil {
-		return ResolvedCompletions{TagSnippets: true, FunctionSnippets: true, GlobalFunctionResolution: true}
+		c = &Completions{}
 	}
 
 	return ResolvedCompletions{
-		TagSnippets:              c.TagSnippets,
-		FunctionSnippets:         c.FunctionSnippets,
-		GlobalFunctionResolution: c.GlobalFunctionResolution,
+		TagSnippets:              BoolDefault(c.TagSnippets, true),
+		FunctionSnippets:         BoolDefault(c.FunctionSnippets, true),
+		GlobalFunctionResolution: BoolDefault(c.GlobalFunctionResolution, true),
 	}
 }
 
@@ -349,9 +355,7 @@ func Merge(base, over *JSON) *JSON {
 		out.Linting = over.Linting
 	}
 
-	if over.Completions != nil {
-		out.Completions = over.Completions
-	}
+	out.Completions = mergeCompletions(base.Completions, over.Completions)
 
 	if over.References != nil {
 		out.References = over.References
@@ -415,6 +419,33 @@ func mergeFormatting(base, over *Formatting) *Formatting {
 		{&out.QueryCommaPosition, &over.QueryCommaPosition},
 	} {
 		if *f.src != "" {
+			*f.dst = *f.src
+		}
+	}
+
+	return &out
+}
+
+// mergeCompletions unions two completions blocks key by key, for the same
+// reason mergeFormatting does: replacing the block wholesale would let a config
+// file naming one completion setting silently reset the other two.
+func mergeCompletions(base, over *Completions) *Completions {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+
+	for _, f := range []struct{ dst, src **bool }{
+		{&out.TagSnippets, &over.TagSnippets},
+		{&out.FunctionSnippets, &over.FunctionSnippets},
+		{&out.GlobalFunctionResolution, &over.GlobalFunctionResolution},
+	} {
+		if *f.src != nil {
 			*f.dst = *f.src
 		}
 	}

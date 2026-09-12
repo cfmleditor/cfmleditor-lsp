@@ -11,6 +11,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -74,6 +75,31 @@ func (s *Server) handleReferences(_ context.Context, rawParams []byte) (any, err
 	return locs, nil
 }
 
+// openDocFS serves the editor's copy of any file it has open, falling through
+// to the real filesystem for everything else.
+//
+// refs.Find opens files itself, from disk, and the line numbers it reports come
+// from what it read. Resolving columns from the editor's buffer while the lines
+// came from the saved text mixes two different versions of the file — and the
+// file being edited is the likeliest one to run a reference search on.
+type openDocFS struct {
+	vfs.FS
+
+	srv *Server
+}
+
+func (o openDocFS) ReadFile(path string) ([]byte, error) {
+	if content, ok := o.srv.getDocument(cfpath.ToURI(path)); ok {
+		return []byte(content), nil
+	}
+
+	return o.FS.ReadFile(path)
+}
+
+func (s *Server) refsFS() vfs.FS {
+	return openDocFS{FS: s.FS, srv: s}
+}
+
 // functionReferences finds the call sites of the function under the cursor.
 func (s *Server) functionReferences(word, content string, docURI uri.URI, line, char int, includeDecl bool) []protocol.Location {
 	decl := s.declarationOf(word, content, docURI, line, char)
@@ -91,7 +117,7 @@ func (s *Server) functionReferences(word, content string, docURI uri.URI, line, 
 	}
 
 	r := s.getResolver()
-	entries := refs.Find(s.FS, s.searchRoots(), refs.Options{
+	entries := refs.Find(s.refsFS(), s.searchRoots(), refs.Options{
 		FuncName:          word,
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
@@ -121,7 +147,7 @@ func (s *Server) functionReferences(word, content string, docURI uri.URI, line, 
 
 // componentReferences finds the places a component dot-path is referred to.
 func (s *Server) componentReferences(component string) []protocol.Location {
-	entries := refs.Find(s.FS, s.searchRoots(), refs.Options{
+	entries := refs.Find(s.refsFS(), s.searchRoots(), refs.Options{
 		Component:         component,
 		Resolvers:         s.cfResolvers(),
 		PropertyResolvers: s.cfPropertyResolvers(),
@@ -135,11 +161,14 @@ func (s *Server) componentReferences(component string) []protocol.Location {
 	}
 
 	// Unlike a call site, a component ref is not always written where it is
-	// recorded: the parser also records the variables a reference flows into,
-	// so `report = myCtrl.GetReport()` is a ref to myCtrl's component on a line
-	// that does not name it. That is the right answer for the `refs` CLI, which
-	// reports which variables hold a component, and the wrong one here, where
-	// every result has to point at text the reader will recognise.
+	// recorded. The parser records the variables a reference flows into, and a
+	// componentResolver can establish one from an expression that never spells
+	// the resolved path — `svc = getPageTools()` is a ref to
+	// packages.tass.pagetools, and "pagetools" appears nowhere on the line. So
+	// the receiving variable is the fallback anchor: it is on the line in every
+	// one of these shapes, which keeps resolver-established references (the
+	// majority, in a resolver-configured project) out of the bin while still
+	// never highlighting a whole line the reader has to search by eye.
 	return s.entryLocations(entries, name, true)
 }
 
@@ -198,7 +227,13 @@ func (s *Server) searchRoots() []string {
 // refs.Entry carries a line number and no column — nothing that consumed it
 // before needed one — so the column is recovered by finding name on the line,
 // reading each file once for however many entries it holds.
-func (s *Server) entryLocations(entries []refs.Entry, name string, mustAppear bool) []protocol.Location {
+//
+// useVariable says what to do when the name is not on the line: try the entry's
+// variable, and drop the entry if that is not there either. Off, the line
+// itself is the range, which is right for a call site (it always writes the
+// name it calls, so a miss means a call wrapped across lines) and wrong for a
+// component ref (which may be recorded on a line that names neither).
+func (s *Server) entryLocations(entries []refs.Entry, name string, useVariable bool) []protocol.Location {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -214,8 +249,11 @@ func (s *Server) entryLocations(entries []refs.Entry, name string, mustAppear bo
 		}
 
 		rng, exact := entryRange(text, e.Line, name)
-		if mustAppear && !exact {
-			continue
+
+		if !exact && useVariable {
+			if rng, exact = entryRange(text, e.Line, e.Variable); !exact {
+				continue
+			}
 		}
 
 		locs = append(locs, protocol.Location{URI: cfpath.ToURI(e.File), Range: rng})
@@ -224,15 +262,11 @@ func (s *Server) entryLocations(entries []refs.Entry, name string, mustAppear bo
 	return dedupeLocations(locs)
 }
 
-// fileLines reads a file for column lookup, preferring the editor's copy. A
-// file open with unsaved edits has moved on from what is on disk, and a column
-// taken from the stale text would point at the wrong place on the line.
+// fileLines reads a file for column lookup, through the same filesystem the
+// scan used, so the column and the line number it belongs to always come from
+// one version of the file.
 func (s *Server) fileLines(path string) []string {
-	if content, ok := s.getDocument(cfpath.ToURI(path)); ok {
-		return strings.Split(content, "\n")
-	}
-
-	data, err := s.FS.ReadFile(path)
+	data, err := s.refsFS().ReadFile(path)
 	if err != nil {
 		return nil
 	}

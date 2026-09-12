@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -249,14 +250,77 @@ func TestReferencesToAComponentPath(t *testing.T) {
 	}
 
 	// The parser also records the variables a component reference flows into,
-	// so `report = myCtrl.GetReport()` on the next line is a ref to the same
-	// component — on a line that never names it. Reporting it would send the
-	// reader to an unrelated statement with the whole line highlighted.
-	for _, l := range got {
-		if l == "view.cfm:1" || l == "report_view.cfm:1" {
-			t.Errorf("reported a line the component is not written on: %s (all: %v)", l, got)
+	// so `report = myCtrl.RunReport()` on the next line is a ref to the same
+	// component on a line that never names it. Those are kept, anchored on the
+	// receiving variable — see TestComponentEntryAnchorsOnTheVariable for why
+	// dropping them is not an option — but never as a whole-line match, which
+	// would give the reader nothing to look at.
+	for _, l := range locs {
+		if l.Range.Start.Character == 0 && l.Range.End.Character > 20 {
+			t.Errorf("whole-line range at %v: %+v", found(t, []protocol.Location{l}, dir), l.Range)
 		}
 	}
+}
+
+// TestComponentEntryAnchorsOnTheVariable is why a component entry whose line
+// does not name the component is anchored rather than dropped. A
+// componentResolver establishes a reference from an expression that never
+// spells the resolved path — `svc = getPageTools()` is a reference to
+// packages.tass.pagetools, and "pagetools" appears nowhere on the line — so
+// dropping those would lose most instantiation sites in exactly the
+// resolver-configured projects this server exists for.
+func TestComponentEntryAnchorsOnTheVariable(t *testing.T) {
+	srv := newTestServer()
+	path := filepath.Join(t.TempDir(), "a.cfc")
+	srv.setDocument(cfpath.ToURI(path), "component {\n\tsvc = getPageTools();\n}\n")
+
+	locs := srv.entryLocations([]refs.Entry{{File: path, Variable: "svc", Line: 1}}, "pagetools", true)
+
+	if len(locs) != 1 {
+		t.Fatalf("resolver-established reference dropped: %+v", locs)
+	}
+
+	// "\tsvc = getPageTools();" — svc starts at 1.
+	if locs[0].Range.Start.Character != 1 || locs[0].Range.End.Character != 4 {
+		t.Errorf("range = %d-%d, want 1-4 (the receiving variable)",
+			locs[0].Range.Start.Character, locs[0].Range.End.Character)
+	}
+}
+
+// TestComponentEntryWithNothingToAnchorOnIsDropped is the boundary: with
+// neither the component nor its variable on the line there is nothing to point
+// at, and a whole-line range would send the reader to a statement they cannot
+// connect to the search.
+func TestComponentEntryWithNothingToAnchorOnIsDropped(t *testing.T) {
+	srv := newTestServer()
+	path := filepath.Join(t.TempDir(), "a.cfc")
+	srv.setDocument(cfpath.ToURI(path), "component {\n\tsomethingElse();\n}\n")
+
+	if locs := srv.entryLocations([]refs.Entry{{File: path, Variable: "svc", Line: 1}}, "pagetools", true); len(locs) != 0 {
+		t.Errorf("entry kept with nothing on the line to anchor it: %+v", locs)
+	}
+}
+
+// TestReferencesSeeUnsavedEdits covers the scan reading the editor's copy. It
+// opens files itself, from disk, so without that a search run while the file
+// being edited has unsaved changes reports line numbers from the saved text —
+// and the file being edited is the likeliest one to search.
+func TestReferencesSeeUnsavedEdits(t *testing.T) {
+	srv, dir, docURI := refsWorkspace(t, "controller.cfc")
+
+	// Insert a line above everything, shifting every line down by one.
+	content, _ := srv.getDocument(docURI)
+	srv.setDocument(docURI, "// an unsaved comment\n"+content)
+
+	locs := referencesAt(t, srv, docURI, 5, 27, false)
+
+	for _, l := range found(t, locs, dir) {
+		if l == "controller.cfc:10" {
+			return
+		}
+	}
+
+	t.Errorf("references were read from the saved file: %v", found(t, locs, dir))
 }
 
 // TestDeclarationRangeSpansTheIdentifier is the includeDeclaration half of the
