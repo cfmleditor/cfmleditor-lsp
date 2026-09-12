@@ -52,6 +52,15 @@ type Options struct {
 	// QueryFormat controls whether cfquery content is formatted.
 	// When false, query content is emitted verbatim. Default false.
 	QueryFormat bool
+	// ParenSpacing is the padding inside parentheses: "pad" for `( a )`,
+	// "tight" for `(a)`. Empty keeps what has always been emitted, which is
+	// neither consistently — see condPad and argPad.
+	ParenSpacing string
+	// BraceStyle is where a block's opening brace goes: "same-line" (K&R,
+	// `function f() {`) or "next-line" (Allman, the brace alone on the line
+	// under the header). Empty means same-line, which is what the formatter
+	// has always emitted.
+	BraceStyle string
 	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
 	// Valid values: "upper", "lower", "leave" (default "leave").
 	ScopeCase string
@@ -76,6 +85,49 @@ type Options struct {
 	// WhitespaceOnly when true causes Format to return an error if the
 	// output differs from the input in non-whitespace content.
 	WhitespaceOnly bool
+}
+
+// condPad and argPad are the padding inside a parenthesis, for the two kinds
+// the formatter emits: a condition or grouping (`if ( a )`, `( a + b ) * c`)
+// and an argument or parameter list (`foo(1, 2)`).
+//
+// Unset they disagree, because that is what the formatter has always done and
+// changing it silently would reformat every file in every project. "pad" and
+// "tight" are how a project asks for one rule in both places.
+func (o Options) condPad() string {
+	if o.ParenSpacing == "tight" {
+		return ""
+	}
+
+	return " "
+}
+
+func (o Options) argPad() string {
+	if o.ParenSpacing == "pad" {
+		return " "
+	}
+
+	return ""
+}
+
+// nextLineBraces reports whether a block's opening brace starts a line of its
+// own (Allman) rather than following the construct's header (K&R). Anything
+// other than "next-line", the empty string included, is same-line, so a
+// project that never set this keeps byte-for-byte what it had.
+func (o Options) nextLineBraces() bool {
+	return o.BraceStyle == "next-line"
+}
+
+// padded wraps a rendered argument or parameter list in the configured inner
+// padding. An empty list stays "()" — "( )" is nobody's preference.
+func (f *Formatter) padded(inner string) string {
+	if inner == "" {
+		return ""
+	}
+
+	pad := f.opts.argPad()
+
+	return pad + inner + pad
 }
 
 // indent renders the indentation for a nesting level. A negative level is

@@ -68,7 +68,7 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 	// ── block (anonymous body) ─────────────────────────────────────────────
 	case "statement_block", "block":
 		// A bare block `{ ... }` not attached to anything.
-		f.scriptBlock(n)
+		f.scriptBareBlock(n)
 
 	// ── fallback: unknown node → emit raw, re-indented ────────────────────
 	default:
@@ -321,7 +321,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	if n != nil && n.Kind() == "parenthesized_expression" {
 		inner = f.expr(n)
 	} else {
-		inner = "( " + f.expr(n) + " )"
+		inner = "(" + f.opts.condPad() + f.expr(n) + f.opts.condPad() + ")"
 	}
 
 	verbatim := func() string {
@@ -329,7 +329,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 			return f.text(n)
 		}
 
-		return "( " + f.text(n) + " )"
+		return "(" + f.opts.condPad() + f.text(n) + f.opts.condPad() + ")"
 	}
 
 	// A `//` comment between two operands is neither the left nor the right
@@ -437,6 +437,48 @@ func isScriptBlockStmt(n *sitter.Node) bool {
 	return false
 }
 
+// writeOpenBrace writes a block's opening brace: after beforeBrace on the line
+// just written, or — under braceStyle "next-line" — alone on the next line at
+// the construct's own indent. The caller has not yet incremented f.level, so
+// the brace lines up with the header rather than with the body.
+//
+// An empty beforeBrace means the caller has already placed the brace at the
+// start of a fresh line and had no choice about it: a header ending in a `//`
+// annotation comment would otherwise swallow the brace. That is already
+// next-line, so both styles leave it alone — adding a second newline would put
+// a blank line between the header and the brace.
+func (f *Formatter) writeOpenBrace(beforeBrace string) {
+	if beforeBrace != "" && f.opts.nextLineBraces() {
+		f.scriptWrite("\n")
+		f.writeIndent()
+		f.scriptWrite("{")
+
+		return
+	}
+
+	f.scriptWrite(beforeBrace + "{")
+}
+
+// attachedKeyword introduces a clause that continues a statement after a
+// closing brace — `else`, `catch`, `finally`. It follows the brace on the same
+// line normally; under braceStyle "next-line" it starts its own line, which is
+// what lets that clause's own brace sit under the keyword instead of dangling
+// off the end of `} else`.
+//
+// `while` in a do/while is deliberately not one of these: it terminates the
+// statement rather than introducing a block, so there is no brace for it to
+// line up with and it stays attached in both styles.
+func (f *Formatter) attachedKeyword(keyword string) string {
+	if f.opts.nextLineBraces() {
+		f.scriptWrite("\n")
+		f.writeIndent()
+
+		return keyword
+	}
+
+	return " " + keyword
+}
+
 // scriptBlock renders a `{ ... }` block, indenting its contents.
 func (f *Formatter) scriptBlock(n *sitter.Node) {
 	f.scriptBlockWith(n, " ")
@@ -448,7 +490,28 @@ func (f *Formatter) scriptBlock(n *sitter.Node) {
 // comment, which has already had to break the line and needs the brace at the
 // start of the next one rather than one column into it.
 func (f *Formatter) scriptBlockWith(n *sitter.Node, beforeBrace string) {
-	f.scriptWrite(beforeBrace + "{")
+	f.writeOpenBrace(beforeBrace)
+	f.scriptBlockBody(n)
+}
+
+// scriptBareBlock renders a `{ ... }` that is a statement in its own right
+// rather than some construct's body. braceStyle does not reach it: "next-line"
+// means "under the header", and this block has no header to go under.
+//
+// Moving it anyway was not merely cosmetic. It made formatting non-idempotent
+// on Lucee's one-word `elseif`, as spelled in its own Query.cfc: the grammar
+// has no such keyword, so it reads `elseif ( ... )` as an ordinary call and
+// leaves the block that follows standing alone. The newline the brace gained on
+// the first pass became a real source line break, which the second pass padded
+// again.
+func (f *Formatter) scriptBareBlock(n *sitter.Node) {
+	f.scriptWrite(" {")
+	f.scriptBlockBody(n)
+}
+
+// scriptBlockBody writes everything after a block's opening brace: the padded,
+// indented contents and the closing brace back at the outer level.
+func (f *Formatter) scriptBlockBody(n *sitter.Node) {
 	f.scriptWrite("\n\n")
 
 	f.level++
@@ -821,7 +884,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		// dropped it, or worse rendered it as the expression itself.
 		var sb strings.Builder
 
-		sb.WriteString("( ")
+		sb.WriteString("(" + f.opts.condPad())
 
 		for i := uint(0); i < n.NamedChildCount(); i++ {
 			c := n.NamedChild(i)
@@ -845,7 +908,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			}
 		}
 
-		sb.WriteString(" )")
+		sb.WriteString(f.opts.condPad() + ")")
 
 		return sb.String()
 
@@ -1088,7 +1151,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		inlineJoined += ","
 	}
 
-	inline := "(" + inlineJoined + ")"
+	inline := "(" + f.padded(inlineJoined) + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
 	// A line comment forces the break unconditionally: joined inline it runs to
 	// end of line and comments out every argument after it.
@@ -1553,7 +1616,7 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	// being wrapped in required_parameter/optional_parameter nodes.
 	if f.hasFlatParams(params) {
 		if inline, ok := f.flatParams(params); ok {
-			return "(" + inline + ")"
+			return "(" + f.padded(inline) + ")"
 		}
 
 		// A list this path cannot lay out on one line without breaking it —
@@ -1585,7 +1648,7 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 		joined += ","
 	}
 
-	return "(" + joined + ")"
+	return "(" + f.padded(joined) + ")"
 }
 
 // exprFuncDefParams renders function definition parameters, each on its own line.
@@ -2422,14 +2485,14 @@ func (f *Formatter) scriptIf(n *sitter.Node) {
 // elseLead emits any comments sitting between the consequence and the
 // alternative, and returns the text to introduce the `else` with: attached to
 // the closing brace normally, or starting a fresh line once a comment has
-// been written between them.
+// been written between them, or under braceStyle "next-line" (attachedKeyword).
 func (f *Formatter) elseLead(n, cons, alt *sitter.Node) string {
 	if cons == nil || alt == nil {
-		return " else"
+		return f.attachedKeyword("else")
 	}
 
 	if !f.writeInterveningComments(n, cons.EndByte(), alt.StartByte()) {
-		return " else"
+		return f.attachedKeyword("else")
 	}
 
 	f.scriptWrite("\n")
@@ -2473,7 +2536,8 @@ func (f *Formatter) scriptIfInline(n *sitter.Node) {
 // current line (e.g. the body of if/while/for).
 func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	if body == nil {
-		f.scriptWrite(" {}")
+		f.writeOpenBrace(" ")
+		f.scriptWrite("}")
 
 		return
 	}
@@ -2489,7 +2553,7 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	// so scriptBlock renders the same code and any difference in blank lines
 	// makes formatting non-idempotent — an unchanged file kept producing a
 	// new diff on every save.
-	f.scriptWrite(" {")
+	f.writeOpenBrace(" ")
 	f.scriptWrite("\n\n")
 
 	f.level++
@@ -2511,7 +2575,8 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 	val := n.ChildByFieldName("value")
 	body := n.ChildByFieldName("body")
 
-	f.iLine(fmt.Sprintf("switch %s {", f.parenExpr(val)))
+	f.iLine("switch " + f.parenExpr(val))
+	f.writeOpenBrace(" ")
 	f.scriptWrite("\n")
 
 	f.level++
@@ -2585,7 +2650,8 @@ func (f *Formatter) scriptFor(n *sitter.Node) {
 	condStr := f.forClause(cond)
 	incrStr := f.forClause(incr)
 
-	f.iLine(fmt.Sprintf("for ( %s; %s; %s )", initStr, condStr, incrStr))
+	pad := f.opts.condPad()
+	f.iLine(fmt.Sprintf("for (%s%s; %s; %s%s)", pad, initStr, condStr, incrStr, pad))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }
@@ -2613,7 +2679,8 @@ func (f *Formatter) scriptForIn(n *sitter.Node) {
 		}
 	}
 
-	f.iLine(fmt.Sprintf("for ( %s%s %s %s )", varKind, f.expr(left), keyword, f.expr(right)))
+	pad := f.opts.condPad()
+	f.iLine(fmt.Sprintf("for (%s%s%s %s %s%s)", pad, varKind, f.expr(left), keyword, f.expr(right), pad))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }
@@ -2720,14 +2787,15 @@ func (f *Formatter) scriptBodyOrStatement(body *sitter.Node) {
 
 // clauseLead emits any comments between the previous clause and this one, and
 // returns the keyword text to introduce it with — attached to the closing
-// brace normally, or on a fresh line once a comment has been written.
+// brace normally, or on a fresh line once a comment has been written, or under
+// braceStyle "next-line" (attachedKeyword).
 func (f *Formatter) clauseLead(parent *sitter.Node, from uint, clause *sitter.Node, keyword string) string {
 	if clause == nil || from == 0 {
-		return " " + keyword
+		return f.attachedKeyword(keyword)
 	}
 
 	if !f.writeInterveningComments(parent, from, clause.StartByte()) {
-		return " " + keyword
+		return f.attachedKeyword(keyword)
 	}
 
 	f.scriptWrite("\n")

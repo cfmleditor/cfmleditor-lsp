@@ -440,6 +440,28 @@ func SettingsFrom(c *Config) server.Settings {
 	}
 }
 
+// FormattingParenSpacing returns the padding inside parentheses ("pad",
+// "tight", or empty for the formatter's existing per-context behaviour).
+func (c *Config) FormattingParenSpacing() string {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil {
+		return ""
+	}
+
+	return raw.Formatting.ParenSpacing
+}
+
+// FormattingBraceStyle returns where a block's opening brace goes
+// ("same-line", "next-line", or empty for the formatter's default same-line).
+func (c *Config) FormattingBraceStyle() string {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil {
+		return ""
+	}
+
+	return raw.Formatting.BraceStyle
+}
+
 // ResolvedFormatting collects every formatting accessor into one resolved
 // struct, so the daemon startup path and the `format` subcommand read the same
 // settings without each restating the field list.
@@ -454,6 +476,8 @@ func (c *Config) ResolvedFormatting() config.ResolvedFormatting {
 		LowercaseAttributes:    c.FormattingLowercaseAttributes(),
 		DoubleQuoteAttributes:  c.FormattingDoubleQuoteAttributes(),
 		QueryUppercaseKeywords: c.FormattingQueryUppercaseKeywords(),
+		ParenSpacing:           c.FormattingParenSpacing(),
+		BraceStyle:             c.FormattingBraceStyle(),
 		ScopeCase:              c.FormattingScopeCase(),
 		CommaPosition:          c.FormattingCommaPosition(),
 		QueryCommaPosition:     c.FormattingQueryCommaPosition(),

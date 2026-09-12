@@ -137,21 +137,32 @@ type Formatting struct {
 	// mention it". As plain bools, a config file naming any formatting key at
 	// all silently switched formatting off for a client that had enabled it
 	// through initializationOptions.
-	Enabled                *bool  `json:"enabled"`
-	Debug                  *bool  `json:"debug"`
-	SelfCloseTags          *bool  `json:"selfCloseTags"`
-	WhitespaceOnly         *bool  `json:"whitespaceOnly"`
-	QueryFormat            *bool  `json:"queryFormat"`
-	LowercaseTags          *bool  `json:"lowercaseTags"`
-	LowercaseAttributes    *bool  `json:"lowercaseAttributes"`
-	DoubleQuoteAttributes  *bool  `json:"doubleQuoteAttributes"`
-	QueryUppercaseKeywords *bool  `json:"queryUppercaseKeywords"`
-	ScopeCase              string `json:"scopeCase"`
-	CommaPosition          string `json:"commaPosition"`
-	QueryCommaPosition     string `json:"queryCommaPosition"`
-	LineWidth              *int   `json:"lineWidth"`
-	AttrBreakThreshold     *int   `json:"attrBreakThreshold"`
-	IndentWidth            *int   `json:"indentWidth"`
+	Enabled                *bool `json:"enabled"`
+	Debug                  *bool `json:"debug"`
+	SelfCloseTags          *bool `json:"selfCloseTags"`
+	WhitespaceOnly         *bool `json:"whitespaceOnly"`
+	QueryFormat            *bool `json:"queryFormat"`
+	LowercaseTags          *bool `json:"lowercaseTags"`
+	LowercaseAttributes    *bool `json:"lowercaseAttributes"`
+	DoubleQuoteAttributes  *bool `json:"doubleQuoteAttributes"`
+	QueryUppercaseKeywords *bool `json:"queryUppercaseKeywords"`
+	// ParenSpacing is the padding inside parentheses: "pad" for `( a )`,
+	// "tight" for `(a)`. Unset keeps what the formatter has always emitted,
+	// which is neither consistently — conditions and grouping are padded,
+	// call and parameter lists are not — so a project that wants one rule
+	// everywhere has to say which.
+	ParenSpacing string `json:"parenSpacing"`
+	// BraceStyle is where a block's opening brace goes: "same-line" (K&R,
+	// `function f() {`) or "next-line" (Allman, the brace alone on the line
+	// under the header). Unset is same-line, what the formatter has always
+	// emitted.
+	BraceStyle         string `json:"braceStyle"`
+	ScopeCase          string `json:"scopeCase"`
+	CommaPosition      string `json:"commaPosition"`
+	QueryCommaPosition string `json:"queryCommaPosition"`
+	LineWidth          *int   `json:"lineWidth"`
+	AttrBreakThreshold *int   `json:"attrBreakThreshold"`
+	IndentWidth        *int   `json:"indentWidth"`
 }
 
 // BoolDefault returns the value of a *bool or the default if nil.
@@ -199,6 +210,8 @@ type ResolvedFormatting struct {
 	LowercaseAttributes    bool
 	DoubleQuoteAttributes  bool
 	QueryUppercaseKeywords bool
+	ParenSpacing           string
+	BraceStyle             string
 	ScopeCase              string
 	CommaPosition          string
 	QueryCommaPosition     string
@@ -266,6 +279,8 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 			LowercaseAttributes:    BoolDefault(f.LowercaseAttributes, true),
 			DoubleQuoteAttributes:  BoolDefault(f.DoubleQuoteAttributes, true),
 			QueryUppercaseKeywords: BoolDefault(f.QueryUppercaseKeywords, true),
+			ParenSpacing:           f.ParenSpacing,
+			BraceStyle:             f.BraceStyle,
 			ScopeCase:              f.ScopeCase,
 			CommaPosition:          f.CommaPosition,
 			QueryCommaPosition:     f.QueryCommaPosition,
@@ -414,6 +429,8 @@ func mergeFormatting(base, over *Formatting) *Formatting {
 	}
 
 	for _, f := range []struct{ dst, src *string }{
+		{&out.ParenSpacing, &over.ParenSpacing},
+		{&out.BraceStyle, &over.BraceStyle},
 		{&out.ScopeCase, &over.ScopeCase},
 		{&out.CommaPosition, &over.CommaPosition},
 		{&out.QueryCommaPosition, &over.QueryCommaPosition},
