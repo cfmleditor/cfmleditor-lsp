@@ -151,7 +151,12 @@ type Formatting struct {
 	// which is neither consistently — conditions and grouping are padded,
 	// call and parameter lists are not — so a project that wants one rule
 	// everywhere has to say which.
-	ParenSpacing       string `json:"parenSpacing"`
+	ParenSpacing string `json:"parenSpacing"`
+	// BraceStyle is where a block's opening brace goes: "same-line" (K&R,
+	// `function f() {`) or "next-line" (Allman, the brace alone on the line
+	// under the header). Unset is same-line, what the formatter has always
+	// emitted.
+	BraceStyle         string `json:"braceStyle"`
 	ScopeCase          string `json:"scopeCase"`
 	CommaPosition      string `json:"commaPosition"`
 	QueryCommaPosition string `json:"queryCommaPosition"`
@@ -206,6 +211,7 @@ type ResolvedFormatting struct {
 	DoubleQuoteAttributes  bool
 	QueryUppercaseKeywords bool
 	ParenSpacing           string
+	BraceStyle             string
 	ScopeCase              string
 	CommaPosition          string
 	QueryCommaPosition     string
@@ -274,6 +280,7 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 			DoubleQuoteAttributes:  BoolDefault(f.DoubleQuoteAttributes, true),
 			QueryUppercaseKeywords: BoolDefault(f.QueryUppercaseKeywords, true),
 			ParenSpacing:           f.ParenSpacing,
+			BraceStyle:             f.BraceStyle,
 			ScopeCase:              f.ScopeCase,
 			CommaPosition:          f.CommaPosition,
 			QueryCommaPosition:     f.QueryCommaPosition,
@@ -423,6 +430,7 @@ func mergeFormatting(base, over *Formatting) *Formatting {
 
 	for _, f := range []struct{ dst, src *string }{
 		{&out.ParenSpacing, &over.ParenSpacing},
+		{&out.BraceStyle, &over.BraceStyle},
 		{&out.ScopeCase, &over.ScopeCase},
 		{&out.CommaPosition, &over.CommaPosition},
 		{&out.QueryCommaPosition, &over.QueryCommaPosition},

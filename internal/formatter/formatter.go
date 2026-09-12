@@ -56,6 +56,11 @@ type Options struct {
 	// "tight" for `(a)`. Empty keeps what has always been emitted, which is
 	// neither consistently — see condPad and argPad.
 	ParenSpacing string
+	// BraceStyle is where a block's opening brace goes: "same-line" (K&R,
+	// `function f() {`) or "next-line" (Allman, the brace alone on the line
+	// under the header). Empty means same-line, which is what the formatter
+	// has always emitted.
+	BraceStyle string
 	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
 	// Valid values: "upper", "lower", "leave" (default "leave").
 	ScopeCase string
@@ -82,14 +87,6 @@ type Options struct {
 	WhitespaceOnly bool
 }
 
-// indent renders the indentation for a nesting level. A negative level is
-// column zero rather than a panic: roughly thirty sites decrement f.level, each
-// paired with an increment somewhere else, and a document that closes a
-// construct it never opened unbalances that pairing. strings.Repeat panics on a
-// negative count, so `</cfcomponent>` on its own — an ordinary mid-edit state,
-// and a real file in the corpus — took the formatter down rather than emitting
-// the tag. Clamping keeps this function total for every caller; the individual
-// level counters are still kept balanced at their own sites.
 // condPad and argPad are the padding inside a parenthesis, for the two kinds
 // the formatter emits: a condition or grouping (`if ( a )`, `( a + b ) * c`)
 // and an argument or parameter list (`foo(1, 2)`).
@@ -113,6 +110,14 @@ func (o Options) argPad() string {
 	return ""
 }
 
+// nextLineBraces reports whether a block's opening brace starts a line of its
+// own (Allman) rather than following the construct's header (K&R). Anything
+// other than "next-line", the empty string included, is same-line, so a
+// project that never set this keeps byte-for-byte what it had.
+func (o Options) nextLineBraces() bool {
+	return o.BraceStyle == "next-line"
+}
+
 // padded wraps a rendered argument or parameter list in the configured inner
 // padding. An empty list stays "()" — "( )" is nobody's preference.
 func (f *Formatter) padded(inner string) string {
@@ -125,6 +130,14 @@ func (f *Formatter) padded(inner string) string {
 	return pad + inner + pad
 }
 
+// indent renders the indentation for a nesting level. A negative level is
+// column zero rather than a panic: roughly thirty sites decrement f.level, each
+// paired with an increment somewhere else, and a document that closes a
+// construct it never opened unbalances that pairing. strings.Repeat panics on a
+// negative count, so `</cfcomponent>` on its own — an ordinary mid-edit state,
+// and a real file in the corpus — took the formatter down rather than emitting
+// the tag. Clamping keeps this function total for every caller; the individual
+// level counters are still kept balanced at their own sites.
 func (o Options) indent(level int) string {
 	if level <= 0 {
 		return ""

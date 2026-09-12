@@ -158,6 +158,7 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `doubleQuoteAttributes` | `true` | Normalize attribute values to double quotes. |
 | `queryUppercaseKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
 | `parenSpacing` | *(unset)* | Padding inside parentheses. `"pad"` gives `if ( a )` and `foo( 1, 2 )`; `"tight"` gives `if (a)` and `foo(1, 2)`. Unset keeps the existing behaviour, which pads conditions and grouping but not argument lists — set it to get one rule in both places. |
+| `braceStyle` | `"same-line"` | Where a block's opening brace goes. `"same-line"` (K&R) keeps `function f() {`; `"next-line"` (Allman) puts the brace alone on the line below, and moves `else`, `catch` and `finally` onto their own lines so their braces line up too. A `{ … }` block that is a statement in its own right is left alone — there is no header for its brace to go under. |
 | `scopeCase` | `"leave"` | Case for CFML scope names. Values: `"upper"`, `"lower"`, `"leave"`. |
 | `commaPosition` | `"after"` | Comma placement in multi-line argument lists. Values: `"after"` (trailing), `"before"` (leading). |
 | `queryCommaPosition` | `"preserve"` | Comma placement in SQL SELECT lists. Values: `"preserve"` (keep original position), `"after"` (trailing), `"before"` (leading). |
