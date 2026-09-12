@@ -730,6 +730,9 @@ func (f *Formatter) expr(n *sitter.Node) string {
 
 		return inline
 
+	case "query_expression":
+		return f.exprQuery(n)
+
 	case "call_expression":
 		fn := n.ChildByFieldName("function")
 		args := n.ChildByFieldName("arguments")
@@ -1149,6 +1152,136 @@ func (f *Formatter) assignmentOperator(n *sitter.Node) string {
 	}
 
 	return "="
+}
+
+// exprQuery renders a `queryExecute(...)` call.
+//
+// The grammar gives this one call a node of its own — `query_expression`, with
+// the SQL as a `query_text` child between two quote tokens — rather than the
+// `call_expression`/`arguments` shape every other call has. With no case for it
+// the expression fell to expr's default arm, `return f.text(n)`, and was
+// emitted verbatim: a queryExecute call was never formatted at all. Its
+// arguments kept whatever indentation the source had, none of parenSpacing,
+// commaPosition or indentWidth reached them, and where the source had no
+// indentation the output had none either. 137 of the 5,624 corpus files
+// contain one; in script-syntax CFML this is the replacement for `<cfquery>`.
+//
+// The SQL is re-emitted exactly as written, quotes included. It is a string
+// literal, so its interior — including the line breaks of a multi-line query —
+// is content rather than layout, and re-indenting it would change what the
+// query says. That is also why a query holding a newline always breaks the
+// argument list: there is no folding it back onto one line.
+//
+// The node only ever covers the positional form with a double-quoted first
+// argument. `queryExecute(sql = "...")` and a single-quoted query are ordinary
+// call_expressions and were already formatted.
+func (f *Formatter) exprQuery(n *sitter.Node) string {
+	callee, parts, ok := f.queryParts(n)
+	if !ok {
+		return f.text(n)
+	}
+
+	multiline := false
+
+	for _, p := range parts {
+		if strings.Contains(p, "\n") {
+			multiline = true
+
+			break
+		}
+	}
+
+	inline := callee + "(" + f.padded(strings.Join(parts, ", ")) + ")"
+	if !multiline && len(parts) <= 3 && len(inline) <= f.opts.LineWidth {
+		return inline
+	}
+
+	// Re-render at the deeper level, as exprArgs does, so a nested split
+	// indents against the position the argument will actually occupy.
+	f.level++
+	_, parts, ok = f.queryParts(n)
+	indent := f.opts.indent(f.level)
+	f.level--
+
+	if !ok {
+		return f.text(n)
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(callee)
+	sb.WriteString("(\n")
+
+	leading := f.opts.CommaPosition == "before"
+
+	for i, p := range parts {
+		sb.WriteString(indent)
+
+		if leading && i > 0 {
+			sb.WriteString(", ")
+		}
+
+		sb.WriteString(p)
+
+		if !leading && i < len(parts)-1 {
+			sb.WriteString(",")
+		}
+
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(f.opts.indent(f.level))
+	sb.WriteString(")")
+
+	return sb.String()
+}
+
+// queryParts splits a query_expression into its callee and rendered arguments,
+// reporting false for any shape this renderer should not touch.
+//
+// The SQL literal arrives as three children — an opening quote, the query_text,
+// and a closing quote — so it is taken as the source span from one quote to the
+// other rather than rendered. A comment among the arguments returns false: it
+// has nowhere to go in a rendered list and would swallow whatever followed it
+// on the line, and reproducing the call as written is what happened before this
+// renderer existed.
+func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, ok bool) {
+	var open *sitter.Node
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+
+		switch {
+		case isCommentKind(c.Kind()):
+			return "", nil, false
+		case callee == "":
+			callee = f.text(c)
+		case c.Kind() == "(" || c.Kind() == ")" || c.Kind() == ",":
+			continue
+		case c.Kind() == `"` || c.Kind() == "'":
+			if open == nil {
+				open = c
+
+				continue
+			}
+
+			parts = append(parts, string(f.src[open.StartByte():c.EndByte()]))
+			open = nil
+		case open != nil:
+			// query_text, already covered by the span its quotes delimit.
+			continue
+		case c.IsNamed():
+			parts = append(parts, f.expr(c))
+		}
+	}
+
+	// An unterminated literal means the walk above did not see the shape it
+	// expects; emitting the pieces it did collect would drop the rest.
+	if open != nil || callee == "" || len(parts) == 0 {
+		return "", nil, false
+	}
+
+	return callee, parts, true
 }
 
 func (f *Formatter) exprArgs(args *sitter.Node) string {

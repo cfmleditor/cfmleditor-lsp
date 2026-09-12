@@ -17,6 +17,7 @@
 
 - `formatting.lowercaseTags: false` did nothing. `<CFOUTPUT>` still came back `<cfoutput>`, and `<CFDUMP>` came back as `cfDUMP`. Opening and closing tags now each keep the casing they were written with.
 - A `//` comment among a function's parameters **deleted the parameter after it** — `a, // why, b` lost `b` into the comment. Same defect for a comment among a function's annotations, and among a function *expression*'s parameters.
+- `queryExecute(…)` calls were never formatted — arguments unindented, and `parenSpacing`, `commaPosition` and `indentWidth` never reaching them. The grammar gives this one call a node of its own, which the formatter had no renderer for, so it was emitted verbatim. 137 of the 5,624 corpus files contain one. The SQL itself is still emitted exactly as written: it is a string literal, so re-indenting it would change what the query says.
 - A braced `case` body (`case 1: { … }`) put its brace in column one and folded the switch's closing brace onto the block's (`}}`).
 - A trailing comma was silently deleted from every list — `[1, 2, ]`, `{ a: 1, }`, `f(1, 2, )`. The form is legal in Lucee, ACF and BoxLang.
 - A `.cfm` whose body is JavaScript (Lucee's `jquery.blockUI.js.cfm`) had its `//` comments folded, commenting out the code after them. The only case where the formatter silently destroyed a file.
@@ -59,7 +60,7 @@ Each release makes the formatter render constructs it previously refused, so a b
 
 ### Internal
 
-- The formatter corpus harness gains a **`malformed` verdict** — an output-shape check. Every other check asks whether the formatter destroyed something or failed to settle; none asked whether the result is well formed, which is how the braced-`case` defect above went unseen. It found one further defect on its first run (FORMATTER-ISSUES.md 4.3).
+- The formatter corpus harness gains a **`malformed` verdict** — an output-shape check. Every other check asks whether the formatter destroyed something or failed to settle; none asked whether the result is well formed, which is how the braced-`case` defect above went unseen. It found one further defect on its first run — the unformatted `queryExecute` above.
 - `make corpus` gains `BASELINE=<earlier report>`, which fails if any file changed verdict, and `OPTS=field=value,…`, for sweeping a setting through its modes.
 - Reflective tests over the config chain and the parser's two scope-dispatch switches, so a key or scope wired into one place and forgotten in another fails a test rather than silently doing nothing.
 - New `/add-formatting-setting` skill and a verification-discipline section in CLAUDE.md.
