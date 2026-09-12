@@ -269,7 +269,7 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	}
 
 	// Try relative to workspace folders
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		candidate = filepath.Join(root, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return &protocol.Location{

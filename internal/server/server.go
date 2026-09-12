@@ -34,8 +34,15 @@ type Server struct {
 	Version     string
 	FS          vfs.FS // filesystem abstraction for portability
 
-	mu                       sync.RWMutex
-	documents                map[uri.URI]string
+	mu        sync.RWMutex
+	documents map[uri.URI]string
+	// rootsMu guards workspaceRoots, and only that. It is deliberately not
+	// s.mu: the roots are read through searchRoots, which is reached from
+	// getResolver and so from most of the server, and nesting those reads
+	// inside the main lock would put an ordering constraint on almost every
+	// path. Nothing taken while holding rootsMu takes another lock, so it
+	// cannot participate in a cycle.
+	rootsMu                  sync.RWMutex
 	workspaceRoots           []string
 	WorkspaceFolders         []string                  // project folders from config
 	IndexGlobs               []string                  // optional glob filters (absolute paths)
@@ -281,7 +288,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 	if s.resolver == nil {
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
-			WorkspaceFolders:   s.WorkspaceFolders,
+			WorkspaceFolders:   s.searchRoots(),
 			Mappings:           s.Mappings,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
@@ -329,7 +336,7 @@ func (s *Server) ensureBeansLoaded() {
 
 	allBeanPaths := make(map[string]string)
 
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		appDir := s.getResolver().FindApplicationRoot(root)
 		if appDir != "" {
 			for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
@@ -414,6 +421,87 @@ func (s *Server) removeDocument(docURI uri.URI) {
 	defer s.mu.Unlock()
 
 	delete(s.documents, docURI)
+}
+
+// editorRoots is a snapshot of the roots the client reported.
+//
+// indexWorkspace read the slice directly from the goroutine handleInitialize
+// spawns, while workspace/didChangeWorkspaceFolders appended to it from the
+// handler — a real race between a client adding a folder and the first index
+// still running, which the race detector duly found once a test drove both.
+func (s *Server) editorRoots() []string {
+	s.rootsMu.RLock()
+	defer s.rootsMu.RUnlock()
+
+	return slices.Clone(s.workspaceRoots)
+}
+
+// addWorkspaceRoot records a usable root, and removeWorkspaceRoot drops one.
+func (s *Server) addWorkspaceRoot(root string) {
+	s.rootsMu.Lock()
+	defer s.rootsMu.Unlock()
+
+	s.workspaceRoots = append(s.workspaceRoots, root)
+}
+
+func (s *Server) removeWorkspaceRoot(root string) {
+	s.rootsMu.Lock()
+	defer s.rootsMu.Unlock()
+
+	for i, r := range s.workspaceRoots {
+		if r == root {
+			s.workspaceRoots = append(s.workspaceRoots[:i], s.workspaceRoots[i+1:]...)
+
+			break
+		}
+	}
+}
+
+// usableWorkspaceRoot converts a workspace folder URI the client reported into
+// a filesystem path, and reports whether it is one worth searching.
+//
+// "" and "/" are not workspaces, they are "conversion failed" and "the whole
+// filesystem". Every workspace-wide search falls back to these roots
+// (searchRoots), so keeping one would have findRefs and scanWorkspace crawl the
+// machine. Neither can come from a well-formed URI: "/" is what the
+// non-canonical `file://C:\Users\q\proj` collapses to once
+// go.lsp.dev/protocol has read its path as the URI's authority (see
+// TestUncanonicalWindowsRootIsMangledUpstream), and "" is a conversion that
+// failed outright. Declining them costs nothing a real workspace needs, and the
+// warning is what makes an otherwise silent mangling diagnosable.
+func (s *Server) usableWorkspaceRoot(rawURI string) (string, bool) {
+	root := cfpath.FromURI(rawURI)
+
+	if root == "" || root == "/" || root == `\` {
+		s.log.Warn("ignoring unusable workspace root",
+			cflog.String("uri", rawURI), cflog.String("path", root))
+
+		return "", false
+	}
+
+	return root, true
+}
+
+// searchRoots is where to look for things across the workspace: the folders
+// from config when there are any, and otherwise the roots the editor opened.
+//
+// WorkspaceFolders alone is only ever the *configured* set — it comes from
+// `workspacePaths` and is empty for every session without a .cfmleditor.json,
+// which since daemon mode became opt-in is the ordinary standalone case. A
+// search that reads it directly then covers nothing and reports nothing found,
+// which is indistinguishable from there being nothing to find: cfmleditor.findRefs
+// answered "0 match(es)" for a function with three callers sitting next to it.
+//
+// Use this for anything that goes looking. The configured set itself is still
+// the right question for membership (isWorkspaceFolder) and for whether the
+// inclusion filter applies at all (isIncludedPath), so those keep reading the
+// field.
+func (s *Server) searchRoots() []string {
+	if len(s.WorkspaceFolders) > 0 {
+		return s.WorkspaceFolders
+	}
+
+	return s.editorRoots()
 }
 
 func (s *Server) isWorkspaceFolder(root string) bool {

@@ -103,12 +103,24 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", string(folder.URI)))
 	}
 
+	// cfpath.FromURI rather than URI.Path(), for the same reason every other
+	// inbound conversion goes through it (0.2.8, #45). Path() returns the
+	// *empty string* for the non-canonical `file://C:\Users\q\proj` several
+	// clients send — which would leave the roots as [""] and send every search
+	// that falls back to them walking nothing — and for the canonical
+	// `file:///c%3A/...` it returns `/c:/Users/q/proj`, a leading slash that is
+	// not a Windows path. These roots are what searchRoots falls back to, so a
+	// bad one here is a workspace-wide search covering the wrong place.
 	for _, folder := range folders {
-		s.workspaceRoots = append(s.workspaceRoots, folder.URI.Path())
+		if root, ok := s.usableWorkspaceRoot(string(folder.URI)); ok {
+			s.addWorkspaceRoot(root)
+		}
 	}
 
-	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
-		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
+	if len(s.editorRoots()) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
+		if root, ok := s.usableWorkspaceRoot(string(*params.RootURI)); ok { //nolint:all // this is for compatibility
+			s.addWorkspaceRoot(root)
+		}
 	}
 
 	// Apply this session's configuration. See configureSession for which file
@@ -132,7 +144,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)
 
-	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.workspaceRoots))
+	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.editorRoots()))
 
 	return protocol.InitializeResult{
 		Capabilities: s.capabilities(),
@@ -665,29 +677,22 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, removed := range params.Event.Removed {
-		root := removed.URI.Path()
+		root := cfpath.FromURI(string(removed.URI))
 		if !s.isWorkspaceFolder(root) {
 			s.index.RemoveFilesUnder(string(removed.URI))
 		}
 
-		s.mu.Lock()
-		for i, r := range s.workspaceRoots {
-			if r == root {
-				s.workspaceRoots = append(s.workspaceRoots[:i], s.workspaceRoots[i+1:]...)
-
-				break
-			}
-		}
-		s.mu.Unlock()
+		s.removeWorkspaceRoot(root)
 		s.log.Info("workspace folder removed", cflog.String("uri", string(removed.URI)))
 	}
 
 	for _, added := range params.Event.Added {
-		root := added.URI.Path()
+		root, ok := s.usableWorkspaceRoot(string(added.URI))
+		if !ok {
+			continue
+		}
 
-		s.mu.Lock()
-		s.workspaceRoots = append(s.workspaceRoots, root)
-		s.mu.Unlock()
+		s.addWorkspaceRoot(root)
 		s.indexRoot(root)
 		s.log.Info("workspace folder added", cflog.String("uri", string(added.URI)))
 	}
@@ -807,8 +812,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			}
 		}
 
-		if baseDir == "" && len(s.WorkspaceFolders) > 0 {
-			baseDir = s.WorkspaceFolders[0]
+		if roots := s.searchRoots(); baseDir == "" && len(roots) > 0 {
+			baseDir = roots[0]
 		}
 
 		resolved := s.getResolver().ComponentPath(dotPath, baseDir)
@@ -1016,7 +1021,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			sourceURI, _ = argString(params.Arguments, 1)
 		}
 
-		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
+		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.searchRoots()))
 		r := s.getResolver()
 		sourceFile := uri.URI(sourceURI).Path()
 		findOpts := refs.Options{
@@ -1036,8 +1041,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			},
 			SourceFile: sourceFile,
 		}
-		entries := refs.Trace(s.FS, s.WorkspaceFolders, findOpts)
-		result := refs.FormatResult(entries, funcName, sourceURI, s.WorkspaceFolders)
+		entries := refs.Trace(s.FS, s.searchRoots(), findOpts)
+		result := refs.FormatResult(entries, funcName, sourceURI, s.searchRoots())
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
 
@@ -1175,7 +1180,7 @@ func (s *Server) safeGo(label string, fn func()) {
 
 // fileToPackage converts a file path to a CFML dot-path relative to workspace.
 func (s *Server) fileToPackage(filePath string) string {
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		if strings.HasPrefix(filePath, root+"/") {
 			rel := filePath[len(root)+1:]
 			rel = strings.TrimSuffix(rel, filepath.Ext(rel))

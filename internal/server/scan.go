@@ -15,13 +15,24 @@ import (
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) scanWorkspace(ctx context.Context) {
+// scanFiles is every CFML file scanWorkspace will read, from searchRoots
+// rather than the configured folders alone — without that a session with no
+// .cfmleditor.json scanned nothing and reported "0 parse errors in 0 files",
+// which reads like a clean workspace.
+//
+// Split out from scanWorkspace because the scan itself only reports through
+// notifications, so this is the part a test can see.
+func (s *Server) scanFiles() []string {
 	var files []string
 
-	for _, folder := range s.WorkspaceFolders {
+	for _, folder := range s.searchRoots() {
 		_ = s.FS.Walk(folder, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
+			}
+
+			if info == nil {
+				return nil
 			}
 
 			if info.IsDir() {
@@ -40,6 +51,12 @@ func (s *Server) scanWorkspace(ctx context.Context) {
 			return nil
 		})
 	}
+
+	return files
+}
+
+func (s *Server) scanWorkspace(ctx context.Context) {
+	files := s.scanFiles()
 
 	s.log.Info("scanWorkspace: starting", cflog.Int("files", len(files)))
 

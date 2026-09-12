@@ -40,7 +40,7 @@ func (s *Server) indexWorkspace() {
 	} else {
 		source = "editorRoots"
 
-		for _, root := range s.workspaceRoots {
+		for _, root := range s.editorRoots() {
 			files = append(files, s.collectCFCFiles(root)...)
 		}
 	}
