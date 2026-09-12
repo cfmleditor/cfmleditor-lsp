@@ -34,8 +34,8 @@ import (
 // same file, plus the editor's gaps — replaces them exactly.
 func (s *Server) configureSession(editorCfg *config.JSON) {
 	baseDir := ""
-	if len(s.workspaceRoots) > 0 {
-		baseDir = s.workspaceRoots[0]
+	if roots := s.editorRoots(); len(roots) > 0 {
+		baseDir = roots[0]
 	}
 
 	path, fileCfg := s.governingConfig()
@@ -91,7 +91,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 // governingConfig finds the .cfmleditor.json this session should run with, and
 // returns its path alongside it. Nil when there is none to be had.
 func (s *Server) governingConfig() (string, *config.JSON) {
-	for _, root := range s.workspaceRoots {
+	for _, root := range s.editorRoots() {
 		if p, cfg := s.findConfigUpwards(root); cfg != nil {
 			return p, cfg
 		}

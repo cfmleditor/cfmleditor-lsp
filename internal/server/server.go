@@ -34,8 +34,15 @@ type Server struct {
 	Version     string
 	FS          vfs.FS // filesystem abstraction for portability
 
-	mu                       sync.RWMutex
-	documents                map[uri.URI]string
+	mu        sync.RWMutex
+	documents map[uri.URI]string
+	// rootsMu guards workspaceRoots, and only that. It is deliberately not
+	// s.mu: the roots are read through searchRoots, which is reached from
+	// getResolver and so from most of the server, and nesting those reads
+	// inside the main lock would put an ordering constraint on almost every
+	// path. Nothing taken while holding rootsMu takes another lock, so it
+	// cannot participate in a cycle.
+	rootsMu                  sync.RWMutex
 	workspaceRoots           []string
 	WorkspaceFolders         []string                  // project folders from config
 	IndexGlobs               []string                  // optional glob filters (absolute paths)
@@ -416,6 +423,40 @@ func (s *Server) removeDocument(docURI uri.URI) {
 	delete(s.documents, docURI)
 }
 
+// editorRoots is a snapshot of the roots the client reported.
+//
+// indexWorkspace read the slice directly from the goroutine handleInitialize
+// spawns, while workspace/didChangeWorkspaceFolders appended to it from the
+// handler — a real race between a client adding a folder and the first index
+// still running, which the race detector duly found once a test drove both.
+func (s *Server) editorRoots() []string {
+	s.rootsMu.RLock()
+	defer s.rootsMu.RUnlock()
+
+	return slices.Clone(s.workspaceRoots)
+}
+
+// addWorkspaceRoot records a usable root, and removeWorkspaceRoot drops one.
+func (s *Server) addWorkspaceRoot(root string) {
+	s.rootsMu.Lock()
+	defer s.rootsMu.Unlock()
+
+	s.workspaceRoots = append(s.workspaceRoots, root)
+}
+
+func (s *Server) removeWorkspaceRoot(root string) {
+	s.rootsMu.Lock()
+	defer s.rootsMu.Unlock()
+
+	for i, r := range s.workspaceRoots {
+		if r == root {
+			s.workspaceRoots = append(s.workspaceRoots[:i], s.workspaceRoots[i+1:]...)
+
+			break
+		}
+	}
+}
+
 // usableWorkspaceRoot converts a workspace folder URI the client reported into
 // a filesystem path, and reports whether it is one worth searching.
 //
@@ -460,7 +501,7 @@ func (s *Server) searchRoots() []string {
 		return s.WorkspaceFolders
 	}
 
-	return s.workspaceRoots
+	return s.editorRoots()
 }
 
 func (s *Server) isWorkspaceFolder(root string) bool {

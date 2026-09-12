@@ -113,13 +113,13 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// bad one here is a workspace-wide search covering the wrong place.
 	for _, folder := range folders {
 		if root, ok := s.usableWorkspaceRoot(string(folder.URI)); ok {
-			s.workspaceRoots = append(s.workspaceRoots, root)
+			s.addWorkspaceRoot(root)
 		}
 	}
 
-	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
+	if len(s.editorRoots()) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
 		if root, ok := s.usableWorkspaceRoot(string(*params.RootURI)); ok { //nolint:all // this is for compatibility
-			s.workspaceRoots = append(s.workspaceRoots, root)
+			s.addWorkspaceRoot(root)
 		}
 	}
 
@@ -144,7 +144,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)
 
-	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.workspaceRoots))
+	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.editorRoots()))
 
 	return protocol.InitializeResult{
 		Capabilities: s.capabilities(),
@@ -682,15 +682,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 			s.index.RemoveFilesUnder(string(removed.URI))
 		}
 
-		s.mu.Lock()
-		for i, r := range s.workspaceRoots {
-			if r == root {
-				s.workspaceRoots = append(s.workspaceRoots[:i], s.workspaceRoots[i+1:]...)
-
-				break
-			}
-		}
-		s.mu.Unlock()
+		s.removeWorkspaceRoot(root)
 		s.log.Info("workspace folder removed", cflog.String("uri", string(removed.URI)))
 	}
 
@@ -700,9 +692,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 			continue
 		}
 
-		s.mu.Lock()
-		s.workspaceRoots = append(s.workspaceRoots, root)
-		s.mu.Unlock()
+		s.addWorkspaceRoot(root)
 		s.indexRoot(root)
 		s.log.Info("workspace folder added", cflog.String("uri", string(added.URI)))
 	}
