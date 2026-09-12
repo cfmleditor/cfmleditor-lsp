@@ -178,7 +178,15 @@ func runServer() {
 		return
 	}
 
-	// No config found — standalone mode
+	// No .cfmleditor.json anywhere above the working directory, so there is no
+	// project to run a daemon for: a standalone session with its own index.
+	// The editor's workspace roots are searched for a config again at
+	// initialize, so a project config the walk above could not reach — the
+	// editor was started from elsewhere — still configures this session; it
+	// just does not put it in a daemon named after whatever directory the
+	// process happened to start in.
+	log.Info("no .cfmleditor.json found; starting standalone")
+
 	stream := jsonrpc2.NewStream(vfs.Stdio())
 	conn := jsonrpc2.NewConn(stream)
 	srv := server.NewServer(conn, log)
