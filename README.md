@@ -169,6 +169,17 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 
 Note: `useTabs` and `tabSize` are taken from the editor's formatting options (sent with each formatting request), not from this config.
 
+The editor's `insertFinalNewline` and `trimFinalNewlines` (LSP 3.15) are honoured too. The
+formatter rebuilds the document rather than editing it, so left to itself it always ends its
+output with exactly one newline — and VS Code's defaults for both of those settings are `false`,
+which would mean adding a final newline the editor said not to add and dropping trailing blank
+lines it said to keep. A client that sends neither option gets that single trailing newline, as
+before.
+
+`trimTrailingWhitespace` is deliberately **not** honoured. For the same reason — output is
+rebuilt from the syntax tree, not patched — the formatter has no trailing whitespace to keep, so
+there is nothing it could honestly do with `false` short of declining to format.
+
 ### References
 
 `textDocument/references` — the editor's "Find All References" — is off by default and enabled per workspace:
