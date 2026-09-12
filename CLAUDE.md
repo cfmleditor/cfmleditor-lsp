@@ -20,7 +20,7 @@ make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
 make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]
                     # format a real-world CFML corpus and report what the formatter did to
-                    # each file (clean / grammar-refused / guard-rejected / not idempotent);
+                    # each file (clean / grammar-refused / guard-rejected / not idempotent / malformed);
                     # skipped without CORPUS, so it never runs in CI. See FORMATTER-ISSUES.md
 make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
 make release <ver>  # validate, build, test, lint, changelog, commit, tag, push

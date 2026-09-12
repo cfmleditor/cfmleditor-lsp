@@ -58,6 +58,17 @@ const (
 	// verdictUnstable formats cleanly but formatting the output again changes it, so
 	// format-on-save produces a diff for an unchanged file.
 	verdictUnstable
+	// verdictMalformed formatted cleanly, passed the guard and is a fixed point,
+	// but the output has a structural defect — see malformedShape.
+	//
+	// This is the one verdict the rest of the harness cannot reach. Everything
+	// above it asks whether the formatter destroyed something or failed to
+	// settle; nothing asks whether what it settled on is well formed. A defect
+	// that is whitespace-only and idempotent is therefore counted clean, which
+	// is how a braced `case` body came out as a brace in column one with the
+	// switch's closing brace folded onto the block's, undetected across every
+	// run in FORMATTER-ISSUES.md.
+	verdictMalformed
 	// verdictPanic crashed the formatter. In the LSP this takes down the daemon.
 	verdictPanic
 	// verdictSkipped is not CFML at all — a file whose extension claims it is
@@ -78,6 +89,8 @@ func (v corpusVerdict) String() string {
 		return "guard-rejected"
 	case verdictUnstable:
 		return "unstable"
+	case verdictMalformed:
+		return "malformed"
 	case verdictPanic:
 		return "panic"
 	case verdictSkipped:
@@ -175,7 +188,72 @@ func classifyCorpusFile(src []byte) (verdict corpusVerdict, detail string) {
 		return verdictUnstable, firstDifferingLine(out, again)
 	}
 
+	if shape := malformedShape(out); shape != "" {
+		return verdictMalformed, shape
+	}
+
 	return verdictClean, ""
+}
+
+// malformedShape reports a structural defect in output that is otherwise clean:
+// whitespace-only, stable, and so invisible to every other check here.
+//
+// Both rules were chosen by measuring candidates against the corpus and keeping
+// only those that accused no healthy file, because a shape check that cries
+// wolf is one nobody reads. Four others were tried and dropped, and are
+// recorded here so they are not tried again:
+//
+//	a space anywhere in a line's indent          1458 files — block comment
+//	                                             continuations and verbatim markup
+//	a lone "{" indented with mixed tabs/spaces      15 files — verbatim regions and
+//	                                             <script> bodies in .cfm
+//	a lone "{" less indented than the line above     5 files — a struct-literal
+//	                                             argument under a multi-line one
+//	any run of two or more braces alone on a line   23 files — nested literals
+//
+// What is left is narrow on purpose. It does not claim to find every malformed
+// output, only to stop this class of defect from being counted clean.
+func malformedShape(out []byte) string {
+	lines := strings.Split(string(out), "\n")
+	strs := stringSpansOf(out, scriptRegionsOf(out))
+
+	offset := 0
+
+	for i, line := range lines {
+		start := offset
+		offset += len(line) + 1
+
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// Inside a string literal a brace is text. The formatter cannot
+		// re-indent those lines without changing what they say, so it leaves
+		// them alone and neither rule below applies. Both rules need this, not
+		// just the second: the corpus happens to contain no multi-line string
+		// holding a "}}" line, which made the first one look safe without it.
+		if strs.contains(start + len(line) - len(strings.TrimLeft(line, " \t"))) {
+			continue
+		}
+
+		// Every block's closing brace gets a line of its own, so a line that is
+		// nothing but closing braces has exactly one. Two means a brace was
+		// written where the cursor happened to be rather than at the start of a
+		// line, and the next one landed beside it.
+		if len(trimmed) > 1 && strings.Trim(trimmed, "}") == "" {
+			return fmt.Sprintf("line %d: closing braces share a line: %q", i+1, trimForReport(line))
+		}
+
+		// A brace opening a block is written at its construct's indent, so a
+		// lone one in column zero means the indent was lost. The first line has
+		// nothing above it to be indented under.
+		if i > 0 && trimmed == "{" && line == trimmed {
+			return fmt.Sprintf("line %d: block brace in column one", i+1)
+		}
+	}
+
+	return ""
 }
 
 // firstDifferingLine locates where two formatter passes diverged, so an unstable file
@@ -370,7 +448,7 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 		}
 	}
 
-	t.Logf("%-18s %6s %6s %6s %6s %6s %6s %6s %6s", "root", "files", "clean", "parse", "script", "guard", "unstab", "panic", "skip")
+	t.Logf("%-18s %6s %6s %6s %6s %6s %6s %6s %6s %6s", "root", "files", "clean", "parse", "script", "guard", "unstab", "shape", "panic", "skip")
 
 	for _, root := range roots {
 		tally, ok := byRoot[root]
@@ -378,16 +456,16 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 			continue
 		}
 
-		t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d", filepath.Base(root), tally.total(),
+		t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d %6d", filepath.Base(root), tally.total(),
 			tally[verdictClean], tally[verdictParseRefused], tally[verdictScriptRefused],
-			tally[verdictGuardRejected], tally[verdictUnstable], tally[verdictPanic],
-			tally[verdictSkipped])
+			tally[verdictGuardRejected], tally[verdictUnstable], tally[verdictMalformed],
+			tally[verdictPanic], tally[verdictSkipped])
 	}
 
-	t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d", "TOTAL", overall.total(),
+	t.Logf("%-18s %6d %6d %6d %6d %6d %6d %6d %6d %6d", "TOTAL", overall.total(),
 		overall[verdictClean], overall[verdictParseRefused], overall[verdictScriptRefused],
-		overall[verdictGuardRejected], overall[verdictUnstable], overall[verdictPanic],
-		overall[verdictSkipped])
+		overall[verdictGuardRejected], overall[verdictUnstable], overall[verdictMalformed],
+		overall[verdictPanic], overall[verdictSkipped])
 
 	if path := os.Getenv("CFML_CORPUS_REPORT"); path != "" {
 		if err := writeCorpusReport(path, results); err != nil {
