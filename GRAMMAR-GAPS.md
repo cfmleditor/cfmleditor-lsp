@@ -30,8 +30,9 @@ RustCFML accept the file is not a repro. 24 of the 32 survive that.
 not proof.** Six of the 24 are Lucee's own *negative* fixtures — files whose
 names say they are meant to fail — and there tree-sitter is right and RustCFML
 is wrong. They are listed below so nobody files them. The remaining eighteen
-first read as six constructs; isolating each by hand cut that to four, which is
-the section after next.
+first read as six constructs; isolating each by hand cut that to four, filed as
+tree-sitter-cfml
+[#116](https://github.com/cfmleditor/tree-sitter-cfml/issues/116)–[#119](https://github.com/cfmleditor/tree-sitter-cfml/issues/119).
 
 The 247 in the other direction are RustCFML's gaps on a Lucee-heavy corpus,
 not ours.
@@ -73,11 +74,16 @@ the file made it look, and in two cases what fails is already settled upstream.
 
 So Lucee's `test3671.cfc` is one gap, not three, and it is a closed question.
 
-## Filable: four constructs
+## Filed: four constructs
 
-Each reproduces standalone on HEAD, RustCFML parses each, and none has an issue.
+Each reproduces standalone on HEAD and RustCFML parses each. All four are now
+open against `tree-sitter-cfml`:
+[#116](https://github.com/cfmleditor/tree-sitter-cfml/issues/116),
+[#117](https://github.com/cfmleditor/tree-sitter-cfml/issues/117),
+[#118](https://github.com/cfmleditor/tree-sitter-cfml/issues/118),
+[#119](https://github.com/cfmleditor/tree-sitter-cfml/issues/119).
 
-### 1. An arrow function with an empty body
+### 1. An arrow function with an empty body ([#116](https://github.com/cfmleditor/tree-sitter-cfml/issues/116))
 
 `Lucee/test/tickets/LDEV4062/LDEV4062.cfm`. Fails in `cfscript/grammar.js` and,
 reached through `<cfset f = function() { … }>`, in `common/define-grammar.js`.
@@ -94,7 +100,7 @@ Not [#75](https://github.com/cfmleditor/tree-sitter-cfml/issues/75), which is a
 MISSING token, and with a following statement the parser takes `y = 1` as the
 lambda body.
 
-### 2. A return type between two access modifiers
+### 2. A return type between two access modifiers ([#117](https://github.com/cfmleditor/tree-sitter-cfml/issues/117))
 
 `Lucee/test/general/modifiers/All.cfc`
 
@@ -107,7 +113,7 @@ and so does `public static struct function f()`. Only the interleaved spelling
 fails — the return type is accepted before the modifier run or after it, not
 inside it. Lucee's file writes four such members with a user-defined type name.
 
-### 3. A `thread { … }` statement followed by a tag island
+### 3. A `thread { … }` statement followed by a tag island ([#118](https://github.com/cfmleditor/tree-sitter-cfml/issues/118))
 
 `Lucee/test/tickets/LDEV4157/LDEV4157.cfm` and `test4157.cfc`
 
@@ -125,7 +131,7 @@ The statement alone parses and the island alone parses; together the grammar
 reports a MISSING `;` at the closing brace. Already recorded in the grammar's
 `LIMITATIONS.md`, but never filed, so nothing tracks it.
 
-### 4. A start tag split across `<cfif>` branches
+### 4. A start tag split across `<cfif>` branches ([#119](https://github.com/cfmleditor/tree-sitter-cfml/issues/119))
 
 Two shapes, both from ContentBox, both ordinary CFML. The closing `>` inside the
 branches (`views/authors/editor.cfm`):
