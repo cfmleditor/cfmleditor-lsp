@@ -38,7 +38,7 @@ func (f *Formatter) formatCFQuery(n *sitter.Node) {
 
 	f.nl()
 	f.writeIndent()
-	f.write("<cfquery" + f.renderAttrs("cfquery", attrs) + ">\n")
+	f.write("<" + f.openTagNameOf("cfquery", n) + f.renderAttrs("cfquery", attrs) + ">\n")
 
 	f.level++
 
@@ -73,7 +73,7 @@ func (f *Formatter) formatCFQuery(n *sitter.Node) {
 
 	f.level--
 	f.writeIndent()
-	f.write("</cfquery>\n")
+	f.write("</" + f.closeTagNameOf("cfquery", n) + ">\n")
 }
 
 // formatQueryChildren walks the CFQuery parse tree and emits formatted SQL.
@@ -611,7 +611,7 @@ func (f *Formatter) formatQueryCFIf(n *sitter.Node) {
 
 		if kind == ">" && phase == 1 {
 			f.writeIndent()
-			f.write("<cfif ")
+			f.write("<" + f.openTagNameOf("cfif", n) + " ")
 			cond = f.normalizeCond(strings.TrimSpace(cond))
 			f.write(cond + ">\n")
 
@@ -659,7 +659,7 @@ func (f *Formatter) formatQueryCFIf(n *sitter.Node) {
 
 	f.level--
 	f.writeIndent()
-	f.write("</cfif>\n")
+	f.write("</" + f.closeTagNameOf("cfif", n) + ">\n")
 }
 
 // formatQueryCFIfInline emits a cfif block inline (no newlines) when it is
@@ -699,7 +699,7 @@ func (f *Formatter) formatQueryCFIfAlt(n *sitter.Node) {
 			continue
 		case "cf_else_tag":
 			f.writeIndent()
-			f.write("<cfelse>\n")
+			f.write("<" + f.openTagNameOf("cfelse", n) + ">\n")
 
 			f.level++
 			tagEmitted = true
@@ -719,7 +719,7 @@ func (f *Formatter) formatQueryCFIfAlt(n *sitter.Node) {
 			}
 
 			f.writeIndent()
-			f.write("<cfelseif ")
+			f.write("<" + f.openTagNameOf("cfelseif", n) + " ")
 			cond = f.normalizeCond(cond)
 			f.write(cond + ">\n")
 
@@ -763,7 +763,7 @@ func (f *Formatter) formatQueryCFTag(n *sitter.Node) {
 	attrs := f.collectAttrs(n)
 
 	f.writeIndent()
-	f.write("<" + name + f.renderAttrs(name, attrs) + ">\n")
+	f.write("<" + f.openTagName(n) + f.renderAttrs(name, attrs) + ">\n")
 
 	f.level++
 
@@ -786,7 +786,7 @@ func (f *Formatter) formatQueryCFTag(n *sitter.Node) {
 
 	f.level--
 	f.writeIndent()
-	f.write("</" + name + ">\n")
+	f.write("</" + f.closeTagName(n) + ">\n")
 }
 
 // formatQueryParenthesized handles parenthesized expressions like VALUES (...).
@@ -1075,7 +1075,7 @@ func (f *Formatter) formatQueryNodeInline(n *sitter.Node) {
 func (f *Formatter) writeQuerySelfCloseTag(n *sitter.Node) {
 	name := f.tagName(n)
 	attrs := f.collectAttrs(n)
-	f.write("<" + name + f.renderAttrs(name, attrs) + " />")
+	f.write("<" + f.openTagName(n) + f.renderAttrs(name, attrs) + " />")
 }
 
 // emitQueryExtrasAndRight emits any cf_comment extras in a node, then the

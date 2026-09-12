@@ -153,7 +153,7 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `selfCloseTags` | `true` | Convert void/implicit-end HTML tags to self-closing form (e.g. `<br>` → `<br />`). |
 | `whitespaceOnly` | `true` | Reject formatting results that change non-whitespace content (safety guard). |
 | `queryFormat` | `false` | Format `<cfquery>` content (SQL re-indentation, keyword casing). When false, query content is emitted verbatim. |
-| `lowercaseTags` | `true` | Lowercase CF tag names (e.g. `<CFOUTPUT>` → `<cfoutput>`). |
+| `lowercaseTags` | `true` | Lowercase CF tag names (e.g. `<CFOUTPUT>` → `<cfoutput>`). When false, each tag keeps the casing it was written with, opening and closing halves independently. |
 | `lowercaseAttributes` | `true` | Lowercase attribute names. |
 | `doubleQuoteAttributes` | `true` | Normalize attribute values to double quotes. |
 | `queryUppercaseKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
