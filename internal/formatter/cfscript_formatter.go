@@ -321,7 +321,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 	if n != nil && n.Kind() == "parenthesized_expression" {
 		inner = f.expr(n)
 	} else {
-		inner = "( " + f.expr(n) + " )"
+		inner = "(" + f.opts.condPad() + f.expr(n) + f.opts.condPad() + ")"
 	}
 
 	verbatim := func() string {
@@ -329,7 +329,7 @@ func (f *Formatter) parenExpr(n *sitter.Node) string {
 			return f.text(n)
 		}
 
-		return "( " + f.text(n) + " )"
+		return "(" + f.opts.condPad() + f.text(n) + f.opts.condPad() + ")"
 	}
 
 	// A `//` comment between two operands is neither the left nor the right
@@ -821,7 +821,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		// dropped it, or worse rendered it as the expression itself.
 		var sb strings.Builder
 
-		sb.WriteString("( ")
+		sb.WriteString("(" + f.opts.condPad())
 
 		for i := uint(0); i < n.NamedChildCount(); i++ {
 			c := n.NamedChild(i)
@@ -845,7 +845,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			}
 		}
 
-		sb.WriteString(" )")
+		sb.WriteString(f.opts.condPad() + ")")
 
 		return sb.String()
 
@@ -1088,7 +1088,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		inlineJoined += ","
 	}
 
-	inline := "(" + inlineJoined + ")"
+	inline := "(" + f.padded(inlineJoined) + ")"
 	// Break onto separate lines if >3 arguments or inline exceeds line width.
 	// A line comment forces the break unconditionally: joined inline it runs to
 	// end of line and comments out every argument after it.
@@ -1553,7 +1553,7 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	// being wrapped in required_parameter/optional_parameter nodes.
 	if f.hasFlatParams(params) {
 		if inline, ok := f.flatParams(params); ok {
-			return "(" + inline + ")"
+			return "(" + f.padded(inline) + ")"
 		}
 
 		// A list this path cannot lay out on one line without breaking it —
@@ -1585,7 +1585,7 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 		joined += ","
 	}
 
-	return "(" + joined + ")"
+	return "(" + f.padded(joined) + ")"
 }
 
 // exprFuncDefParams renders function definition parameters, each on its own line.
@@ -2585,7 +2585,8 @@ func (f *Formatter) scriptFor(n *sitter.Node) {
 	condStr := f.forClause(cond)
 	incrStr := f.forClause(incr)
 
-	f.iLine(fmt.Sprintf("for ( %s; %s; %s )", initStr, condStr, incrStr))
+	pad := f.opts.condPad()
+	f.iLine(fmt.Sprintf("for (%s%s; %s; %s%s)", pad, initStr, condStr, incrStr, pad))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }
@@ -2613,7 +2614,8 @@ func (f *Formatter) scriptForIn(n *sitter.Node) {
 		}
 	}
 
-	f.iLine(fmt.Sprintf("for ( %s%s %s %s )", varKind, f.expr(left), keyword, f.expr(right)))
+	pad := f.opts.condPad()
+	f.iLine(fmt.Sprintf("for (%s%s%s %s %s%s)", pad, varKind, f.expr(left), keyword, f.expr(right), pad))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }

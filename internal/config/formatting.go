@@ -50,6 +50,7 @@ func (r ResolvedFormatting) FormatterOptions() formatter.Options {
 	o.LowercaseAttributes = r.LowercaseAttributes
 	o.DoubleQuoteAttributes = r.DoubleQuoteAttributes
 	o.QueryUppercaseKeywords = r.QueryUppercaseKeywords
+	o.ParenSpacing = r.ParenSpacing
 	o.ScopeCase = r.ScopeCase
 	o.CommaPosition = r.CommaPosition
 	o.QueryCommaPosition = r.QueryCommaPosition

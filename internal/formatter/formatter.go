@@ -52,6 +52,10 @@ type Options struct {
 	// QueryFormat controls whether cfquery content is formatted.
 	// When false, query content is emitted verbatim. Default false.
 	QueryFormat bool
+	// ParenSpacing is the padding inside parentheses: "pad" for `( a )`,
+	// "tight" for `(a)`. Empty keeps what has always been emitted, which is
+	// neither consistently — see condPad and argPad.
+	ParenSpacing string
 	// ScopeCase controls the case of CFML scope names (variables, arguments, etc.).
 	// Valid values: "upper", "lower", "leave" (default "leave").
 	ScopeCase string
@@ -86,6 +90,41 @@ type Options struct {
 // and a real file in the corpus — took the formatter down rather than emitting
 // the tag. Clamping keeps this function total for every caller; the individual
 // level counters are still kept balanced at their own sites.
+// condPad and argPad are the padding inside a parenthesis, for the two kinds
+// the formatter emits: a condition or grouping (`if ( a )`, `( a + b ) * c`)
+// and an argument or parameter list (`foo(1, 2)`).
+//
+// Unset they disagree, because that is what the formatter has always done and
+// changing it silently would reformat every file in every project. "pad" and
+// "tight" are how a project asks for one rule in both places.
+func (o Options) condPad() string {
+	if o.ParenSpacing == "tight" {
+		return ""
+	}
+
+	return " "
+}
+
+func (o Options) argPad() string {
+	if o.ParenSpacing == "pad" {
+		return " "
+	}
+
+	return ""
+}
+
+// padded wraps a rendered argument or parameter list in the configured inner
+// padding. An empty list stays "()" — "( )" is nobody's preference.
+func (f *Formatter) padded(inner string) string {
+	if inner == "" {
+		return ""
+	}
+
+	pad := f.opts.argPad()
+
+	return pad + inner + pad
+}
+
 func (o Options) indent(level int) string {
 	if level <= 0 {
 		return ""
