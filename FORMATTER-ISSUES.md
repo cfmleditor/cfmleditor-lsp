@@ -35,11 +35,11 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,562** |
+| Formatted cleanly | 3,863 | 5,450 | **5,563** |
 | Rejected by the guard | 1,671 | 84 | **2** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **2** |
-| Malformed output | — † | — † | **1** |
+| Malformed output | — † | — † | **0** |
 | Panics | 0 | 0 | **0** |
 
 The malformed row has no earlier figure because the check that produces it did
@@ -559,7 +559,6 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
-| Malformed output | 1 | Whitespace-only, stable, and structurally wrong — the class the harness could not see until the shape check was added. The one file is characterised in 4.3. |
 | Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
@@ -842,9 +841,8 @@ listed in the comment on `malformedShape` with their false-positive counts so
 they are not tried again. What is left is narrow on purpose — it does not claim
 to find every malformed output, only to stop this class being counted clean.
 
-The one file it reports is `Lucee/test/tickets/LDEV1576/test.cfm`, and it is a
-real defect rather than a rule misfiring. Everything after a multi-line string
-argument loses its indentation:
+It reported one file on its first run, `Lucee/test/tickets/LDEV1576/test.cfm`,
+and it was a real defect rather than a rule misfiring:
 
 ```
 	local.qInsert = queryExecute(
@@ -857,9 +855,20 @@ requestID: {value: 8, CFSQLType: 'CF_SQL_INTEGER'},
 );
 ```
 
-The string's own continuation lines are correct — re-indenting inside a literal
-would change it — but the arguments after it are code, and they should be at the
-call's indent. Outstanding.
+The cause was not lost indentation but indentation never applied. The grammar
+gives `queryExecute` a `query_expression` node of its own — the SQL arriving as
+a `query_text` child between two quote tokens — rather than the
+`call_expression`/`arguments` shape every other call has, and with no case for
+it the expression fell to `expr`'s default arm, `return f.text(n)`. The whole
+call was emitted verbatim, so it kept whatever indentation the source had, which
+here was none. 137 corpus files contain a `queryExecute`; in script-syntax CFML
+it is the replacement for `<cfquery>`, and none of them was being formatted.
+
+Fixed by `exprQuery`. The SQL is still re-emitted exactly as written, quotes
+included: it is a string literal, so its interior — including the line breaks of
+a multi-line query — is content rather than layout, and re-indenting it would
+change what the query says. That is the one thing `queryFormat` cannot reach.
+The corpus now stands at 0 malformed.
 
 Causes that were in this list and are now fixed are recorded above rather than
 here: the outright comment *deletions* (a `//` on the operands of an `&&`
