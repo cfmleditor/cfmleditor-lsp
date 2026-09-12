@@ -17,7 +17,7 @@ func TestMalformedShapeCatchesFoldedBraces(t *testing.T) {
 
 	before := "component {\n\tfunction sw(k) {\n\t\tswitch ( k ) {\n\t\tcase 1:\n {\n\n\t\t\t\ta();\n\n\t\t\t}}\n\n\t}\n}\n"
 
-	got := malformedShape([]byte(before))
+	got := malformedShape([]byte(before), corpusOptions())
 	if got == "" {
 		t.Fatal("malformedShape passed the output the braced-case defect produced")
 	}
@@ -35,7 +35,7 @@ func TestMalformedShapeCatchesALostIndent(t *testing.T) {
 
 	src := "component {\n\tfunction f() {\n\t\tq = queryExecute(\n\" select 1\nfrom t\",\n{\na: 1\n}\n);\n\t}\n}\n"
 
-	got := malformedShape([]byte(src))
+	got := malformedShape([]byte(src), corpusOptions())
 	if !strings.Contains(got, "column one") {
 		t.Errorf("a block brace in column one was not reported: %q", got)
 	}
@@ -58,19 +58,50 @@ func TestMalformedShapeAcceptsHealthyOutput(t *testing.T) {
 	}
 
 	for name, src := range cases {
-		if got := malformedShape([]byte(src)); got != "" {
+		if got := malformedShape([]byte(src), corpusOptions()); got != "" {
 			t.Errorf("%s: healthy output reported as malformed: %s\n%s", name, got, src)
 		}
+	}
+}
+
+// TestMalformedShapeAllowsNextLineBraces is the boundary the column-one rule
+// needs, and it was not obvious: Allman puts every opening brace on a line of
+// its own, so a top-level `component` has one in column zero by design. The
+// rule accused 3,563 of the corpus's 5,624 files under braceStyle "next-line"
+// before it was scoped — found by the first sweep CFML_CORPUS_OPTS made cheap
+// enough to run.
+//
+// The closing-brace rule holds in both styles and is still checked here.
+func TestMalformedShapeAllowsNextLineBraces(t *testing.T) {
+	t.Parallel()
+
+	opts := corpusOptions()
+	opts.BraceStyle = "next-line"
+
+	src := mustFormatWith(t, "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}\n</cfscript>\n", opts)
+
+	if got := malformedShape([]byte(src), opts); got != "" {
+		t.Errorf("next-line output reported as malformed: %s\n%s", got, src)
+	}
+
+	if got := malformedShape([]byte("component\n{\n\tf();\n\t}}\n"), opts); got == "" {
+		t.Error("the closing-brace rule stopped applying under next-line braces")
 	}
 }
 
 func mustFormat(t *testing.T, src string) string {
 	t.Helper()
 
+	return mustFormatWith(t, src, corpusOptions())
+}
+
+func mustFormatWith(t *testing.T, src string, opts Options) string {
+	t.Helper()
+
 	tree := language.Parse(language.CFML, []byte(src), nil)
 	defer tree.Close()
 
-	out, err := Format([]byte(src), tree, corpusOptions())
+	out, err := Format([]byte(src), tree, opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}
