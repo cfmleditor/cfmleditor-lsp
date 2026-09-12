@@ -416,6 +416,31 @@ func (s *Server) removeDocument(docURI uri.URI) {
 	delete(s.documents, docURI)
 }
 
+// usableWorkspaceRoot converts a workspace folder URI the client reported into
+// a filesystem path, and reports whether it is one worth searching.
+//
+// "" and "/" are not workspaces, they are "conversion failed" and "the whole
+// filesystem". Every workspace-wide search falls back to these roots
+// (searchRoots), so keeping one would have findRefs and scanWorkspace crawl the
+// machine. Neither can come from a well-formed URI: "/" is what the
+// non-canonical `file://C:\Users\q\proj` collapses to once
+// go.lsp.dev/protocol has read its path as the URI's authority (see
+// TestUncanonicalWindowsRootIsMangledUpstream), and "" is a conversion that
+// failed outright. Declining them costs nothing a real workspace needs, and the
+// warning is what makes an otherwise silent mangling diagnosable.
+func (s *Server) usableWorkspaceRoot(rawURI string) (string, bool) {
+	root := cfpath.FromURI(rawURI)
+
+	if root == "" || root == "/" || root == `\` {
+		s.log.Warn("ignoring unusable workspace root",
+			cflog.String("uri", rawURI), cflog.String("path", root))
+
+		return "", false
+	}
+
+	return root, true
+}
+
 // searchRoots is where to look for things across the workspace: the folders
 // from config when there are any, and otherwise the roots the editor opened.
 //

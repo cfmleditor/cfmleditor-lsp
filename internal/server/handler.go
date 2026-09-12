@@ -112,11 +112,15 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// not a Windows path. These roots are what searchRoots falls back to, so a
 	// bad one here is a workspace-wide search covering the wrong place.
 	for _, folder := range folders {
-		s.workspaceRoots = append(s.workspaceRoots, cfpath.FromURI(string(folder.URI)))
+		if root, ok := s.usableWorkspaceRoot(string(folder.URI)); ok {
+			s.workspaceRoots = append(s.workspaceRoots, root)
+		}
 	}
 
 	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
-		s.workspaceRoots = append(s.workspaceRoots, cfpath.FromURI(string(*params.RootURI))) //nolint:all // this is for compatibility
+		if root, ok := s.usableWorkspaceRoot(string(*params.RootURI)); ok { //nolint:all // this is for compatibility
+			s.workspaceRoots = append(s.workspaceRoots, root)
+		}
 	}
 
 	// Apply this session's configuration. See configureSession for which file
@@ -691,7 +695,10 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, added := range params.Event.Added {
-		root := cfpath.FromURI(string(added.URI))
+		root, ok := s.usableWorkspaceRoot(string(added.URI))
+		if !ok {
+			continue
+		}
 
 		s.mu.Lock()
 		s.workspaceRoots = append(s.workspaceRoots, root)

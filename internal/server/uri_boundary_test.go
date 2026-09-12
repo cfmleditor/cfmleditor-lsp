@@ -306,3 +306,64 @@ func TestChangedWorkspaceFoldersDecodeTheirURIs(t *testing.T) {
 		t.Errorf("removed folder is still a root: %q", s.workspaceRoots)
 	}
 }
+
+// TestUnusableWorkspaceRootIsDeclined is the guard over the mangling above. A
+// root of "/" is not a workspace, and since searchRoots hands these to
+// findRefs and scanWorkspace, keeping one would have a "find all references"
+// crawl the filesystem. Nothing found is the better answer, and the warning
+// says why.
+func TestUnusableWorkspaceRootIsDeclined(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		uri  string
+	}{
+		{"a client's non-canonical windows root, which upstream collapses to /", "file://C:\\Users\\q\\proj"},
+		{"the filesystem root itself", "file:///"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := initializeWithRoots(t, tc.uri)
+
+			if len(s.workspaceRoots) != 0 {
+				t.Errorf("workspaceRoots = %q, want none — a search over these walks the machine", s.workspaceRoots)
+			}
+		})
+	}
+}
+
+// TestUsableWorkspaceRootsAreStillKept is the boundary: declining "/" must not
+// decline anything real.
+func TestUsableWorkspaceRootsAreStillKept(t *testing.T) {
+	s := initializeWithRoots(t, "", "file:///tmp/a", "file:///tmp/uri%20demo/b")
+
+	want := []string{"/tmp/a", "/tmp/uri demo/b"}
+	if !slices.Equal(s.workspaceRoots, want) {
+		t.Errorf("workspaceRoots = %q, want %q", s.workspaceRoots, want)
+	}
+}
+
+// TestUnusableAddedFolderIsDeclined covers the same on the other handler, where
+// the root is also handed straight to indexRoot.
+func TestUnusableAddedFolderIsDeclined(t *testing.T) {
+	s := initializeWithRoots(t, "file:///tmp/plain/src")
+
+	raw, err := json.Marshal(protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Added: []protocol.WorkspaceFolder{{URI: uri.URI("file://C:\\Users\\q\\proj"), Name: "a"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.handleDidChangeWorkspaceFolders(context.Background(), raw); err != nil {
+		t.Fatalf("handleDidChangeWorkspaceFolders: %v", err)
+	}
+
+	if slices.Contains(s.workspaceRoots, "/") {
+		t.Errorf("the filesystem root was added as a workspace root: %q", s.workspaceRoots)
+	}
+
+	if !slices.Equal(s.workspaceRoots, []string{"/tmp/plain/src"}) {
+		t.Errorf("workspaceRoots = %q, want the original root untouched", s.workspaceRoots)
+	}
+}
