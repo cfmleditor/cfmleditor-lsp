@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	json "github.com/go-json-experiment/json"
+	"strings"
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
@@ -122,7 +123,57 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 		return content, err
 	}
 
-	result := string(out)
+	return applyFinalNewlineOptions(content, string(out), opts), nil
+}
 
-	return result, nil
+// applyFinalNewlineOptions honours the two end-of-file options the editor sends
+// with every formatting request (LSP 3.15) and the formatter has no way to know
+// about, because it rebuilds the document rather than editing it: it always
+// ends its output with exactly one newline, whatever the source did.
+//
+// That is not a safe default to keep unconditionally. VS Code's own defaults
+// for both `files.insertFinalNewline` and `files.trimFinalNewlines` are false,
+// so on a stock editor the formatter was adding a final newline the user's
+// settings say not to add and removing trailing blank lines they say to keep.
+//
+// Both fields are optional pointers. A client that sends neither — the
+// `cfmleditor.format` command does, and so does any client older than 3.15 —
+// gets what the formatter produced, so nothing changes for them.
+//
+// The two options answer different questions and neither implies the other:
+// insertFinalNewline is only about a source that ended without one, and
+// trimFinalNewlines is only about the blank lines after it. Setting
+// insertFinalNewline to false on a file that already ends in a newline asks for
+// nothing, and does nothing here.
+//
+// Only trailing newlines move, so the whitespaceOnly guard inside Format has
+// already passed on content this cannot change. Re-formatting is stable: on the
+// second pass the restored ending is what the source now has, and each rule
+// asks for it again.
+func applyFinalNewlineOptions(content, out string, opts protocol.FormattingOptions) string {
+	srcNL := trailingNewlines(content)
+	want := trailingNewlines(out)
+
+	if opts.TrimFinalNewlines != nil && !*opts.TrimFinalNewlines && srcNL > want {
+		want = srcNL
+	}
+
+	if opts.InsertFinalNewline != nil && !*opts.InsertFinalNewline && srcNL == 0 {
+		want = 0
+	}
+
+	body := strings.TrimRight(out, "\n")
+
+	if want == len(out)-len(body) {
+		return out
+	}
+
+	return body + strings.Repeat("\n", want)
+}
+
+// trailingNewlines counts the newlines a document ends with. The formatter
+// emits "\n" line endings, so a "\r\n" source has its "\r" folded into the
+// preceding line by the time this sees it and there is nothing to count twice.
+func trailingNewlines(s string) int {
+	return len(s) - len(strings.TrimRight(s, "\n"))
 }

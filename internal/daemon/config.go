@@ -279,6 +279,17 @@ func (c *Config) FormattingLineWidth() int {
 	return *raw.Formatting.LineWidth
 }
 
+// FormattingParamBreakThreshold returns the configured parameter break
+// threshold, or 0 if not set.
+func (c *Config) FormattingParamBreakThreshold() int {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil || raw.Formatting.ParamBreakThreshold == nil {
+		return 0
+	}
+
+	return *raw.Formatting.ParamBreakThreshold
+}
+
 // FormattingAttrBreakThreshold returns the configured attr break threshold, or 0 if not set.
 func (c *Config) FormattingAttrBreakThreshold() int {
 	raw := c.raw()
@@ -440,6 +451,28 @@ func SettingsFrom(c *Config) server.Settings {
 	}
 }
 
+// FormattingBlankLinesInBlocks reports whether a block's body is padded with a
+// blank line after the opening brace and before the closing one (default true).
+func (c *Config) FormattingBlankLinesInBlocks() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil {
+		return true
+	}
+
+	return config.BoolDefault(raw.Formatting.BlankLinesInBlocks, true)
+}
+
+// FormattingSwitchCaseIndent reports whether `case` and `default` labels are
+// indented one level inside the switch (default false).
+func (c *Config) FormattingSwitchCaseIndent() bool {
+	raw := c.raw()
+	if raw == nil || raw.Formatting == nil {
+		return false
+	}
+
+	return config.BoolDefault(raw.Formatting.SwitchCaseIndent, false)
+}
+
 // FormattingParenSpacing returns the padding inside parentheses ("pad",
 // "tight", or empty for the formatter's existing per-context behaviour).
 func (c *Config) FormattingParenSpacing() string {
@@ -476,12 +509,15 @@ func (c *Config) ResolvedFormatting() config.ResolvedFormatting {
 		LowercaseAttributes:    c.FormattingLowercaseAttributes(),
 		DoubleQuoteAttributes:  c.FormattingDoubleQuoteAttributes(),
 		QueryUppercaseKeywords: c.FormattingQueryUppercaseKeywords(),
+		BlankLinesInBlocks:     c.FormattingBlankLinesInBlocks(),
+		SwitchCaseIndent:       c.FormattingSwitchCaseIndent(),
 		ParenSpacing:           c.FormattingParenSpacing(),
 		BraceStyle:             c.FormattingBraceStyle(),
 		ScopeCase:              c.FormattingScopeCase(),
 		CommaPosition:          c.FormattingCommaPosition(),
 		QueryCommaPosition:     c.FormattingQueryCommaPosition(),
 		LineWidth:              c.FormattingLineWidth(),
+		ParamBreakThreshold:    c.FormattingParamBreakThreshold(),
 		AttrBreakThreshold:     c.FormattingAttrBreakThreshold(),
 		IndentWidth:            c.FormattingIndentWidth(),
 	}
