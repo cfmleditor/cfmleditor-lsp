@@ -29,7 +29,9 @@ RustCFML accept the file is not a repro. 24 of the 32 survive that.
 **RustCFML is the more permissive parser, so "RustCFML accepts it" is evidence,
 not proof.** Six of the 24 are Lucee's own *negative* fixtures — files whose
 names say they are meant to fail — and there tree-sitter is right and RustCFML
-is wrong. They are listed below so nobody files them.
+is wrong. They are listed below so nobody files them. The remaining eighteen
+first read as six constructs; isolating each by hand cut that to four, which is
+the section after next.
 
 The 247 in the other direction are RustCFML's gaps on a Lucee-heavy corpus,
 not ours.
@@ -48,95 +50,115 @@ lax about errors it would raise at runtime instead.
 | `Lucee/test/general/Struct/invalid3.cfm` | `var x={susi(),peter};` |
 | `Lucee/test/tickets/LDEV3060/invalidcomponent.cfc` | `domain_id :: oDnsDomain.getId()` — `::` where `:` was meant |
 
-## Filable: six constructs
+## Verified against the grammar, one construct at a time
 
-Each reproduces on its own, and RustCFML parses each.
+A fragment is a *file*, and a file that fails is not yet a construct. Each of the
+six candidates was therefore re-cut into the smallest standalone source that
+still reproduces, run against `tree-sitter-cfml` **HEAD** (`a4b5b72`, `v0.26.35`
+— the version this repo pins, and the newest published), and checked against the
+grammar's own `LIMITATIONS.md` and issue tracker before being called a gap.
 
-### 1. A lambda with no body
+That step changed five of the six. `component { package final whatever function
+f() {} }` parses on its own, and so does every one of `final component`, `final
+function f()`, `final public function f()`, a `thread { … }` statement, a tag
+island, and a `<cfif>` spanning whole tag attributes. What fails is narrower than
+the file made it look, and in two cases what fails is already settled upstream.
 
-`Lucee/test/tickets/LDEV4062/LDEV4062.cfm`
+### Already known upstream — do not file
+
+| Construct | Status |
+|---|---|
+| `final` on a parameter — `function f( final required s )` | In `LIMITATIONS.md`. Implemented, measured, rejected: `( final (` is ambiguous at every parameter list in the language. |
+| `final component`, `final function f()`, `final public function f()` | All parse. Fixed by [#77](https://github.com/cfmleditor/tree-sitter-cfml/issues/77) / [#69](https://github.com/cfmleditor/tree-sitter-cfml/issues/69). |
+
+So Lucee's `test3671.cfc` is one gap, not three, and it is a closed question.
+
+## Filable: four constructs
+
+Each reproduces standalone on HEAD, RustCFML parses each, and none has an issue.
+
+### 1. An arrow function with an empty body
+
+`Lucee/test/tickets/LDEV4062/LDEV4062.cfm`. Fails in `cfscript/grammar.js` and,
+reached through `<cfset f = function() { … }>`, in `common/define-grammar.js`.
+`=>` and `->` both fail; the parameter list may be empty or not.
 
 ```cfml
-testLambda=()=>;
+x = () => ;
+y = 1;
 ```
 
-### 2. `final` on a component, a function, and a parameter
+Not [#75](https://github.com/cfmleditor/tree-sitter-cfml/issues/75), which is a
+*statement* as the body. The empty body is worse than an error: at end of file
+`x = () => ;` yields an `arrow_function` whose body is a `number` holding a
+MISSING token, and with a following statement the parser takes `y = 1` as the
+lambda body.
 
-`Lucee/test/tickets/LDEV3671/test3671.cfc`. `FORMATTER-ISSUES.md` § 4 already
-records `final component` degrading to `html_text` rather than an `ERROR` node;
-this is the same keyword in three positions.
-
-```cfml
-final component {
-	final public function testFunc(final required s) {
-	}
-}
-```
-
-### 3. Modifier ordering, and contextual keywords as function names
+### 2. A return type between two access modifiers
 
 `Lucee/test/general/modifiers/All.cfc`
 
 ```cfml
-component {
-	package final whatever function final() {}
-	final whatever package function public() {}
-	whatever final package function package() {}
-	package final function function private() {}
-}
+component { public struct static function f() {} }
 ```
 
-### 4. A tag island after a `thread` statement
+`struct public static function f()` parses ([#88](https://github.com/cfmleditor/tree-sitter-cfml/issues/88))
+and so does `public static struct function f()`. Only the interleaved spelling
+fails — the return type is accepted before the modifier run or after it, not
+inside it. Lucee's file writes four such members with a user-defined type name.
 
-`Lucee/test/tickets/LDEV4157/LDEV4157.cfm`
+### 3. A `thread { … }` statement followed by a tag island
+
+`Lucee/test/tickets/LDEV4157/LDEV4157.cfm` and `test4157.cfc`
 
 ````cfml
-thread name="LDEV4157" {
+thread name="t" {
 	thread.test = "thread";
 }
 
 ```
-	<cfset res = "tag-island after the thread statement works">
+	<cfset res = "works">
 ```
 ````
 
-### 5. The same inside a component, with `thread action="join"`
+The statement alone parses and the island alone parses; together the grammar
+reports a MISSING `;` at the closing brace. Already recorded in the grammar's
+`LIMITATIONS.md`, but never filed, so nothing tracks it.
 
-`Lucee/test/tickets/LDEV4157/test4157.cfc`
+### 4. A start tag split across `<cfif>` branches
 
-````cfml
-component {
-	function foo() {
-		thread name="LDEV4157cfc" {
-			thread.test = "thread";
-		}
-
-		```
-			<cfset var res = "tag-island after the thread statement in cfc works">
-		```
-		thread action="join" name="LDEV4157cfc";
-
-		return cfthread.LDEV4157cfc.test & " and " & res;
-	}
-}
-````
-
-### 6. A tag whose attributes are split across `<cfif>` branches
-
-`ContentBox/.../views/authors/editor.cfm`, and the same shape in
-`.../views/settings/rawSettingsTable.cfm`. The opening `<a` and its closing `>`
-are in different branches, which is ordinary CFML and common in real templates.
+Two shapes, both from ContentBox, both ordinary CFML. The closing `>` inside the
+branches (`views/authors/editor.cfm`):
 
 ```cfml
 <a
 	title="Back"
-	class="btn btn-sm btn-back mt5"
-	<cfif prc.oCurrentAuthor.hasPermission( "AUTHOR_ADMIN" )>
-		href="#event.buildLink( prc.xehAuthors )#">
+	<cfif x>
+		href="a">
 	<cfelse>
-		href="#event.buildLink( prc.xehDashboard )#">
+		href="b">
 	</cfif>
+	Back</a>
 ```
+
+and the whole tag *opening* inside them, closed after the `</cfif>`
+(`views/settings/rawSettingsTable.cfm`):
+
+```cfml
+<cfif x>
+	<a
+		disabled="disabled"
+<cfelse>
+	<a
+		class="confirmIt"
+</cfif>
+	title="Delete"
+>
+```
+
+A `<cfif>` that spans only whole *attributes* — `<a <cfif x>href="a"<cfelse>href="b"</cfif>>`
+— parses. It is putting the `>` on the branch side that fails, in both HTML and
+`<cf…>` tags.
 
 ## Shrank poorly: twelve files still to reduce
 
