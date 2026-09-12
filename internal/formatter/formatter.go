@@ -1705,6 +1705,14 @@ func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
 
 // ─── CF tag formatting ───────────────────────────────────────────────────────
 
+// tagName is a CF tag's canonical name: always lowercase, whatever the source
+// wrote and whatever LowercaseTags says. It is the tag's identity — what the
+// per-tag rules switch on, what gets compared against literals, what the source
+// is searched for to find a matching close. What to *write* is openTagName or
+// closeTagName.
+//
+// It used to fold in LowercaseTags, so with that off it returned things like
+// "cfARGUMENT" and the bare comparison in hasArgumentChild stopped matching.
 func (f *Formatter) tagName(n *sitter.Node) string {
 	kind := n.Kind()
 
@@ -1713,12 +1721,7 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 		for i := uint(0); i < n.ChildCount(); i++ {
 			c := n.Child(i)
 			if c.Kind() == "cf_tag_name" {
-				name := f.text(c)
-				if f.opts.LowercaseTags {
-					name = strings.ToLower(name)
-				}
-
-				return "cf" + name
+				return "cf" + strings.ToLower(f.text(c))
 			}
 
 			if c.Kind() == "cf_start_tag" || c.Kind() == "cf_start_tag_with_selfclose" {
@@ -1732,18 +1735,13 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 		raw := f.text(n)
 		if strings.HasPrefix(strings.ToLower(raw), "<cf") {
 			rest := raw[3:]
-			end := strings.IndexAny(rest, " \t\r\n/>")
 			name := rest
 
-			if end > 0 {
+			if end := strings.IndexAny(rest, " \t\r\n/>"); end > 0 {
 				name = rest[:end]
 			}
 
-			if f.opts.LowercaseTags {
-				name = strings.ToLower(name)
-			}
-
-			return "cf" + name
+			return "cf" + strings.ToLower(name)
 		}
 	}
 
@@ -1755,6 +1753,90 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 	}
 
 	return ""
+}
+
+// openTagName and closeTagName are what to write for a tag's opening and
+// closing halves.
+//
+// With LowercaseTags on — the default — both are the canonical name and the
+// source is not consulted at all, so nothing about the default output changes.
+// With it off the source's own spelling is kept, which is the whole point of
+// the setting and is what it did not do. The grammar folds a known tag's
+// keyword into the node kind: `<CFOUTPUT>` parses as cf_output_tag with no
+// token covering "OUTPUT" at all, so the name was rebuilt from the kind and
+// came out lowercase however it was written. The one path that did read the
+// source rebuilt the name as "cf" plus the source's suffix, which turned
+// <CFDUMP> into the mongrel cfDUMP.
+//
+// The halves are read separately because CFML does not require them to agree —
+// `<CFOUTPUT>...</cfoutput>` is legal — and "leave my casing alone" means
+// leaving each as it was written.
+func (f *Formatter) openTagName(n *sitter.Node) string {
+	return f.openTagNameOf(f.tagName(n), n)
+}
+
+func (f *Formatter) closeTagName(n *sitter.Node) string {
+	return f.closeTagNameOf(f.tagName(n), n)
+}
+
+// openTagNameOf and closeTagNameOf are the same for a writer that hardcodes the
+// tag it emits — cfif, cfelse, cfcomponent, cfscript, cfquery — rather than
+// reading the name off the node.
+func (f *Formatter) openTagNameOf(canonical string, n *sitter.Node) string {
+	return f.spelledAs(canonical, int(n.StartByte()))
+}
+
+func (f *Formatter) closeTagNameOf(canonical string, n *sitter.Node) string {
+	if f.opts.LowercaseTags || canonical == "" {
+		return canonical
+	}
+
+	end := int(n.EndByte())
+	if end > len(f.src) {
+		end = len(f.src)
+	}
+
+	at := lastIndexFold(f.src[:end], "</"+canonical)
+	if at < 0 {
+		return canonical
+	}
+
+	return f.spelledAs(canonical, at)
+}
+
+// spelledAs reads back how the tag name at a "<" is written in the source.
+//
+// It can only ever return a different *casing* of the name it was given: a
+// spelling that does not case-fold equal to the canonical name is discarded, so
+// a miscounted offset degrades to today's output rather than emitting some
+// other tag.
+func (f *Formatter) spelledAs(canonical string, lt int) string {
+	if f.opts.LowercaseTags || canonical == "" || lt < 0 || lt >= len(f.src) || f.src[lt] != '<' {
+		return canonical
+	}
+
+	i := lt + 1
+	if i < len(f.src) && f.src[i] == '/' {
+		i++
+	}
+
+	start := i
+	for i < len(f.src) && isTagNameByte(f.src[i]) {
+		i++
+	}
+
+	if spelled := string(f.src[start:i]); strings.EqualFold(spelled, canonical) {
+		return spelled
+	}
+
+	return canonical
+}
+
+func isTagNameByte(b byte) bool {
+	return b >= 'a' && b <= 'z' ||
+		b >= 'A' && b <= 'Z' ||
+		b >= '0' && b <= '9' ||
+		b == '_'
 }
 
 // formatCFTag handles generic cf_tag nodes (cffunction, cfloop, etc.)
@@ -1822,7 +1904,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 
 	f.nl()
 	f.writeIndent()
-	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
+	f.write("<" + f.openTagName(n) + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
 	closed := f.hasRealCFEndTag(n)
@@ -1899,7 +1981,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	if closed {
 		f.nl()
 		f.writeIndent()
-		f.write("</" + name + ">")
+		f.write("</" + f.closeTagName(n) + ">")
 	}
 
 	f.write("\n")
@@ -1910,7 +1992,7 @@ func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
 	attrs := f.collectAttrs(n)
 	f.nl()
 	f.writeIndent()
-	f.write("<cfcomponent" + f.renderAttrs("cfcomponent", attrs) + ">")
+	f.write("<" + f.openTagNameOf("cfcomponent", n) + f.renderAttrs("cfcomponent", attrs) + ">")
 	f.write("\n\n")
 
 	f.level++
@@ -1923,7 +2005,7 @@ func (f *Formatter) formatCFComponentOpen(n *sitter.Node) {
 // open tag before it is accepted by the grammar without an ERROR node, and
 // decrementing for it would leave the level negative for everything that
 // follows, so the decrement is skipped when there is nothing to close.
-func (f *Formatter) formatCFComponentClose(_ *sitter.Node) {
+func (f *Formatter) formatCFComponentClose(n *sitter.Node) {
 	if f.level > 0 {
 		f.level--
 	}
@@ -1931,7 +2013,7 @@ func (f *Formatter) formatCFComponentClose(_ *sitter.Node) {
 	f.write("\n")
 	f.nl()
 	f.writeIndent()
-	f.write("</cfcomponent>")
+	f.write("</" + f.closeTagNameOf("cfcomponent", n) + ">")
 	f.write("\n")
 }
 
@@ -1943,7 +2025,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 	f.nl()
 	f.writeIndent()
-	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
+	f.write("<" + f.openTagName(n) + f.renderAttrs(name, attrs) + ">")
 	f.write("\n")
 
 	isBlock := true // specific block tag types are always blocks
@@ -2033,7 +2115,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 
 	f.nl()
 	f.writeIndent()
-	f.write("</" + name + ">")
+	f.write("</" + f.closeTagName(n) + ">")
 	f.write("\n")
 }
 
@@ -2068,7 +2150,7 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 
 	f.nl()
 	f.writeIndent()
-	f.write("<" + name + f.renderAttrs(name, attrs) + ">")
+	f.write("<" + f.openTagName(n) + f.renderAttrs(name, attrs) + ">")
 
 	// Emit everything between the tags verbatim. Collecting only the known
 	// cf_savecontent_body* node kinds missed content the grammar places
@@ -2079,7 +2161,7 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 	f.write(f.savecontentBody(n, name))
 
 	// Emit closing tag
-	f.write("</" + name + ">")
+	f.write("</" + f.closeTagName(n) + ">")
 	f.write("\n")
 }
 
@@ -2308,7 +2390,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	cond := f.normalizeCond(strings.Join(condParts, " "))
 	f.nl()
 	f.writeIndent()
-	f.write("<cfif " + cond + ">")
+	f.write("<" + f.openTagNameOf("cfif", n) + " " + cond + ">")
 	f.write("\n")
 
 	f.level++
@@ -2357,7 +2439,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 	f.write("\n")
 	f.nl()
 	f.writeIndent()
-	f.write("</cfif>")
+	f.write("</" + f.closeTagNameOf("cfif", n) + ">")
 	f.write("\n")
 }
 
@@ -2412,14 +2494,14 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 		f.write("\n")
 		f.nl()
 		f.writeIndent()
-		f.write("<cfelse>")
+		f.write("<" + f.openTagNameOf("cfelse", n) + ">")
 		f.write("\n")
 	} else {
 		cond := f.normalizeCond(strings.Join(condParts, " "))
 		f.write("\n")
 		f.nl()
 		f.writeIndent()
-		f.write("<cfelseif " + cond + ">")
+		f.write("<" + f.openTagNameOf("cfelseif", n) + " " + cond + ">")
 		f.write("\n")
 	}
 
@@ -2478,13 +2560,12 @@ func (f *Formatter) formatCFSelfCloseAttrTag(n *sitter.Node) {
 	f.lastTagMultiLine = strings.Contains(rendered, "\n")
 	f.nl()
 	f.writeIndent()
-	f.write("<" + name + rendered + " />")
+	f.write("<" + f.openTagName(n) + rendered + " />")
 	f.write("\n")
 }
 
 func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	f.lastTagMultiLine = false
-	name := f.tagName(n)
 
 	// For specific self-closing tags (cf_set_tag, cf_return_tag),
 	// reconstruct from expression children with normalized spacing.
@@ -2513,7 +2594,7 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 
 		f.nl()
 		f.writeIndent()
-		f.write("<" + name + " " + lines[0])
+		f.write("<" + f.openTagName(n) + " " + lines[0])
 		f.write("\n")
 
 		for i, l := range lines[1:] {
@@ -2539,9 +2620,9 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	f.writeIndent()
 
 	if body != "" {
-		f.write("<" + name + " " + body + " />")
+		f.write("<" + f.openTagName(n) + " " + body + " />")
 	} else {
-		f.write("<" + name + " />")
+		f.write("<" + f.openTagName(n) + " />")
 	}
 
 	f.write("\n")
@@ -2554,7 +2635,7 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 func (f *Formatter) formatCFScript(n *sitter.Node) {
 	f.nl()
 	f.writeIndent()
-	f.write("<cfscript>\n")
+	f.write("<" + f.openTagNameOf("cfscript", n) + ">\n")
 
 	f.level++
 
@@ -2581,7 +2662,7 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 	f.level--
 	f.nl()
 	f.writeIndent()
-	f.write("</cfscript>\n")
+	f.write("</" + f.closeTagNameOf("cfscript", n) + ">\n")
 }
 
 func (f *Formatter) formatScriptChildren(n *sitter.Node) {
