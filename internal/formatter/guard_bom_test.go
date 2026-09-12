@@ -46,6 +46,78 @@ func TestScriptComponentDetectedThroughABOM(t *testing.T) {
 	}
 }
 
+// TestScriptComponentDetectedThroughAnImport is the same defect as the BOM
+// above, with a different token in the way: `import a.b.C;` is legal between
+// the doc block and the component, and the probe stepped over `abstract` and
+// `final` but not over that.
+//
+// It surfaced as a guard rejection in exactly one place — under
+// `commaPosition: "before"`, where a comma legitimately moves across a `//`
+// comment. With comments recognised the guard skips them and sees no change to
+// the code stream; with comment recognition off the comment is code, and a
+// comma crossing it reads as a reordering. Five corpus files have an import
+// before their component, and on all five the guard ran weakened in every mode.
+func TestScriptComponentDetectedThroughAnImport(t *testing.T) {
+	t.Parallel()
+
+	body := "component {\n\tfunction f() {\n\t\tg(\n\t\t\t// key\n\t\t\tk,\n\t\t\t// value\n\t\t\tv\n\t\t);\n\t}\n}\n"
+
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"no import", body},
+		{"one import", "import a.b.C;\n\n" + body},
+		{"several imports", "import a.b.C;\nimport d.e.F;\n\n" + body},
+		{"import with no semicolon", "import a.b.C\n\n" + body},
+		{"doc block, then import", "/**\n * why\n */\nimport a.b.C;\n\n" + body},
+		{"BOM, doc block, then import", "\ufeff/**\n * why\n */\nimport a.b.C;\n\n" + body},
+		{"import then final", "import a.b.C;\n\nfinal " + body},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if !isScriptSyntaxComponent([]byte(tc.src)) {
+				t.Fatal("script-syntax component not recognised")
+			}
+
+			if n := len(scriptRegionsOf([]byte(tc.src))); n == 0 {
+				t.Fatal("file has no script region, so `//` is not recognised anywhere in it")
+			}
+
+			// Leading commas move a comma across each `//` comment, which is
+			// what the weakened guard read as a reordering.
+			opts := testOpts()
+			opts.WhitespaceOnly = true
+			opts.CommaPosition = "before"
+
+			if _, err := Format([]byte(tc.src), parse(t, tc.src), opts); err != nil {
+				t.Errorf("guard refused a correct format: %v", err)
+			}
+		})
+	}
+}
+
+// TestImportWithoutAComponentIsNotScript is the boundary. The loop steps over
+// imports to find what follows them; a file of imports and nothing else is not
+// a script component, and must not be claimed as one.
+func TestImportWithoutAComponentIsNotScript(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{
+		"import a.b.C;\n",
+		"import a.b.C;\nimport d.e.F;\n",
+		"import a.b.C;\n<cfoutput>hi</cfoutput>\n",
+		// Never terminates: no semicolon, no newline, end of file. importEnd
+		// reports that rather than guessing, and the probe declines.
+		"import a.b.C",
+	} {
+		if isScriptSyntaxComponent([]byte(src)) {
+			t.Errorf("claimed as a script component: %q", src)
+		}
+	}
+}
+
 // TestBOMSurvivesFormatting keeps 2.3's fix intact through the change above:
 // the BOM is stepped over when deciding what the file is, not dropped from it.
 func TestBOMSurvivesFormatting(t *testing.T) {

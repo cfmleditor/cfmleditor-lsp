@@ -564,6 +564,26 @@ Counts from the current `make corpus` run (section 5).
 
 Fixed since the audit table above, all found by re-running the harness:
 
+- `import a.b.C;` between the doc block and the component defeated
+  `isScriptSyntaxComponent`, which stepped over `abstract` and `final` but not
+  over an import. The file then had no script region at all, and with no script
+  region the guard stops recognising `//` as a comment anywhere in it and
+  compares comment text as though it were code — the same failure the UTF-8 BOM
+  caused, with a different token in the way. Five corpus files have an import
+  before their component, and on all five the guard ran weakened in every mode.
+
+  It surfaced as a rejection in exactly one place: under
+  `commaPosition: "before"` a comma legitimately moves across a `//` comment,
+  and with the comment being read as code that looks like a reordering
+  (`coldbox-platform/.../ColdBoxScheduledTask.cfc`, line 193). Under the default
+  `commaPosition: "after"` nothing moves, which is why the corpus showed two
+  guard rejections in that mode and three in this one. Both now show two.
+
+  The probe steps over any number of imports, ending each at a semicolon or a
+  line break — Lucee accepts `import a.b.C` without the semicolon, and stopping
+  at the line end also keeps a file that ends mid-import from swallowing the
+  rest of the source looking for one.
+
 - Two mistakes in how the guard's string scanner reads a CFML literal, both of
   which ran a literal past its own closing quote so that the span covered code —
   where no comment could then be recognised. Each cost one file, and each is a
