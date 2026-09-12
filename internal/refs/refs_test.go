@@ -572,3 +572,21 @@ func TestFindStillReturnsEntriesOnly(t *testing.T) {
 		t.Errorf("expected 1 entry from Find, got %d", len(entries))
 	}
 }
+
+// TestCollectFilesSkipsAnUnstattableRoot covers a search root that is not
+// there. filepath.Walk reports it with a nil FileInfo, and dereferencing that
+// took down the whole search instead of skipping the one root — so a stale
+// workspacePaths entry, or a folder removed since the editor opened it, turned
+// every Find All References into an internal error.
+func TestCollectFilesSkipsAnUnstattableRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.cfc"), []byte("component {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := collectFiles(vfs.OS{}, []string{filepath.Join(dir, "does-not-exist"), dir})
+
+	if len(got) != 1 || filepath.Base(got[0]) != "a.cfc" {
+		t.Errorf("collectFiles = %v, want just a.cfc from the root that exists", got)
+	}
+}

@@ -111,63 +111,71 @@ func initializeIn(t *testing.T, s *Server, dir string) {
 	}
 }
 
-// TestSessionConfiguredByTheDaemonDoesNotReloadConfig pins what the flag is for. A
-// daemon session is handed its settings before initialize, and must not then
-// load .cfmleditor.json a second time and apply it over the top.
-//
-// The config file here deliberately disagrees with the Settings, which is not
-// a situation daemon mode produces — the daemon read that same file — but it
-// is the only way to observe from the outside which of the two paths ran.
-func TestSessionConfiguredByTheDaemonDoesNotReloadConfig(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"), []byte(`{"linting":{"enabled":false}}`), 0o644); err != nil {
+// TestNearestConfigToTheEditorWins pins which .cfmleditor.json governs a
+// session. The daemon walks up from the process's working directory and the
+// session walks up from the workspace roots the editor reported; those start in
+// different places, so a project's own config can sit under the folder the
+// editor opened while the daemon passed a different one on its way up. The
+// nearer one is this session's.
+func TestNearestConfigToTheEditorWins(t *testing.T) {
+	outer := t.TempDir()
+	inner := filepath.Join(outer, "project")
+
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outerPath := filepath.Join(outer, ".cfmleditor.json")
+	if err := os.WriteFile(outerPath, []byte(`{"mappings": {"models": "./outer-models"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(inner, ".cfmleditor.json"), []byte(`{"mappings": {"models": "./inner-models"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{ConfigPath: filepath.Join(dir, ".cfmleditor.json"), Linting: true}.Apply(s)
-	initializeIn(t, s, dir)
+	// The daemon found the outer config; the editor opened the inner folder.
+	Settings{ConfigPath: outerPath, Mappings: map[string]string{"models": filepath.Join(outer, "outer-models")}}.Apply(s)
+	initializeIn(t, s, inner)
 
-	if !s.Linting {
-		t.Error("the workspace config was loaded over a session the daemon had already configured")
+	if got := s.Mappings["models"]; got != filepath.Join(inner, "inner-models") {
+		t.Errorf("mappings came from %q, want the project's own config", got)
 	}
 }
 
-// TestConfigReloadDoesNotDependOnComponentResolvers is the defect the flag
-// replaces. The condition used to be "this session has no component
-// resolvers", so whether a daemon session re-read and re-applied the workspace
-// config at startup turned on whether the config happened to declare one —
-// an unrelated key deciding unrelated behaviour. Both shapes must now behave
-// identically.
+// TestConfigReloadDoesNotDependOnComponentResolvers is the defect the
+// ConfigPath work replaced. The condition used to be "this session has no
+// component resolvers", so whether a session re-read and re-applied the
+// workspace config at startup turned on whether the config happened to declare
+// one — an unrelated key deciding unrelated behaviour. Both shapes must behave
+// identically, and neither may end up with the file's resolvers listed twice.
 func TestConfigReloadDoesNotDependOnComponentResolvers(t *testing.T) {
+	const resolverJSON = `{"componentResolvers": [{"match": "getService(\"$1\")", "resolve": "svc.$1", "prefix": "getService"}]}`
+
 	for _, tc := range []struct {
 		name      string
 		resolvers []config.Resolver
 	}{
 		{"settings without resolvers", nil},
-		{"settings with a resolver", []config.Resolver{{Match: "getService(\"$1\")", Resolve: "svc.$1", Prefix: "getService"}}},
+		{"settings with the file's resolver already applied", []config.Resolver{
+			{Match: `getService("$1")`, Resolve: "svc.$1", Prefix: "getService"},
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"), []byte(`{"linting":{"enabled":false}}`), 0o644); err != nil {
+			cfgPath := filepath.Join(dir, ".cfmleditor.json")
+
+			if err := os.WriteFile(cfgPath, []byte(resolverJSON), 0o644); err != nil {
 				t.Fatal(err)
 			}
 
 			s := NewServer(nil, cflog.NewLogger(false))
-			Settings{
-				ConfigPath:         filepath.Join(dir, ".cfmleditor.json"),
-				Linting:            true,
-				ComponentResolvers: tc.resolvers,
-			}.Apply(s)
+			Settings{ConfigPath: cfgPath, ComponentResolvers: tc.resolvers}.Apply(s)
 			initializeIn(t, s, dir)
 
-			if !s.Linting {
-				t.Error("config reloaded over an already-configured session")
-			}
-
-			if got := len(s.ComponentResolvers); got != len(tc.resolvers) {
-				t.Errorf("component resolvers went from %d to %d — the config was applied a second time",
-					len(tc.resolvers), got)
+			if got := len(s.ComponentResolvers); got != 1 {
+				t.Errorf("component resolvers = %d, want 1: %+v", got, s.ComponentResolvers)
 			}
 		})
 	}
@@ -342,21 +350,42 @@ func TestOverlayDoesNotDuplicateResolvers(t *testing.T) {
 	}
 }
 
-// TestNoEditorSettingsMeansNoOverlay keeps the previous behaviour where there
-// is nothing to merge: a session the daemon configured is left alone.
-func TestNoEditorSettingsMeansNoOverlay(t *testing.T) {
+// TestConfigAppliedOnceWithNoEditorSettings covers the plainest daemon case:
+// nothing to merge, and the governing file applied exactly once.
+func TestConfigAppliedOnceWithNoEditorSettings(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".cfmleditor.json")
 
-	if err := os.WriteFile(cfgPath, []byte(`{"linting": {"enabled": false}}`), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"linting": {"enabled": true}, "mappings": {"models": "./models"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{ConfigPath: cfgPath, Linting: true}.Apply(s)
+	Settings{ConfigPath: cfgPath, Linting: true, Mappings: map[string]string{"models": filepath.Join(dir, "models")}}.Apply(s)
 	initializeIn(t, s, dir)
 
 	if !s.Linting {
-		t.Error("the config was re-applied with nothing to merge into it")
+		t.Error("the config file's linting was lost")
+	}
+
+	if got := s.Mappings["models"]; got != filepath.Join(dir, "models") {
+		t.Errorf("mappings = %q", got)
+	}
+}
+
+// TestEditorSettingsSurviveAnUnreadableDaemonConfig is the failure this path
+// cannot afford. For a client with no config file to write, initializationOptions
+// are the entire configuration; discarding them because a file the daemon
+// mentioned has since gone would leave the session unconfigured and say nothing.
+func TestEditorSettingsSurviveAnUnreadableDaemonConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	Settings{ConfigPath: filepath.Join(dir, "gone", ".cfmleditor.json")}.Apply(s)
+
+	initializeServerWith(t, s, dir, `{"linting": {"enabled": true}}`)
+
+	if !s.Linting {
+		t.Error("initializationOptions were dropped because the daemon's config file could not be read")
 	}
 }

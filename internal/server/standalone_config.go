@@ -9,16 +9,39 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-// loadWorkspaceConfig applies the nearest .cfmleditor.json, using editorCfg
-// (the client's initializationOptions) to fill in anything that file does not
-// state. The file wins on every key it sets, so adding editor settings never
-// changes how an existing project behaves.
+// configureSession applies the configuration this session runs with: the
+// governing .cfmleditor.json, merged with the editor's initializationOptions,
+// applied exactly once.
 //
-// editorCfg may be nil, and so may the file — with neither, nothing is applied.
-func (s *Server) loadWorkspaceConfig(editorCfg *config.JSON) {
+// The governing file is the nearest one to the workspace roots the editor
+// reported, and the daemon's own (s.ConfigPath) only when that walk finds
+// nothing. The two are usually the same file and often are not both present:
+// the daemon walks up from the process's working directory, which for an IDE
+// that sets none is wherever it was launched from, while a project's own
+// config sits under the folder the editor opened. Preferring the session's
+// walk is what keeps a project config from being masked by whichever one the
+// daemon happened to pass on its way up.
+//
+// initializationOptions are merged whatever happens, including when no file
+// can be read at all: for a client with no config file to write — the IntelliJ
+// plugin sends every formatter setting this way — they are the entire
+// configuration, and dropping them silently is the one failure this path
+// cannot afford.
+//
+// Applying once matters because applyConfig appends resolvers and keeps the
+// first map it is given. A daemon session arrives with those fields already
+// filled from Settings, so they are cleared first and the merged result — the
+// same file, plus the editor's gaps — replaces them exactly.
+func (s *Server) configureSession(editorCfg *config.JSON) {
 	baseDir := ""
 	if len(s.workspaceRoots) > 0 {
 		baseDir = s.workspaceRoots[0]
+	}
+
+	path, fileCfg := s.governingConfig()
+
+	if fileCfg == nil && editorCfg == nil {
+		return
 	}
 
 	// Relative paths are meaningless once the two sides are merged, since they
@@ -29,28 +52,60 @@ func (s *Server) loadWorkspaceConfig(editorCfg *config.JSON) {
 		editorCfg.BeanPaths = config.ResolvePaths(editorCfg.BeanPaths, baseDir)
 	}
 
-	for _, root := range s.workspaceRoots {
-		p, fileCfg := s.findConfigUpwards(root)
-		if fileCfg == nil {
-			continue
-		}
+	dir := baseDir
 
-		dir := filepath.Dir(p)
+	if fileCfg != nil {
+		dir = filepath.Dir(path)
 		fileCfg.Mappings = config.ResolvePaths(fileCfg.Mappings, dir)
 		fileCfg.BeanPaths = config.ResolvePaths(fileCfg.BeanPaths, dir)
 
-		s.log.Info("loaded config from workspace", cflog.String("path", p))
-		s.applyConfig(config.Resolve(config.Merge(editorCfg, fileCfg), dir))
-
-		return
+		s.log.Info("loaded config from workspace", cflog.String("path", path))
+	} else {
+		s.log.Info("no .cfmleditor.json found; using editor initializationOptions")
 	}
 
-	if editorCfg == nil {
-		return
+	merged := config.Merge(editorCfg, fileCfg)
+
+	// config.Resolve leaves an absent formatting block at its zero value on
+	// purpose (see config.DefaultResolvedFormatting), which is not what the
+	// daemon resolved for the same file: daemon.Config's accessors apply each
+	// field's default whether or not the block exists. Applying the zero value
+	// would hand the session WhitespaceOnly=false — the formatter's safety
+	// guard, off — whenever neither side mentions formatting.
+	prevFormatting := s.Formatting
+
+	s.Mappings = nil
+	s.ExpressionMappings = nil
+	s.ServicePropertyResolvers = nil
+	s.ComponentResolvers = nil
+	s.PropertyResolvers = nil
+	s.BeanPaths = nil
+
+	s.applyConfig(config.Resolve(merged, dir))
+
+	if merged.Formatting == nil {
+		s.Formatting = prevFormatting
+	}
+}
+
+// governingConfig finds the .cfmleditor.json this session should run with, and
+// returns its path alongside it. Nil when there is none to be had.
+func (s *Server) governingConfig() (string, *config.JSON) {
+	for _, root := range s.workspaceRoots {
+		if p, cfg := s.findConfigUpwards(root); cfg != nil {
+			return p, cfg
+		}
 	}
 
-	s.log.Info("no .cfmleditor.json found; using editor initializationOptions")
-	s.applyConfig(config.Resolve(editorCfg, baseDir))
+	if s.ConfigPath != "" {
+		if cfg := s.readConfigFile(s.ConfigPath); cfg != nil {
+			return s.ConfigPath, cfg
+		}
+
+		s.log.Warn("the daemon's config file is no longer readable", cflog.String("path", s.ConfigPath))
+	}
+
+	return "", nil
 }
 
 // editorConfig decodes the client's initializationOptions, which carry the
@@ -76,16 +131,6 @@ func (s *Server) editorConfig(raw protocol.LSPAny) *config.JSON {
 	return &cfg
 }
 
-// findConfigUpwards walks from dir towards the filesystem root, returning the
-// first readable, parseable .cfmleditor.json it finds along with its path. A
-// file that exists but does not parse is skipped rather than aborting the
-// walk, so one malformed config cannot mask a valid one further up.
-//
-// Walking upwards matches what daemon.FindConfig does for the daemon-mode
-// startup path. Checking only the root directory itself meant a config that
-// daemon mode picks up happily was invisible in standalone mode, which
-// silently dropped mappings, resolvers, and linting depending only on which
-// mode the editor happened to start.
 // readConfigFile parses one .cfmleditor.json, or returns nil if it is missing
 // or unreadable as config.
 func (s *Server) readConfigFile(path string) *config.JSON {
@@ -104,51 +149,16 @@ func (s *Server) readConfigFile(path string) *config.JSON {
 	return &cfg
 }
 
-// overlayEditorConfig merges the editor's initializationOptions with the config
-// file the daemon already applied to this session, and applies the result.
+// findConfigUpwards walks from dir towards the filesystem root, returning the
+// first readable, parseable .cfmleditor.json it finds along with its path. A
+// file that exists but does not parse is skipped rather than aborting the
+// walk, so one malformed config cannot mask a valid one further up.
 //
-// The daemon reads .cfmleditor.json once and hands every session the same
-// settings, but it never sees initializationOptions: those arrive per session,
-// at initialize, and for an IDE that has no config file of its own to write —
-// IntelliLucee sends every formatter setting from its settings UI this way —
-// they are the entire configuration. Skipping them whenever the daemon happened
-// to find a config file would mean an editor's settings applied or not
-// depending on which directory its process was started from.
-//
-// This re-resolves from the daemon's own file rather than searching again, so
-// the two can't disagree, and clears what the daemon applied first: applyConfig
-// appends resolvers and keeps the first map it is given, both of which assume
-// it runs once. The merged result is a superset of what was cleared — same
-// file, plus the editor's gaps — so one application replaces it exactly.
-func (s *Server) overlayEditorConfig(editorCfg *config.JSON) {
-	fileCfg := s.readConfigFile(s.ConfigPath)
-	if fileCfg == nil {
-		return
-	}
-
-	baseDir := ""
-	if len(s.workspaceRoots) > 0 {
-		baseDir = s.workspaceRoots[0]
-	}
-
-	editorCfg.Mappings = config.ResolvePaths(editorCfg.Mappings, baseDir)
-	editorCfg.BeanPaths = config.ResolvePaths(editorCfg.BeanPaths, baseDir)
-
-	dir := filepath.Dir(s.ConfigPath)
-	fileCfg.Mappings = config.ResolvePaths(fileCfg.Mappings, dir)
-	fileCfg.BeanPaths = config.ResolvePaths(fileCfg.BeanPaths, dir)
-
-	s.Mappings = nil
-	s.ExpressionMappings = nil
-	s.ServicePropertyResolvers = nil
-	s.ComponentResolvers = nil
-	s.PropertyResolvers = nil
-	s.BeanPaths = nil
-
-	s.log.Info("merging editor initializationOptions with the daemon's config", cflog.String("path", s.ConfigPath))
-	s.applyConfig(config.Resolve(config.Merge(editorCfg, fileCfg), dir))
-}
-
+// Walking upwards matches what daemon.FindConfig does for the daemon-mode
+// startup path. Checking only the root directory itself meant a config that
+// daemon mode picks up happily was invisible in standalone mode, which
+// silently dropped mappings, resolvers, and linting depending only on which
+// mode the editor happened to start.
 func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 	d, err := filepath.Abs(dir)
 	if err != nil {

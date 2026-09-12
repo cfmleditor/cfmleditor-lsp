@@ -28,7 +28,7 @@ func TestMergeOverrideWinsPerKey(t *testing.T) {
 	base := &JSON{
 		JavaStubsPath: "base.stubs",
 		Linting:       &Linting{Enabled: true},
-		Completions:   &Completions{TagSnippets: true},
+		Completions:   &Completions{TagSnippets: boolPtr(true)},
 	}
 	over := &JSON{
 		JavaStubsPath: "over.stubs",
@@ -46,7 +46,7 @@ func TestMergeOverrideWinsPerKey(t *testing.T) {
 	}
 
 	// Completions is untouched by over, so base's must survive.
-	if got.Completions == nil || !got.Completions.TagSnippets {
+	if got.Completions == nil || !BoolDefault(got.Completions.TagSnippets, false) {
 		t.Error("base's completions should survive when over does not set them")
 	}
 }

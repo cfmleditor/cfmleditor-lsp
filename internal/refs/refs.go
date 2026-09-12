@@ -91,6 +91,15 @@ func collectFiles(fsys vfs.FS, roots []string) []string {
 
 	for _, root := range roots {
 		_ = fsys.Walk(root, func(path string, info os.FileInfo, _ error) error {
+			// A root that cannot be stat'ed — deleted, renamed, or a stale
+			// workspacePaths entry — is reported with a nil FileInfo, and
+			// dereferencing it took down the whole search rather than skipping
+			// the one root. Reachable from the LSP now that textDocument/
+			// references walks the editor's own workspace roots.
+			if info == nil {
+				return nil
+			}
+
 			if info.IsDir() {
 				return nil
 			}
