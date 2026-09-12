@@ -17,6 +17,11 @@ import "github.com/cfmleditor/cfmleditor-lsp/internal/config"
 // Adding a config key now means adding a field here and a line in Apply,
 // rather than remembering three call sites.
 type Settings struct {
+	// ConfigPath is the .cfmleditor.json these settings were read from, empty
+	// when the daemon's own walk found none. It is what tells a session
+	// whether its configuration has already been discovered for it — see
+	// handleInitialize.
+	ConfigPath               string
 	WorkspaceFolders         []string
 	IndexGlobs               []string
 	Mappings                 map[string]string
@@ -27,10 +32,15 @@ type Settings struct {
 	BeanPaths                map[string]string
 	Formatting               config.ResolvedFormatting
 	Linting                  bool
+	References               bool
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
 }
 
 // Apply copies the settings onto a freshly created Server.
 func (set Settings) Apply(s *Server) {
+	s.ConfigPath = set.ConfigPath
 	s.WorkspaceFolders = set.WorkspaceFolders
 	s.IndexGlobs = set.IndexGlobs
 	s.Mappings = set.Mappings
@@ -41,4 +51,8 @@ func (set Settings) Apply(s *Server) {
 	s.BeanPaths = set.BeanPaths
 	s.Formatting = set.Formatting
 	s.Linting = set.Linting
+	s.References = set.References
+	s.TagSnippets = set.TagSnippets
+	s.FunctionSnippets = set.FunctionSnippets
+	s.GlobalFunctionResolution = set.GlobalFunctionResolution
 }

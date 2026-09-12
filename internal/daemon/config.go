@@ -9,6 +9,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
 )
 
 // configJSON is the on-disk shape of .cfmleditor.json.
@@ -131,18 +132,25 @@ func (c *Config) Linting() bool {
 	return raw != nil && raw.Linting != nil && raw.Linting.Enabled
 }
 
+// References returns whether textDocument/references is enabled in config.
+func (c *Config) References() bool {
+	raw := c.raw()
+
+	return raw != nil && raw.References != nil && raw.References.Enabled
+}
+
 // FormattingEnabled returns whether formatting is enabled in config.
 func (c *Config) FormattingEnabled() bool {
 	raw := c.raw()
 
-	return raw != nil && raw.Formatting != nil && raw.Formatting.Enabled
+	return raw != nil && raw.Formatting != nil && config.BoolDefault(raw.Formatting.Enabled, false)
 }
 
 // FormattingDebug returns whether formatting debug checks are enabled.
 func (c *Config) FormattingDebug() bool {
 	raw := c.raw()
 
-	return raw != nil && raw.Formatting != nil && raw.Formatting.Debug
+	return raw != nil && raw.Formatting != nil && config.BoolDefault(raw.Formatting.Debug, false)
 }
 
 // FormattingSelfCloseTags returns whether void/implicit-end HTML tags should be self-closed.
@@ -368,6 +376,54 @@ func (c *Config) IndexGlobs() []string {
 // expandGlob expands a glob pattern, handling ** for recursive directory matching.
 func expandGlob(pattern string) []string {
 	return cfpath.ExpandGlob(pattern)
+}
+
+// ResolvedCompletions returns the completion settings with defaults applied.
+func (c *Config) ResolvedCompletions() config.ResolvedCompletions {
+	raw := c.raw()
+	if raw == nil {
+		return config.ResolveCompletions(nil)
+	}
+
+	return config.ResolveCompletions(raw.Completions)
+}
+
+// SettingsFrom builds the per-session settings for every daemon session from a
+// config.
+//
+// It lives here rather than at the call site because the call site is package
+// main, which nothing can test. A key read from config but never copied into
+// Settings reaches no daemon session at all, and that is not a visible
+// failure: it looks exactly like the key not being set. `completions` was
+// missing for exactly that reason, so every daemon session ran with global
+// function resolution and both kinds of snippet switched off — unless the
+// config happened to omit componentResolvers, which is the one case where
+// handleInitialize falls back to loading the config itself.
+func SettingsFrom(c *Config) server.Settings {
+	props := make([]config.PropResolver, 0, len(c.PropertyResolvers()))
+	for _, p := range c.PropertyResolvers() {
+		props = append(props, config.PropResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+	}
+
+	comp := c.ResolvedCompletions()
+
+	return server.Settings{
+		ConfigPath:               c.Path,
+		WorkspaceFolders:         c.WorkspaceFolders(),
+		IndexGlobs:               c.IndexGlobs(),
+		Mappings:                 c.Mappings(),
+		ExpressionMappings:       c.ExpressionMappings(),
+		ServicePropertyResolvers: c.ServicePropertyResolvers(),
+		ComponentResolvers:       c.ComponentResolvers(),
+		PropertyResolvers:        props,
+		BeanPaths:                c.BeanPaths(),
+		Formatting:               c.ResolvedFormatting(),
+		Linting:                  c.Linting(),
+		References:               c.References(),
+		TagSnippets:              comp.TagSnippets,
+		FunctionSnippets:         comp.FunctionSnippets,
+		GlobalFunctionResolution: comp.GlobalFunctionResolution,
+	}
 }
 
 // ResolvedFormatting collects every formatting accessor into one resolved

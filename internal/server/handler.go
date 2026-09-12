@@ -57,6 +57,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleCompletion(ctx, req.Params())
 		case protocol.MethodTextDocumentDefinition:
 			return s.handleDefinition(ctx, req.Params())
+		case protocol.MethodTextDocumentReferences:
+			return s.handleReferences(ctx, req.Params())
 		case protocol.MethodTextDocumentFormatting:
 			return s.handleFormatting(ctx, req.Params())
 		case protocol.MethodTextDocumentOnTypeFormatting:
@@ -109,15 +111,38 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
 	}
 
-	// In standalone mode, load config from workspace roots if not already
-	// configured. This MUST happen before the goroutines below are spawned:
-	// applyConfig is what sets s.Linting, and initLinter returns early when it
-	// reads that field as false, which would leave s.linter nil and silently
-	// disable diagnostics for the rest of the session. Spawning after the
-	// writes also gives the goroutines a happens-before edge to them, so no
-	// locking is needed for config that is only written here.
-	if len(s.ComponentResolvers) == 0 {
-		s.loadWorkspaceConfig(s.editorConfig(params.InitializationOptions))
+	// Find and apply the workspace config, unless the daemon already did.
+	//
+	// s.ConfigPath is the file the daemon read before this session existed; it
+	// hands every session the same settings, so there is nothing left to look
+	// for. It is empty when the daemon's own walk — upwards from the process's
+	// working directory — found nothing, and that is not the same question as
+	// this one: the walk below starts from the workspace roots the editor
+	// reported, which can sit under a config the first walk never passed.
+	//
+	// The editor's initializationOptions are per-session and the daemon never
+	// saw them, so they are merged either way — see overlayEditorConfig for why
+	// that cannot be a second partial application.
+	//
+	// The condition used to be "has this session no component resolvers yet",
+	// standing in for "has it been configured". That made everything else here
+	// depend on an unrelated config key: adding one resolver to a working
+	// .cfmleditor.json silently changed what a session did at startup, which is
+	// how the completions defaults came to be dropped for some workspaces and
+	// not others. The re-read it allowed was what repaired them, by accident;
+	// now that NewServer and Settings carry those defaults properly, it has
+	// nothing left to contribute.
+	//
+	// This MUST happen before the goroutines below are spawned: applyConfig is
+	// what sets s.Linting, and initLinter returns early when it reads that
+	// field as false, which would leave s.linter nil and silently disable
+	// diagnostics for the rest of the session. Spawning after the writes also
+	// gives the goroutines a happens-before edge to them, so no locking is
+	// needed for config that is only written here.
+	if editorCfg := s.editorConfig(params.InitializationOptions); s.ConfigPath == "" {
+		s.loadWorkspaceConfig(editorCfg)
+	} else if editorCfg != nil {
+		s.overlayEditorConfig(editorCfg)
 	}
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
@@ -687,6 +712,35 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 }
 
 // safeGo runs fn in a goroutine with panic recovery.
+// writeRefsReport writes the reference report for funcName beside the file the
+// request came from, as markdown and as DOT, and tells the client where it
+// went. Only cfmleditor.findRefs' explicit export argument reaches here.
+func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result refs.TraceResult) {
+	outDir := filepath.Dir(sourceFile)
+	if outDir == "" || outDir == "." {
+		outDir = os.TempDir()
+	}
+
+	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
+
+	outFile := filepath.Join(outDir, "refs-"+funcName+".md")
+	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
+
+		return
+	}
+
+	dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
+	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
+	}
+
+	s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
+		Type:    protocol.MessageTypeInfo,
+		Message: "Wrote " + outFile,
+	})
+}
+
 func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) {
 	var params protocol.ExecuteCommandParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
@@ -995,27 +1049,17 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
 
-		output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
-
-		outDir := filepath.Dir(sourceFile)
-		if outDir == "" || outDir == "." {
-			outDir = os.TempDir()
+		// Writing the report is opt-in, via a third argument. It used to be
+		// unconditional, and the caller that fires most often is a code action
+		// on an ordinary editor gesture — so asking "find all references" left
+		// refs-<name>.md and refs-<name>.dot beside the file being read, inside
+		// the user's source tree, ready to be committed by accident. The
+		// summary is returned to the client either way, so the files duplicate
+		// something the caller already has; only a caller that wants them on
+		// disk asks for them.
+		if argBool(params.Arguments, 2) {
+			s.writeRefsReport(ctx, funcName, sourceFile, result)
 		}
-
-		outFile := filepath.Join(outDir, "refs-"+funcName+".md")
-		if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
-			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
-		}
-
-		dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
-			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
-		}
-
-		s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
-			Type:    protocol.MessageTypeInfo,
-			Message: "Wrote " + outFile,
-		})
 
 		return result.Summary, nil
 	case "cfmleditor.exportDeps":

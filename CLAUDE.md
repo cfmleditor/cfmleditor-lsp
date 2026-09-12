@@ -132,7 +132,7 @@ Editor document change
 | `internal/docs` | Built-in CFML function/tag signatures and return types (**generated — do not hand-edit**) |
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
-| `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI and `cfmleditor.findRefs` |
+| `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
@@ -229,8 +229,25 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
   actions, document formatting, on-type formatting (`>`), workspace folders.
+- `textDocument/references` (`internal/server/references.go`) is **opt-in**: off unless
+  `"references": {"enabled": true}`, and `capabilities()` advertises `referencesProvider` only
+  when the flag is on, so a client that has not opted in never offers the command. It is gated
+  because one request walks and parses every CFML file under `searchRoots()` — the same scan
+  `cfmleditor.findRefs` and the `refs` CLI do — with no incremental call-site index to answer
+  from. A dot-path under the cursor searches `refs.Options.Component`; anything else is a
+  function name and searches `refs.Options.FuncName`. The search is scoped by the file that
+  *declares* the function (`declarationOf`, which follows go-to-definition's order of
+  preference), not by the requesting document, so it works from a call site. `refs.Entry` has a
+  line and no column, so `entryRange` recovers the column by finding the identifier on the line;
+  component entries whose line does not name the component are dropped rather than reported as a
+  whole-line match, because the parser also records the variables a component ref flows into
+  (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
+- `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
+  `true`. It used to write unconditionally, which meant the code action on an ordinary "find all
+  references" gesture dropped two files beside the source file being read. The plain code actions
+  pass two arguments; a separate "Export references to X to a file" action passes the third.
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
   `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
   `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
@@ -254,6 +271,7 @@ the user-facing view and all `formatting` defaults.
 | `javaStubsPath` | Auto-synthesizes a `createObject("java", "X")` → `<javaStubsPath>.X` resolver |
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
+| `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr |
 

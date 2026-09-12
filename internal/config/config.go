@@ -29,6 +29,7 @@ type JSON struct {
 	Formatting    *Formatting  `json:"formatting"`
 	Linting       *Linting     `json:"linting"`
 	Completions   *Completions `json:"completions"`
+	References    *References  `json:"references"`
 	Debug         bool         `json:"debug"`
 }
 
@@ -76,6 +77,19 @@ type Linting struct {
 	Enabled bool `json:"enabled"`
 }
 
+// References holds textDocument/references configuration.
+//
+// Off by default, and advertised to the client only when enabled, so a session
+// that has not opted in behaves exactly as before: the editor never offers
+// "Find All References" and never sends the request. It is a flag rather than
+// a plain capability because answering one request walks and parses every CFML
+// file under the workspace roots — the same scan `cfmleditor.findRefs` and the
+// `refs` CLI do — and how that feels on a large workspace is the thing being
+// tried out.
+type References struct {
+	Enabled bool `json:"enabled"`
+}
+
 // Completions holds completion configuration.
 type Completions struct {
 	TagSnippets              bool `json:"tagSnippets"`
@@ -83,10 +97,42 @@ type Completions struct {
 	GlobalFunctionResolution bool `json:"globalFunctionResolution"`
 }
 
+// ResolvedCompletions holds completion settings with defaults applied.
+type ResolvedCompletions struct {
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
+}
+
+// ResolveCompletions applies the defaults for a `completions` block: an absent
+// block means all three are on, which is not what their zero value says.
+//
+// It exists so that the defaults are written down once. They used to live
+// inside Resolve alone, and every path to a Server that did not run Resolve —
+// a daemon session, or a standalone session with no config file and no editor
+// settings — got the zero value instead, silently turning off global function
+// resolution and both kinds of snippet.
+func ResolveCompletions(c *Completions) ResolvedCompletions {
+	if c == nil {
+		return ResolvedCompletions{TagSnippets: true, FunctionSnippets: true, GlobalFunctionResolution: true}
+	}
+
+	return ResolvedCompletions{
+		TagSnippets:              c.TagSnippets,
+		FunctionSnippets:         c.FunctionSnippets,
+		GlobalFunctionResolution: c.GlobalFunctionResolution,
+	}
+}
+
 // Formatting holds formatter configuration.
 type Formatting struct {
-	Enabled                bool   `json:"enabled"`
-	Debug                  bool   `json:"debug"`
+	// Enabled and Debug are pointers for the same reason every other flag here
+	// is: Merge has to tell "the file turned this off" from "the file did not
+	// mention it". As plain bools, a config file naming any formatting key at
+	// all silently switched formatting off for a client that had enabled it
+	// through initializationOptions.
+	Enabled                *bool  `json:"enabled"`
+	Debug                  *bool  `json:"debug"`
 	SelfCloseTags          *bool  `json:"selfCloseTags"`
 	WhitespaceOnly         *bool  `json:"whitespaceOnly"`
 	QueryFormat            *bool  `json:"queryFormat"`
@@ -130,6 +176,7 @@ type Resolved struct {
 	BeanPaths                map[string]string
 	Formatting               ResolvedFormatting
 	Linting                  bool
+	References               bool
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
@@ -193,20 +240,19 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 		r.Linting = cfg.Linting.Enabled
 	}
 
-	if cfg.Completions != nil {
-		r.TagSnippets = cfg.Completions.TagSnippets
-		r.FunctionSnippets = cfg.Completions.FunctionSnippets
-		r.GlobalFunctionResolution = cfg.Completions.GlobalFunctionResolution
-	} else {
-		r.TagSnippets = true
-		r.FunctionSnippets = true
-		r.GlobalFunctionResolution = true
+	if cfg.References != nil {
+		r.References = cfg.References.Enabled
 	}
+
+	comp := ResolveCompletions(cfg.Completions)
+	r.TagSnippets = comp.TagSnippets
+	r.FunctionSnippets = comp.FunctionSnippets
+	r.GlobalFunctionResolution = comp.GlobalFunctionResolution
 
 	if f := cfg.Formatting; f != nil {
 		r.Formatting = ResolvedFormatting{
-			Enabled:                f.Enabled,
-			Debug:                  f.Debug,
+			Enabled:                BoolDefault(f.Enabled, false),
+			Debug:                  BoolDefault(f.Debug, false),
 			SelfCloseTags:          BoolDefault(f.SelfCloseTags, true),
 			WhitespaceOnly:         BoolDefault(f.WhitespaceOnly, true),
 			QueryFormat:            BoolDefault(f.QueryFormat, false),
@@ -297,9 +343,7 @@ func Merge(base, over *JSON) *JSON {
 	out.ComponentResolvers = append(append([]Resolver{}, over.ComponentResolvers...), base.ComponentResolvers...)
 	out.PropertyResolvers = append(append([]PropResolver{}, over.PropertyResolvers...), base.PropertyResolvers...)
 
-	if over.Formatting != nil {
-		out.Formatting = over.Formatting
-	}
+	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
 
 	if over.Linting != nil {
 		out.Linting = over.Linting
@@ -309,7 +353,71 @@ func Merge(base, over *JSON) *JSON {
 		out.Completions = over.Completions
 	}
 
+	if over.References != nil {
+		out.References = over.References
+	}
+
 	out.Debug = base.Debug || over.Debug
+
+	return &out
+}
+
+// mergeFormatting unions two formatting blocks key by key, with over's value
+// winning wherever over states one.
+//
+// It used to replace the whole block, which reads as "the file wins" but means
+// something much stronger: a config file naming a single formatting key
+// discarded every other formatting setting the editor had sent. That is how an
+// IDE configures the formatter when it has no config file of its own to write
+// — IntelliLucee sends all fourteen settings from its settings UI this way —
+// so one `"formatting": {"lineWidth": 120}` in a project reverted the other
+// thirteen to their defaults and switched the formatter off entirely.
+func mergeFormatting(base, over *Formatting) *Formatting {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+
+	for _, f := range []struct{ dst, src **bool }{
+		{&out.Enabled, &over.Enabled},
+		{&out.Debug, &over.Debug},
+		{&out.SelfCloseTags, &over.SelfCloseTags},
+		{&out.WhitespaceOnly, &over.WhitespaceOnly},
+		{&out.QueryFormat, &over.QueryFormat},
+		{&out.LowercaseTags, &over.LowercaseTags},
+		{&out.LowercaseAttributes, &over.LowercaseAttributes},
+		{&out.DoubleQuoteAttributes, &over.DoubleQuoteAttributes},
+		{&out.QueryUppercaseKeywords, &over.QueryUppercaseKeywords},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
+	}
+
+	for _, f := range []struct{ dst, src **int }{
+		{&out.LineWidth, &over.LineWidth},
+		{&out.AttrBreakThreshold, &over.AttrBreakThreshold},
+		{&out.IndentWidth, &over.IndentWidth},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
+	}
+
+	for _, f := range []struct{ dst, src *string }{
+		{&out.ScopeCase, &over.ScopeCase},
+		{&out.CommaPosition, &over.CommaPosition},
+		{&out.QueryCommaPosition, &over.QueryCommaPosition},
+	} {
+		if *f.src != "" {
+			*f.dst = *f.src
+		}
+	}
 
 	return &out
 }

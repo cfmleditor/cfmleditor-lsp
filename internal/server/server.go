@@ -50,6 +50,8 @@ type Server struct {
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
 	Formatting               config.ResolvedFormatting // formatting settings
 	Linting                  bool                      // enable cflint diagnostics
+	References               bool                      // answer textDocument/references (opt-in; see config.References)
+	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
 	TagSnippets              bool                      // insert snippets for tags
 	FunctionSnippets         bool                      // insert snippets for functions
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
@@ -79,21 +81,31 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		idx = sharedIndex[0]
 	}
 
+	// The documented defaults for the `completions` block, so that a session
+	// which never runs config.Resolve still behaves as documented rather than
+	// as the zero value says. Standalone mode with neither a config file nor
+	// editor settings is one such session: loadWorkspaceConfig returns before
+	// it reaches applyConfig, and nothing else ever writes these.
+	comp := config.ResolveCompletions(nil)
+
 	return &Server{
-		conn:              conn,
-		log:               log,
-		FS:                vfs.OS{},
-		documents:         make(map[uri.URI]string),
-		index:             idx,
-		lintCancels:       make(map[uri.URI]context.CancelFunc),
-		compCache:         cache.New(),
-		funcRanges:        make(map[uri.URI][]cache.FuncRange),
-		cacheTimers:       make(map[uri.URI]*time.Timer),
-		reindexTimers:     make(map[uri.URI]*time.Timer),
-		docLocks:          make(map[uri.URI]*sync.Mutex),
-		parseResults:      make(map[uri.URI]*parser.ParseResult),
-		changeCount:       make(map[uri.URI]int),
-		changeWindowStart: make(map[uri.URI]time.Time),
+		conn:                     conn,
+		log:                      log,
+		FS:                       vfs.OS{},
+		TagSnippets:              comp.TagSnippets,
+		FunctionSnippets:         comp.FunctionSnippets,
+		GlobalFunctionResolution: comp.GlobalFunctionResolution,
+		documents:                make(map[uri.URI]string),
+		index:                    idx,
+		lintCancels:              make(map[uri.URI]context.CancelFunc),
+		compCache:                cache.New(),
+		funcRanges:               make(map[uri.URI][]cache.FuncRange),
+		cacheTimers:              make(map[uri.URI]*time.Timer),
+		reindexTimers:            make(map[uri.URI]*time.Timer),
+		docLocks:                 make(map[uri.URI]*sync.Mutex),
+		parseResults:             make(map[uri.URI]*parser.ParseResult),
+		changeCount:              make(map[uri.URI]int),
+		changeWindowStart:        make(map[uri.URI]time.Time),
 	}
 }
 
@@ -117,6 +129,11 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			FirstTriggerCharacter: ">",
 		},
 		DefinitionProvider: protocol.Boolean(true),
+		// Advertised only when opted in. A client that is told the server has
+		// no references provider does not offer "Find All References" at all,
+		// which is what keeps the flag from being a capability the editor
+		// exposes and the server then declines to answer.
+		ReferencesProvider: protocol.Boolean(s.References),
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: []string{"(", ","},
 		},

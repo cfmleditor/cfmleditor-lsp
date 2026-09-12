@@ -86,6 +86,69 @@ func (s *Server) editorConfig(raw protocol.LSPAny) *config.JSON {
 // daemon mode picks up happily was invisible in standalone mode, which
 // silently dropped mappings, resolvers, and linting depending only on which
 // mode the editor happened to start.
+// readConfigFile parses one .cfmleditor.json, or returns nil if it is missing
+// or unreadable as config.
+func (s *Server) readConfigFile(path string) *config.JSON {
+	data, err := s.FS.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var cfg config.JSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		s.log.Warn("ignoring unparseable config", cflog.String("path", path), cflog.Err(err))
+
+		return nil
+	}
+
+	return &cfg
+}
+
+// overlayEditorConfig merges the editor's initializationOptions with the config
+// file the daemon already applied to this session, and applies the result.
+//
+// The daemon reads .cfmleditor.json once and hands every session the same
+// settings, but it never sees initializationOptions: those arrive per session,
+// at initialize, and for an IDE that has no config file of its own to write —
+// IntelliLucee sends every formatter setting from its settings UI this way —
+// they are the entire configuration. Skipping them whenever the daemon happened
+// to find a config file would mean an editor's settings applied or not
+// depending on which directory its process was started from.
+//
+// This re-resolves from the daemon's own file rather than searching again, so
+// the two can't disagree, and clears what the daemon applied first: applyConfig
+// appends resolvers and keeps the first map it is given, both of which assume
+// it runs once. The merged result is a superset of what was cleared — same
+// file, plus the editor's gaps — so one application replaces it exactly.
+func (s *Server) overlayEditorConfig(editorCfg *config.JSON) {
+	fileCfg := s.readConfigFile(s.ConfigPath)
+	if fileCfg == nil {
+		return
+	}
+
+	baseDir := ""
+	if len(s.workspaceRoots) > 0 {
+		baseDir = s.workspaceRoots[0]
+	}
+
+	editorCfg.Mappings = config.ResolvePaths(editorCfg.Mappings, baseDir)
+	editorCfg.BeanPaths = config.ResolvePaths(editorCfg.BeanPaths, baseDir)
+
+	dir := filepath.Dir(s.ConfigPath)
+	fileCfg.Mappings = config.ResolvePaths(fileCfg.Mappings, dir)
+	fileCfg.BeanPaths = config.ResolvePaths(fileCfg.BeanPaths, dir)
+
+	s.Mappings = nil
+	s.ExpressionMappings = nil
+	s.ServicePropertyResolvers = nil
+	s.ComponentResolvers = nil
+	s.PropertyResolvers = nil
+	s.BeanPaths = nil
+
+	s.log.Info("merging editor initializationOptions with the daemon's config", cflog.String("path", s.ConfigPath))
+	s.applyConfig(config.Resolve(config.Merge(editorCfg, fileCfg), dir))
+}
+
 func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 	d, err := filepath.Abs(dir)
 	if err != nil {
@@ -94,14 +157,8 @@ func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 
 	for {
 		p := filepath.Join(d, ".cfmleditor.json")
-
-		if data, err := s.FS.ReadFile(p); err == nil {
-			var cfg config.JSON
-			if json.Unmarshal(data, &cfg) == nil {
-				return p, &cfg
-			}
-
-			s.log.Warn("ignoring unparseable config", cflog.String("path", p))
+		if cfg := s.readConfigFile(p); cfg != nil {
+			return p, cfg
 		}
 
 		parent := filepath.Dir(d)
@@ -136,6 +193,7 @@ func (s *Server) applyConfig(r *config.Resolved) {
 	}
 
 	s.Linting = r.Linting
+	s.References = r.References
 	s.TagSnippets = r.TagSnippets
 	s.FunctionSnippets = r.FunctionSnippets
 	s.GlobalFunctionResolution = r.GlobalFunctionResolution

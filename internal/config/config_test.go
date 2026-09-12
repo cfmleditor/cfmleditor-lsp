@@ -231,7 +231,7 @@ func TestResolve_FormattingAbsentIsZeroValueNotDefaults(t *testing.T) {
 func TestResolve_FormattingPresentAppliesFieldDefaults(t *testing.T) {
 	// When the section IS present but individual pointer fields are nil, those specific
 	// fields fall back to their documented defaults.
-	r := Resolve(&JSON{Formatting: &Formatting{Enabled: true}}, "/proj")
+	r := Resolve(&JSON{Formatting: &Formatting{Enabled: boolPtr(true)}}, "/proj")
 
 	if !r.Formatting.Enabled {
 		t.Error("expected Enabled to reflect the explicit true")
