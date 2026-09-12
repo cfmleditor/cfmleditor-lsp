@@ -238,7 +238,9 @@ When `.cfmleditor.json` is found, the server starts in daemon mode. The search w
 2. Subsequent sessions connect to the existing daemon via the socket, sharing a single index.
 3. The daemon shuts down automatically when all editor sessions disconnect.
 
-Without a config file the server runs in standalone mode — a single session with its own index. Standalone sessions look for a config the same way, walking upwards from each workspace folder the editor reports, so the same file is picked up in either mode.
+Without a config file the server runs in standalone mode — a single session with its own index. Standalone sessions look for a config the same way, walking upwards from each workspace folder the editor reports, so the same file is picked up in either mode; what they do not do is join a daemon.
+
+That is deliberate. The socket is derived from `workspaceName`, so an index is only ever shared between sessions that named the same project. With no config there is no name to key on, and the alternative — falling back to the working directory — is not one: it groups whatever happens to share a folder name, and an editor that starts the server without setting a working directory (the IntelliJ plugin does not) gives every project on the machine the same one. A shared index means one project's symbols answering another's go-to-definition and workspace-symbol queries. Add a `.cfmleditor.json` with a `workspaceName` to get the sharing.
 
 ### Indexing behaviour
 

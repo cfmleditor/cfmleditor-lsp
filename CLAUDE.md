@@ -98,6 +98,11 @@ An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml
   `index.Index`. Later clients `daemon.Proxy()` into the socket. A `ConnTracker` shuts the
   daemon down when the last client disconnects.
 - **Standalone mode** — no config file; a single self-contained session with its own index.
+  `FindConfig` returns nil when its walk finds nothing, which is what selects this mode. It used
+  to return a `Config` with an empty `Path` and the working directory's base name as its `Name`,
+  making the standalone branch unreachable and keying the socket — a hash of `Name` — on that
+  base name, so unrelated projects in folders with the same name shared one daemon and one
+  index. Every caller already tested for nil.
 
 Note the repo root has its own `.cfmleditor.json` (`workspaceName: testdata`), so running the
 binary from the repo root enters daemon mode against `testdata/`.

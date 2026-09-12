@@ -21,7 +21,21 @@ type Config struct {
 	Name string // project name used to derive the daemon socket
 }
 
-// FindConfig looks for .cfmleditor.json starting from dir, then one level up.
+// FindConfig looks for .cfmleditor.json starting from dir and walking up to the
+// filesystem root. It returns nil when there is none: no config file means no
+// project to run a daemon for, and the caller runs a standalone session.
+//
+// It used to return a Config with an empty Path and the base name of dir as its
+// Name, which made "no config found" indistinguishable from "config found" at
+// every call site — all of which already test for nil. Two consequences, both
+// bad. The standalone branch in runServer became unreachable, so every session
+// started a daemon whatever it found. And the socket path is a hash of Name, so
+// with no config the daemon was keyed on the *base name of the working
+// directory*: two unrelated projects in folders both called "app" shared one
+// daemon and one index, and an editor that starts the server with no working
+// directory of its own — the IntelliJ plugin does — gave every project on the
+// machine the same name, so all of them did. A shared index means one project's
+// symbols answering another's go-to-definition and workspace-symbol queries.
 func FindConfig(dir string) (*Config, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -53,7 +67,7 @@ func FindConfig(dir string) (*Config, error) {
 		d = parent
 	}
 
-	return &Config{Path: "", Name: filepath.Base(abs)}, nil
+	return nil, nil
 }
 
 func (c *Config) raw() *configJSON {

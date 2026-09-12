@@ -65,16 +65,74 @@ func TestFindConfigMissingName(t *testing.T) {
 	}
 }
 
+// TestFindConfigNoFile pins the answer every caller already tests for. It used
+// to be a Config with an empty Path and the base name of dir as its Name, which
+// made "found nothing" look exactly like "found something" — and since the
+// socket path is a hash of Name, it keyed the daemon on the base name of the
+// working directory.
 func TestFindConfigNoFile(t *testing.T) {
-	dir := t.TempDir()
-
-	cfg, _ := FindConfig(dir)
-	if cfg == nil {
-		t.Fatal("expected fallback config, got nil")
+	cfg, err := FindConfig(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if cfg.Name != filepath.Base(dir) {
-		t.Fatalf("expected name %q, got %q", filepath.Base(dir), cfg.Name)
+	if cfg != nil {
+		t.Fatalf("expected nil with no config file, got %+v", cfg)
+	}
+}
+
+// TestSocketPathDoesNotCollideOnFolderName is the harm that fallback did. Two
+// unrelated projects in folders with the same name shared one daemon, and so
+// one index — one project's symbols answering the other's go-to-definition.
+// With no config there is now no daemon at all; with one, the socket is keyed
+// on a name the project chose or on the config's own absolute directory.
+func TestSocketPathDoesNotCollideOnFolderName(t *testing.T) {
+	a := filepath.Join(t.TempDir(), "app")
+	b := filepath.Join(t.TempDir(), "app")
+
+	writeConfig(t, a, `{}`)
+	writeConfig(t, b, `{}`)
+
+	cfgA, err := FindConfig(a)
+	if err != nil || cfgA == nil {
+		t.Fatalf("FindConfig(a) = %v, %v", cfgA, err)
+	}
+
+	cfgB, err := FindConfig(b)
+	if err != nil || cfgB == nil {
+		t.Fatalf("FindConfig(b) = %v, %v", cfgB, err)
+	}
+
+	if cfgA.SocketPath() == cfgB.SocketPath() {
+		t.Errorf("two projects in folders both called %q share a socket: %s",
+			filepath.Base(a), cfgA.SocketPath())
+	}
+}
+
+// TestSocketPathIsStableForOneProject is the other half: the same project must
+// keep reaching the same daemon, whichever directory under it the server starts
+// in, or every editor window gets an index of its own.
+func TestSocketPathIsStableForOneProject(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, `{"workspaceName":"myproject"}`)
+
+	nested := filepath.Join(root, "src", "models")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	top, err := FindConfig(root)
+	if err != nil || top == nil {
+		t.Fatalf("FindConfig(root) = %v, %v", top, err)
+	}
+
+	deep, err := FindConfig(nested)
+	if err != nil || deep == nil {
+		t.Fatalf("FindConfig(nested) = %v, %v", deep, err)
+	}
+
+	if top.SocketPath() != deep.SocketPath() {
+		t.Errorf("the same project resolved to two sockets: %s and %s", top.SocketPath(), deep.SocketPath())
 	}
 }
 
