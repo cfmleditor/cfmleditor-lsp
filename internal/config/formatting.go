@@ -21,6 +21,7 @@ func DefaultResolvedFormatting() ResolvedFormatting {
 		LowercaseAttributes:    true,
 		DoubleQuoteAttributes:  true,
 		QueryUppercaseKeywords: true,
+		BlankLinesInBlocks:     true,
 		LineWidth:              100,
 		AttrBreakThreshold:     4,
 		IndentWidth:            4,
@@ -50,6 +51,8 @@ func (r ResolvedFormatting) FormatterOptions() formatter.Options {
 	o.LowercaseAttributes = r.LowercaseAttributes
 	o.DoubleQuoteAttributes = r.DoubleQuoteAttributes
 	o.QueryUppercaseKeywords = r.QueryUppercaseKeywords
+	o.BlankLinesInBlocks = r.BlankLinesInBlocks
+	o.SwitchCaseIndent = r.SwitchCaseIndent
 	o.ParenSpacing = r.ParenSpacing
 	o.BraceStyle = r.BraceStyle
 	o.ScopeCase = r.ScopeCase
@@ -58,6 +61,10 @@ func (r ResolvedFormatting) FormatterOptions() formatter.Options {
 
 	if r.LineWidth > 0 {
 		o.LineWidth = r.LineWidth
+	}
+
+	if r.ParamBreakThreshold > 0 {
+		o.ParamBreakThreshold = r.ParamBreakThreshold
 	}
 
 	if r.AttrBreakThreshold > 0 {

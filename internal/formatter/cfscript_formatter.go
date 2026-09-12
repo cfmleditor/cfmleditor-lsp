@@ -524,16 +524,47 @@ func (f *Formatter) scriptBareBlock(n *sitter.Node) {
 // scriptBlockBody writes everything after a block's opening brace: the padded,
 // indented contents and the closing brace back at the outer level.
 func (f *Formatter) scriptBlockBody(n *sitter.Node) {
-	f.scriptWrite("\n\n")
+	f.blockPadOpen()
 
 	f.level++
 	lead := f.flushBlockComments()
 	f.scriptChildren(n, lead)
-	f.scriptWrite("\n")
+	f.blockPadClose()
 
 	f.level--
 	f.writeIndent()
 	f.scriptWrite("}")
+}
+
+// blockPadOpen ends the line a block's opening brace is on, and writes the
+// blank line under it that the formatter has always put there.
+// blankLinesInBlocks false keeps the line break and drops the blank.
+func (f *Formatter) blockPadOpen() {
+	if f.opts.BlankLinesInBlocks {
+		f.scriptWrite("\n\n")
+
+		return
+	}
+
+	f.scriptWrite("\n")
+}
+
+// blockPadClose is the same at the other end: a newline that becomes the blank
+// line above the closing brace, the last statement having already ended its own
+// line.
+//
+// Unpadded it has to be scriptNL rather than a plain newline. Not every body
+// leaves the cursor at the start of a line — a brace-less clause is emitted
+// verbatim and stops where its text does — and there this newline is what puts
+// the closing brace on a line of its own instead of a blank line.
+func (f *Formatter) blockPadClose() {
+	if f.opts.BlankLinesInBlocks {
+		f.scriptWrite("\n")
+
+		return
+	}
+
+	f.scriptNL()
 }
 
 // scriptBlockOf renders the named child at field `field` as a block.
@@ -1663,8 +1694,13 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 	return "(" + f.padded(joined) + ")"
 }
 
-// exprFuncDefParams renders function definition parameters, each on its own line.
-func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
+// exprFuncDefParams renders function definition parameters: on one line when
+// paramBreakThreshold allows it and they fit, otherwise each on its own line.
+//
+// col is the column the "(" lands in — the indent plus everything already built
+// into the signature — so the one-line form can be measured against LineWidth.
+// The caller is the only one that knows it.
+func (f *Formatter) exprFuncDefParams(params *sitter.Node, col int) string {
 	if params == nil {
 		return "()"
 	}
@@ -1695,6 +1731,10 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 
 	if len(parts) == 0 {
 		return "()"
+	}
+
+	if flat, ok := f.flatFuncDefParams(parts, col); ok {
+		return flat
 	}
 
 	indent := f.opts.indent(f.level + 1)
@@ -1735,6 +1775,56 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node) string {
 	sb.WriteString(")")
 
 	return sb.String()
+}
+
+// flatFuncDefParams renders the parameter list on one line and reports whether
+// that is allowed here.
+//
+// The threshold is the first gate, and its default of zero is what keeps a
+// declaration breaking the way it always has: every list has at least one
+// parameter by this point, so nothing is ever at or below zero. A project
+// raising it is asking for short signatures to stay on one line.
+//
+// Four things refuse the one-line form whatever the threshold says. A comment
+// among the parameters would swallow the rest of the signature, including the
+// brace. A parameter that rendered multi-line cannot be folded back up. A
+// trailing comma the source wrote means nothing on one line and would have to
+// be either dropped — a non-whitespace change — or emitted as `(a, b,)`. And a
+// list that would run past LineWidth is what the limit is for; the measurement
+// stops at the closing paren, since whatever follows is the caller's to place.
+func (f *Formatter) flatFuncDefParams(parts []paramPart, col int) (string, bool) {
+	if len(parts) > f.opts.ParamBreakThreshold {
+		return "", false
+	}
+
+	var sb strings.Builder
+
+	for i, p := range parts {
+		if p.isComment || strings.Contains(p.text, "\n") || strings.Contains(p.text, "//") {
+			return "", false
+		}
+
+		if p.commaAfter && i == len(parts)-1 {
+			return "", false
+		}
+
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+
+		sb.WriteString(p.text)
+
+		if p.commaAfter {
+			sb.WriteString(",")
+		}
+	}
+
+	out := "(" + f.padded(sb.String()) + ")"
+	if col+len(out) > f.opts.LineWidth {
+		return "", false
+	}
+
+	return out, true
 }
 
 // lastParameter returns the index of the final entry that is a parameter rather
@@ -1870,8 +1960,24 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 			current = append(current, fmt.Sprintf("%s = %s", f.expr(left), f.expr(right)))
 			currentHasName = true
 		default:
-			if c.IsNamed() {
-				current = append(current, f.text(c))
+			if !c.IsNamed() {
+				break
+			}
+
+			current = append(current, f.text(c))
+
+			// A `//` comment ends its line by definition, so it cannot share an
+			// entry with whatever follows. Entries are joined with a space, so
+			// a standalone one used to absorb the next parameter — `a, // why,
+			// b` came back as `a,` and `// why b`, with b deleted into the
+			// comment. The guard caught the lost parameter and refused the
+			// file, so it simply stopped responding to format-on-save.
+			//
+			// Only when the entry is nothing but comments. A comment trailing a
+			// parameter belongs to it, and flushing there would strip the comma
+			// that has not been read yet.
+			if currentAllComments && f.isLineCommentNode(c) {
+				flush(false)
 			}
 		}
 	}
@@ -2221,7 +2327,7 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 		sig.WriteString(f.text(name))
 	}
 
-	paramStr := f.exprFuncDefParams(params)
+	paramStr := f.exprFuncDefParams(params, len(f.opts.indent(f.level))+sig.Len())
 	sig.WriteString(paramStr)
 
 	braceLead := " "
@@ -2566,7 +2672,7 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	// makes formatting non-idempotent — an unchanged file kept producing a
 	// new diff on every save.
 	f.writeOpenBrace(" ")
-	f.scriptWrite("\n\n")
+	f.blockPadOpen()
 
 	f.level++
 
@@ -2575,7 +2681,7 @@ func (f *Formatter) scriptBlockOf2(body *sitter.Node) {
 	}
 
 	f.formatScriptNode(body)
-	f.scriptWrite("\n")
+	f.blockPadClose()
 
 	f.level--
 	f.writeIndent()
@@ -2592,6 +2698,16 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 	f.scriptWrite("\n")
 
 	f.level++
+
+	// Each clause writes its label one level back from the statements under
+	// it, so the two move together: shifting the whole body in by one puts the
+	// label where the statements were and the statements one further in, which
+	// is the indented style. Doing it here rather than at the labels is what
+	// keeps them apart — moving the label alone left it level with its own
+	// statements, which is neither style.
+	if f.opts.SwitchCaseIndent {
+		f.level++
+	}
 
 	if body != nil {
 		for i := uint(0); i < body.NamedChildCount(); i++ {
@@ -2626,6 +2742,10 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 				f.formatScriptNode(clause)
 			}
 		}
+	}
+
+	if f.opts.SwitchCaseIndent {
+		f.level--
 	}
 
 	f.level--

@@ -36,6 +36,21 @@ type Options struct {
 	LineWidth int
 	// QueryLineWidth is the soft column limit for SQL inside cfquery (default 70).
 	QueryLineWidth int
+	// BlankLinesInBlocks pads a block's body with a blank line after the
+	// opening brace and before the closing one. Default true, which is what the
+	// formatter has always emitted.
+	BlankLinesInBlocks bool
+	// SwitchCaseIndent indents `case` and `default` labels one level inside the
+	// switch, level with the statements under them. Default false, which keeps
+	// the label pulled back to the `switch` keyword's own column.
+	SwitchCaseIndent bool
+	// ParamBreakThreshold is the number of parameters above which a function
+	// declaration's parameter list is expanded onto separate lines. Zero — the
+	// default — breaks every list that has any parameters at all, which is what
+	// the formatter has always done. A list at or below the threshold still
+	// breaks when it would run past LineWidth, or when it holds a comment or a
+	// trailing comma.
+	ParamBreakThreshold int
 	// AttrBreakThreshold is the number of attributes above which they are
 	// always expanded onto separate lines regardless of line width (default 4).
 	AttrBreakThreshold int
@@ -181,6 +196,7 @@ func DefaultOptions() Options {
 		QueryUppercaseKeywords: true,
 		QueryFormat:            false,
 		SelfCloseTags:          true,
+		BlankLinesInBlocks:     true,
 	}
 }
 

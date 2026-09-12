@@ -159,10 +159,13 @@ The `formatting` object controls the built-in formatter invoked via `textDocumen
 | `queryUppercaseKeywords` | `true` | Uppercase SQL keywords inside `<cfquery>` blocks. |
 | `parenSpacing` | *(unset)* | Padding inside parentheses. `"pad"` gives `if ( a )` and `foo( 1, 2 )`; `"tight"` gives `if (a)` and `foo(1, 2)`. Unset keeps the existing behaviour, which pads conditions and grouping but not argument lists — set it to get one rule in both places. |
 | `braceStyle` | `"same-line"` | Where a block's opening brace goes. `"same-line"` (K&R) keeps `function f() {`; `"next-line"` (Allman) puts the brace alone on the line below, and moves `else`, `catch` and `finally` onto their own lines so their braces line up too. A `{ … }` block that is a statement in its own right is left alone — there is no header for its brace to go under. |
+| `blankLinesInBlocks` | `true` | Pad a block's body with a blank line after the opening brace and before the closing one. False gives compact blocks, and collapses an empty body from three lines to two. |
+| `switchCaseIndent` | `false` | Indent `case` and `default` labels one level inside the switch, with their statements one further in. False keeps the label at the `switch` keyword's own column. |
 | `scopeCase` | `"leave"` | Case for CFML scope names. Values: `"upper"`, `"lower"`, `"leave"`. |
 | `commaPosition` | `"after"` | Comma placement in multi-line argument lists. Values: `"after"` (trailing), `"before"` (leading). |
 | `queryCommaPosition` | `"preserve"` | Comma placement in SQL SELECT lists. Values: `"preserve"` (keep original position), `"after"` (trailing), `"before"` (leading). |
 | `lineWidth` | `100` | Soft column limit — attributes expand to separate lines when a tag exceeds this width. |
+| `paramBreakThreshold` | `0` | Number of parameters above which a function declaration's parameter list is expanded onto separate lines. `0` expands every list that has parameters, which is what the formatter has always done; raise it to keep short signatures on one line. A list at or below the threshold still expands when it would run past `lineWidth`, or when it holds a comment or a trailing comma. |
 | `attrBreakThreshold` | `4` | Number of attributes above which they are always expanded onto separate lines. |
 | `indentWidth` | `4` | Spaces per indentation level. Overridden by editor `tabSize` when provided. |
 | `debug` | `false` | Enable formatter debug checks. |

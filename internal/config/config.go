@@ -146,6 +146,14 @@ type Formatting struct {
 	LowercaseAttributes    *bool `json:"lowercaseAttributes"`
 	DoubleQuoteAttributes  *bool `json:"doubleQuoteAttributes"`
 	QueryUppercaseKeywords *bool `json:"queryUppercaseKeywords"`
+	// BlankLinesInBlocks pads a block's body with a blank line after the
+	// opening brace and before the closing one. Unset is true, what the
+	// formatter has always emitted.
+	BlankLinesInBlocks *bool `json:"blankLinesInBlocks"`
+	// SwitchCaseIndent indents `case` and `default` labels one level inside the
+	// switch, level with the statements under them. Unset is false, which keeps
+	// the label pulled back to the `switch` keyword's own column.
+	SwitchCaseIndent *bool `json:"switchCaseIndent"`
 	// ParenSpacing is the padding inside parentheses: "pad" for `( a )`,
 	// "tight" for `(a)`. Unset keeps what the formatter has always emitted,
 	// which is neither consistently — conditions and grouping are padded,
@@ -161,8 +169,12 @@ type Formatting struct {
 	CommaPosition      string `json:"commaPosition"`
 	QueryCommaPosition string `json:"queryCommaPosition"`
 	LineWidth          *int   `json:"lineWidth"`
-	AttrBreakThreshold *int   `json:"attrBreakThreshold"`
-	IndentWidth        *int   `json:"indentWidth"`
+	// ParamBreakThreshold is the number of parameters above which a function
+	// declaration's parameter list is expanded onto separate lines. Unset
+	// breaks every list that has parameters, as the formatter always has.
+	ParamBreakThreshold *int `json:"paramBreakThreshold"`
+	AttrBreakThreshold  *int `json:"attrBreakThreshold"`
+	IndentWidth         *int `json:"indentWidth"`
 }
 
 // BoolDefault returns the value of a *bool or the default if nil.
@@ -210,12 +222,15 @@ type ResolvedFormatting struct {
 	LowercaseAttributes    bool
 	DoubleQuoteAttributes  bool
 	QueryUppercaseKeywords bool
+	BlankLinesInBlocks     bool
+	SwitchCaseIndent       bool
 	ParenSpacing           string
 	BraceStyle             string
 	ScopeCase              string
 	CommaPosition          string
 	QueryCommaPosition     string
 	LineWidth              int
+	ParamBreakThreshold    int
 	AttrBreakThreshold     int
 	IndentWidth            int
 }
@@ -279,12 +294,15 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 			LowercaseAttributes:    BoolDefault(f.LowercaseAttributes, true),
 			DoubleQuoteAttributes:  BoolDefault(f.DoubleQuoteAttributes, true),
 			QueryUppercaseKeywords: BoolDefault(f.QueryUppercaseKeywords, true),
+			BlankLinesInBlocks:     BoolDefault(f.BlankLinesInBlocks, true),
+			SwitchCaseIndent:       BoolDefault(f.SwitchCaseIndent, false),
 			ParenSpacing:           f.ParenSpacing,
 			BraceStyle:             f.BraceStyle,
 			ScopeCase:              f.ScopeCase,
 			CommaPosition:          f.CommaPosition,
 			QueryCommaPosition:     f.QueryCommaPosition,
 			LineWidth:              IntDefault(f.LineWidth, 100),
+			ParamBreakThreshold:    IntDefault(f.ParamBreakThreshold, 0),
 			AttrBreakThreshold:     IntDefault(f.AttrBreakThreshold, 4),
 			IndentWidth:            IntDefault(f.IndentWidth, 4),
 		}
@@ -412,6 +430,8 @@ func mergeFormatting(base, over *Formatting) *Formatting {
 		{&out.LowercaseAttributes, &over.LowercaseAttributes},
 		{&out.DoubleQuoteAttributes, &over.DoubleQuoteAttributes},
 		{&out.QueryUppercaseKeywords, &over.QueryUppercaseKeywords},
+		{&out.BlankLinesInBlocks, &over.BlankLinesInBlocks},
+		{&out.SwitchCaseIndent, &over.SwitchCaseIndent},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src
@@ -420,6 +440,7 @@ func mergeFormatting(base, over *Formatting) *Formatting {
 
 	for _, f := range []struct{ dst, src **int }{
 		{&out.LineWidth, &over.LineWidth},
+		{&out.ParamBreakThreshold, &over.ParamBreakThreshold},
 		{&out.AttrBreakThreshold, &over.AttrBreakThreshold},
 		{&out.IndentWidth, &over.IndentWidth},
 	} {
