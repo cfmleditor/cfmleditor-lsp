@@ -17,6 +17,7 @@
 
 - `formatting.lowercaseTags: false` did nothing. `<CFOUTPUT>` still came back `<cfoutput>`, and `<CFDUMP>` came back as `cfDUMP`. Opening and closing tags now each keep the casing they were written with.
 - A `//` comment among a function's parameters **deleted the parameter after it** — `a, // why, b` lost `b` into the comment. Same defect for a comment among a function's annotations, and among a function *expression*'s parameters.
+- An `import` statement before `component` switched off `//` comment recognition for the whole file, so the safety guard compared comment text as though it were code. Same cause as the UTF-8 BOM fix — a token before `component` the probe did not step over. Five of the 5,624 corpus files are affected; it only became a visible refusal under `commaPosition: "before"`, but the guard ran weakened on all five in every mode.
 - `queryExecute(…)` calls were never formatted — arguments unindented, and `parenSpacing`, `commaPosition` and `indentWidth` never reaching them. The grammar gives this one call a node of its own, which the formatter had no renderer for, so it was emitted verbatim. 137 of the 5,624 corpus files contain one. The SQL itself is still emitted exactly as written: it is a string literal, so re-indenting it would change what the query says.
 - A braced `case` body (`case 1: { … }`) put its brace in column one and folded the switch's closing brace onto the block's (`}}`).
 - A trailing comma was silently deleted from every list — `[1, 2, ]`, `{ a: 1, }`, `f(1, 2, )`. The form is legal in Lucee, ACF and BoxLang.

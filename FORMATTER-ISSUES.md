@@ -560,10 +560,29 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
 | Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
-| `import` before `component` degrades the guard | 5 | Not counted above, because it only becomes a rejection under a non-default setting — but the guard is weakened on all five files in every mode. Characterised in 4.4. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
+
+- `import a.b.C;` between the doc block and the component defeated
+  `isScriptSyntaxComponent`, which stepped over `abstract` and `final` but not
+  over an import. The file then had no script region at all, and with no script
+  region the guard stops recognising `//` as a comment anywhere in it and
+  compares comment text as though it were code — the same failure the UTF-8 BOM
+  caused, with a different token in the way. Five corpus files have an import
+  before their component, and on all five the guard ran weakened in every mode.
+
+  It surfaced as a rejection in exactly one place: under
+  `commaPosition: "before"` a comma legitimately moves across a `//` comment,
+  and with the comment being read as code that looks like a reordering
+  (`coldbox-platform/.../ColdBoxScheduledTask.cfc`, line 193). Under the default
+  `commaPosition: "after"` nothing moves, which is why the corpus showed two
+  guard rejections in that mode and three in this one. Both now show two.
+
+  The probe steps over any number of imports, ending each at a semicolon or a
+  line break — Lucee accepts `import a.b.C` without the semicolon, and stopping
+  at the line end also keeps a file that ends mid-import from swallowing the
+  rest of the source looking for one.
 
 - Two mistakes in how the guard's string scanner reads a CFML literal, both of
   which ran a literal past its own closing quote so that the span covered code —
@@ -870,64 +889,6 @@ included: it is a string literal, so its interior — including the line breaks 
 a multi-line query — is content rather than layout, and re-indenting it would
 change what the query says. That is the one thing `queryFormat` cannot reach.
 The corpus now stands at 0 malformed.
-
-### 4.4 `import` before `component` switches off comment recognition
-
-`isScriptSyntaxComponent` decides whether a `.cfc` is script syntax, and
-everything downstream keys off the answer: with no script region the guard stops
-recognising `//` as a comment anywhere in the file and compares comment text as
-though it were code.
-
-The probe steps over a leading doc block, then over `abstract` and `final`, then
-requires `component` or `interface`. It does not step over an `import`
-statement, which is legal between the two:
-
-```cfml
-/**
- * This object represents a scheduled task ...
- */
-import coldbox.system.async.time.DateTimeHelper;
-
-component extends="coldbox.system.async.tasks.ScheduledTask" accessors="true" {
-```
-
-For that file the probe lands on `import`, the keyword check fails, and
-`scriptRegionsOf` returns nothing at all.
-
-This is the same root cause as the UTF-8 BOM case recorded in the comment on
-`isScriptSyntaxComponent` — a token before `component` that the probe does not
-know to skip — with a different token doing it. **Five corpus files** are
-affected, and on all five the guard runs weakened in every mode.
-
-It surfaces as a rejection in exactly one place today. Under
-`commaPosition: "before"` a comma legitimately moves across a `//` comment:
-
-```
-    // key                    // key
-    keyName,        →         keyName
-    // producer               // producer
-    () => {                   , () => {
-```
-
-With comments recognised, the guard skips them and sees no change to the code
-stream. With comment recognition off, the comment is code, and a comma crossing
-it reads as a reordering — `coldbox-platform/.../ColdBoxScheduledTask.cfc`,
-reported at line 193. Under the default `commaPosition: "after"` nothing moves,
-which is why the corpus shows two guard rejections rather than three.
-
-The fix is to step over an `import` statement in the same loop that steps over
-`abstract` and `final`. Worth doing for the weakened guard rather than for the
-one visible rejection: on those five files, every `//` comment is currently
-being compared as code, which is the shape that produced several of the false
-rejections in section 3.
-
-Two things were ruled out on the way, and are recorded so they are not retried:
-the enclosing function formats cleanly on its own, and so does the file with
-that function removed — it is the combination, because the header is what
-switches comment recognition off and the function is what contains the moving
-comma. The component declaration itself, the doc block and the `import` were
-each tested in isolation against the function and none reproduced; only the
-real header does.
 
 Causes that were in this list and are now fixed are recorded above rather than
 here: the outright comment *deletions* (a `//` on the operands of an `&&`

@@ -764,6 +764,25 @@ func isTagNameEnd(c byte) bool {
 	return isWS(c) || c == '>' || c == '/'
 }
 
+// importEnd returns the offset just past an import statement whose keyword ends
+// at pos, or -1 when it does not terminate.
+//
+// A semicolon ends it, and so does a newline: Lucee accepts `import a.b.C`
+// without one, and stopping at the line end also keeps a malformed file from
+// swallowing the rest of the source looking for a `;` that never comes.
+func importEnd(src []byte, pos int) int {
+	for i := pos; i < len(src); i++ {
+		switch src[i] {
+		case ';':
+			return i + 1
+		case '\n':
+			return i + 1
+		}
+	}
+
+	return -1
+}
+
 // isScriptSyntaxComponent reports whether src is a script-syntax component,
 // which has no <cfscript> tag to key off because the entire file is script.
 func isScriptSyntaxComponent(src []byte) bool {
@@ -788,6 +807,22 @@ func isScriptSyntaxComponent(src []byte) bool {
 	// any string literal can appear, and computing them would recurse — string
 	// spans need the script regions this function is being called to determine.
 	pos := skipWSAndComments(src, start, nil, all, nil)
+
+	// `import a.b.C;` is legal between the doc block and the component, and a
+	// file may open with several. Not stepping over them cost the same as the
+	// BOM above: the keyword check failed on a file that is plainly a script
+	// component, the file got no script region, and the guard then stopped
+	// recognising `//` anywhere in it and compared comment text as code. Five
+	// corpus files, and it surfaced as a rejection only under
+	// `commaPosition: "before"`, where a comma legitimately crosses a comment.
+	for hasWordAt(src, pos, "import") {
+		end := importEnd(src, pos+len("import"))
+		if end < 0 {
+			return false
+		}
+
+		pos = skipWSAndComments(src, end, nil, all, nil)
+	}
 
 	for _, kw := range []string{"abstract", "final"} {
 		if hasWordAt(src, pos, kw) {
