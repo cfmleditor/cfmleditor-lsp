@@ -1,11 +1,17 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	json "github.com/go-json-experiment/json"
+
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -129,5 +135,174 @@ func TestDefinitionURIsAreCanonical(t *testing.T) {
 
 	if strings.Contains(string(loc.URI), " ") {
 		t.Errorf("Location URI contains a raw space: %s", loc.URI)
+	}
+}
+
+// initializeWithRoots drives initialize with raw URI strings, so a test can
+// hand the server the exact spelling a client sends rather than one built by
+// cfpath.ToURI.
+func initializeWithRoots(t *testing.T, rootURI string, folderURIs ...string) *Server {
+	t.Helper()
+
+	params := map[string]any{
+		"processId":    nil,
+		"capabilities": map[string]any{},
+	}
+
+	if rootURI != "" {
+		params["rootUri"] = rootURI
+	}
+
+	if len(folderURIs) > 0 {
+		folders := make([]map[string]any, 0, len(folderURIs))
+		for i, u := range folderURIs {
+			folders = append(folders, map[string]any{"uri": u, "name": fmt.Sprintf("w%d", i)})
+		}
+
+		params["workspaceFolders"] = folders
+	}
+
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshalling params: %v", err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	if _, err := s.handleInitialize(context.Background(), raw); err != nil {
+		t.Fatalf("handleInitialize: %v", err)
+	}
+
+	return s
+}
+
+// TestWorkspaceRootsDecodeTheClientsURIs is issue #45 at the one boundary it
+// was not fixed at. The workspace roots are what searchRoots falls back to when
+// no .cfmleditor.json names any, so every workspace-wide search — findRefs,
+// scanWorkspace, document links, component resolution — walks whatever lands
+// here.
+//
+// URI.Path() returns `/c:/Users/q/proj` for the canonical percent-encoded
+// Windows form, a leading slash that is not a Windows path; cfpath.FromURI,
+// which every other inbound conversion already goes through, does not.
+//
+// The non-canonical `file://C:\Users\q\proj` some clients send is a
+// different story and is not fixable here: go.lsp.dev/protocol rewrites it to
+// `file://c:\users\q\proj/` while unmarshalling, reading the whole path as
+// the URI's authority, and both conversions then yield "/". See
+// TestUncanonicalWindowsRootIsManagledUpstream.
+func TestWorkspaceRootsDecodeTheClientsURIs(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		{"plain posix path", "file:///tmp/plain/src", "/tmp/plain/src"},
+		{"space is decoded", "file:///tmp/uri%20demo/src", "/tmp/uri demo/src"},
+		{"canonical windows drive letter", "file:///c%3A/Users/q/proj", "c:/Users/q/proj"},
+	}
+
+	for _, tc := range cases {
+		t.Run("rootUri: "+tc.name, func(t *testing.T) {
+			s := initializeWithRoots(t, tc.uri)
+
+			if len(s.workspaceRoots) != 1 || s.workspaceRoots[0] != tc.want {
+				t.Errorf("workspaceRoots = %q, want [%q]", s.workspaceRoots, tc.want)
+			}
+		})
+
+		t.Run("workspaceFolders: "+tc.name, func(t *testing.T) {
+			s := initializeWithRoots(t, "", tc.uri)
+
+			if len(s.workspaceRoots) != 1 || s.workspaceRoots[0] != tc.want {
+				t.Errorf("workspaceRoots = %q, want [%q]", s.workspaceRoots, tc.want)
+			}
+		})
+	}
+}
+
+// TestUncanonicalWindowsRootIsMangledUpstream records a limit rather than a
+// behaviour we chose, so that the next person to look does not spend the time
+// twice.
+//
+// `file://C:\Users\q\proj` — two slashes, backslashes, a bare drive colon —
+// is what several clients send, and go.lsp.dev/protocol parses the whole thing
+// as the URI's authority and re-serialises it lowercased with a trailing
+// slash. By the time any handler runs, the path is gone; no conversion on our
+// side can recover it. The root ends up "/", which for a workspace-wide search
+// means the filesystem root.
+//
+// If this test starts failing, the library has been fixed and the guard notes
+// around workspaceRoots can go.
+func TestUncanonicalWindowsRootIsMangledUpstream(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"processId":    nil,
+		"capabilities": map[string]any{},
+		"rootUri":      "file://C:\\Users\\q\\proj",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var params protocol.InitializeParams
+	if err := json.Unmarshal(raw, &params); err != nil {
+		t.Fatalf("unmarshalling initialize params: %v", err)
+	}
+
+	if params.RootURI == nil {
+		t.Fatal("rootUri did not survive unmarshalling at all")
+	}
+
+	decoded := string(*params.RootURI)
+	if !strings.Contains(decoded, "users") {
+		t.Skipf("go.lsp.dev/protocol no longer lowercases the authority (%q); recheck this boundary", decoded)
+	}
+
+	if got := cfpath.FromURI(decoded); got != "/" {
+		t.Errorf("the upstream mangling changed: FromURI(%q) = %q, want \"/\" — recheck whether this is now fixable here", decoded, got)
+	}
+}
+
+// TestChangedWorkspaceFoldersDecodeTheirURIs covers the same conversion on the
+// other side. A root added here is indexed and then searched; one removed has
+// to match what initialize stored, or it is never removed from the list.
+func TestChangedWorkspaceFoldersDecodeTheirURIs(t *testing.T) {
+	added := "file:///tmp/uri%20demo/added"
+	wantAdded := "/tmp/uri demo/added"
+
+	s := initializeWithRoots(t, "file:///tmp/plain/src")
+
+	raw, err := json.Marshal(protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Added: []protocol.WorkspaceFolder{{URI: uri.URI(added), Name: "a"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.handleDidChangeWorkspaceFolders(context.Background(), raw); err != nil {
+		t.Fatalf("handleDidChangeWorkspaceFolders: %v", err)
+	}
+
+	if !slices.Contains(s.workspaceRoots, wantAdded) {
+		t.Errorf("workspaceRoots = %q, want it to contain %q", s.workspaceRoots, wantAdded)
+	}
+
+	// Removing it again has to match the stored form, or the root stays.
+	raw, err = json.Marshal(protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{
+			Removed: []protocol.WorkspaceFolder{{URI: uri.URI(added), Name: "a"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.handleDidChangeWorkspaceFolders(context.Background(), raw); err != nil {
+		t.Fatalf("handleDidChangeWorkspaceFolders: %v", err)
+	}
+
+	if slices.Contains(s.workspaceRoots, wantAdded) {
+		t.Errorf("removed folder is still a root: %q", s.workspaceRoots)
 	}
 }

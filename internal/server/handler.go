@@ -103,12 +103,20 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.log.Debug("workspace folder", cflog.Int("index", i), cflog.String("name", folder.Name), cflog.String("uri", string(folder.URI)))
 	}
 
+	// cfpath.FromURI rather than URI.Path(), for the same reason every other
+	// inbound conversion goes through it (0.2.8, #45). Path() returns the
+	// *empty string* for the non-canonical `file://C:\Users\q\proj` several
+	// clients send — which would leave the roots as [""] and send every search
+	// that falls back to them walking nothing — and for the canonical
+	// `file:///c%3A/...` it returns `/c:/Users/q/proj`, a leading slash that is
+	// not a Windows path. These roots are what searchRoots falls back to, so a
+	// bad one here is a workspace-wide search covering the wrong place.
 	for _, folder := range folders {
-		s.workspaceRoots = append(s.workspaceRoots, folder.URI.Path())
+		s.workspaceRoots = append(s.workspaceRoots, cfpath.FromURI(string(folder.URI)))
 	}
 
 	if len(s.workspaceRoots) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
-		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
+		s.workspaceRoots = append(s.workspaceRoots, cfpath.FromURI(string(*params.RootURI))) //nolint:all // this is for compatibility
 	}
 
 	// Apply this session's configuration. See configureSession for which file
@@ -665,7 +673,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, removed := range params.Event.Removed {
-		root := removed.URI.Path()
+		root := cfpath.FromURI(string(removed.URI))
 		if !s.isWorkspaceFolder(root) {
 			s.index.RemoveFilesUnder(string(removed.URI))
 		}
@@ -683,7 +691,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 	}
 
 	for _, added := range params.Event.Added {
-		root := added.URI.Path()
+		root := cfpath.FromURI(string(added.URI))
 
 		s.mu.Lock()
 		s.workspaceRoots = append(s.workspaceRoots, root)
