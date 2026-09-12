@@ -176,13 +176,23 @@ func (s *Server) componentReferences(component string) []protocol.Location {
 // preference go-to-definition uses, so the two agree about which of several
 // same-named functions is meant.
 func (s *Server) declarationOf(word, content string, docURI uri.URI, line, char int) *protocol.Location {
+	defs := s.index.Lookup(word)
+
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
 			return defLocation(def)
 		}
+
+		// A qualified call whose receiver did not resolve. The one candidate
+		// that is certainly wrong is this file's own same-named function: the
+		// call names a receiver, so it is not calling into itself.
+		// handleDefinition excludes it here for the same reason, and picking it
+		// would scope the whole search to the wrong component — `dao.save()` in
+		// a UserService that also declares save() would return UserService's
+		// callers.
+		return onlyDefOutside(defs, docURI)
 	}
 
-	defs := s.index.Lookup(word)
 	for _, d := range defs {
 		if d.URI == docURI {
 			return defLocation(d)
@@ -201,6 +211,32 @@ func (s *Server) declarationOf(word, content string, docURI uri.URI, line, char 
 	}
 
 	return nil
+}
+
+// onlyDefOutside returns the single definition of the name outside docURI, or
+// nil when there is none or more than one — several same-named functions give
+// no basis for choosing, and choosing wrong scopes the search to the wrong
+// component.
+func onlyDefOutside(defs []*parser.FunctionDef, docURI uri.URI) *protocol.Location {
+	var only *parser.FunctionDef
+
+	for _, d := range defs {
+		if d.URI == docURI {
+			continue
+		}
+
+		if only != nil {
+			return nil
+		}
+
+		only = d
+	}
+
+	if only == nil {
+		return nil
+	}
+
+	return defLocation(only)
 }
 
 func defLocation(def *parser.FunctionDef) *protocol.Location {

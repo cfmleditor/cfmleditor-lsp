@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Fix a project's own `.cfmleditor.json` being ignored in favour of the daemon's. The two searches start in different places — the daemon walks up from the process's working directory, a session walks up from the workspace roots the editor reported — so a project config sitting under the folder the editor opened was masked by whichever config the daemon happened to pass on its way up. The nearer one governs now. The two config paths this had grown into are one function (`configureSession`), which also closes the case where the daemon's file has since become unreadable and the editor's `initializationOptions` were dropped with it, silently, on the one path that exists to apply them.
+
+- Fix `textDocument/references` scoping a qualified call by the current file's own same-named function. `dao.save()` names a receiver, so it is not calling the `save()` its own component declares — but with the receiver unresolved the declaration lookup fell through to "prefer this file", and the search then returned that component's callers instead of the DAO's. Go-to-definition has always excluded the current file at this point for the same reason.
+
+- Fix a search root that cannot be stat'ed taking down a whole reference search. `filepath.Walk` reports such a root with a nil `FileInfo` and `collectFiles` dereferenced it, so one stale `workspacePaths` entry — or a folder removed since the editor opened it — turned every Find All References into an internal error rather than a result from the roots that are there.
+
 - Fix `completions` having the same defect `formatting` was just fixed for: its three settings were plain bools, so `{"completions": {"tagSnippets": false}}` also switched off `functionSnippets` and `globalFunctionResolution` — naming one setting silently disabled the two it did not name, including the one whose loss breaks go-to-definition for unqualified cross-file calls. They are `*bool` now, the block merges key by key, and an empty block states nothing rather than meaning all-false.
 
 - Fix the editor-settings overlay replacing the daemon's formatting configuration with a zero value when neither the config file nor the editor payload mentions `formatting`. `config.Resolve` leaves an absent block at its zero value deliberately, which is not what `daemon.Config` resolves for the same file — its accessors apply each field's default whether or not the block exists — so the overlay was handing the session `WhitespaceOnly: false`, the formatter's safety guard, off.

@@ -111,27 +111,15 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		s.workspaceRoots = append(s.workspaceRoots, params.RootURI.Path()) //nolint:all // this is for compatibility
 	}
 
-	// Find and apply the workspace config, unless the daemon already did.
+	// Apply this session's configuration. See configureSession for which file
+	// governs and why the editor's initializationOptions are always merged.
 	//
-	// s.ConfigPath is the file the daemon read before this session existed; it
-	// hands every session the same settings, so there is nothing left to look
-	// for. It is empty when the daemon's own walk — upwards from the process's
-	// working directory — found nothing, and that is not the same question as
-	// this one: the walk below starts from the workspace roots the editor
-	// reported, which can sit under a config the first walk never passed.
-	//
-	// The editor's initializationOptions are per-session and the daemon never
-	// saw them, so they are merged either way — see overlayEditorConfig for why
-	// that cannot be a second partial application.
-	//
-	// The condition used to be "has this session no component resolvers yet",
-	// standing in for "has it been configured". That made everything else here
-	// depend on an unrelated config key: adding one resolver to a working
+	// The condition here used to be "has this session no component resolvers
+	// yet", standing in for "has it been configured". That made everything
+	// else depend on an unrelated config key: adding one resolver to a working
 	// .cfmleditor.json silently changed what a session did at startup, which is
 	// how the completions defaults came to be dropped for some workspaces and
-	// not others. The re-read it allowed was what repaired them, by accident;
-	// now that NewServer and Settings carry those defaults properly, it has
-	// nothing left to contribute.
+	// not others.
 	//
 	// This MUST happen before the goroutines below are spawned: applyConfig is
 	// what sets s.Linting, and initLinter returns early when it reads that
@@ -139,11 +127,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// diagnostics for the rest of the session. Spawning after the writes also
 	// gives the goroutines a happens-before edge to them, so no locking is
 	// needed for config that is only written here.
-	if editorCfg := s.editorConfig(params.InitializationOptions); s.ConfigPath == "" {
-		s.loadWorkspaceConfig(editorCfg)
-	} else if editorCfg != nil {
-		s.overlayEditorConfig(editorCfg)
-	}
+	s.configureSession(s.editorConfig(params.InitializationOptions))
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)

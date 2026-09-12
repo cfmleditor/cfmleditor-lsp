@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 
@@ -436,5 +437,53 @@ func TestReferenceColumnCountsUTF16Units(t *testing.T) {
 	got = nameRange([]string{`x = "café 🎉"; GetData();`}, 0, "GetData")
 	if got.Start.Character != 15 || got.End.Character != 22 {
 		t.Errorf("non-ASCII line: %d-%d, want 15-22", got.Start.Character, got.End.Character)
+	}
+}
+
+// TestDeclarationOfIgnoresThisFileForAQualifiedCall pins which definition a
+// qualified call is scoped by. `dao.save()` names a receiver, so it is not
+// calling the save() this component happens to declare — and picking that one
+// would return this component's callers instead of the DAO's.
+// handleDefinition excludes the current file here for the same reason.
+func TestDeclarationOfIgnoresThisFileForAQualifiedCall(t *testing.T) {
+	srv := newTestServer()
+
+	docURI := uri.URI("file:///UserService.cfc")
+	other := uri.URI("file:///UserDAO.cfc")
+
+	srv.index.IndexFileFromResult(docURI, []parser.FunctionDef{{Name: "save", URI: docURI, Line: 2}}, nil)
+	srv.index.IndexFileFromResult(other, []parser.FunctionDef{{Name: "save", URI: other, Line: 7}}, nil)
+
+	content := "component {\n\tfunction save() {}\n\tfunction run() {\n\t\tdao.save();\n\t}\n}\n"
+
+	// The cursor is on `save` in `dao.save()`, whose receiver does not resolve.
+	got := srv.declarationOf("save", content, docURI, 3, 7)
+
+	if got == nil {
+		t.Fatal("no declaration found")
+	}
+
+	if got.URI == docURI {
+		t.Errorf("scoped to this file's own save() at line %d; a qualified call is not calling into itself", got.Range.Start.Line)
+	}
+}
+
+// TestDeclarationOfPrefersThisFileForABareCall is the other side: with no
+// receiver, this file's own definition is exactly the right answer.
+func TestDeclarationOfPrefersThisFileForABareCall(t *testing.T) {
+	srv := newTestServer()
+
+	docURI := uri.URI("file:///UserService.cfc")
+	other := uri.URI("file:///UserDAO.cfc")
+
+	srv.index.IndexFileFromResult(docURI, []parser.FunctionDef{{Name: "save", URI: docURI, Line: 2}}, nil)
+	srv.index.IndexFileFromResult(other, []parser.FunctionDef{{Name: "save", URI: other, Line: 7}}, nil)
+
+	content := "component {\n\tfunction save() {}\n\tfunction run() {\n\t\tsave();\n\t}\n}\n"
+
+	got := srv.declarationOf("save", content, docURI, 3, 4)
+
+	if got == nil || got.URI != docURI {
+		t.Errorf("bare call should resolve to this file's own definition, got %+v", got)
 	}
 }
