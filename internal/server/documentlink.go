@@ -109,7 +109,7 @@ func (s *Server) resolveLink(filePath, baseDir string) string {
 		}
 	}
 
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		candidate = filepath.Join(root, filePath)
 		if _, err := s.FS.Stat(candidate); err == nil {
 			return candidate

@@ -807,8 +807,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			}
 		}
 
-		if baseDir == "" && len(s.WorkspaceFolders) > 0 {
-			baseDir = s.WorkspaceFolders[0]
+		if roots := s.searchRoots(); baseDir == "" && len(roots) > 0 {
+			baseDir = roots[0]
 		}
 
 		resolved := s.getResolver().ComponentPath(dotPath, baseDir)
@@ -1016,7 +1016,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			sourceURI, _ = argString(params.Arguments, 1)
 		}
 
-		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.WorkspaceFolders))
+		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.searchRoots()))
 		r := s.getResolver()
 		sourceFile := uri.URI(sourceURI).Path()
 		findOpts := refs.Options{
@@ -1036,8 +1036,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			},
 			SourceFile: sourceFile,
 		}
-		entries := refs.Trace(s.FS, s.WorkspaceFolders, findOpts)
-		result := refs.FormatResult(entries, funcName, sourceURI, s.WorkspaceFolders)
+		entries := refs.Trace(s.FS, s.searchRoots(), findOpts)
+		result := refs.FormatResult(entries, funcName, sourceURI, s.searchRoots())
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
 
@@ -1175,7 +1175,7 @@ func (s *Server) safeGo(label string, fn func()) {
 
 // fileToPackage converts a file path to a CFML dot-path relative to workspace.
 func (s *Server) fileToPackage(filePath string) string {
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		if strings.HasPrefix(filePath, root+"/") {
 			rel := filePath[len(root)+1:]
 			rel = strings.TrimSuffix(rel, filepath.Ext(rel))

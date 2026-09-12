@@ -246,18 +246,6 @@ func defLocation(def *parser.FunctionDef) *protocol.Location {
 	}
 }
 
-// searchRoots is where a workspace-wide search looks: the folders from config
-// when there are any, and otherwise the roots the editor opened. Without the
-// fallback a session with no .cfmleditor.json searches nowhere and reports no
-// references, which is indistinguishable from there being none.
-func (s *Server) searchRoots() []string {
-	if len(s.WorkspaceFolders) > 0 {
-		return s.WorkspaceFolders
-	}
-
-	return s.workspaceRoots
-}
-
 // entryLocations turns reference entries into LSP locations.
 //
 // refs.Entry carries a line number and no column — nothing that consumed it

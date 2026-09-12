@@ -281,7 +281,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 	if s.resolver == nil {
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
-			WorkspaceFolders:   s.WorkspaceFolders,
+			WorkspaceFolders:   s.searchRoots(),
 			Mappings:           s.Mappings,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
@@ -329,7 +329,7 @@ func (s *Server) ensureBeansLoaded() {
 
 	allBeanPaths := make(map[string]string)
 
-	for _, root := range s.WorkspaceFolders {
+	for _, root := range s.searchRoots() {
 		appDir := s.getResolver().FindApplicationRoot(root)
 		if appDir != "" {
 			for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
@@ -414,6 +414,28 @@ func (s *Server) removeDocument(docURI uri.URI) {
 	defer s.mu.Unlock()
 
 	delete(s.documents, docURI)
+}
+
+// searchRoots is where to look for things across the workspace: the folders
+// from config when there are any, and otherwise the roots the editor opened.
+//
+// WorkspaceFolders alone is only ever the *configured* set — it comes from
+// `workspacePaths` and is empty for every session without a .cfmleditor.json,
+// which since daemon mode became opt-in is the ordinary standalone case. A
+// search that reads it directly then covers nothing and reports nothing found,
+// which is indistinguishable from there being nothing to find: cfmleditor.findRefs
+// answered "0 match(es)" for a function with three callers sitting next to it.
+//
+// Use this for anything that goes looking. The configured set itself is still
+// the right question for membership (isWorkspaceFolder) and for whether the
+// inclusion filter applies at all (isIncludedPath), so those keep reading the
+// field.
+func (s *Server) searchRoots() []string {
+	if len(s.WorkspaceFolders) > 0 {
+		return s.WorkspaceFolders
+	}
+
+	return s.workspaceRoots
 }
 
 func (s *Server) isWorkspaceFolder(root string) bool {
