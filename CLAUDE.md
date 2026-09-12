@@ -18,10 +18,15 @@ make link-status    # show the link, the build, and what PATH resolves cfmledito
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
-make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]
+make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]
                     # format a real-world CFML corpus and report what the formatter did to
-                    # each file (clean / grammar-refused / guard-rejected / not idempotent);
-                    # skipped without CORPUS, so it never runs in CI. See FORMATTER-ISSUES.md
+                    # each file (clean / grammar-refused / guard-rejected / not idempotent /
+                    # malformed); skipped without CORPUS, so it never runs in CI.
+                    # BASELINE=<an earlier REPORT> fails the run if any file changed verdict —
+                    # the totals cannot show that, since one file breaking and another being
+                    # fixed leaves every column identical. OPTS sets formatter.Options fields
+                    # by name, for sweeping a new setting through its modes without editing
+                    # the test. See FORMATTER-ISSUES.md
 make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
 make release <ver>  # validate, build, test, lint, changelog, commit, tag, push
 make release-dry <ver>
@@ -579,6 +584,34 @@ Some handles need both shapes; others only one, depending on how the code uses t
   `perf` job that never gates a merge. None of them run `make docs`, since
   `internal/docs/generated_docs.go` is committed.
 
+## Verification discipline
+
+Four habits that have each caught a real defect in this codebase, and whose
+absence has each let one through:
+
+- **Confirm every new test fails with its fix reverted.** Comment out the change,
+  run the test, see it fail, put it back. Tests that passed either way have been
+  written here repeatedly — a `lowercaseTags` test with an all-lowercase fixture,
+  a `scanWorkspace` test asserting indexing that never happens, a bare-block test
+  whose fixture did not reproduce the bug it was named for.
+- **Diff the corpus per file, not by totals.** `make corpus BASELINE=<earlier report>`
+  does this. A change that breaks one file and fixes another leaves every column
+  identical.
+- **Run `go test -short -race ./...` before pushing.** CI's race job found a
+  pre-existing data race on the workspace roots that a non-race run could not.
+- **Print actual output before writing an expected string.** Hand-counting the
+  indentation of a nested fixture is wrong more often than right.
+
+**A hand-maintained parallel list wants a reflective test.** Wherever the same
+names must appear in two or more places, enumerate them in a test rather than in
+a comment. `mergeFormatting`'s field list had one and it caught two omissions
+while the untested hops beside it stayed silent; the config and daemon chains
+(`TestFormattingKeysReachTheFormatter`, `TestResolvedFormattingReadsEveryKey`) and
+the parser's two scope-dispatch switches
+(`TestBothDispatchSwitchesHandleEveryScope`) now have theirs. Prefer a structural
+check when the rule itself is structural: a behavioural test only catches the
+cases whose absence has an observable it happens to assert.
+
 ## Release
 
 `make release <version>` (`scripts/release.go`) validates, builds, tests, lints, scans for
@@ -598,6 +631,8 @@ gate, and a local run cannot drift apart.
 
 ## Skills
 
+- `/add-formatting-setting` — the config hops a new `formatting` key crosses, the defaults
+  that must not move, and how to verify one against the corpus
 - `/add-parser-test` — patterns and pitfalls for adding tests to `internal/parser/cfparser_test.go`
 - `/run-cfmleditor-lsp` — build, smoke-test, and drive the binary (CLI subcommands + LSP stdio)
 - `/parser-internals` — scanner tokenisation, the two parse loops, call-site extraction, and how

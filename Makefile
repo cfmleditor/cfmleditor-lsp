@@ -102,10 +102,23 @@ visualtest:
 #
 #   make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
 #
+# BASELINE names an earlier REPORT and fails the run if any file changed verdict,
+# which the totals cannot show: a change that breaks one file and fixes another
+# leaves every column identical.
+#
+#   make corpus CORPUS=/src/Lucee REPORT=/tmp/before.tsv          # record
+#   make corpus CORPUS=/src/Lucee BASELINE=/tmp/before.tsv        # compare
+#
+# OPTS sets formatter.Options fields by name, for sweeping a new setting through
+# every mode it offers without editing the test:
+#
+#   make corpus CORPUS=/src/Lucee OPTS=braceStyle=next-line,paramBreakThreshold=3
+#
 # REPORT is optional and names a TSV of every non-clean file to work through.
 corpus:
-	@test -n "$(CORPUS)" || { echo "usage: make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>]" >&2; exit 2; }
+	@test -n "$(CORPUS)" || { echo "usage: make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]" >&2; exit 2; }
 	CFML_CORPUS="$(CORPUS)" CFML_CORPUS_REPORT="$(REPORT)" \
+	CFML_CORPUS_BASELINE="$(BASELINE)" CFML_CORPUS_OPTS="$(OPTS)" \
 		go test -v -count=1 -timeout 30m -run TestFormatterCorpus ./internal/formatter/
 
 # Reduces the parse-refused and script-refused entries in a corpus report to

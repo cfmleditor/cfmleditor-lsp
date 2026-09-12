@@ -35,11 +35,16 @@ cleanly were then formatted a second time to check idempotency.
 
 | | Before | After the audit | Current |
 |---|---|---|---|
-| Formatted cleanly | 3,863 | 5,450 | **5,563** |
+| Formatted cleanly | 3,863 | 5,450 | **5,562** |
 | Rejected by the guard | 1,671 | 84 | **2** |
 | Refused: grammar cannot parse | 86 | 86 | **54** |
 | Not idempotent | 390 † | 36 | **2** |
+| Malformed output | — † | — † | **1** |
 | Panics | 0 | 0 | **0** |
+
+The malformed row has no earlier figure because the check that produces it did
+not exist: nothing here asked whether output the guard accepted and the
+idempotency check settled on was *well formed*. See section 4.3.
 
 † measured at the post-fix corpus size; the pre-fix figure of 50 covered a much
 smaller pool, since a file the guard rejects never reaches the idempotency
@@ -554,6 +559,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. |
 | Grammar cannot parse embedded cfscript/cfquery | 32 | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
+| Malformed output | 1 | Whitespace-only, stable, and structurally wrong — the class the harness could not see until the shape check was added. The one file is characterised in 4.3. |
 | Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
 | `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
 
@@ -804,6 +810,57 @@ puts body text on its own line, and the result does not. Grammar work — the
 formatter's output is correct CFML, and re-indenting body text is not something
 it can reasonably avoid.
 
+### 4.3 Malformed output: the class the harness could not see
+
+Every check above this one asks whether the formatter *destroyed* something or
+failed to *settle*. None asks whether what it settled on is well formed. A
+defect that is whitespace-only and idempotent therefore passes the guard, passes
+the second pass, and is counted **clean** — which is how a braced `case` body
+came out as
+
+```
+		switch ( k ) {
+		case 1:
+ {                    <- brace in column one
+				a();
+			}}            <- the switch's closing brace folded onto the block's
+```
+
+across every run recorded in this file, invisible. `malformedShape`
+(`internal/formatter/corpus_test.go`) closes that gap with two rules:
+
+- a line that is nothing but closing braces has more than one on it;
+- a lone `{` sits in column one.
+
+Both ignore string literals, where a brace is text the formatter cannot
+re-indent without changing what it says.
+
+Both rules were chosen by measuring candidates against the corpus and keeping
+only those that accused no healthy file, on the grounds that a shape check that
+cries wolf is one nobody reads. Four others were tried and dropped; they are
+listed in the comment on `malformedShape` with their false-positive counts so
+they are not tried again. What is left is narrow on purpose — it does not claim
+to find every malformed output, only to stop this class being counted clean.
+
+The one file it reports is `Lucee/test/tickets/LDEV1576/test.cfm`, and it is a
+real defect rather than a rule misfiring. Everything after a multi-line string
+argument loses its indentation:
+
+```
+	local.qInsert = queryExecute(
+" insert into LDEV1576
+...
+(:requestID,:passThumbnail)",
+{                                    <- column one, and so is everything below
+requestID: {value: 8, CFSQLType: 'CF_SQL_INTEGER'},
+},
+);
+```
+
+The string's own continuation lines are correct — re-indenting inside a literal
+would change it — but the arguments after it are code, and they should be at the
+call's indent. Outstanding.
+
 Causes that were in this list and are now fixed are recorded above rather than
 here: the outright comment *deletions* (a `//` on the operands of an `&&`
 condition, and one parked before a ternary's `:`), the folded signature
@@ -820,10 +877,10 @@ the corpus, so `make test` and CI are unaffected:
 ```console
 $ make corpus CORPUS=/src/Lucee:/src/ContentBox REPORT=/tmp/corpus.tsv
     formatting 4499 files from 2 root(s)
-    root                files  clean  parse script  guard unstab  panic   skip
-    Lucee                3775   3677     20     54     20      1      0      3
-    ContentBox            724    719      2      1      2      0      0      0
-    TOTAL                4499   4396     22     55     22      1      0      3
+    root                files  clean  parse script  guard unstab  shape  panic   skip
+    Lucee                3775   3677     20     54     20      1      0      0      3
+    ContentBox            724    719      2      1      2      0      0      0      0
+    TOTAL                4499   4396     22     55     22      1      0      0      3
 ```
 
 `CORPUS` is a `PATH`-style list of source trees; each is reported separately so a
