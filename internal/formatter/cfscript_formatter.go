@@ -495,8 +495,19 @@ func (f *Formatter) scriptBlockWith(n *sitter.Node, beforeBrace string) {
 }
 
 // scriptBareBlock renders a `{ ... }` that is a statement in its own right
-// rather than some construct's body. braceStyle does not reach it: "next-line"
-// means "under the header", and this block has no header to go under.
+// rather than some construct's body — the braced body of a `case`, or a block
+// the grammar could not attach to anything.
+//
+// Being a statement, it opens its own line and closes with a newline, like
+// every other statement renderer. It used to do neither: it wrote " {" wherever
+// the cursor happened to be and left it there, so `case 1: { ... }` came out as
+// a bare `{` in column one under the label, and the next thing written — the
+// switch's own closing brace — landed on the same line as the block's, `}}`.
+// The result is whitespace-only and idempotent, so the guard passed it and the
+// corpus counted the file clean.
+//
+// braceStyle does not reach it: "next-line" means "under the header", and this
+// block has no header to go under.
 //
 // Moving it anyway was not merely cosmetic. It made formatting non-idempotent
 // on Lucee's one-word `elseif`, as spelled in its own Query.cfc: the grammar
@@ -505,8 +516,9 @@ func (f *Formatter) scriptBlockWith(n *sitter.Node, beforeBrace string) {
 // the first pass became a real source line break, which the second pass padded
 // again.
 func (f *Formatter) scriptBareBlock(n *sitter.Node) {
-	f.scriptWrite(" {")
+	f.iLine("{")
 	f.scriptBlockBody(n)
+	f.scriptWrite("\n")
 }
 
 // scriptBlockBody writes everything after a block's opening brace: the padded,
