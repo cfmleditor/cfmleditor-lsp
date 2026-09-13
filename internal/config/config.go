@@ -74,8 +74,26 @@ func JavaStubResolver(javaStubsPath string) Resolver {
 }
 
 // Linting holds linting configuration.
+//
+// Enabled is a pointer for the reason the completions and features blocks
+// document: the block now has more than one key, so a plain bool could not tell
+// "the config turned linting off" from "the config named minSeverity and said
+// nothing about enabled". Without that distinction a child config setting only
+// `minSeverity` would switch linting off in the course of tuning it.
 type Linting struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled"`
+
+	// MinSeverity is the least severe CFLint level still reported, named on
+	// CFLint's own scale: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO,
+	// COSMETIC. Empty — the default — reports everything.
+	//
+	// It exists because mapSeverity folds INFO and COSMETIC up onto Warning so
+	// they are not hidden by an editor that shows neither Hint nor Information
+	// by default. That makes every advisory rule as loud as a real one, which
+	// on a large legacy file is a lot of yellow; a floor of WARNING is the way
+	// back to only the rules worth acting on, and it drops those issues rather
+	// than merely making them quiet.
+	MinSeverity string `json:"minSeverity"`
 }
 
 // References holds textDocument/references configuration.
@@ -282,6 +300,7 @@ type Resolved struct {
 	Formatting               ResolvedFormatting
 	Features                 ResolvedFeatures
 	Linting                  bool
+	LintMinSeverity          string
 	References               bool
 	TagSnippets              bool
 	FunctionSnippets         bool
@@ -348,7 +367,8 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	}
 
 	if cfg.Linting != nil {
-		r.Linting = cfg.Linting.Enabled
+		r.Linting = BoolDefault(cfg.Linting.Enabled, false)
+		r.LintMinSeverity = cfg.Linting.MinSeverity
 	}
 
 	if cfg.References != nil {
@@ -463,9 +483,7 @@ func Merge(base, over *JSON) *JSON {
 
 	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
 
-	if over.Linting != nil {
-		out.Linting = over.Linting
-	}
+	out.Linting = mergeLinting(base.Linting, over.Linting)
 
 	out.Completions = mergeCompletions(base.Completions, over.Completions)
 
@@ -484,6 +502,35 @@ func Merge(base, over *JSON) *JSON {
 // wherever over states a value — the same rule mergeFormatting follows, and for
 // the same reason: replacing the block wholesale would let one side naming a
 // single switch discard every switch the other had set.
+// mergeLinting unions two linting blocks key by key, with over's value winning
+// wherever over states one.
+//
+// Replacing the whole block was correct while `enabled` was its only key and is
+// not now: a child config naming only `minSeverity` would have carried a
+// zero-valued `enabled` with it and switched linting off, which is why Enabled
+// became a pointer.
+func mergeLinting(base, over *Linting) *Linting {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+
+	if over.Enabled != nil {
+		out.Enabled = over.Enabled
+	}
+
+	if over.MinSeverity != "" {
+		out.MinSeverity = over.MinSeverity
+	}
+
+	return &out
+}
+
 func mergeFeatures(base, over *Features) *Features {
 	if base == nil {
 		return over

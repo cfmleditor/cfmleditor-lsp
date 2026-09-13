@@ -1,6 +1,7 @@
 package cflint
 
 import (
+	"fmt"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -11,16 +12,40 @@ func TestMapSeverity(t *testing.T) {
 		"ERROR":    protocol.DiagnosticSeverityError,
 		"error":    protocol.DiagnosticSeverityError, // case-insensitive
 		"FATAL":    protocol.DiagnosticSeverityError,
+		"CRITICAL": protocol.DiagnosticSeverityError,
+		"critical": protocol.DiagnosticSeverityError,
 		"WARNING":  protocol.DiagnosticSeverityWarning,
-		"INFO":     protocol.DiagnosticSeverityInformation,
-		"COSMETIC": protocol.DiagnosticSeverityInformation,
-		"UNKNOWN":  protocol.DiagnosticSeverityHint,
-		"":         protocol.DiagnosticSeverityHint,
+		"CAUTION":  protocol.DiagnosticSeverityWarning,
+		"caution":  protocol.DiagnosticSeverityWarning,
+		"INFO":     protocol.DiagnosticSeverityWarning,
+		"COSMETIC": protocol.DiagnosticSeverityWarning,
+		"UNKNOWN":  protocol.DiagnosticSeverityWarning,
+		"":         protocol.DiagnosticSeverityWarning,
 	}
 
 	for input, want := range cases {
 		if got := mapSeverity(input); got != want {
 			t.Errorf("mapSeverity(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+// TestEveryCFLintLevelIsVisible states CFLint's severity enum in full and pins
+// the rule that makes a CFLint issue reach the user at all: an editor shows
+// neither Hint nor Information by default, so a level mapped to either is
+// published, logged, and then invisible -- indistinguishable from a diagnostic
+// that was never produced. The list is com.cflint.Levels, plus the empty string
+// a missing severity arrives as.
+func TestEveryCFLintLevelIsVisible(t *testing.T) {
+	levels := []string{
+		"FATAL", "CRITICAL", "ERROR", "WARNING", "CAUTION", "INFO", "COSMETIC", "UNKNOWN", "",
+	}
+
+	for _, level := range levels {
+		got := mapSeverity(level)
+		if got != protocol.DiagnosticSeverityError && got != protocol.DiagnosticSeverityWarning {
+			t.Errorf("mapSeverity(%q) = %v; every level must map to Error or Warning, "+
+				"since Hint and Information are hidden by default", level, got)
 		}
 	}
 }
@@ -36,7 +61,7 @@ func TestToDiagnostics_LineAndColumnConvertedToZeroBased(t *testing.T) {
 		},
 	}}
 
-	diags := toDiagnostics(result)
+	diags := toDiagnostics(result, noSeverityFloor)
 	if len(diags) != 1 {
 		t.Fatalf("expected 1 diagnostic, got %d", len(diags))
 	}
@@ -62,7 +87,7 @@ func TestToDiagnostics_ZeroLineAndColumnNotDecrementedBelowZero(t *testing.T) {
 		{Severity: "INFO", ID: "I1", Locations: []Location{{Line: 0, Column: 0, Message: "file level"}}},
 	}}
 
-	diags := toDiagnostics(result)
+	diags := toDiagnostics(result, noSeverityFloor)
 	if len(diags) != 1 {
 		t.Fatalf("expected 1 diagnostic, got %d", len(diags))
 	}
@@ -88,7 +113,7 @@ func TestToDiagnostics_MultipleLocationsPerIssue(t *testing.T) {
 		},
 	}}
 
-	diags := toDiagnostics(result)
+	diags := toDiagnostics(result, noSeverityFloor)
 	if len(diags) != 2 {
 		t.Fatalf("expected one diagnostic per location, got %d", len(diags))
 	}
@@ -99,7 +124,103 @@ func TestToDiagnostics_MultipleLocationsPerIssue(t *testing.T) {
 }
 
 func TestToDiagnostics_EmptyResult(t *testing.T) {
-	if diags := toDiagnostics(Result{}); len(diags) != 0 {
+	if diags := toDiagnostics(Result{}, noSeverityFloor); len(diags) != 0 {
 		t.Errorf("expected no diagnostics for empty result, got %d", len(diags))
+	}
+}
+
+// TestMinSeverityRankOrdersCFLintsScale pins the order itself. The ranks are
+// only meaningful relative to each other, so the test compares neighbours
+// rather than asserting the numbers, which are free to change.
+func TestMinSeverityRankOrdersCFLintsScale(t *testing.T) {
+	ordered := []string{"FATAL", "CRITICAL", "ERROR", "WARNING", "CAUTION", "INFO", "COSMETIC"}
+
+	for i := range len(ordered) - 1 {
+		more, ok := MinSeverityRank(ordered[i])
+		if !ok {
+			t.Fatalf("MinSeverityRank(%q) not recognised", ordered[i])
+		}
+
+		less, ok := MinSeverityRank(ordered[i+1])
+		if !ok {
+			t.Fatalf("MinSeverityRank(%q) not recognised", ordered[i+1])
+		}
+
+		if more >= less {
+			t.Errorf("%s should outrank %s, got %d and %d", ordered[i], ordered[i+1], more, less)
+		}
+	}
+
+	if _, ok := MinSeverityRank(""); ok {
+		t.Error("an empty minSeverity must report false, so a caller can tell unset from valid")
+	}
+
+	if _, ok := MinSeverityRank("nonsense"); ok {
+		t.Error("an unrecognised minSeverity must report false")
+	}
+
+	if _, ok := MinSeverityRank("  warning  "); !ok {
+		t.Error("minSeverity should tolerate case and surrounding space")
+	}
+}
+
+// TestMinSeverityDropsLessSevereIssues is the point of the setting: a floor of
+// WARNING keeps FATAL through WARNING and drops CAUTION, INFO and COSMETIC.
+func TestMinSeverityDropsLessSevereIssues(t *testing.T) {
+	result := Result{Issues: []Issue{
+		{Severity: "FATAL", ID: "F", Locations: []Location{{Line: 1, Message: "fatal"}}},
+		{Severity: "CRITICAL", ID: "C", Locations: []Location{{Line: 2, Message: "critical"}}},
+		{Severity: "ERROR", ID: "E", Locations: []Location{{Line: 3, Message: "error"}}},
+		{Severity: "WARNING", ID: "W", Locations: []Location{{Line: 4, Message: "warning"}}},
+		{Severity: "CAUTION", ID: "T", Locations: []Location{{Line: 5, Message: "caution"}}},
+		{Severity: "INFO", ID: "I", Locations: []Location{{Line: 6, Message: "info"}}},
+		{Severity: "COSMETIC", ID: "S", Locations: []Location{{Line: 7, Message: "cosmetic"}}},
+	}}
+
+	if diags := toDiagnostics(result, noSeverityFloor); len(diags) != 7 {
+		t.Errorf("no floor should report every issue, got %d of 7", len(diags))
+	}
+
+	warning, _ := MinSeverityRank("WARNING")
+
+	kept := toDiagnostics(result, warning)
+	if len(kept) != 4 {
+		t.Fatalf("floor of WARNING should keep 4 issues, got %d", len(kept))
+	}
+
+	for _, d := range kept {
+		switch msg := fmt.Sprint(d.Message); msg {
+		case "caution", "info", "cosmetic":
+			t.Errorf("%q is below the WARNING floor and should have been dropped", msg)
+		}
+	}
+
+	if only := toDiagnostics(result, 0); len(only) != 1 {
+		t.Errorf("floor of FATAL should keep 1 issue, got %d", len(only))
+	}
+}
+
+// TestMinSeverityKeepsUnrecognisedLevels guards the same disappearing-diagnostic
+// failure mapSeverity's default arm does. A level CFLint's enum does not list is
+// not something the user's floor ever ruled on, so silently dropping it would
+// hide an issue behind a setting that never mentioned it.
+func TestMinSeverityKeepsUnrecognisedLevels(t *testing.T) {
+	result := Result{Issues: []Issue{
+		{Severity: "UNKNOWN", ID: "U", Locations: []Location{{Line: 1, Message: "unknown"}}},
+		{Severity: "", ID: "B", Locations: []Location{{Line: 2, Message: "blank"}}},
+		{Severity: "COSMETIC", ID: "S", Locations: []Location{{Line: 3, Message: "cosmetic"}}},
+	}}
+
+	fatal, _ := MinSeverityRank("FATAL")
+
+	kept := toDiagnostics(result, fatal)
+	if len(kept) != 2 {
+		t.Fatalf("unrecognised levels should survive the strictest floor, got %d of 2", len(kept))
+	}
+
+	for _, d := range kept {
+		if fmt.Sprint(d.Message) == "cosmetic" {
+			t.Error("COSMETIC is recognised and below the floor; it should have been dropped")
+		}
 	}
 }

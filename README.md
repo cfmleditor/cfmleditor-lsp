@@ -233,6 +233,45 @@ would mean giving up format-on-save too.
 `linting` and `references` are the same kind of switch and keep their own
 top-level keys, `references` additionally defaulting to *off*.
 
+### Linting
+
+CFLint diagnostics are off by default and enabled per workspace. The binary is
+downloaded from the `cfmleditor/CFLint` releases on first use, unless a `cflint`
+is already on `PATH`, which wins:
+
+```json
+{
+  "linting": { "enabled": true, "minSeverity": "WARNING" }
+}
+```
+
+`minSeverity` is the least severe CFLint level still reported, named on CFLint's
+own scale — `FATAL`, `CRITICAL`, `ERROR`, `WARNING`, `CAUTION`, `INFO`,
+`COSMETIC`, in that order. Anything below it is dropped rather than merely made
+quiet. Unset — the default — reports everything, and an unrecognised name is
+ignored with a warning in the log rather than silently filtering nothing.
+
+It is worth setting because of how severities are mapped. CFLint's seven levels
+have to fold onto the LSP's four, and every one of them lands on Error or
+Warning: an editor shows neither Hint nor Information by default — VS Code draws
+a Hint as a faint underline and keeps it out of the Problems panel, and hides
+Information unless "Show Infos" is ticked — so a level mapped to either would be
+published, logged, and then invisible, which is indistinguishable from a
+diagnostic that was never produced.
+
+The cost of that is that advisory rules (`OUTPUT_ATTR`, `IMPLICIT_SCOPE`,
+`ARG_VAR_MIXED`) arrive as loud as real ones. `"minSeverity": "WARNING"` is the
+way back to only the rules worth acting on, and it is a filter on CFLint's scale
+rather than on the mapped severity, so it can still tell an `INFO` from a
+`WARNING` after the two have folded together.
+
+| Level | LSP severity |
+|---|---|
+| `FATAL`, `CRITICAL`, `ERROR` | Error |
+| `WARNING`, `CAUTION` | Warning |
+| `INFO`, `COSMETIC` | Warning |
+| Anything else | Warning, and never filtered by `minSeverity` |
+
 ### References
 
 `textDocument/references` — the editor's "Find All References" — is off by default and enabled per workspace:

@@ -63,6 +63,7 @@ type Server struct {
 	Formatting               config.ResolvedFormatting // formatting settings
 	Features                 config.ResolvedFeatures   // per-capability off switches (all default on)
 	Linting                  bool                      // enable cflint diagnostics
+	LintMinSeverity          string                    // CFLint severity floor ("" reports everything)
 	References               bool                      // answer textDocument/references (opt-in; see config.References)
 	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
 	TagSnippets              bool                      // insert snippets for tags
@@ -192,7 +193,13 @@ func (s *Server) initLinter() {
 		return
 	}
 
-	runner, err := cflint.NewRunner()
+	if _, ok := cflint.MinSeverityRank(s.LintMinSeverity); !ok && s.LintMinSeverity != "" {
+		s.log.Warn("ignoring unrecognised linting.minSeverity",
+			cflog.String("value", s.LintMinSeverity),
+			cflog.String("expected", "one of FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC"))
+	}
+
+	runner, err := cflint.NewRunner(s.LintMinSeverity)
 	if err != nil {
 		s.log.Warn("cflint unavailable", cflog.Err(err))
 
