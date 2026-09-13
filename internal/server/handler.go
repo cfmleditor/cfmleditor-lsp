@@ -61,6 +61,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleReferences(ctx, req.Params())
 		case protocol.MethodTextDocumentFormatting:
 			return s.handleFormatting(ctx, req.Params())
+		case protocol.MethodTextDocumentRangeFormatting:
+			return s.handleRangeFormatting(ctx, req.Params())
 		case protocol.MethodTextDocumentOnTypeFormatting:
 			return s.handleOnTypeFormatting(ctx, req.Params())
 		case protocol.MethodTextDocumentDocumentSymbol:
