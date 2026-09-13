@@ -239,7 +239,35 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 
 - Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
-  actions, document formatting, range formatting, on-type formatting (`>`), workspace folders.
+  actions, document formatting, range formatting, on-type formatting (`>`), document highlight,
+  folding ranges, workspace folders.
+- `textDocument/documentHighlight` (`internal/server/documenthighlight.go`) shades the other
+  occurrences of the identifier under the cursor. Deliberately a *textual* answer, reported as
+  `DocumentHighlightKindText`: matching is whole-identifier and case-folded through the same
+  `identSpan` the references handler uses. It never leaves the open buffer, which is what
+  separates it from `textDocument/references` and why it is on by default.
+
+  The protocol's Read/Write distinction is deliberately not attempted. CFML spells too many
+  things with `=` — an assignment, a named argument (`f( name = 1 )`), a tag attribute
+  (`<cffunction name="x">`) — so a cheap "is the next token `=`" rule would mark the attribute
+  *name* in every tag as a write. A wrong Write badge is worse than none.
+- `textDocument/foldingRange` (`internal/server/folding.go`) folds on the CST rather than on
+  indentation, which gets tags wrong constantly. A script-syntax `.cfc` is the case that makes
+  this more than a tree walk: the CFML grammar hands its whole body to the CFScript grammar as
+  one opaque `cf_component_content`, so walking only the outer tree yields exactly one fold for
+  the file. Each injected region is parsed with its own grammar and walked too, its rows offset
+  by where the region starts.
+
+  Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
+  it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
+  **closing line stays visible**, which takes two separate checks: the deepest last *token* is
+  what closes a node (a `function_declaration`'s `}` belongs to its `statement_block`, so
+  reading the immediate last child misses every wrapper), and a node ending inside the **leading
+  whitespace** of its last line has no closing token of its own (`<cfelse>`'s branch ends at the
+  tab before the enclosing `</cfif>`). Identical ranges are **deduped**, keeping the outermost,
+  since the CST nests wrappers that add no lines. And a node whose whole extent is one opaque
+  injected region is **skipped**: `component_file` wraps a script `.cfc` and would fold the file
+  to nothing.
 - `textDocument/rangeFormatting` (`internal/server/range_formatting.go`) formats the **whole**
   document and returns only the edits inside the requested lines. Formatting the selected text
   alone is the obvious approach and wrong twice over: a selection rarely parses standalone, and
