@@ -258,6 +258,18 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   the file. Each injected region is parsed with its own grammar and walked too, its rows offset
   by where the region starts.
 
+  **The walk descends through named children only**, and every accessor on a
+  tree-sitter node is a cgo call — the walk measured 71% `runtime.cgocall`. An
+  anonymous node is a grammar literal and tokens are leaves, so nothing
+  foldable hides under one (`TestAnonymousNodesAreLeaves`; also checked by
+  running both walks over the corpus — 92,001 folds, none different). For the
+  same reason `Range()` is read once per node instead of
+  `StartPosition`/`EndPosition`/`EndByte`, the single-line rejection runs
+  before anything else, and a `depth` counter replaces a `Parent()` call. What
+  is left is dominated by the CFScript sub-parse of a script `.cfc` body,
+  which is inherent to the design above: 6.5ms for a 500-line component,
+  against 13ms before.
+
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
   **closing line stays visible**, which takes two separate checks: the deepest last *token* is

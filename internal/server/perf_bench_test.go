@@ -236,3 +236,92 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 		}
 	}
 }
+
+// foldingRange walks every named node in the document and every accessor on a
+// tree-sitter node is a cgo call, so this is the handler most sensitive to how
+// the walk is written rather than to what it computes.
+func BenchmarkFoldingRange(b *testing.B) {
+	for _, funcs := range []int{20, 60} {
+		b.Run(fmt.Sprintf("funcs%d", funcs), func(b *testing.B) {
+			s := newTestServer()
+			docURI := uri.File("/ws/open/Doc.cfc")
+
+			benchOpen(b, s, docURI, benchDoc(funcs))
+
+			req, err := json.Marshal(protocol.FoldingRangeParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				if _, err := s.handleFoldingRange(context.Background(), req); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// The handlers that answer from the index rather than from a parse. Grouped so
+// a change that moves one of them shows up next to the others.
+func BenchmarkIndexBackedHandlers(b *testing.B) {
+	cases := []struct {
+		name string
+		req  func(uri.URI) any
+		call func(*Server, []byte) (any, error)
+	}{
+		{"hover", func(u uri.URI) any {
+			return protocol.HoverParams{TextDocumentPositionParams: benchPos(u, 2, 30)}
+		}, func(s *Server, r []byte) (any, error) { return s.handleHover(context.Background(), r) }},
+		{"definition", func(u uri.URI) any {
+			return protocol.DefinitionParams{TextDocumentPositionParams: benchPos(u, 2, 30)}
+		}, func(s *Server, r []byte) (any, error) { return s.handleDefinition(context.Background(), r) }},
+		{"signatureHelp", func(u uri.URI) any {
+			return protocol.SignatureHelpParams{TextDocumentPositionParams: benchPos(u, 4, 20)}
+		}, func(s *Server, r []byte) (any, error) { return s.handleSignatureHelp(context.Background(), r) }},
+		{"documentHighlight", func(u uri.URI) any {
+			return protocol.DocumentHighlightParams{TextDocumentPositionParams: benchPos(u, 4, 8)}
+		}, func(s *Server, r []byte) (any, error) { return s.handleDocumentHighlight(context.Background(), r) }},
+		{"documentLink", func(u uri.URI) any {
+			return protocol.DocumentLinkParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}
+		}, func(s *Server, r []byte) (any, error) { return s.handleDocumentLink(context.Background(), r) }},
+		{"documentSymbol", func(u uri.URI) any {
+			return protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}
+		}, func(s *Server, r []byte) (any, error) { return s.handleDocumentSymbol(context.Background(), r) }},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			s := benchLoadedServer(5000, 8)
+			docURI := uri.File("/ws/open/Doc.cfc")
+
+			benchOpen(b, s, docURI, benchDoc(60))
+
+			req, err := json.Marshal(tc.req(docURI))
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				if _, err := tc.call(s, req); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func benchPos(docURI uri.URI, line, char uint32) protocol.TextDocumentPositionParams {
+	return protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: line, Character: char},
+	}
+}
