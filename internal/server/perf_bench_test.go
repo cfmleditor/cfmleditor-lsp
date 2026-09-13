@@ -193,3 +193,46 @@ func BenchmarkScopesToFuncRanges(b *testing.B) {
 		})
 	}
 }
+
+// What a completion response actually costs end to end. The handler's result is
+// JSON-marshalled onto the wire, so the question for any saving inside the
+// handler is how it compares with that.
+func BenchmarkCompletionWithMarshal(b *testing.B) {
+	s := benchLoadedServer(5000, 8)
+	docURI := uri.File("/ws/open/Doc.cfc")
+
+	benchOpen(b, s, docURI, benchDoc(60))
+
+	req, err := json.Marshal(protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     protocol.Position{Line: 4, Character: 6},
+		},
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	res, err := s.handleCompletion(context.Background(), req)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	out, err := json.Marshal(res)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.Logf("response: %d items, %d bytes of JSON", len(res.(*protocol.CompletionList).Items), len(out))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		r, _ := s.handleCompletion(context.Background(), req) //nolint:errcheck
+
+		if _, err := json.Marshal(r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
