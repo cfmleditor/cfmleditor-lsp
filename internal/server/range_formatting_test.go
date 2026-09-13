@@ -1,6 +1,7 @@
 package server
 
 import (
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -219,4 +220,45 @@ func containsLine(lines []string, want string) bool {
 	}
 
 	return false
+}
+
+// TestRangeFormattingCoalesceIsLinear pins the cost of merging touching edits.
+//
+// The obvious spelling of coalesce copies the whole accumulated slice on every
+// merge, which is quadratic. It is invisible on a small file and not at all
+// invisible on a large one: a whole-document format merges every changed line
+// into a single edit, and on the corpus that reached 13.9 GB and was killed.
+//
+// Measured by allocation rather than by wall clock, which is what makes the
+// difference a hard number rather than a flaky timeout: linear coalescing of n
+// merges allocates O(n) strings, quadratic allocates O(n²).
+func TestRangeFormattingCoalesceIsLinear(t *testing.T) {
+	const n = 4000
+
+	edits := make([]lineEdit, 0, n)
+	for i := range n {
+		edits = append(edits, lineEdit{aStart: i, aEnd: i + 1, lines: []string{"x"}})
+	}
+
+	var before, after runtime.MemStats
+
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	merged := coalesce(edits)
+
+	runtime.ReadMemStats(&after)
+
+	if len(merged) != 1 || len(merged[0].lines) != n {
+		t.Fatalf("coalesce produced %d edits holding %d lines, want 1 holding %d", len(merged), len(merged[0].lines), n)
+	}
+
+	// A linear merge copies each line a small constant number of times. The
+	// quadratic one copies ~n²/2 = 8M string headers, two orders of magnitude
+	// past this bound whatever the allocator is doing.
+	const limit = 100 * n * 16
+
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > limit {
+		t.Errorf("coalescing %d edits allocated %d bytes, want under %d — the merge is quadratic", n, grew, limit)
+	}
 }

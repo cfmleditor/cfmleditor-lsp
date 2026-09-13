@@ -39,7 +39,9 @@ func Hunks(a, b []string) []Hunk {
 		hiB--
 	}
 
-	if lo == hiA && lo == hiB {
+	// Nothing left on either side: the sequences were identical.
+	remA, remB := hiA-lo, hiB-lo
+	if remA == 0 && remB == 0 {
 		return nil
 	}
 
@@ -140,6 +142,7 @@ func backtrack(trace [][]int, n, m, offset int) []Hunk {
 
 	for i := len(steps) - 1; i >= 0; i-- {
 		s := steps[i]
+
 		if len(hunks) > 0 {
 			last := &hunks[len(hunks)-1]
 			if last.AEnd == s.aStart && last.BEnd == s.bStart {

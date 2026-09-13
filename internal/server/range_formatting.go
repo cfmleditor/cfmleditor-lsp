@@ -29,7 +29,7 @@ import (
 // selection itself is clean. That is the same refusal whole-document formatting
 // makes, and for the same reason: the formatter has no rendering for an ERROR
 // node.
-func (s *Server) handleRangeFormatting(ctx context.Context, rawParams []byte) (any, error) {
+func (s *Server) handleRangeFormatting(_ context.Context, rawParams []byte) (any, error) {
 	if !s.Formatting.Enabled {
 		return nil, nil
 	}
@@ -123,7 +123,7 @@ func rangeEdits(content, formatted string, first, last int) []protocol.TextEdit 
 	emitGap := func(srcEnd, dstEnd int) {
 		for srcPos < srcEnd && dstPos < dstEnd {
 			if src[srcPos] != dst[dstPos] {
-				candidates = append(candidates, lineEdit{srcPos, srcPos + 1, dst[dstPos : dstPos+1]})
+				candidates = append(candidates, lineEdit{aStart: srcPos, aEnd: srcPos + 1, lines: dst[dstPos : dstPos+1]})
 			}
 
 			srcPos++
@@ -133,7 +133,7 @@ func rangeEdits(content, formatted string, first, last int) []protocol.TextEdit 
 
 	for _, h := range textdiff.Hunks(srcKeys, dstKeys) {
 		emitGap(h.AStart, h.BStart)
-		candidates = append(candidates, lineEdit{h.AStart, h.AEnd, dst[h.BStart:h.BEnd]})
+		candidates = append(candidates, lineEdit{aStart: h.AStart, aEnd: h.AEnd, lines: dst[h.BStart:h.BEnd]})
 		srcPos, dstPos = h.AEnd, h.BEnd
 	}
 
@@ -144,9 +144,14 @@ func rangeEdits(content, formatted string, first, last int) []protocol.TextEdit 
 
 // lineEdit replaces source lines [aStart,aEnd) with lines. An empty source
 // range is an insertion before aStart.
+//
+// lines usually points into the formatted document rather than owning storage,
+// which is what owned records: coalesce may not append to a borrowed slice,
+// since doing so writes over the formatted lines that follow.
 type lineEdit struct {
 	aStart, aEnd int
 	lines        []string
+	owned        bool
 }
 
 // inRange keeps the edits that belong to the selected lines.
@@ -199,14 +204,27 @@ func coalesce(edits []lineEdit) []lineEdit {
 	merged := make([]lineEdit, 0, len(edits))
 
 	for _, e := range edits {
-		if n := len(merged); n > 0 && merged[n-1].aEnd == e.aStart {
-			merged[n-1].aEnd = e.aEnd
-			merged[n-1].lines = append(append([]string{}, merged[n-1].lines...), e.lines...)
+		n := len(merged)
+		if n == 0 || merged[n-1].aEnd != e.aStart {
+			merged = append(merged, e)
 
 			continue
 		}
 
-		merged = append(merged, e)
+		prev := &merged[n-1]
+
+		// Copy once, on the first merge into this edit, then append in place.
+		// Re-copying per merge is the obvious spelling and is quadratic: a
+		// whole-document format merges every changed line into one edit, so a
+		// large file copied the whole accumulated slice thousands of times.
+		// Measured on the corpus, that reached 13.9 GB and was killed.
+		if !prev.owned {
+			prev.lines = append(make([]string, 0, len(prev.lines)+len(e.lines)), prev.lines...)
+			prev.owned = true
+		}
+
+		prev.lines = append(prev.lines, e.lines...)
+		prev.aEnd = e.aEnd
 	}
 
 	return merged
