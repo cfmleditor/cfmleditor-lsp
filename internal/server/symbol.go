@@ -60,13 +60,18 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 	}
 
 	query := strings.ToLower(params.Query)
-	symbols := []protocol.SymbolInformation{}
 
-	for _, d := range s.index.AllFunctions() {
-		if query != "" && !containsFoldStr(d.Name, query) {
-			continue
-		}
+	// Filtered inside the index, which tests the query once per distinct name
+	// rather than once per definition, and never builds the discarded
+	// remainder. AllFunctions here cost 3.1MB per keystroke on a
+	// 40,000-definition workspace to return a few dozen symbols.
+	defs := s.index.FunctionsMatching(func(name string) bool {
+		return query == "" || containsFoldStr(name, query)
+	})
 
+	symbols := make([]protocol.SymbolInformation, 0, len(defs))
+
+	for _, d := range defs {
 		symbols = append(symbols, protocol.SymbolInformation{
 			BaseSymbolInformation: protocol.BaseSymbolInformation{
 				Name: d.Name,

@@ -691,22 +691,26 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) 
 
 // resolverRefs scans content for assignments whose RHS matches a component resolver.
 // scopesToFuncRanges converts ParseResult scopes to cache.FuncRange slice.
+//
+// The name comes straight off the scope. It used to be recovered instead by
+// scanning pr.Funcs for a definition declared on the scope's opening line,
+// which is quadratic in the file's function count, and every caller runs this
+// holding s.mu — the lock the whole server takes to reach any of its per-URI
+// maps. On a 200-function component that was 62µs of write-locked work per
+// didOpen and per signature-changing edit, against 3.6µs for the copy.
+//
+// The scan looked defensive because tagParser builds its own FuncScopes
+// without a Name, but those never reach pr.Scopes: a tag region's scopes come
+// from findTagFuncScopes and a script region's from scriptParser, and both name
+// them (internal/parser/result.go). TestFuncScopesAreNamedByBothParsers pins
+// that, and the two spellings were checked to agree on every function in the
+// 5,624-file corpus before the scan was removed.
 func scopesToFuncRanges(pr *parser.ParseResult) []cache.FuncRange {
 	ranges := make([]cache.FuncRange, 0, len(pr.Scopes))
 
 	for _, sc := range pr.Scopes {
-		name := ""
-
-		for _, f := range pr.Funcs {
-			if int(f.Line) == sc.Start {
-				name = f.Name
-
-				break
-			}
-		}
-
 		ranges = append(ranges, cache.FuncRange{
-			Name:  name,
+			Name:  sc.Name,
 			Start: sc.Start,
 			End:   sc.End,
 		})

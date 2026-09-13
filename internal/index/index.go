@@ -47,12 +47,45 @@ func (idx *Index) Lookup(name string) []*parser.FunctionDef {
 
 // AllFunctions returns every indexed function definition.
 func (idx *Index) AllFunctions() []*parser.FunctionDef {
+	return idx.FunctionsMatching(nil)
+}
+
+// FunctionsMatching returns the indexed definitions whose lowercased name
+// satisfies match, or every definition when match is nil.
+//
+// The predicate is given the bucket key, so it runs once per distinct name
+// rather than once per definition: a workspace of 5,000 components declaring
+// the same eight methods asks it eight times, not forty thousand. It sees only
+// a name, which is what keeps it safe to run under the read lock — it has
+// nothing to re-enter the index with.
+//
+// workspace/symbol is the reason this exists. It is issued on every keystroke
+// in the symbol picker and it discards all but a handful of matches, but it
+// went through AllFunctions, which materialised every definition in the
+// workspace into a slice grown from nil: 3.1MB allocated and copied per
+// keystroke on a 40,000-definition index, to return a few dozen symbols.
+func (idx *Index) FunctionsMatching(match func(loweredName string) bool) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	var all []*parser.FunctionDef
-	for _, defs := range idx.funcs {
-		all = append(all, defs...)
+	total := 0
+
+	for name, defs := range idx.funcs {
+		if match == nil || match(name) {
+			total += len(defs)
+		}
+	}
+
+	if total == 0 {
+		return nil
+	}
+
+	all := make([]*parser.FunctionDef, 0, total)
+
+	for name, defs := range idx.funcs {
+		if match == nil || match(name) {
+			all = append(all, defs...)
+		}
 	}
 
 	return all
@@ -93,13 +126,30 @@ func ownRef(r parser.ComponentRef) *parser.ComponentRef {
 //
 // Appending to a map's slice is fine by contrast: it only ever writes at or
 // past the length a caller can see.
+//
+// The result is sized in one go, on the first entry that survives, because
+// these filters almost always keep almost everything: one file's handful of
+// entries leaving a name bucket that every other file in the workspace also
+// files under. Growing from nil reallocates the bucket log2(n) times and copies
+// it each time — on a 5,000-file workspace where every component declares
+// init, 2.5MB of copies to remove eight entries.
+//
+// Sizing on first keep rather than up front is what keeps the opposite case
+// free: a bucket this file alone occupied is emptied outright, and the caller
+// deletes it, so allocating for it before knowing that would be pure waste.
 func keepFuncs(entries []*parser.FunctionDef, keep func(*parser.FunctionDef) bool) []*parser.FunctionDef {
 	var filtered []*parser.FunctionDef
 
-	for _, e := range entries {
-		if keep(e) {
-			filtered = append(filtered, e)
+	for i, e := range entries {
+		if !keep(e) {
+			continue
 		}
+
+		if filtered == nil {
+			filtered = make([]*parser.FunctionDef, 0, len(entries)-i)
+		}
+
+		filtered = append(filtered, e)
 	}
 
 	return filtered
@@ -108,10 +158,16 @@ func keepFuncs(entries []*parser.FunctionDef, keep func(*parser.FunctionDef) boo
 func keepRefs(entries []*parser.ComponentRef, keep func(*parser.ComponentRef) bool) []*parser.ComponentRef {
 	var filtered []*parser.ComponentRef
 
-	for _, e := range entries {
-		if keep(e) {
-			filtered = append(filtered, e)
+	for i, e := range entries {
+		if !keep(e) {
+			continue
 		}
+
+		if filtered == nil {
+			filtered = make([]*parser.ComponentRef, 0, len(entries)-i)
+		}
+
+		filtered = append(filtered, e)
 	}
 
 	return filtered
@@ -367,6 +423,16 @@ func (idx *Index) RemoveFile(fileURI uri.URI) {
 }
 
 // RemoveFilesUnder removes all indexed entries whose URI starts with prefix.
+// Called when a workspace folder is removed, so it is rare and may walk every
+// bucket; what it must not do is leave the two views of an entry disagreeing.
+//
+// It used to clear funcs and comprefs alone. The per-file maps then still
+// listed the removed folder's files, which is wrong twice over: FunctionsForFile
+// kept answering with definitions no bucket held any more, and HasFile kept
+// reporting the file as indexed, so Resolver.EnsureIndexed never re-read it if
+// the folder came back. It also leaves removeFileEntries — which reaches the
+// name buckets through exactly these maps — reconciling a view no writer
+// maintains.
 func (idx *Index) RemoveFilesUnder(prefix string) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -394,38 +460,111 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 			idx.comprefs[key] = filtered
 		}
 	}
+
+	// The per-file maps are keyed by uriKey, which lowercases and decodes the
+	// URI, so the prefix has to be put through the same normalisation before it
+	// can be compared against a key.
+	fileKey := uriKey(uri.URI(prefix))
+
+	for key := range idx.fileFuncs {
+		if strings.HasPrefix(key, fileKey) {
+			delete(idx.fileFuncs, key)
+			delete(idx.fileRefs, key)
+			delete(idx.thisVars, key)
+			delete(idx.scopeRefs, key)
+		}
+	}
+
+	// fileRefs can hold a file that declared no functions, so it cannot be
+	// swept only alongside fileFuncs.
+	for key := range idx.fileRefs {
+		if strings.HasPrefix(key, fileKey) {
+			delete(idx.fileRefs, key)
+			delete(idx.thisVars, key)
+			delete(idx.scopeRefs, key)
+		}
+	}
+
+	for key := range idx.thisVars {
+		if strings.HasPrefix(key, fileKey) {
+			delete(idx.thisVars, key)
+			delete(idx.scopeRefs, key)
+		}
+	}
 }
 
+// removeFileEntries drops one file's functions and component refs from every
+// map that holds them.
+//
+// It reaches the name buckets through fileFuncs/fileRefs, which already hold
+// exactly this file's entries, rather than walking every bucket in the index
+// and asking each entry which file it came from. That walk is the same shape
+// ShiftLines was fixed for and it was left here, where it costs more: every
+// index write goes through this function, so re-indexing one file was
+// proportional to the whole workspace and the startup scan was quadratic in
+// the file count. Measured by BenchmarkIndexFileFromResult on a 5,000-file
+// index, one file cost 43ms and 160,020 allocations.
+//
+// The per-entry uriKey was most of it. It lowercases and percent-decodes, both
+// of which allocate on a real workspace path, and it ran once per entry in the
+// index per file indexed: 5.9 GB of the 6.6 GB a 5,624-file corpus scan
+// allocated, and 86% of its CPU, was this one comparison.
+//
+// Entries are matched by pointer identity, not by URI, because that is what
+// makes the bucket set knowable in advance: a definition lives under its
+// lowercased name and a ref under its lowercased variable, and fileFuncs holds
+// the very pointers the name buckets do (ownFunc/ownRef mint one pointer per
+// entry, so identity is exact). The two views cannot disagree — every writer
+// here fills both together, and each removal runs before the write that
+// replaces them.
 func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	key := uriKey(fileURI)
 	delete(idx.thisVars, key)
-	delete(idx.fileFuncs, key)
-	delete(idx.fileRefs, key)
 	delete(idx.scopeRefs, key)
 
-	for k, entries := range idx.funcs {
-		filtered := keepFuncs(entries, func(e *parser.FunctionDef) bool {
-			return uriKey(e.URI) != key
-		})
+	if defs := idx.fileFuncs[key]; len(defs) > 0 {
+		gone := make(map[*parser.FunctionDef]bool, len(defs))
+		buckets := make(map[string]bool, len(defs))
 
-		if len(filtered) == 0 {
-			delete(idx.funcs, k)
-		} else {
-			idx.funcs[k] = filtered
+		for _, d := range defs {
+			gone[d] = true
+			buckets[strings.ToLower(d.Name)] = true
+		}
+
+		keep := func(e *parser.FunctionDef) bool { return !gone[e] }
+
+		for k := range buckets {
+			if filtered := keepFuncs(idx.funcs[k], keep); len(filtered) == 0 {
+				delete(idx.funcs, k)
+			} else {
+				idx.funcs[k] = filtered
+			}
 		}
 	}
 
-	for k, entries := range idx.comprefs {
-		filtered := keepRefs(entries, func(e *parser.ComponentRef) bool {
-			return uriKey(e.URI) != key
-		})
+	delete(idx.fileFuncs, key)
 
-		if len(filtered) == 0 {
-			delete(idx.comprefs, k)
-		} else {
-			idx.comprefs[k] = filtered
+	if refs := idx.fileRefs[key]; len(refs) > 0 {
+		gone := make(map[*parser.ComponentRef]bool, len(refs))
+		buckets := make(map[string]bool, len(refs))
+
+		for _, r := range refs {
+			gone[r] = true
+			buckets[strings.ToLower(r.Variable)] = true
+		}
+
+		keep := func(e *parser.ComponentRef) bool { return !gone[e] }
+
+		for k := range buckets {
+			if filtered := keepRefs(idx.comprefs[k], keep); len(filtered) == 0 {
+				delete(idx.comprefs, k)
+			} else {
+				idx.comprefs[k] = filtered
+			}
 		}
 	}
+
+	delete(idx.fileRefs, key)
 }
 
 // LookupComponentRef returns component references for the given variable name.

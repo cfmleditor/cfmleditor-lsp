@@ -70,7 +70,6 @@ type Server struct {
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
 	changeCount              map[uri.URI]int           // rapid change counter per file
 	changeWindowStart        map[uri.URI]time.Time     // start of current rapid-change window
-	resolveCache             map[string]string         // cached component path resolutions
 	beansLoaded              bool                      // whether bean map has been built
 	index                    *index.Index
 	resolver                 *resolve.Resolver
@@ -552,10 +551,14 @@ func (s *Server) isIncludedPath(rawURI string) bool {
 	return false
 }
 
+// invalidateResolveCache drops the cached path resolutions, which live on the
+// Resolver — dropping the Resolver is what discards them.
+//
+// It used to also nil a Server.resolveCache map, under the server's main lock.
+// Nothing ever wrote to or read that map; the real cache has been
+// resolve.Resolver.resolveCache throughout, and the field only made this
+// function look like it cleared something the Resolver did not own.
 func (s *Server) invalidateResolveCache() {
-	s.mu.Lock()
-	s.resolveCache = nil
-	s.mu.Unlock()
 	s.invalidateResolver()
 }
 
