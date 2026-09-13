@@ -73,21 +73,15 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 	}
 
 	// User-defined function in current file or index (unqualified)
-	defs := s.index.Lookup(word)
-	if len(defs) > 0 {
+	match, inFile, total := s.index.LookupPreferred(word, docURI)
+	if total > 0 {
 		// Only show if in current file or (global resolution enabled + exactly one match)
 		var def *parser.FunctionDef
 
-		for _, d := range defs {
-			if d.URI == docURI {
-				def = d
-
-				break
-			}
-		}
-
-		if def == nil && s.GlobalFunctionResolution && len(defs) == 1 {
-			def = defs[0]
+		if inFile {
+			def = match
+		} else if s.GlobalFunctionResolution && total == 1 {
+			def = match
 		}
 
 		if def != nil {

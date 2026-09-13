@@ -42,7 +42,59 @@ func (idx *Index) Lookup(name string) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	return idx.funcs[strings.ToLower(name)]
+	return snapshot(idx.funcs[strings.ToLower(name)])
+}
+
+// LookupPreferred answers the question hover, signature help and argument
+// completion actually ask of a bare function name: the definition to show,
+// preferring the one declared in the requesting file, plus how many candidates
+// there were so a caller can tell "the only one" from "the first of several".
+//
+// It exists so those three do not go through Lookup, which copies the bucket it
+// returns (see snapshot). That copy is the right default — a caller walking
+// every match pays for what it walks — but these three want one entry, and the
+// bucket for a name every component declares holds one entry per file in the
+// workspace: 40KB per call, on paths that run while the user is typing.
+//
+// inFile distinguishes a real preference from a fallback, which hover needs:
+// it shows a global match only when it is unambiguous.
+func (idx *Index) LookupPreferred(name string, preferURI uri.URI) (def *parser.FunctionDef, inFile bool, total int) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	defs := idx.funcs[strings.ToLower(name)]
+	if len(defs) == 0 {
+		return nil, false, 0
+	}
+
+	// The preference is answered from the file's own definitions rather than by
+	// scanning the name's bucket for the file, so the cost is bounded by the
+	// open document instead of by the workspace. The two views hold the same
+	// entries, so the candidate set is the same either way.
+	//
+	// One deliberate difference from the callers this replaces, which each
+	// compared d.URI == docURI raw: the file is found by uriKey, the same
+	// normalisation FunctionsForFile and every other per-file accessor here
+	// uses. That makes this agree with the rest of the index on what "the same
+	// file" means, where the raw comparison could miss a definition over a
+	// percent-escape or a case difference in the URI. It is free — uriKey runs
+	// once on the argument, not once per entry.
+	for _, d := range idx.fileFuncs[uriKey(preferURI)] {
+		if strings.EqualFold(d.Name, name) {
+			return d, true, len(defs)
+		}
+	}
+
+	return defs[0], false, len(defs)
+}
+
+// CountFunctions reports how many definitions are indexed under a name, without
+// building the slice Lookup would have to copy to answer the same question.
+func (idx *Index) CountFunctions(name string) int {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	return len(idx.funcs[strings.ToLower(name)])
 }
 
 // AllFunctions returns every indexed function definition.
@@ -112,65 +164,75 @@ func ownRef(r parser.ComponentRef) *parser.ComponentRef {
 	return &r
 }
 
-// keepFuncs and keepRefs return a *new* slice of the entries satisfying keep.
+// snapshot copies a stored slice for a caller.
 //
-// The obvious in-place form — `filtered := entries[:0]` followed by appends —
-// writes over the backing array the map's slice already points at, and every
-// accessor here (Lookup, FunctionsForFile, LookupComponentRef, RefsForFile)
-// hands that same array straight out to the caller and then releases the read
-// lock. A caller still walking the slice it was given is reading the array a
-// concurrent IndexFile is compacting: `go test -race` reports it, and even with
-// the timing on its side the caller silently sees another file's entries
-// shifted into place. Allocating means the entries a caller was handed stay the
-// entries it was handed.
+// Every accessor here hands its result out and then releases the read lock, so
+// what it returns has to be storage no writer will touch. That used to be
+// arranged the other way round — the maps held slices no writer ever mutated in
+// place, so a read could hand out the live one for free — and it made writes
+// pay for reads. funcs is keyed by lowercased name, so a workspace where every
+// component declares init has one bucket holding an entry per file, and
+// changing this file's single entry in it rebuilt all 5,000: ~1ms of
+// write-locked work and 660KB of garbage per line-changing keystroke, to alter
+// one pointer.
 //
-// Appending to a map's slice is fine by contrast: it only ever writes at or
-// past the length a caller can see.
+// Copying on the way out inverts that. A read now pays for the entries it is
+// about to iterate anyway, which is a constant factor on work it was already
+// doing, while a write pays only for the entries it actually changes. Typing
+// is far more frequent than hovering, and a bucket is large in exactly the
+// case where the reader wants all of it.
 //
-// The result is sized in one go, on the first entry that survives, because
-// these filters almost always keep almost everything: one file's handful of
-// entries leaving a name bucket that every other file in the workspace also
-// files under. Growing from nil reallocates the bucket log2(n) times and copies
-// it each time — on a 5,000-file workspace where every component declares
-// init, 2.5MB of copies to remove eight entries.
-//
-// Sizing on first keep rather than up front is what keeps the opposite case
-// free: a bucket this file alone occupied is emptied outright, and the caller
-// deletes it, so allocating for it before knowing that would be pure waste.
-func keepFuncs(entries []*parser.FunctionDef, keep func(*parser.FunctionDef) bool) []*parser.FunctionDef {
-	var filtered []*parser.FunctionDef
-
-	for i, e := range entries {
-		if !keep(e) {
-			continue
-		}
-
-		if filtered == nil {
-			filtered = make([]*parser.FunctionDef, 0, len(entries)-i)
-		}
-
-		filtered = append(filtered, e)
+// nil for an empty result keeps the accessors' old "nothing indexed" answer
+// distinguishable from an empty non-nil slice, which some callers compare
+// against nil.
+func snapshot[T any](s []T) []T {
+	if len(s) == 0 {
+		return nil
 	}
 
-	return filtered
+	return append(make([]T, 0, len(s)), s...)
+}
+
+// keepFuncs and keepRefs compact entries in place, returning the prefix that
+// satisfied keep.
+//
+// Writing over the backing array is safe precisely because snapshot exists: no
+// caller is holding it. Before that it was not, and this allocated a fresh
+// slice for every filtered bucket — the comment here recorded a race that
+// `go test -race` had actually reported, where a caller walking the slice it
+// had been given read another file's entries shifted into place by a
+// concurrent IndexFile.
+//
+// The tail is cleared so the entries dropped from the bucket can be collected
+// rather than pinned by an array the map still points at.
+func keepFuncs(entries []*parser.FunctionDef, keep func(*parser.FunctionDef) bool) []*parser.FunctionDef {
+	n := 0
+
+	for _, e := range entries {
+		if keep(e) {
+			entries[n] = e
+			n++
+		}
+	}
+
+	clear(entries[n:])
+
+	return entries[:n]
 }
 
 func keepRefs(entries []*parser.ComponentRef, keep func(*parser.ComponentRef) bool) []*parser.ComponentRef {
-	var filtered []*parser.ComponentRef
+	n := 0
 
-	for i, e := range entries {
-		if !keep(e) {
-			continue
+	for _, e := range entries {
+		if keep(e) {
+			entries[n] = e
+			n++
 		}
-
-		if filtered == nil {
-			filtered = make([]*parser.ComponentRef, 0, len(entries)-i)
-		}
-
-		filtered = append(filtered, e)
 	}
 
-	return filtered
+	clear(entries[n:])
+
+	return entries[:n]
 }
 
 // uriKey returns a lowercase URI for case-insensitive comparison on case-insensitive filesystems.
@@ -197,7 +259,7 @@ func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	return idx.fileFuncs[uriKey(fileURI)]
+	return snapshot(idx.fileFuncs[uriKey(fileURI)])
 }
 
 // HasFile reports whether the index holds an entry for this file, which is not
@@ -245,13 +307,18 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 	// BenchmarkShiftLines, that becomes 6µs where method names differ between
 	// files.
 	//
-	// What remains proportional to workspace size is the name buckets: funcs is
-	// keyed by lowercased name, so a workspace where every component defines
-	// `init` has one bucket holding an entry per file, and replacing this
-	// file's few entries still rebuilds that whole slice. Rebuilding rather
-	// than writing in place is not optional — callers hold the slice after the
-	// read lock is released (see keepFuncs) — so the worst case, every file
-	// sharing every method name, stays at ~0.9ms rather than going flat.
+	// The replacement is then written into the affected buckets in place. What
+	// used to remain proportional to workspace size was exactly that step:
+	// funcs is keyed by lowercased name, so a workspace where every component
+	// declares `init` has one bucket holding an entry per file, and swapping
+	// this file's single pointer in it meant rebuilding all 5,000 — because
+	// callers held the bucket slice after the read lock was released. Accessors
+	// now hand out a copy (see snapshot), so the bucket is the index's alone to
+	// write and the worst case is flat rather than ~0.9ms.
+	//
+	// The entry itself is still replaced rather than written through: a caller
+	// holding a *FunctionDef is reading def.Line unsynchronised, so the struct
+	// has to be new even though the slot holding it need not be.
 	newFuncs := make(map[*parser.FunctionDef]*parser.FunctionDef)
 	funcBuckets := make(map[string]bool)
 
@@ -284,55 +351,43 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 		return
 	}
 
-	// Only the buckets holding a replaced entry need rebuilding. A definition
+	// Only the buckets holding a replaced entry need touching. A definition
 	// lives under its lowercased name and a ref under its lowercased variable,
 	// so the affected keys are known without searching for them.
 	for k := range funcBuckets {
-		idx.funcs[k] = remapFuncs(idx.funcs[k], newFuncs)
+		remapFuncs(idx.funcs[k], newFuncs)
 	}
 
-	idx.fileFuncs[key] = remapFuncs(idx.fileFuncs[key], newFuncs)
+	remapFuncs(idx.fileFuncs[key], newFuncs)
 
 	for k := range refBuckets {
-		idx.comprefs[k] = remapRefs(idx.comprefs[k], newRefs)
+		remapRefs(idx.comprefs[k], newRefs)
 	}
 
-	idx.fileRefs[key] = remapRefs(idx.fileRefs[key], newRefs)
+	remapRefs(idx.fileRefs[key], newRefs)
 
-	for sk, refs := range idx.scopeRefs[key] {
-		idx.scopeRefs[key][sk] = remapRefs(refs, newRefs)
+	for _, refs := range idx.scopeRefs[key] {
+		remapRefs(refs, newRefs)
 	}
 }
 
-// remapFuncs and remapRefs rebuild a slice with replaced entries substituted in.
-// The slice is rebuilt rather than written through for the same reason
-// ShiftLines replaces rather than mutates: a caller may still be walking it.
-func remapFuncs(entries []*parser.FunctionDef, replaced map[*parser.FunctionDef]*parser.FunctionDef) []*parser.FunctionDef {
-	out := make([]*parser.FunctionDef, len(entries))
-
+// remapFuncs and remapRefs substitute replaced entries into a stored slice in
+// place. Safe because accessors hand out a copy (see snapshot), so the only
+// slices these are called on are the index's own.
+func remapFuncs(entries []*parser.FunctionDef, replaced map[*parser.FunctionDef]*parser.FunctionDef) {
 	for i, e := range entries {
 		if n := replaced[e]; n != nil {
-			out[i] = n
-		} else {
-			out[i] = e
+			entries[i] = n
 		}
 	}
-
-	return out
 }
 
-func remapRefs(entries []*parser.ComponentRef, replaced map[*parser.ComponentRef]*parser.ComponentRef) []*parser.ComponentRef {
-	out := make([]*parser.ComponentRef, len(entries))
-
+func remapRefs(entries []*parser.ComponentRef, replaced map[*parser.ComponentRef]*parser.ComponentRef) {
 	for i, e := range entries {
 		if n := replaced[e]; n != nil {
-			out[i] = n
-		} else {
-			out[i] = e
+			entries[i] = n
 		}
 	}
-
-	return out
 }
 
 // IndexFile parses the given CFC content and updates the index for that file URI.
@@ -572,7 +627,7 @@ func (idx *Index) LookupComponentRef(variable string) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	return idx.comprefs[strings.ToLower(variable)]
+	return snapshot(idx.comprefs[strings.ToLower(variable)])
 }
 
 // RefsForFile returns all component references indexed for a specific file.
@@ -580,7 +635,7 @@ func (idx *Index) RefsForFile(fileURI uri.URI) []*parser.ComponentRef {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	return idx.fileRefs[uriKey(fileURI)]
+	return snapshot(idx.fileRefs[uriKey(fileURI)])
 }
 
 // ThisVarsForFile returns the this-scoped variable names for a file.
@@ -588,13 +643,15 @@ func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	return idx.thisVars[uriKey(fileURI)]
+	return snapshot(idx.thisVars[uriKey(fileURI)])
 }
 
 // SetThisVars stores this-scoped variable names for a file.
 func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 	idx.mu.Lock()
-	idx.thisVars[uriKey(fileURI)] = vars
+	// Owned, for the reason ownFunc gives: the caller's slice is a live
+	// ParseResult's, and the index must be the only writer of what it stores.
+	idx.thisVars[uriKey(fileURI)] = snapshot(vars)
 	idx.mu.Unlock()
 }
 

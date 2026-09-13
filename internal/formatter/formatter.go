@@ -2733,6 +2733,36 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 
 // ─── CFScript formatting ─────────────────────────────────────────────────────
 
+// formatScriptRegion re-parses one cf_script_content node with the CFScript
+// grammar and formats it.
+//
+// It is a function rather than the body of its caller's loop so that the tree
+// is closed when the region is done with, not when the whole <cfscript> element
+// is. A tree-sitter tree is C memory the Go collector does not account for, and
+// a deferred Close inside a loop runs at function return — so every region in
+// an element was held live at once, in the one place already known as the
+// server's largest source of untracked memory growth. Today an element has a
+// single content child and it costs nothing; the shape is what is wrong.
+func (f *Formatter) formatScriptRegion(c *sitter.Node) {
+	scriptSrc := f.src[c.StartByte():c.EndByte()]
+
+	tree := f.opts.ParseScript(scriptSrc)
+	if tree == nil {
+		return
+	}
+
+	defer tree.Close()
+
+	if tree.RootNode().HasError() {
+		f.recordParseError("cfscript", tree.RootNode(), scriptSrc, c.StartPosition().Row)
+	}
+
+	origSrc := f.src
+	f.src = scriptSrc
+	f.formatScriptChildren(tree.RootNode())
+	f.src = origSrc
+}
+
 // formatCFScript pretty-prints the contents of a <cfscript>…</cfscript> block
 // by recursing into the cfscript sub-grammar nodes via cfscript_formatter.go.
 func (f *Formatter) formatCFScript(n *sitter.Node) {
@@ -2745,20 +2775,7 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
 		if c.Kind() == "cf_script_content" && f.opts.ParseScript != nil {
-			scriptSrc := f.src[c.StartByte():c.EndByte()]
-
-			tree := f.opts.ParseScript(scriptSrc)
-			if tree != nil {
-				if tree.RootNode().HasError() {
-					f.recordParseError("cfscript", tree.RootNode(), scriptSrc, c.StartPosition().Row)
-				}
-				defer tree.Close()
-
-				origSrc := f.src
-				f.src = scriptSrc
-				f.formatScriptChildren(tree.RootNode())
-				f.src = origSrc
-			}
+			f.formatScriptRegion(c)
 		}
 	}
 

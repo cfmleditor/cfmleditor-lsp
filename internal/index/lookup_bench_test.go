@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -53,5 +54,65 @@ func BenchmarkLookupComponentRefInFileWideFile(b *testing.B) {
 		if got := idx.LookupComponentRefInFile("svc199", u, 1000); got == nil {
 			b.Fatal("no ref found")
 		}
+	}
+}
+
+// The read side of the snapshot trade. Lookup now copies the bucket it returns,
+// so a name every component in the workspace declares — init, and little else —
+// costs a slice of one pointer per file. It is the case where the caller is
+// about to walk all of them anyway.
+func BenchmarkLookup(b *testing.B) {
+	for _, sz := range []struct {
+		name   string
+		files  int
+		shared bool
+		key    string
+	}{
+		{"sharedName_5000files", 5000, true, "method3"},
+		{"distinctName_5000files", 5000, false, "f0_method3"},
+		{"miss", 5000, false, "nosuchmethod"},
+	} {
+		b.Run(sz.name, func(b *testing.B) {
+			idx, _ := benchIndex(sz.files, 8, sz.shared)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				idx.Lookup(sz.key)
+			}
+		})
+	}
+}
+
+// LookupPreferred is what the keystroke paths use instead of Lookup, so it must
+// not copy the bucket. The sharedName case is the one that matters: a name
+// every component in the workspace declares.
+func BenchmarkLookupPreferred(b *testing.B) {
+	for _, sz := range []struct {
+		name   string
+		shared bool
+		key    string
+	}{
+		{"sharedName_inFile", true, "method3"},
+		{"sharedName_notInFile", true, "method3"},
+		{"distinctName_inFile", false, "f0_method3"},
+	} {
+		b.Run(sz.name, func(b *testing.B) {
+			idx, u := benchIndex(5000, 8, sz.shared)
+
+			// The miss case: a document the index has never seen, so the
+			// preference cannot be satisfied and the fallback is taken.
+			if strings.HasSuffix(sz.name, "notInFile") {
+				u = uri.File("/ws/elsewhere/Other.cfc")
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				idx.LookupPreferred(sz.key, u)
+			}
+		})
 	}
 }
