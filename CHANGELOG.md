@@ -64,6 +64,7 @@ Each release makes the formatter render constructs it previously refused, so a b
 
 ### Changed
 
+- `workspace/didChangeWatchedFiles` now decodes with `encoding/json/v2`, as the LSP wire and every other request handler already did — it was the one left on the standard library. A checkout or branch switch arrives as a single batch of thousands of events; on 5,000, decoding drops from 4.6ms and 5,024 allocations to 1.3ms and 4. Config files stay on the standard library deliberately: `json/v2` matches field names case-sensitively, so a mis-cased key in a hand-written `.cfmleditor.json` would be dropped without an error.
 - Go toolchain 1.26.6 → 1.26.8, picking up two rounds of standard-library security fixes. `go.mod` is the only place the version is written — the Makefile reads it for `make lint` and `make vuln`, and every CI job takes it from `go-version-file` — so nothing else moved. The pinned golangci-lint and govulncheck are unchanged and both still work against it.
 - CFLint fallback version 1.5.14 → 1.5.16, which carries CFLint's scan-performance work (373s → 145s on a 6,544-file codebase). Only used when the releases API cannot be reached.
 
