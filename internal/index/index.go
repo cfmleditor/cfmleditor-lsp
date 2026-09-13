@@ -144,6 +144,20 @@ func (idx *Index) FunctionsForFile(fileURI uri.URI) []*parser.FunctionDef {
 	return idx.fileFuncs[uriKey(fileURI)]
 }
 
+// HasFile reports whether the index holds an entry for this file, which is not
+// the same question as whether the file declares any functions: a component
+// with only properties or `this` assignments indexes to an empty — but present
+// — entry, and callers that use "no functions" as a stand-in for "never
+// indexed" re-read such a file from disk on every lookup.
+func (idx *Index) HasFile(fileURI uri.URI) bool {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	_, ok := idx.fileFuncs[uriKey(fileURI)]
+
+	return ok
+}
+
 // ShiftLines adjusts line numbers for all entries in a file where Line > afterLine.
 //
 // It replaces the affected entries rather than writing through the pointers it
@@ -328,6 +342,28 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	}
 
 	idx.fileRefs[fk] = fileRefsList
+}
+
+// RemoveFile drops every entry the index holds for one file — its functions,
+// component refs, this-scoped vars, per-function scope refs, and its ORM entity
+// registration if it had one. Used when a watched file is deleted on disk.
+//
+// The entity map is keyed by name rather than by URI, so it is swept by value
+// rather than by a computed key: an entity name the deleted file registered may
+// since have been claimed by a different file, and deleting the key blind would
+// unregister that one instead.
+func (idx *Index) RemoveFile(fileURI uri.URI) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.removeFileEntries(fileURI)
+
+	key := uriKey(fileURI)
+	for name, u := range idx.entities {
+		if uriKey(u) == key {
+			delete(idx.entities, name)
+		}
+	}
 }
 
 // RemoveFilesUnder removes all indexed entries whose URI starts with prefix.

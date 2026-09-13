@@ -31,8 +31,13 @@ type Server struct {
 	conn        jsonrpc2.Conn
 	log         cflog.Logger
 	initialized bool
-	Version     string
-	FS          vfs.FS // filesystem abstraction for portability
+	// watchedFilesDynamic records whether the client accepted, at initialize,
+	// that it can be asked to watch files. Written by handleInitialize and read
+	// by handleInitialized, which the protocol orders strictly after it on the
+	// same read loop — the same happens-before `initialized` above relies on.
+	watchedFilesDynamic bool
+	Version             string
+	FS                  vfs.FS // filesystem abstraction for portability
 
 	mu        sync.RWMutex
 	documents map[uri.URI]string

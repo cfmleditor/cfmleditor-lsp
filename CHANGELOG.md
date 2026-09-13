@@ -11,6 +11,7 @@
   - `paramBreakThreshold` — parameters above this expand onto separate lines. `0` (the default) always expands; raise it to keep short signatures on one line.
   - `blankLinesInBlocks` (default `true`) — the blank line after `{` and before `}`. `false` gives compact blocks.
   - `switchCaseIndent` (default `false`) — indent `case`/`default` one level inside the switch, statements moving with them.
+- **The index now tracks files changed outside the editor.** The server asks the client to watch the workspace for `.cfc`/`.cfm` changes (`workspace/didChangeWatchedFiles`) and re-indexes, or drops, each one. Nothing to configure and no extension change: it is a server-initiated registration, so any client that supports dynamic registration starts watching on its own. Clients that don't are told in the log that the index will not track disk changes.
 - The editor's **`insertFinalNewline` and `trimFinalNewlines`** (LSP 3.15) are now honoured. VS Code defaults both to `false`, and the formatter was adding a final newline and trimming trailing blank lines regardless. `trimTrailingWhitespace` stays unhonoured — output is rebuilt from the syntax tree, so there is no trailing whitespace to preserve.
 
 ### Fixed — formatter
@@ -48,6 +49,8 @@ Each release makes the formatter render constructs it previously refused, so a b
 
 ### Fixed — workspace and references
 
+- **The index was a startup snapshot.** It was built once and afterwards updated only from files open in the editor, so a `git pull`, a branch switch, a codegen step or a second editor left completion, go-to-definition and hover answering from components that no longer existed — confidently wrong rather than merely stale, and only `cfmleditor.reindex` could clear it. Daemon mode was worse: the daemon outlives every client, so one stale snapshot was shared by all of them and survived closing the editor.
+- A CFC that declares **no functions** — a property-only bean, a DTO, a `this`-scope struct — was re-read from disk and re-parsed on *every* lookup against it. "Has no indexed functions" was standing in for "has never been indexed", and for these components the two differ permanently.
 - Every workspace-wide search covered nothing in a session with no `.cfmleditor.json`. `cfmleditor.findRefs` answered `0 match(es)` for a function with three callers; `scanWorkspace` reported `0 parse errors in 0 files`. Eight call sites now fall back to the roots the editor opened.
 - Workspace roots reported at `initialize` were converted with the wrong helper, producing `/c:/Users/…` on Windows. A root that converts to `/` is now declined with a warning, rather than having "find all references" walk the filesystem.
 - A data race between the initial index and `didChangeWorkspaceFolders`.

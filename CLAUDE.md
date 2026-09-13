@@ -131,8 +131,8 @@ Editor document change
 | Package | Responsibility |
 |---|---|
 | `internal/parser` | Line-scanner/tag-search parsing → `ParseResult`; resolver matching (`ast.go`) |
-| `internal/server` | LSP handler wiring, completion, definition, hover, symbols, signature help, code actions, document links, formatting, on-type formatting, workspace commands, bean scanning |
-| `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities |
+| `internal/server` | LSP handler wiring, completion, definition, hover, symbols, signature help, code actions, document links, formatting, on-type formatting, watched-file reindexing, workspace commands, bean scanning |
+| `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities. `HasFile` answers "indexed at all" — not the same as `FunctionsForFile` returning nothing, since a property-only bean indexes to an empty but present entry |
 | `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain |
 | `internal/path` | Case-insensitive path resolution, mappings, globs, `Application.cfc` mapping/bean/ORM extraction, binary + CFML file detection |
 | `internal/config` | `.cfmleditor.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
@@ -239,6 +239,24 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
   actions, document formatting, on-type formatting (`>`), workspace folders.
+- `workspace/didChangeWatchedFiles` (`internal/server/watchedfiles.go`) keeps the index current
+  when files change outside the editor. There is no static way to ask for this — the protocol
+  offers only dynamic registration — so `initialized` sends `client/registerCapability` for
+  `**/*.cfc` and `**/*.cfm` when the client advertised
+  `workspace.didChangeWatchedFiles.dynamicRegistration`, and logs once when it did not. Nothing
+  is needed from the extension. Before this the index was a startup snapshot: `indexWorkspace`
+  ran once and only `didOpen`/`didChange`/`didSave` updated it afterwards, so a checkout or a
+  second editor left the server resolving to components that no longer existed, with
+  `cfmleditor.reindex` the only cure — and in daemon mode one stale snapshot served every
+  client and outlived the editor.
+
+  Three rules decide what an event does, and each has a test that fails without it. An **open
+  document's buffer outranks disk** for content, since the event is either the editor's own
+  save or a change the editor will reload and report itself. A **deletion is honoured whether
+  or not the file is open**: content is the editor's to report, existence is not, and an entry
+  pointing at a path that is gone cannot recover, while re-saving a buffer re-indexes it. A
+  **read that fails is treated as a deletion**, so a file caught mid-write or created and
+  removed inside one batch does not leave its previous contents indexed as current.
 - `textDocument/references` (`internal/server/references.go`) is **opt-in**: off unless
   `"references": {"enabled": true}`, and `capabilities()` advertises `referencesProvider` only
   when the flag is on, so a client that has not opted in never offers the command. It is gated

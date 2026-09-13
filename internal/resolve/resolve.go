@@ -148,21 +148,25 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 }
 
 // EnsureIndexed ensures a CFC file is indexed, loading from disk if needed.
+//
+// The "needed" test is whether the index holds the file (HasFile), not whether
+// it holds any functions for it. Those differ for a component that legitimately
+// declares none — a property-only bean, a DTO, a `this`-scope struct — and
+// asking the second question re-read and re-parsed every such file on every
+// single lookup, since re-indexing it produced the same empty result.
 func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 	cfcURI := cfpath.ToURI(cfcPath)
 
-	defs := r.Index.FunctionsForFile(cfcURI)
-	if len(defs) == 0 {
+	if !r.Index.HasFile(cfcURI) {
 		data, err := r.FS.ReadFile(cfcPath)
 		if err != nil {
 			return nil
 		}
 
 		r.Index.IndexFile(cfcURI, string(data))
-		defs = r.Index.FunctionsForFile(cfcURI)
 	}
 
-	return defs
+	return r.Index.FunctionsForFile(cfcURI)
 }
 
 // LookupFuncWithExtends searches for a function in cfcPath, walking the extends chain.
