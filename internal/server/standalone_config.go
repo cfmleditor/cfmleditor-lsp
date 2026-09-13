@@ -1,6 +1,12 @@
 package server
 
 import (
+	// The standard library on purpose, where the LSP wire and every request
+	// handler use encoding/json/v2. v2 matches field names case-sensitively, so
+	// a key a user spelled with the wrong case in .cfmleditor.json would be
+	// dropped in silence, and it rejects duplicate members where stdlib takes
+	// the last — both breaking for a hand-written config file. Pinned by
+	// TestConfigDecodingStaysOnTheStandardLibrary in internal/config.
 	"encoding/json"
 	"path/filepath"
 

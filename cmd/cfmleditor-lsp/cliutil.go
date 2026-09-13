@@ -1,6 +1,9 @@
 package main
 
 import (
+	// The standard library on purpose — see the note in
+	// internal/server/standalone_config.go: json/v2 would silently drop a
+	// mis-cased key from a hand-written .cfmleditor.json.
 	"encoding/json"
 	"os"
 	"path/filepath"
