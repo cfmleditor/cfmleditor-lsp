@@ -78,11 +78,47 @@ func TestFeatureKeysReachTheServer(t *testing.T) {
 	}
 }
 
+// featureDefaults is the expected default for every switch, by field name.
+//
+// Enumerated rather than assumed, and checked for completeness below, so that
+// adding a switch to Features fails here until its default is stated — the
+// point of walking the struct reflectively in the first place. Folding is the
+// one that is off: see the Features doc comment.
+var featureDefaults = map[string]bool{
+	"DocumentHighlight": true,
+	"Folding":           foldingDefault,
+	"WatchedFiles":      true,
+	"RangeFormatting":   true,
+}
+
 // TestFeaturesDefaultToOn is the property that makes these opt-outs. An absent
-// block, an empty block, and a nil config must all leave every feature on;
-// taking the zero value instead would switch them all off on any path that
-// skipped ResolveFeatures.
+// block, an empty block, and a nil config must all leave every feature at its
+// default; taking the zero value instead would switch them all off on any path
+// that skipped ResolveFeatures.
 func TestFeaturesDefaultToOn(t *testing.T) {
+	if got := reflect.TypeOf(ResolvedFeatures{}).NumField(); got != len(featureDefaults) {
+		t.Fatalf("ResolvedFeatures has %d fields but %d defaults are stated; add the new switch to featureDefaults", got, len(featureDefaults))
+	}
+
+	check := func(t *testing.T, what string, rv reflect.Value) {
+		t.Helper()
+
+		for i := range rv.Type().NumField() {
+			name := rv.Type().Field(i).Name
+
+			want, stated := featureDefaults[name]
+			if !stated {
+				t.Errorf("%s has no stated default", name)
+
+				continue
+			}
+
+			if got := rv.Field(i).Interface().(bool); got != want { //nolint:forcetypeassert // every field is a bool, asserted above
+				t.Errorf("%s: %s defaults to %v, want %v", what, name, got, want)
+			}
+		}
+	}
+
 	cases := map[string]*Features{
 		"nil block":   nil,
 		"empty block": {},
@@ -90,21 +126,25 @@ func TestFeaturesDefaultToOn(t *testing.T) {
 
 	for name, f := range cases {
 		t.Run(name, func(t *testing.T) {
-			rv := reflect.ValueOf(ResolveFeatures(f))
-			for i := range rv.Type().NumField() {
-				if rv.Field(i).Interface() != true {
-					t.Errorf("%s defaults to off, want on", rv.Type().Field(i).Name)
-				}
-			}
+			check(t, name, reflect.ValueOf(ResolveFeatures(f)))
 		})
 	}
 
 	// Through Resolve as well, since that is the hop a session actually takes.
-	rv := reflect.ValueOf(Resolve(&JSON{}, t.TempDir()).Features)
-	for i := range rv.Type().NumField() {
-		if rv.Field(i).Interface() != true {
-			t.Errorf("Resolve leaves %s off for a config with no features block", rv.Type().Field(i).Name)
-		}
+	check(t, "Resolve", reflect.ValueOf(Resolve(&JSON{}, t.TempDir()).Features))
+}
+
+// TestFoldingIsOptIn states folding's default on its own, so that flipping it
+// back is a deliberate edit to a test that says what it is for rather than a
+// number changing inside a table.
+func TestFoldingIsOptIn(t *testing.T) {
+	if Resolve(&JSON{}, t.TempDir()).Features.Folding {
+		t.Error("folding is on for a config that does not mention it; it is opt-in")
+	}
+
+	on := true
+	if !Resolve(&JSON{Features: &Features{Folding: &on}}, t.TempDir()).Features.Folding {
+		t.Error("folding stayed off despite being asked for")
 	}
 }
 
@@ -112,15 +152,17 @@ func TestFeaturesDefaultToOn(t *testing.T) {
 // plain bools, naming one switch would read the rest back as false and turn
 // them all off — the defect the completions block was fixed for.
 func TestSettingOneFeatureLeavesTheOthersOn(t *testing.T) {
+	// documentHighlight rather than folding: folding is off by default, so
+	// setting it to false would assert nothing.
 	off := false
-	resolved := Resolve(&JSON{Features: &Features{Folding: &off}}, t.TempDir()).Features
+	resolved := Resolve(&JSON{Features: &Features{DocumentHighlight: &off}}, t.TempDir()).Features
 
-	if resolved.Folding {
-		t.Error("folding stayed on despite being set to false")
+	if resolved.DocumentHighlight {
+		t.Error("documentHighlight stayed on despite being set to false")
 	}
 
-	if !resolved.DocumentHighlight || !resolved.WatchedFiles || !resolved.RangeFormatting {
-		t.Errorf("setting folding switched off its siblings: %+v", resolved)
+	if !resolved.WatchedFiles || !resolved.RangeFormatting {
+		t.Errorf("setting documentHighlight switched off its siblings: %+v", resolved)
 	}
 }
 
@@ -130,20 +172,33 @@ func TestSettingOneFeatureLeavesTheOthersOn(t *testing.T) {
 func TestMergeFeaturesKeepsBothSides(t *testing.T) {
 	off := false
 
-	editor := &JSON{Features: &Features{Folding: &off}}
+	editor := &JSON{Features: &Features{DocumentHighlight: &off}}
 	file := &JSON{Features: &Features{WatchedFiles: &off}}
 
 	resolved := Resolve(Merge(editor, file), t.TempDir()).Features
 
-	if resolved.Folding {
-		t.Error("the editor's folding=false was lost when merging with a config file")
+	if resolved.DocumentHighlight {
+		t.Error("the editor's documentHighlight=false was lost when merging with a config file")
 	}
 
 	if resolved.WatchedFiles {
 		t.Error("the file's watchedFiles=false was lost")
 	}
 
-	if !resolved.DocumentHighlight || !resolved.RangeFormatting {
+	if !resolved.RangeFormatting {
 		t.Errorf("merging switched off a feature neither side named: %+v", resolved)
+	}
+
+	// The same merge, with folding named on one side, since an opt-in switch
+	// has to survive a merge just as an opt-out does.
+	on := true
+	both := Resolve(Merge(&JSON{Features: &Features{Folding: &on}}, file), t.TempDir()).Features
+
+	if !both.Folding {
+		t.Error("the editor's folding=true was lost when merging with a config file")
+	}
+
+	if both.WatchedFiles {
+		t.Error("the file's watchedFiles=false was lost when the editor asked for folding")
 	}
 }

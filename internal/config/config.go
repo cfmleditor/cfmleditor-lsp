@@ -109,6 +109,16 @@ type References struct {
 // `linting` and `references` are the same kind of switch and predate this
 // block, so they keep their own top-level keys; `references` additionally
 // defaults *off*, since answering one request scans the whole workspace.
+//
+// `folding` defaults off as well, and is the one member of this block that
+// does. It is new, and it is the most expensive thing here to answer: a
+// script-syntax component's body reaches the CFML grammar as one opaque
+// region, so folding it means parsing the whole body with the CFScript grammar
+// on every request. That is a few milliseconds on a large component even after
+// the walk around it was cut down, and an editor that never asked for it loses
+// nothing it had — it falls back to folding by indentation, which is what it
+// did before the feature existed. Turn it on with
+// `{"features": {"folding": true}}`.
 type Features struct {
 	DocumentHighlight *bool `json:"documentHighlight"`
 	Folding           *bool `json:"folding"`
@@ -129,14 +139,20 @@ type ResolvedFeatures struct {
 	RangeFormatting   bool
 }
 
+// foldingDefault is off. Named rather than inlined so the tests that assert the
+// defaults read the same constant the resolver does, instead of restating it.
+const foldingDefault = false
+
 // ResolveFeatures applies the defaults for a `features` block: absent means
-// every feature is on, which is the opposite of what the zero value says.
+// every feature is on except folding, which is opt-in for the reason the type
+// above gives.
 //
 // As with ResolveCompletions, the defaults live here so that every path to a
 // Server agrees on them. A path that skipped this and took the zero value
 // would come up with every feature switched off — which is not a subtle
 // failure, but is a silent one, indistinguishable from the features not
-// existing.
+// existing. That trap is unchanged by folding's default: the zero value is
+// still wrong for the other three.
 func ResolveFeatures(f *Features) ResolvedFeatures {
 	if f == nil {
 		f = &Features{}
@@ -144,7 +160,7 @@ func ResolveFeatures(f *Features) ResolvedFeatures {
 
 	return ResolvedFeatures{
 		DocumentHighlight: BoolDefault(f.DocumentHighlight, true),
-		Folding:           BoolDefault(f.Folding, true),
+		Folding:           BoolDefault(f.Folding, foldingDefault),
 		WatchedFiles:      BoolDefault(f.WatchedFiles, true),
 		RangeFormatting:   BoolDefault(f.RangeFormatting, true),
 	}

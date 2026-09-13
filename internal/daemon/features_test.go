@@ -3,7 +3,6 @@ package daemon
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
@@ -55,9 +54,14 @@ func TestSettingsFromCarriesFeatures(t *testing.T) {
 }
 
 // TestSettingsFromDefaultsFeaturesOn: a daemon config with no features block
-// must produce the same all-on defaults a standalone session gets. The two
+// must produce the same defaults a standalone session gets. The two
 // disagreeing is the exact drift that left daemon sessions with completions
 // switched off.
+//
+// The comparison is against config.ResolveFeatures(nil) rather than against a
+// list of expected values, so it keeps testing agreement rather than restating
+// the defaults — folding's is off, and a copy here would have had to be found
+// and changed when it moved.
 func TestSettingsFromDefaultsFeaturesOn(t *testing.T) {
 	set := SettingsFrom(configWith(t, `{"workspaceName": "w"}`))
 
@@ -65,10 +69,9 @@ func TestSettingsFromDefaultsFeaturesOn(t *testing.T) {
 		t.Errorf("daemon defaults %+v, config says %+v", set.Features, config.ResolveFeatures(nil))
 	}
 
-	rv := reflect.ValueOf(set.Features)
-	for i := range rv.Type().NumField() {
-		if rv.Field(i).Interface() != true {
-			t.Errorf("daemon leaves %s off with no features block", rv.Type().Field(i).Name)
-		}
+	// The trap this guards: the zero value is every switch off, and a daemon
+	// path that never applied the defaults would land on it.
+	if set.Features == (config.ResolvedFeatures{}) {
+		t.Fatal("daemon took the zero value of ResolvedFeatures — every switch off")
 	}
 }

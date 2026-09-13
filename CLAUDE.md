@@ -330,10 +330,15 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   whole-line match, because the parser also records the variables a component ref flows into
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
-  All four default to **on**, so they are opt-outs; the fields are `*bool` for the reason the
-  `completions` block documents — a defaults-true flag as a plain bool cannot tell "turned off"
-  from "not mentioned", so naming one key would switch off its siblings. `mergeFeatures` unions
-  key by key for the same reason `mergeFormatting` does.
+  Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
+  (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
+  one opaque region, so answering one request means parsing the whole body with the CFScript
+  grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
+  per open document. The fields are `*bool` for the reason the `completions` block documents — a
+  defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
+  key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
+  `mergeFormatting` does. `featureDefaults` in `features_chain_test.go` states every default and
+  fails if a new switch is added without one.
 
   Two traps this shape sets, both with a test:
   - **The zero value is every switch off.** `NewServer` therefore seeds `config.ResolveFeatures(nil)`,
@@ -391,7 +396,7 @@ the user-facing view and all `formatting` defaults.
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability off switches: `documentHighlight`, `folding`, `watchedFiles`, `rangeFormatting`. All default **on** — opt-outs, for when one misbehaves. See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr |
 
