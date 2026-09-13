@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0]
+
 ### Added
 
 - **`textDocument/references`** — the editor's "Find All References", behind `"references": {"enabled": true}` (off by default, because one request walks and parses every CFML file under the workspace roots).
