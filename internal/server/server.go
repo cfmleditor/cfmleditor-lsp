@@ -153,11 +153,16 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: []string{"(", ","},
 		},
-		DocumentSymbolProvider:  protocol.Boolean(true),
-		WorkspaceSymbolProvider: protocol.Boolean(true),
-		HoverProvider:           protocol.Boolean(true),
-		DocumentLinkProvider:    &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
-		CodeActionProvider:      protocol.Boolean(true),
+		DocumentSymbolProvider: protocol.Boolean(true),
+		// Both stay inside the open document — no file is read and no workspace
+		// is walked — which is why neither is gated the way referencesProvider
+		// is.
+		DocumentHighlightProvider: protocol.Boolean(true),
+		FoldingRangeProvider:      protocol.Boolean(true),
+		WorkspaceSymbolProvider:   protocol.Boolean(true),
+		HoverProvider:             protocol.Boolean(true),
+		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
+		CodeActionProvider:        protocol.Boolean(true),
 		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
 			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace"},
 		},

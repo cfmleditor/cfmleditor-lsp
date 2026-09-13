@@ -334,11 +334,18 @@ func entryRange(lines []string, line uint32, name string) (protocol.Range, bool)
 // because CFML is. The neighbour check is what keeps "GetData" from matching
 // inside "GetDataSet" and reporting a column in the wrong call.
 func identSpan(text, name string) (start, end int, ok bool) {
+	return identSpanFrom(text, name, 0)
+}
+
+// identSpanFrom is identSpan resumed at an offset, so a caller wanting every
+// occurrence on a line — documentHighlight does — can walk them without a
+// second copy of the neighbour rule.
+func identSpanFrom(text, name string, from int) (start, end int, ok bool) {
 	if name == "" {
 		return 0, 0, false
 	}
 
-	for i := 0; i+len(name) <= len(text); i++ {
+	for i := max(from, 0); i+len(name) <= len(text); i++ {
 		// EqualFold on equal-length byte slices, rather than lowercasing the
 		// line first: folding can change a string's length (U+0130 lowercases
 		// to two runes), which would desynchronise every offset after it.
