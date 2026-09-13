@@ -202,6 +202,7 @@ func (s *Server) applyConfig(r *config.Resolved) {
 		s.BeanPaths = r.BeanPaths
 	}
 
+	s.Features = r.Features
 	s.Linting = r.Linting
 	s.References = r.References
 	s.TagSnippets = r.TagSnippets

@@ -31,6 +31,7 @@ type Settings struct {
 	PropertyResolvers        []config.PropResolver
 	BeanPaths                map[string]string
 	Formatting               config.ResolvedFormatting
+	Features                 config.ResolvedFeatures
 	Linting                  bool
 	References               bool
 	TagSnippets              bool
@@ -50,6 +51,7 @@ func (set Settings) Apply(s *Server) {
 	s.PropertyResolvers = append(s.PropertyResolvers, set.PropertyResolvers...)
 	s.BeanPaths = set.BeanPaths
 	s.Formatting = set.Formatting
+	s.Features = set.Features
 	s.Linting = set.Linting
 	s.References = set.References
 	s.TagSnippets = set.TagSnippets

@@ -139,6 +139,20 @@ func (c *Config) Debug() bool {
 	return raw != nil && raw.Debug
 }
 
+// ResolvedFeatures returns the feature switches with their defaults applied.
+//
+// Through config.ResolveFeatures rather than reading the pointers here, so the
+// daemon and a standalone session cannot disagree about what an absent block
+// means — the drift that left daemon sessions with completions switched off.
+func (c *Config) ResolvedFeatures() config.ResolvedFeatures {
+	raw := c.raw()
+	if raw == nil {
+		return config.ResolveFeatures(nil)
+	}
+
+	return config.ResolveFeatures(raw.Features)
+}
+
 // Linting returns whether linting (cflint) is enabled in config.
 func (c *Config) Linting() bool {
 	raw := c.raw()
@@ -443,6 +457,7 @@ func SettingsFrom(c *Config) server.Settings {
 		PropertyResolvers:        props,
 		BeanPaths:                c.BeanPaths(),
 		Formatting:               c.ResolvedFormatting(),
+		Features:                 c.ResolvedFeatures(),
 		Linting:                  c.Linting(),
 		References:               c.References(),
 		TagSnippets:              comp.TagSnippets,

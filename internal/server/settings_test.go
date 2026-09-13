@@ -33,6 +33,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		PropertyResolvers:        []config.PropResolver{{Match: "$1", Resolve: "beans.$1", Attribute: "name"}},
 		BeanPaths:                map[string]string{"svc": "/w/services"},
 		Formatting:               config.ResolvedFormatting{Enabled: true, LineWidth: 123},
+		Features:                 config.ResolveFeatures(nil),
 		Linting:                  true,
 		References:               true,
 		TagSnippets:              true,

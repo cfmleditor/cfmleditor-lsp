@@ -30,6 +30,7 @@ type JSON struct {
 	Linting       *Linting     `json:"linting"`
 	Completions   *Completions `json:"completions"`
 	References    *References  `json:"references"`
+	Features      *Features    `json:"features"`
 	Debug         bool         `json:"debug"`
 }
 
@@ -88,6 +89,65 @@ type Linting struct {
 // tried out.
 type References struct {
 	Enabled bool `json:"enabled"`
+}
+
+// Features switches off individual LSP capabilities, for when one misbehaves on
+// a real workspace and the alternative is downgrading the binary.
+//
+// Every flag defaults to *on*: these are opt-outs, so no existing setup
+// changes by adding the block or by upgrading into it. They are pointers for
+// the reason the completions block documents at length — a defaults-true flag
+// stored as a plain bool cannot tell "the config turned this off" from "the
+// config did not mention it", so naming any one key would silently switch off
+// its siblings.
+//
+// Disabling one *un-advertises* its capability rather than merely refusing the
+// request. That matters: the editor then falls back to its own behaviour — its
+// word-based highlighting, its indentation folding — instead of offering a
+// command the server declines and leaving the user with nothing.
+//
+// `linting` and `references` are the same kind of switch and predate this
+// block, so they keep their own top-level keys; `references` additionally
+// defaults *off*, since answering one request scans the whole workspace.
+type Features struct {
+	DocumentHighlight *bool `json:"documentHighlight"`
+	Folding           *bool `json:"folding"`
+	WatchedFiles      *bool `json:"watchedFiles"`
+	// RangeFormatting is a second gate under formatting.enabled, not an
+	// alternative to it. Range formatting is the one feature here that writes
+	// to the buffer, and it shares every line of its machinery with
+	// format-on-save — so without this, the only way to stop it is to switch
+	// off formatting altogether and lose format-on-save with it.
+	RangeFormatting *bool `json:"rangeFormatting"`
+}
+
+// ResolvedFeatures holds the feature switches with defaults applied.
+type ResolvedFeatures struct {
+	DocumentHighlight bool
+	Folding           bool
+	WatchedFiles      bool
+	RangeFormatting   bool
+}
+
+// ResolveFeatures applies the defaults for a `features` block: absent means
+// every feature is on, which is the opposite of what the zero value says.
+//
+// As with ResolveCompletions, the defaults live here so that every path to a
+// Server agrees on them. A path that skipped this and took the zero value
+// would come up with every feature switched off — which is not a subtle
+// failure, but is a silent one, indistinguishable from the features not
+// existing.
+func ResolveFeatures(f *Features) ResolvedFeatures {
+	if f == nil {
+		f = &Features{}
+	}
+
+	return ResolvedFeatures{
+		DocumentHighlight: BoolDefault(f.DocumentHighlight, true),
+		Folding:           BoolDefault(f.Folding, true),
+		WatchedFiles:      BoolDefault(f.WatchedFiles, true),
+		RangeFormatting:   BoolDefault(f.RangeFormatting, true),
+	}
 }
 
 // Completions holds completion configuration.
@@ -204,6 +264,7 @@ type Resolved struct {
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
 	Formatting               ResolvedFormatting
+	Features                 ResolvedFeatures
 	Linting                  bool
 	References               bool
 	TagSnippets              bool
@@ -277,6 +338,8 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if cfg.References != nil {
 		r.References = cfg.References.Enabled
 	}
+
+	r.Features = ResolveFeatures(cfg.Features)
 
 	comp := ResolveCompletions(cfg.Completions)
 	r.TagSnippets = comp.TagSnippets
@@ -394,7 +457,38 @@ func Merge(base, over *JSON) *JSON {
 		out.References = over.References
 	}
 
+	out.Features = mergeFeatures(base.Features, over.Features)
+
 	out.Debug = base.Debug || over.Debug
+
+	return &out
+}
+
+// mergeFeatures unions two feature blocks key by key, with over winning
+// wherever over states a value — the same rule mergeFormatting follows, and for
+// the same reason: replacing the block wholesale would let one side naming a
+// single switch discard every switch the other had set.
+func mergeFeatures(base, over *Features) *Features {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+
+	for _, f := range []struct{ dst, src **bool }{
+		{&out.DocumentHighlight, &over.DocumentHighlight},
+		{&out.Folding, &over.Folding},
+		{&out.WatchedFiles, &over.WatchedFiles},
+		{&out.RangeFormatting, &over.RangeFormatting},
+	} {
+		if *f.src != nil {
+			*f.dst = *f.src
+		}
+	}
 
 	return &out
 }
