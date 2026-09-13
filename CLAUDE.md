@@ -270,6 +270,19 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   which is inherent to the design above: 6.5ms for a 500-line component,
   against 13ms before.
 
+  **No tree-sitter tree is cached, and none may be** — every one is a local
+  closed before its function returns, pinned by
+  `TestServerHoldsNoTreeSitterTree`, which walks the `Server`'s whole type
+  graph. Holding trees between requests is the obvious next optimisation and
+  looks free; it is a trade of C memory the Go collector does not account for,
+  in a daemon shared by every session, and wants to be a decision rather than
+  something that arrives inside a performance patch. Two adjacent ideas were
+  measured and dropped: pooling parsers saves 4.4µs of a 549µs parse on a
+  1,310-line component (0.8%), and there is no pure-Go tree-sitter runtime to
+  move to — every binding on the proxy is cgo, the three grammars are 1.2M
+  lines of *generated* C parse tables that tree-sitter's CLI emits only as C,
+  and the external scanners are another ~1,000 lines of hand-written C.
+
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
   **closing line stays visible**, which takes two separate checks: the deepest last *token* is
