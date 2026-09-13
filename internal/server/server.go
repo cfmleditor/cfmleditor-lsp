@@ -61,6 +61,7 @@ type Server struct {
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
 	Formatting               config.ResolvedFormatting // formatting settings
+	Features                 config.ResolvedFeatures   // per-capability off switches (all default on)
 	Linting                  bool                      // enable cflint diagnostics
 	References               bool                      // answer textDocument/references (opt-in; see config.References)
 	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
@@ -100,6 +101,13 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 	// it reaches applyConfig, and nothing else ever writes these.
 	comp := config.ResolveCompletions(nil)
 
+	// Same trap, and a worse landing: every feature switch defaults to on, so
+	// the zero value is every capability the block governs switched off. A
+	// session that never reaches applyConfig would advertise no folding, no
+	// highlighting, no range formatting and no file watching, and look for all
+	// the world like a build without them.
+	feat := config.ResolveFeatures(nil)
+
 	return &Server{
 		conn:                     conn,
 		log:                      log,
@@ -107,6 +115,7 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		TagSnippets:              comp.TagSnippets,
 		FunctionSnippets:         comp.FunctionSnippets,
 		GlobalFunctionResolution: comp.GlobalFunctionResolution,
+		Features:                 feat,
 		documents:                make(map[uri.URI]string),
 		index:                    idx,
 		lintCancels:              make(map[uri.URI]context.CancelFunc),
@@ -140,7 +149,10 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		// Answered by formatting the whole document and returning only the
 		// edits inside the requested lines, so it can never disagree with
 		// DocumentFormattingProvider above. See handleRangeFormatting.
-		DocumentRangeFormattingProvider: protocol.Boolean(true),
+		// Advertised only when enabled, so a client told the server has no
+		// provider offers no command at all and falls back to its own
+		// behaviour — the same reasoning as ReferencesProvider below.
+		DocumentRangeFormattingProvider: protocol.Boolean(s.Features.RangeFormatting),
 		DocumentOnTypeFormattingProvider: protocol.DocumentOnTypeFormattingOptions{
 			FirstTriggerCharacter: ">",
 		},
@@ -154,11 +166,12 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			TriggerCharacters: []string{"(", ","},
 		},
 		DocumentSymbolProvider: protocol.Boolean(true),
-		// Both stay inside the open document — no file is read and no workspace
-		// is walked — which is why neither is gated the way referencesProvider
-		// is.
-		DocumentHighlightProvider: protocol.Boolean(true),
-		FoldingRangeProvider:      protocol.Boolean(true),
+		// Both stay inside the open document — no file is read and no
+		// workspace is walked — so both default to on, unlike
+		// referencesProvider. The switches exist to turn one off when it
+		// misbehaves, not because either is expensive.
+		DocumentHighlightProvider: protocol.Boolean(s.Features.DocumentHighlight),
+		FoldingRangeProvider:      protocol.Boolean(s.Features.Folding),
 		WorkspaceSymbolProvider:   protocol.Boolean(true),
 		HoverProvider:             protocol.Boolean(true),
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},

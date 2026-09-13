@@ -317,6 +317,24 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   component entries whose line does not name the component are dropped rather than reported as a
   whole-line match, because the parser also records the variables a component ref flows into
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
+- **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
+  All four default to **on**, so they are opt-outs; the fields are `*bool` for the reason the
+  `completions` block documents — a defaults-true flag as a plain bool cannot tell "turned off"
+  from "not mentioned", so naming one key would switch off its siblings. `mergeFeatures` unions
+  key by key for the same reason `mergeFormatting` does.
+
+  Two traps this shape sets, both with a test:
+  - **The zero value is every switch off.** `NewServer` therefore seeds `config.ResolveFeatures(nil)`,
+    exactly as it does for `completions`; a session that never reaches `applyConfig` would
+    otherwise advertise none of them and look like a build without the features.
+  - **A gate in the handler is one a direct call slips past.** The watched-files gate lives in
+    `applyWatchedFileChanges`, not in its handler, because the first test of it called that
+    function directly and passed with the switch ignored.
+
+  Disabling a feature **un-advertises** its capability rather than declining the request, so the
+  editor falls back to its own behaviour. `rangeFormatting` is a second gate *under*
+  `formatting.enabled`, not an alternative to it — it is the only one of the four that writes to
+  the buffer, and it shares all its machinery with format-on-save.
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
 - `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
@@ -347,6 +365,7 @@ the user-facing view and all `formatting` defaults.
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
+| `features` | Per-capability off switches: `documentHighlight`, `folding`, `watchedFiles`, `rangeFormatting`. All default **on** — opt-outs, for when one misbehaves. See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr |
 

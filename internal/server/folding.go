@@ -26,6 +26,10 @@ import (
 // injected region is therefore parsed with its own grammar and walked too, its
 // rows offset by where the region starts.
 func (s *Server) handleFoldingRange(_ context.Context, rawParams []byte) (any, error) {
+	if !s.Features.Folding {
+		return nil, nil
+	}
+
 	var params protocol.FoldingRangeParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

@@ -92,6 +92,15 @@ func (s *Server) handleDidChangeWatchedFiles(_ context.Context, rawParams []byte
 // applyWatchedFileChanges re-indexes or drops each changed file, then
 // invalidates the caches whose contents the batch could have falsified.
 func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
+	// The gate lives here rather than in the handler so that every route to
+	// this work passes it — a client that kept a registration across a config
+	// change, and any future caller. A gate in the handler alone is one a
+	// direct call slips past, which is exactly what let the first version of
+	// this test pass with the switch ignored.
+	if !s.Features.WatchedFiles {
+		return
+	}
+
 	var indexed, removed, skipped, appChanged int
 
 	for _, ev := range changes {

@@ -34,6 +34,12 @@ import (
 // than no badge, and nothing here can tell the cases apart without the semantic
 // pass this handler exists to avoid.
 func (s *Server) handleDocumentHighlight(_ context.Context, rawParams []byte) (any, error) {
+	// Defensive: a client that sends the request anyway gets an empty answer
+	// rather than one the capability said it would not give.
+	if !s.Features.DocumentHighlight {
+		return nil, nil
+	}
+
 	var params protocol.DocumentHighlightParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

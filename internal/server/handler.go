@@ -178,6 +178,12 @@ func clientWatchesFiles(caps protocol.ClientCapabilities) bool {
 }
 
 func (s *Server) handleInitialized(_ context.Context) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+	if !s.Features.WatchedFiles {
+		s.log.Info("file watching disabled by config; the index will not track on-disk changes")
+
+		return nil, nil
+	}
+
 	if !s.watchedFilesDynamic {
 		// Not an error, but worth saying once: this session's index is a
 		// startup snapshot, and only cfmleditor.reindex will refresh it.

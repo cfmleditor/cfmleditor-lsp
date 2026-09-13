@@ -59,6 +59,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
+| `features` | No | Off switches for individual capabilities. All default to `true`; set the block only to turn one off. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 
 ### Mappings
@@ -182,6 +183,47 @@ before.
 `trimTrailingWhitespace` is deliberately **not** honoured. For the same reason — output is
 rebuilt from the syntax tree, not patched — the formatter has no trailing whitespace to keep, so
 there is nothing it could honestly do with `false` short of declining to format.
+
+### Features
+
+Every capability the server adds is on by default, but each can be switched off
+on its own, for when one misbehaves on a real workspace and the alternative is
+downgrading the binary:
+
+```json
+{
+  "features": {
+    "documentHighlight": true,
+    "folding": true,
+    "watchedFiles": true,
+    "rangeFormatting": true
+  }
+}
+```
+
+| Key | Turns off |
+|---|---|
+| `documentHighlight` | Shading the other occurrences of the identifier under the cursor. |
+| `folding` | Syntax-aware folding ranges; the editor falls back to folding by indentation. |
+| `watchedFiles` | Re-indexing files changed outside the editor. The index then reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
+| `rangeFormatting` | "Format Selection", leaving whole-document formatting and format-on-save working. |
+
+Set only the keys you want off — the block is merged key by key, so naming one
+leaves the rest alone, and an editor's `initializationOptions` and a project's
+`.cfmleditor.json` can each set different ones.
+
+Switching one off *un-advertises* it rather than leaving the server to decline
+the request, so the editor falls back to its own behaviour instead of offering a
+command that returns nothing.
+
+`rangeFormatting` sits under `formatting.enabled` rather than replacing it:
+formatting has to be on at all for either kind to run. It has its own switch
+because it is the only one of the four that writes to your buffer, and it shares
+all its machinery with format-on-save — without a separate switch, stopping it
+would mean giving up format-on-save too.
+
+`linting` and `references` are the same kind of switch and keep their own
+top-level keys, `references` additionally defaulting to *off*.
 
 ### References
 

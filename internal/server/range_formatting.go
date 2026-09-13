@@ -30,7 +30,10 @@ import (
 // makes, and for the same reason: the formatter has no rendering for an ERROR
 // node.
 func (s *Server) handleRangeFormatting(_ context.Context, rawParams []byte) (any, error) {
-	if !s.Formatting.Enabled {
+	// Two gates, not one: formatting.enabled governs the formatter as a whole,
+	// and features.rangeFormatting only this half of it. Without the second,
+	// stopping a range-formatting defect means giving up format-on-save too.
+	if !s.Formatting.Enabled || !s.Features.RangeFormatting {
 		return nil, nil
 	}
 
