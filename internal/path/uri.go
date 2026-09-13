@@ -82,3 +82,50 @@ func FromURIFor(platform uri.Platform, rawURI string) string {
 
 	return strings.TrimPrefix(rawURI, uriScheme)
 }
+
+// URIDistance reports how far apart two document URIs are in the directory
+// tree: the number of directory hops needed to get from one to the other. Two
+// files in the same directory are 0 apart, a file one directory deeper is 1,
+// and files in sibling directories are 2 — one hop up, one down.
+//
+// It exists to make "the nearest of several" a deterministic answer. Several
+// components in a workspace commonly declare the same method name, and when
+// none of them is the file the request came from, something has to choose. That
+// choice used to be the order the index happened to hold them in, which is the
+// order eight parallel indexing goroutines finished in — so it varied between
+// restarts, and hovering the same call could name a different component today
+// than yesterday.
+//
+// Distance is measured from the deepest shared directory, so it is symmetric
+// and needs no notion of which URI is the reference. Comparison is case-folded
+// for the ASCII range, matching the case-insensitivity the rest of this package
+// applies to paths; separators are '/' because these are URIs, on every
+// platform.
+//
+// It is not what resolve.ComponentPath uses to break the same kind of tie — that
+// one measures from a base *directory* to a file, via filepath.Rel, and the two
+// take different inputs. This one is file-to-file.
+func URIDistance(a, b string) int {
+	n := 0
+	for n < len(a) && n < len(b) && foldByte(a[n]) == foldByte(b[n]) {
+		n++
+	}
+
+	// Back up to the last separator: a shared byte run can stop part-way
+	// through a segment, and "/ws/abc" and "/ws/abd" share no directory below
+	// /ws even though they share five bytes below it.
+	cut := strings.LastIndexByte(a[:n], '/') + 1
+
+	return strings.Count(a[cut:], "/") + strings.Count(b[cut:], "/")
+}
+
+// foldByte lowercases an ASCII letter and leaves every other byte alone. The
+// explicit range matters: folding with |0x20 also maps '_' onto DEL and '[' onto
+// '{', which the symbol search was once wrong about for exactly that reason.
+func foldByte(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+
+	return c
+}
