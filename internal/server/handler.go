@@ -40,7 +40,7 @@ func (s *Server) Handler() jsonrpc2.Handler {
 		case protocol.MethodInitialize:
 			return s.handleInitialize(ctx, req.Params())
 		case protocol.MethodInitialized:
-			return nil, nil
+			return s.handleInitialized(ctx)
 		case protocol.MethodShutdown:
 			return nil, nil
 		case protocol.MethodExit:
@@ -79,6 +79,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleCodeAction(ctx, req.Params())
 		case protocol.MethodWorkspaceDidChangeWorkspaceFolders:
 			return s.handleDidChangeWorkspaceFolders(ctx, req.Params())
+		case protocol.MethodWorkspaceDidChangeWatchedFiles:
+			return s.handleDidChangeWatchedFiles(ctx, req.Params())
 		case protocol.MethodWorkspaceExecuteCommand:
 			return s.handleExecuteCommand(ctx, req.Params())
 		default:
@@ -94,6 +96,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	}
 
 	s.initialized = true
+	s.watchedFilesDynamic = clientWatchesFiles(params.Capabilities)
 
 	folders, _ := params.WorkspaceFolders.Get()
 
@@ -153,6 +156,37 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 			Version: optStr(s.Version),
 		},
 	}, nil
+}
+
+// clientWatchesFiles reports whether the client will accept a
+// workspace/didChangeWatchedFiles registration. There is no static way to ask
+// for file watching — the protocol only offers dynamic registration — so a
+// client that does not advertise it cannot be watched at all.
+func clientWatchesFiles(caps protocol.ClientCapabilities) bool {
+	w := caps.Workspace
+	if w == nil || w.DidChangeWatchedFiles == nil {
+		return false
+	}
+
+	return w.DidChangeWatchedFiles.DynamicRegistration != nil && *w.DidChangeWatchedFiles.DynamicRegistration
+}
+
+func (s *Server) handleInitialized(_ context.Context) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+	if !s.watchedFilesDynamic {
+		// Not an error, but worth saying once: this session's index is a
+		// startup snapshot, and only cfmleditor.reindex will refresh it.
+		s.log.Info("client does not support file watching; index will not track on-disk changes")
+
+		return nil, nil
+	}
+
+	// registerCapability is a request, so it waits for the client to answer.
+	// This handler serves a notification on the read loop, which must not
+	// block; and the request context is recycled once the handler returns, so
+	// the call carries its own.
+	s.safeGo("registerFileWatchers", func() { s.registerFileWatchers(context.Background()) })
+
+	return nil, nil
 }
 
 func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
@@ -528,8 +562,7 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 	// Invalidate Application.cfc mappings cache if an Application file was saved
 	filePath := docURI.Path()
 
-	baseName := filepath.Base(filePath)
-	if strings.EqualFold(baseName, "Application.cfc") || strings.EqualFold(baseName, "Application.cfm") {
+	if isApplicationFile(filePath) {
 		cfpath.InvalidateAppMappingsCache()
 	}
 

@@ -51,10 +51,9 @@ func (s *Server) indexWorkspace() {
 	indexStart := time.Now()
 
 	type parseResult struct {
-		fileURI    uri.URI
-		pr         *parser.ParseResult
-		file       string
-		persistent bool
+		fileURI uri.URI
+		pr      *parser.ParseResult
+		file    string
 	}
 
 	results := make(chan parseResult, 64)
@@ -70,12 +69,7 @@ func (s *Server) indexWorkspace() {
 		defer indexWg.Done()
 
 		for r := range results {
-			s.index.IndexFileFromResult(r.fileURI, r.pr.Funcs, r.pr.ComponentRefs)
-			s.index.SetThisVars(r.fileURI, r.pr.ThisVars())
-
-			if r.persistent && s.isOrmPath(r.file) {
-				s.index.SetEntity(cfpath.CfcNameFromURI(string(r.fileURI)), r.fileURI)
-			}
+			s.applyIndexResult(r.fileURI, r.file, r.pr)
 
 			indexed++
 		}
@@ -115,7 +109,7 @@ func (s *Server) indexWorkspace() {
 			}
 
 			pr := s.parseContentForIndex(uri.File(f), string(data))
-			results <- parseResult{fileURI: uri.File(f), pr: pr, file: f, persistent: pr.Persistent}
+			results <- parseResult{fileURI: uri.File(f), pr: pr, file: f}
 		}()
 	}
 
@@ -124,6 +118,25 @@ func (s *Server) indexWorkspace() {
 	indexWg.Wait()
 
 	s.log.Info("indexing complete", cflog.Int("files", indexed), cflog.Int("total", total), cflog.Duration("dur", time.Since(indexStart)))
+}
+
+// applyIndexResult writes one parsed file into the index: its signatures and
+// component refs, its this-scoped vars, and its ORM entity registration when
+// the component is persistent and sits in ORM scope.
+//
+// This is the single definition of "what indexing a file means", called by the
+// startup walk (indexWorkspace, indexRoot) and by the watched-file handler. It
+// was previously written out at each of those sites, which is the shape that
+// lets a later hop be added to one and forgotten at the others — a file picked
+// up by a watcher would then be indexed differently from the identical file
+// that happened to exist at startup.
+func (s *Server) applyIndexResult(fileURI uri.URI, path string, pr *parser.ParseResult) {
+	s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.ComponentRefs)
+	s.index.SetThisVars(fileURI, pr.ThisVars())
+
+	if pr.Persistent && s.isOrmPath(path) {
+		s.index.SetEntity(cfpath.CfcNameFromURI(string(fileURI)), fileURI)
+	}
 }
 
 // isOrmPath returns true if the file path is within the ORM entity scope.
@@ -214,14 +227,7 @@ func (s *Server) indexRoot(root string) {
 				return nil
 			}
 
-			content := string(data)
-			pr := s.parseContentForIndex(fileURI, content)
-			s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.ComponentRefs)
-			s.index.SetThisVars(fileURI, pr.ThisVars())
-
-			if pr.Persistent && s.isOrmPath(path) {
-				s.index.SetEntity(cfpath.CfcNameFromURI(string(fileURI)), fileURI)
-			}
+			s.applyIndexResult(fileURI, path, s.parseContentForIndex(fileURI, string(data)))
 		}
 
 		return nil
