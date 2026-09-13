@@ -560,7 +560,7 @@ Counts from the current `make corpus` run (section 5).
 | Grammar cannot parse embedded cfscript/cfquery | 32 (see `GRAMMAR-GAPS.md`) | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
 | Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
 | Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
-| `final component` body not formatted | — | Not a formatter bug: the *document* grammar does not accept `final` on a component at the top of a `.cfc`, in any position or case, and degrades to `html_text` + `text` rather than an `ERROR` node. The formatter therefore emits the body verbatim, the change is whitespace-only, the guard passes it, and the corpus counts the file **clean**. `component` and `abstract component` parse normally. See 6.2. |
+| `final abstract component` refused | — | Not a formatter bug, and no longer a silent one. `final component` — the case this row used to describe — now parses and formats normally, as do `FINAL component` and `abstract component`; the grammar bump fixed it (tree-sitter-cfml #77). What is left is *two* modifiers: the document grammar accepts the header, but the cfscript sub-parse of the body errors, so the formatter refuses the file outright. Loud rather than silent, which is the safe direction. Upstream measured widening the rule and declined it. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
 
@@ -986,18 +986,33 @@ re-filed by mistake: a plain `static { }` block, and the ordered-struct literal
 `$[ key : "value" ]`. `param name="url.x" type="numeric";` also parses — it is
 only the bare `param url.number;` form that fails.
 
-### 6.2 A document-grammar gap that does not produce an ERROR
+### 6.2 The silent document-grammar gap, now closed
 
-`final component { … }` at the top of a `.cfc` is not recognised by the CFML
-document grammar — not in any position (`final abstract component`) and not in
-any case (`FINAL component`). Rather than producing an `ERROR` node it degrades
-to `html_text` + `text`, so nothing downstream can tell that parsing failed:
-the formatter emits the body verbatim, the change is whitespace-only, the guard
-passes it, and the corpus scores the file **clean**. `component` and
-`abstract component` are accepted.
+This section used to record `final component { … }` degrading to `html_text` +
+`text` instead of producing an `ERROR` node — the dangerous shape, because
+nothing downstream could tell parsing had failed: the formatter emitted the body
+verbatim, the change was whitespace-only, the guard passed it, and the corpus
+scored the file **clean**.
 
-This is worth separating from the ERROR-node cases: a refusal is visible and
-safe, while a silent degradation to text is neither.
+That is fixed. Re-measured against the pinned grammar, every single-modifier
+header parses and has its body formatted:
+
+| Header | Document grammar | Body formatted |
+|---|---|---|
+| `component` | accepted | yes |
+| `final component` | accepted | yes |
+| `FINAL component` | accepted | yes |
+| `abstract component` | accepted | yes |
+| `final abstract component` | accepted | **no — formatter refuses** |
+
+Only the two-modifier header is left, and it fails in the *safe* direction. The
+document grammar recognises it (no degradation to text), but the body's cfscript
+sub-parse errors, so `formatter.ParseError` refuses the file rather than emitting
+it blind. tree-sitter-cfml's own `LIMITATIONS.md` records widening the cfscript
+`component` rule to a run of modifiers as measured and declined: `abstract` at
+the head of a component-body member becomes ambiguous between an `access_type`
+and a nested component's modifiers, and the conflict pulls in
+`variable_declaration` as well. No corpus file writes two modifiers there.
 
 ### 6.3 What the remaining files are
 
