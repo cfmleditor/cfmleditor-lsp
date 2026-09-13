@@ -276,12 +276,32 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   graph. Holding trees between requests is the obvious next optimisation and
   looks free; it is a trade of C memory the Go collector does not account for,
   in a daemon shared by every session, and wants to be a decision rather than
-  something that arrives inside a performance patch. Two adjacent ideas were
-  measured and dropped: pooling parsers saves 4.4µs of a 549µs parse on a
-  1,310-line component (0.8%), and there is no pure-Go tree-sitter runtime to
-  move to — every binding on the proxy is cgo, the three grammars are 1.2M
-  lines of *generated* C parse tables that tree-sitter's CLI emits only as C,
-  and the external scanners are another ~1,000 lines of hand-written C.
+  something that arrives inside a performance patch. Pooling parsers was measured
+  and dropped alongside it: 4.4µs of a 549µs parse on a 1,310-line component,
+  0.8%.
+
+  **A pure-Go runtime is a real option and is blocked on the scanner, not on
+  the tables.** `github.com/odvcencio/gotreesitter` is actively maintained and
+  its `ts2go` converts all three of our `parser.c` files (cfml 5,494 states /
+  517 symbols, cfscript 5,315/447, cfquery 4,152/451). What it cannot do is
+  parse CFML: the runtime ships hand-written Go ports of upstream external
+  scanners for 119 grammars and ours is not among them, so every external
+  token is skipped and a tag component comes back as nothing but `ERROR`
+  nodes — verified against the cgo runtime on the same 257-byte sample, which
+  parses it cleanly. Porting means ~3,600 lines of stateful C:
+  `common/scanner.h` (2,068), `common/tag.h` (488) and the three `scanner.c`
+  (1,043, of which cfscript is 975), including the serialize/deserialize pair
+  incremental reuse needs. That is work in the grammar repo, not here.
+
+  Speed is not the reason to want it — the project's own BENCH.md says full
+  parses trade raw speed for portability, and a full parse is 54% of what
+  folding costs. The reasons are that **caching a tree would become safe**,
+  since a Go tree is memory the collector can see, which is the constraint
+  `TestServerHoldsNoTreeSitterTree` exists to hold; that its incremental
+  reparse is where it is fastest (nanoseconds for a no-edit reparse, zero
+  allocations); and that dropping cgo removes the zig cross-compiler from the
+  release workflow, the WASI_SDK requirement from `make build-wasm`, and the
+  blind spot `-race` has across the cgo boundary.
 
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
