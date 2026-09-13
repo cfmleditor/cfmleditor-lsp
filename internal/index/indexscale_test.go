@@ -140,3 +140,36 @@ func TestRemoveFilesUnderClearsPerFileViews(t *testing.T) {
 		t.Errorf("init bucket = %d, want 1", len(idx.Lookup("init")))
 	}
 }
+
+// The same rule as TestIndexFileFromResultDoesNotScaleWithIndexSize, for the
+// lookup on the other side. Hover, definition and completion each ask this on
+// the keystroke (hover twice), and it used to search the variable name's
+// bucket — which for the names that get asked about holds one entry per file in
+// the workspace, each costing a uriKey to reject. On 5,000 files that was
+// 0.98ms and 160KB per lookup.
+func TestLookupComponentRefInFileDoesNotScaleWithIndexSize(t *testing.T) {
+	measure := func(files int) float64 {
+		idx, u := benchIndex(files, 8, true)
+
+		if idx.LookupComponentRefInFile("svc3", u, 100) == nil {
+			t.Fatalf("no ref found with %d files indexed", files)
+		}
+
+		res := testing.Benchmark(func(b *testing.B) {
+			for b.Loop() {
+				idx.LookupComponentRefInFile("svc3", u, 100)
+			}
+		})
+
+		return float64(res.AllocsPerOp())
+	}
+
+	small := measure(200)
+	large := measure(4000)
+
+	t.Logf("allocs/op: 200 files %.0f, 4000 files %.0f", small, large)
+
+	if large > small*2 {
+		t.Errorf("lookup scales with the index: %.0f allocs at 200 files, %.0f at 4000 (20x the files)", small, large)
+	}
+}

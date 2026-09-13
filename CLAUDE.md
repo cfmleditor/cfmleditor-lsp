@@ -720,8 +720,12 @@ index-sized scan turns into a quadratic: `removeFileEntries` walked every
 name bucket on every index write, which made a 5,624-file workspace scan
 take 34s and allocate 6.6GB (0.22s and 95MB once it went through
 `fileFuncs`/`fileRefs`); `workspace/symbol` materialised all 40,000
-definitions per keystroke to return a few dozen. Both were invisible in a
-unit test and obvious in one profile. Reach for
+definitions per keystroke to return a few dozen;
+`LookupComponentRefInFile` — which hover, definition and completion each
+ask on the keystroke — searched the variable name's bucket for the file
+rather than the file's refs for the name, and the names it gets asked
+about (`svc`, `dao`, `qry`) have one entry per file in the workspace.
+All three were invisible in a unit test and obvious in one profile. Reach for
 `go test ./internal/index/ ./internal/server/ -bench . -benchmem -run '^$'`
 before assuming an LSP path is cheap — the benchmarks there load an index
 the size of a real workspace, which is the axis a handler benchmark on an
