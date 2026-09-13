@@ -1120,17 +1120,11 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 	}
 	// Try unqualified
 	if def == nil {
-		defs := s.index.Lookup(funcName)
-		if len(defs) > 0 {
-			def = defs[0]
-
-			for _, d := range defs {
-				if d.URI == docURI {
-					def = d
-
-					break
-				}
-			}
+		// Prefer current file, else the first match. This runs on every
+		// keystroke inside an argument list, so it must not copy the name's
+		// bucket to read one entry out of it.
+		if match, _, total := s.index.LookupPreferred(funcName, docURI); total > 0 {
+			def = match
 		}
 	}
 

@@ -236,7 +236,7 @@ func cmdUnresolved(args []string) {
 					continue
 				}
 
-				if matchGlobalDefs && len(resolver.Index.Lookup(call.FuncName)) > 0 {
+				if matchGlobalDefs && resolver.Index.CountFunctions(call.FuncName) > 0 {
 					mu.Lock()
 					resolved++
 					mu.Unlock()

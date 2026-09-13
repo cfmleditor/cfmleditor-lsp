@@ -66,20 +66,12 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 	}
 
 	// Try user-defined functions from the index
-	defs := s.index.Lookup(funcName)
-	if len(defs) == 0 {
+	// Prefer current file, else the first match. Asked of the index rather
+	// than of a returned slice, so a name every component declares does not
+	// cost a copy of one entry per file in the workspace on each keystroke.
+	def, _, total := s.index.LookupPreferred(funcName, docURI)
+	if total == 0 {
 		return nil, nil
-	}
-
-	// Prefer current file
-	def := defs[0]
-
-	for _, d := range defs {
-		if d.URI == docURI {
-			def = d
-
-			break
-		}
 	}
 
 	return &protocol.SignatureHelp{
