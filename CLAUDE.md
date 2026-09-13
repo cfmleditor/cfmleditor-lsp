@@ -144,6 +144,7 @@ Editor document change
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
+| `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
 | `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment` |
@@ -238,7 +239,25 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 
 - Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
-  actions, document formatting, on-type formatting (`>`), workspace folders.
+  actions, document formatting, range formatting, on-type formatting (`>`), workspace folders.
+- `textDocument/rangeFormatting` (`internal/server/range_formatting.go`) formats the **whole**
+  document and returns only the edits inside the requested lines. Formatting the selected text
+  alone is the obvious approach and wrong twice over: a selection rarely parses standalone, and
+  its indentation depends on everything enclosing it. Going through the whole document makes the
+  result identical line-for-line to format-on-save, so the two commands cannot disagree.
+
+  Lines are matched on their **trimmed** text (`internal/textdiff`, a Myers line diff). Matching
+  raw lines collapses a reindented block into one hunk with nothing to anchor on; trimmed, a
+  reindented line still matches itself and the diff sees only the lines the formatter genuinely
+  added or removed.
+
+  An edit is kept only when it lies **entirely** within the selection. Overlap is not enough: a
+  formatter change is not always divisible — joining a five-line `<cfif …>` header onto one line
+  is a single hunk covering all five — and keeping it because it reaches into the selection
+  rewrites lines the user did not select. The overlap rule did exactly that in 1,745 of the
+  5,509 corpus files that format. The guarantee is therefore: every change fitting inside the
+  selection is applied, and one straddling its edge waits for a wider selection or a document
+  format.
 - `workspace/didChangeWatchedFiles` (`internal/server/watchedfiles.go`) keeps the index current
   when files change outside the editor. There is no static way to ask for this — the protocol
   offers only dynamic registration — so `initialized` sends `client/registerCapability` for

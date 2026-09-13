@@ -137,6 +137,10 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			TriggerCharacters: []string{"<", "/", ".", ">"},
 		},
 		DocumentFormattingProvider: protocol.Boolean(true),
+		// Answered by formatting the whole document and returning only the
+		// edits inside the requested lines, so it can never disagree with
+		// DocumentFormattingProvider above. See handleRangeFormatting.
+		DocumentRangeFormattingProvider: protocol.Boolean(true),
 		DocumentOnTypeFormattingProvider: protocol.DocumentOnTypeFormattingOptions{
 			FirstTriggerCharacter: ">",
 		},
