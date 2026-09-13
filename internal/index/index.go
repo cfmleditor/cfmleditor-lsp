@@ -319,73 +319,106 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 	// The entry itself is still replaced rather than written through: a caller
 	// holding a *FunctionDef is reading def.Line unsynchronised, so the struct
 	// has to be new even though the slot holding it need not be.
-	newFuncs := make(map[*parser.FunctionDef]*parser.FunctionDef)
-	funcBuckets := make(map[string]bool)
+	// Replacements are collected per bucket, for the reason removeFileEntries
+	// gives: a bucket sweep should only consider the entries that could be in
+	// that bucket. Pooling them into one map keyed by pointer made every entry
+	// of a 5,000-entry `init` bucket pay a hash and a probe to be told it was
+	// not one of this file's few.
+	funcReps := make(map[string][]funcReplacement)
+	fileFuncReps := make([]funcReplacement, 0, len(idx.fileFuncs[key]))
 
 	for _, d := range idx.fileFuncs[key] {
-		if uriKey(d.URI) != key || int(d.Line) <= afterLine || newFuncs[d] != nil {
+		if int(d.Line) <= afterLine {
 			continue
 		}
 
 		shifted := *d
 		shifted.Line = uint32(int(shifted.Line) + delta)
-		newFuncs[d] = &shifted
-		funcBuckets[strings.ToLower(d.Name)] = true
+
+		rep := funcReplacement{old: d, new: &shifted}
+		name := strings.ToLower(d.Name)
+		funcReps[name] = append(funcReps[name], rep)
+		fileFuncReps = append(fileFuncReps, rep)
 	}
 
-	newRefs := make(map[*parser.ComponentRef]*parser.ComponentRef)
-	refBuckets := make(map[string]bool)
+	refReps := make(map[string][]refReplacement)
+	fileRefReps := make([]refReplacement, 0, len(idx.fileRefs[key]))
 
 	for _, r := range idx.fileRefs[key] {
-		if uriKey(r.URI) != key || int(r.Line) <= afterLine || newRefs[r] != nil {
+		if int(r.Line) <= afterLine {
 			continue
 		}
 
 		shifted := *r
 		shifted.Line = uint32(int(shifted.Line) + delta)
-		newRefs[r] = &shifted
-		refBuckets[strings.ToLower(r.Variable)] = true
+
+		rep := refReplacement{old: r, new: &shifted}
+		name := strings.ToLower(r.Variable)
+		refReps[name] = append(refReps[name], rep)
+		fileRefReps = append(fileRefReps, rep)
 	}
 
-	if len(newFuncs) == 0 && len(newRefs) == 0 {
+	if len(fileFuncReps) == 0 && len(fileRefReps) == 0 {
 		return
 	}
 
 	// Only the buckets holding a replaced entry need touching. A definition
 	// lives under its lowercased name and a ref under its lowercased variable,
 	// so the affected keys are known without searching for them.
-	for k := range funcBuckets {
-		remapFuncs(idx.funcs[k], newFuncs)
+	for name, reps := range funcReps {
+		remapFuncs(idx.funcs[name], reps)
 	}
 
-	remapFuncs(idx.fileFuncs[key], newFuncs)
+	remapFuncs(idx.fileFuncs[key], fileFuncReps)
 
-	for k := range refBuckets {
-		remapRefs(idx.comprefs[k], newRefs)
+	for name, reps := range refReps {
+		remapRefs(idx.comprefs[name], reps)
 	}
 
-	remapRefs(idx.fileRefs[key], newRefs)
+	remapRefs(idx.fileRefs[key], fileRefReps)
 
 	for _, refs := range idx.scopeRefs[key] {
-		remapRefs(refs, newRefs)
+		remapRefs(refs, fileRefReps)
 	}
+}
+
+// funcReplacement and refReplacement pair an entry with the shifted copy that
+// supersedes it.
+type funcReplacement struct {
+	old, new *parser.FunctionDef
+}
+
+type refReplacement struct {
+	old, new *parser.ComponentRef
 }
 
 // remapFuncs and remapRefs substitute replaced entries into a stored slice in
 // place. Safe because accessors hand out a copy (see snapshot), so the only
 // slices these are called on are the index's own.
-func remapFuncs(entries []*parser.FunctionDef, replaced map[*parser.FunctionDef]*parser.FunctionDef) {
+//
+// reps is scanned rather than hashed: for a name bucket it holds the entries of
+// one file carrying one name, which is one of them unless that file declares
+// the name twice.
+func remapFuncs(entries []*parser.FunctionDef, reps []funcReplacement) {
 	for i, e := range entries {
-		if n := replaced[e]; n != nil {
-			entries[i] = n
+		for _, r := range reps {
+			if r.old == e {
+				entries[i] = r.new
+
+				break
+			}
 		}
 	}
 }
 
-func remapRefs(entries []*parser.ComponentRef, replaced map[*parser.ComponentRef]*parser.ComponentRef) {
+func remapRefs(entries []*parser.ComponentRef, reps []refReplacement) {
 	for i, e := range entries {
-		if n := replaced[e]; n != nil {
-			entries[i] = n
+		for _, r := range reps {
+			if r.old == e {
+				entries[i] = r.new
+
+				break
+			}
 		}
 	}
 }
@@ -577,49 +610,92 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	delete(idx.thisVars, key)
 	delete(idx.scopeRefs, key)
 
-	if defs := idx.fileFuncs[key]; len(defs) > 0 {
-		gone := make(map[*parser.FunctionDef]bool, len(defs))
-		buckets := make(map[string]bool, len(defs))
-
-		for _, d := range defs {
-			gone[d] = true
-			buckets[strings.ToLower(d.Name)] = true
-		}
-
-		keep := func(e *parser.FunctionDef) bool { return !gone[e] }
-
-		for k := range buckets {
-			if filtered := keepFuncs(idx.funcs[k], keep); len(filtered) == 0 {
-				delete(idx.funcs, k)
-			} else {
-				idx.funcs[k] = filtered
-			}
+	// Grouped by bucket, not pooled into one set of everything this file
+	// declares. Both spellings visit the same bucket entries; the difference is
+	// what each visit costs. A pooled set has to be a map, so every entry in a
+	// 5,000-entry `init` bucket pays a hash and a probe to be told it is not
+	// one of this file's eight — 57% of the time this function spent, measured,
+	// was runtime.mapaccess1. Grouped, the candidates for a bucket are the
+	// entries of this file that carry that one name, which is one of them
+	// except where a file declares the same name twice, so the test is a
+	// pointer comparison or two.
+	for name, group := range groupFuncsByName(idx.fileFuncs[key]) {
+		if filtered := keepFuncs(idx.funcs[name], notInFuncs(group)); len(filtered) == 0 {
+			delete(idx.funcs, name)
+		} else {
+			idx.funcs[name] = filtered
 		}
 	}
 
 	delete(idx.fileFuncs, key)
 
-	if refs := idx.fileRefs[key]; len(refs) > 0 {
-		gone := make(map[*parser.ComponentRef]bool, len(refs))
-		buckets := make(map[string]bool, len(refs))
-
-		for _, r := range refs {
-			gone[r] = true
-			buckets[strings.ToLower(r.Variable)] = true
-		}
-
-		keep := func(e *parser.ComponentRef) bool { return !gone[e] }
-
-		for k := range buckets {
-			if filtered := keepRefs(idx.comprefs[k], keep); len(filtered) == 0 {
-				delete(idx.comprefs, k)
-			} else {
-				idx.comprefs[k] = filtered
-			}
+	for name, group := range groupRefsByVariable(idx.fileRefs[key]) {
+		if filtered := keepRefs(idx.comprefs[name], notInRefs(group)); len(filtered) == 0 {
+			delete(idx.comprefs, name)
+		} else {
+			idx.comprefs[name] = filtered
 		}
 	}
 
 	delete(idx.fileRefs, key)
+}
+
+// groupFuncsByName and groupRefsByVariable bucket one file's entries by the key
+// they are filed under, so a bucket sweep only has to consider the entries that
+// could actually be in it.
+func groupFuncsByName(defs []*parser.FunctionDef) map[string][]*parser.FunctionDef {
+	if len(defs) == 0 {
+		return nil
+	}
+
+	byName := make(map[string][]*parser.FunctionDef, len(defs))
+	for _, d := range defs {
+		k := strings.ToLower(d.Name)
+		byName[k] = append(byName[k], d)
+	}
+
+	return byName
+}
+
+func groupRefsByVariable(refs []*parser.ComponentRef) map[string][]*parser.ComponentRef {
+	if len(refs) == 0 {
+		return nil
+	}
+
+	byVar := make(map[string][]*parser.ComponentRef, len(refs))
+	for _, r := range refs {
+		k := strings.ToLower(r.Variable)
+		byVar[k] = append(byVar[k], r)
+	}
+
+	return byVar
+}
+
+// notInFuncs and notInRefs are keep predicates over a group small enough that a
+// linear scan beats hashing. The group holds one file's entries under a single
+// name, so its length is the number of times that file declares that name.
+func notInFuncs(group []*parser.FunctionDef) func(*parser.FunctionDef) bool {
+	return func(e *parser.FunctionDef) bool {
+		for _, g := range group {
+			if g == e {
+				return false
+			}
+		}
+
+		return true
+	}
+}
+
+func notInRefs(group []*parser.ComponentRef) func(*parser.ComponentRef) bool {
+	return func(e *parser.ComponentRef) bool {
+		for _, g := range group {
+			if g == e {
+				return false
+			}
+		}
+
+		return true
+	}
 }
 
 // LookupComponentRef returns component references for the given variable name.

@@ -427,7 +427,18 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			}
 		}
 
-		items = append(items, s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))...)
+		// Nothing may be appended to items after this. The cached slice is
+		// handed over rather than copied when there is nothing to merge it
+		// with, so items can be the process-wide builtin list or a document's
+		// cache entry — either of which a later append could write into past
+		// its length, where a concurrent request is appending too. The copy
+		// this avoids is around half the bytes of a completion round trip:
+		// 383KB against the 742KB the whole request and its marshalling cost.
+		if cached := s.completionFromCache(params.TextDocument.URI, int(params.Position.Line)); len(items) == 0 {
+			items = cached
+		} else {
+			items = append(items, cached...)
+		}
 	}
 
 	s.log.Debug("completion: total",
@@ -436,21 +447,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		cflog.Int("items", len(items)),
 	)
 
-	if !s.TagSnippets || !s.FunctionSnippets {
-		for i := range items {
-			if items[i].InsertTextFormat != protocol.InsertTextFormatSnippet {
-				continue
-			}
-
-			isTag := items[i].Kind == protocol.CompletionItemKindKeyword
-			isFunc := items[i].Kind == protocol.CompletionItemKindFunction || items[i].Kind == protocol.CompletionItemKindMethod
-
-			if (isTag && !s.TagSnippets) || (isFunc && !s.FunctionSnippets) {
-				items[i].InsertText = protocol.Optional[string]{}
-				items[i].InsertTextFormat = protocol.InsertTextFormatPlainText
-			}
-		}
-	}
+	items = s.applySnippetPolicy(items)
 
 	if items == nil {
 		items = []protocol.CompletionItem{}
@@ -594,6 +591,52 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 
 // completionFromCache returns cached items for the cursor's scope.
 // File cache already contains builtins + globals. Function cache has local vars only.
+// applySnippetPolicy blanks the snippet insert text of the item kinds the
+// config turned off, copying only if it has something to change.
+//
+// It used to write over items in place at the end of the handler, and items is
+// frequently a slice the server handed over rather than copied: the
+// process-wide builtin function list behind a sync.Once, or a document's
+// completion cache entry. So with functionSnippets or tagSnippets off, serving
+// one request permanently rewrote the shared list for every session in the
+// process. That was invisible because the edit is idempotent and the settings
+// are process-wide, and it is the reason the handler could not hand out the
+// cached slice without copying it first.
+//
+// Both flags default on, so the common path returns the input untouched and
+// costs nothing.
+func (s *Server) applySnippetPolicy(items []protocol.CompletionItem) []protocol.CompletionItem {
+	if s.TagSnippets && s.FunctionSnippets {
+		return items
+	}
+
+	var out []protocol.CompletionItem
+
+	for i := range items {
+		if items[i].InsertTextFormat != protocol.InsertTextFormatSnippet {
+			continue
+		}
+
+		isTag := items[i].Kind == protocol.CompletionItemKindKeyword
+		isFunc := items[i].Kind == protocol.CompletionItemKindFunction || items[i].Kind == protocol.CompletionItemKindMethod
+
+		if (isTag && !s.TagSnippets) || (isFunc && !s.FunctionSnippets) {
+			if out == nil {
+				out = append(make([]protocol.CompletionItem, 0, len(items)), items...)
+			}
+
+			out[i].InsertText = protocol.Optional[string]{}
+			out[i].InsertTextFormat = protocol.InsertTextFormatPlainText
+		}
+	}
+
+	if out == nil {
+		return items
+	}
+
+	return out
+}
+
 func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.CompletionItem {
 	s.mu.RLock()
 	funcs := s.funcRanges[docURI]

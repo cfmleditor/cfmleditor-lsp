@@ -335,6 +335,20 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   editor falls back to its own behaviour. `rangeFormatting` is a second gate *under*
   `formatting.enabled`, not an alternative to it — it is the only one of the four that writes to
   the buffer, and it shares all its machinery with format-on-save.
+- **Completion hands its cached items over, it does not copy them.** The
+  `inHashExpr` branch and the default branch both return
+  `completionFromCache`'s slice directly when there is nothing to merge with it,
+  so the response can be the process-wide `getBuiltinFuncItems` list (a
+  `sync.Once` shared by every session in the process) or a document's cache
+  entry. **Nothing downstream may write to `items`, and nothing may append to it
+  after that point** — an append would write past the length into an array a
+  concurrent request is appending to as well. `applySnippetPolicy` therefore
+  copies before editing; it used to edit in place, which permanently rewrote the
+  shared list for every session the first time a config turned snippets off.
+  `TestCompletionDoesNotWriteToTheSharedBuiltinList` pins this, and fails if the
+  in-place edit comes back. Removing the copy took a completion request from
+  383KB to 3.4KB, roughly half the bytes of the whole round trip including its
+  JSON marshalling.
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
 - `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
