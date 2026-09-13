@@ -303,6 +303,23 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   release workflow, the WASI_SDK requirement from `make build-wasm`, and the
   blind spot `-race` has across the cgo boundary.
 
+  **A WASM grammar skips the scanner port and pays for it elsewhere.** The
+  grammar repo already ships `docs/tree-sitter-{cfml,cfscript,cfquery}.wasm`
+  for its playground, and those *do* carry the external scanner — their
+  imports are `env.iswspace`, `env.iswalpha`, `env.towlower` and friends,
+  which is what `scanner.c` calls. Nothing can load them, though: gotreesitter
+  does not take WASM scanners (its own WASM support is the other direction,
+  compiling itself for `GOOS=js`), and go-tree-sitter v0.25.0 has no wasm
+  store. Using one means web-tree-sitter's architecture in Go — run
+  `docs/tree-sitter.wasm` (196KB, 122 `ts_*` exports, an Emscripten build)
+  under wazero, load the 3.4MB grammar into it as a relocatable side module
+  whose `env.*` imports the runtime's allocator satisfies, and marshal every
+  call across. Nobody has published that loader. It would also be *slower*
+  than what we have: a host-to-guest wazero call is in cgo's ballpark rather
+  than below it, and the parse runs as compiled WASM instead of native C, so
+  both halves of folding's cost get worse. Add 10.1MB of grammar to ship.
+  The only thing it buys over the pure-Go route is not writing the scanner.
+
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
   **closing line stays visible**, which takes two separate checks: the deepest last *token* is
