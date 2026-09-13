@@ -53,6 +53,8 @@ Each release makes the formatter render constructs it previously refused, so a b
 
 ### Fixed — workspace and references
 
+- **Go-to-definition, hover and signature help now pick the same component every time.** Where several components declare a method of the same name and none of them is the file you are in, the one you were shown was whichever the index happened to hold first — which is the order a parallel workspace scan finished in, so it could differ after a restart. The nearest one in the directory tree is now chosen, and "N definitions found" is listed nearest first, both stable across sessions.
+
 - **The index was a startup snapshot.** It was built once and afterwards updated only from files open in the editor, so a `git pull`, a branch switch, a codegen step or a second editor left completion, go-to-definition and hover answering from components that no longer existed — confidently wrong rather than merely stale, and only `cfmleditor.reindex` could clear it. Daemon mode was worse: the daemon outlives every client, so one stale snapshot was shared by all of them and survived closing the editor.
 - A CFC that declares **no functions** — a property-only bean, a DTO, a `this`-scope struct — was re-read from disk and re-parsed on *every* lookup against it. "Has no indexed functions" was standing in for "has never been indexed", and for these components the two differ permanently.
 - Every workspace-wide search covered nothing in a session with no `.cfmleditor.json`. `cfmleditor.findRefs` answered `0 match(es)` for a function with three callers; `scanWorkspace` reported `0 parse errors in 0 files`. Eight call sites now fall back to the roots the editor opened.

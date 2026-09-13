@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/uri"
 )
 
@@ -85,7 +86,35 @@ func (idx *Index) LookupPreferred(name string, preferURI uri.URI) (def *parser.F
 		}
 	}
 
-	return defs[0], false, len(defs)
+	return nearestTo(defs, preferURI), false, len(defs)
+}
+
+// nearestTo picks the definition in the directory closest to preferURI, and the
+// lowest URI among equals.
+//
+// This used to be defs[0] — the order the bucket happened to hold, which is the
+// order eight parallel indexing goroutines finished in, so it differed between
+// restarts and hovering the same call could name a different component than it
+// did yesterday. Nearest is both stable and the better guess: a workspace where
+// several components declare the same method name is usually one where the
+// relevant one is the near one.
+//
+// The lowest-URI fallback is not cosmetic. Without it two files the same
+// distance away leave the answer decided by bucket order again, which is the
+// thing being fixed.
+func nearestTo(defs []*parser.FunctionDef, preferURI uri.URI) *parser.FunctionDef {
+	ref := string(preferURI)
+	best := defs[0]
+	bestDist := cfpath.URIDistance(ref, string(best.URI))
+
+	for _, d := range defs[1:] {
+		dist := cfpath.URIDistance(ref, string(d.URI))
+		if dist < bestDist || (dist == bestDist && d.URI < best.URI) {
+			best, bestDist = d, dist
+		}
+	}
+
+	return best
 }
 
 // CountFunctions reports how many definitions are indexed under a name, without

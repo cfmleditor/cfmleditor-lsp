@@ -1,10 +1,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
-	json "github.com/go-json-experiment/json"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	json "github.com/go-json-experiment/json"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -105,6 +108,14 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 				})
 			}
 		}
+
+		// Nearest first, and the lowest URI among equals. The editor lists
+		// these in the order they are returned, and that order used to be the
+		// index's bucket order — the order eight parallel indexing goroutines
+		// finished in, so the same "3 definitions found" list could come back
+		// differently after a restart. Nearest is also the more useful first
+		// entry, since it is the one the caller most likely meant.
+		orderByNearest(locations, docURI)
 
 		if len(locations) == 1 {
 			return locations[0], nil
@@ -280,4 +291,23 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 	}
 
 	return nil
+}
+
+// orderByNearest sorts locations by directory distance from docURI, then by
+// URI, so the list a client shows is stable across sessions rather than
+// following whatever order the index happened to hold.
+func orderByNearest(locations []protocol.Location, docURI uri.URI) {
+	ref := string(docURI)
+
+	slices.SortFunc(locations, func(a, b protocol.Location) int {
+		if d := cmp.Compare(cfpath.URIDistance(ref, string(a.URI)), cfpath.URIDistance(ref, string(b.URI))); d != 0 {
+			return d
+		}
+
+		if d := cmp.Compare(a.URI, b.URI); d != 0 {
+			return d
+		}
+
+		return cmp.Compare(a.Range.Start.Line, b.Range.Start.Line)
+	})
 }
