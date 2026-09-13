@@ -38,7 +38,7 @@ func providerOn(t *testing.T, v any) bool {
 }
 
 // TestFeaturesDefaultOnInCapabilities is the baseline the switches are measured
-// against: a server with no config advertises all three providers.
+// against: a server with no config advertises the opt-out providers.
 func TestFeaturesDefaultOnInCapabilities(t *testing.T) {
 	caps := initializeWithConfig(t, `{"formatting": {"enabled": true}}`).capabilities()
 
@@ -46,12 +46,49 @@ func TestFeaturesDefaultOnInCapabilities(t *testing.T) {
 		t.Error("documentHighlight is not advertised by default")
 	}
 
-	if !providerOn(t, caps.FoldingRangeProvider) {
-		t.Error("foldingRange is not advertised by default")
-	}
-
 	if !providerOn(t, caps.DocumentRangeFormattingProvider) {
 		t.Error("rangeFormatting is not advertised by default")
+	}
+}
+
+// TestFoldingIsNotAdvertisedUntilAskedFor. Folding is the one opt-in switch
+// here, so the editor must be told there is no provider and fall back to
+// folding by indentation — which is what it did before the feature existed.
+func TestFoldingIsNotAdvertisedUntilAskedFor(t *testing.T) {
+	caps := initializeWithConfig(t, `{"formatting": {"enabled": true}}`).capabilities()
+
+	if providerOn(t, caps.FoldingRangeProvider) {
+		t.Error("foldingRange is advertised without being asked for")
+	}
+
+	on := initializeWithConfig(t, `{
+		"formatting": {"enabled": true},
+		"features": {"folding": true}
+	}`).capabilities()
+
+	if !providerOn(t, on.FoldingRangeProvider) {
+		t.Error("foldingRange is still not advertised after being switched on")
+	}
+}
+
+// TestFoldingAnswersWhenSwitchedOn. The capability is one gate and the handler
+// is another, and a test that only checked the capability would pass with the
+// handler still refusing.
+func TestFoldingAnswersWhenSwitchedOn(t *testing.T) {
+	s := initializeWithConfig(t, `{"features": {"folding": true}}`)
+
+	docURI := uriOfTempDoc(t, s, "component {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}\n")
+
+	fr, err := s.handleFoldingRange(context.Background(), mustJSON(t, protocol.FoldingRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folds, ok := fr.([]protocol.FoldingRange)
+	if !ok || len(folds) == 0 {
+		t.Errorf("folding is switched on but returned %#v", fr)
 	}
 }
 
@@ -213,14 +250,14 @@ func TestWatchedFilesSwitchStopsReindexing(t *testing.T) {
 func TestNewServerDefaultsFeaturesOn(t *testing.T) {
 	s := newTestServer()
 
-	rv := reflect.ValueOf(s.Features)
-	for i := range rv.Type().NumField() {
-		if rv.Field(i).Interface() != true {
-			t.Errorf("a fresh Server has %s off, want on", rv.Type().Field(i).Name)
-		}
+	// The trap, stated directly: every switch off is what the struct says when
+	// nobody has applied the defaults.
+	if s.Features == (config.ResolvedFeatures{}) {
+		t.Fatal("a fresh Server took the zero value of ResolvedFeatures — every switch off")
 	}
 
-	// And it must match what the config package says an absent block means.
+	// And it must match what the config package says an absent block means,
+	// which is the assertion that stays correct as those defaults change.
 	if s.Features != config.ResolveFeatures(nil) {
 		t.Errorf("NewServer defaults %+v, config.ResolveFeatures(nil) says %+v", s.Features, config.ResolveFeatures(nil))
 	}

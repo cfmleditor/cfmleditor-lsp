@@ -73,7 +73,7 @@ func foldingRanges(content string) []protocol.FoldingRange {
 
 	var folds []protocol.FoldingRange
 
-	collectFolds(tree.RootNode(), src, 0, opaque, &folds)
+	collectFolds(tree.RootNode(), src, 0, opaque, &folds, 0)
 
 	for _, m := range injections {
 		g, known := injectionGrammars[m.Language]
@@ -90,7 +90,7 @@ func foldingRanges(content string) []protocol.FoldingRange {
 
 		// Walked with the region's own bytes, since the sub-tree's positions
 		// are relative to them; row 0 of the region is the row it starts on.
-		collectFolds(sub.RootNode(), region, uint32(m.Node.StartPosition().Row), opaque, &folds)
+		collectFolds(sub.RootNode(), region, uint32(m.Node.StartPosition().Row), opaque, &folds, 0)
 		sub.Close()
 	}
 
@@ -100,19 +100,37 @@ func foldingRanges(content string) []protocol.FoldingRange {
 // collectFolds walks a tree pre-order, so an enclosing construct is recorded
 // before the constructs inside it, which is what makes dedupeFolds keep the
 // outer one of two nodes covering the same lines.
-func collectFolds(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uintptr]bool, out *[]protocol.FoldingRange) {
-	if n.Parent() != nil && !opaque[n.Id()] && !wrapsOnlyOpaque(n, opaque) {
-		if f, ok := foldFor(n, src, rowOffset); ok {
+// Every accessor on a tree-sitter node is a cgo call into the C grammar, and
+// this walk visits every node in the file: it measured 71% runtime.cgocall.
+// What the body below is arranged around is therefore the *number of accessor
+// calls per node*, not the work between them.
+//
+// Three things follow from that. depth replaces a Parent() call that existed
+// only to recognise the root. Range() reads both positions and both byte
+// offsets in one call where StartPosition/EndPosition/EndByte were three. And
+// the cheap rejection — a node that begins and ends on one line cannot fold —
+// runs before anything else, because most nodes in a file are single-line and
+// each one that stops here stops after a single accessor.
+func collectFolds(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uintptr]bool, out *[]protocol.FoldingRange, depth int) {
+	// Id() is itself a call, so it is only worth asking when something can be
+	// opaque — that is, when the file has injected regions at all.
+	if len(opaque) > 0 && opaque[n.Id()] {
+		return
+	}
+
+	if depth > 0 {
+		if f, ok := foldFor(n, src, rowOffset); ok && !wrapsOnlyOpaque(n, opaque) {
 			*out = append(*out, f)
 		}
 	}
 
-	if opaque[n.Id()] {
-		return
-	}
-
-	for i := range n.ChildCount() {
-		collectFolds(n.Child(i), src, rowOffset, opaque, out)
+	// Named children only. An anonymous node is a literal token from the
+	// grammar and tokens are leaves, so no named node hides under one — and a
+	// node that is not named can never fold. Skipping them drops roughly half
+	// the tree, and with it half the accessor calls this walk is made of.
+	// TestFoldingWalksEveryFoldableNode pins the leaf assumption.
+	for i := range n.NamedChildCount() {
+		collectFolds(n.NamedChild(i), src, rowOffset, opaque, out, depth+1)
 	}
 }
 
@@ -127,6 +145,13 @@ func collectFolds(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uintp
 // on the line after the opening tag, so the extents differ and the block keeps
 // its fold.
 func wrapsOnlyOpaque(n *sitter.Node, opaque map[uintptr]bool) bool {
+	// Nothing is opaque in a file with no injected regions, which is every
+	// tag-syntax document, and walking its named children to discover that is
+	// a cgo call per child.
+	if len(opaque) == 0 {
+		return false
+	}
+
 	for i := range n.NamedChildCount() {
 		c := n.NamedChild(i)
 		if !opaque[c.Id()] {
@@ -144,12 +169,13 @@ func wrapsOnlyOpaque(n *sitter.Node, opaque map[uintptr]bool) bool {
 // foldFor turns one node into a folding range, or reports that it is not worth
 // folding.
 func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRange, bool) {
-	if !n.IsNamed() {
-		return protocol.FoldingRange{}, false
-	}
+	// One call for both positions and both byte offsets, and the first thing
+	// asked of the node: a single-line node cannot fold, and most nodes are
+	// single-line.
+	r := n.Range()
 
-	start := uint32(n.StartPosition().Row)
-	end := uint32(n.EndPosition().Row)
+	start := uint32(r.StartPoint.Row)
+	end := uint32(r.EndPoint.Row)
 
 	if end <= start {
 		return protocol.FoldingRange{}, false
@@ -183,7 +209,7 @@ func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRang
 	// Comments hit neither and fold to their last line, which is right: their
 	// last line carries content.
 	switch {
-	case endsInLeadingWhitespace(n, src):
+	case endsInLeadingWhitespace(r, src):
 		end--
 	default:
 		if last := deepestLastToken(n); last != nil {
@@ -208,9 +234,11 @@ func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRang
 // endsInLeadingWhitespace reports whether everything on the node's last line,
 // up to where the node ends, is whitespace — so the node contributes nothing to
 // that line.
-func endsInLeadingWhitespace(n *sitter.Node, src []byte) bool {
-	endByte := n.EndByte()
-	col := n.EndPosition().Column
+// It takes the range its caller already read rather than re-reading the node,
+// which was two more cgo calls for a node that had got this far.
+func endsInLeadingWhitespace(r sitter.Range, src []byte) bool {
+	endByte := r.EndByte
+	col := r.EndPoint.Column
 
 	if endByte > uint(len(src)) || col > endByte {
 		return false

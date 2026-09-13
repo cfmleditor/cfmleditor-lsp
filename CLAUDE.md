@@ -258,6 +258,18 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   the file. Each injected region is parsed with its own grammar and walked too, its rows offset
   by where the region starts.
 
+  **The walk descends through named children only**, and every accessor on a
+  tree-sitter node is a cgo call — the walk measured 71% `runtime.cgocall`. An
+  anonymous node is a grammar literal and tokens are leaves, so nothing
+  foldable hides under one (`TestAnonymousNodesAreLeaves`; also checked by
+  running both walks over the corpus — 92,001 folds, none different). For the
+  same reason `Range()` is read once per node instead of
+  `StartPosition`/`EndPosition`/`EndByte`, the single-line rejection runs
+  before anything else, and a `depth` counter replaces a `Parent()` call. What
+  is left is dominated by the CFScript sub-parse of a script `.cfc` body,
+  which is inherent to the design above: 6.5ms for a 500-line component,
+  against 13ms before.
+
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
   **closing line stays visible**, which takes two separate checks: the deepest last *token* is
@@ -318,10 +330,15 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   whole-line match, because the parser also records the variables a component ref flows into
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
-  All four default to **on**, so they are opt-outs; the fields are `*bool` for the reason the
-  `completions` block documents — a defaults-true flag as a plain bool cannot tell "turned off"
-  from "not mentioned", so naming one key would switch off its siblings. `mergeFeatures` unions
-  key by key for the same reason `mergeFormatting` does.
+  Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
+  (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
+  one opaque region, so answering one request means parsing the whole body with the CFScript
+  grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
+  per open document. The fields are `*bool` for the reason the `completions` block documents — a
+  defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
+  key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
+  `mergeFormatting` does. `featureDefaults` in `features_chain_test.go` states every default and
+  fails if a new switch is added without one.
 
   Two traps this shape sets, both with a test:
   - **The zero value is every switch off.** `NewServer` therefore seeds `config.ResolveFeatures(nil)`,
@@ -379,7 +396,7 @@ the user-facing view and all `formatting` defaults.
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability off switches: `documentHighlight`, `folding`, `watchedFiles`, `rangeFormatting`. All default **on** — opt-outs, for when one misbehaves. See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr |
 

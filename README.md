@@ -59,7 +59,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
-| `features` | No | Off switches for individual capabilities. All default to `true`; set the block only to turn one off. See below. |
+| `features` | No | Per-capability switches. `documentHighlight`, `watchedFiles` and `rangeFormatting` default to `true`; `folding` defaults to `false` and is opt-in. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 
 ### Mappings
@@ -186,30 +186,38 @@ there is nothing it could honestly do with `false` short of declining to format.
 
 ### Features
 
-Every capability the server adds is on by default, but each can be switched off
+Most capabilities the server adds are on by default and each can be switched off
 on its own, for when one misbehaves on a real workspace and the alternative is
-downgrading the binary:
+downgrading the binary. **`folding` is the exception: it is off unless you ask
+for it.**
 
 ```json
 {
   "features": {
     "documentHighlight": true,
-    "folding": true,
+    "folding": false,
     "watchedFiles": true,
     "rangeFormatting": true
   }
 }
 ```
 
-| Key | Turns off |
-|---|---|
-| `documentHighlight` | Shading the other occurrences of the identifier under the cursor. |
-| `folding` | Syntax-aware folding ranges; the editor falls back to folding by indentation. |
-| `watchedFiles` | Re-indexing files changed outside the editor. The index then reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
-| `rangeFormatting` | "Format Selection", leaving whole-document formatting and format-on-save working. |
+| Key | Default | Controls |
+|---|---|---|
+| `documentHighlight` | on | Shading the other occurrences of the identifier under the cursor. |
+| `folding` | **off** | Syntax-aware folding ranges. With it off the editor folds by indentation, as it did before the feature existed. |
+| `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
+| `rangeFormatting` | on | "Format Selection". Switching it off leaves whole-document formatting and format-on-save working. |
 
-Set only the keys you want off — the block is merged key by key, so naming one
-leaves the rest alone, and an editor's `initializationOptions` and a project's
+`folding` is opt-in because it is the most expensive request here to answer. A
+script-syntax component reaches the CFML grammar as one opaque region, so
+folding it means parsing the whole component body with the CFScript grammar on
+every request — a few milliseconds on a large component, and there is no way to
+answer it more cheaply without holding a parse tree per open document. Turn it
+on with `{"features": {"folding": true}}` if you want it.
+
+Set only the keys you want to change — the block is merged key by key, so naming
+one leaves the rest alone, and an editor's `initializationOptions` and a project's
 `.cfmleditor.json` can each set different ones.
 
 Switching one off *un-advertises* it rather than leaving the server to decline
