@@ -571,12 +571,40 @@ marker, e.g. `{"match": "^REQUEST\\[\\]$", "resolve": "nocheck", "prefix": "REQU
 "noFollow": true}` — the parser deliberately does not do this automatically, since suppressing
 vs. surfacing "genuinely dynamic" is a project-level judgment call.
 
-**Known parser limitation: CFML comments containing CFScript**
+**Known parser limitation: a CFML comment inside a tag's attribute list**
 
-The tag parser does not fully skip `<!--- ... --->` comment blocks that contain embedded
-CFScript or `<cfset>` tags. Variables declared in live code but only used inside a comment block
-still generate lint errors for the commented-out lines. These are false positives; the fix
-requires improving comment boundary detection in the tag parser.
+This note used to say the tag parser "does not fully skip `<!--- ... --->` comment blocks that
+contain embedded CFScript or `<cfset>` tags", which reads as a broad problem and is not one.
+Re-probed across seventeen shapes, fifteen are handled correctly — a tag comment holding
+`<cfset>` or a whole `<cfscript>`, a comment inside `<cffunction>` or `<cfoutput>`, `/* */` and
+`//` in cfscript, a CFML comment inside `<cfscript>`, a use-in-comment with a live declaration,
+nested comments, a comment holding an entire `<cffunction>`, an unterminated comment at EOF, an
+unbalanced quote, a tag-syntax `.cfc`, a four-dash opener, and CRLF.
+
+One shape looks like a bug and is not: a `--->` inside a quoted string ends the comment early.
+tree-sitter puts the `cf_comment` end at the same place, because CFML comments are not
+string-aware — an engine does the same. Do not "fix" it.
+
+What genuinely diverges is a comment **between a tag's attributes**:
+
+```cfml
+<cffunction name="real" <!--- <cfset p = getThing()><cfset p.gone()> ---> output="false">
+```
+
+tree-sitter parses that properly (`cf_attribute`, `cf_comment`, `cf_attribute`). The tag parser
+does not: roughly eight sites locate a tag's closing `>` with a bare
+`strings.IndexByte(src, '>')`, and the first `>` here is the one inside the comment, so the tag
+is treated as ended and the rest of the comment is scanned as live tags — reporting `p.gone()`
+as an unresolved call. Quoted attribute values *are* handled (`<cfset s = "a > b">`,
+`hint="returns a > b"` and `<a title="x > y">` all parse correctly); only comments are missed.
+
+**It is close to unreachable.** One file in the 5,624-file corpus contains the shape —
+`Lucee/test/jira/Jira3190/index.cfm`, a regression test whose comment holds no code — so the
+corpus produces zero false positives from it. Fixing it means one shared `tagEndIndex` helper
+that skips quotes *and* comments, routed through all eight sites. That consolidation is worth
+doing whenever someone next works in that area, since eight independent copies of the same scan
+are the parallel-list hazard this file warns about elsewhere; it is not worth doing for this
+bug alone.
 
 ## `noFollow` flag
 
