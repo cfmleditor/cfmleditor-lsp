@@ -132,7 +132,7 @@ Editor document change
 |---|---|
 | `internal/parser` | Line-scanner/tag-search parsing → `ParseResult`; resolver matching (`ast.go`) |
 | `internal/server` | LSP handler wiring, completion, definition, hover, symbols, signature help, code actions, document links, formatting, on-type formatting, watched-file reindexing, workspace commands, bean scanning |
-| `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities. `HasFile` answers "indexed at all" — not the same as `FunctionsForFile` returning nothing, since a property-only bean indexes to an empty but present entry |
+| `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities. `HasFile` answers "indexed at all" — not the same as `FunctionsForFile` returning nothing, since a property-only bean indexes to an empty but present entry. Two views of every entry — the name buckets (`funcs`/`comprefs`) and the per-file lists (`fileFuncs`/`fileRefs`) — hold the same pointers, and **every writer must fill or clear both**; `removeFileEntries` reaches the buckets *through* the per-file lists, so a writer that updates one view alone leaves entries no removal can find |
 | `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain |
 | `internal/path` | Case-insensitive path resolution, mappings, globs, `Application.cfc` mapping/bean/ORM extraction, binary + CFML file detection |
 | `internal/config` | `.cfmleditor.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
@@ -713,6 +713,21 @@ absence has each let one through:
   pre-existing data race on the workspace roots that a non-race run could not.
 - **Print actual output before writing an expected string.** Hand-counting the
   indentation of a nested fixture is wrong more often than right.
+
+**Cost that scales with the workspace hides in per-file operations.** The
+things that run once per file, or once per keystroke, are where an
+index-sized scan turns into a quadratic: `removeFileEntries` walked every
+name bucket on every index write, which made a 5,624-file workspace scan
+take 34s and allocate 6.6GB (0.22s and 95MB once it went through
+`fileFuncs`/`fileRefs`); `workspace/symbol` materialised all 40,000
+definitions per keystroke to return a few dozen. Both were invisible in a
+unit test and obvious in one profile. Reach for
+`go test ./internal/index/ ./internal/server/ -bench . -benchmem -run '^$'`
+before assuming an LSP path is cheap — the benchmarks there load an index
+the size of a real workspace, which is the axis a handler benchmark on an
+empty server cannot see. Pin the shape, not the clock, when it matters:
+`TestIndexFileFromResultDoesNotScaleWithIndexSize` compares allocations at
+two index sizes, so it fails on the regression rather than on a busy runner.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in
