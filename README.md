@@ -36,6 +36,33 @@ Match it to the version in `go.mod` whenever that is bumped:
 go work use
 ```
 
+### Keep gopls on the same Go release
+
+gopls type-checks with the `go/types` of the Go release it was *built with*, not
+the one on your `PATH`. A gopls built with an older Go rejects syntax that
+release did not have, so after a `go.mod` bump your editor fills with errors on
+code that builds and lints cleanly. Go 1.27 added `new(expr)` and allowed any
+valid field selector as a struct literal key, and both are used here, so a gopls
+built with 1.26 reports roughly a hundred and thirty phantom errors — mostly
+`unknown field X in struct literal`.
+
+Check what yours was built with, and rebuild it against the pinned toolchain if
+it is behind:
+
+```sh
+go version -m $(command -v gopls) | head -1
+GOTOOLCHAIN=go1.27.1 go install golang.org/x/tools/gopls@latest
+```
+
+Editors that manage their own copy need pointing at the rebuilt one, or their
+cached binary removed so it is fetched again — Zed keeps its under
+`~/Library/Application Support/Zed/languages/gopls/`, and the filename records
+the Go it was built with.
+
+This is the same trap `make lint` documents at length for golangci-lint, which
+is why the Makefile builds that from source under this module's own toolchain.
+gopls cannot be pinned the same way, because the build never invokes it.
+
 ## Run
 
 The server communicates over stdio using JSON-RPC 2.0 with LSP headers:
