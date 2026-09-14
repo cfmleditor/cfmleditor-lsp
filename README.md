@@ -16,6 +16,26 @@ Or manually:
 go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
 ```
 
+The Go toolchain version is pinned in `go.mod`, and CGO is required (the
+tree-sitter grammar is C).
+
+### If you keep a `go.work`
+
+A `go.work` is the normal setup for anyone working on the grammar and the server
+together, and it is gitignored — so nothing in the repo updates it for you. It
+carries its own `go` directive, and the build refuses to start when that is
+older than `go.mod`'s:
+
+```
+go: module . listed in go.work file requires go >= 1.27.1, but go.work lists go 1.26.8
+```
+
+Match it to the version in `go.mod` whenever that is bumped:
+
+```sh
+go work use
+```
+
 ## Run
 
 The server communicates over stdio using JSON-RPC 2.0 with LSP headers:
