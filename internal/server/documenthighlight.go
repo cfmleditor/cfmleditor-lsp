@@ -67,7 +67,20 @@ func highlightsOf(content, word string) []protocol.DocumentHighlight {
 	// a CRLF line, and it can never precede one, so it never shifts a column.
 	// entryRange in references.go does trim, because it has a whole-line
 	// fallback whose end a "\r" would move; there is no such fallback here.
-	for i, text := range strings.Split(content, "\n") {
+	// Walked rather than strings.Split: the loop only ever iterates, and Split
+	// materialises one string header per line -- 16 bytes each, so 80KB on a
+	// 5,000-line file -- on a request the editor sends on every cursor move.
+	// That is cost proportional to the *file* for an answer proportional to the
+	// occurrences of one identifier.
+	for i, rest := 0, content; rest != ""; i++ {
+		text := rest
+
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			text, rest = rest[:nl], rest[nl+1:]
+		} else {
+			rest = ""
+		}
+
 		for at := 0; ; {
 			start, end, found := identSpanFrom(text, word, at)
 			if !found {

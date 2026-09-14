@@ -153,11 +153,22 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 			// Call sites don't carry their own source text (CallSite.Text is only
 			// populated by the uncached fallback parse path, not the ExtractCalls
-			// path used here) — split lines once so we can pull the call's line
-			// text ourselves for display.
+			// path used here) — split lines so we can pull the call's line text
+			// ourselves for display.
+			//
+			// Split on first use, not here. Every file reaching this point merely
+			// *contains* the name somewhere; most yield no call site at all, and
+			// one that does may already carry its own text. Splitting eagerly
+			// billed every candidate file for a slice the common case never
+			// reads, on a request that walks the whole workspace.
 			var contentLines []string
-			if funcTarget != "" {
-				contentLines = strings.Split(content, "\n")
+
+			lines := func() []string {
+				if contentLines == nil {
+					contentLines = strings.Split(content, "\n")
+				}
+
+				return contentLines
 			}
 
 			// Parse once with resolvers and call scanning — scan all scopes
@@ -236,8 +247,10 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 					}
 
 					callText := call.Text
-					if callText == "" && int(call.Line) < len(contentLines) {
-						callText = strings.TrimSpace(strings.TrimSuffix(contentLines[call.Line], "\r"))
+					if callText == "" {
+						if src := lines(); int(call.Line) < len(src) {
+							callText = strings.TrimSpace(strings.TrimSuffix(src[call.Line], "\r"))
+						}
 					}
 
 					reason := ""

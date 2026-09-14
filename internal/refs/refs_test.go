@@ -590,3 +590,41 @@ func TestCollectFilesSkipsAnUnstattableRoot(t *testing.T) {
 		t.Errorf("collectFiles = %v, want just a.cfc from the root that exists", got)
 	}
 }
+
+// TestFindPopulatesCallTextLazily covers the lazy line split.
+//
+// The split used to run for every file that merely *contained* the target name,
+// billing each one for a slice only a matching call ever reads. It now happens
+// on first use, so this pins the thing that laziness could plausibly break:
+// Entry.Call must still carry the source line, including on a second call in
+// the same file (the memo must be reused, not re-split) and on the last line of
+// a file with no trailing newline.
+//
+// The saving itself is deliberately not asserted. It is real but modest -- a
+// no-match 2,000-line file drops from 140,944 to 108,176 B/op, one alloc fewer
+// -- and parsing dominates the rest, so every threshold that separates the two
+// is tuned to the parser's current per-line cost and would pass either way once
+// that drifts. A test that cannot fail on the regression is worse than none.
+func TestFindPopulatesCallTextLazily(t *testing.T) {
+	dir := t.TempDir()
+
+	// Two calls in one file, the second on the final line with no newline after.
+	content := "<cfset a = svc.GetReport()>\n<cfset ignored = 1>\n<cfset b = svc.GetReport()>"
+	if err := os.WriteFile(filepath.Join(dir, "caller.cfm"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := Find(vfs.OS{}, []string{dir}, Options{FuncName: "GetReport"})
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
+	}
+
+	for i, want := range []string{
+		"<cfset a = svc.GetReport()>",
+		"<cfset b = svc.GetReport()>",
+	} {
+		if entries[i].Call != want {
+			t.Errorf("entry %d call text = %q, want %q", i, entries[i].Call, want)
+		}
+	}
+}
