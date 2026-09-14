@@ -70,7 +70,7 @@ regeneration then drops every Lucee-only entry (`cfdistributedlock`, `cfstatic`,
 deletion** — `git checkout -- internal/docs/generated_docs.go`. Only commit a change to that
 file when `make docs` reported both sources staged.
 
-Go toolchain is pinned at **1.26.8** (`go.mod`). CGO is required (tree-sitter grammar).
+Go toolchain is pinned at **1.27.1** (`go.mod`). CGO is required (tree-sitter grammar).
 
 ### CLI subcommands
 
