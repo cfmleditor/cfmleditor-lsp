@@ -190,7 +190,7 @@ func TestDeclarationCommentIsNotTreatedAsADeclarator(t *testing.T) {
 	assertReparses(t, out)
 
 	// The semicolon must not end up inside the comment.
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if at := strings.Index(line, "//"); at >= 0 && strings.Contains(line[at:], ";") {
 			t.Errorf("the terminating semicolon was folded into a comment: %q", line)
 		}
@@ -240,7 +240,7 @@ func TestLineCommentAmongFunctionExpressionAnnotationsIsNotInlined(t *testing.T)
 
 	assertContains(t, out, "// note")
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if at := strings.Index(line, "// note"); at >= 0 && strings.Contains(line[at:], "{") {
 			t.Errorf("the closure's opening brace was folded into a comment: %q", line)
 		}

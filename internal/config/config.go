@@ -1,6 +1,8 @@
 // Package config defines the shared .cfmleditor.json configuration types.
 package config
 
+import "maps"
+
 import "path/filepath"
 
 // JSON is the on-disk shape of .cfmleditor.json.
@@ -659,13 +661,9 @@ func mergeStringMap(base, over map[string]string) map[string]string {
 	}
 
 	out := make(map[string]string, len(base)+len(over))
-	for k, v := range base {
-		out[k] = v
-	}
+	maps.Copy(out, base)
 
-	for k, v := range over {
-		out[k] = v
-	}
+	maps.Copy(out, over)
 
 	return out
 }

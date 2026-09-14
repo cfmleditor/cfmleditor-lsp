@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"

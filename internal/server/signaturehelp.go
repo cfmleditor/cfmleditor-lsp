@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
-	json "github.com/go-json-experiment/json"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"

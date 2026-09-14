@@ -2,6 +2,7 @@ package server
 
 import (
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -213,13 +214,7 @@ func TestLineSpan(t *testing.T) {
 }
 
 func containsLine(lines []string, want string) bool {
-	for _, l := range lines {
-		if l == want {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(lines, want)
 }
 
 // TestRangeFormattingCoalesceIsLinear pins the cost of merging touching edits.

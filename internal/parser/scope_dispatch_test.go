@@ -138,8 +138,8 @@ func funcBody(t *testing.T, src, header string) string {
 	}
 
 	rest := src[at+len(header):]
-	if end := strings.Index(rest, "\nfunc "); end >= 0 {
-		return rest[:end]
+	if before, _, ok := strings.Cut(rest, "\nfunc "); ok {
+		return before
 	}
 
 	return rest

@@ -188,7 +188,7 @@ func TestSignatureAnnotationCommentsAreNotFolded(t *testing.T) {
 
 	// Nothing may sit after a line comment on its own line — not the next
 	// annotation, and not the brace that opens the body.
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if at := strings.Index(line, "//"); at >= 0 {
 			if rest := strings.TrimSpace(line[at:]); strings.HasSuffix(rest, "{") {
 				t.Errorf("the body's opening brace was folded into a comment: %q", line)
@@ -229,7 +229,7 @@ func TestConditionOperandNotFoldedOntoItsComment(t *testing.T) {
 
 	out := formatGuarded(t, src)
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		at := strings.Index(line, "// Find out if object")
 		if at < 0 {
 			continue

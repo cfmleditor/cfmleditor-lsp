@@ -28,7 +28,7 @@ func TestTemplateTextWithLineCommentsKeepsItsLines(t *testing.T) {
 
 	assertContains(t, out, "// remove the current block (if there is one)")
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		at := strings.Index(line, "//")
 		if at < 0 || (at > 0 && line[at-1] == ':') {
 			continue

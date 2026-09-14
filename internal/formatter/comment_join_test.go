@@ -84,7 +84,7 @@ func TestLineCommentDoesNotSwallowCode(t *testing.T) {
 			}
 
 			// Nothing may end up commented out that was not before.
-			for _, line := range strings.Split(out, "\n") {
+			for line := range strings.SplitSeq(out, "\n") {
 				if i := strings.Index(line, "//"); i >= 0 {
 					if strings.Contains(line[i:], " or ") || strings.Contains(line[i:], "{") {
 						t.Errorf("code folded into a line comment: %q", line)

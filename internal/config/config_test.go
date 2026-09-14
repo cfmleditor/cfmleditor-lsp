@@ -189,12 +189,12 @@ func TestResolve_LintingDefault(t *testing.T) {
 		t.Error("expected Linting false when Linting section is absent")
 	}
 
-	enabled := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true)}}, "/proj")
+	enabled := Resolve(&JSON{Linting: &Linting{Enabled: new(true)}}, "/proj")
 	if !enabled.Linting {
 		t.Error("expected Linting true when explicitly enabled")
 	}
 
-	disabled := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(false)}}, "/proj")
+	disabled := Resolve(&JSON{Linting: &Linting{Enabled: new(false)}}, "/proj")
 	if disabled.Linting {
 		t.Error("expected Linting false when explicitly disabled")
 	}
@@ -217,7 +217,7 @@ func TestResolve_CompletionsDefaults(t *testing.T) {
 	// Turning one off leaves the other two alone. As plain bools it did not:
 	// naming any single setting switched off the two it did not name, so
 	// {"tagSnippets": false} also disabled global function resolution.
-	one := Resolve(&JSON{Completions: &Completions{TagSnippets: boolPtr(false)}}, "/proj")
+	one := Resolve(&JSON{Completions: &Completions{TagSnippets: new(false)}}, "/proj")
 	if one.TagSnippets {
 		t.Error("an explicit tagSnippets:false was not respected")
 	}
@@ -228,9 +228,9 @@ func TestResolve_CompletionsDefaults(t *testing.T) {
 
 	// And each can still be turned off explicitly.
 	off := Resolve(&JSON{Completions: &Completions{
-		TagSnippets:              boolPtr(false),
-		FunctionSnippets:         boolPtr(false),
-		GlobalFunctionResolution: boolPtr(false),
+		TagSnippets:              new(false),
+		FunctionSnippets:         new(false),
+		GlobalFunctionResolution: new(false),
 	}}, "/proj")
 	if off.TagSnippets || off.FunctionSnippets || off.GlobalFunctionResolution {
 		t.Errorf("explicit all-false completions were not respected, got %+v", off)
@@ -255,7 +255,7 @@ func TestResolve_FormattingAbsentIsZeroValueNotDefaults(t *testing.T) {
 func TestResolve_FormattingPresentAppliesFieldDefaults(t *testing.T) {
 	// When the section IS present but individual pointer fields are nil, those specific
 	// fields fall back to their documented defaults.
-	r := Resolve(&JSON{Formatting: &Formatting{Enabled: boolPtr(true)}}, "/proj")
+	r := Resolve(&JSON{Formatting: &Formatting{Enabled: new(true)}}, "/proj")
 
 	if !r.Formatting.Enabled {
 		t.Error("expected Enabled to reflect the explicit true")
@@ -338,13 +338,13 @@ func TestResolve_AnchoredSurvivesJSONAndResolve(t *testing.T) {
 // reflectively by TestSettingsFromFillsEveryField and
 // TestSettingsApplyCoversEveryField.
 func TestLintMinSeverityReachesResolved(t *testing.T) {
-	r := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true), MinSeverity: "WARNING"}}, "/proj")
+	r := Resolve(&JSON{Linting: &Linting{Enabled: new(true), MinSeverity: "WARNING"}}, "/proj")
 	if r.LintMinSeverity != "WARNING" {
 		t.Errorf("LintMinSeverity = %q, want WARNING", r.LintMinSeverity)
 	}
 
 	// Unset is the default, and means no floor rather than an error.
-	if r := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true)}}, "/proj"); r.LintMinSeverity != "" {
+	if r := Resolve(&JSON{Linting: &Linting{Enabled: new(true)}}, "/proj"); r.LintMinSeverity != "" {
 		t.Errorf("an unset minSeverity should resolve to %q, got %q", "", r.LintMinSeverity)
 	}
 }
@@ -355,7 +355,7 @@ func TestLintMinSeverityReachesResolved(t *testing.T) {
 // would have carried a zero-valued `enabled` along with it and switched linting
 // off while appearing to configure it.
 func TestLintingEnabledSurvivesAMinSeverityOnlyOverride(t *testing.T) {
-	base := &JSON{Linting: &Linting{Enabled: boolPtr(true)}}
+	base := &JSON{Linting: &Linting{Enabled: new(true)}}
 	over := &JSON{Linting: &Linting{MinSeverity: "ERROR"}}
 
 	got := Merge(base, over)

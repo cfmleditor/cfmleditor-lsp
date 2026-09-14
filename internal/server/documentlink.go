@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 	"path/filepath"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"

@@ -27,16 +27,16 @@ func setFormatting(f *Formatting, boolVal bool) map[string]any {
 		field := fv.Field(i)
 
 		switch field.Type() {
-		case reflect.TypeOf(""):
+		case reflect.TypeFor[string]():
 			field.SetString("value-" + name)
 			want[name] = "value-" + name
-		case reflect.TypeOf((*bool)(nil)):
+		case reflect.TypeFor[*bool]():
 			v := boolVal
 
 			field.Set(reflect.ValueOf(&v))
 
 			want[name] = boolVal
-		case reflect.TypeOf((*int)(nil)):
+		case reflect.TypeFor[*int]():
 			n += 7
 			v := n
 

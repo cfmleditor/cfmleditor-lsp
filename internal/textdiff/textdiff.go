@@ -8,6 +8,8 @@
 // result belong to the lines the user selected.
 package textdiff
 
+import "slices"
+
 // Hunk replaces A[AStart:AEnd] with B[BStart:BEnd]. Both ranges are half-open,
 // and either may be empty: an empty A range is an insertion before AStart, an
 // empty B range a deletion.
@@ -140,9 +142,7 @@ func backtrack(trace [][]int, n, m, offset int) []Hunk {
 	// steps came out end-first; walk them forwards, merging any that meet.
 	var hunks []Hunk
 
-	for i := len(steps) - 1; i >= 0; i-- {
-		s := steps[i]
-
+	for _, s := range slices.Backward(steps) {
 		if len(hunks) > 0 {
 			last := &hunks[len(hunks)-1]
 			if last.AEnd == s.aStart && last.BEnd == s.bStart {

@@ -16,7 +16,7 @@ func setEveryFeature(f *Features, v bool) []string {
 	var names []string
 
 	for i := range rt.NumField() {
-		if rt.Field(i).Type != reflect.TypeOf((*bool)(nil)) {
+		if rt.Field(i).Type != reflect.TypeFor[*bool]() {
 			continue
 		}
 
@@ -66,8 +66,8 @@ func TestFeatureKeysReachTheServer(t *testing.T) {
 		// And the reverse direction: nothing in ResolvedFeatures that the JSON
 		// block cannot set, which would be a switch with no way to reach it.
 		var resolvedNames []string
-		for i := range rv.Type().NumField() {
-			resolvedNames = append(resolvedNames, rv.Type().Field(i).Name)
+		for field := range rv.Type().Fields() {
+			resolvedNames = append(resolvedNames, field.Name)
 		}
 
 		sort.Strings(resolvedNames)
@@ -96,7 +96,7 @@ var featureDefaults = map[string]bool{
 // default; taking the zero value instead would switch them all off on any path
 // that skipped ResolveFeatures.
 func TestFeaturesDefaultToOn(t *testing.T) {
-	if got := reflect.TypeOf(ResolvedFeatures{}).NumField(); got != len(featureDefaults) {
+	if got := reflect.TypeFor[ResolvedFeatures]().NumField(); got != len(featureDefaults) {
 		t.Fatalf("ResolvedFeatures has %d fields but %d defaults are stated; add the new switch to featureDefaults", got, len(featureDefaults))
 	}
 

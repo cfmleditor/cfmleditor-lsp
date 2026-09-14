@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"slices"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -36,8 +37,7 @@ func preformat(src []byte, tree *sitter.Tree, parse func([]byte) *sitter.Tree) (
 		// Apply edits in reverse order to preserve byte offsets.
 		result := string(src)
 
-		for i := len(edits) - 1; i >= 0; i-- {
-			e := edits[i]
+		for _, e := range slices.Backward(edits) {
 			result = result[:e.start] + e.replacement + result[e.end:]
 		}
 

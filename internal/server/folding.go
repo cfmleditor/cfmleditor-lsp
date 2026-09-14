@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"

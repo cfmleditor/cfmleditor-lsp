@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"

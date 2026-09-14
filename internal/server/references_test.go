@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -69,11 +70,9 @@ func referencesAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32, 
 	t.Helper()
 
 	req := makeCall(t, protocol.MethodTextDocumentReferences, protocol.ReferenceParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: line, Character: char},
-		},
-		Context: protocol.ReferenceContext{IncludeDeclaration: includeDecl},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: line, Character: char},
+		Context:      protocol.ReferenceContext{IncludeDeclaration: includeDecl},
 	})
 
 	res, err := srv.handleReferences(context.Background(), req)
@@ -128,15 +127,7 @@ func itoa(n int) string {
 
 func hasAll(got, want []string) bool {
 	for _, w := range want {
-		seen := false
-
-		for _, g := range got {
-			if g == w {
-				seen = true
-
-				break
-			}
-		}
+		seen := slices.Contains(got, w)
 
 		if !seen {
 			return false
@@ -315,10 +306,8 @@ func TestReferencesSeeUnsavedEdits(t *testing.T) {
 
 	locs := referencesAt(t, srv, docURI, 5, 27, false)
 
-	for _, l := range found(t, locs, dir) {
-		if l == "controller.cfc:10" {
-			return
-		}
+	if slices.Contains(found(t, locs, dir), "controller.cfc:10") {
+		return
 	}
 
 	t.Errorf("references were read from the saved file: %v", found(t, locs, dir))

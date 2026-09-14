@@ -1,5 +1,7 @@
 package parser
 
+import "slices"
+
 import "strings"
 
 // TextBeforeCursor returns all content from the start of the document up to the cursor position.
@@ -183,8 +185,8 @@ func FindUnclosedTags(content string, startLine, line, char int) []string {
 			}
 
 			closeName := toLowerASCII(text[i : i+end])
-			for j := len(stack) - 1; j >= 0; j-- {
-				if stack[j] == closeName {
+			for j, s := range slices.Backward(stack) {
+				if s == closeName {
 					stack = append(stack[:j], stack[j+1:]...)
 
 					break

@@ -114,10 +114,8 @@ func BenchmarkCompletion(b *testing.B) {
 	benchOpen(b, s, docURI, benchDoc(60))
 
 	req, err := json.Marshal(protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 4, Character: 6},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 4, Character: 6},
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -204,10 +202,8 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 	benchOpen(b, s, docURI, benchDoc(60))
 
 	req, err := json.Marshal(protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 4, Character: 6},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 4, Character: 6},
 	})
 	if err != nil {
 		b.Fatal(err)

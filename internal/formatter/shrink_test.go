@@ -284,7 +284,7 @@ func TestShrinkRefusals(t *testing.T) {
 		unsolved []string
 	)
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		cols := strings.Split(line, "\t")
 		if len(cols) < 2 || (cols[0] != "script-refused" && cols[0] != "parse-refused") {
 			continue
@@ -319,8 +319,8 @@ func TestShrinkRefusals(t *testing.T) {
 		// verbatim; those stay region-relative and say so.
 		lineRange := fmt.Sprintf("%d-%d", first, last)
 
-		if off := bytes.Index(src, region); off >= 0 {
-			base := bytes.Count(src[:off], []byte("\n"))
+		if before, _, ok := bytes.Cut(src, region); ok {
+			base := bytes.Count(before, []byte("\n"))
 			lineRange = fmt.Sprintf("%d-%d", first+base, last+base)
 		} else if name != "cfml" {
 			lineRange += " (region-relative)"

@@ -55,10 +55,8 @@ func TestCfelseCompletionRangeIsWellFormed(t *testing.T) {
 			srv.setDocument(docURI, tt.content)
 
 			req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-					Position:     protocol.Position{Line: tt.line, Character: tt.char},
-				},
+				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+				Position:     protocol.Position{Line: tt.line, Character: tt.char},
 			})
 
 			res, err := srv.handleCompletion(context.Background(), req)

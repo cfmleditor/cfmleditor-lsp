@@ -38,11 +38,11 @@ func TestResolvedFormattingReadsEveryKey(t *testing.T) {
 			}
 
 			switch fv.Field(i).Type() {
-			case reflect.TypeOf(""):
+			case reflect.TypeFor[string]():
 				formatting[tag] = "value-" + field.Name
-			case reflect.TypeOf((*bool)(nil)):
+			case reflect.TypeFor[*bool]():
 				formatting[tag] = boolVal
-			case reflect.TypeOf((*int)(nil)):
+			case reflect.TypeFor[*int]():
 				n += 7
 				formatting[tag] = n
 			default:

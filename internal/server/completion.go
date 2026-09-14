@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
-	json "github.com/go-json-experiment/json"
 	"path/filepath"
 	"sort"
 	"strings"
