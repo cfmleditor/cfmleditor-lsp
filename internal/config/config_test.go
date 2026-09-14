@@ -189,12 +189,12 @@ func TestResolve_LintingDefault(t *testing.T) {
 		t.Error("expected Linting false when Linting section is absent")
 	}
 
-	enabled := Resolve(&JSON{Linting: &Linting{Enabled: true}}, "/proj")
+	enabled := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true)}}, "/proj")
 	if !enabled.Linting {
 		t.Error("expected Linting true when explicitly enabled")
 	}
 
-	disabled := Resolve(&JSON{Linting: &Linting{Enabled: false}}, "/proj")
+	disabled := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(false)}}, "/proj")
 	if disabled.Linting {
 		t.Error("expected Linting false when explicitly disabled")
 	}
@@ -330,5 +330,41 @@ func TestResolve_AnchoredSurvivesJSONAndResolve(t *testing.T) {
 
 	if r.ComponentResolvers[1].Anchored {
 		t.Error("expected a resolver without the field to default to unanchored")
+	}
+}
+
+// TestLintMinSeverityReachesResolved is the config half of the hop chain a
+// `linting.minSeverity` crosses. The daemon and server halves are covered
+// reflectively by TestSettingsFromFillsEveryField and
+// TestSettingsApplyCoversEveryField.
+func TestLintMinSeverityReachesResolved(t *testing.T) {
+	r := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true), MinSeverity: "WARNING"}}, "/proj")
+	if r.LintMinSeverity != "WARNING" {
+		t.Errorf("LintMinSeverity = %q, want WARNING", r.LintMinSeverity)
+	}
+
+	// Unset is the default, and means no floor rather than an error.
+	if r := Resolve(&JSON{Linting: &Linting{Enabled: boolPtr(true)}}, "/proj"); r.LintMinSeverity != "" {
+		t.Errorf("an unset minSeverity should resolve to %q, got %q", "", r.LintMinSeverity)
+	}
+}
+
+// TestLintingEnabledSurvivesAMinSeverityOnlyOverride is why Linting.Enabled is a
+// pointer. The block used to be replaced wholesale, which was equivalent while
+// `enabled` was its only key: a child config tuning only the severity floor
+// would have carried a zero-valued `enabled` along with it and switched linting
+// off while appearing to configure it.
+func TestLintingEnabledSurvivesAMinSeverityOnlyOverride(t *testing.T) {
+	base := &JSON{Linting: &Linting{Enabled: boolPtr(true)}}
+	over := &JSON{Linting: &Linting{MinSeverity: "ERROR"}}
+
+	got := Merge(base, over)
+
+	if got.Linting == nil || !BoolDefault(got.Linting.Enabled, false) {
+		t.Error("base's enabled:true should survive an override that only sets minSeverity")
+	}
+
+	if got.Linting.MinSeverity != "ERROR" {
+		t.Errorf("MinSeverity = %q, want over's ERROR", got.Linting.MinSeverity)
 	}
 }

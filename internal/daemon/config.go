@@ -157,7 +157,17 @@ func (c *Config) ResolvedFeatures() config.ResolvedFeatures {
 func (c *Config) Linting() bool {
 	raw := c.raw()
 
-	return raw != nil && raw.Linting != nil && raw.Linting.Enabled
+	return raw != nil && raw.Linting != nil && config.BoolDefault(raw.Linting.Enabled, false)
+}
+
+// LintMinSeverity returns the configured CFLint severity floor, or "" for none.
+func (c *Config) LintMinSeverity() string {
+	raw := c.raw()
+	if raw == nil || raw.Linting == nil {
+		return ""
+	}
+
+	return raw.Linting.MinSeverity
 }
 
 // References returns whether textDocument/references is enabled in config.
@@ -459,6 +469,7 @@ func SettingsFrom(c *Config) server.Settings {
 		Formatting:               c.ResolvedFormatting(),
 		Features:                 c.ResolvedFeatures(),
 		Linting:                  c.Linting(),
+		LintMinSeverity:          c.LintMinSeverity(),
 		References:               c.References(),
 		TagSnippets:              comp.TagSnippets,
 		FunctionSnippets:         comp.FunctionSnippets,

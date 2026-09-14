@@ -35,6 +35,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		Formatting:               config.ResolvedFormatting{Enabled: true, LineWidth: 123},
 		Features:                 config.ResolveFeatures(nil),
 		Linting:                  true,
+		LintMinSeverity:          "WARNING",
 		References:               true,
 		TagSnippets:              true,
 		FunctionSnippets:         true,

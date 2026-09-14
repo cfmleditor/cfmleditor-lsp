@@ -33,6 +33,7 @@ type Settings struct {
 	Formatting               config.ResolvedFormatting
 	Features                 config.ResolvedFeatures
 	Linting                  bool
+	LintMinSeverity          string
 	References               bool
 	TagSnippets              bool
 	FunctionSnippets         bool
@@ -53,6 +54,7 @@ func (set Settings) Apply(s *Server) {
 	s.Formatting = set.Formatting
 	s.Features = set.Features
 	s.Linting = set.Linting
+	s.LintMinSeverity = set.LintMinSeverity
 	s.References = set.References
 	s.TagSnippets = set.TagSnippets
 	s.FunctionSnippets = set.FunctionSnippets

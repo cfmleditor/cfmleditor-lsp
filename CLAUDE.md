@@ -368,6 +368,32 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   JSON marshalling.
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
+
+  **`mapSeverity` may return only Error or Warning.** CFLint's seven levels
+  (`com.cflint.Levels`: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC,
+  plus UNKNOWN) fold onto the LSP's four, and an editor shows neither Hint nor
+  Information by default — VS Code draws a Hint as a faint underline and keeps it
+  out of the Problems panel, and hides Information behind its "Show Infos" filter.
+  A level mapped to either is published, counted in the `cflint scan complete` log
+  line, and then invisible, which reads as a diagnostic that was never produced.
+  That is exactly how CRITICAL and CAUTION went missing: both were absent from the
+  switch, so the second-most-severe level CFLint has was reported more quietly than
+  COSMETIC. `TestEveryCFLintLevelIsVisible` states the enum in full and fails on a
+  level that maps to Hint or Information; the default arm returns Warning for the
+  same reason, so a level added upstream surfaces rather than disappearing.
+
+  **`linting.minSeverity` filters on CFLint's raw scale, not the mapped severity.**
+  Because INFO and COSMETIC fold up onto Warning, a floor applied after the fold
+  could not tell them from a real WARNING and would keep every INFO it was meant
+  to drop. `meetsFloor` therefore runs in `toDiagnostics` against `issue.Severity`
+  before `mapSeverity` sees it, and a severity the enum does not list is kept
+  whatever the floor — a setting that never mentioned a level should not be what
+  hides it.
+
+  `Linting.Enabled` is a `*bool` for the reason `completions` documents: the block
+  has two keys now, so a plain bool could not tell "turned off" from "not
+  mentioned", and `mergeLinting` unions key by key — otherwise a child config
+  naming only `minSeverity` would switch linting off while appearing to tune it.
 - `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
   `true`. It used to write unconditionally, which meant the code action on an ordinary "find all
   references" gesture dropped two files beside the source file being read. The plain code actions
@@ -395,6 +421,7 @@ the user-facing view and all `formatting` defaults.
 | `javaStubsPath` | Auto-synthesizes a `createObject("java", "X")` → `<javaStubsPath>.X` resolver |
 | `formatting` | Formatter options |
 | `linting.enabled` | Enable CFLint diagnostics |
+| `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
 | `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |

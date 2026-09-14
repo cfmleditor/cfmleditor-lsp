@@ -19,7 +19,7 @@ const fullConfig = `{
 	"propertyResolvers": [{"match": "$1", "resolve": "beans.$1", "attribute": "name"}],
 	"beanPaths": {"svc": "./services"},
 	"formatting": {"enabled": true},
-	"linting": {"enabled": true},
+	"linting": {"enabled": true, "minSeverity": "WARNING"},
 	"references": {"enabled": true},
 	"completions": {"tagSnippets": true, "functionSnippets": true, "globalFunctionResolution": true}
 }`

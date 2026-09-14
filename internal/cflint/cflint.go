@@ -53,16 +53,30 @@ type Location struct {
 // Runner manages the CFLint binary.
 type Runner struct {
 	binPath string
+
+	// minRank is the least severe CFLint level still reported, as a rank from
+	// severityRank. noSeverityFloor reports everything, which is the default.
+	minRank int
 }
 
 // NewRunner creates a Runner, downloading the binary if needed.
-func NewRunner() (*Runner, error) {
+//
+// minSeverity is a CFLint level name (`linting.minSeverity`); issues less
+// severe than it are dropped. An empty or unrecognised value reports
+// everything — see MinSeverityRank, which is where a caller should check a
+// configured value if it wants to warn about a typo.
+func NewRunner(minSeverity string) (*Runner, error) {
 	binPath, err := ensureBinary()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Runner{binPath: binPath}, nil
+	rank, ok := MinSeverityRank(minSeverity)
+	if !ok {
+		rank = noSeverityFloor
+	}
+
+	return &Runner{binPath: binPath, minRank: rank}, nil
 }
 
 // Scan runs CFLint on the given file and returns LSP diagnostics.
@@ -93,13 +107,17 @@ func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnost
 		return nil, fmt.Errorf("parsing cflint output: %w\nstdout: %s\nstderr: %s", err, string(out), stderr.String())
 	}
 
-	return toDiagnostics(result), nil
+	return toDiagnostics(result, r.minRank), nil
 }
 
-func toDiagnostics(result Result) []protocol.Diagnostic {
+func toDiagnostics(result Result, minRank int) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
 	for _, issue := range result.Issues {
+		if !meetsFloor(issue.Severity, minRank) {
+			continue
+		}
+
 		sev := mapSeverity(issue.Severity)
 
 		for _, loc := range issue.Locations {
@@ -129,16 +147,87 @@ func toDiagnostics(result Result) []protocol.Diagnostic {
 	return diags
 }
 
+// noSeverityFloor is the minRank that reports every issue, however trivial. It
+// is deliberately larger than any rank in severityRank, so the comparison in
+// meetsFloor needs no special case for "no floor configured".
+const noSeverityFloor = 1 << 30
+
+// severityRank orders CFLint's levels, most severe first. The order is
+// com.cflint.Levels', which is the scale CFLint's own rule docs use, so
+// `linting.minSeverity` is written in the vocabulary a user reads there rather
+// than in LSP severities.
+//
+// The filter deliberately runs on this raw scale rather than on what
+// mapSeverity returns. mapSeverity currently folds INFO and COSMETIC up onto
+// Warning so they stay visible, which makes the mapped severities too coarse to
+// filter on — a floor of WARNING applied after the fold would keep every INFO
+// it was meant to drop.
+var severityRank = map[string]int{
+	"FATAL":    0,
+	"CRITICAL": 1,
+	"ERROR":    2,
+	"WARNING":  3,
+	"CAUTION":  4,
+	"INFO":     5,
+	"COSMETIC": 6,
+}
+
+// MinSeverityRank turns a configured `linting.minSeverity` into a rank for
+// NewRunner, reporting whether the name was recognised. An empty string is not
+// an error — it is the default, meaning no floor — but it is not recognised
+// either, so a caller can tell "unset" from "set to something valid" and warn
+// only about a genuine typo.
+func MinSeverityRank(name string) (int, bool) {
+	rank, ok := severityRank[strings.ToUpper(strings.TrimSpace(name))]
+
+	return rank, ok
+}
+
+// meetsFloor reports whether an issue at the given CFLint level is severe
+// enough to report.
+//
+// A severity CFLint's enum does not list — UNKNOWN, or a level added upstream
+// — is always reported, whatever the floor. The alternative is that an
+// unrecognised level is silently dropped by a setting that never mentioned it,
+// which is the same disappearing-diagnostic failure mapSeverity's default arm
+// exists to avoid.
+func meetsFloor(severity string, minRank int) bool {
+	rank, ok := MinSeverityRank(severity)
+	if !ok {
+		return true
+	}
+
+	return rank <= minRank
+}
+
+// mapSeverity folds CFLint's eight levels onto the LSP's four. The full set is
+// com.cflint.Levels: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC,
+// UNKNOWN.
+//
+// Nothing here may return Hint, and nothing may return Information: an editor
+// shows neither by default. VS Code draws a Hint as a faint underline and keeps
+// it out of the Problems panel entirely, and its Problems filter hides
+// Information unless "Show Infos" is ticked -- so a CFLint issue mapped to
+// either is reported by the server, counted in the "cflint scan complete" log
+// line, and then invisible, which reads as a diagnostic that was never
+// produced. Every level therefore lands on Error or Warning, including the
+// default arm, so an unrecognised severity surfaces rather than disappearing.
+//
+// INFO and COSMETIC being Warnings is the interim part: they are advisory in
+// CFLint's own scale, and the honest mapping is Information. Restoring that
+// means changing the one arm below -- and is worth doing together with a
+// config key, so the choice belongs to the workspace rather than to this
+// switch.
 func mapSeverity(s string) protocol.DiagnosticSeverity {
 	switch strings.ToUpper(s) {
-	case "ERROR", "FATAL":
+	case "ERROR", "FATAL", "CRITICAL":
 		return protocol.DiagnosticSeverityError
-	case "WARNING":
+	case "WARNING", "CAUTION":
 		return protocol.DiagnosticSeverityWarning
 	case "INFO", "COSMETIC":
-		return protocol.DiagnosticSeverityInformation
+		return protocol.DiagnosticSeverityWarning
 	default:
-		return protocol.DiagnosticSeverityHint
+		return protocol.DiagnosticSeverityWarning
 	}
 }
 

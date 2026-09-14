@@ -27,12 +27,12 @@ func TestMergeNilSides(t *testing.T) {
 func TestMergeOverrideWinsPerKey(t *testing.T) {
 	base := &JSON{
 		JavaStubsPath: "base.stubs",
-		Linting:       &Linting{Enabled: true},
+		Linting:       &Linting{Enabled: boolPtr(true)},
 		Completions:   &Completions{TagSnippets: boolPtr(true)},
 	}
 	over := &JSON{
 		JavaStubsPath: "over.stubs",
-		Linting:       &Linting{Enabled: false},
+		Linting:       &Linting{Enabled: boolPtr(false)},
 	}
 
 	got := Merge(base, over)
@@ -41,7 +41,7 @@ func TestMergeOverrideWinsPerKey(t *testing.T) {
 		t.Errorf("JavaStubsPath = %q, want over's value", got.JavaStubsPath)
 	}
 
-	if got.Linting == nil || got.Linting.Enabled {
+	if got.Linting == nil || BoolDefault(got.Linting.Enabled, false) {
 		t.Error("over's linting block should win, including when it disables linting")
 	}
 
@@ -53,14 +53,14 @@ func TestMergeOverrideWinsPerKey(t *testing.T) {
 
 func TestMergeUnsetFieldsFallThrough(t *testing.T) {
 	base := &JSON{
-		Linting:       &Linting{Enabled: true},
+		Linting:       &Linting{Enabled: boolPtr(true)},
 		JavaStubsPath: "base.stubs",
 		Formatting:    &Formatting{Enabled: boolPtr(true), SelfCloseTags: boolPtr(false)},
 	}
 
 	got := Merge(base, &JSON{})
 
-	if got.Linting == nil || !got.Linting.Enabled {
+	if got.Linting == nil || !BoolDefault(got.Linting.Enabled, false) {
 		t.Error("an empty override must not clear base's linting")
 	}
 
