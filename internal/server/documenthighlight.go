@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"

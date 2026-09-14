@@ -5,6 +5,7 @@ package formatter
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -239,12 +240,12 @@ func (f *Formatter) scriptNL()            { f.nl() }
 // when this returns false.
 func (f *Formatter) keptLineComments(n *sitter.Node, rendered string) bool {
 	for _, c := range f.lineComments(n) {
-		at := strings.Index(rendered, c)
-		if at < 0 {
+		_, after, ok := strings.Cut(rendered, c)
+		if !ok {
 			return false
 		}
 
-		rest := rendered[at+len(c):]
+		rest := after
 		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
 			rest = rest[:nl]
 		}
@@ -1467,8 +1468,8 @@ func isLineCommentText(s string) bool {
 // every entry is a comment. A trailing comma belongs after that entry, not
 // after a comment that happens to follow it.
 func lastArgument(isComment []bool) int {
-	for i := len(isComment) - 1; i >= 0; i-- {
-		if !isComment[i] {
+	for i, comment := range slices.Backward(isComment) {
+		if !comment {
 			return i
 		}
 	}
@@ -1963,8 +1964,8 @@ func (f *Formatter) flatFuncDefParams(parts []paramPart, col int) (string, bool)
 // lastParameter returns the index of the final entry that is a parameter rather
 // than a comment, or -1 when there is none.
 func lastParameter(parts []paramPart) int {
-	for i := len(parts) - 1; i >= 0; i-- {
-		if !parts[i].isComment {
+	for i, part := range slices.Backward(parts) {
+		if !part.isComment {
 			return i
 		}
 	}

@@ -310,13 +310,13 @@ func TestFormatCommentInsideLiteral(t *testing.T) {
 
 			// Every line comment must be the last thing on its line, otherwise
 			// it has swallowed whatever followed it.
-			for _, line := range strings.Split(string(out), "\n") {
-				idx := strings.Index(line, "//")
-				if idx < 0 {
+			for line := range strings.SplitSeq(string(out), "\n") {
+				_, after, ok := strings.Cut(line, "//")
+				if !ok {
 					continue
 				}
 
-				if rest := strings.TrimSpace(line[idx+2:]); strings.Contains(rest, ",") {
+				if rest := strings.TrimSpace(after); strings.Contains(rest, ",") {
 					t.Errorf("a line comment swallowed following elements: %q\nfull output:\n%s", line, out)
 				}
 			}
@@ -479,13 +479,13 @@ func TestFormatCommentAmongCallArguments(t *testing.T) {
 		t.Fatalf("format: %v", err)
 	}
 
-	for _, line := range strings.Split(string(out), "\n") {
-		idx := strings.Index(line, "//")
-		if idx < 0 {
+	for line := range strings.SplitSeq(string(out), "\n") {
+		_, after, ok := strings.Cut(line, "//")
+		if !ok {
 			continue
 		}
 
-		if rest := strings.TrimSpace(line[idx+2:]); strings.Contains(rest, ",") {
+		if rest := strings.TrimSpace(after); strings.Contains(rest, ",") {
 			t.Errorf("a line comment swallowed following arguments: %q\nfull output:\n%s", line, out)
 		}
 	}

@@ -111,11 +111,7 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for r := range 4 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range 200 {
 				for _, d := range idx.Lookup("init") {
 					_ = d.Line
@@ -130,15 +126,11 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 				idx.LookupComponentRefInFile("svc", uris[r], 1000)
 				idx.LookupPreferred("init", uris[r])
 			}
-		}()
+		})
 	}
 
 	for w := range 2 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			u := uris[files-1-w]
 
 			for i := range 200 {
@@ -151,7 +143,7 @@ func TestConcurrentReadsAndWrites(t *testing.T) {
 					{Variable: "svc", URI: u, Component: "models.Other", Line: 3},
 				})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

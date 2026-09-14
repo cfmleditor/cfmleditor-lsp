@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,15 +68,7 @@ func TestFindRefsWritesFilesWhenAsked(t *testing.T) {
 	got := reportFiles(t, dir)
 
 	for _, want := range []string{"refs-GetReport.md", "refs-GetReport.dot"} {
-		found := false
-
-		for _, g := range got {
-			if g == want {
-				found = true
-
-				break
-			}
-		}
+		found := slices.Contains(got, want)
 
 		if !found {
 			t.Errorf("export did not write %s (wrote %v)", want, got)

@@ -39,11 +39,7 @@ func TestDidChangeAgainstRapidChangeTimer(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -56,7 +52,7 @@ func TestDidChangeAgainstRapidChangeTimer(t *testing.T) {
 			delete(srv.changeWindowStart, docURI)
 			srv.mu.Unlock()
 		}
-	}()
+	})
 
 	deadline := time.Now().Add(750 * time.Millisecond)
 	for time.Now().Before(deadline) {

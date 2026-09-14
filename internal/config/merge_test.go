@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-func boolPtr(b bool) *bool { return &b }
-func intPtr(i int) *int    { return &i }
-
 func TestMergeNilSides(t *testing.T) {
 	if got := Merge(nil, nil); got != nil {
 		t.Errorf("Merge(nil, nil) = %v, want nil", got)
@@ -27,12 +24,12 @@ func TestMergeNilSides(t *testing.T) {
 func TestMergeOverrideWinsPerKey(t *testing.T) {
 	base := &JSON{
 		JavaStubsPath: "base.stubs",
-		Linting:       &Linting{Enabled: boolPtr(true)},
-		Completions:   &Completions{TagSnippets: boolPtr(true)},
+		Linting:       &Linting{Enabled: new(true)},
+		Completions:   &Completions{TagSnippets: new(true)},
 	}
 	over := &JSON{
 		JavaStubsPath: "over.stubs",
-		Linting:       &Linting{Enabled: boolPtr(false)},
+		Linting:       &Linting{Enabled: new(false)},
 	}
 
 	got := Merge(base, over)
@@ -53,9 +50,9 @@ func TestMergeOverrideWinsPerKey(t *testing.T) {
 
 func TestMergeUnsetFieldsFallThrough(t *testing.T) {
 	base := &JSON{
-		Linting:       &Linting{Enabled: boolPtr(true)},
+		Linting:       &Linting{Enabled: new(true)},
 		JavaStubsPath: "base.stubs",
-		Formatting:    &Formatting{Enabled: boolPtr(true), SelfCloseTags: boolPtr(false)},
+		Formatting:    &Formatting{Enabled: new(true), SelfCloseTags: new(false)},
 	}
 
 	got := Merge(base, &JSON{})
@@ -141,14 +138,14 @@ func TestMergeFormattingCoversEveryField(t *testing.T) {
 		b, o := baseVal.Field(i), overVal.Field(i)
 
 		switch o.Type() {
-		case reflect.TypeOf((*bool)(nil)):
-			b.Set(reflect.ValueOf(boolPtr(false)))
-			o.Set(reflect.ValueOf(boolPtr(true)))
-		case reflect.TypeOf((*int)(nil)):
+		case reflect.TypeFor[*bool]():
+			b.Set(reflect.ValueOf(new(false)))
+			o.Set(reflect.ValueOf(new(true)))
+		case reflect.TypeFor[*int]():
 			one, two := 1, 2
 			b.Set(reflect.ValueOf(&one))
 			o.Set(reflect.ValueOf(&two))
-		case reflect.TypeOf(""):
+		case reflect.TypeFor[string]():
 			b.SetString("base")
 			o.SetString("over")
 		default:
@@ -181,8 +178,8 @@ func TestMergeFormattingCoversEveryField(t *testing.T) {
 // sending a full settings payload: a config file naming one key must leave the
 // rest of the editor's block alone.
 func TestMergeFormattingKeepsUnstatedFields(t *testing.T) {
-	editor := &Formatting{Enabled: boolPtr(true), AttrBreakThreshold: intPtr(7), ScopeCase: "upper"}
-	file := &Formatting{LineWidth: intPtr(120)}
+	editor := &Formatting{Enabled: new(true), AttrBreakThreshold: new(7), ScopeCase: "upper"}
+	file := &Formatting{LineWidth: new(120)}
 
 	got := mergeFormatting(editor, file)
 
@@ -208,8 +205,8 @@ func TestMergeFormattingKeepsUnstatedFields(t *testing.T) {
 // replacing it. The two tests above exercise the helper directly and so cannot
 // see the call site going back to a wholesale swap.
 func TestMergeUsesFormattingFieldMerge(t *testing.T) {
-	editor := &JSON{Formatting: &Formatting{Enabled: boolPtr(true), AttrBreakThreshold: intPtr(7)}}
-	file := &JSON{Formatting: &Formatting{LineWidth: intPtr(120)}}
+	editor := &JSON{Formatting: &Formatting{Enabled: new(true), AttrBreakThreshold: new(7)}}
+	file := &JSON{Formatting: &Formatting{LineWidth: new(120)}}
 
 	got := Merge(editor, file)
 

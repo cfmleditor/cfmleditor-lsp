@@ -3,6 +3,7 @@ package index
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 
@@ -172,26 +173,22 @@ func (idx *Index) FunctionsMatching(match func(loweredName string) bool) []*pars
 	return all
 }
 
-// ownFunc and ownRef copy an entry into storage the index alone owns.
+// Every entry below is filed as new(funcs[i]) — a copy the index alone owns —
+// and never as &funcs[i].
 //
-// Indexing used to file `&funcs[i]` — a pointer into the caller's slice, which
-// for the LSP server is the live ParseResult for an open document. That gave
-// the entries two writers. ParseResult.ApplyEdit shifts line numbers on every
-// in-function keystroke (internal/parser/incremental.go), holding the server's
-// per-document lock and knowing nothing about this index; meanwhile another
-// editor's connection could be reading the same struct through Lookup. In
-// daemon mode one Index is shared by every connection, so those are genuinely
-// concurrent, and neither lock covers the other's writer.
+// A pointer into the caller's slice is, for the LSP server, a pointer into the
+// live ParseResult for an open document. That gives the entry two writers.
+// ParseResult.ApplyEdit shifts line numbers on every in-function keystroke
+// (internal/parser/incremental.go), holding the server's per-document lock and
+// knowing nothing about this index; meanwhile another editor's connection could
+// be reading the same struct through Lookup. In daemon mode one Index is shared
+// by every connection, so those are genuinely concurrent, and neither lock
+// covers the other's writer.
 //
 // Copying on the way in makes the index the only writer, which is what lets
-// ShiftLines below fix the remaining half.
-func ownFunc(d parser.FunctionDef) *parser.FunctionDef {
-	return &d
-}
-
-func ownRef(r parser.ComponentRef) *parser.ComponentRef {
-	return &r
-}
+// ShiftLines below fix the remaining half. new(x) allocates a fresh variable
+// initialised to x's value rather than aliasing it, so it carries the same
+// guarantee the ownFunc/ownRef helpers used to.
 
 // snapshot copies a stored slice for a caller.
 //
@@ -466,7 +463,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
 
 	for i := range pr.Funcs {
-		d := ownFunc(pr.Funcs[i])
+		d := new(pr.Funcs[i])
 		key := strings.ToLower(d.Name)
 		idx.funcs[key] = append(idx.funcs[key], d)
 		fileDefs = append(fileDefs, d)
@@ -477,7 +474,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.ComponentRefs))
 
 	for i := range pr.ComponentRefs {
-		r := ownRef(pr.ComponentRefs[i])
+		r := new(pr.ComponentRefs[i])
 		key := strings.ToLower(r.Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], r)
 		fileRefsList = append(fileRefsList, r)
@@ -497,7 +494,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
 
 	for i := range funcs {
-		d := ownFunc(funcs[i])
+		d := new(funcs[i])
 		key := strings.ToLower(d.Name)
 		idx.funcs[key] = append(idx.funcs[key], d)
 		fileDefs = append(fileDefs, d)
@@ -508,7 +505,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 
 	for i := range refs {
-		r := ownRef(refs[i])
+		r := new(refs[i])
 		key := strings.ToLower(r.Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], r)
 		fileRefsList = append(fileRefsList, r)
@@ -705,25 +702,13 @@ func groupRefsByVariable(refs []*parser.ComponentRef) map[string][]*parser.Compo
 // name, so its length is the number of times that file declares that name.
 func notInFuncs(group []*parser.FunctionDef) func(*parser.FunctionDef) bool {
 	return func(e *parser.FunctionDef) bool {
-		for _, g := range group {
-			if g == e {
-				return false
-			}
-		}
-
-		return true
+		return !slices.Contains(group, e)
 	}
 }
 
 func notInRefs(group []*parser.ComponentRef) func(*parser.ComponentRef) bool {
 	return func(e *parser.ComponentRef) bool {
-		for _, g := range group {
-			if g == e {
-				return false
-			}
-		}
-
-		return true
+		return !slices.Contains(group, e)
 	}
 }
 
@@ -820,7 +805,7 @@ func (idx *Index) SetFuncRefs(fileURI uri.URI, scopeKey string, refs []parser.Co
 	// Each ref is filed under its own URI, as the append this replaced did;
 	// fileURI identifies only the scope whose refs are being replaced.
 	for i := range refs {
-		r := ownRef(refs[i])
+		r := new(refs[i])
 		key := strings.ToLower(r.Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], r)
 		rk := uriKey(r.URI)

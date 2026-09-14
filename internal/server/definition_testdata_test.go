@@ -65,10 +65,8 @@ func openTestdataFile(t *testing.T, srv *Server, relPath string) uri.URI {
 func definitionAt(t *testing.T, srv *Server, docURI uri.URI, line, char uint32) any {
 	t.Helper()
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: line, Character: char},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: line, Character: char},
 	})
 
 	result, err := srv.handleDefinition(context.Background(), req)

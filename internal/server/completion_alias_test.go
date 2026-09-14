@@ -56,10 +56,8 @@ func TestCompletionDoesNotWriteToTheSharedBuiltinList(t *testing.T) {
 			}
 
 			req, err := json.Marshal(protocol.CompletionParams{
-				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-					Position:     protocol.Position{Line: 0, Character: 16},
-				},
+				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+				Position:     protocol.Position{Line: 0, Character: 16},
 			})
 			if err != nil {
 				t.Fatal(err)

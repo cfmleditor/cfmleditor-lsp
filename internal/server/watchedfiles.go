@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"

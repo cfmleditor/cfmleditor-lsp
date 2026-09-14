@@ -52,10 +52,8 @@ func TestDefinitionListsNearestFirstAndStably(t *testing.T) {
 		}
 
 		res, err := s.handleDefinition(context.Background(), mustJSON(t, protocol.DefinitionParams{
-			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-				TextDocument: protocol.TextDocumentIdentifier{URI: asking},
-				Position:     protocol.Position{Line: 2, Character: 16},
-			},
+			TextDocument: protocol.TextDocumentIdentifier{URI: asking},
+			Position:     protocol.Position{Line: 2, Character: 16},
 		}))
 		if err != nil {
 			t.Fatal(err)

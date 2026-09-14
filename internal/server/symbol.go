@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -73,10 +73,8 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 
 	for _, d := range defs {
 		symbols = append(symbols, protocol.SymbolInformation{
-			BaseSymbolInformation: protocol.BaseSymbolInformation{
-				Name: d.Name,
-				Kind: protocol.SymbolKindFunction,
-			},
+			Name: d.Name,
+			Kind: protocol.SymbolKindFunction,
 			Location: protocol.Location{
 				URI: d.URI,
 				Range: protocol.Range{

@@ -29,7 +29,7 @@ func TestBracedCaseBodyIsAStatement(t *testing.T) {
 	assertNotContains(t, out, "case 1:\n {")
 	assertContains(t, out, "case 1:\n")
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) != "{" {
 			continue
 		}

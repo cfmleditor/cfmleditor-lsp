@@ -4,7 +4,6 @@ go 1.27.1
 
 require (
 	github.com/cfmleditor/tree-sitter-cfml v0.26.35
-	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	go.lsp.dev/jsonrpc2 v1.0.1
 	go.lsp.dev/protocol v1.0.1
@@ -13,6 +12,7 @@ require (
 )
 
 require (
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 )

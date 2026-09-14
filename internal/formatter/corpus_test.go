@@ -140,7 +140,7 @@ func applyCorpusOptOverrides(opts *Options) {
 
 	v := reflect.ValueOf(opts).Elem()
 
-	for _, pair := range strings.Split(spec, ",") {
+	for pair := range strings.SplitSeq(spec, ",") {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
@@ -468,10 +468,7 @@ func collectCorpusFiles(roots []string) ([]corpusResult, error) {
 func runCorpus(t *testing.T, files []corpusResult) []corpusResult {
 	t.Helper()
 
-	workers := runtime.GOMAXPROCS(0)
-	if workers > len(files) {
-		workers = len(files)
-	}
+	workers := min(runtime.GOMAXPROCS(0), len(files))
 
 	var (
 		wg   sync.WaitGroup
@@ -479,11 +476,7 @@ func runCorpus(t *testing.T, files []corpusResult) []corpusResult {
 	)
 
 	for range workers {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for i := range next {
 				src, err := os.ReadFile(files[i].path)
 				if err != nil {
@@ -506,7 +499,7 @@ func runCorpus(t *testing.T, files []corpusResult) []corpusResult {
 
 				files[i].verdict, files[i].detail = classifyCorpusFile(src)
 			}
-		}()
+		})
 	}
 
 	for i := range files {

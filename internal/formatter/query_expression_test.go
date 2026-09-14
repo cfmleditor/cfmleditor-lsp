@@ -47,7 +47,7 @@ func TestQueryExecuteArgumentsAreIndented(t *testing.T) {
 
 	out := formatQueryExpr(t, querySrc, nil)
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, ")") {
 			continue

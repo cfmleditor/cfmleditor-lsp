@@ -34,7 +34,19 @@ GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 # at all. govulncheck fails the same way, less legibly: built with 1.25 against a
 # 1.26 module it reports every package as "requires newer Go version" and scans
 # nothing, while still exiting non-zero.
-GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+#
+# Building it under this module's toolchain is necessary but not sufficient: the
+# linter also has to *understand* that Go version's syntax. v2.12.2 vendored
+# staticcheck v0.7.0, which predates Go 1.27, and its IR builder panicked on the
+# 1.27 standard library -- "buildir: package \"poll\": unexpected expr:
+# *ast.KeyValueExpr" -- because 1.27 allows any valid field selector as a key in
+# a struct literal and internal/poll uses it. That aborts goanalysis_metalinter
+# outright, so it reads as a lint failure rather than a tool that cannot parse
+# its input. v2.13.2 vendors staticcheck v0.8.1 (2026.2.1), which added Go 1.27
+# support. The panic was Linux-only -- internal/poll is platform-split and the
+# darwin build does not use the new form -- so a local `make lint` on macOS
+# passed while CI did not. Bump this in step with the go directive.
+GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
 # The version is read out of go.mod directly rather than with `go list -m`.
 # Inside a workspace that lists every module in go.work, one per line, and

@@ -1894,10 +1894,7 @@ func (f *Formatter) closeTagNameOf(canonical string, n *sitter.Node) string {
 		return canonical
 	}
 
-	end := int(n.EndByte())
-	if end > len(f.src) {
-		end = len(f.src)
-	}
+	end := min(int(n.EndByte()), len(f.src))
 
 	at := lastIndexFold(f.src[:end], "</"+canonical)
 	if at < 0 {
@@ -2273,10 +2270,7 @@ func (f *Formatter) formatCFSavecontent(n *sitter.Node) {
 func (f *Formatter) savecontentBody(n *sitter.Node, name string) string {
 	start := headerEnd(f.src, int(n.StartByte()))
 
-	end := int(n.EndByte())
-	if end > len(f.src) {
-		end = len(f.src)
-	}
+	end := min(int(n.EndByte()), len(f.src))
 
 	if closeAt := lastIndexFold(f.src[:end], "</"+name); closeAt >= start {
 		end = closeAt
@@ -2386,13 +2380,7 @@ func (f *Formatter) normalizeCond(raw string) string {
 // anyHasLineComment reports whether any part carries a "//" comment, which
 // makes the remainder of that part's line uncollapsible.
 func anyHasLineComment(parts []string) bool {
-	for _, p := range parts {
-		if hasLineComment(p) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(parts, hasLineComment)
 }
 
 // hasLineComment reports whether s opens a "//" comment outside a string

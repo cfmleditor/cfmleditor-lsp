@@ -8,8 +8,6 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-func boolp(b bool) *bool { return &b }
-
 func fmtOpts(insertFinal, trimFinal *bool) protocol.FormattingOptions {
 	return protocol.FormattingOptions{
 		InsertSpaces:       false,
@@ -64,7 +62,7 @@ func TestFormatterAlwaysEndsWithOneNewlineByDefault(t *testing.T) {
 func TestInsertFinalNewlineFalseKeepsASourceWithoutOne(t *testing.T) {
 	t.Parallel()
 
-	got := formatEOF(t, eofSrc, fmtOpts(boolp(false), nil))
+	got := formatEOF(t, eofSrc, fmtOpts(new(false), nil))
 	if strings.HasSuffix(got, "\n") {
 		t.Errorf("insertFinalNewline=false still added a final newline:\n%q", got[len(got)-10:])
 	}
@@ -76,7 +74,7 @@ func TestInsertFinalNewlineFalseKeepsASourceWithoutOne(t *testing.T) {
 func TestInsertFinalNewlineFalseLeavesAnExistingOneAlone(t *testing.T) {
 	t.Parallel()
 
-	got := formatEOF(t, eofSrc+"\n", fmtOpts(boolp(false), nil))
+	got := formatEOF(t, eofSrc+"\n", fmtOpts(new(false), nil))
 	if !strings.HasSuffix(got, "}\n") {
 		t.Errorf("insertFinalNewline=false stripped a newline the source had:\n%q", got[max(0, len(got)-10):])
 	}
@@ -88,7 +86,7 @@ func TestInsertFinalNewlineFalseLeavesAnExistingOneAlone(t *testing.T) {
 func TestTrimFinalNewlinesFalseKeepsTrailingBlankLines(t *testing.T) {
 	t.Parallel()
 
-	got := formatEOF(t, eofSrc+"\n\n\n\n", fmtOpts(nil, boolp(false)))
+	got := formatEOF(t, eofSrc+"\n\n\n\n", fmtOpts(nil, new(false)))
 	if n := len(got) - len(strings.TrimRight(got, "\n")); n != 4 {
 		t.Errorf("trimFinalNewlines=false kept %d trailing newlines, want the source's 4", n)
 	}
@@ -99,7 +97,7 @@ func TestTrimFinalNewlinesFalseKeepsTrailingBlankLines(t *testing.T) {
 func TestTrimFinalNewlinesTrueTrims(t *testing.T) {
 	t.Parallel()
 
-	got := formatEOF(t, eofSrc+"\n\n\n\n", fmtOpts(nil, boolp(true)))
+	got := formatEOF(t, eofSrc+"\n\n\n\n", fmtOpts(nil, new(true)))
 	if n := len(got) - len(strings.TrimRight(got, "\n")); n != 1 {
 		t.Errorf("trimFinalNewlines=true left %d trailing newlines, want 1", n)
 	}
@@ -115,10 +113,10 @@ func TestFinalNewlineOptionsAreIdempotent(t *testing.T) {
 		content string
 		opts    protocol.FormattingOptions
 	}{
-		"insert=false, no newline":  {eofSrc, fmtOpts(boolp(false), nil)},
-		"trim=false, four blanks":   {eofSrc + "\n\n\n\n", fmtOpts(nil, boolp(false))},
-		"both false, no newline":    {eofSrc, fmtOpts(boolp(false), boolp(false))},
-		"both false, four blanks":   {eofSrc + "\n\n\n\n", fmtOpts(boolp(false), boolp(false))},
+		"insert=false, no newline":  {eofSrc, fmtOpts(new(false), nil)},
+		"trim=false, four blanks":   {eofSrc + "\n\n\n\n", fmtOpts(nil, new(false))},
+		"both false, no newline":    {eofSrc, fmtOpts(new(false), new(false))},
+		"both false, four blanks":   {eofSrc + "\n\n\n\n", fmtOpts(new(false), new(false))},
 		"neither sent, four blanks": {eofSrc + "\n\n\n\n", fmtOpts(nil, nil)},
 	}
 

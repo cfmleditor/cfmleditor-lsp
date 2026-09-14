@@ -4,7 +4,7 @@ import (
 	stdjson "encoding/json"
 	"testing"
 
-	v2 "github.com/go-json-experiment/json"
+	v2 "encoding/json/v2"
 )
 
 // Config files are decoded with the standard library on purpose, while the LSP

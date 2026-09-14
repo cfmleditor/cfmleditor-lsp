@@ -2,8 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
-	json "github.com/go-json-experiment/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,10 +226,8 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</cfoutput>\n<")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 1, Character: 1},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 1, Character: 1},
 		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
@@ -307,10 +305,8 @@ func TestCompletionTagAttributes(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfquery ")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 9},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 9},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new(" "),
@@ -353,10 +349,8 @@ func TestCompletionTagAttributesMultiline(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfloop\n  ")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 1, Character: 2},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 1, Character: 2},
 		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
@@ -391,11 +385,9 @@ func TestCompletionSpecialTagShowsFunctions(t *testing.T) {
 		srv.setDocument(uri.URI("file:///test.cfm"), tc.doc)
 
 		req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-				Position:     tc.pos,
-			},
-			Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+			Position:     tc.pos,
+			Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 		})
 
 		result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -421,11 +413,9 @@ func TestCompletionCfElseOffersIf(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfelse ")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 8},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 8},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -461,10 +451,8 @@ func TestCompletionAfterClosedTag(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 15},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 15},
 		Context: protocol.CompletionContext{
 			TriggerKind: protocol.CompletionTriggerKindInvoked,
 		},
@@ -488,10 +476,8 @@ func TestCompletionClosingTag(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 17},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 17},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("/"),
@@ -522,10 +508,8 @@ func TestCompletionClosingTagNested(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput><cfloop query=\"q\">hello</")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 36},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 36},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("/"),
@@ -556,10 +540,8 @@ func TestCompletionClosingTagAlreadyClosed(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfoutput>hello</cfoutput></")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 28},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 28},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("/"),
@@ -684,10 +666,8 @@ func TestDefinitionLookup(t *testing.T) {
 	srv.index.IndexFile(callerURI, callerContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
-			Position:     protocol.Position{Line: 0, Character: 55},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: callerURI},
+		Position:     protocol.Position{Line: 0, Character: 55},
 	})
 
 	result, replyErr := srv.handleDefinition(context.Background(), req)
@@ -714,10 +694,8 @@ func TestDefinitionNotFound(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = noSuchFunc()>")
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 14},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 14},
 	})
 
 	result, replyErr := srv.handleDefinition(context.Background(), req)
@@ -867,10 +845,8 @@ func TestHoverFunction(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = Len(y)>")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 12},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 12},
 	})
 
 	result, replyErr := srv.handleHover(context.Background(), req)
@@ -897,10 +873,8 @@ func TestHoverTag(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfquery name=\"q\">")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 3},
 	})
 
 	result, replyErr := srv.handleHover(context.Background(), req)
@@ -923,10 +897,8 @@ func TestHoverUnknown(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "myCustomVar")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 3},
 	})
 
 	result, replyErr := srv.handleHover(context.Background(), req)
@@ -1260,10 +1232,8 @@ func TestCompletionCloseTagTriggeredByGt(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif> true>")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 6},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 6},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new(">"),
@@ -1300,10 +1270,8 @@ func TestCompletionDuplicateGtAfterTag(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfif test>></cfif>")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 12},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 12},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new(">"),
@@ -2071,10 +2039,8 @@ func TestCompletionDotAfterCallExpression(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 36},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 36},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("."),
@@ -2127,10 +2093,8 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 35},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 35},
 	})
 
 	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
@@ -2166,10 +2130,8 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 8},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 8},
 	})
 
 	result, replyErr := srv.handleHover(context.Background(), req)
@@ -2207,10 +2169,8 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 	srv.setDocument(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: uint32(len(docContent))},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: uint32(len(docContent))},
 	})
 
 	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
@@ -2238,10 +2198,8 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, ")
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 28},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 28},
 	})
 
 	result, replyErr := srv.handleSignatureHelp(context.Background(), req)
@@ -2273,10 +2231,8 @@ func TestSignatureHelpNoContext(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = 123>")
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 12},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 12},
 	})
 
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
@@ -2308,10 +2264,8 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 22},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 22},
 	})
 
 	result, replyErr := srv.handleHover(context.Background(), req)
@@ -2409,10 +2363,8 @@ func TestSignatureHelpActiveParamMultiple(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = Replace(str, find, repl, ")
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 36},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 36},
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
@@ -2429,10 +2381,8 @@ func TestSignatureHelpNestedCall(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, Len(")
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 32},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 32},
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
@@ -2468,10 +2418,8 @@ func TestCompletionDotAfterVariableRef(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 4},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 4},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("."),
@@ -2555,10 +2503,8 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 4},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 4},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("."),
@@ -2623,10 +2569,8 @@ func TestHoverBuiltinCaseInsensitive(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = ARRAYAPPEND(arr, val)>")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 15},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 15},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -2689,10 +2633,8 @@ func TestCompletionDotOnThis(t *testing.T) {
 	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 4, Character: 5},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 4, Character: 5},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("."),
@@ -2846,10 +2788,8 @@ func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 3, Character: 9},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 3, Character: 9},
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
@@ -2872,10 +2812,8 @@ func TestHoverNoResultForUnknownWord(t *testing.T) {
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset xyz123 = 1>")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 8},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 8},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -2897,10 +2835,8 @@ func TestCompletionDotAfterNewExpression(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 4},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 4},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new("."),
@@ -3023,10 +2959,8 @@ func TestSignatureHelpAfterSecondComma(t *testing.T) {
 	srv.setDocument(docURI, `<cfset x = ListAppend(list, val, `)
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 33},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 33},
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
@@ -3049,11 +2983,9 @@ func TestCompletionDotAfterCreateObject(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 4},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 4},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -3089,10 +3021,8 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 22},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 22},
 	})
 
 	result, replyErr := srv.handleDefinition(context.Background(), req)
@@ -3221,10 +3151,8 @@ func TestHoverUnqualifiedUserFunction(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 3, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 3, Character: 3},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3244,11 +3172,9 @@ func TestCompletionClosingTagSlash(t *testing.T) {
 	srv.setDocument(docURI, "<cfoutput></")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 12},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new("/")},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 12},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new("/")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -3284,10 +3210,8 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 3, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 3, Character: 3},
 	})
 	result, _ := srv.handleDefinition(context.Background(), req)
 
@@ -3454,10 +3378,8 @@ func TestSignatureHelpEmptyDocument(t *testing.T) {
 	srv.setDocument(docURI, "")
 
 	req := makeCall(t, protocol.MethodTextDocumentSignatureHelp, protocol.SignatureHelpParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 0},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 0},
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
@@ -3472,10 +3394,8 @@ func TestHoverEmptyDocument(t *testing.T) {
 	srv.setDocument(docURI, "")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 0},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 0},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3490,10 +3410,8 @@ func TestDefinitionEmptyWord(t *testing.T) {
 	srv.setDocument(docURI, "   ")
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 1},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 1},
 	})
 	result, _ := srv.handleDefinition(context.Background(), req)
 
@@ -3613,10 +3531,8 @@ func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 8},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 8},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3636,10 +3552,8 @@ func TestHoverUnqualifiedShowsBuiltin(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = Len(y)>")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
-			Position:     protocol.Position{Line: 0, Character: 12},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.cfm"},
+		Position:     protocol.Position{Line: 0, Character: 12},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3670,10 +3584,8 @@ func TestHoverMultipleMatchesNoQualifier(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 3},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3693,10 +3605,8 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 5},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 5},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
@@ -3716,11 +3626,9 @@ func TestArgumentCompletionBuiltin(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 23},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 23},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -3753,11 +3661,9 @@ func TestArgumentCompletionUserFunction(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 3, Character: 5},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 3, Character: 5},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -3790,11 +3696,9 @@ func TestArgumentCompletionSortOrder(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = Len(")
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 15},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 15},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 	result, _ := srv.handleCompletion(context.Background(), req)
 	list := completionListFromResult(t, result)
@@ -3899,11 +3803,9 @@ func TestCompletionResponseTime(t *testing.T) {
 	srv.rebuildFileCompletionCacheFromPR(docURI, pr)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 4, Character: 0},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 4, Character: 0},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindInvoked},
 	})
 
 	start := time.Now()
@@ -3926,10 +3828,8 @@ func TestHoverResponseTime(t *testing.T) {
 	srv.setDocument(docURI, "<cfset x = ArrayAppend(arr, val)>")
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 15},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 15},
 	})
 
 	start := time.Now()
@@ -3954,10 +3854,8 @@ func TestDefinitionResponseTime(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 3, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 3, Character: 3},
 	})
 
 	start := time.Now()
@@ -4067,10 +3965,8 @@ func TestDefinitionNoGlobalResolution(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 3},
 	})
 	result, _ := srv.handleDefinition(context.Background(), req)
 	// With global resolution disabled, should NOT resolve to other file
@@ -4089,10 +3985,8 @@ func TestHoverNoGlobalResolution(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentHover, protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 5},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 5},
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 	// With global resolution disabled, should NOT show hover from other file
@@ -4113,10 +4007,8 @@ func TestDefinitionWithGlobalResolutionEnabled(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodTextDocumentDefinition, protocol.DefinitionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: 3},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: 3},
 	})
 	result, _ := srv.handleDefinition(context.Background(), req)
 	// With global resolution enabled, should resolve
@@ -4170,11 +4062,9 @@ func TestCompletionViaCreateObject(t *testing.T) {
 	srv.index.IndexFile(docURI, docContent)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 1, Character: 15},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 1, Character: 15},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)
@@ -4281,11 +4171,9 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 4, Character: 20},
-		},
-		Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 4, Character: 20},
+		Context:      protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: new(".")},
 	})
 
 	result, replyErr := srv.handleCompletion(context.Background(), req)

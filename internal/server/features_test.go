@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	json "github.com/go-json-experiment/json"
+	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/protocol"
@@ -144,10 +144,8 @@ func TestDisabledHandlersDeclineTheRequest(t *testing.T) {
 	docURI := uriOfTempDoc(t, s, "component {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}\n")
 
 	hl, err := s.handleDocumentHighlight(context.Background(), mustJSON(t, protocol.DocumentHighlightParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 2, Character: 2},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 2, Character: 2},
 	}))
 	if err != nil || hl != nil {
 		t.Errorf("documentHighlight answered while disabled: %v, %v", hl, err)
