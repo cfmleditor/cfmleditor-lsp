@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1972,8 +1973,30 @@ func sortScopes(scopes []FuncScope) {
 	}
 }
 
+// funcKey builds the "start:end" key the lazy per-function caches
+// (funcVars/funcRefsMap/funcCallsMap/funcLinksMap) are stored under.
+//
+// It is on every per-keystroke path -- hover, definition and completion each
+// reach FuncVars/FuncRefs, and FuncLinks calls it once per link -- so it is
+// written to allocate exactly once, for the returned string. The obvious
+// spelling, strings.Join([]string{itoa(start), itoa(end)}, ":"), costs four:
+// a string from each itoa, the slice holding them, and the join's result. In a
+// profile of the document-link handler that was 600,001 of its 630,284
+// objects, 95% of everything it allocated.
+//
+// A struct key would allocate none at all, and is deliberately not used: the
+// zero value of a struct{start, end int} is {0, 0}, which is a real function
+// beginning on line 0, so it could not also mean "no enclosing function" the
+// way the empty string does for every `inFunc == ""` test in the two parsers.
 func funcKey(start, end int) string {
-	return strings.Join([]string{itoa(start), itoa(end)}, ":")
+	// Two base-10 ints with sign, plus the separator.
+	var buf [2*20 + 1]byte
+
+	b := strconv.AppendInt(buf[:0], int64(start), 10)
+	b = append(b, ':')
+	b = strconv.AppendInt(b, int64(end), 10)
+
+	return string(b)
 }
 
 func atoi(s string) int {
@@ -1997,31 +2020,6 @@ func atoi(s string) int {
 	}
 
 	return n
-}
-
-func itoa(n int) string {
-	if n < 0 {
-		return "-" + uitoa(uint(-n))
-	}
-
-	return uitoa(uint(n))
-}
-
-func uitoa(n uint) string {
-	if n == 0 {
-		return "0"
-	}
-
-	var buf [20]byte
-
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-
-	return string(buf[i:])
 }
 
 // lineOffsets converts line numbers to byte offsets.

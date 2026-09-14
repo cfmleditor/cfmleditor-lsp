@@ -83,3 +83,62 @@ func TestHighlightsHandleCRLF(t *testing.T) {
 func TestHighlightsOfNothing(t *testing.T) {
 	assertHighlights(t, "x = 1;\n", "", nil)
 }
+
+// TestHighlightLineNumbersSurviveTheWalk covers the line shapes that a manual
+// walk gets wrong where strings.Split does not: a file with no trailing
+// newline, consecutive newlines (an empty line must still consume a line
+// number), a match on the very last line, and a file that is nothing but
+// newlines.
+func TestHighlightLineNumbersSurviveTheWalk(t *testing.T) {
+	// No trailing newline, match on the final line.
+	assertHighlights(t, "a = 1;\nuser = 2;", "user", []string{"1:0-4"})
+
+	// Blank lines still advance the line counter.
+	assertHighlights(t, "a = 1;\n\n\nuser = 2;\n", "user", []string{"3:0-4"})
+
+	// Leading blank line.
+	assertHighlights(t, "\nuser = 2;\n", "user", []string{"1:0-4"})
+
+	// Trailing newline does not invent a match or a line.
+	assertHighlights(t, "user = 1;\n", "user", []string{"0:0-4"})
+
+	// Nothing but separators.
+	assertHighlights(t, "\n\n\n", "user", nil)
+}
+
+// TestHighlightsCostTheAnswerNotTheFile pins the shape rather than a byte
+// count: the same single match in a file a hundred times longer must not
+// allocate a hundred times more memory. strings.Split did exactly that -- a
+// string header per line, 16 bytes each, on a request the editor sends on every
+// cursor move -- so this fails if it comes back.
+//
+// It has to weigh *bytes*, not allocations. Split takes one slice however long
+// the file is, so an AllocsPerRun comparison passes just as happily with Split
+// as without it; the first version of this test did, and caught nothing.
+func TestHighlightsCostTheAnswerNotTheFile(t *testing.T) {
+	const match = "user = 1;\n"
+
+	bytesPerOp := func(src string) int64 {
+		r := testing.Benchmark(func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if got := highlightsOf(src, "user"); len(got) != 1 {
+					b.Fatalf("expected exactly 1 highlight, got %d", len(got))
+				}
+			}
+		})
+
+		return r.AllocedBytesPerOp()
+	}
+
+	small := bytesPerOp(match + strings.Repeat("a = 2;\n", 100))
+	large := bytesPerOp(match + strings.Repeat("a = 2;\n", 10000))
+
+	// The answer is one highlight either way, so the larger file may cost no
+	// more than a slack factor over the smaller. Split makes it ~100x.
+	if large > small*2 {
+		t.Errorf("memory scales with the file, not the answer: %d B/op for 101 lines, %d B/op for 10001 lines",
+			small, large)
+	}
+}
