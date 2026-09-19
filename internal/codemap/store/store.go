@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   island     INTEGER NOT NULL DEFAULT 0,
   reachable  INTEGER NOT NULL DEFAULT 0,
   root       INTEGER NOT NULL DEFAULT 0,
+  utility    INTEGER NOT NULL DEFAULT 0,
+  boundary   INTEGER NOT NULL DEFAULT 0,
   in_degree  INTEGER NOT NULL DEFAULT 0,
   out_degree INTEGER NOT NULL DEFAULT 0
 );
@@ -65,6 +67,9 @@ CREATE INDEX IF NOT EXISTS nodes_kind   ON nodes(kind);
 -- Answers "what is unreferenced" without a scan, which is the query most likely
 -- to be run against the whole table.
 CREATE INDEX IF NOT EXISTS nodes_dead   ON nodes(reachable, in_degree);
+-- The question a utility marking is for: rank what everything depends on, with
+-- the infrastructure separable.
+CREATE INDEX IF NOT EXISTS nodes_util   ON nodes(utility, in_degree);
 
 CREATE TABLE IF NOT EXISTS edges (
   from_id TEXT NOT NULL,
@@ -141,8 +146,9 @@ func (s *Store) Save(m *codemap.Map) error {
 	in, out := degrees(m)
 
 	nodeStmt, err := tx.Prepare(`INSERT INTO nodes
-      (id, kind, name, name_lower, file, line, access, component, entry, island, reachable, root, in_degree, out_degree)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (id, kind, name, name_lower, file, line, access, component, entry, island, reachable, root,
+       utility, boundary, in_degree, out_degree)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return fmt.Errorf("preparing node insert: %w", err)
 	}
@@ -161,6 +167,7 @@ func (s *Store) Save(m *codemap.Map) error {
 		if _, err := nodeStmt.Exec(n.ID, string(n.Kind), n.Name, strings.ToLower(n.Name),
 			n.File, n.Line, n.Access, n.Component,
 			b2i(n.Entry), n.Island, b2i(n.Reachable), b2i(n.Root),
+			b2i(n.Utility), b2i(n.Boundary),
 			in[n.ID], out[n.ID]); err != nil {
 			return fmt.Errorf("inserting node %s: %w", n.ID, err)
 		}

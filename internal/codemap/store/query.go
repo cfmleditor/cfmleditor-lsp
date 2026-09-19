@@ -13,7 +13,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
 )
 
-const symbolCols = `id, kind, name, file, line, access, component, entry, reachable, island, in_degree, out_degree`
+const symbolCols = `id, kind, name, file, line, access, component, entry, reachable, utility, island, in_degree, out_degree`
 
 func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 	defer func() { _ = rows.Close() }()
@@ -22,13 +22,13 @@ func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 
 	for rows.Next() {
 		var (
-			s                 Symbol
-			entry, reach, ln  int
-			access, component sql.NullString
+			s                     Symbol
+			entry, reach, ln, uti int
+			access, component     sql.NullString
 		)
 
 		if err := rows.Scan(&s.ID, &s.Kind, &s.Name, &s.File, &ln, &access, &component,
-			&entry, &reach, &s.Island, &s.InDegree, &s.OutDegree); err != nil {
+			&entry, &reach, &uti, &s.Island, &s.InDegree, &s.OutDegree); err != nil {
 			return nil, fmt.Errorf("scanning symbol: %w", err)
 		}
 
@@ -37,6 +37,7 @@ func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 		s.Component = component.String
 		s.Entry = entry != 0
 		s.Reachable = reach != 0
+		s.Utility = uti != 0
 		out = append(out, s)
 	}
 
@@ -180,14 +181,14 @@ func (s *Store) neighbours(id, match, join string, limit int) ([]Neighbour, erro
 
 	for rows.Next() {
 		var (
-			n                 Neighbour
-			entry, reach, dyn int
-			ln                int
-			access, component sql.NullString
+			n                      Neighbour
+			entry, reach, dyn, uti int
+			ln                     int
+			access, component      sql.NullString
 		)
 
 		if err := rows.Scan(&n.ID, &n.Kind, &n.Name, &n.File, &ln, &access, &component,
-			&entry, &reach, &n.Island, &n.InDegree, &n.OutDegree,
+			&entry, &reach, &uti, &n.Island, &n.InDegree, &n.OutDegree,
 			&n.EdgeKind, &n.Count, &dyn); err != nil {
 			return nil, fmt.Errorf("scanning neighbour: %w", err)
 		}
@@ -197,6 +198,7 @@ func (s *Store) neighbours(id, match, join string, limit int) ([]Neighbour, erro
 		n.Component = component.String
 		n.Entry = entry != 0
 		n.Reachable = reach != 0
+		n.Utility = uti != 0
 		n.Dynamic = dyn != 0
 		out = append(out, n)
 	}

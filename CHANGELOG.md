@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The SQLite store dropped `utility` and `boundary`.** Both are carried on every node in the map and neither reached the schema, so the question a utility marking exists for — rank what everything depends on, with the infrastructure separable — could not be written as SQL at all, and nothing said why. Both are columns now, with an index on `(utility, in_degree)` for that ranking, and a test that fails if a node flag stops round-tripping.
+
 ### Added
 
 - **A `codemap` block in `.cfmleditor.json`**, carrying the `entry` and `utility` globs the `graph` command uses. They describe the codebase rather than one invocation, so every person and every tool that builds the map describes the same one — a map built without them reports different dead code and a different set of hubs, and nothing about the result says which run was configured correctly. The command-line flags add to the config rather than replacing it.
