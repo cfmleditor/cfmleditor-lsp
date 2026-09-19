@@ -565,7 +565,14 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
   `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
   `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
-  `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`.
+  `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`, `.resolveRoute`.
+
+  **`resolveRoute` exists so an editor does not keep its own copy of the
+  convention.** A command that takes a route by hand and go-to-definition on a
+  route in source must answer alike; two resolvers reading two configs disagree
+  quietly, and the wrong one still opens a file. It answers rather than errors
+  when no convention is configured, because a JSON-RPC error is not something a
+  command handler can show anyone.
 
   **`generateCodeMap` reuses the server's index instead of building one** — it is
   already current, and re-reading every `.cfc` is the more expensive half of a cold
