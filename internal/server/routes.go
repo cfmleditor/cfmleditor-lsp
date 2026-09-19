@@ -40,6 +40,18 @@ func (s *Server) routeResolver() *route.Resolver {
 		Config: s.Routes,
 		Lookups: route.Lookups{
 			ComponentPath: func(component string) string {
+				// One base directory for the whole workspace, not the directory of
+				// the file the route was written in. A route names a component
+				// globally — the same route means the same thing wherever it is
+				// written — so resolving it relative to each file would make a
+				// shared view resolve differently depending on which page included
+				// it.
+				//
+				// The consequence is that a controller template should be written
+				// through a mapping ("tassweb.packages.tass.${1}") rather than as a
+				// path relative to the workspace root ("packages.tass.${1}"). Both
+				// work when the root is the application; only the mapped form keeps
+				// working for a route in a sibling application's file.
 				base := ""
 				if len(roots) > 0 {
 					base = roots[0]

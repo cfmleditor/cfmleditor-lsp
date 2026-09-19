@@ -157,10 +157,11 @@ from go-to-definition, and a document link on each resolvable route.
   "functions":   ["redirect", "setPrint"],      // redirect("a.b.c")
 
   "aliases": { "ui.web": ["tassweb", "kiosk", "parentportal"] },
+  // prefer a mapped path over one relative to the workspace root
   "controllers": [
-    { "component": "packages.tass.${1}-${2}", "method": "${3+:search}" },
-    { "component": "packages.tass.${2}",      "method": "${3+:search}" },
-    { "component": "packages.tass.${1}",      "method": "${2+:search}" }
+    { "component": "tassweb.packages.tass.${1}-${2}", "method": "${3+:search}" },
+    { "component": "tassweb.packages.tass.${2}",      "method": "${3+:search}" },
+    { "component": "tassweb.packages.tass.${1}",      "method": "${2+:search}" }
   ],
   "views": [
     { "longestDir": true, "ext": [".cfm"] },
@@ -181,6 +182,13 @@ suffix joins without the dots (`dialog.custom.roll` → `dialogCustomRoll`),
 `:slash` with them, `:lower`/`:upper` fold the case; the default joins with dots.
 A rule that reaches past the end of a route declines it rather than matching a
 truncated path.
+
+**Write a controller template through a `mappings` entry** — `tassweb.packages.tass.${1}`
+rather than `packages.tass.${1}` — when one exists. A route names a component
+globally, so it is resolved against one base directory for the whole workspace
+rather than against the directory of the file it was written in; both spellings
+work when that base is the application itself, and only the mapped one keeps
+working for a route written in a sibling application's file.
 
 **`:search` enumerates start points**, longest first. A route's segments do not say
 where the controller's name stops and the method's begins — the same shape is
