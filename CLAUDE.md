@@ -583,6 +583,26 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   outside the workspace: the arguments come from whatever asked the editor to run
   the command.
 
+## Capabilities the VS Code extension has and this server does not
+
+The `cfmleditor` extension stands its own language providers down whenever this
+server is running, on the rule that enabling the server hands it the language.
+That rule is simpler to hold than a per-capability list, and it costs three
+things the extension could answer and this server cannot. They are listed here
+so the loss is deliberate and so whoever implements one knows what it has to
+match.
+
+| Missing here | Extension's implementation | Notes |
+|---|---|---|
+| `textDocument/typeDefinition` | `CFMLTypeDefinitionProvider` | Go to the *type* of the symbol under the cursor, rather than its declaration. Most of the machinery exists — `CanResolveCall` already resolves a receiver to a component, which is the answer this request wants. |
+| Docblock completion | `DocBlockCompletions`, triggered on `*`, `@` and `.` | `@param`, `@return` and friends inside a `/** */` block. Note the trigger characters: `capabilities()` advertises `<`, `/`, `.` and `>`, so adding this means widening that list as well as handling the context. |
+| `textDocument/documentColor` | `CFMLDocumentColorProvider` | Colour swatches and the picker for colour literals. Wholly absent here; nothing in the parser records them. |
+
+Two of the three are cheap relative to what already exists, and `documentColor`
+is the one with no foundation at all. Until they land, a user who enables the
+server loses them — which is worth remembering when one is reported as a
+regression rather than a gap.
+
 ## Configuration (`.cfmleditor.json`)
 
 The authoritative schema is `config.JSON` in `internal/config/config.go`; README.md documents

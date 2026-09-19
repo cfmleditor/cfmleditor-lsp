@@ -138,13 +138,22 @@ Explain usage:
 }
 
 func runServer() {
-	fmt.Fprintf(os.Stderr, "cfmleditor-lsp %s\n", version)
-
 	cwd, _ := os.Getwd()
 	cfg, _ := daemon.FindConfig(cwd)
 
 	debug := cfg != nil && cfg.Debug()
 	log := cflog.NewLogger(debug)
+
+	// Through the logger rather than straight to stderr, which is where this
+	// used to go. An LSP client has no way to know that a line on a server's
+	// stderr is routine: vscode-languageclient logs all of it at error level, so
+	// a healthy startup announced itself as "[error] cfmleditor-lsp dev" and the
+	// one banner meant to reassure anyone reading the Output panel was the only
+	// thing in it that looked broken.
+	//
+	// It stays first, before anything that can fail, because the version is what
+	// a crash report needs most and a later line might never be reached.
+	log.Info("cfmleditor-lsp starting", cflog.String("version", version))
 
 	if debug {
 		log.Info("debug mode enabled")

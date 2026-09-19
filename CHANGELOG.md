@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The server's own log lines reached the editor as failures.** Everything it logged went to stderr, and `vscode-languageclient` reports a server's stderr at error level whatever it says — so the startup banner, "indexing complete" and a genuine fault were indistinguishable in the Output panel, all three prefixed `[error]`. The server now also sends `window/logMessage`, which carries a severity the client can render honestly. Both, not one instead of the other: stderr is the only place a record can go before the client connects or after it disappears, and a crash during startup is exactly when the reason matters most.
+
+### Added
+
+- **The capabilities the VS Code extension has and this server does not are documented** (`README.md`, `CLAUDE.md`): `textDocument/typeDefinition`, docblock completion, and `textDocument/documentColor`. The extension stands its own providers down while the server runs, so these go quiet when it is enabled — recorded so the loss is deliberate, and so whoever implements one knows what it has to match.
+
 ## [0.3.1]
 
 ### Added
