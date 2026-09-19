@@ -481,6 +481,8 @@ func SettingsFrom(c *Config) server.Settings {
 
 	return server.Settings{
 		ConfigPath:               c.Path,
+		Routes:                   c.Routes(),
+		CodeMap:                  c.CodeMap(),
 		WorkspaceFolders:         c.WorkspaceFolders(),
 		IndexGlobs:               c.IndexGlobs(),
 		Mappings:                 c.Mappings(),

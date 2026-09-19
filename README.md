@@ -114,16 +114,43 @@ drops all of that. Use `call` when you want only "what calls what".
 on purpose — it renders in a browser and falls over in the low thousands of nodes, so a
 map big enough to need a cap should be collapsed to `--level package` first.
 
-`html` is a single self-contained file with four views: hierarchical **edge bundling**
+`html` is a single self-contained file with six views: hierarchical **edge bundling**
 (grouped by island, then directory), a **force** layout that gives each island its own
 centre so detached code sits apart rather than being pressed against the border, a
 **dependency matrix** that has no occlusion at any size, and an **islands** view of the
 disconnected pieces. Above ~1,200 nodes the force view renders to a canvas with a
 quadtree for hit-testing, so it stays interactive into the tens of thousands.
 
+Two more exist because at tens of thousands of nodes none of those four can show
+the whole map. **Drill-down** starts at the top-level directories and expands one
+level per click, so what is drawn depends on what you opened rather than on the
+size of the map. **Focus** draws one node and everything within *n* hops, a ring
+per hop, and clicking any node re-centres. Neither is capped.
+
 The report embeds its JavaScript — a 76KB D3 bundle of just the modules these views
 use, built from `internal/codemap/assets/vendor` and committed. No CDN, no network:
 the file opens the same on an air-gapped machine and still renders years later.
+
+### From the editor
+
+`cfmleditor.generateCodeMap` builds a report from the running server, so nothing
+needs a CLI on a PATH:
+
+```jsonc
+// workspace/executeCommand — every field optional
+{ "level": "call", "format": "html", "out": "reports/map.html",
+  "under": "packages/tass", "live": true, "open": true }
+```
+
+Defaults are `level: function`, `format: html`, output `.cfmleditor/codemap.html`,
+and the `codemap` config block supplies the rest. `cfmleditor.showCodeMapStats`
+answers the cheap question — how much of this workspace the map resolves — without
+writing anything.
+
+It reuses the server's index, which `didChange` and the watched-file handler
+already keep current, so it skips the index pass a cold CLI run pays for. It
+returns immediately and reports through `window/showMessage`, and it will not
+write outside the workspace.
 
 ### Scoping
 

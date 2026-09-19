@@ -56,6 +56,7 @@ type Server struct {
 	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
 	ServicePropertyResolvers map[string]string         // "@serviceproperty" annotation kind → dot-path template
 	Routes                   route.Config              // framework routing convention (see internal/route)
+	CodeMap                  config.CodeMap            // entry and utility globs for cfmleditor.generateCodeMap
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
 	resolverMu               sync.Mutex                // guards resolver, cachedResolvers, cachedResolverSet
@@ -181,7 +182,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
 		CodeActionProvider:        protocol.Boolean(true),
 		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats"},
 		},
 		Workspace: &protocol.WorkspaceOptions{
 			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{

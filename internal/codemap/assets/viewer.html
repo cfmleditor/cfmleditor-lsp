@@ -103,6 +103,8 @@
       <button class="view" data-view="bundle" aria-pressed="true">Bundle</button>
       <button class="view" data-view="force">Force</button>
       <button class="view" data-view="matrix">Matrix</button>
+      <button class="view" data-view="tree">Drill-down</button>
+      <button class="view" data-view="focus">Focus</button>
       <button class="view" data-view="islands">Islands</button>
     </div>
     <p class="hint" id="view-hint"></p>
@@ -126,6 +128,22 @@
     <label class="row"><input type="checkbox" id="dyn" checked> show dynamic (guessed)</label>
     <label class="row"><input type="checkbox" id="util"> show utility code</label>
     <p class="hint" id="utilnote"></p>
+
+    <div id="focus-controls" hidden>
+      <h2>Focus</h2>
+      <p class="hint" id="focus-on"></p>
+      <label class="row">hops <input type="range" id="radius" min="1" max="4" step="1" value="2"
+        style="flex:1"> <b id="radiusv" style="font-variant-numeric:tabular-nums">2</b></label>
+      <label class="row"><input type="checkbox" id="dir-in" checked> what depends on it</label>
+      <label class="row"><input type="checkbox" id="dir-out" checked> what it depends on</label>
+    </div>
+
+    <div id="tree-controls" hidden>
+      <h2>Drill-down</h2>
+      <p class="hint">Click a group to expand it, again to collapse. Only the level
+        you are looking at is drawn, so the size of the map does not matter.</p>
+      <button class="mini" id="tree-reset">collapse all</button>
+    </div>
 
     <h2>Size</h2>
     <label class="row">max nodes <input type="range" id="cap" min="0" max="100" step="1" value="60"
@@ -221,6 +239,17 @@ const state = {
   query: "",
   cap: 0,            // resolved from the slider against the real node count
   selected: null,
+
+  // Drill-down: the set of directories and files opened so far. Everything else
+  // is drawn as the deepest closed ancestor, so the number of nodes on screen is
+  // a function of what has been opened and not of how big the map is.
+  expanded: new Set(),
+
+  // Focus: the node at the centre and how many hops out to draw.
+  focus: null,
+  radius: 2,
+  dirIn: true,
+  dirOut: true,
 };
 
 // What each view can actually show, as opposed to an arbitrary round number. These
@@ -238,6 +267,12 @@ const VIEW_LIMIT = {
   matrix: () => Math.max(60, Math.floor((Math.min(...size()) - 170) / 2.5)),
   // Circles pack at any size; only the leaf dots need to stay above a pixel.
   islands: () => 40000,
+  // Neither of these renders the whole map. Drill-down draws one level at a time
+  // and focus draws one neighbourhood, so capping their input would only hide
+  // nodes they were never going to put on screen — and would quietly change what
+  // expanding or re-centring finds.
+  tree: () => Infinity,
+  focus: () => Infinity,
 };
 
 // Above this the force view draws to a canvas instead of SVG. Ten thousand DOM
@@ -246,6 +281,8 @@ const VIEW_LIMIT = {
 const FORCE_RASTER = 1200;
 
 const VIEW_HINTS = {
+  tree: "Directories, expandable. Start at the top and open only what you are asking about — nothing else is rendered, so the whole map can be any size.",
+  focus: "One node and its neighbourhood. Rings are hops: the centre is the node, the first ring is what touches it directly. Click any node to re-centre.",
   bundle: "Nodes on a ring, grouped by island then directory; edges bundled along that hierarchy. Hover a node to see what it calls and what calls it.",
   force: "Physical layout. Each island is pulled to its own centre, so detached code sits apart instead of being flung to the edge.",
   matrix: "Every dependency as a cell. No occlusion at any size — a block off the diagonal is a cycle, a full row is a hub.",
@@ -353,6 +390,7 @@ function shortName(n) {
 
 function select(id) {
   state.selected = id;
+  state.focus = id;
   renderDetail();
   draw();
 }
@@ -373,15 +411,25 @@ function draw() {
       ". The ones kept are the most connected. Raise the slider, pick one island, " +
       "switch to the matrix, or rebuild with --level package.";
   }
-  document.getElementById("capnote").textContent =
-    g.nodes.length.toLocaleString() + " of " + NODES.length.toLocaleString() + " nodes shown, " +
-    g.edges.length.toLocaleString() + " edges";
+  const selfPaced = state.view === "tree" || state.view === "focus";
+
+  document.getElementById("focus-controls").hidden = state.view !== "focus";
+  document.getElementById("tree-controls").hidden = state.view !== "tree";
+
+  if (!selfPaced) {
+    document.getElementById("capnote").textContent =
+      g.nodes.length.toLocaleString() + " of " + NODES.length.toLocaleString() + " nodes shown, " +
+      g.edges.length.toLocaleString() + " edges";
+  }
+
   const utils = NODES.filter(n => n.utility).length;
   document.getElementById("utilnote").textContent = utils
     ? utils.toLocaleString() + " nodes are marked utility" + (state.utility ? "" : " and hidden")
     : "nothing is marked utility (see --utility)";
-  document.getElementById("viewcap").textContent =
-    "this view is legible to about " + VIEW_LIMIT[state.view]().toLocaleString() + " nodes";
+  renderHubs();
+  document.getElementById("viewcap").textContent = selfPaced
+    ? "this view draws only what you open, so the size of the map does not limit it"
+    : "this view is legible to about " + VIEW_LIMIT[state.view]().toLocaleString() + " nodes";
 
   if (!g.nodes.length) {
     const t = svg.append("text").attr("x", "50%").attr("y", "45%")
@@ -392,7 +440,10 @@ function draw() {
     return;
   }
 
-  ({ bundle: drawBundle, force: drawForce, matrix: drawMatrix, islands: drawIslands })[state.view](g);
+  ({
+    bundle: drawBundle, force: drawForce, matrix: drawMatrix,
+    islands: drawIslands, tree: drawTree, focus: drawFocus,
+  })[state.view](g);
 }
 
 // A map collapsed to file or package level holds no function nodes at all, so a
@@ -417,6 +468,303 @@ function emptyHint() {
   if (state.island !== "") hints.push("One island is selected - try All islands.");
   if (KINDS.some(k => !state.kinds.has(k))) hints.push("Some edge kinds are switched off.");
   return hints;
+}
+
+/* ---------- drill-down: a hierarchy over the paths already in the data ---------- */
+
+// Ancestors of a node, outermost first: a function in packages/tass/core/user.cfc
+// belongs to packages, packages/tass, packages/tass/core, and the file itself.
+//
+// This is derived rather than stored. The node already carries its path and the
+// path already is the hierarchy, so a second representation would only be a thing
+// that could disagree with the first.
+function ancestorsOf(n) {
+  if (!n.file) return [];
+  const parts = n.file.split("/").filter(Boolean);
+  const out = [];
+  for (let i = 1; i <= parts.length; i++) out.push(parts.slice(0, i).join("/"));
+  return out;
+}
+
+// What a node is drawn as right now: itself if everything down to its file has
+// been opened, otherwise the deepest closed ancestor.
+//
+// This is what makes the view independent of the map's size. At 54,000 nodes the
+// first frame draws a dozen top-level directories, and each expansion adds only
+// that directory's children — you navigate rather than survey, which is how
+// anyone reads a codebase this big anyway.
+function drillTarget(n) {
+  const anc = ancestorsOf(n);
+  for (const a of anc) {
+    if (!state.expanded.has(a)) return { id: "dir:" + a, group: a, name: a.split("/").pop() };
+  }
+  return { id: n.id, group: null, name: shortName(n) };
+}
+
+function drillGraph(g) {
+  const byId = new Map();
+  const map = new Map();       // real node id -> display id
+
+  for (const n of g.nodes) {
+    const t = drillTarget(n);
+    map.set(n.id, t.id);
+
+    let d = byId.get(t.id);
+    if (!d) {
+      d = {
+        id: t.id, group: t.group, name: t.name, members: 0,
+        entry: false, reachable: false, utility: true, kind: t.group ? "package" : n.kind,
+        island: n.island, file: t.group || n.file, line: t.group ? 0 : n.line,
+      };
+      byId.set(t.id, d);
+    }
+
+    d.members++;
+    d.entry = d.entry || n.entry;
+    d.reachable = d.reachable || n.reachable;
+    // A group is infrastructure only if all of it is, the same rule Collapse uses.
+    d.utility = d.utility && n.utility;
+  }
+
+  const edges = new Map();
+  for (const e of g.edges) {
+    const from = map.get(e.from), to = map.get(e.to);
+    if (!from || !to || from === to) continue;
+    const key = from + "\u0000" + to + "\u0000" + e.kind;
+    const prev = edges.get(key);
+    if (prev) { prev.count += e.count; if (!e.dynamic) prev.dynamic = false; continue; }
+    edges.set(key, { from, to, kind: e.kind, count: e.count, dynamic: e.dynamic });
+  }
+
+  return { nodes: [...byId.values()], edges: [...edges.values()] };
+}
+
+function drawTree(g) {
+  const [w, h] = size();
+  const d = drillGraph(g);
+
+  document.getElementById("capnote").textContent =
+    d.nodes.length.toLocaleString() + " shown (" + g.nodes.length.toLocaleString() +
+    " underneath), " + d.edges.length.toLocaleString() + " edges";
+
+  const zoomable = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.2, 8]).on("zoom", ev => zoomable.attr("transform", ev.transform)));
+
+  const nodes = d.nodes.map(n => ({ ...n, x: w / 2 + (Math.random() - 0.5) * 200, y: h / 2 + (Math.random() - 0.5) * 200 }));
+  const index = new Map(nodes.map(n => [n.id, n]));
+  const links = d.edges.filter(e => index.has(e.from) && index.has(e.to))
+    .map(e => ({ source: e.from, target: e.to, kind: e.kind, dynamic: e.dynamic, count: e.count }));
+
+  svg.append("defs").append("marker")
+    .attr("id", "tarrow").attr("viewBox", "0 -4 8 8").attr("refX", 22)
+    .attr("markerWidth", 5).attr("markerHeight", 5).attr("orient", "auto")
+    .append("path").attr("d", "M0,-3L7,0L0,3").attr("fill", "var(--muted)");
+
+  const link = zoomable.append("g").selectAll("line").data(links).join("line")
+    .attr("stroke", l => KIND_COLOR(l.kind))
+    .attr("stroke-opacity", l => l.dynamic ? 0.3 : 0.55)
+    .attr("stroke-dasharray", l => l.dynamic ? "2,3" : null)
+    .attr("stroke-width", l => Math.min(6, 0.8 + Math.log1p(l.count)))
+    .attr("marker-end", "url(#tarrow)");
+
+  const radius = n => n.group ? Math.min(26, 8 + Math.sqrt(n.members) * 2.2) : 5;
+
+  const node = zoomable.append("g").selectAll("circle").data(nodes).join("circle")
+    .attr("r", radius)
+    .attr("fill", n => nodeFill(n))
+    .attr("fill-opacity", n => n.group ? 0.35 : 1)
+    .attr("stroke", n => state.expanded.has(n.group) ? "var(--accent)" : "var(--panel)")
+    .attr("stroke-width", 1.5)
+    .style("cursor", "pointer")
+    .on("click", (ev, n) => {
+      if (!n.group) { select(n.id); return; }
+      // Opening a directory reveals its children; closing it puts them back.
+      state.expanded.add(n.group);
+      draw();
+    })
+    .on("contextmenu", (ev, n) => {
+      ev.preventDefault();
+      if (n.group) { collapseUnder(n.group); draw(); }
+    })
+    .on("mouseenter", (ev, n) => showTip(
+      n.group
+        ? `<b>${n.name}</b><br><span style="color:var(--muted)">${n.members.toLocaleString()} nodes \u00b7 click to open</span>`
+        : tipHTML(BY_ID.get(n.id)), ev))
+    .on("mouseleave", hideTip);
+
+  const label = zoomable.append("g").selectAll("text").data(nodes).join("text")
+    .attr("font-size", n => n.group ? 11 : 9)
+    .attr("dx", n => radius(n) + 4).attr("dy", 3)
+    .attr("fill", n => n.group ? "var(--ink)" : "var(--muted)")
+    .attr("pointer-events", "none")
+    .text(n => n.group ? `${n.name} (${n.members})` : n.name);
+
+  liveSim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(n => n.id).distance(90).strength(0.4))
+    .force("charge", d3.forceManyBody().strength(-420))
+    .force("collide", d3.forceCollide().radius(n => radius(n) + 14))
+    .force("x", d3.forceX(w / 2).strength(0.05))
+    .force("y", d3.forceY(h / 2).strength(0.05))
+    .on("tick", () => {
+      link.attr("x1", l => l.source.x).attr("y1", l => l.source.y)
+          .attr("x2", l => l.target.x).attr("y2", l => l.target.y);
+      node.attr("cx", n => n.x).attr("cy", n => n.y);
+      label.attr("x", n => n.x).attr("y", n => n.y);
+    });
+}
+
+// Closing a directory closes everything inside it, or reopening it would restore
+// a half-expanded state the reader did not leave it in.
+function collapseUnder(dir) {
+  state.expanded.delete(dir);
+  for (const e of [...state.expanded]) {
+    if (e.startsWith(dir + "/")) state.expanded.delete(e);
+  }
+}
+
+/* ---------- focus: one node and its neighbourhood ---------- */
+
+// Adjacency in both directions, built once. Callers and callees are different
+// questions and the view offers both, so the walk needs both.
+let ADJ = null;
+function adjacency() {
+  if (ADJ) return ADJ;
+  ADJ = { out: new Map(), in: new Map() };
+  for (const e of EDGES) {
+    if (!ADJ.out.has(e.from)) ADJ.out.set(e.from, []);
+    if (!ADJ.in.has(e.to)) ADJ.in.set(e.to, []);
+    ADJ.out.get(e.from).push(e);
+    ADJ.in.get(e.to).push(e);
+  }
+  return ADJ;
+}
+
+// Everything within radius hops of id, with the hop count, so the renderer can
+// place a ring per distance rather than let a force layout decide.
+function neighbourhood(id, radius) {
+  const adj = adjacency();
+  const dist = new Map([[id, 0]]);
+  const edges = [];
+  let frontier = [id];
+
+  for (let d = 1; d <= radius && frontier.length; d++) {
+    const next = [];
+    for (const cur of frontier) {
+      const step = (list, other) => {
+        for (const e of list || []) {
+          edges.push(e);
+          const o = other(e);
+          if (dist.has(o)) continue;
+          dist.set(o, d);
+          next.push(o);
+        }
+      };
+      if (state.dirOut) step(adj.out.get(cur), e => e.to);
+      if (state.dirIn) step(adj.in.get(cur), e => e.from);
+    }
+    frontier = next;
+  }
+
+  const keep = new Set(dist.keys());
+  return {
+    dist,
+    nodes: NODES.filter(n => keep.has(n.id)),
+    edges: edges.filter(e => keep.has(e.from) && keep.has(e.to)),
+  };
+}
+
+function drawFocus(g) {
+  const [w, h] = size();
+  const id = state.focus && BY_ID.has(state.focus) ? state.focus : defaultFocus(g);
+
+  if (!id) {
+    svg.append("text").attr("x", "50%").attr("y", "50%").attr("text-anchor", "middle")
+      .attr("fill", "var(--muted)").text("Click a node in any view to focus it.");
+    return;
+  }
+
+  state.focus = id;
+  document.getElementById("focus-on").textContent = shortName(BY_ID.get(id));
+
+  const nb = neighbourhood(id, state.radius);
+
+  document.getElementById("capnote").textContent =
+    nb.nodes.length.toLocaleString() + " nodes within " + state.radius +
+    " hop" + (state.radius === 1 ? "" : "s") + ", " + nb.edges.length.toLocaleString() + " edges";
+
+  // A ring per hop, so distance is a thing you can read off the picture rather
+  // than infer from a force layout that had other priorities.
+  const byRing = new Map();
+  for (const n of nb.nodes) {
+    const d = nb.dist.get(n.id);
+    if (!byRing.has(d)) byRing.set(d, []);
+    byRing.get(d).push(n);
+  }
+
+  const maxR = Math.min(w, h) / 2 - 70;
+  const pos = new Map();
+
+  for (const [ring, members] of byRing) {
+    if (ring === 0) { pos.set(members[0].id, [w / 2, h / 2]); continue; }
+    const r = (maxR * ring) / Math.max(1, state.radius);
+    members.sort((a, b) => (a.file || "").localeCompare(b.file || ""));
+    members.forEach((n, i) => {
+      const a = (i / members.length) * 2 * Math.PI - Math.PI / 2;
+      pos.set(n.id, [w / 2 + r * Math.cos(a), h / 2 + r * Math.sin(a)]);
+    });
+  }
+
+  const zoomable = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.3, 8]).on("zoom", ev => zoomable.attr("transform", ev.transform)));
+
+  for (let ring = 1; ring <= state.radius; ring++) {
+    zoomable.append("circle")
+      .attr("cx", w / 2).attr("cy", h / 2)
+      .attr("r", (maxR * ring) / state.radius)
+      .attr("fill", "none").attr("stroke", "var(--line)").attr("stroke-dasharray", "2,4");
+  }
+
+  zoomable.append("g").selectAll("line").data(nb.edges).join("line")
+    .attr("x1", e => pos.get(e.from)[0]).attr("y1", e => pos.get(e.from)[1])
+    .attr("x2", e => pos.get(e.to)[0]).attr("y2", e => pos.get(e.to)[1])
+    .attr("stroke", e => e.to === id ? "var(--in)" : e.from === id ? "var(--out)" : KIND_COLOR(e.kind))
+    .attr("stroke-opacity", e => (e.from === id || e.to === id) ? 0.9 : 0.25)
+    .attr("stroke-width", e => (e.from === id || e.to === id) ? 1.8 : 0.8)
+    .attr("stroke-dasharray", e => e.dynamic ? "2,3" : null);
+
+  const nodeSel = zoomable.append("g").selectAll("g").data(nb.nodes).join("g")
+    .attr("transform", n => `translate(${pos.get(n.id)[0]},${pos.get(n.id)[1]})`)
+    .style("cursor", "pointer")
+    .on("click", (ev, n) => { state.focus = n.id; select(n.id); })
+    .on("mouseenter", (ev, n) => showTip(tipHTML(n), ev))
+    .on("mouseleave", hideTip);
+
+  nodeSel.append("circle")
+    .attr("r", n => n.id === id ? 9 : 4)
+    .attr("fill", n => nodeFill(n))
+    .attr("stroke", n => n.id === id ? "var(--accent)" : "var(--panel)")
+    .attr("stroke-width", n => n.id === id ? 3 : 1);
+
+  const labelled = nb.nodes.length <= 160;
+  if (labelled) {
+    nodeSel.append("text")
+      .attr("dx", 8).attr("dy", 3).attr("font-size", n => n.id === id ? 11 : 8.5)
+      .attr("font-weight", n => n.id === id ? 700 : null)
+      .attr("fill", n => n.id === id ? "var(--ink)" : "var(--muted)")
+      .text(n => shortName(n));
+  }
+}
+
+// Without a pick, the most-depended-on application node is the most useful thing
+// to open on: it is where a change costs the most.
+function defaultFocus(g) {
+  let best = null, bestIn = -1;
+  for (const n of g.nodes) {
+    if (n.utility) continue;
+    const c = inDeg.get(n.id) || 0;
+    if (c > bestIn) { best = n.id; bestIn = c; }
+  }
+  return best || (g.nodes[0] && g.nodes[0].id) || null;
 }
 
 /* --- 1. hierarchical edge bundling --- */
@@ -902,10 +1250,20 @@ function renderStats() {
     .join("");
 }
 
+// The hub list follows the utility toggle, for the same reason the chart does:
+// infrastructure outranks everything, so with it included the ranking is the same
+// handful of components no matter what you are looking at.
 function renderHubs() {
-  const top = [...inDeg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
-  document.getElementById("hubs").innerHTML = top.map(([id, c]) =>
-    `<li data-id="${id}"><span class="n">${shortName(BY_ID.get(id))}</span><span class="c">${c}</span></li>`).join("");
+  const top = [...inDeg.entries()]
+    .filter(([id]) => state.utility || !(BY_ID.get(id) || {}).utility)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 14);
+
+  document.getElementById("hubs").innerHTML = top.map(([id, c]) => {
+    const n = BY_ID.get(id);
+    const tag = n && n.utility ? ' <span class="tag">util</span>' : "";
+    return `<li data-id="${id}"><span class="n">${shortName(n)}${tag}</span><span class="c">${c}</span></li>`;
+  }).join("");
 }
 
 function renderIslandList() {
@@ -965,6 +1323,10 @@ function sync() {
   state.utility = document.getElementById("util").checked;
   const slider = +document.getElementById("cap").value;
   state.cap = capFromSlider(slider);
+  state.radius = +document.getElementById("radius").value;
+  state.dirIn = document.getElementById("dir-in").checked;
+  state.dirOut = document.getElementById("dir-out").checked;
+  document.getElementById("radiusv").textContent = state.radius;
   document.getElementById("capv").textContent =
     slider >= 100 ? "all" : state.cap.toLocaleString();
   document.getElementById("view-hint").textContent = VIEW_HINTS[state.view];
@@ -986,7 +1348,7 @@ document.querySelectorAll("button.view").forEach(b => b.addEventListener("click"
   sync();
 }));
 
-["island", "reach", "dyn", "util", "cap"].forEach(id =>
+["island", "reach", "dyn", "util", "cap", "radius", "dir-in", "dir-out"].forEach(id =>
   document.getElementById(id).addEventListener("input", sync));
 
 let debounce;
@@ -1010,6 +1372,11 @@ window.addEventListener("resize", () => {
 
 // The generator decides where the utility toggle starts; the reader can always
 // move it, because the nodes are in the page either way.
+document.getElementById("tree-reset").addEventListener("click", () => {
+  state.expanded.clear();
+  draw();
+});
+
 document.getElementById("util").checked = !DATA.hideUtility;
 document.getElementById("title").textContent = DATA.title || "Code map";
 document.getElementById("root").textContent = (DATA.root || "") + " · " + (DATA.level || "function") + " level";

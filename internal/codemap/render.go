@@ -271,19 +271,32 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 		}
 	}
 
-	hubs := m.Hubs(limit)
 	in := m.InDegree()
 
-	if len(hubs) > 0 {
-		fmt.Fprintf(&b, "\nMost depended on (%d):\n", len(hubs))
+	// Two rankings, because one is unreadable. Infrastructure outranks everything
+	// — on a real workspace the top twelve were all of it — so a single list
+	// answers "what is the logging component" every time. Splitting gives the
+	// question people actually asked, and keeps the other answer rather than
+	// hiding it.
+	app := m.HubsWhere(limit, func(n *Node) bool { return !n.Utility })
+	if len(app) > 0 {
+		heading := "Most depended on"
+		if m.Stats.Utility > 0 {
+			heading += " (utility excluded)"
+		}
 
-		for _, n := range hubs {
-			mark := ""
-			if n.Utility {
-				mark = "  [utility]"
-			}
+		fmt.Fprintf(&b, "\n%s (%d):\n", heading, len(app))
 
-			fmt.Fprintf(&b, "  %5d  %s%s\n", in[n.ID], describe(&n), mark)
+		for i := range app {
+			fmt.Fprintf(&b, "  %5d  %s\n", in[app[i].ID], describe(&app[i]))
+		}
+	}
+
+	if util := m.HubsWhere(limit, func(n *Node) bool { return n.Utility }); len(util) > 0 {
+		fmt.Fprintf(&b, "\nMost depended on, utility (%d):\n", len(util))
+
+		for i := range util {
+			fmt.Fprintf(&b, "  %5d  %s\n", in[util[i].ID], describe(&util[i]))
 		}
 	}
 
@@ -308,10 +321,34 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 			shown = shown[:limit]
 		}
 
-		fmt.Fprintf(&b, "\nUnreferenced (%d — candidates, not a verdict; see unresolved count above):\n", len(orphans))
+		// Utility is tagged here as well as in the hub list. Infrastructure is
+		// routinely unreferenced and correctly so — a Java stub exists to be
+		// method-checked and is never called, a wrapper is reached only through
+		// code the resolver could not follow — so an untagged list reads as a much
+		// longer dead-code report than the codebase deserves.
+		util := 0
+
+		for i := range orphans {
+			if orphans[i].Utility {
+				util++
+			}
+		}
+
+		note := ""
+		if util > 0 {
+			note = fmt.Sprintf("; %d of them utility", util)
+		}
+
+		fmt.Fprintf(&b, "\nUnreferenced (%d — candidates, not a verdict%s; see unresolved count above):\n",
+			len(orphans), note)
 
 		for i := range shown {
-			fmt.Fprintf(&b, "  %s\n", describe(&shown[i]))
+			mark := ""
+			if shown[i].Utility {
+				mark = "  [utility]"
+			}
+
+			fmt.Fprintf(&b, "  %s%s\n", describe(&shown[i]), mark)
 		}
 	}
 

@@ -205,6 +205,10 @@ func (s *Server) applyConfig(r *config.Resolved) {
 		s.Routes = r.Routes
 	}
 
+	if len(r.CodeMap.Entry)+len(r.CodeMap.Utility) > 0 && len(s.CodeMap.Entry)+len(s.CodeMap.Utility) == 0 {
+		s.CodeMap = r.CodeMap
+	}
+
 	s.ComponentResolvers = append(s.ComponentResolvers, r.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, r.PropertyResolvers...)
 

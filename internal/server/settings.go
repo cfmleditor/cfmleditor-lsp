@@ -1,6 +1,9 @@
 package server
 
-import "github.com/cfmleditor/cfmleditor-lsp/internal/config"
+import (
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+)
 
 // Settings is the per-session configuration a Server needs, gathered in one
 // place so that every way of starting a session applies the same set.
@@ -27,6 +30,8 @@ type Settings struct {
 	Mappings                 map[string]string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	Routes                   route.Config
+	CodeMap                  config.CodeMap
 	ComponentResolvers       []config.Resolver
 	PropertyResolvers        []config.PropResolver
 	BeanPaths                map[string]string
@@ -48,6 +53,8 @@ func (set Settings) Apply(s *Server) {
 	s.Mappings = set.Mappings
 	s.ExpressionMappings = set.ExpressionMappings
 	s.ServicePropertyResolvers = set.ServicePropertyResolvers
+	s.Routes = set.Routes
+	s.CodeMap = set.CodeMap
 	s.ComponentResolvers = append(s.ComponentResolvers, set.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, set.PropertyResolvers...)
 	s.BeanPaths = set.BeanPaths
