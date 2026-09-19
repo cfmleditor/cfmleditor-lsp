@@ -571,6 +571,17 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	release := s.lockDoc(docURI)
 
 	s.removeDocument(docURI)
+
+	// The completion cache goes with the document.
+	//
+	// It was the one per-file structure didClose left behind, and it is the
+	// largest: an entry per function scope, each holding the completion items
+	// for that scope. Nothing invalidated it but a watched-file change, so a
+	// daemon that outlives many editor sessions accumulated one for every file
+	// any of them had ever opened. Reopening the file rebuilds it; keeping it
+	// for a buffer nobody has costs memory for as long as the daemon runs.
+	s.compCache.Invalidate(docURI)
+
 	s.mu.Lock()
 	delete(s.parseResults, docURI)
 	delete(s.funcRanges, docURI)
