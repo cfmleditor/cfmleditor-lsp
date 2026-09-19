@@ -118,7 +118,9 @@ func TestBuildLineIdxMatchesTheScanItReplaced(t *testing.T) {
 	}
 }
 
-func assertSameInts(t *testing.T, src string, got, want []int) {
+// want is []int because the reference implementation predates the narrowing to
+// int32; comparing across the two types is the point, not an accident.
+func assertSameInts(t *testing.T, src string, got []int32, want []int) {
 	t.Helper()
 
 	if len(got) != len(want) {
@@ -126,7 +128,7 @@ func assertSameInts(t *testing.T, src string, got, want []int) {
 	}
 
 	for i := range got {
-		if got[i] != want[i] {
+		if int(got[i]) != want[i] {
 			t.Fatalf("buildLineIdx(%q)[%d] = %d, want %d", src, i, got[i], want[i])
 		}
 	}

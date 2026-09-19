@@ -308,6 +308,15 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 
 // findTagFuncScopes finds <cffunction>...</cffunction> boundaries.
 func findTagFuncScopes(src string, baseLine int) []FuncScope {
+	return findTagFuncScopesIdx(src, baseLine, nil)
+}
+
+// findTagFuncScopesIdx is findTagFuncScopes for a caller holding a line index
+// for exactly this src. ClassifyRegions builds one over the whole file on its
+// way to the regions, and extractSignatures then asked for the scopes of that
+// same whole file — so the index was built twice over one string, every parse.
+// A nil idx means build one.
+func findTagFuncScopesIdx(src string, baseLine int, idx []int32) []FuncScope {
 	// A modest capacity rather than a counted one. Counting <cffunction first
 	// sizes the slice exactly, but it is a second pass over the whole source and
 	// it runs on script components too, where it scans everything to find
@@ -315,7 +324,10 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 	// grows well enough on its own.
 	scopes := make([]FuncScope, 0, 8)
 
-	idx := buildLineIdx(src)
+	if idx == nil {
+		idx = buildLineIdx(src)
+	}
+
 	pos := 0
 	commentDepth := 0
 
@@ -386,13 +398,18 @@ func findTagFuncScopes(src string, baseLine int) []FuncScope {
 
 // buildLineIdx returns byte offsets of each line start.
 //
+// int32 rather than int: this is one entry per line of every file parsed, built
+// several times over, and it was the single largest allocation site in a tag
+// parse. A CFML file large enough to overflow int32 is 2GB of source, which no
+// engine would load and this parser holds entirely in memory anyway.
+//
 // Both passes go through the stdlib's byte scanners rather than a loop over
 // every byte: strings.Count and strings.IndexByte are vectorised, and this runs
 // once per parsed file over the whole source, which made it 3.9% of tag parsing
 // in a profile. The count pass stays — sizing the slice up front is what keeps
 // the fill pass from reallocating a dozen times on a large file.
-func buildLineIdx(src string) []int {
-	idx := make([]int, 1, strings.Count(src, "\n")+1)
+func buildLineIdx(src string) []int32 {
+	idx := make([]int32, 1, strings.Count(src, "\n")+1)
 
 	for off := 0; off < len(src); {
 		i := strings.IndexByte(src[off:], '\n')
@@ -402,18 +419,18 @@ func buildLineIdx(src string) []int {
 
 		off += i + 1
 
-		idx = append(idx, off)
+		idx = append(idx, int32(off))
 	}
 
 	return idx
 }
 
 // lineAtOffset returns the 0-based line number for a byte offset.
-func lineAtOffset(idx []int, offset int) int {
+func lineAtOffset(idx []int32, offset int) int {
 	lo, hi := 0, len(idx)
 	for lo < hi {
 		mid := (lo + hi) / 2
-		if idx[mid] <= offset {
+		if int(idx[mid]) <= offset {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -425,8 +442,18 @@ func lineAtOffset(idx []int, offset int) int {
 
 // ClassifyRegions segments CFC content into script and tag regions.
 func ClassifyRegions(content string) []Region {
+	regions, _ := ClassifyRegionsIdx(content)
+
+	return regions
+}
+
+// ClassifyRegionsIdx is ClassifyRegions plus the line index it built on the way,
+// so a caller that also needs line numbers for this content does not build a
+// second one. The index is nil for a script file, which never reaches the code
+// that wants it.
+func ClassifyRegionsIdx(content string) ([]Region, []int32) {
 	if isScriptFile(content) {
-		return []Region{{Kind: RegionScript, StartLine: 0, Text: content}}
+		return []Region{{Kind: RegionScript, StartLine: 0, Text: content}}, nil
 	}
 
 	return splitCFScriptBlocks(content)
@@ -614,7 +641,7 @@ func findScriptSkipSpans(content string) []scriptSkipSpan {
 // blocks inside comments do not produce spurious script regions. Literal
 // <script>...</script> blocks with no CFML inside (see findScriptSkipSpans)
 // are emitted as RegionSkip so their JavaScript is never scanned as CFML.
-func splitCFScriptBlocks(content string) []Region {
+func splitCFScriptBlocks(content string) ([]Region, []int32) {
 	idx := buildLineIdx(content)
 	skipSpans := findScriptSkipSpans(content)
 	skipIdx := 0
@@ -738,7 +765,7 @@ func splitCFScriptBlocks(content string) []Region {
 		}
 	}
 
-	return regions
+	return regions, idx
 }
 
 // indexCFTag finds "<" followed by suffix (case-insensitive) in s.

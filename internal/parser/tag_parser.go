@@ -21,15 +21,20 @@ type tagParser struct {
 	properties          []propertyDef
 	extends             string
 	persistent          bool
-	lineIndex           []int // byte offset of each line start
+	lineIndex           []int32 // byte offset of each line start
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
 	extractCalls        bool // whether to extract all call sites
 	builtinReturnLookup func(string) string
-	inFunc              string          // current function scope key ("start:end"), empty if global
-	localVarSet         map[string]bool // var'd/local. variable names in current function
-	forceGlobal         bool            // when true, addRef routes to componentRefs regardless of inFunc
+	inFunc              string // current function scope key ("start:end"), empty if global
+	// localVars holds the var'd/local. names declared in the function being
+	// parsed. A slice scanned with EqualFold rather than a map of lowercased
+	// keys: a function declares a handful of locals, so the scan is short, and
+	// the map cost both its buckets and a strings.ToLower per insert and per
+	// lookup — together 7% of everything a tag parse allocated.
+	localVars   []string
+	forceGlobal bool // when true, addRef routes to componentRefs regardless of inFunc
 
 	// baseLine is this region's absolute start line (0 if parsing the whole
 	// file as one region). knownScopes, when set by the caller, gives the
@@ -60,7 +65,7 @@ func (p *tagParser) lineAt(offset int) int {
 	lo, hi := 0, len(p.lineIndex)
 	for lo < hi {
 		mid := (lo + hi) / 2
-		if p.lineIndex[mid] <= offset {
+		if int(p.lineIndex[mid]) <= offset {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -211,7 +216,7 @@ func (p *tagParser) parse() {
 			// "cffunction". Function scope was therefore never exited.
 			if isCloseTagFor(tag, "cffunction") {
 				p.inFunc = ""
-				p.localVarSet = nil
+				p.localVars = p.localVars[:0]
 				p.forceGlobal = false
 				pos = tagEnd
 
@@ -314,7 +319,7 @@ func (p *tagParser) enterFunctionScope(tagEnd, line int) {
 	// <cffunction> whether or not the function declared anything local, which on
 	// the benchmark component was 13% of everything the tag parser allocated —
 	// and a map is an expensive way to record nothing.
-	p.localVarSet = nil
+	p.localVars = p.localVars[:0]
 
 	if len(p.funcs) > 0 {
 		for _, arg := range p.funcs[len(p.funcs)-1].Arguments {
@@ -326,11 +331,11 @@ func (p *tagParser) enterFunctionScope(tagEnd, line int) {
 // markVarLocal records name as declared local to the function being parsed,
 // allocating the set on first use.
 func (p *tagParser) markVarLocal(name string) {
-	if p.localVarSet == nil {
-		p.localVarSet = make(map[string]bool, 8)
+	if p.isVarDeclaredLocal(name) {
+		return
 	}
 
-	p.localVarSet[strings.ToLower(name)] = true
+	p.localVars = append(p.localVars, name)
 }
 
 // parseCFFunction extracts a function def from <cffunction> and its <cfargument> children.
@@ -459,7 +464,9 @@ func (p *tagParser) precedingComment(idx int) string {
 // what `ref = argumentVariable` refers to — and without a line there is nowhere
 // for go-to-definition to land.
 func (p *tagParser) parseCFArguments(block string, blockStart int) []Argument {
-	var args []Argument
+	// Most functions take a few arguments, and a nil slice reaching four costs
+	// three copies to get there.
+	args := make([]Argument, 0, 4)
 
 	pos := 0
 
@@ -1261,11 +1268,13 @@ func hasPrefixFold(s, prefix string) bool {
 // isVarDeclaredLocal returns true if the variable was declared with var or local.
 // in the current function.
 func (p *tagParser) isVarDeclaredLocal(name string) bool {
-	if p.localVarSet == nil {
-		return false
+	for _, v := range p.localVars {
+		if strings.EqualFold(v, name) {
+			return true
+		}
 	}
 
-	return p.localVarSet[strings.ToLower(name)]
+	return false
 }
 
 func (p *tagParser) resolveCall(expr string) string {
