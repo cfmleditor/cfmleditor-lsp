@@ -388,3 +388,37 @@ func TestCallGraphKeepsRouteEdges(t *testing.T) {
 		t.Error("the routed function is unreachable in the call graph; the route edge is not being followed")
 	}
 }
+
+// TestOrphansStillListUtility. Marking is never a filter, and the unreferenced
+// list is where that is most tempting to break: infrastructure is routinely
+// unreferenced and correctly so, a Java stub exists to be method-checked and is
+// never called. Dropping those would make the list shorter and wrong.
+func TestOrphansStillListUtility(t *testing.T) {
+	m := &codemap.Map{
+		Nodes: []codemap.Node{
+			{ID: "page.cfm", Kind: codemap.KindFile, Name: "page.cfm", File: "page.cfm", Entry: true},
+			{ID: "stub.cfc::never", Kind: codemap.KindFunction, Name: "never", File: "stub.cfc", Utility: true},
+			{ID: "app.cfc::dead", Kind: codemap.KindFunction, Name: "dead", File: "app.cfc"},
+		},
+	}
+	m.Annotate()
+
+	var sawUtility, sawApp bool
+
+	for _, o := range m.Orphans() {
+		switch o.ID {
+		case "stub.cfc::never":
+			sawUtility = true
+		case "app.cfc::dead":
+			sawApp = true
+		}
+	}
+
+	if !sawUtility {
+		t.Error("an unreferenced utility function was dropped from Orphans; marking is not a filter")
+	}
+
+	if !sawApp {
+		t.Error("an unreferenced application function is missing from Orphans")
+	}
+}

@@ -308,10 +308,34 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 			shown = shown[:limit]
 		}
 
-		fmt.Fprintf(&b, "\nUnreferenced (%d — candidates, not a verdict; see unresolved count above):\n", len(orphans))
+		// Utility is tagged here as well as in the hub list. Infrastructure is
+		// routinely unreferenced and correctly so — a Java stub exists to be
+		// method-checked and is never called, a wrapper is reached only through
+		// code the resolver could not follow — so an untagged list reads as a much
+		// longer dead-code report than the codebase deserves.
+		util := 0
+
+		for i := range orphans {
+			if orphans[i].Utility {
+				util++
+			}
+		}
+
+		note := ""
+		if util > 0 {
+			note = fmt.Sprintf("; %d of them utility", util)
+		}
+
+		fmt.Fprintf(&b, "\nUnreferenced (%d — candidates, not a verdict%s; see unresolved count above):\n",
+			len(orphans), note)
 
 		for i := range shown {
-			fmt.Fprintf(&b, "  %s\n", describe(&shown[i]))
+			mark := ""
+			if shown[i].Utility {
+				mark = "  [utility]"
+			}
+
+			fmt.Fprintf(&b, "  %s%s\n", describe(&shown[i]), mark)
 		}
 	}
 
