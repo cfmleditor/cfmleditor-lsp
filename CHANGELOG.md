@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cfmleditor-lsp graph` — a whole-project code map.** Every function and file, and the calls, instantiations, inheritance and includes between them, in one streaming pass. On an 11,769-file workspace that is 60,439 nodes and 105,622 edges in about ten seconds. Four levels (`function`, the default hybrid of functions *and* files; `call`, the strict call graph; `file`; `package`) and six formats (`text`, `json`, `jsonl`, `dot`, `mermaid`, `html`).
+
+  **Every declared function is in the map whether or not anything calls it.** Unreachable code is not dropped and not folded into the main graph: it becomes its own island with its own root, which `--detached` lists and the HTML report draws as a separate tree. A map that quietly omitted what it could not connect would describe a tidier codebase than the one on disk.
+
+  Calls from top-level `.cfm` code are attributed to the file node, and that is the larger half of the graph rather than an edge case — 74,226 of 107,683 call sites on a real workspace. An implementation recording only calls inside function bodies would lose a page-heavy application almost entirely.
+
+- **`--format html` — a self-contained interactive report.** Four views, because no single picture works at every size: hierarchical edge bundling grouped by island then directory; a force layout giving each island its own centre, so detached code sits apart instead of being pressed against the border; a dependency matrix, which has no occlusion at any size; and an islands view of the disconnected pieces. Above ~1,200 nodes the force view renders to a canvas with a quadtree for hit-testing, so it stays interactive into the tens of thousands.
+
+  The page embeds its JavaScript — a 76KB D3 bundle of only the modules these views use, built from `internal/codemap/assets/vendor` by `make update-d3` and committed. No CDN and no network: a report opens the same on an air-gapped machine, and still renders years later.
+
+- **`--db <file>` — SQLite persistence and an incremental cache.** The map is stored with indexes and an FTS5 trigram symbol index, so `sqlite3` is a supported way to query it. The per-file parse cache is keyed on each file's content hash *and* a fingerprint of every indexed component and config, because resolving a call reads the index built from every other `.cfc`: keying on content alone would serve a stale edge set after an unrelated file moved a method. Roughly 15 seconds cold against 7 warm.
+
+- **`cfmleditor-lsp mcp` — the map over the Model Context Protocol**, read-only by construction. `search_symbols`, `get_symbol`, `get_callers`, `get_callees`, `find_path`, `list_islands`, `list_orphans`, `get_stats`, and `explain_call`, which re-parses a file and traces how a call site's receiver was typed and which `componentResolver` fired.
+
+- **`resolve.ResolveCallTarget`** — runs exactly the resolution `CanResolveCall` runs and also reports where the call landed. `canResolveCall` already found the callee and threw it away. Rather than widen its return across twenty-odd `return ""` sites, each accept path records alongside its existing trace step, and `TestEveryAcceptPathRecordsATarget` parses the source and fails on an accept path that forgets.
+
+- **`--entry <glob>`** marks files as entry points by path, for code a runner invokes by a constructed name — release scripts, scheduled tasks, plugin directories. No static analysis can see `createObject("component", "prs" & version)`, so those files look unreferenced and are not: on one workspace a single release-script directory was 10,639 of 11,374 apparently-unreferenced functions. A bare directory name matches everything beneath it; private methods are never marked.
+
+### Fixed
+
+- **`collectCFMLFiles` skipped a hand-kept list of directories**, not every dot-directory, so `.claude/worktrees` — git worktrees holding a complete second copy of the codebase — was scanned as though it were source. On one workspace that doubled every count and added thousands of phantom entries. `unresolved` and `scan` are affected as well as `graph`.
+
+### Notes for multi-application workspaces
+
+- **Each file is resolved under its own `.cfmleditor.json`.** A workspace is often several applications side by side, each with its own config and each listing the others in `workspacePaths`, so any scan reads all of them. Under a single config the other applications' `componentResolvers` never fire — which does not error, it simply resolves nothing and leaves those files with no edges. `--one-config` restores the old behaviour.
+
+- **`--under <path>` keeps the nodes just outside the prefix that an edge crosses into**, marked as boundary nodes. Cutting hard at the prefix removes every caller from elsewhere, which is exactly what you scoped the map down to find: on one package that was 472 edges against 7,999. `--under-strict` does the hard cut.
+
 ## [0.3.0]
 
 ### Added

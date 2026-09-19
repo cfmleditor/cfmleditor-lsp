@@ -47,6 +47,14 @@ func main() {
 			cmdDeps(os.Args[2:])
 
 			return
+		case "graph":
+			cmdGraph(os.Args[2:])
+
+			return
+		case "mcp":
+			cmdMCP(os.Args[2:])
+
+			return
 		case "refs":
 			cmdRefs(os.Args[2:])
 
@@ -85,6 +93,8 @@ Commands:
   unresolved   Scan for unresolved component/method calls
   refs         Find references to a component or function
   deps         Print component dependency info
+  graph        Build a whole-project map of functions and their connections
+  mcp          Serve that map over the Model Context Protocol on stdio
   explain      Explain how a call site's component was resolved
   version      Print version
   help         Show this help
@@ -101,6 +111,19 @@ Format usage:
     --allow-non-whitespace  permit changes beyond whitespace (off by default)
     --root <dir>            read formatting config from this directory's
                             .cfmleditor.json instead of each file's own
+
+Graph usage:
+  cfmleditor-lsp graph [--format text|json|jsonl|dot|mermaid|html]
+                       [--level function|call|file|package] [--out <file>]
+                       [--live | --detached | --from <id>] [--under <path>]
+                       [--unresolved] [--builtins] <dir> [...]
+  e.g. cfmleditor-lsp graph --format html --out map.html .
+       cfmleditor-lsp graph --level package --format dot . | dot -Tsvg > map.svg
+  Run "cfmleditor-lsp graph --help" for the full option list.
+
+MCP usage:
+  cfmleditor-lsp graph --db .cfmleditor/codemap.db .   # build the map first
+  cfmleditor-lsp mcp --db .cfmleditor/codemap.db       # then serve it
 
 Explain usage:
   cfmleditor-lsp explain <file> <line> [call-substring]

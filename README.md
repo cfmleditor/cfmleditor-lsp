@@ -73,6 +73,146 @@ The server communicates over stdio using JSON-RPC 2.0 with LSP headers:
 
 Configure your editor to launch this binary as an LSP server for `.cfm`, `.cfc`, `.cfml`, and `.cfs` files.
 
+## Code map
+
+`cfmleditor-lsp graph` builds a map of a whole project: every function and file, and
+the calls, instantiations, inheritance and includes between them. On an 11,700-file
+workspace that is around 60,000 nodes and 105,000 edges in roughly ten seconds.
+
+```sh
+cfmleditor-lsp graph .                                     # summary to the terminal
+cfmleditor-lsp graph --format html --out map.html .         # interactive report
+cfmleditor-lsp graph --level package --format dot . | dot -Tsvg > map.svg
+cfmleditor-lsp graph --db .cfmleditor/codemap.db .          # save it, and cache it
+```
+
+**Every declared function is in the map, whether or not anything calls it.** Code
+nothing reaches is not dropped and not merged into the main graph: it becomes its own
+*island*, with its own root, which the HTML report draws as a separate tree and
+`--detached` lists on its own. A map that quietly omitted what it could not connect
+would describe a tidier codebase than the one on disk.
+
+### Levels
+
+| `--level` | Nodes | For |
+|---|---|---|
+| `function` (default) | functions **and** files | everything; files carry the relationships functions cannot |
+| `call` | functions, plus pages whose top-level code calls something | a strict call graph: shortest paths, real cycles, functions nobody invokes |
+| `file` | one per file | module-scale dependency structure |
+| `package` | one per directory | the level that actually renders as a picture of a large project |
+
+`function` is deliberately a hybrid. Three of the four relationships a CFML codebase
+has are between *files* — a component extends a component, a page includes a page,
+`new Foo()` names a component it may never call a method on — so dropping file nodes
+drops all of that. Use `call` when you want only "what calls what".
+
+### Formats
+
+`text` (default), `json`, `jsonl`, `dot`, `mermaid`, `html`.
+
+`json` is the canonical artifact; everything else is a view of it. `mermaid` is capped
+on purpose — it renders in a browser and falls over in the low thousands of nodes, so a
+map big enough to need a cap should be collapsed to `--level package` first.
+
+`html` is a single self-contained file with four views: hierarchical **edge bundling**
+(grouped by island, then directory), a **force** layout that gives each island its own
+centre so detached code sits apart rather than being pressed against the border, a
+**dependency matrix** that has no occlusion at any size, and an **islands** view of the
+disconnected pieces. Above ~1,200 nodes the force view renders to a canvas with a
+quadtree for hit-testing, so it stays interactive into the tens of thousands.
+
+The report embeds its JavaScript — a 76KB D3 bundle of just the modules these views
+use, built from `internal/codemap/assets/vendor` and committed. No CDN, no network:
+the file opens the same on an air-gapped machine and still renders years later.
+
+### Scoping
+
+`--under <path>` narrows the map to a prefix **and keeps the nodes just outside it
+that an edge crosses into**, marked as boundary nodes. Cutting hard at the prefix
+instead removes every caller from elsewhere — which is exactly what you scoped the
+map down in order to see — and the package comes back looking uncalled rather than
+narrow. `--under-strict` does the hard cut if you want it.
+
+A map collapsed with `--level file` or `--level package` has no function nodes in
+it, so searching one for a function name can only come back empty; the HTML report
+says so rather than showing nothing.
+
+### Per-application configs, and code a runner invokes
+
+A workspace is often several applications side by side, each with its own
+`.cfmleditor.json` — and each listing the others in `workspacePaths`, so any scan
+reads all of them. By default each file is now resolved under **its own** nearest
+config, because applying one application's `componentResolvers` to another's source
+does not fail loudly: it resolves nothing, and those files come out of the map with
+no edges. `--one-config` restores the old single-config behaviour.
+
+`--entry <glob>` marks files as entry points by path. Some code is invoked by a
+runner that constructs its name, so nothing in the codebase names it and no static
+analysis can see the call — release-script directories, scheduled tasks, plugin
+folders. On one workspace 10,639 of 11,374 apparently-unreferenced functions were
+release scripts of exactly that kind:
+
+```sh
+cfmleditor-lsp graph --entry '../prs' --entry 'tasks/*' .
+```
+
+A bare directory name matches everything beneath it. Private methods are never
+marked, since a runner reaching in by a constructed name cannot reach one.
+
+**Calls from top-level page code count.** A `.cfm` page is mostly code with no
+enclosing function, so its calls are attributed to the file node. That is not a
+fallback: on a real workspace, file-level callers account for 74,226 of 107,683
+call sites — more than every function-level caller combined.
+
+### Database and cache
+
+`--db <file>` writes the map to SQLite and reuses a per-file cache on the next run.
+The cache is keyed on each file's content hash *and* a fingerprint of every indexed
+component, because resolving a call reads the index built from every other `.cfc` —
+so editing any component invalidates the cache and the rebuild is a full one, while
+editing `.cfm` pages leaves it valid. On a large workspace that is roughly 15 seconds
+cold against 7 warm.
+
+The schema is the contract, and `sqlite3` is a supported way to use it:
+
+```sql
+-- the de-facto API: what the most code depends on
+SELECT id, in_degree FROM nodes ORDER BY in_degree DESC LIMIT 20;
+
+-- functions nothing reaches, in one package
+SELECT id, file, line FROM nodes
+WHERE kind = 'function' AND reachable = 0 AND file LIKE 'packages/tass/%';
+```
+
+### MCP server
+
+`cfmleditor-lsp mcp --db <file>` serves that map over the Model Context Protocol on
+stdio, so an assistant can ask about structure instead of grepping for it. It is
+read-only by construction: every tool is a query, and none writes a file or runs a
+command.
+
+```jsonc
+{
+  "mcpServers": {
+    "cfmleditor-codemap": {
+      "command": "cfmleditor-lsp",
+      "args": ["mcp", "--db", ".cfmleditor/codemap.db"]
+    }
+  }
+}
+```
+
+Tools: `search_symbols`, `get_symbol`, `get_callers`, `get_callees`, `find_path`,
+`list_islands`, `list_orphans`, `get_stats`, and `explain_call` — which re-parses a
+file and traces, step by step, how a call site's receiver was typed and which
+`componentResolver` fired.
+
+**Read `get_stats` before trusting an empty caller list.** The resolved/unresolved
+ratio is the map's confidence in itself: a call the resolver could not follow is an
+edge the map does not have, so on a workspace resolving around half its call sites,
+"nothing calls this" means rather less than it looks like it does. That is also why
+the unreferenced list is described as candidates rather than as dead code.
+
 ## Configuration
 
 Place a `.cfmleditor.json` file in your project root to enable daemon mode and configure workspace indexing.

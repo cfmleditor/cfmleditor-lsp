@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__CODEMAP_TITLE__</title>
+<style>
+  :root {
+    --bg: #fbfbfd; --panel: #ffffff; --ink: #14181f; --muted: #6b7684;
+    --line: #dfe3e9; --accent: #2d6cdf; --in: #1a7f5a; --out: #c2410c;
+    --dead: #9aa3af; --dyn: #a855f7;
+    --k-calls: #4a6572; --k-instantiates: #8e24aa; --k-extends: #2e7d32; --k-includes: #ef6c00;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10131a; --panel: #171b24; --ink: #e6e9ef; --muted: #98a2b3;
+      --line: #262c38; --accent: #6ea8ff; --in: #34d399; --out: #fb923c;
+      --dead: #5b6472; --dyn: #c084fc;
+      --k-calls: #93a4b1; --k-instantiates: #c084fc; --k-extends: #4ade80; --k-includes: #fb923c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10131a; --panel: #171b24; --ink: #e6e9ef; --muted: #98a2b3;
+    --line: #262c38; --accent: #6ea8ff; --in: #34d399; --out: #fb923c;
+    --dead: #5b6472; --dyn: #c084fc;
+    --k-calls: #93a4b1; --k-instantiates: #c084fc; --k-extends: #4ade80; --k-includes: #fb923c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app { display: grid; grid-template-columns: 260px 1fr 300px; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; }
+  aside.right { border-right: none; border-left: 1px solid var(--line); }
+  main { position: relative; overflow: hidden; }
+  h1 { font-size: 14px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+       margin: 20px 0 8px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 11px; margin: 0 0 4px; word-break: break-all; }
+  .views { display: flex; flex-wrap: wrap; gap: 4px; }
+  button.view, button.mini {
+    font: inherit; font-size: 12px; padding: 5px 9px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+  }
+  button.view[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label.row { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; font-size: 12px; }
+  input[type="search"], select {
+    width: 100%; font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .stat { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 2px 0; }
+  .stat b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li {
+    padding: 5px 7px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  ul.list li:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  ul.list li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.list li .c { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+         border: 1px solid var(--line); color: var(--muted); margin-right: 4px; }
+  .tag.entry { border-color: var(--out); color: var(--out); }
+  .tag.dead { border-color: var(--dead); color: var(--dead); }
+  .tag.dyn { border-color: var(--dyn); color: var(--dyn); }
+  svg, canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  canvas[hidden], svg[hidden] { display: none; }
+  .notice {
+    position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 12px; font-size: 12px; color: var(--muted); pointer-events: none; z-index: 5;
+    max-width: 70%; text-align: center;
+  }
+  .tip {
+    position: absolute; pointer-events: none; z-index: 10; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font-size: 12px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.14); opacity: 0; transition: opacity .1s;
+    max-width: 340px; word-break: break-all;
+  }
+  .detail code { font-size: 11px; color: var(--muted); word-break: break-all; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  @media (max-width: 900px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; height: auto; }
+    aside, aside.right { border: none; border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <h1 id="title">Code map</h1>
+    <p class="sub" id="root"></p>
+
+    <h2>View</h2>
+    <div class="views">
+      <button class="view" data-view="bundle" aria-pressed="true">Bundle</button>
+      <button class="view" data-view="force">Force</button>
+      <button class="view" data-view="matrix">Matrix</button>
+      <button class="view" data-view="islands">Islands</button>
+    </div>
+    <p class="hint" id="view-hint"></p>
+
+    <h2>Search</h2>
+    <input type="search" id="q" placeholder="file or function…" autocomplete="off">
+
+    <h2>Reachability</h2>
+    <select id="reach">
+      <option value="all">Everything</option>
+      <option value="live">Reachable from an entry point</option>
+      <option value="detached">Detached only</option>
+    </select>
+    <p class="hint">Detached code stays in the map. Each disconnected piece gets its own island, drawn as its own tree.</p>
+
+    <h2>Islands</h2>
+    <select id="island"><option value="">All islands</option></select>
+
+    <h2>Edges</h2>
+    <div id="kinds"></div>
+    <label class="row"><input type="checkbox" id="dyn" checked> show dynamic (guessed)</label>
+
+    <h2>Size</h2>
+    <label class="row">max nodes <input type="range" id="cap" min="0" max="100" step="1" value="60"
+      style="flex:1"> <b id="capv" style="font-variant-numeric:tabular-nums"></b></label>
+    <p class="hint" id="capnote"></p>
+    <p class="hint" id="viewcap"></p>
+  </aside>
+
+  <main>
+    <svg id="canvas"></svg>
+    <canvas id="raster" hidden></canvas>
+    <div class="notice" id="notice" hidden></div>
+    <div class="tip" id="tip"></div>
+  </main>
+
+  <aside class="right">
+    <h2>Totals</h2>
+    <div id="stats"></div>
+
+    <h2>Selected</h2>
+    <div id="detail" class="detail"><p class="sub">Click a node.</p></div>
+
+    <h2>Most depended on</h2>
+    <ul class="list" id="hubs"></ul>
+
+    <h2>Detached islands</h2>
+    <ul class="list" id="islands"></ul>
+  </aside>
+</div>
+
+<script>__D3_BUNDLE__</script>
+<script type="application/json" id="codemap-data">__CODEMAP_DATA__</script>
+<script>
+"use strict";
+
+// Decode the compact wire form (see compact.go). Strings are interned, edges name
+// their endpoints by node position, and a node's id is reconstructed rather than
+// sent when it is derivable. Everything below this point works on ordinary objects
+// again — the encoding buys page weight, not a different data model.
+const FLAG = { entry: 1, reachable: 2, root: 4, abstract: 8, boundary: 16 };
+
+function decode(raw) {
+  const S = raw.s || [];
+  const str = i => (i >= 0 && i < S.length ? S[i] : "");
+  const nodeKinds = raw.nk || [], edgeKinds = raw.ek || [];
+
+  const nodes = (raw.n || []).map(a => {
+    const [kindI, nameI, fileI, line, accessI, compI, island, flags, idI] = a;
+    const kind = nodeKinds[kindI] || "function";
+    const name = str(nameI), file = str(fileI);
+    return {
+      id: idI >= 0 ? str(idI) : (kind === "function" ? file + "::" + name.toLowerCase() : file),
+      kind, name, file, line: line || 0,
+      access: str(accessI), component: str(compI),
+      island: island || 0,
+      entry: !!(flags & FLAG.entry),
+      reachable: !!(flags & FLAG.reachable),
+      root: !!(flags & FLAG.root),
+      abstract: !!(flags & FLAG.abstract),
+      boundary: !!(flags & FLAG.boundary),
+    };
+  });
+
+  const edges = (raw.e || []).map(a => {
+    const [from, to, kindI, count, dyn] = a;
+    return {
+      from: nodes[from].id, to: nodes[to].id,
+      kind: edgeKinds[kindI] || "calls",
+      count: count || 1, dynamic: !!dyn,
+    };
+  });
+
+  return { nodes, edges };
+}
+
+const DATA = JSON.parse(document.getElementById("codemap-data").textContent);
+const decoded = decode(DATA);
+const NODES = decoded.nodes;
+const EDGES = decoded.edges;
+const BY_ID = new Map(NODES.map(n => [n.id, n]));
+
+const KINDS = ["calls", "instantiates", "extends", "includes"];
+const KIND_COLOR = k => getComputedStyle(document.documentElement).getPropertyValue("--k-" + k).trim() || "#888";
+
+const state = {
+  view: "bundle",
+  kinds: new Set(KINDS),
+  dynamic: true,
+  reach: "all",
+  island: "",
+  query: "",
+  cap: 0,            // resolved from the slider against the real node count
+  selected: null,
+};
+
+// What each view can actually show, as opposed to an arbitrary round number. These
+// are the points past which a view stops answering questions, and they differ by
+// two orders of magnitude — a single global cap was always going to be wrong for
+// three of the four.
+const VIEW_LIMIT = {
+  // Labels around a ring; past this they overlap into a grey band and the picture
+  // says nothing a package-level collapse would not say better.
+  bundle: () => 2500,
+  // Canvas-rendered above FORCE_RASTER, so drawing is not the bound — the
+  // simulation is. It stays interactive into the tens of thousands.
+  force: () => 40000,
+  // Rows need a few pixels each to be distinguishable, so the bound is the pane.
+  matrix: () => Math.max(60, Math.floor((Math.min(...size()) - 170) / 2.5)),
+  // Circles pack at any size; only the leaf dots need to stay above a pixel.
+  islands: () => 40000,
+};
+
+// Above this the force view draws to a canvas instead of SVG. Ten thousand DOM
+// nodes with per-tick attribute writes is where the browser's layout cost starts
+// to dominate the simulation itself; a canvas redraws the same scene in one pass.
+const FORCE_RASTER = 1200;
+
+const VIEW_HINTS = {
+  bundle: "Nodes on a ring, grouped by island then directory; edges bundled along that hierarchy. Hover a node to see what it calls and what calls it.",
+  force: "Physical layout. Each island is pulled to its own centre, so detached code sits apart instead of being flung to the edge.",
+  matrix: "Every dependency as a cell. No occlusion at any size — a block off the diagonal is a cycle, a full row is a hub.",
+  islands: "One circle per disconnected piece of the graph. The big one is the application; the rest are detached trees.",
+};
+
+/* ---------- degrees, computed once over the whole graph ---------- */
+
+const inDeg = new Map(), outDeg = new Map();
+for (const e of EDGES) {
+  inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
+  outDeg.set(e.from, (outDeg.get(e.from) || 0) + 1);
+}
+
+/* ---------- filtering ---------- */
+
+function nodeVisible(n) {
+  if (state.reach === "live" && !n.reachable) return false;
+  if (state.reach === "detached" && n.reachable) return false;
+  if (state.island !== "" && String(n.island) !== state.island) return false;
+  if (state.query && !(n.id + " " + n.name).toLowerCase().includes(state.query)) return false;
+  return true;
+}
+
+function edgeVisible(e, keep) {
+  if (!state.kinds.has(e.kind)) return false;
+  if (!state.dynamic && e.dynamic) return false;
+  return keep.has(e.from) && keep.has(e.to);
+}
+
+// Ranking for the cap: keep the nodes that carry the most structure. Truncating by
+// id would keep an alphabetical slice, which is a different graph, not a smaller one.
+function rank(n) {
+  return (inDeg.get(n.id) || 0) * 2 + (outDeg.get(n.id) || 0) + (n.entry ? 50 : 0);
+}
+
+let capped = 0, cappedBy = "";
+
+// The slider is logarithmic over [100, every node], because the interesting range
+// spans four orders of magnitude: a linear slider over a 40,000-node project spends
+// its first pixel crossing the entire useful range for a small one. The top
+// position means all, exactly, with no rounding to explain away.
+function capFromSlider(v) {
+  const total = Math.max(1, NODES.length);
+  if (v >= 100) return total;
+  const lo = Math.log(Math.min(100, total)), hi = Math.log(Math.max(100, total));
+  return Math.max(1, Math.min(total, Math.round(Math.exp(lo + (hi - lo) * (v / 100)))));
+}
+
+function graph() {
+  let nodes = NODES.filter(nodeVisible);
+  capped = 0;
+  cappedBy = "";
+
+  const viewLimit = VIEW_LIMIT[state.view]();
+  const limit = Math.min(state.cap, viewLimit);
+
+  if (nodes.length > limit) {
+    capped = nodes.length - limit;
+    cappedBy = state.cap <= viewLimit ? "the size slider" : "what the " + state.view + " view can show";
+    nodes = nodes.slice().sort((a, b) => rank(b) - rank(a)).slice(0, limit);
+  }
+
+  const keep = new Set(nodes.map(n => n.id));
+  const edges = EDGES.filter(e => edgeVisible(e, keep));
+  return { nodes, edges, keep };
+}
+
+/* ---------- shared chrome ---------- */
+
+const svg = d3.select("#canvas");
+const raster = document.getElementById("raster");
+const tip = d3.select("#tip");
+const notice = document.getElementById("notice");
+
+// The running simulation, so switching views or filters stops the previous one
+// instead of leaving it ticking against a detached canvas.
+let liveSim = null;
+function stopForce() {
+  if (liveSim) { liveSim.stop(); liveSim = null; }
+}
+
+function size() {
+  const r = document.querySelector("main").getBoundingClientRect();
+  return [Math.max(320, r.width), Math.max(320, r.height)];
+}
+
+function showTip(html, ev) {
+  tip.html(html).style("opacity", 1);
+  const m = document.querySelector("main").getBoundingClientRect();
+  const x = Math.min(ev.clientX - m.left + 14, m.width - 350);
+  tip.style("left", Math.max(8, x) + "px").style("top", (ev.clientY - m.top + 14) + "px");
+}
+const hideTip = () => tip.style("opacity", 0);
+
+function shortName(n) {
+  if (!n) return "?";
+  if (n.kind === "function") return (n.file || "").split("/").pop() + "." + n.name;
+  return n.name || n.id;
+}
+
+function select(id) {
+  state.selected = id;
+  renderDetail();
+  draw();
+}
+
+/* ---------- views ---------- */
+
+function draw() {
+  stopForce();
+  svg.selectAll("*").remove();
+  svg.attr("hidden", null);
+  raster.hidden = true;
+  hideTip();
+  const g = graph();
+
+  notice.hidden = capped === 0;
+  if (capped) {
+    notice.textContent = capped.toLocaleString() + " nodes hidden \u2014 limited by " + cappedBy +
+      ". The ones kept are the most connected. Raise the slider, pick one island, " +
+      "switch to the matrix, or rebuild with --level package.";
+  }
+  document.getElementById("capnote").textContent =
+    g.nodes.length.toLocaleString() + " of " + NODES.length.toLocaleString() + " nodes shown, " +
+    g.edges.length.toLocaleString() + " edges";
+  document.getElementById("viewcap").textContent =
+    "this view is legible to about " + VIEW_LIMIT[state.view]().toLocaleString() + " nodes";
+
+  if (!g.nodes.length) {
+    const t = svg.append("text").attr("x", "50%").attr("y", "45%")
+      .attr("text-anchor", "middle").attr("fill", "var(--muted)");
+    [emptyReason()].concat(emptyHint()).forEach((line, i) =>
+      t.append("tspan").attr("x", "50%").attr("dy", i ? "1.5em" : 0)
+       .attr("font-size", i ? 12 : 14).text(line));
+    return;
+  }
+
+  ({ bundle: drawBundle, force: drawForce, matrix: drawMatrix, islands: drawIslands })[state.view](g);
+}
+
+// A map collapsed to file or package level holds no function nodes at all, so a
+// search for a function name can only ever come back empty. Saying so is the
+// difference between "your term is not here" and "this tool is broken".
+function hasFunctions() {
+  return NODES.some(n => n.kind === "function");
+}
+
+function emptyReason() {
+  if (state.query && !hasFunctions()) return "No match, and this map has no function nodes to search.";
+  if (state.query) return `Nothing matches "${state.query}".`;
+  return "Nothing matches these filters.";
+}
+
+function emptyHint() {
+  const hints = [];
+  if (state.query && !hasFunctions()) {
+    hints.push(`Built at ${DATA.level || "?"} level; rebuild with --level function or --level call.`);
+  }
+  if (state.reach !== "all") hints.push("Reachability is filtered - try Everything.");
+  if (state.island !== "") hints.push("One island is selected - try All islands.");
+  if (KINDS.some(k => !state.kinds.has(k))) hints.push("Some edge kinds are switched off.");
+  return hints;
+}
+
+/* --- 1. hierarchical edge bundling --- */
+
+function drawBundle(g) {
+  const [w, h] = size();
+  const radius = Math.min(w, h) / 2 - 110;
+
+  // Path: island / directory / leaf. Island first so a detached piece occupies its
+  // own arc of the ring rather than being interleaved with the live code.
+  const root = { name: "", children: [], map: new Map() };
+  for (const n of g.nodes) {
+    const dir = (n.file || n.name).split("/").slice(0, -1).join("/") || ".";
+    const segs = ["island " + n.island, dir];
+    let cur = root;
+    for (const s of segs) {
+      if (!cur.map.has(s)) {
+        const child = { name: s, children: [], map: new Map() };
+        cur.map.set(s, child);
+        cur.children.push(child);
+      }
+      cur = cur.map.get(s);
+    }
+    cur.children.push({ name: shortName(n), data: n, children: null });
+  }
+
+  const hier = d3.hierarchy(root, d => d.children)
+    .sum(d => (d.children ? 0 : 1))
+    .sort((a, b) => d3.ascending(a.data.name, b.data.name));
+
+  d3.cluster().size([2 * Math.PI, radius])(hier);
+
+  const leaves = hier.leaves().filter(l => l.data.data);
+  const byId = new Map(leaves.map(l => [l.data.data.id, l]));
+
+  const root2 = svg.append("g").attr("transform", `translate(${w / 2},${h / 2})`);
+  const zoomable = root2.append("g");
+  svg.call(d3.zoom().scaleExtent([0.3, 8]).on("zoom", ev => zoomable.attr("transform", ev.transform)));
+
+  const line = d3.lineRadial().curve(d3.curveBundle.beta(0.85))
+    .radius(d => d.y).angle(d => d.x);
+
+  const links = [];
+  for (const e of g.edges) {
+    const a = byId.get(e.from), b = byId.get(e.to);
+    if (a && b && a !== b) links.push({ e, a, b, path: a.path(b) });
+  }
+
+  const linkSel = zoomable.append("g").attr("fill", "none")
+    .selectAll("path").data(links).join("path")
+    .attr("d", d => line(d.path))
+    .attr("stroke", d => KIND_COLOR(d.e.kind))
+    .attr("stroke-opacity", d => d.e.dynamic ? 0.13 : 0.26)
+    .attr("stroke-dasharray", d => d.e.dynamic ? "2,3" : null)
+    .attr("stroke-width", 1);
+
+  const nodeSel = zoomable.append("g").selectAll("g").data(leaves).join("g")
+    .attr("transform", d => `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y},0)`);
+
+  nodeSel.append("circle").attr("r", d => 2 + Math.min(4, (inDeg.get(d.data.data.id) || 0) / 6))
+    .attr("fill", d => nodeFill(d.data.data));
+
+  nodeSel.append("text")
+    .attr("dy", "0.31em")
+    .attr("x", d => d.x < Math.PI ? 7 : -7)
+    .attr("text-anchor", d => d.x < Math.PI ? "start" : "end")
+    .attr("transform", d => d.x >= Math.PI ? "rotate(180)" : null)
+    .attr("font-size", leaves.length > 420 ? 6.5 : 9)
+    .attr("fill", d => d.data.data.id === state.selected ? "var(--accent)" : "var(--ink)")
+    .attr("fill-opacity", d => d.data.data.reachable ? 1 : 0.5)
+    .text(d => d.data.name)
+    .style("cursor", "pointer")
+    .on("click", (ev, d) => select(d.data.data.id))
+    .on("mouseenter", (ev, d) => highlight(d.data.data.id, ev))
+    .on("mouseleave", () => highlight(null));
+
+  function highlight(id, ev) {
+    if (!id) {
+      linkSel.attr("stroke-opacity", d => d.e.dynamic ? 0.13 : 0.26).attr("stroke-width", 1);
+      nodeSel.selectAll("text").attr("font-weight", null);
+      hideTip();
+      return;
+    }
+    linkSel
+      .attr("stroke-opacity", d => (d.e.from === id || d.e.to === id) ? 0.95 : 0.03)
+      .attr("stroke-width", d => (d.e.from === id || d.e.to === id) ? 2 : 1)
+      .attr("stroke", d => d.e.to === id ? "var(--in)" : d.e.from === id ? "var(--out)" : KIND_COLOR(d.e.kind))
+      .filter(d => d.e.from === id || d.e.to === id).raise();
+    nodeSel.selectAll("text").attr("font-weight", d => d.data.data.id === id ? 700 : null);
+    showTip(tipHTML(BY_ID.get(id)), ev);
+  }
+}
+
+/* --- 2. force-directed, one centre per island --- */
+
+function drawForce(g) {
+  if (g.nodes.length > FORCE_RASTER) { drawForceRaster(g); return; }
+
+  const [w, h] = size();
+  const centre = islandCentres(g.nodes, w, h);
+
+  // Start each node at its island's centre rather than at d3's default phyllotaxis
+  // around the origin. Without this the first second of every force view is every
+  // node piled in the top-left corner slowly migrating out, which reads as a bug.
+  const nodes = g.nodes.map(n => {
+    const [cx, cy] = centre.get(n.island) || [w / 2, h / 2];
+    return { ...n, x: cx + (Math.random() - 0.5) * 60, y: cy + (Math.random() - 0.5) * 60 };
+  });
+  const index = new Map(nodes.map(n => [n.id, n]));
+  const links = g.edges.filter(e => index.has(e.from) && index.has(e.to))
+    .map(e => ({ source: e.from, target: e.to, kind: e.kind, dynamic: e.dynamic, count: e.count }));
+
+  const zoomable = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.15, 6]).on("zoom", ev => zoomable.attr("transform", ev.transform)));
+
+  svg.append("defs").append("marker")
+    .attr("id", "arrow").attr("viewBox", "0 -4 8 8").attr("refX", 16)
+    .attr("markerWidth", 5).attr("markerHeight", 5).attr("orient", "auto")
+    .append("path").attr("d", "M0,-3L7,0L0,3").attr("fill", "var(--muted)");
+
+  const link = zoomable.append("g").selectAll("line").data(links).join("line")
+    .attr("stroke", d => KIND_COLOR(d.kind))
+    .attr("stroke-opacity", d => d.dynamic ? 0.25 : 0.5)
+    .attr("stroke-dasharray", d => d.dynamic ? "2,3" : null)
+    .attr("stroke-width", d => Math.min(3, 0.6 + Math.log1p(d.count)))
+    .attr("marker-end", "url(#arrow)");
+
+  const node = zoomable.append("g").selectAll("circle").data(nodes).join("circle")
+    .attr("r", d => 3 + nodeRadius(d))
+    .attr("fill", d => nodeFill(d))
+    .attr("stroke", d => d.id === state.selected ? "var(--accent)" : "var(--panel)")
+    .attr("stroke-width", d => d.id === state.selected ? 3 : 1)
+    .style("cursor", "pointer")
+    .on("click", (ev, d) => select(d.id))
+    .on("mouseenter", (ev, d) => showTip(tipHTML(d), ev))
+    .on("mouseleave", hideTip)
+    .call(d3.drag()
+      .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+      .on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = d.fy = null; }));
+
+  const labelled = nodes.length <= 220;
+  const label = labelled ? zoomable.append("g").selectAll("text").data(nodes).join("text")
+    .attr("font-size", 9).attr("dx", 9).attr("dy", 3)
+    .attr("fill", "var(--muted)").attr("pointer-events", "none")
+    .text(d => shortName(d)) : null;
+
+  const sim = forceSim(nodes, links, centre);
+  liveSim = sim;
+  sim.on("tick", () => {
+      link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      node.attr("cx", d => d.x).attr("cy", d => d.y);
+      if (label) label.attr("x", d => d.x).attr("y", d => d.y);
+    });
+}
+
+// The physics, shared by both presentations. Repulsion eases off with size because
+// a fixed charge that reads well at 200 nodes blows a 20,000-node graph apart.
+function forceSim(nodes, links, centre) {
+  const n = nodes.length;
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id)
+      .distance(n > 4000 ? 18 : 38).strength(n > 4000 ? 0.35 : 0.55))
+    .force("charge", d3.forceManyBody()
+      .strength(n > 4000 ? -22 : n > 600 ? -60 : -170)
+      .theta(n > 4000 ? 1.4 : 0.9)
+      .distanceMax(n > 4000 ? 320 : Infinity))
+    .force("x", d3.forceX(d => centre.get(d.island)[0]).strength(0.14))
+    .force("y", d3.forceY(d => centre.get(d.island)[1]).strength(0.14));
+
+  if (n <= 4000) {
+    sim.force("collide", d3.forceCollide().radius(d => 6 + nodeRadius(d)));
+  }
+
+  if (n > 900) sim.alphaDecay(n > 6000 ? 0.09 : 0.06);
+
+  return sim;
+}
+
+const nodeRadius = d => Math.min(9, Math.sqrt(inDeg.get(d.id) || 0) * 1.9);
+
+// Canvas presentation. Above a few thousand nodes an SVG scene costs more in
+// layout and style recalculation per tick than the simulation costs in physics,
+// and the browser stops being interactive long before the graph stops being
+// useful. One canvas redraw replaces tens of thousands of attribute writes; a
+// quadtree gives back the hover and click that the DOM was providing.
+function drawForceRaster(g) {
+  const [w, h] = size();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+
+  svg.attr("hidden", "");
+  raster.hidden = false;
+  raster.width = Math.round(w * dpr);
+  raster.height = Math.round(h * dpr);
+  const ctx = raster.getContext("2d", { alpha: false });
+
+  const centre = islandCentres(g.nodes, w, h);
+  const nodes = g.nodes.map(n => {
+    const [cx, cy] = centre.get(n.island) || [w / 2, h / 2];
+    return { ...n, x: cx + (Math.random() - 0.5) * 120, y: cy + (Math.random() - 0.5) * 120 };
+  });
+  const index = new Map(nodes.map(n => [n.id, n]));
+  const links = g.edges.filter(e => index.has(e.from) && index.has(e.to))
+    .map(e => ({ source: e.from, target: e.to, kind: e.kind, dynamic: e.dynamic }));
+
+  const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+  const colours = {
+    bg: css("--bg"), dead: css("--dead"), accent: css("--accent"),
+    out: css("--out"), in: css("--in"), dyn: css("--dyn"),
+  };
+  KINDS.forEach(k => colours[k] = KIND_COLOR(k));
+
+  let transform = d3.zoomIdentity;
+  let hovered = null;
+  let tree = null;
+
+  const sim = forceSim(nodes, links, centre);
+  liveSim = sim;
+
+  let frame = null;
+  const schedule = () => { if (!frame) frame = requestAnimationFrame(render); };
+
+  function render() {
+    frame = null;
+    ctx.save();
+    ctx.fillStyle = colours.bg;
+    ctx.fillRect(0, 0, raster.width, raster.height);
+    ctx.scale(dpr, dpr);
+    ctx.translate(transform.x, transform.y);
+    ctx.scale(transform.k, transform.k);
+
+    // Edges first, in one path per kind: setting strokeStyle per edge is the
+    // single most expensive thing a canvas graph renderer can do.
+    const byKind = new Map();
+    for (const l of links) {
+      if (!l.source.x) continue;
+      const key = l.kind + (l.dynamic ? "!" : "");
+      let arr = byKind.get(key);
+      if (!arr) byKind.set(key, arr = []);
+      arr.push(l);
+    }
+    ctx.lineWidth = 0.7 / transform.k;
+    for (const [key, arr] of byKind) {
+      const kind = key.replace("!", "");
+      ctx.strokeStyle = colours[kind] || "#888";
+      ctx.globalAlpha = key.endsWith("!") ? 0.12 : 0.3;
+      ctx.beginPath();
+      for (const l of arr) {
+        ctx.moveTo(l.source.x, l.source.y);
+        ctx.lineTo(l.target.x, l.target.y);
+      }
+      ctx.stroke();
+    }
+
+    // Highlight everything touching the hovered node, over the top.
+    if (hovered) {
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = 1.6 / transform.k;
+      ctx.beginPath();
+      ctx.strokeStyle = colours.out;
+      for (const l of links) if (l.source.id === hovered.id) { ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); }
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.strokeStyle = colours.in;
+      for (const l of links) if (l.target.id === hovered.id) { ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); }
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+    for (const n of nodes) {
+      const r = (2.2 + nodeRadius(n)) / Math.max(1, Math.sqrt(transform.k));
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = n.entry ? colours.out
+        : !n.reachable ? colours.dead
+        : n.kind === "external" ? colours.dyn
+        : (n.kind === "file" || n.kind === "package") ? colours.in
+        : colours.accent;
+      ctx.fill();
+    }
+
+    // Labels only once zoomed in far enough for them to be readable and sparse.
+    if (transform.k > 2.2) {
+      ctx.fillStyle = css("--muted");
+      ctx.font = (9 / transform.k) + "px ui-sans-serif, sans-serif";
+      for (const n of nodes) {
+        const sx = n.x * transform.k + transform.x, sy = n.y * transform.k + transform.y;
+        if (sx < -40 || sy < -20 || sx > w + 40 || sy > h + 20) continue;
+        ctx.fillText(shortName(n), n.x + 6 / transform.k, n.y + 3 / transform.k);
+      }
+    }
+
+    if (hovered) {
+      ctx.beginPath();
+      ctx.arc(hovered.x, hovered.y, (5 + nodeRadius(hovered)) / Math.max(1, Math.sqrt(transform.k)), 0, 2 * Math.PI);
+      ctx.strokeStyle = colours.accent;
+      ctx.lineWidth = 2 / transform.k;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  sim.on("tick", () => { tree = null; schedule(); });
+
+  d3.select(raster).call(d3.zoom().scaleExtent([0.05, 30])
+    .on("zoom", ev => { transform = ev.transform; schedule(); }));
+
+  function at(ev) {
+    const r = raster.getBoundingClientRect();
+    const x = transform.invertX(ev.clientX - r.left), y = transform.invertY(ev.clientY - r.top);
+    if (!tree) tree = d3.quadtree().x(d => d.x).y(d => d.y).addAll(nodes);
+    return tree.find(x, y, 24 / transform.k);
+  }
+
+  raster.onmousemove = ev => {
+    const n = at(ev);
+    if (n !== hovered) { hovered = n; schedule(); }
+    if (n) showTip(tipHTML(n), ev); else hideTip();
+  };
+  raster.onmouseleave = () => { hovered = null; hideTip(); schedule(); };
+  raster.onclick = ev => { const n = at(ev); if (n) select(n.id); };
+
+  schedule();
+}
+
+// islandCentres lays each island out on a golden-angle spiral, largest at the
+// middle. Without per-island centres the many-body repulsion presses every
+// detached island flat against the border, which is how unreachable code stopped
+// being visible in the first place.
+function islandCentres(nodes, w, h) {
+  const counts = d3.rollup(nodes, v => v.length, d => d.island);
+  const order = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const centre = new Map();
+  order.forEach(([isl], i) => {
+    if (i === 0) { centre.set(isl, [w / 2, h / 2]); return; }
+    const ring = Math.ceil(Math.sqrt(i));
+    const ang = i * 2.399963;
+    const r = Math.min(w, h) * 0.13 * ring;
+    centre.set(isl, [w / 2 + r * Math.cos(ang), h / 2 + r * Math.sin(ang)]);
+  });
+  return centre;
+}
+
+/* --- 3. dependency matrix --- */
+
+function drawMatrix(g) {
+  const [w, h] = size();
+  const order = g.nodes.slice().sort((a, b) =>
+    d3.ascending(a.island, b.island) || d3.ascending(a.file || "", b.file || "") || d3.ascending(a.name, b.name));
+  const pos = new Map(order.map((n, i) => [n.id, i]));
+  const keep = new Set(order.map(n => n.id));
+  const cells = g.edges.filter(e => keep.has(e.from) && keep.has(e.to));
+
+  const margin = 150;
+  const side = Math.min(w, h) - margin - 20;
+  const step = side / order.length;
+
+  const gRoot = svg.append("g").attr("transform", `translate(${margin},${margin * 0.55})`);
+
+  // Island bands down the diagonal: the visual grouping that turns a grid of dots
+  // into "these belong together".
+  const bands = d3.rollup(order, v => [pos.get(v[0].id), pos.get(v[v.length - 1].id)], d => d.island);
+  gRoot.append("g").selectAll("rect").data([...bands.values()]).join("rect")
+    .attr("x", d => d[0] * step).attr("y", d => d[0] * step)
+    .attr("width", d => (d[1] - d[0] + 1) * step).attr("height", d => (d[1] - d[0] + 1) * step)
+    .attr("fill", "var(--accent)").attr("fill-opacity", 0.05);
+
+  gRoot.append("g").selectAll("rect").data(cells).join("rect")
+    .attr("x", d => pos.get(d.to) * step).attr("y", d => pos.get(d.from) * step)
+    .attr("width", step).attr("height", step)
+    .attr("fill", d => KIND_COLOR(d.kind))
+    .attr("fill-opacity", d => d.dynamic ? 0.35 : Math.min(1, 0.5 + Math.log1p(d.count) / 4))
+    .style("cursor", "pointer")
+    .on("mouseenter", (ev, d) => showTip(
+      `<b>${shortName(BY_ID.get(d.from))}</b> → <b>${shortName(BY_ID.get(d.to))}</b><br>` +
+      `<span style="color:var(--muted)">${d.kind}${d.dynamic ? " (guessed)" : ""} · ${d.count} site${d.count === 1 ? "" : "s"}</span>`, ev))
+    .on("mouseleave", hideTip)
+    .on("click", (ev, d) => select(d.from));
+
+  const fs = Math.min(10, Math.max(4, step - 1));
+  gRoot.append("g").selectAll("text").data(order).join("text")
+    .attr("x", -6).attr("y", (d, i) => i * step + step / 2 + fs / 3)
+    .attr("text-anchor", "end").attr("font-size", fs)
+    .attr("fill", d => d.reachable ? "var(--ink)" : "var(--dead)")
+    .style("cursor", "pointer").text(d => shortName(d))
+    .on("click", (ev, d) => select(d.id));
+
+  gRoot.append("g").selectAll("text").data(order).join("text")
+    .attr("transform", (d, i) => `translate(${i * step + step / 2},-6) rotate(-90)`)
+    .attr("font-size", fs).attr("fill", d => d.reachable ? "var(--ink)" : "var(--dead)")
+    .style("cursor", "pointer").text(d => shortName(d))
+    .on("click", (ev, d) => select(d.id));
+}
+
+/* --- 4. islands --- */
+
+function drawIslands(g) {
+  const [w, h] = size();
+  const groups = d3.groups(g.nodes, d => d.island)
+    .map(([id, members]) => ({ id, members }))
+    .sort((a, b) => b.members.length - a.members.length);
+
+  const root = d3.hierarchy({ children: groups.map(isl => ({ isl, children: isl.members.map(n => ({ n })) })) })
+    .sum(d => (d.n ? 1 : 0));
+
+  d3.pack().size([w - 24, h - 24]).padding(9)(root);
+
+  const zoomable = svg.append("g").attr("transform", "translate(12,12)");
+  svg.call(d3.zoom().scaleExtent([0.5, 12]).on("zoom", ev =>
+    zoomable.attr("transform", `translate(12,12) ${ev.transform}`)));
+
+  const island = zoomable.append("g").selectAll("g")
+    .data(root.children || []).join("g");
+
+  island.append("circle")
+    .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", d => d.r)
+    .attr("fill", d => d.data.isl.members.some(n => n.reachable) ? "var(--accent)" : "var(--dead)")
+    .attr("fill-opacity", 0.07)
+    .attr("stroke", d => d.data.isl.members.some(n => n.reachable) ? "var(--accent)" : "var(--dead)")
+    .attr("stroke-opacity", 0.4)
+    .style("cursor", "pointer")
+    .on("click", (ev, d) => { document.getElementById("island").value = String(d.data.isl.id); sync(); });
+
+  island.append("text")
+    .attr("x", d => d.x).attr("y", d => d.y - d.r - 5).attr("text-anchor", "middle")
+    .attr("font-size", 11).attr("fill", "var(--muted)")
+    .text(d => `island ${d.data.isl.id} · ${d.data.isl.members.length}` +
+      (d.data.isl.members.some(n => n.reachable) ? "" : " · detached"));
+
+  zoomable.append("g").selectAll("circle")
+    .data(root.leaves()).join("circle")
+    .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", d => Math.max(1.5, d.r))
+    .attr("fill", d => nodeFill(d.data.n))
+    .style("cursor", "pointer")
+    .on("click", (ev, d) => select(d.data.n.id))
+    .on("mouseenter", (ev, d) => showTip(tipHTML(d.data.n), ev))
+    .on("mouseleave", hideTip);
+}
+
+/* ---------- node colour & tooltips ---------- */
+
+function nodeFill(n) {
+  if (!n) return "var(--muted)";
+  if (n.boundary) return "var(--muted)";
+  if (n.entry) return "var(--out)";
+  if (!n.reachable) return "var(--dead)";
+  if (n.kind === "external") return "var(--dyn)";
+  if (n.kind === "file" || n.kind === "package") return "var(--in)";
+  return "var(--accent)";
+}
+
+function tipHTML(n) {
+  if (!n) return "";
+  const tags = [];
+  if (n.entry) tags.push('<span class="tag entry">entry</span>');
+  if (n.boundary) tags.push('<span class="tag">outside scope</span>');
+  if (!n.reachable) tags.push('<span class="tag dead">detached</span>');
+  if (n.access) tags.push(`<span class="tag">${n.access}</span>`);
+  return `<b>${shortName(n)}</b><br>${tags.join("")}` +
+    `<span style="color:var(--muted)">${n.file || n.id}${n.line ? ":" + (n.line + 1) : ""}` +
+    ` · island ${n.island} · ${inDeg.get(n.id) || 0} in / ${outDeg.get(n.id) || 0} out</span>`;
+}
+
+/* ---------- right panel ---------- */
+
+function renderStats() {
+  const s = DATA.stats || {};
+  const pct = s.callSites ? ((s.resolved / s.callSites) * 100).toFixed(1) + "%" : "–";
+  const rows = [
+    ["nodes", NODES.length], ["edges", EDGES.length],
+    ["files", s.files], ["functions", s.functions],
+    ["call sites", s.callSites], ["resolved", `${s.resolved || 0} (${pct})`],
+    ["dynamic", s.dynamic], ["unresolved", s.unresolved],
+    ["islands", s.islands], ["detached", s.detached],
+  ];
+  document.getElementById("stats").innerHTML = rows
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `<div class="stat"><span>${k}</span><b>${typeof v === "number" ? v.toLocaleString() : v}</b></div>`)
+    .join("");
+}
+
+function renderHubs() {
+  const top = [...inDeg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
+  document.getElementById("hubs").innerHTML = top.map(([id, c]) =>
+    `<li data-id="${id}"><span class="n">${shortName(BY_ID.get(id))}</span><span class="c">${c}</span></li>`).join("");
+}
+
+function renderIslandList() {
+  const counts = d3.rollup(NODES, v => v, d => d.island);
+  const list = [...counts.entries()]
+    .map(([id, members]) => ({ id, n: members.length, live: members.some(m => m.reachable), members }))
+    .sort((a, b) => b.n - a.n);
+
+  const sel = document.getElementById("island");
+  sel.innerHTML = '<option value="">All islands</option>' + list.map(i =>
+    `<option value="${i.id}">island ${i.id} — ${i.n} node${i.n === 1 ? "" : "s"}${i.live ? "" : " (detached)"}</option>`).join("");
+  sel.value = state.island;
+
+  const detached = list.filter(i => !i.live).slice(0, 18);
+  document.getElementById("islands").innerHTML = detached.length
+    ? detached.map(i => {
+        const root = i.members.find(m => m.root) || i.members[0];
+        return `<li data-island="${i.id}"><span class="n">${shortName(root)}</span><span class="c">${i.n}</span></li>`;
+      }).join("")
+    : '<li><span class="n" style="color:var(--muted)">every island is reachable</span></li>';
+}
+
+function renderDetail() {
+  const n = BY_ID.get(state.selected);
+  const el = document.getElementById("detail");
+  if (!n) { el.innerHTML = '<p class="sub">Click a node.</p>'; return; }
+
+  const outs = EDGES.filter(e => e.from === n.id);
+  const ins = EDGES.filter(e => e.to === n.id);
+  const list = (arr, dir) => arr.slice(0, 12).map(e => {
+    const other = BY_ID.get(dir === "out" ? e.to : e.from);
+    return `<li data-id="${other ? other.id : ""}"><span class="n">${shortName(other)}</span>` +
+      `<span class="c" style="color:${KIND_COLOR(e.kind)}">${e.kind[0]}${e.dynamic ? "?" : ""}</span></li>`;
+  }).join("") || '<li><span class="n" style="color:var(--muted)">none</span></li>';
+
+  el.innerHTML =
+    `<p style="margin:0 0 6px"><b>${n.name}</b></p>` +
+    `<p style="margin:0 0 8px">` +
+      (n.entry ? '<span class="tag entry">entry</span>' : "") +
+      (n.boundary ? '<span class="tag">outside scope</span>' : "") +
+      (n.reachable ? "" : '<span class="tag dead">detached</span>') +
+      (n.access ? `<span class="tag">${n.access}</span>` : "") +
+      `<span class="tag">island ${n.island}</span></p>` +
+    `<p class="sub"><code>${n.file || n.id}${n.line ? ":" + (n.line + 1) : ""}</code></p>` +
+    `<h2 style="margin-top:14px">Calls out (${outs.length})</h2><ul class="list">${list(outs, "out")}</ul>` +
+    `<h2>Called by (${ins.length})</h2><ul class="list">${list(ins, "in")}</ul>`;
+}
+
+/* ---------- controls ---------- */
+
+function sync() {
+  state.island = document.getElementById("island").value;
+  state.reach = document.getElementById("reach").value;
+  state.query = document.getElementById("q").value.trim().toLowerCase();
+  state.dynamic = document.getElementById("dyn").checked;
+  const slider = +document.getElementById("cap").value;
+  state.cap = capFromSlider(slider);
+  document.getElementById("capv").textContent =
+    slider >= 100 ? "all" : state.cap.toLocaleString();
+  document.getElementById("view-hint").textContent = VIEW_HINTS[state.view];
+  draw();
+}
+
+document.getElementById("kinds").innerHTML = KINDS.map(k =>
+  `<label class="row"><input type="checkbox" data-kind="${k}" checked>` +
+  `<span class="swatch" style="background:var(--k-${k})"></span>${k}</label>`).join("");
+
+document.querySelectorAll("[data-kind]").forEach(el => el.addEventListener("change", () => {
+  el.checked ? state.kinds.add(el.dataset.kind) : state.kinds.delete(el.dataset.kind);
+  draw();
+}));
+
+document.querySelectorAll("button.view").forEach(b => b.addEventListener("click", () => {
+  state.view = b.dataset.view;
+  document.querySelectorAll("button.view").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+  sync();
+}));
+
+["island", "reach", "dyn", "cap"].forEach(id =>
+  document.getElementById(id).addEventListener("input", sync));
+
+let debounce;
+document.getElementById("q").addEventListener("input", () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(sync, 180);
+});
+
+document.body.addEventListener("click", ev => {
+  const li = ev.target.closest("li[data-id]");
+  if (li && li.dataset.id) { select(li.dataset.id); return; }
+  const isl = ev.target.closest("li[data-island]");
+  if (isl) { document.getElementById("island").value = isl.dataset.island; sync(); }
+});
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(draw, 180);
+});
+
+document.getElementById("title").textContent = DATA.title || "Code map";
+document.getElementById("root").textContent = (DATA.root || "") + " · " + (DATA.level || "function") + " level";
+if (!hasFunctions()) {
+  const q = document.getElementById("q");
+  q.placeholder = "no function nodes at this level...";
+  q.title = "This map was collapsed past individual functions. Rebuild with --level function or --level call to search for one.";
+}
+renderStats();
+renderHubs();
+renderIslandList();
+renderDetail();
+sync();
+</script>
+</body>
+</html>
