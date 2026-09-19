@@ -110,6 +110,39 @@ func assignPositions(content string, refs []Ref) {
 }
 
 // scanAttributes finds name="value" and name='value'.
+// firstBytes is the set of bytes any of these names can begin with, both cases.
+//
+// The scanners below used to test every position in the document for the start
+// of an identifier and then hand it to a matcher. But a name can only match
+// where its own first byte is, and a convention configures a handful of names —
+// "data-view", "data-read", "data-process" share one. One array lookup rejects
+// almost every byte in the file before any of that runs.
+func firstBytes(names []string) *[256]bool {
+	var set [256]bool
+
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+
+		c := n[0]
+		set[c] = true
+
+		// Matching is case-insensitive, so both spellings of the first byte have
+		// to be in the set or the fast path would reject the very thing the slow
+		// path was going to accept.
+		if c >= 'a' && c <= 'z' {
+			set[c-32] = true
+		}
+
+		if c >= 'A' && c <= 'Z' {
+			set[c+32] = true
+		}
+	}
+
+	return &set
+}
+
 func scanAttributes(content string, names []string) []Ref {
 	if len(names) == 0 {
 		return nil
@@ -117,7 +150,13 @@ func scanAttributes(content string, names []string) []Ref {
 
 	var out []Ref
 
+	first := firstBytes(names)
+
 	for i := 0; i < len(content); i++ {
+		if !first[content[i]] {
+			continue
+		}
+
 		if !isNameStart(content[i]) || (i > 0 && isNamePart(content[i-1])) {
 			continue
 		}
@@ -148,7 +187,14 @@ func scanProperties(content string, names []string) []Ref {
 
 	var out []Ref
 
+	first := firstBytes(names)
+
 	for i := 0; i < len(content); i++ {
+		// A quoted key starts at the quote, so those open a candidate too.
+		if !first[content[i]] && content[i] != '"' && content[i] != '\'' {
+			continue
+		}
+
 		at := i
 
 		// A quoted key: step over the opening quote so the name matcher sees the
@@ -198,10 +244,15 @@ func scanQueryParams(content string, names []string) []Ref {
 
 	var out []Ref
 
+	// Straight to the next delimiter. This tested every byte in the file for two
+	// values; IndexAny is vectorised and the delimiters are sparse.
 	for i := 0; i < len(content); i++ {
-		if content[i] != '?' && content[i] != '&' {
-			continue
+		j := strings.IndexAny(content[i:], "?&")
+		if j < 0 {
+			break
 		}
+
+		i += j
 
 		at := i + 1
 		// Four bytes, compared where they sit.
@@ -356,7 +407,13 @@ func scanFunctionArgs(content string, names []string) []Ref {
 
 	var out []Ref
 
+	first := firstBytes(names)
+
 	for i := 0; i < len(content); i++ {
+		if !first[content[i]] {
+			continue
+		}
+
 		if !isNameStart(content[i]) || (i > 0 && isPropNamePart(content[i-1])) {
 			continue
 		}
