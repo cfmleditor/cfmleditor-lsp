@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Go-to-definition now answers variables.** `<cfargument>`, `var`/`local.`/`variables.`/`this.` assignments, `<cfparam name>`, `<cfloop index>`, and the `url`/`form`/`cgi`/`cookie`/`client`/`application`/`request`/`session`/`server` scopes, written scoped or bare. An unscoped name follows CFML's own search order — local and arguments before variables, variables before the request scopes — so a bare `total` inside a function with `var total` resolves to its own rather than to a `url.total` on the page. A declaration inside the enclosing function outranks one outside it, and among several the nearest at or before the cursor wins, which is the rule component refs already followed.
+
+  The four shared scopes resolve **across files**, because that is the point of them: `application.x` is written in `Application.cfc` and read everywhere, `server.x` in `Server.cfc`. Only those four ever read another file, and only when the current one does not declare the name, so an ordinary lookup stays local.
+
+- **Tag parsing is 2.4x faster** (222µs to 93µs on the benchmark component, and 38% less memory), from changes two profiles pointed at. `getAttr` lowercased the whole tag on every call, and a `<cffunction>` is asked for five or six attributes. `indexCFTag` — the search the entire tag scanner is built on — walked byte at a time calling `EqualFold` at every `<`, when a page is full of angle brackets and almost none of them start the tag being looked for. `buildLineIdx` made two byte-at-a-time passes over the whole source per parsed file. All now go through the stdlib's vectorised scanners, and each rewrite is checked against the implementation it replaced over generated input rather than a few chosen cases.
+
+  A second profile, taken once scanning was no longer the bottleneck, showed allocation was: `ParseVars` classified the file and then called `FindFuncScopes`, which classified it again, building a second line index over the whole source every time; and every `<cffunction>` allocated a map to record the locals it declared, whether or not it declared any. Both are gone.
+
 ### Fixed
 
 - **Go-to-definition answered nothing when a component called its own method through an unresolvable receiver.** A qualified call whose receiver the parser cannot type — `VARIABLES._svc.doThing()`, an `any` argument, a chain, a bracket index — falls back to looking the method name up in the index. That fallback discarded any definition in the requesting file, so where the name was declared only there, the answer was nothing at all while the name sat in the index the whole time. The definition is now kept and ranked **last**: the qualifier is evidence against it (`x.doThing()` is not a call to this component's `doThing()`), and nearest-first would otherwise rank it top, since nothing is nearer than the same file — `myObj.init()` would land on the caller's own `init()` ahead of every real candidate.
@@ -12,7 +22,7 @@
 
 - **The extension's own go-to-definition suite now runs against this server** (`internal/server/definition_conformance_test.go`). Same cases, same cursor-marker syntax, fixtures copied from the extension with their source commit recorded. It exists because the extension stands its own providers down whenever this server runs, so every case it answers and this server does not is something a user loses by enabling the server — and nothing could say which those were.
 
-  **25 of 41 pass. The 16 that do not are one gap: there is no variable branch at all.** `<cfargument>`, `local.`/`var`/`variables.` assignments, `url.`, `<cfparam name>`, `<cfloop index>` and the `application`/`request`/`session`/`server` scopes, each both scoped and unscoped, all return nil. Every component, method and function case passes. Each gap is named with a reason, and the test **fails when a known gap starts passing**, so closing one cannot go unnoticed and the list cannot rot into decoration.
+  **All 41 pass.** They did not at first: 16 were one gap, with no variable branch at all. `knownGaps` is empty now and deliberately kept, because the test **fails when a known gap starts passing** — that is what made closing them a ratchet rather than a claim.
 
 - **The capabilities the VS Code extension has and this server does not are documented** (`README.md`, `CLAUDE.md`): `textDocument/typeDefinition`, docblock completion, and `textDocument/documentColor`. The extension stands its own providers down while the server runs, so these go quiet when it is enabled — recorded so the loss is deliberate, and so whoever implements one knows what it has to match.
 

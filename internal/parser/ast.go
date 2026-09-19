@@ -38,7 +38,95 @@ const (
 	ScopeArguments              // arguments.x
 	ScopeThis                   // this.x
 	ScopeVariables              // variables.x or unscoped assignment
+
+	// The request and shared scopes. They carry no component types — which is
+	// why the script parser's component-ref dispatch deliberately leaves most of
+	// them out — but an assignment into one is still a declaration, and
+	// go-to-definition on `application.x` has to have somewhere to land.
+	ScopeURL
+	ScopeForm
+	ScopeCGI
+	ScopeCookie
+	ScopeClient
+	ScopeApplication
+	ScopeRequest
+	ScopeSession
+	ScopeServer
 )
+
+// readOnlyScopePrefixes maps a scope keyword to its Scope. These are the scopes
+// with no behaviour beyond recording the name: unlike `local.`/`var` they seed no
+// local-variable set, and unlike `this.`/`variables.` they force nothing global.
+//
+// A table rather than a case each, because the list has to agree with
+// ScopeName's and with the definition handler's, and three hand-maintained
+// copies of one list is the shape that rots. TestScopeTablesAgree fails if they
+// diverge.
+var readOnlyScopePrefixes = map[string]Scope{
+	"url":         ScopeURL,
+	"form":        ScopeForm,
+	"cgi":         ScopeCGI,
+	"cookie":      ScopeCookie,
+	"client":      ScopeClient,
+	"application": ScopeApplication,
+	"request":     ScopeRequest,
+	"session":     ScopeSession,
+	"server":      ScopeServer,
+}
+
+// ScopeForPrefix returns the scope a leading keyword names, and whether it named
+// one at all. It covers every scope, not only the read-only ones, so a caller
+// reading a qualifier from source has one answer to consult.
+func ScopeForPrefix(name string) (Scope, bool) {
+	switch strings.ToLower(name) {
+	case "local", "var":
+		return ScopeLocal, true
+	case "arguments":
+		return ScopeArguments, true
+	case "this":
+		return ScopeThis, true
+	case "variables":
+		return ScopeVariables, true
+	}
+
+	sc, ok := readOnlyScopePrefixes[strings.ToLower(name)]
+
+	return sc, ok
+}
+
+// ScopeName is the keyword a scope is written with, for diagnostics.
+func ScopeName(s Scope) string {
+	switch s {
+	case ScopeLocal:
+		return "local"
+	case ScopeArguments:
+		return "arguments"
+	case ScopeThis:
+		return "this"
+	case ScopeVariables:
+		return "variables"
+	case ScopeURL:
+		return "url"
+	case ScopeForm:
+		return "form"
+	case ScopeCGI:
+		return "cgi"
+	case ScopeCookie:
+		return "cookie"
+	case ScopeClient:
+		return "client"
+	case ScopeApplication:
+		return "application"
+	case ScopeRequest:
+		return "request"
+	case ScopeSession:
+		return "session"
+	case ScopeServer:
+		return "server"
+	}
+
+	return ""
+}
 
 // VarDef represents a variable declaration in source.
 type VarDef struct {
@@ -512,13 +600,46 @@ func (rs *ResolverSet) Resolve(expr string) string {
 }
 
 func indexFold(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
+	return indexFoldFrom(s, substr, 0)
+}
+
+// indexFoldFrom is indexFold resumed at an offset, and is the allocation-free
+// alternative to lowercasing a string before searching it.
+//
+// The first-byte check before each EqualFold is what makes it worth using on a
+// hot path: EqualFold on a two-byte needle is a function call, and skipping it
+// for every position whose first byte cannot match turns the common case into a
+// byte comparison. Folding the first byte by hand (rather than EqualFold on one
+// byte) keeps that check inlineable.
+func indexFoldFrom(s, substr string, from int) int {
+	if len(substr) == 0 {
+		return max(from, 0)
+	}
+
+	first := lowerASCII(substr[0])
+
+	for i := max(from, 0); i+len(substr) <= len(s); i++ {
+		if lowerASCII(s[i]) != first {
+			continue
+		}
+
 		if strings.EqualFold(s[i:i+len(substr)], substr) {
 			return i
 		}
 	}
 
 	return -1
+}
+
+// lowerASCII folds one ASCII byte. A byte above ASCII is returned unchanged,
+// which is correct here because it can only be part of a multi-byte rune that
+// EqualFold will judge properly.
+func lowerASCII(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
+	}
+
+	return b
 }
 
 // placeholderRe matches $1, $2, etc. in patterns.
