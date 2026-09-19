@@ -1203,6 +1203,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		})
 
 		return mermaid, nil
+	case "cfmleditor.resolveRoute":
+		return s.handleResolveRoute(params.Arguments)
 	case "cfmleditor.generateCodeMap":
 		return s.handleGenerateCodeMap(params.Arguments)
 	case "cfmleditor.showCodeMapStats":

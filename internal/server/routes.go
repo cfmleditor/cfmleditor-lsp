@@ -1,13 +1,14 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
 	"go.lsp.dev/protocol"
 )
 
@@ -17,7 +18,7 @@ import (
 // It is memoised behind the same invalidation as the component resolvers: the
 // lookups close over the index and the workspace roots, so a resolver built
 // before a reindex would answer from a workspace that no longer exists.
-func (s *Server) routeResolver() *route.Resolver {
+func (s *Server) routeResolver() *routepkg.Resolver {
 	s.routeMu.Lock()
 	defer s.routeMu.Unlock()
 
@@ -36,9 +37,9 @@ func (s *Server) routeResolver() *route.Resolver {
 		dirs  = map[string]bool{}
 	)
 
-	s.cachedRoutes = &route.Resolver{
+	s.cachedRoutes = &routepkg.Resolver{
 		Config: s.Routes,
-		Lookups: route.Lookups{
+		Lookups: routepkg.Lookups{
 			ComponentPath: func(component string) string {
 				// One base directory for the whole workspace, not the directory of
 				// the file the route was written in. A route names a component
@@ -120,13 +121,13 @@ func (s *Server) invalidateRoutes() {
 // attribute value can be split across lines and the cheap single-line version
 // would silently stop working on exactly the long attribute lists where a link
 // helps most.
-func (s *Server) routeAtPosition(content string, line, char int) (route.Ref, bool) {
+func (s *Server) routeAtPosition(content string, line, char int) (routepkg.Ref, bool) {
 	r := s.routeResolver()
 	if r == nil {
-		return route.Ref{}, false
+		return routepkg.Ref{}, false
 	}
 
-	for _, ref := range route.Scan(content, r.Config) {
+	for _, ref := range routepkg.Scan(content, r.Config) {
 		if int(ref.Line) != line {
 			continue
 		}
@@ -137,7 +138,7 @@ func (s *Server) routeAtPosition(content string, line, char int) (route.Ref, boo
 		}
 	}
 
-	return route.Ref{}, false
+	return routepkg.Ref{}, false
 }
 
 // routeDefinitions turns a route into go-to-definition locations.
@@ -146,9 +147,9 @@ func (s *Server) routeAtPosition(content string, line, char int) (route.Ref, boo
 // which one serves a shared page is a runtime fact, and an editor showing a
 // picker is a truer answer than silently jumping to whichever happened to sort
 // first.
-func (s *Server) routeDefinitions(ref route.Ref) []protocol.Location {
+func (s *Server) routeDefinitions(ref routepkg.Ref) []protocol.Location {
 	r := s.routeResolver()
-	if r == nil || !route.Plausible(ref.Value) {
+	if r == nil || !routepkg.Plausible(ref.Value) {
 		return nil
 	}
 
@@ -157,7 +158,7 @@ func (s *Server) routeDefinitions(ref route.Ref) []protocol.Location {
 	for _, t := range r.Resolve(ref.Value) {
 		loc := protocol.Location{URI: cfpath.ToURI(t.Path)}
 
-		if t.Kind == route.KindController && t.Method != "" {
+		if t.Kind == routepkg.KindController && t.Method != "" {
 			if fn := s.findMethodPosition(t.Path, t.Method); fn != nil {
 				loc.Range = *fn
 			}
@@ -202,8 +203,8 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 
 	var links []protocol.DocumentLink
 
-	for _, ref := range route.Scan(docContent, r.Config) {
-		if !route.Plausible(ref.Value) {
+	for _, ref := range routepkg.Scan(docContent, r.Config) {
+		if !routepkg.Plausible(ref.Value) {
 			continue
 		}
 
@@ -237,14 +238,14 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 // a shared view reaching into more than one product; there a link would send the
 // reader to the wrong one without saying so, and go-to-definition handles it
 // instead by offering every location.
-func linkTarget(targets []route.Target) (route.Target, bool) {
+func linkTarget(targets []routepkg.Target) (routepkg.Target, bool) {
 	var (
-		controllers []route.Target
-		views       []route.Target
+		controllers []routepkg.Target
+		views       []routepkg.Target
 	)
 
 	for _, t := range targets {
-		if t.Kind == route.KindController {
+		if t.Kind == routepkg.KindController {
 			controllers = append(controllers, t)
 		} else {
 			views = append(views, t)
@@ -259,13 +260,82 @@ func linkTarget(targets []route.Target) (route.Target, bool) {
 		return views[0], true
 	}
 
-	return route.Target{}, false
+	return routepkg.Target{}, false
 }
 
-func routeTooltip(t route.Target) string {
-	if t.Kind == route.KindController && t.Method != "" {
+func routeTooltip(t routepkg.Target) string {
+	if t.Kind == routepkg.KindController && t.Method != "" {
 		return t.Component + "." + t.Method + "()"
 	}
 
 	return filepath.Base(t.Path)
+}
+
+// handleResolveRoute answers "where does this route go" for a route the caller
+// supplies, rather than one found in a document.
+//
+// It exists so an editor command that takes a route by hand and go-to-definition
+// on a route in source resolve through the same code. The alternative — an editor
+// keeping its own copy of the convention — was the state of things before this,
+// and two resolvers reading two different configs disagree quietly: the one that
+// is wrong still opens a file, just not the right one.
+func (s *Server) handleResolveRoute(params []protocol.LSPAny) (any, error) {
+	if len(params) == 0 {
+		return nil, fmt.Errorf("cfmleditor.resolveRoute requires a route")
+	}
+
+	route, _ := argString(params, 0)
+	if route == "" {
+		return nil, nil
+	}
+
+	r := s.routeResolver()
+	if r == nil {
+		return map[string]any{
+			"route":   route,
+			"targets": []any{},
+			"reason":  "no routes convention is configured for this workspace",
+		}, nil
+	}
+
+	if !routepkg.Plausible(route) {
+		return map[string]any{
+			"route":   route,
+			"targets": []any{},
+			"reason":  "not shaped like a route",
+		}, nil
+	}
+
+	targets := r.Resolve(route)
+	out := make([]any, 0, len(targets))
+
+	for _, t := range targets {
+		entry := map[string]any{
+			"kind": string(t.Kind),
+			"uri":  string(cfpath.ToURI(t.Path)),
+			"path": t.Path,
+		}
+
+		if t.Component != "" {
+			entry["component"] = t.Component
+		}
+
+		if t.Method != "" {
+			entry["method"] = t.Method
+
+			// The declaration line, so the caller reveals the method rather than
+			// the top of a ten-thousand-line controller.
+			if rng := s.findMethodPosition(t.Path, t.Method); rng != nil {
+				entry["range"] = *rng
+			}
+		}
+
+		if t.Alias != "" {
+			entry["via"] = t.Alias
+		}
+
+		out = append(out, entry)
+	}
+
+	return map[string]any{"route": route, "targets": out}, nil
 }

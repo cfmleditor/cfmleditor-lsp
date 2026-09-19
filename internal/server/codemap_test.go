@@ -92,3 +92,41 @@ func TestCodeMapExtMatchesFormat(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveRouteWithoutAConvention answers rather than errors. An editor
+// command that calls this in a workspace with no routes block should be able to
+// tell the user why nothing happened, and a JSON-RPC error is not something a
+// command handler can put in front of someone.
+func TestResolveRouteWithoutAConvention(t *testing.T) {
+	s := &Server{}
+
+	got, err := s.handleResolveRoute([]protocol.LSPAny{[]byte(`"a.b.c"`)})
+	if err != nil {
+		t.Fatalf("handleResolveRoute: %v", err)
+	}
+
+	out, _ := got.(map[string]any)
+	if out["reason"] == nil {
+		t.Errorf("no reason given for an empty result: %v", out)
+	}
+
+	targets, _ := out["targets"].([]any)
+	if len(targets) != 0 {
+		t.Errorf("targets from an unconfigured workspace: %v", targets)
+	}
+}
+
+// TestResolveRouteRequiresARoute: an empty argument list is a caller bug and has
+// to say so, but an empty string is a user who has not typed anything yet.
+func TestResolveRouteRequiresARoute(t *testing.T) {
+	s := &Server{}
+
+	if _, err := s.handleResolveRoute(nil); err == nil {
+		t.Error("no arguments did not error")
+	}
+
+	got, err := s.handleResolveRoute([]protocol.LSPAny{[]byte(`""`)})
+	if err != nil || got != nil {
+		t.Errorf("an empty route gave (%v, %v), want (nil, nil)", got, err)
+	}
+}

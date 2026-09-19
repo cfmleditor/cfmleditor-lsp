@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cfmleditor.resolveRoute`** — answers "where does this route go" for a route the caller supplies, rather than one found in a document. It exists so an editor command that takes a route by hand and go-to-definition on a route in source resolve through the same code: an editor keeping its own copy of the convention was the state of things before, and two resolvers reading two different configs disagree quietly — the one that is wrong still opens a file, just not the right one. Returns every target with its URI, component, method and declaration range, so a caller can reveal the method rather than the top of a ten-thousand-line controller.
+
+  A workspace with no `routes` block gets an answer, not an error: a JSON-RPC error is not something an editor command handler can put in front of someone, so the reason comes back in the result.
+
 ### Fixed
 
 - **Only a function's first argument was read for a route.** A route is as often passed by name — `setRequestContext(route="a.b.c")`, `setRequestContext(r="a.b.c")` — or one call down in `redirect(buildRoute("a.b.c"))`, and none of those were found. Every string in the argument list is read now, with the route grammar rejecting the rest: a parameter name is the caller's business, and a scanner that had to be told it would need a config entry per function per codebase. On one workspace this took function-sourced routes from 11 occurrences to 151, `setPrint` alone from 2 to 95.
