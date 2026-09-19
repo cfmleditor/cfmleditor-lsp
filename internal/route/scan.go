@@ -204,7 +204,15 @@ func scanQueryParams(content string, names []string) []Ref {
 		}
 
 		at := i + 1
-		if strings.HasPrefix(strings.ToLower(content[min(at, len(content)):]), "amp;") {
+		// Four bytes, compared where they sit.
+		//
+		// This lowercased the whole of the rest of the file to test a prefix of
+		// four characters, once per '?' or '&' in the document. On a 64,000-line
+		// component that was 1.8GB allocated and 64% of the scan's time — three
+		// seconds for a single textDocument/documentLink, and the same three
+		// seconds behind every go-to-definition before the scan was narrowed to
+		// the cursor. The cost was not the scanning; it was this line.
+		if at+4 <= len(content) && strings.EqualFold(content[at:at+4], "amp;") {
 			at += 4
 		}
 

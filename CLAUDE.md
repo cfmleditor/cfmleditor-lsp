@@ -1013,6 +1013,30 @@ empty server cannot see. Pin the shape, not the clock, when it matters:
 `TestIndexFileFromResultDoesNotScaleWithIndexSize` compares allocations at
 two index sizes, so it fails on the regression rather than on a busy runner.
 
+**A cost that scales with the document wants a scaling test, not a timing one.**
+Every defect behind the three-second go-to-definition was invisible to the tests
+that existed, because all of them returned the right answer. `routepkg.Scan`
+lowercased the whole remainder of the file to test a four-character prefix, once
+per `?` or `&` — 1.8GB and three seconds on a 64,000-line component, with the
+refs correct throughout. `routeAtPosition` scanned the whole document and kept
+only the cursor's line. Document links rescanned on every request.
+
+The tests that catch these compare a **ratio**, never a clock:
+`TestScanScalesLinearly` gives eight times the input and fails above three times
+the input ratio (the defect was 63x, near-exactly quadratic);
+`TestScanDoesNotAllocateOverContentWithNoRoutes` grows only the content that
+matches nothing and fails if allocation follows it (the defect was 97x);
+`TestRouteLookupDoesNotScaleWithDocumentSize` appends 460KB after the cursor and
+fails if the lookup notices. A busy runner moves both numbers together, so they
+fail on the regression rather than on the machine.
+
+Two traps, both of which this file's tests fell into first. A route test needs
+`Routes.Enabled()` to be *true* — it wants a source **and** a controller or view
+rule, and without the second half every route path short-circuits and the test
+passes whatever the code does. And a window test needs both documents to present
+a **full** window, or it compares a five-line window against a fifty-line one and
+fails for that instead.
+
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in
 a comment. `mergeFormatting`'s field list had one and it caught two omissions

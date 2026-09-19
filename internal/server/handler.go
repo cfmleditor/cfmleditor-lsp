@@ -191,6 +191,18 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)
 
+	// The switches as resolved, not as written: a feature that looks off in the
+	// config and on in the server is otherwise invisible until someone times a
+	// request and disbelieves the answer.
+	s.log.Info("features resolved",
+		cflog.Bool("routes", s.Features.Routes),
+		cflog.Bool("variableDefinitions", s.Features.VariableDefinitions),
+		cflog.Bool("documentHighlight", s.Features.DocumentHighlight),
+		cflog.Bool("folding", s.Features.Folding),
+		cflog.Bool("watchedFiles", s.Features.WatchedFiles),
+		cflog.Bool("rangeFormatting", s.Features.RangeFormatting),
+		cflog.Bool("routesConfigured", s.Routes.Enabled()))
+
 	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.editorRoots()))
 
 	return protocol.InitializeResult{
