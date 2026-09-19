@@ -309,14 +309,28 @@ func (p *tagParser) enterFunctionScope(tagEnd, line int) {
 
 	p.inFunc = funcKey(line, endLine)
 	p.scopes = append(p.scopes, FuncScope{Start: line, End: endLine})
-	p.localVarSet = make(map[string]bool)
 
-	// Add function arguments to local var set
+	// The set starts nil and is built on first write. It was a map per
+	// <cffunction> whether or not the function declared anything local, which on
+	// the benchmark component was 13% of everything the tag parser allocated —
+	// and a map is an expensive way to record nothing.
+	p.localVarSet = nil
+
 	if len(p.funcs) > 0 {
 		for _, arg := range p.funcs[len(p.funcs)-1].Arguments {
-			p.localVarSet[strings.ToLower(arg.Name)] = true
+			p.markVarLocal(arg.Name)
 		}
 	}
+}
+
+// markVarLocal records name as declared local to the function being parsed,
+// allocating the set on first use.
+func (p *tagParser) markVarLocal(name string) {
+	if p.localVarSet == nil {
+		p.localVarSet = make(map[string]bool, 8)
+	}
+
+	p.localVarSet[strings.ToLower(name)] = true
 }
 
 // parseCFFunction extracts a function def from <cffunction> and its <cfargument> children.
@@ -566,8 +580,9 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name := extractIdent(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
-			if p.localVarSet != nil {
-				p.localVarSet[strings.ToLower(name)] = true
+
+			if p.inFunc != "" {
+				p.markVarLocal(name)
 			}
 
 			p.checkSetRHS(rest, name, line)
@@ -578,8 +593,9 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
-			if p.localVarSet != nil {
-				p.localVarSet[strings.ToLower(name)] = true
+
+			if p.inFunc != "" {
+				p.markVarLocal(name)
 			}
 
 			p.checkSetRHSStr(rhs, name, line)

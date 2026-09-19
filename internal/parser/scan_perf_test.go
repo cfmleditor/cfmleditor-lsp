@@ -132,6 +132,67 @@ func assertSameInts(t *testing.T, src string, got, want []int) {
 	}
 }
 
+func hasScriptTagSlow(content string) bool {
+	for i := 0; i+7 < len(content); i++ {
+		if content[i] == '<' && strings.EqualFold(content[i+1:i+7], "script") {
+			switch content[i+7] {
+			case '>', '/', ' ', '\t', '\n', '\r':
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func containsCFTagSlow(s string) bool {
+	for i := 0; i < len(s)-2; i++ {
+		if s[i] == '<' && toLowerByte(s[i+1]) == 'c' && toLowerByte(s[i+2]) == 'f' {
+			return true
+		}
+	}
+
+	return false
+}
+
+func TestScanPredicatesMatchTheLoopsTheyReplaced(t *testing.T) {
+	fixed := []string{
+		"", "<", "<s", "<script", "<script>", "<SCRIPT >", "<scripting>",
+		"<script\n", "<script\t", "<script/", "<scriptx>", "text<script",
+		"<cf", "<CF", "<c", "<x><cfset>", "a<b<cfif>", "<<cf", "<cf>",
+	}
+
+	for _, c := range fixed {
+		if got, want := hasScriptTag(c), hasScriptTagSlow(c); got != want {
+			t.Errorf("hasScriptTag(%q) = %v, want %v", c, got, want)
+		}
+
+		if got, want := containsCFTag(c), containsCFTagSlow(c); got != want {
+			t.Errorf("containsCFTag(%q) = %v, want %v", c, got, want)
+		}
+	}
+
+	rng := rand.New(rand.NewSource(3))
+	alphabet := []byte("<>scriptSCRIPTcf /\n\t")
+
+	for range 6000 {
+		var b strings.Builder
+		for range rng.Intn(40) {
+			b.WriteByte(alphabet[rng.Intn(len(alphabet))])
+		}
+
+		c := b.String()
+
+		if got, want := hasScriptTag(c), hasScriptTagSlow(c); got != want {
+			t.Fatalf("hasScriptTag(%q) = %v, want %v", c, got, want)
+		}
+
+		if got, want := containsCFTag(c), containsCFTagSlow(c); got != want {
+			t.Fatalf("containsCFTag(%q) = %v, want %v", c, got, want)
+		}
+	}
+}
+
 func BenchmarkIndexCFTag(b *testing.B) {
 	src := strings.Repeat(`<div class="x"><span>text</span></div>`, 400) + "<cffunction name=\"x\">"
 

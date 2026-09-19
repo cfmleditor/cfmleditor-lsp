@@ -8,7 +8,9 @@
 
   The four shared scopes resolve **across files**, because that is the point of them: `application.x` is written in `Application.cfc` and read everywhere, `server.x` in `Server.cfc`. Only those four ever read another file, and only when the current one does not declare the name, so an ordinary lookup stays local.
 
-- **Tag parsing is 2.2x faster** (222µs to 101µs on the benchmark component, and a third less memory), from three changes the same profile pointed at. `getAttr` lowercased the whole tag on every call, and a `<cffunction>` is asked for five or six attributes. `indexCFTag` — the search the entire tag scanner is built on — walked byte at a time calling `EqualFold` at every `<`, when a page is full of angle brackets and almost none of them start the tag being looked for. `buildLineIdx` made two byte-at-a-time passes over the whole source per parsed file. All three now go through the stdlib's vectorised scanners, and the two rewrites are checked against the implementations they replaced over generated input rather than a few chosen cases.
+- **Tag parsing is 2.4x faster** (222µs to 93µs on the benchmark component, and 38% less memory), from changes two profiles pointed at. `getAttr` lowercased the whole tag on every call, and a `<cffunction>` is asked for five or six attributes. `indexCFTag` — the search the entire tag scanner is built on — walked byte at a time calling `EqualFold` at every `<`, when a page is full of angle brackets and almost none of them start the tag being looked for. `buildLineIdx` made two byte-at-a-time passes over the whole source per parsed file. All now go through the stdlib's vectorised scanners, and each rewrite is checked against the implementation it replaced over generated input rather than a few chosen cases.
+
+  A second profile, taken once scanning was no longer the bottleneck, showed allocation was: `ParseVars` classified the file and then called `FindFuncScopes`, which classified it again, building a second line index over the whole source every time; and every `<cffunction>` allocated a map to record the locals it declared, whether or not it declared any. Both are gone.
 
 ### Fixed
 
