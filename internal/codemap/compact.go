@@ -82,7 +82,14 @@ func (in *interner) put(s string) int {
 
 func (m *Map) compact(title string) *compactMap {
 	nodeKinds := []string{string(KindFunction), string(KindFile), string(KindExternal), string(KindPackage)}
-	edgeKinds := []string{string(EdgeCalls), string(EdgeInstantiates), string(EdgeExtends), string(EdgeIncludes)}
+	// Every EdgeKind the encoder can emit must be listed, or its index comes back
+	// -1 and the viewer decodes the edge as the first kind instead — route edges
+	// silently became calls, which is the one distinction the map exists to keep.
+	// TestEveryEdgeKindIsEncodable pins the list against the constants.
+	edgeKinds := []string{
+		string(EdgeCalls), string(EdgeInstantiates), string(EdgeExtends),
+		string(EdgeIncludes), string(EdgeRoute),
+	}
 
 	nodeKindIdx := indexOf(nodeKinds)
 	edgeKindIdx := indexOf(edgeKinds)

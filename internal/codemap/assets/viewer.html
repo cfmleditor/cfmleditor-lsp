@@ -10,6 +10,7 @@
     --line: #dfe3e9; --accent: #2d6cdf; --in: #1a7f5a; --out: #c2410c;
     --dead: #9aa3af; --dyn: #a855f7;
     --k-calls: #4a6572; --k-instantiates: #8e24aa; --k-extends: #2e7d32; --k-includes: #ef6c00;
+    --k-route: #00838f;
   }
   :root:not([data-theme="light"]) { }
   @media (prefers-color-scheme: dark) {
@@ -18,6 +19,7 @@
       --line: #262c38; --accent: #6ea8ff; --in: #34d399; --out: #fb923c;
       --dead: #5b6472; --dyn: #c084fc;
       --k-calls: #93a4b1; --k-instantiates: #c084fc; --k-extends: #4ade80; --k-includes: #fb923c;
+      --k-route: #22d3ee;
     }
   }
   :root[data-theme="dark"] {
@@ -25,6 +27,7 @@
     --line: #262c38; --accent: #6ea8ff; --in: #34d399; --out: #fb923c;
     --dead: #5b6472; --dyn: #c084fc;
     --k-calls: #93a4b1; --k-instantiates: #c084fc; --k-extends: #4ade80; --k-includes: #fb923c;
+    --k-route: #22d3ee;
   }
   * { box-sizing: border-box; }
   body {
@@ -202,7 +205,7 @@ const NODES = decoded.nodes;
 const EDGES = decoded.edges;
 const BY_ID = new Map(NODES.map(n => [n.id, n]));
 
-const KINDS = ["calls", "instantiates", "extends", "includes"];
+const KINDS = ["calls", "instantiates", "extends", "includes", "route"];
 const KIND_COLOR = k => getComputedStyle(document.documentElement).getPropertyValue("--k-" + k).trim() || "#888";
 
 const state = {
