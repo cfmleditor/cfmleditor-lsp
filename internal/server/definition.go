@@ -116,15 +116,36 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 		defs := s.index.Lookup(word)
 		s.log.Debug("definition: qualified fallback to global lookup", cflog.String("word", word), cflog.Int("matches", len(defs)))
 
-		var locations []protocol.Location
+		// A definition in the requesting file is kept, and ranked last.
+		//
+		// It used to be discarded, on the reasoning that `x.doThing()` is not a
+		// call to this file's own `doThing()` — which is true, and is why it
+		// sorts last, but is not a reason to answer nothing. Where a name is
+		// declared only here, discarding it left the one shape this fallback
+		// exists for with no answer at all: an unresolvable receiver
+		// (`VARIABLES._svc.`, `ARGUMENTS.a.`, a chain, a bracket index) on a
+		// method this component also declares. Every one of those returned nil
+		// while the name sat in the index.
+		//
+		// Last rather than first because the qualifier is evidence against it:
+		// nearest-first would otherwise put it at the top, since nothing is
+		// nearer than the same file, and `myObj.init()` would jump to this
+		// component's own `init()` ahead of a real candidate elsewhere.
+		var locations, sameFile []protocol.Location
 
 		for _, d := range defs {
-			if d.URI != docURI {
-				locations = append(locations, protocol.Location{
-					URI:   d.URI,
-					Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
-				})
+			loc := protocol.Location{
+				URI:   d.URI,
+				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
 			}
+
+			if d.URI == docURI {
+				sameFile = append(sameFile, loc)
+
+				continue
+			}
+
+			locations = append(locations, loc)
 		}
 
 		// Nearest first, and the lowest URI among equals. The editor lists
@@ -134,6 +155,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 		// differently after a restart. Nearest is also the more useful first
 		// entry, since it is the one the caller most likely meant.
 		orderByNearest(locations, docURI)
+
+		locations = append(locations, sameFile...)
 
 		if len(locations) == 1 {
 			return locations[0], nil

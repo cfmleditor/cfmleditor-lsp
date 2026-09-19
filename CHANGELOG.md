@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **Go-to-definition answered nothing when a component called its own method through an unresolvable receiver.** A qualified call whose receiver the parser cannot type — `VARIABLES._svc.doThing()`, an `any` argument, a chain, a bracket index — falls back to looking the method name up in the index. That fallback discarded any definition in the requesting file, so where the name was declared only there, the answer was nothing at all while the name sat in the index the whole time. The definition is now kept and ranked **last**: the qualifier is evidence against it (`x.doThing()` is not a call to this component's `doThing()`), and nearest-first would otherwise rank it top, since nothing is nearer than the same file — `myObj.init()` would land on the caller's own `init()` ahead of every real candidate.
+
 - **The server's own log lines reached the editor as failures.** Everything it logged went to stderr, and `vscode-languageclient` reports a server's stderr at error level whatever it says — so the startup banner, "indexing complete" and a genuine fault were indistinguishable in the Output panel, all three prefixed `[error]`. The server now also sends `window/logMessage`, which carries a severity the client can render honestly. Both, not one instead of the other: stderr is the only place a record can go before the client connects or after it disappears, and a crash during startup is exactly when the reason matters most.
 
 ### Added
