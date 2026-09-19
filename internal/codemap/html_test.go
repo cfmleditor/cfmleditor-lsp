@@ -137,6 +137,29 @@ func TestViewerIsSelfContained(t *testing.T) {
 	}
 }
 
+// TestEveryViewIsReachable. Each view is a button plus a function plus an entry
+// in the dispatch table and one in the limit table, and a view missing any one of
+// those is either an unclickable button or a click that throws. Four hand-kept
+// lists is exactly the shape this codebase keeps getting wrong.
+func TestEveryViewIsReachable(t *testing.T) {
+	views := []string{"bundle", "force", "matrix", "islands", "tree", "focus"}
+
+	for _, v := range views {
+		for _, want := range []string{
+			`data-view="` + v + `"`, // the button
+			v + ":",                 // the dispatch entry and the limit entry
+		} {
+			if !strings.Contains(viewerHTML, want) {
+				t.Errorf("view %q: viewer.html has no %q", v, want)
+			}
+		}
+
+		if !strings.Contains(viewerHTML, "draw"+strings.ToUpper(v[:1])+v[1:]) {
+			t.Errorf("view %q has no draw function", v)
+		}
+	}
+}
+
 // TestEmbeddedBundleCannotCloseTheScriptElement is a build-time guard rather than
 // a runtime escape. The bundle is inlined into a <script>, so a "</script"
 // anywhere in it would end the element early and turn the rest of the page into

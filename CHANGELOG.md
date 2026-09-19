@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Two views that do not render the whole map**, because at 54,000 nodes none of the others can. **Drill-down** starts at the top-level directories and expands one level at a time, so what is on screen is a function of what you opened rather than how big the map is — the first frame of a 54,000-node map is a dozen circles. **Focus** draws one node and everything within *n* hops, on a ring per hop, and clicking any node re-centres. Neither is capped, because neither was ever going to draw more than you asked for.
+
+  The hierarchy is derived from the paths already on each node rather than stored: the path already *is* the hierarchy, so a second representation could only disagree with the first. Groups aggregate their members' edges, and a group counts as utility only if all of it is — the same rule `Collapse` uses.
+
+
 - **`cfmleditor.generateCodeMap` and `cfmleditor.showCodeMapStats`** — build a code map from the editor, with no CLI and no rebuilt binary on a PATH. Both take an optional options object (`level`, `format`, `out`, `under`, `from`, `live`, `detached`, `open`) and both work invoked with no arguments, so an editor can bind either to a menu item. Entry globs, utility globs and `hideUtility` come from the `codemap` config block exactly as they do for the CLI.
 
   The build reuses the server's own index rather than making one. That index is already current — `didChange` and the watched-file handler maintain it — so the generate skips the index pass, the more expensive half of a cold CLI run. It runs on its own goroutine and reports through `window/showMessage`, because a map of a large workspace takes seconds and a blocking `executeCommand` freezes the editor. Output is confined to the workspace: a command an editor invokes with arbitrary arguments is one that can be asked to write anywhere.

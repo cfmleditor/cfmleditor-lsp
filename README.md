@@ -114,12 +114,18 @@ drops all of that. Use `call` when you want only "what calls what".
 on purpose — it renders in a browser and falls over in the low thousands of nodes, so a
 map big enough to need a cap should be collapsed to `--level package` first.
 
-`html` is a single self-contained file with four views: hierarchical **edge bundling**
+`html` is a single self-contained file with six views: hierarchical **edge bundling**
 (grouped by island, then directory), a **force** layout that gives each island its own
 centre so detached code sits apart rather than being pressed against the border, a
 **dependency matrix** that has no occlusion at any size, and an **islands** view of the
 disconnected pieces. Above ~1,200 nodes the force view renders to a canvas with a
 quadtree for hit-testing, so it stays interactive into the tens of thousands.
+
+Two more exist because at tens of thousands of nodes none of those four can show
+the whole map. **Drill-down** starts at the top-level directories and expands one
+level per click, so what is drawn depends on what you opened rather than on the
+size of the map. **Focus** draws one node and everything within *n* hops, a ring
+per hop, and clicking any node re-centres. Neither is capped.
 
 The report embeds its JavaScript — a 76KB D3 bundle of just the modules these views
 use, built from `internal/codemap/assets/vendor` and committed. No CDN, no network:
