@@ -3,6 +3,9 @@ package server
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,7 +120,37 @@ func (s *Server) indexWorkspace() {
 	close(results)
 	indexWg.Wait()
 
-	s.log.Info("indexing complete", cflog.Int("files", indexed), cflog.Int("total", total), cflog.Duration("dur", time.Since(indexStart)))
+	// Hand the scan's working memory back to the operating system.
+	//
+	// Indexing is a burst: every worker holds a file's text and its parse result,
+	// and the heap the runtime grows to accommodate that is many times what the
+	// index keeps. Go's scavenger returns it eventually and unhurriedly, so
+	// without this the process sits at its indexing peak for a long time
+	// afterwards — which for a daemon means the resident size a user sees is the
+	// cost of a step it finished minutes ago.
+	//
+	// It forces a collection, so it belongs exactly here: once, at the end of a
+	// phase that has just finished, and never on a path serving a request.
+	var before runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+	debug.FreeOSMemory()
+
+	var after runtime.MemStats
+
+	runtime.ReadMemStats(&after)
+
+	s.log.Info("indexing complete",
+		cflog.Int("files", indexed), cflog.Int("total", total),
+		cflog.Duration("dur", time.Since(indexStart)),
+		cflog.String("heapInUse", mb(after.HeapAlloc)),
+		cflog.String("heapReserved", mb(after.HeapSys-after.HeapReleased)),
+		cflog.String("returnedToOS", mb(after.HeapReleased-before.HeapReleased)))
+}
+
+// mb formats a byte count for a log line.
+func mb(b uint64) string {
+	return strconv.FormatFloat(float64(b)/(1<<20), 'f', 1, 64) + "MB"
 }
 
 // applyIndexResult writes one parsed file into the index: its signatures and
