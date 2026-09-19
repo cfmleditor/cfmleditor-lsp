@@ -10,6 +10,10 @@
 
 ### Added
 
+- **The extension's own go-to-definition suite now runs against this server** (`internal/server/definition_conformance_test.go`). Same cases, same cursor-marker syntax, fixtures copied from the extension with their source commit recorded. It exists because the extension stands its own providers down whenever this server runs, so every case it answers and this server does not is something a user loses by enabling the server — and nothing could say which those were.
+
+  **25 of 41 pass. The 16 that do not are one gap: there is no variable branch at all.** `<cfargument>`, `local.`/`var`/`variables.` assignments, `url.`, `<cfparam name>`, `<cfloop index>` and the `application`/`request`/`session`/`server` scopes, each both scoped and unscoped, all return nil. Every component, method and function case passes. Each gap is named with a reason, and the test **fails when a known gap starts passing**, so closing one cannot go unnoticed and the list cannot rot into decoration.
+
 - **The capabilities the VS Code extension has and this server does not are documented** (`README.md`, `CLAUDE.md`): `textDocument/typeDefinition`, docblock completion, and `textDocument/documentColor`. The extension stands its own providers down while the server runs, so these go quiet when it is enabled — recorded so the loss is deliberate, and so whoever implements one knows what it has to match.
 
 ## [0.3.1]
