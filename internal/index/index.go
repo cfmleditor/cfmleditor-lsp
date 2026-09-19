@@ -485,6 +485,22 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 
 // IndexFileFromResult updates the index using pre-parsed function defs and refs.
 func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDef, refs []parser.ComponentRef) {
+	// The strings a parse produces are slices of the file's source, and a Go
+	// substring keeps the whole backing array alive. That is right for a parse
+	// result, which dies with the source it came from, and wrong here: the index
+	// outlives every one of them, so a single retained function name holds its
+	// entire file in memory and an index of a workspace holds the workspace.
+	//
+	// On a real one — 18,245 files, 322MB of source — the index retained 285MB,
+	// 0.9x the source it was built from, for data whose own size is a few
+	// megabytes. Copying the strings as they are stored takes it to 55.6MB.
+	//
+	// Done here rather than at each caller because this is the one door into the
+	// index, and a caller that forgot would put the retention back with nothing
+	// to show it had.
+	funcs = parser.CompactDefs(funcs)
+	refs = parser.CompactRefs(refs)
+
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
