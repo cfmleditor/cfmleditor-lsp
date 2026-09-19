@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +27,10 @@ func (s *Server) routeResolver() *routepkg.Resolver {
 		return s.cachedRoutes
 	}
 
-	if !s.Routes.Enabled() {
+	// The switch is here rather than at each caller for the reason the
+	// watched-files one documents: a gate in the caller is one a direct call
+	// slips past, and four handlers reach routes through this single function.
+	if !s.Features.Routes || !s.Routes.Enabled() {
 		return nil
 	}
 
@@ -115,30 +119,88 @@ func (s *Server) invalidateRoutes() {
 	s.routeMu.Unlock()
 }
 
-// routeAtPosition returns the route reference the cursor is inside, if any.
+// routeWindow is how many lines either side of the cursor are scanned for a
+// route reference.
 //
-// The scan is over the whole document rather than the cursor's line, because an
-// attribute value can be split across lines and the cheap single-line version
-// would silently stop working on exactly the long attribute lists where a link
-// helps most.
+// The scan used to cover the whole document, on the reasoning that an attribute
+// value can be split across lines and a single-line scan would miss it. The
+// first half is true and the conclusion does not follow: only a ref whose
+// recorded line *is* the cursor's line can match below, so every other line
+// scanned was work thrown away. On a 23,687-line component that was 380ms of a
+// 389ms go-to-definition — 98% of the request — repeated for every one.
+//
+// A window keeps what the whole-document scan was protecting: an attribute
+// opening this many lines above the cursor is still seen, so a value split
+// across a long attribute list still resolves. Fifty lines is far more than any
+// real tag spans and is 0.2% of that file.
+const routeWindow = 50
+
+// routeAtPosition returns the route reference the cursor is inside, if any.
 func (s *Server) routeAtPosition(content string, line, char int) (routepkg.Ref, bool) {
 	r := s.routeResolver()
 	if r == nil {
 		return routepkg.Ref{}, false
 	}
 
-	for _, ref := range routepkg.Scan(content, r.Config) {
-		if int(ref.Line) != line {
+	window, baseLine := linesAround(content, line, routeWindow)
+	if window == "" {
+		return routepkg.Ref{}, false
+	}
+
+	want := line - baseLine
+
+	for _, ref := range routepkg.Scan(window, r.Config) {
+		if int(ref.Line) != want {
 			continue
 		}
 
 		start := int(ref.Col)
 		if char >= start && char <= start+len(ref.Value) {
+			// Reported against the document, not the window.
+			ref.Line = uint32(line)
+
 			return ref, true
 		}
 	}
 
 	return routepkg.Ref{}, false
+}
+
+// linesAround returns the text of the lines within n of line, and the number of
+// the first line it starts at, so a caller can map a position back.
+func linesAround(content string, line, n int) (window string, baseLine int) {
+	first := max(line-n, 0)
+
+	start, cur := 0, 0
+
+	for cur < first {
+		i := strings.IndexByte(content[start:], '\n')
+		if i < 0 {
+			return "", 0
+		}
+
+		start += i + 1
+		cur++
+	}
+
+	end := start
+
+	// Up to the cursor's line plus n, counted from where the window actually
+	// starts. Ranging over 2n+1 lines instead overshoots whenever the start was
+	// clamped to the top of the file, which is harmless but means the window is
+	// not the range its own name describes.
+	for range line + n - first + 1 {
+		i := strings.IndexByte(content[end:], '\n')
+		if i < 0 {
+			end = len(content)
+
+			break
+		}
+
+		end += i + 1
+	}
+
+	return content[start:end], first
 }
 
 // routeDefinitions turns a route into go-to-definition locations.
@@ -203,7 +265,7 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 
 	var links []protocol.DocumentLink
 
-	for _, ref := range routepkg.Scan(docContent, r.Config) {
+	for _, ref := range s.scanDocumentRoutes(docContent, r) {
 		if !routepkg.Plausible(ref.Value) {
 			continue
 		}
@@ -228,6 +290,49 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 	}
 
 	return links
+}
+
+// scanDocumentRoutes is the whole-document route scan, memoised against the
+// content it was taken from.
+//
+// Document links are the one route caller that genuinely needs every reference
+// in the file, so the cursor window that made go-to-definition cheap does not
+// apply. What does apply is that the editor asks for links repeatedly on a
+// document that has not changed — on open, on focus, after any request that
+// refreshes them — and the scan is proportional to the file. On a 64,000-line
+// component it is three seconds, and it was three seconds every time.
+//
+// Keyed on a hash of the content rather than a version number, because the
+// version belongs to the document and this cache is keyed by nothing else: an
+// edit that changes the text changes the key, and one that does not, does not.
+// One entry, because the editor asks about the document in front of it.
+func (s *Server) scanDocumentRoutes(content string, r *routepkg.Resolver) []routepkg.Ref {
+	key := contentKey(content)
+
+	s.routeMu.Lock()
+	if s.routeScanKey == key {
+		refs := s.routeScanRefs
+		s.routeMu.Unlock()
+
+		return refs
+	}
+	s.routeMu.Unlock()
+
+	refs := routepkg.Scan(content, r.Config)
+
+	s.routeMu.Lock()
+	s.routeScanKey = key
+	s.routeScanRefs = refs
+	s.routeMu.Unlock()
+
+	return refs
+}
+
+// contentKey identifies a document's text for the scan cache.
+func contentKey(content string) string {
+	sum := sha256.Sum256([]byte(content))
+
+	return string(sum[:])
 }
 
 // linkTarget picks the one destination a document link can have.

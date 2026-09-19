@@ -12,6 +12,7 @@ import (
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -44,7 +45,14 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	// "tassweb.admin.changelogsgridview.read" yields one segment, which then
 	// resolves as an unrelated component path or not at all. The whole attribute
 	// value is the thing being pointed at.
-	ref, isRoute := s.routeAtPosition(content, line, char)
+	r := s.routeResolver()
+
+	dt.mark("routeResolver")
+
+	ref, isRoute := routepkg.Ref{}, false
+	if r != nil {
+		ref, isRoute = s.routeAtPosition(content, line, char)
+	}
 
 	dt.mark("routeScan")
 

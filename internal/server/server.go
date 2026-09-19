@@ -62,6 +62,8 @@ type Server struct {
 	resolverMu               sync.Mutex                // guards resolver, cachedResolvers, cachedResolverSet
 	routeMu                  sync.Mutex                // guards cachedRoutes
 	cachedRoutes             *route.Resolver           // memoised; dropped by invalidateRoutes
+	routeScanKey             string                    // content hash the scan below was taken from
+	routeScanRefs            []route.Ref               // memoised whole-document scan; see routeLinks
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning

@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
@@ -52,7 +54,7 @@ var crossFileScopes = map[parser.Scope][]string{
 // so a name it does not recognise costs one scan of the document's declarations
 // and nothing else.
 func (s *Server) resolveVariableDef(content string, line, char int, word string, docURI uri.URI) []protocol.Location {
-	if word == "" || isCallAt(content, line, char) {
+	if !s.Features.VariableDefinitions || word == "" || isCallAt(content, line, char) {
 		return nil
 	}
 
@@ -81,7 +83,23 @@ func (s *Server) resolveVariableDef(content string, line, char int, word string,
 		return nil
 	}
 
-	return s.crossFileVarDef(scope, word, docURI)
+	// This is the one path here that reads files it was not given, and it does
+	// so once per workspace root. A workspace with dozens of roots — an editor
+	// sends every folder, not the handful the config lists — turns one
+	// go-to-definition into dozens of reads and parses, so it is worth being
+	// able to see on its own.
+	start := time.Now()
+	locs := s.crossFileVarDef(scope, word, docURI)
+
+	if d := time.Since(start); d > 50*time.Millisecond {
+		s.log.Warn("slow cross-file variable lookup",
+			cflog.String("word", word),
+			cflog.String("scope", parser.ScopeName(scope)),
+			cflog.Duration("dur", d),
+			cflog.Int("roots", len(s.searchRoots())))
+	}
+
+	return locs
 }
 
 // matchVarInFile finds the declaration in this document, if it is here.
