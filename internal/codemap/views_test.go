@@ -341,3 +341,50 @@ func TestEntryGlobMatching(t *testing.T) {
 		}
 	}
 }
+
+// TestCallGraphKeepsRouteEdges. A route is an invocation — a page names it and
+// the dispatcher calls the controller method — so the strict call graph has to
+// keep it. Dropping routes would discard exactly the paths route resolution
+// exists to recover and report those methods as uncalled all over again.
+func TestCallGraphKeepsRouteEdges(t *testing.T) {
+	m := &codemap.Map{
+		Nodes: []codemap.Node{
+			{ID: "page.cfm", Kind: codemap.KindFile, Name: "page.cfm", File: "page.cfm", Entry: true},
+			{ID: "svc.cfc", Kind: codemap.KindFile, Name: "svc.cfc", File: "svc.cfc"},
+			{ID: "svc.cfc::routed", Kind: codemap.KindFunction, Name: "routed", File: "svc.cfc"},
+			{ID: "svc.cfc::called", Kind: codemap.KindFunction, Name: "called", File: "svc.cfc"},
+		},
+		Edges: []codemap.Edge{
+			{From: "page.cfm", To: "svc.cfc::routed", Kind: codemap.EdgeRoute, Count: 1},
+			{From: "page.cfm", To: "svc.cfc::called", Kind: codemap.EdgeCalls, Count: 1},
+			{From: "svc.cfc", To: "svc.cfc::routed", Kind: codemap.EdgeContains, Count: 1},
+			{From: "page.cfm", To: "svc.cfc", Kind: codemap.EdgeInstantiates, Count: 1},
+		},
+	}
+	m.Annotate()
+
+	cg := m.CallGraph()
+	idx := cg.NodeIndex()
+
+	if _, ok := idx["svc.cfc::routed"]; !ok {
+		t.Fatal("the routed function was dropped from the call graph")
+	}
+
+	kinds := map[codemap.EdgeKind]int{}
+	for i := range cg.Edges {
+		kinds[cg.Edges[i].Kind]++
+	}
+
+	if kinds[codemap.EdgeRoute] != 1 {
+		t.Errorf("call graph holds %d route edges, want 1", kinds[codemap.EdgeRoute])
+	}
+
+	if kinds[codemap.EdgeInstantiates] != 0 || kinds[codemap.EdgeContains] != 0 {
+		t.Errorf("call graph kept a non-invoking edge: %v", kinds)
+	}
+
+	// And the routed function must come out reachable, which is the whole point.
+	if n := idx["svc.cfc::routed"]; !n.Reachable {
+		t.Error("the routed function is unreachable in the call graph; the route edge is not being followed")
+	}
+}

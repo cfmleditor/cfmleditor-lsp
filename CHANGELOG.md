@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A `codemap` block in `.cfmleditor.json`**, carrying the `entry` and `utility` globs the `graph` command uses. They describe the codebase rather than one invocation, so every person and every tool that builds the map describes the same one — a map built without them reports different dead code and a different set of hubs, and nothing about the result says which run was configured correctly. The command-line flags add to the config rather than replacing it.
+
+- **`--utility` marks code as infrastructure** — the logging, the PDF writer, the context accessor every request touches. Marked, never excluded: it is genuinely the most-depended-on code in a workspace (on one, the entire top ten by fan-in), so removing it would misreport what depends on what, while leaving it unmarked makes every ranking a list of it. The counts and rankings keep counting it, the text report tags it, and the HTML report gains a toggle. `--hide-utility` (or `"hideUtility": true`) sets that toggle's starting position without removing anything from the page.
+
+- **Route edges are part of the call graph.** `--level call` kept only parsed call sites, so a function-level chart discarded every route — exactly the edges reaching the controller methods nothing else calls, putting them back to looking unreachable. A route is an invocation; the dispatcher makes the call. It stays a distinct edge kind so a reader can still tell a parsed call site from a resolved convention.
+
 ### Fixed
 
 - **Route edges were drawn as calls in the HTML report.** The compact encoder maps each edge kind to its index in a list, and `route` was missing from that list — so its index came back `-1` and the viewer decoded it as the first kind instead. Nothing failed: the picture simply said `calls` where the map held `route`, which is the one distinction the route work exists to keep. The viewer also offered no filter for them. `TestEveryEdgeKindIsEncodable` now checks every kind round-trips and that the viewer offers a filter for each.

@@ -117,6 +117,17 @@ type Node struct {
 	// node, so its lowest id is named root to keep it drawable.
 	Root bool `json:"root,omitempty"`
 
+	// Utility marks a node as infrastructure rather than application code: the
+	// logging, the PDF writer, the context accessor that every request touches.
+	//
+	// It is a label, never a filter. These are genuinely the most-depended-on code
+	// in a workspace — one context accessor had 1,439 callers — so they dominate
+	// every ranking and tie every part of the graph to every other part, and a map
+	// that hid them would be lying about what the code does. A map that cannot set
+	// them aside on request is unreadable for a different reason. Marking, and
+	// letting the reader toggle, is the only honest version.
+	Utility bool `json:"utility,omitempty"`
+
 	// Boundary marks a node that is outside a scoped view but kept because an edge
 	// crosses into it. See [Map.FilterUnder]: scoping to a package and dropping
 	// everything beyond it hides exactly the callers you scoped in order to find.
@@ -153,6 +164,9 @@ type Stats struct {
 	// the route edges are worth correspondingly less.
 	Routes           int `json:"routes"`
 	RoutesUnresolved int `json:"routesUnresolved"`
+
+	// Utility counts the nodes marked as infrastructure.
+	Utility int `json:"utility"`
 
 	// Cached counts files served from a [Cache] instead of parsed. A rebuild where
 	// this is near Files is the fast path working.

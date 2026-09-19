@@ -85,11 +85,11 @@ func decodeID(c *compactMap, row []int) string {
 // same four constants, and a mismatch does not fail anything — it just draws entry
 // points as dead code.
 func TestCompactFlagsMatchTheViewer(t *testing.T) {
-	want := map[string]int{"entry": 1, "reachable": 2, "root": 4, "abstract": 8, "boundary": 16}
+	want := map[string]int{"entry": 1, "reachable": 2, "root": 4, "abstract": 8, "boundary": 16, "utility": 32}
 
 	got := map[string]int{
 		"entry": flagEntry, "reachable": flagReachable, "root": flagRoot,
-		"abstract": flagAbstract, "boundary": flagBoundary,
+		"abstract": flagAbstract, "boundary": flagBoundary, "utility": flagUtility,
 	}
 	for name, v := range want {
 		if got[name] != v {
@@ -97,7 +97,7 @@ func TestCompactFlagsMatchTheViewer(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(viewerHTML, `const FLAG = { entry: 1, reachable: 2, root: 4, abstract: 8, boundary: 16 };`) {
+	if !strings.Contains(viewerHTML, `const FLAG = { entry: 1, reachable: 2, root: 4, abstract: 8, boundary: 16, utility: 32 };`) {
 		t.Error("the viewer's FLAG constants no longer match this file's; decoding will mislabel nodes")
 	}
 }
@@ -108,7 +108,7 @@ func TestViewerIsSelfContained(t *testing.T) {
 	var buf bytes.Buffer
 
 	m := &Map{Root: "/tmp/x", Level: LevelFunction}
-	if err := m.WriteHTML(&buf, "t"); err != nil {
+	if err := m.WriteHTML(&buf, HTMLOptions{Title: "t"}); err != nil {
 		t.Fatalf("WriteHTML: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestPayloadIsInertInsideAScript(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := m.WriteHTML(&buf, "t"); err != nil {
+	if err := m.WriteHTML(&buf, HTMLOptions{Title: "t"}); err != nil {
 		t.Fatalf("WriteHTML: %v", err)
 	}
 
@@ -219,6 +219,57 @@ func TestEveryEdgeKindIsEncodable(t *testing.T) {
 	for _, kind := range c.Edges {
 		if !strings.Contains(viewerHTML, `"`+kind+`"`) {
 			t.Errorf("edge kind %q is encoded but the viewer's KINDS list does not mention it", kind)
+		}
+	}
+}
+
+// TestHideUtilityIsAStartingPositionNotAFilter. --hide-utility must move the
+// toggle, not remove the nodes: a report that omitted them would be a different
+// map, and one whose reader cannot tell it was narrowed.
+func TestHideUtilityIsAStartingPositionNotAFilter(t *testing.T) {
+	m := &Map{
+		Root: "/w", Level: LevelFunction,
+		Nodes: []Node{
+			{ID: "app.cfc", Kind: KindFile, Name: "app.cfc", File: "app.cfc"},
+			{ID: "util.cfc", Kind: KindFile, Name: "util.cfc", File: "util.cfc", Utility: true},
+		},
+		Edges: []Edge{{From: "app.cfc", To: "util.cfc", Kind: EdgeCalls, Count: 1}},
+	}
+
+	for _, hide := range []bool{false, true} {
+		var buf bytes.Buffer
+		if err := m.WriteHTML(&buf, HTMLOptions{Title: "t", HideUtility: hide}); err != nil {
+			t.Fatalf("WriteHTML: %v", err)
+		}
+
+		start := strings.Index(buf.String(), `id="codemap-data">`) + len(`id="codemap-data">`)
+		end := strings.Index(buf.String()[start:], "</script>") + start
+
+		var payload compactMap
+		if err := json.Unmarshal([]byte(buf.String()[start:end]), &payload); err != nil {
+			t.Fatalf("decoding payload: %v", err)
+		}
+
+		if payload.HideUtility != hide {
+			t.Errorf("HideUtility=%v did not reach the payload", hide)
+		}
+
+		// Both nodes and the edge are present either way.
+		if len(payload.N) != 2 || len(payload.E) != 1 {
+			t.Errorf("HideUtility=%v changed the payload: %d nodes, %d edges", hide, len(payload.N), len(payload.E))
+		}
+
+		// And the utility flag survives, or the toggle has nothing to act on.
+		var marked int
+
+		for _, row := range payload.N {
+			if row[7]&flagUtility != 0 {
+				marked++
+			}
+		}
+
+		if marked != 1 {
+			t.Errorf("HideUtility=%v: %d nodes carry the utility flag, want 1", hide, marked)
 		}
 	}
 }

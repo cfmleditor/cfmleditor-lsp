@@ -256,6 +256,33 @@ The build reports the same share. A low one means the config describes a differe
 convention from the one in use, and the route edges are worth correspondingly
 less.
 
+### Utility code
+
+Some code is infrastructure: the logging, the PDF writer, the context accessor
+every request touches. It is genuinely the most-depended-on code in a workspace —
+on one, the entire top ten by fan-in was infrastructure — so it dominates every
+ranking and ties every part of the graph to every other.
+
+Marking it is not excluding it. The counts, the rankings and the islands all keep
+counting it, and the HTML report gains a toggle:
+
+```jsonc
+"codemap": {
+  "entry":   ["../prs"],                          // a runner invokes these
+  "utility": ["packages/tass/core/context.cfc"],  // infrastructure
+  "hideUtility": true                             // report opens with it off
+}
+```
+
+`--entry` and `--utility` on the command line **add to** the config rather than
+replacing it, so a one-off question needs no config change and cannot silently
+drop the project's own settings. `--hide-utility` sets the toggle's starting
+position; the nodes are in the page either way, so a reader can always switch
+them back on and see what was set aside.
+
+Collapsing treats a package as utility only when all of it is — one utility file
+among twenty application ones is not something a reader can set aside.
+
 ### Per-application configs, and code a runner invokes
 
 A workspace is often several applications side by side, each with its own

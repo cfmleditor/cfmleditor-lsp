@@ -124,6 +124,8 @@
     <h2>Edges</h2>
     <div id="kinds"></div>
     <label class="row"><input type="checkbox" id="dyn" checked> show dynamic (guessed)</label>
+    <label class="row"><input type="checkbox" id="util"> show utility code</label>
+    <p class="hint" id="utilnote"></p>
 
     <h2>Size</h2>
     <label class="row">max nodes <input type="range" id="cap" min="0" max="100" step="1" value="60"
@@ -163,7 +165,7 @@
 // their endpoints by node position, and a node's id is reconstructed rather than
 // sent when it is derivable. Everything below this point works on ordinary objects
 // again — the encoding buys page weight, not a different data model.
-const FLAG = { entry: 1, reachable: 2, root: 4, abstract: 8, boundary: 16 };
+const FLAG = { entry: 1, reachable: 2, root: 4, abstract: 8, boundary: 16, utility: 32 };
 
 function decode(raw) {
   const S = raw.s || [];
@@ -184,6 +186,7 @@ function decode(raw) {
       root: !!(flags & FLAG.root),
       abstract: !!(flags & FLAG.abstract),
       boundary: !!(flags & FLAG.boundary),
+      utility: !!(flags & FLAG.utility),
     };
   });
 
@@ -212,6 +215,7 @@ const state = {
   view: "bundle",
   kinds: new Set(KINDS),
   dynamic: true,
+  utility: true,
   reach: "all",
   island: "",
   query: "",
@@ -259,6 +263,10 @@ for (const e of EDGES) {
 /* ---------- filtering ---------- */
 
 function nodeVisible(n) {
+  // Utility code is hidden, never dropped from the data: the counts in the
+  // sidebar and the rankings still include it, so turning it off narrows what you
+  // are looking at without changing what the map says the codebase is.
+  if (!state.utility && n.utility) return false;
   if (state.reach === "live" && !n.reachable) return false;
   if (state.reach === "detached" && n.reachable) return false;
   if (state.island !== "" && String(n.island) !== state.island) return false;
@@ -368,6 +376,10 @@ function draw() {
   document.getElementById("capnote").textContent =
     g.nodes.length.toLocaleString() + " of " + NODES.length.toLocaleString() + " nodes shown, " +
     g.edges.length.toLocaleString() + " edges";
+  const utils = NODES.filter(n => n.utility).length;
+  document.getElementById("utilnote").textContent = utils
+    ? utils.toLocaleString() + " nodes are marked utility" + (state.utility ? "" : " and hidden")
+    : "nothing is marked utility (see --utility)";
   document.getElementById("viewcap").textContent =
     "this view is legible to about " + VIEW_LIMIT[state.view]().toLocaleString() + " nodes";
 
@@ -850,6 +862,7 @@ function drawIslands(g) {
 
 function nodeFill(n) {
   if (!n) return "var(--muted)";
+  if (n.utility) return "var(--dead)";
   if (n.boundary) return "var(--muted)";
   if (n.entry) return "var(--out)";
   if (!n.reachable) return "var(--dead)";
@@ -862,6 +875,7 @@ function tipHTML(n) {
   if (!n) return "";
   const tags = [];
   if (n.entry) tags.push('<span class="tag entry">entry</span>');
+  if (n.utility) tags.push('<span class="tag">utility</span>');
   if (n.boundary) tags.push('<span class="tag">outside scope</span>');
   if (!n.reachable) tags.push('<span class="tag dead">detached</span>');
   if (n.access) tags.push(`<span class="tag">${n.access}</span>`);
@@ -931,6 +945,7 @@ function renderDetail() {
     `<p style="margin:0 0 6px"><b>${n.name}</b></p>` +
     `<p style="margin:0 0 8px">` +
       (n.entry ? '<span class="tag entry">entry</span>' : "") +
+      (n.utility ? '<span class="tag">utility</span>' : "") +
       (n.boundary ? '<span class="tag">outside scope</span>' : "") +
       (n.reachable ? "" : '<span class="tag dead">detached</span>') +
       (n.access ? `<span class="tag">${n.access}</span>` : "") +
@@ -947,6 +962,7 @@ function sync() {
   state.reach = document.getElementById("reach").value;
   state.query = document.getElementById("q").value.trim().toLowerCase();
   state.dynamic = document.getElementById("dyn").checked;
+  state.utility = document.getElementById("util").checked;
   const slider = +document.getElementById("cap").value;
   state.cap = capFromSlider(slider);
   document.getElementById("capv").textContent =
@@ -970,7 +986,7 @@ document.querySelectorAll("button.view").forEach(b => b.addEventListener("click"
   sync();
 }));
 
-["island", "reach", "dyn", "cap"].forEach(id =>
+["island", "reach", "dyn", "util", "cap"].forEach(id =>
   document.getElementById(id).addEventListener("input", sync));
 
 let debounce;
@@ -992,6 +1008,9 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(draw, 180);
 });
 
+// The generator decides where the utility toggle starts; the reader can always
+// move it, because the nodes are in the page either way.
+document.getElementById("util").checked = !DATA.hideUtility;
 document.getElementById("title").textContent = DATA.title || "Code map";
 document.getElementById("root").textContent = (DATA.root || "") + " · " + (DATA.level || "function") + " level";
 if (!hasFunctions()) {

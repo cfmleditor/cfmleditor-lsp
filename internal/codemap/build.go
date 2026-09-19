@@ -103,6 +103,17 @@ type Options struct {
 	// "../prs/*" both work the way a reader expects.
 	EntryGlobs []string
 
+	// UtilityGlobs marks files as infrastructure rather than application code —
+	// the logging, the PDF writer, the context accessor every request touches.
+	//
+	// Marked, not excluded. These are the most-depended-on code in a workspace and
+	// removing them would misreport what depends on what; leaving them
+	// unmarked makes every ranking a list of them and ties every part of the graph
+	// to every other. The reader decides, and the label is what lets them.
+	//
+	// Matched exactly as EntryGlobs are.
+	UtilityGlobs []string
+
 	// ConfigExtra is mixed into the cache fingerprint. A caller that resolves files
 	// under several .cfmleditor.json files puts their contents here: the resolver
 	// chain decides what a call site resolves to, so a cached edge set computed
@@ -243,6 +254,7 @@ func Build(opts Options) *Map {
 
 	m.Stats.Files = len(opts.Files)
 	m.Stats.Functions = countKind(m.Nodes, KindFunction)
+	m.Stats.Utility = countUtility(m.Nodes)
 	m.Stats.BuildMillis = time.Since(start).Milliseconds()
 
 	// Islands, reachability and roots are properties of the finished graph, not of
@@ -376,19 +388,22 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 	// the exception: the engine loads it per request without anything in the
 	// codebase naming it, so treating it like any other component reported every
 	// application's own front door as unreferenced code.
+	utility := MatchesEntryGlob(opts.UtilityGlobs, rel)
+
 	res.Nodes = append(res.Nodes, Node{
-		ID:    FileID(rel),
-		Kind:  KindFile,
-		Name:  base,
-		File:  rel,
-		Entry: !isCFC || isApplication || MatchesEntryGlob(opts.EntryGlobs, rel),
+		ID:      FileID(rel),
+		Kind:    KindFile,
+		Name:    base,
+		File:    rel,
+		Entry:   !isCFC || isApplication || MatchesEntryGlob(opts.EntryGlobs, rel),
+		Utility: utility,
 	})
 
 	// A file named by an entry glob has its public methods marked too: a runner
 	// that loads a component by a constructed name calls into it by a constructed
 	// method name just as often, so marking only the file would leave everything
 	// inside it looking unreachable.
-	res.addFunctions(pr, rel, isApplication, MatchesEntryGlob(opts.EntryGlobs, rel))
+	res.addFunctions(pr, rel, isApplication, MatchesEntryGlob(opts.EntryGlobs, rel), utility)
 	res.addExtends(cfg, pr, rel, baseDir, root)
 	res.addRefs(cfg, pr, rel, baseDir, root)
 	res.addIncludes(opts, cfg, pr, rel, baseDir, root)
@@ -404,7 +419,7 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 	return res
 }
 
-func (res *FileGraph) addFunctions(pr *parser.ParseResult, rel string, isApplication, entryFile bool) {
+func (res *FileGraph) addFunctions(pr *parser.ParseResult, rel string, isApplication, entryFile, utility bool) {
 	access := make(map[string]string, len(pr.Scopes))
 	for _, sc := range pr.Scopes {
 		access[strings.ToLower(sc.Name)] = sc.Access
@@ -422,13 +437,14 @@ func (res *FileGraph) addFunctions(pr *parser.ParseResult, rel string, isApplica
 			(entryFile && !strings.EqualFold(acc, "private"))
 
 		res.Nodes = append(res.Nodes, Node{
-			ID:     FuncID(rel, f.Name),
-			Kind:   KindFunction,
-			Name:   f.Name,
-			File:   rel,
-			Line:   f.Line,
-			Access: acc,
-			Entry:  entry,
+			ID:      FuncID(rel, f.Name),
+			Kind:    KindFunction,
+			Name:    f.Name,
+			File:    rel,
+			Line:    f.Line,
+			Access:  acc,
+			Entry:   entry,
+			Utility: utility,
 		})
 
 		res.Edges = append(res.Edges, Edge{
@@ -770,6 +786,18 @@ func MatchesEntryGlob(globs []string, rel string) bool {
 	}
 
 	return false
+}
+
+func countUtility(nodes []Node) int {
+	n := 0
+
+	for i := range nodes {
+		if nodes[i].Utility {
+			n++
+		}
+	}
+
+	return n
 }
 
 func countKind(nodes []Node, kind NodeKind) int {

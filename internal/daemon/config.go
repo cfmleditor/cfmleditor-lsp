@@ -145,6 +145,16 @@ func (c *Config) Routes() route.Config {
 	return raw.Routes
 }
 
+// CodeMap returns the code-map settings from config (see config.JSON.CodeMap).
+func (c *Config) CodeMap() config.CodeMap {
+	raw := c.raw()
+	if raw == nil {
+		return config.CodeMap{}
+	}
+
+	return raw.CodeMap
+}
+
 // Debug returns whether debug logging is enabled in config.
 func (c *Config) Debug() bool {
 	raw := c.raw()

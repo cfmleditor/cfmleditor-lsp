@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -44,11 +46,21 @@ instantiations, inheritance and includes between them.
   --entry <glob>   also treat files matching this as entry points, for code a
                    runner invokes by a constructed name (repeatable), e.g.
                    --entry '../prs' --entry 'tasks/*'
+  --utility <glob> mark files as infrastructure rather than application code
+                   (repeatable, and added to any in .cfmleditor.json). They
+                   stay in the map and every ranking says so; the html report
+                   can then set them aside on request.
+                   e.g. --utility 'packages/tass/core/context.cfc'
+  --hide-utility   open the html report with utility code switched off (the
+                   toggle is still there; nothing is removed from the page)
   --one-config     read every file under the scan root's own .cfmleditor.json,
                    instead of each file's nearest one
   --workers <n>    scan parallelism (default: GOMAXPROCS)
   --limit <n>      list length in the text report (default 20)
   --quiet          no progress on stderr
+
+The "codemap" block of .cfmleditor.json carries the entry and utility globs,
+so every run describes the same codebase; these flags add to it.
 
 Every declared function is in the map whether or not anything calls it.
 Unreachable code is not dropped: it becomes its own island with its own
@@ -64,6 +76,8 @@ type graphFlags struct {
 	under       string
 	underStrict bool
 	entryGlobs  []string
+	utilGlobs   []string
+	hideUtility bool
 	from        []string
 	live        bool
 	detached    bool
@@ -83,7 +97,7 @@ func cmdGraph(args []string) {
 		os.Exit(1)
 	}
 
-	m, err := buildGraph(flags)
+	m, err := buildGraph(&flags)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -133,6 +147,11 @@ func parseGraphFlags(args []string) (graphFlags, error) {
 
 			v, err = next(a)
 			f.entryGlobs = append(f.entryGlobs, v)
+		case "--utility":
+			var v string
+
+			v, err = next(a)
+			f.utilGlobs = append(f.utilGlobs, v)
 		case "--from":
 			var v string
 
@@ -160,6 +179,8 @@ func parseGraphFlags(args []string) (graphFlags, error) {
 			f.unresolved = true
 		case "--builtins":
 			f.builtins = true
+		case "--hide-utility":
+			f.hideUtility = true
 		case "--one-config":
 			f.oneConfig = true
 		case "--quiet":
@@ -191,7 +212,12 @@ func parseGraphFlags(args []string) (graphFlags, error) {
 	return f, nil
 }
 
-func buildGraph(f graphFlags) (*codemap.Map, error) {
+// buildGraph takes its flags by pointer because it merges the config's codemap
+// settings into them, and the caller renders from the same struct. By value, that
+// merge was discarded on return: the map was built with the config's entry and
+// utility globs and then written with the flags as typed, so --hide-utility set
+// in config silently did nothing to the report.
+func buildGraph(f *graphFlags) (*codemap.Map, error) {
 	fsys := vfs.OS{}
 
 	root, err := filepath.Abs(f.paths[0])
@@ -203,7 +229,17 @@ func buildGraph(f graphFlags) (*codemap.Map, error) {
 		root = filepath.Dir(root)
 	}
 
-	scanRoots, fallback, shared := routeWorkspace(fsys, root, f)
+	scanRoots, fallback, shared, settings := routeWorkspace(fsys, root, *f)
+
+	// Config supplies the entry and utility globs; the command line adds to them
+	// rather than replacing them, so a one-off question needs no config change and
+	// cannot silently drop the project's own settings. Applied here rather than
+	// inside routeWorkspace, which takes its flags by value — the merge it did
+	// there was discarded on return, and the only symptom was a map built as
+	// though the config said nothing.
+	f.entryGlobs = append(slices.Clone(settings.Entry), f.entryGlobs...)
+	f.utilGlobs = append(slices.Clone(settings.Utility), f.utilGlobs...)
+	f.hideUtility = f.hideUtility || settings.HideUtility
 
 	files := collectCFMLFiles(fsys, scanRoots)
 	if len(files) == 0 {
@@ -252,6 +288,7 @@ func buildGraph(f graphFlags) (*codemap.Map, error) {
 		Workers:                  f.workers,
 		ConfigExtra:              configs.Fingerprint(),
 		EntryGlobs:               f.entryGlobs,
+		UtilityGlobs:             f.utilGlobs,
 		IncludeUnresolved:        f.unresolved,
 		IncludeBuiltins:          f.builtins,
 	}
@@ -382,7 +419,10 @@ func writeGraph(m *codemap.Map, f graphFlags) error {
 	case "mermaid":
 		err = m.WriteMermaid(w, 2000)
 	case "html":
-		err = m.WriteHTML(w, "Code map — "+filepath.Base(m.Root))
+		err = m.WriteHTML(w, codemap.HTMLOptions{
+			Title:       "Code map — " + filepath.Base(m.Root),
+			HideUtility: f.hideUtility,
+		})
 	case "text":
 		err = m.WriteText(w, f.limit)
 	default:
@@ -412,7 +452,7 @@ func writeGraph(m *codemap.Map, f graphFlags) error {
 // Shared by `graph` and `routes` so the two cannot disagree about which config
 // governs a file — a diagnostic that scanned a different workspace from the build
 // it is meant to explain would be worse than none.
-func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string, fallback codemap.FileConfig, shared *index.Index) {
+func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string, fallback codemap.FileConfig, shared *index.Index, settings config.CodeMap) {
 	cfg, _ := daemon.FindConfig(root)
 
 	var (
@@ -436,8 +476,15 @@ func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string,
 			})
 		}
 
+		settings = cfg.CodeMap()
+
 		if !f.quiet {
 			fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
+
+			if n := len(settings.Entry) + len(settings.Utility); n > 0 {
+				fmt.Fprintf(os.Stderr, "  %d entry and %d utility globs from config\n",
+					len(settings.Entry), len(settings.Utility))
+			}
 		}
 	}
 
@@ -464,5 +511,5 @@ func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string,
 		ServicePropertyResolvers: servicePropertyResolvers,
 	}
 
-	return scanRoots, fallback, shared
+	return scanRoots, fallback, shared, settings
 }

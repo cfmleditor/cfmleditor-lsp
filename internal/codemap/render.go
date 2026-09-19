@@ -240,6 +240,10 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 			m.Stats.Routes, resolved, float64(resolved)*100/float64(m.Stats.Routes), m.Stats.RoutesUnresolved)
 	}
 
+	if m.Stats.Utility > 0 {
+		fmt.Fprintf(&b, "  %d nodes marked utility\n", m.Stats.Utility)
+	}
+
 	fmt.Fprintf(&b, "  %d islands, %d nodes no entry point reaches\n", m.Stats.Islands, m.Stats.Detached)
 	fmt.Fprintf(&b, "  built in %dms\n", m.Stats.BuildMillis)
 
@@ -274,7 +278,12 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 		fmt.Fprintf(&b, "\nMost depended on (%d):\n", len(hubs))
 
 		for _, n := range hubs {
-			fmt.Fprintf(&b, "  %5d  %s\n", in[n.ID], describe(&n))
+			mark := ""
+			if n.Utility {
+				mark = "  [utility]"
+			}
+
+			fmt.Fprintf(&b, "  %5d  %s%s\n", in[n.ID], describe(&n), mark)
 		}
 	}
 

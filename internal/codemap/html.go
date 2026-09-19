@@ -8,6 +8,20 @@ import (
 	"strings"
 )
 
+// HTMLOptions configures a generated report.
+type HTMLOptions struct {
+	// Title names the report.
+	Title string
+
+	// HideUtility opens the report with utility code switched off.
+	//
+	// It sets the toggle's starting position, not the contents: the nodes are
+	// still in the page and the counts still include them, so a reader can switch
+	// them back on. A report that omitted them would be a different map, and one
+	// whose reader cannot tell it was narrowed.
+	HideUtility bool
+}
+
 //go:embed assets/viewer.html
 var viewerHTML string
 
@@ -34,12 +48,16 @@ var d3Bundle string
 // machine with no network, and it renders identically years later — a CDN reference
 // would make all three depend on someone else's uptime and versioning. The bundle
 // carries only the eight D3 modules these views use, 76KB rather than 280KB.
-func (m *Map) WriteHTML(w io.Writer, title string) error {
+func (m *Map) WriteHTML(w io.Writer, opts HTMLOptions) error {
+	title := opts.Title
 	if title == "" {
 		title = "Code map"
 	}
 
-	data, err := json.Marshal(m.compact(title))
+	payload := m.compact(title)
+	payload.HideUtility = opts.HideUtility
+
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encoding map: %w", err)
 	}
