@@ -594,14 +594,31 @@ match.
 
 | Missing here | Extension's implementation | Notes |
 |---|---|---|
+| **Variable definitions** | `CFMLDefinitionProvider`'s variable branch | **The largest of the four, and measured**: 16 of the 41 cases in `definition_conformance_test.go`. `handleDefinition` answers components, file paths and function names; a cursor on a variable falls through the function-name lookup and returns nil. Covers `<cfargument>`, `local.`/`var`/`variables.` assignments, `url.`, `<cfparam name>`, `<cfloop index>`, and the `application`/`request`/`session`/`server` scopes, each both scoped and unscoped. The parser already tracks the data (`pr.Scopes`, `FuncVars`); what is missing is a branch that resolves an identifier against the enclosing function's vars, then the file's, then the declaration sites a tag creates. |
 | `textDocument/typeDefinition` | `CFMLTypeDefinitionProvider` | Go to the *type* of the symbol under the cursor, rather than its declaration. Most of the machinery exists — `CanResolveCall` already resolves a receiver to a component, which is the answer this request wants. |
 | Docblock completion | `DocBlockCompletions`, triggered on `*`, `@` and `.` | `@param`, `@return` and friends inside a `/** */` block. Note the trigger characters: `capabilities()` advertises `<`, `/`, `.` and `>`, so adding this means widening that list as well as handling the context. |
 | `textDocument/documentColor` | `CFMLDocumentColorProvider` | Colour swatches and the picker for colour literals. Wholly absent here; nothing in the parser records them. |
 
-Two of the three are cheap relative to what already exists, and `documentColor`
-is the one with no foundation at all. Until they land, a user who enables the
-server loses them — which is worth remembering when one is reported as a
-regression rather than a gap.
+`documentColor` is the one with no foundation at all; the other three each have
+most of their machinery already. Until they land, a user who enables the server
+loses them — which is worth remembering when one is reported as a regression
+rather than a gap.
+
+**The list is measured, not maintained by hand.**
+`internal/server/definition_conformance_test.go` replays the extension's own
+`provideDefinition` suite — same cases, same cursor-marker syntax, fixtures
+copied into `internal/server/testdata/conformance` with their source commit
+recorded. 25 of 41 pass; the 16 that do not are named in `knownGaps` with a
+reason each, and **the test fails when a known gap starts passing**, so closing
+one cannot go unnoticed and the list cannot rot into decoration.
+`TestKnownGapsAreRealCases` fails on a gap naming a case that no longer exists,
+so a renamed case cannot hide as a fixed one.
+
+The fixtures live in the *package's* testdata rather than the repo root's. They
+are a whole second workspace, and putting them in the shared `testdata/` changed
+what the repo-wide scans find — `TestReachabilityDoesNotFollowContains` failed
+on the fixture `Application.cfc`'s `onRequestStart`, correctly, because a second
+application had appeared in the tree it walks.
 
 ## Configuration (`.cfmleditor.json`)
 
