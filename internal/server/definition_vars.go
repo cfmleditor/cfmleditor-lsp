@@ -103,23 +103,121 @@ func (s *Server) resolveVariableDef(content string, line, char int, word string,
 }
 
 // matchVarInFile finds the declaration in this document, if it is here.
+//
+// One pass over the declarations, not one per scope. An unscoped name has nine
+// scopes to try, and asking each in turn walked every declaration in the file
+// nine times — on a 64,000-line component that is 10,497 of them, and the answer
+// is usually in the first scope or nowhere. The pass collects the best candidate
+// for every scope at once; the search order then only decides which of them to
+// return.
 func matchVarInFile(vars []parser.VarDef, word string, line int, scoped bool, scope parser.Scope, docURI uri.URI, content string) *protocol.Location {
-	order := unscopedSearchOrder
+	// A scope-qualified name has exactly one scope to look in, so it takes the
+	// single-scope walk: the per-scope version would allocate two slices and
+	// prepare a lookup table to answer a question about one of them.
 	if scoped {
-		order = []parser.Scope{scope}
+		if best := bestVarDecl(vars, word, scope, line); best != nil {
+			return varLocation(docURI, content, *best, word)
+		}
+
+		return nil
 	}
 
-	for _, want := range order {
-		if best := bestVarDecl(vars, word, want, line); best != nil {
-			return varLocation(docURI, content, *best, word)
+	best := bestVarDeclPerScope(vars, word, unscopedSearchOrder, line)
+	for i := range unscopedSearchOrder {
+		if best[i] != nil {
+			return varLocation(docURI, content, *best[i], word)
 		}
 	}
 
 	return nil
 }
 
+// lowerASCIIByte folds one ASCII byte, for the guard below.
+func lowerASCIIByte(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
+	}
+
+	return b
+}
+
+// bestVarDeclPerScope returns the declaration in force at line for each scope in
+// order, indexed the same way as order.
+func bestVarDeclPerScope(vars []parser.VarDef, name string, order []parser.Scope, line int) []*parser.VarDef {
+	if name == "" {
+		return make([]*parser.VarDef, len(order))
+	}
+
+	inFunc := make([]*parser.VarDef, len(order))
+	atFile := make([]*parser.VarDef, len(order))
+
+	// Scope values are small and dense, so a lookup from scope to its position in
+	// the order beats searching the order per declaration.
+	slot := [64]int{}
+	for i := range slot {
+		slot[i] = -1
+	}
+
+	for i, sc := range order {
+		if int(sc) < len(slot) {
+			slot[sc] = i
+		}
+	}
+
+	// The name is checked before the scope, and cheaply before that.
+	//
+	// A single-scope walk rejects on the scope first, which is very selective and
+	// leaves EqualFold running on a handful of declarations. This walk admits
+	// every scope, so without a cheap guard EqualFold runs on all of them — and a
+	// function call per declaration is what made the one pass cost more than the
+	// nine it replaced. Length and a folded first byte reject almost everything
+	// inline.
+	want := lowerASCIIByte(name[0])
+
+	for i := range vars {
+		v := &vars[i]
+
+		if len(v.Name) != len(name) || lowerASCIIByte(v.Name[0]) != want {
+			continue
+		}
+
+		if int(v.Scope) >= len(slot) {
+			continue
+		}
+
+		at := slot[v.Scope]
+		if at < 0 || !strings.EqualFold(v.Name, name) {
+			continue
+		}
+
+		enclosing := v.FuncStart >= 0 && line >= v.FuncStart && line <= v.FuncEnd
+
+		switch {
+		case enclosing:
+			inFunc[at] = nearerTo(inFunc[at], v, line)
+		case v.FuncStart < 0:
+			atFile[at] = nearerTo(atFile[at], v, line)
+		}
+	}
+
+	// A declaration inside the enclosing function outranks one outside it, per
+	// scope, which is what bestVarDecl did one scope at a time.
+	for i := range inFunc {
+		if inFunc[i] == nil {
+			inFunc[i] = atFile[i]
+		}
+	}
+
+	return inFunc
+}
+
 // bestVarDecl picks the declaration of name in the given scope that is actually
 // in scope at the cursor.
+//
+// Used for a scope-qualified name, where there is only one scope to consider.
+// An unscoped name goes through bestVarDeclPerScope, which answers for all nine
+// in one pass; this states the rule plainly for one, and is what that version is
+// checked against.
 //
 // A declaration inside the enclosing function wins over one outside it, because
 // that is what the name means there. Among several, the nearest at or before the
@@ -255,10 +353,12 @@ func (s *Server) varSearchDirs(docURI uri.URI, scope parser.Scope) []string {
 
 // varLocation points at the identifier on its declaring line rather than at the
 // line, so the editor reveals the name.
+//
+// One line, not all of them. This used to split the whole document into a
+// []string to read a single row of it: a megabyte allocated per lookup on a
+// 64,000-line component, and the only thing wanted from it was one line's text.
 func varLocation(docURI uri.URI, content string, v parser.VarDef, name string) *protocol.Location {
-	lines := strings.Split(content, "\n")
-
-	rng, _ := entryRange(lines, v.Line, name)
+	rng, _ := rangeInLine(parser.LineTextAt(content, int(v.Line)), v.Line, name)
 
 	return &protocol.Location{URI: docURI, Range: rng}
 }
