@@ -144,6 +144,12 @@ func runServer() {
 	debug := cfg != nil && cfg.Debug()
 	log := cflog.NewLogger(debug)
 
+	// Any panic that gets past the per-request handlers is recorded before the
+	// process goes. Those handlers recover where recovery is right; one reaching
+	// here is one nothing expected, and without this the only trace is a stack on
+	// a stderr the client may already have stopped reading.
+	defer cflog.CapturePanic("runServer")()
+
 	// Through the logger rather than straight to stderr, which is where this
 	// used to go. An LSP client has no way to know that a line on a server's
 	// stderr is routine: vscode-languageclient logs all of it at error level, so
@@ -153,7 +159,14 @@ func runServer() {
 	//
 	// It stays first, before anything that can fail, because the version is what
 	// a crash report needs most and a later line might never be reached.
-	log.Info("cfmleditor-lsp starting", cflog.String("version", version))
+	log.Info("cfmleditor-lsp starting",
+		cflog.String("version", version),
+		cflog.Int("pid", os.Getpid()),
+		cflog.String("cwd", cwd))
+
+	if path := cflog.FilePath(); path != "" {
+		log.Info("logging to file", cflog.String("path", path))
+	}
 
 	if debug {
 		log.Info("debug mode enabled")

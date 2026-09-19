@@ -32,13 +32,28 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
 
+	// Stage timings, so a slow answer names the stage that was slow. Reported
+	// only when the request was slow; see defTimer.
+	dt := newDefTimer()
+	outcome := "none"
+
+	defer func() { dt.report(s.log, outcome, string(params.TextDocument.URI), line, char) }()
+
 	// Routes are checked before the word under the cursor, because a route is a
 	// dotted string that WordAtPosition reads as a fragment: the cursor inside
 	// "tassweb.admin.changelogsgridview.read" yields one segment, which then
 	// resolves as an unrelated component path or not at all. The whole attribute
 	// value is the thing being pointed at.
-	if ref, ok := s.routeAtPosition(content, line, char); ok {
+	ref, isRoute := s.routeAtPosition(content, line, char)
+
+	dt.mark("routeScan")
+
+	if isRoute {
 		if locs := s.routeDefinitions(ref); len(locs) > 0 {
+			dt.mark("routeResolve")
+
+			outcome = "route"
+
 			s.log.Debug("definition: route resolved",
 				cflog.String("route", ref.Value), cflog.Int("targets", len(locs)))
 
@@ -49,6 +64,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 			return locs, nil
 		}
 	}
+
+	dt.mark("routeResolve")
 
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
@@ -62,6 +79,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	// Check if cursor is inside a resolver-matched call (e.g. getService("UserService"))
 	if comp := parser.ResolverArgAtCursor(content, line, char, s.cfResolvers()); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
+			outcome = "resolverArg"
+
 			s.log.Debug("definition: resolver arg resolved", cflog.String("component", comp))
 
 			return *loc, nil
@@ -69,8 +88,12 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	// Check if cursor is on a component dot-path (new, createObject, extends, etc.)
+	dt.mark("resolverArg")
+
 	if comp := parser.ComponentPathAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentFileDef(comp, docURI); loc != nil {
+			outcome = "componentPath"
+
 			s.log.Debug("definition: component path resolved", cflog.String("path", comp), cflog.String("target", string(loc.URI)))
 
 			return *loc, nil
@@ -80,8 +103,12 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	// Check if cursor is on a file path (cfinclude, cfmodule template)
+	dt.mark("componentPath")
+
 	if filePath := parser.FilePathAtCursor(content, line, char); filePath != "" {
 		if loc := s.resolveFilePathDef(filePath, docURI); loc != nil {
+			outcome = "filePath"
+
 			s.log.Debug("definition: file path resolved", cflog.String("path", filePath), cflog.String("target", string(loc.URI)))
 
 			return *loc, nil
@@ -91,11 +118,17 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	// Check if cursor is inside a <cfinvoke> method attribute
+	dt.mark("filePath")
+
 	if comp := parser.CfInvokeComponentAtCursor(content, line, char); comp != "" {
 		if loc := s.resolveComponentDef(comp, word, docURI); loc != nil {
+			outcome = "cfinvoke"
+
 			return *loc, nil
 		}
 	}
+
+	dt.mark("cfinvoke")
 
 	// Variables, before the function-name paths.
 	//
@@ -104,7 +137,14 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	// a `total()`, and resolveVariableDef declines anything followed by a paren
 	// so a call never reaches it. After the component and file-path checks,
 	// because a scope keyword is not a component and those checks are narrower.
-	if locs := s.resolveVariableDef(content, line, char, word, docURI); len(locs) > 0 {
+	varLocs := s.resolveVariableDef(content, line, char, word, docURI)
+
+	dt.mark("variable")
+
+	if len(varLocs) > 0 {
+		locs := varLocs
+		outcome = "variable"
+
 		s.log.Debug("definition: variable resolved",
 			cflog.String("word", word), cflog.String("target", string(locs[0].URI)))
 
@@ -113,6 +153,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 
 	// Check if there's a dot qualifier (e.g. persist.templateFunction)
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
+		defer dt.mark("qualified")
+
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
 
 		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
@@ -184,6 +226,8 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	// No qualifier — prefer current file's definition
+	defer dt.mark("unqualified")
+
 	defs := s.index.Lookup(word)
 
 	for _, d := range defs {
