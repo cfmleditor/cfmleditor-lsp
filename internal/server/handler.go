@@ -20,6 +20,24 @@ import (
 	"go.lsp.dev/uri"
 )
 
+// docOf digs the document URI out of a request's parameters for logging, and
+// returns "" for a request that names no document. Best-effort by design: this
+// runs only on a request already known to be slow, and a log line is not worth
+// failing over.
+func docOf(params []byte) string {
+	var p struct {
+		TextDocument struct {
+			URI string `json:"uri"`
+		} `json:"textDocument"`
+	}
+
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+
+	return p.TextDocument.URI
+}
+
 // Handler returns a jsonrpc2.Handler that dispatches LSP method calls.
 func (s *Server) Handler() jsonrpc2.Handler {
 	return func(ctx context.Context, req *jsonrpc2.Request) (result any, err error) {
@@ -32,7 +50,14 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			}
 
 			if dur := time.Since(start); dur > 100*time.Millisecond {
-				s.log.Warn("slow request", cflog.String("method", req.Method()), cflog.Duration("dur", dur))
+				// The document, not just the method. "textDocument/definition
+				// took 3s" repeated every few seconds is indistinguishable from
+				// one stuck request and from many slow ones, and names nothing
+				// to open and try.
+				s.log.Warn("slow request",
+					cflog.String("method", req.Method()),
+					cflog.Duration("dur", dur),
+					cflog.String("doc", docOf(req.Params())))
 			}
 		}()
 
@@ -165,6 +190,18 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)
+
+	// The switches as resolved, not as written: a feature that looks off in the
+	// config and on in the server is otherwise invisible until someone times a
+	// request and disbelieves the answer.
+	s.log.Info("features resolved",
+		cflog.Bool("routes", s.Features.Routes),
+		cflog.Bool("variableDefinitions", s.Features.VariableDefinitions),
+		cflog.Bool("documentHighlight", s.Features.DocumentHighlight),
+		cflog.Bool("folding", s.Features.Folding),
+		cflog.Bool("watchedFiles", s.Features.WatchedFiles),
+		cflog.Bool("rangeFormatting", s.Features.RangeFormatting),
+		cflog.Bool("routesConfigured", s.Routes.Enabled()))
 
 	s.log.Info("CFML LSP initialized", cflog.Strings("workspaceRoots", s.editorRoots()))
 

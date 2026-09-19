@@ -85,10 +85,12 @@ func TestFeatureKeysReachTheServer(t *testing.T) {
 // point of walking the struct reflectively in the first place. Folding is the
 // one that is off: see the Features doc comment.
 var featureDefaults = map[string]bool{
-	"DocumentHighlight": true,
-	"Folding":           foldingDefault,
-	"WatchedFiles":      true,
-	"RangeFormatting":   true,
+	"DocumentHighlight":   true,
+	"Folding":             foldingDefault,
+	"WatchedFiles":        true,
+	"RangeFormatting":     true,
+	"VariableDefinitions": true,
+	"Routes":              true,
 }
 
 // TestFeaturesDefaultToOn is the property that makes these opt-outs. An absent

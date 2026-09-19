@@ -16,19 +16,29 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 		return nil, err
 	}
 
+	dt := newDefTimer()
+
+	defer func() { dt.report(s.log, "documentLink", string(params.TextDocument.URI), 0, 0) }()
+
 	content, ok := s.getDocument(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
 	}
+
+	dt.mark("getDocument")
 
 	// Use cached parse result for global-scope links; scan function bodies on demand
 	docURI := params.TextDocument.URI
 
 	defer s.lockDoc(docURI)()
 
+	dt.mark("lockDoc")
+
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
 	s.mu.RUnlock()
+
+	dt.mark("parseResult")
 
 	var docLinks []parser.DocumentLink
 	if pr != nil {
@@ -42,6 +52,8 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 		// Fallback: full scan
 		docLinks = parser.ExtractLinks(content)
 	}
+
+	dt.mark("funcLinks")
 
 	var links []protocol.DocumentLink
 
@@ -64,7 +76,11 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 	// Route links are appended rather than merged into docLinks: they already
 	// carry a resolved Target, so they need no resolve round trip, and a route is
 	// not a file path the parser could have produced.
+	dt.mark("buildLinks")
+
 	links = append(links, s.routeLinks(content)...)
+
+	dt.mark("routeLinks")
 
 	return links, nil
 }

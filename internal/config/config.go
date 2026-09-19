@@ -192,14 +192,32 @@ type Features struct {
 	// format-on-save — so without this, the only way to stop it is to switch
 	// off formatting altogether and lose format-on-save with it.
 	RangeFormatting *bool `json:"rangeFormatting"`
+	// VariableDefinitions answers go-to-definition on a variable rather than a
+	// component or a function. It is the newest of these and the one with the
+	// most surface — nine scopes, two declaration sites the parser did not
+	// record before, and a cross-file lookup for the shared scopes — so it is
+	// the one most worth being able to switch off without giving up
+	// go-to-definition entirely.
+	VariableDefinitions *bool `json:"variableDefinitions"`
+	// Routes answers go-to-definition and document links for framework routes.
+	//
+	// Switching it off stops the route scan, which is the most expensive thing
+	// any of these do: it reads the document rather than an index, so its cost
+	// is the size of the file and it is paid on every request that could be a
+	// route. On a 64,000-line component that was three seconds per
+	// go-to-definition before the scan was narrowed to the cursor, and document
+	// links still pay the whole-file price because they are the whole file.
+	Routes *bool `json:"routes"`
 }
 
 // ResolvedFeatures holds the feature switches with defaults applied.
 type ResolvedFeatures struct {
-	DocumentHighlight bool
-	Folding           bool
-	WatchedFiles      bool
-	RangeFormatting   bool
+	DocumentHighlight   bool
+	Folding             bool
+	WatchedFiles        bool
+	RangeFormatting     bool
+	VariableDefinitions bool
+	Routes              bool
 }
 
 // foldingDefault is off. Named rather than inlined so the tests that assert the
@@ -222,10 +240,12 @@ func ResolveFeatures(f *Features) ResolvedFeatures {
 	}
 
 	return ResolvedFeatures{
-		DocumentHighlight: BoolDefault(f.DocumentHighlight, true),
-		Folding:           BoolDefault(f.Folding, foldingDefault),
-		WatchedFiles:      BoolDefault(f.WatchedFiles, true),
-		RangeFormatting:   BoolDefault(f.RangeFormatting, true),
+		DocumentHighlight:   BoolDefault(f.DocumentHighlight, true),
+		Folding:             BoolDefault(f.Folding, foldingDefault),
+		WatchedFiles:        BoolDefault(f.WatchedFiles, true),
+		RangeFormatting:     BoolDefault(f.RangeFormatting, true),
+		VariableDefinitions: BoolDefault(f.VariableDefinitions, true),
+		Routes:              BoolDefault(f.Routes, true),
 	}
 }
 
@@ -619,6 +639,8 @@ func mergeFeatures(base, over *Features) *Features {
 		{&out.Folding, &over.Folding},
 		{&out.WatchedFiles, &over.WatchedFiles},
 		{&out.RangeFormatting, &over.RangeFormatting},
+		{&out.VariableDefinitions, &over.VariableDefinitions},
+		{&out.Routes, &over.Routes},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src

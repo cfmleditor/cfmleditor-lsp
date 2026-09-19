@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Logger is the common logging interface used across all packages.
@@ -37,6 +38,10 @@ func Duration(key string, val time.Duration) zap.Field { return zap.Duration(key
 // Any constructs a field with an arbitrary value.
 func Any(key string, val any) zap.Field { return zap.Any(key, val) }
 
+// Field is one structured log field. Aliased so callers can hold a slice of
+// them without importing zap themselves.
+type Field = zap.Field
+
 // Err constructs an error field.
 func Err(err error) zap.Field { return zap.Error(err) }
 
@@ -60,6 +65,15 @@ func NewLogger(debug bool) Logger {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 
 		l = zap.NewNop()
+	}
+
+	// A copy on disk when CFMLEDITOR_LSP_LOG names one. See FileEnv: stderr
+	// belongs to the client, so it is the one place a record cannot be trusted
+	// to survive the client going away — which is when the record matters.
+	if fc := fileCore(debug); fc != nil {
+		l = l.WithOptions(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+			return zapcore.NewTee(c, fc)
+		}))
 	}
 
 	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar()}
