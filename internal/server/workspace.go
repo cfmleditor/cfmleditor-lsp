@@ -145,7 +145,21 @@ func (s *Server) indexWorkspace() {
 		cflog.Duration("dur", time.Since(indexStart)),
 		cflog.String("heapInUse", mb(after.HeapAlloc)),
 		cflog.String("heapReserved", mb(after.HeapSys-after.HeapReleased)),
-		cflog.String("returnedToOS", mb(after.HeapReleased-before.HeapReleased)))
+		cflog.String("returnedToOS", mb(sub(after.HeapReleased, before.HeapReleased))))
+}
+
+// sub is a-b without wrapping.
+//
+// HeapReleased can go down between two reads: the runtime counts pages it has
+// handed back, and it takes them again when the heap next grows. An unguarded
+// subtraction of two uint64s then prints 17592186044416MB, which is what this
+// log line did the first time the number went the other way.
+func sub(a, b uint64) uint64 {
+	if a < b {
+		return 0
+	}
+
+	return a - b
 }
 
 // mb formats a byte count for a log line.
