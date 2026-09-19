@@ -181,7 +181,7 @@ from go-to-definition, and a document link on each resolvable route.
   "attributes":  ["data-view", "data-read", "data-process"],
   "queryParams": ["do"],                        // href="x.cfm?do=a.b.c"
   "properties":  ["read", "view", "process"],   // { view: "a.b.c" }
-  "functions":   ["redirect", "setPrint"],      // redirect("a.b.c")
+  "functions":   ["redirect", "setPrint"],      // any string argument
 
   // a trailing segment that says how a target is shown, not what it is
   "suffixes": ["iframe"],
@@ -206,6 +206,14 @@ than to a quote; a function argument often carries a query string or fragment af
 the route, so it is cut at the first delimiter rather than rejected for holding
 one. JavaScript properties are the loosest — `read` and `view` are ordinary words —
 which is why a value must look like a route before it is resolved at all.
+
+**Every string argument of a listed function is read**, not just the first. A route
+may be passed positionally, or as `route="a.b.c"`, or as `r="a.b.c"`, or one call
+down in `redirect(buildRoute("a.b.c"))` — the parameter name is the caller's
+business, and a scanner that had to be told it would need a config entry per
+function per codebase. Taking every string and letting the route grammar reject
+the rest costs an unresolvable route, which produces no edge; requiring the name
+costs every call that spells it differently.
 
 `${N}` is one segment, `${N+}` everything from N on, `${N-M}` a span. A `:concat`
 suffix joins without the dots (`dialog.custom.roll` → `dialogCustomRoll`),
