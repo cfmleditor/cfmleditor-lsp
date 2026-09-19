@@ -156,6 +156,9 @@ from go-to-definition, and a document link on each resolvable route.
   "properties":  ["read", "view", "process"],   // { view: "a.b.c" }
   "functions":   ["redirect", "setPrint"],      // redirect("a.b.c")
 
+  // a trailing segment that says how a target is shown, not what it is
+  "suffixes": ["iframe"],
+
   "aliases": { "ui.web": ["tassweb", "kiosk", "parentportal"] },
   // prefer a mapped path over one relative to the workspace root
   "controllers": [
@@ -200,6 +203,13 @@ because every candidate is still checked against the component's real methods.
 makes the order safe: a component template built from the first segment matches
 enormous numbers of routes, so without the method check it would shadow every
 rule below it.
+
+**`suffixes` strips a trailing segment that says how a target is presented rather
+than what it is.** TASS writes `kiosk.lms.lms_grades.iframe` for the route
+`kiosk.lms.lms_grades` loaded inside an iframe container. The route is tried as
+written first, so a suffix that is also a genuine trailing segment somewhere keeps
+resolving as it did; suffixes are stripped before aliases are applied, so an alias
+does not have to be written once per presentation.
 
 **Aliases can name several replacements.** `ui.web` means "the product serving
 this page", and a view shared between products reaches whichever one is running —

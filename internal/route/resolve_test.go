@@ -290,3 +290,86 @@ func TestLongerAliasWins(t *testing.T) {
 		t.Errorf("component = %q; the broader ui.web alias shadowed the specific one", got[0].Component)
 	}
 }
+
+// TestSuffixIsStrippedNotResolved. A trailing segment can say how a target is
+// presented rather than what it is: TASS writes "kiosk.lms.lms_grades.iframe" for
+// the route kiosk.lms.lms_grades loaded inside an iframe container. Treating the
+// suffix as part of the route leaves it resolving to nothing.
+func TestSuffixIsStrippedNotResolved(t *testing.T) {
+	cfg := Config{
+		Attributes: []string{"data-view"},
+		Suffixes:   []string{"iframe"},
+		Views:      []ViewRule{{LongestDir: true, Ext: []string{".cfm"}}},
+	}
+	w := fake{
+		dirs:  map[string]bool{"kiosk": true, "kiosk/lms": true},
+		files: map[string]bool{"kiosk/lms/lms_grades.cfm": true},
+	}
+	r := &Resolver{Config: cfg, Lookups: w.lookups()}
+
+	got := r.Resolve("kiosk.lms.lms_grades.iframe")
+	if len(got) != 1 {
+		t.Fatalf("resolved to %+v", got)
+	}
+
+	if got[0].Path != "/w/kiosk/lms/lms_grades.cfm" {
+		t.Errorf("path = %q", got[0].Path)
+	}
+
+	// Without the suffix configured it must not resolve, or the test above proves
+	// nothing about the stripping.
+	plain := &Resolver{Config: Config{
+		Attributes: cfg.Attributes, Views: cfg.Views,
+	}, Lookups: w.lookups()}
+
+	if got := plain.Resolve("kiosk.lms.lms_grades.iframe"); len(got) != 0 {
+		t.Errorf("resolved without the suffix configured: %+v", got)
+	}
+}
+
+// TestRouteAsWrittenBeatsTheStrippedReading. A configured suffix may also be a
+// genuine trailing segment somewhere, so the unstripped route is tried first and
+// keeps resolving the way it did before the suffix was configured.
+func TestRouteAsWrittenBeatsTheStrippedReading(t *testing.T) {
+	cfg := Config{
+		Attributes:  []string{"data-view"},
+		Suffixes:    []string{"read"},
+		Controllers: []ControllerRule{{Component: "c.${1}", Method: "${2+:concat}"}},
+	}
+	w := fake{components: map[string][]string{"c.app": {"thingRead", "thing"}}}
+	r := &Resolver{Config: cfg, Lookups: w.lookups()}
+
+	got := r.Resolve("app.thing.read")
+	if len(got) == 0 {
+		t.Fatal("resolved to nothing")
+	}
+
+	// Method carries the template's expansion, which is case-folded like the rest
+	// of route matching, so compare it that way.
+	if !strings.EqualFold(got[0].Method, "thingRead") {
+		t.Errorf("first target = %q, want thingRead: the stripped reading won", got[0].Method)
+	}
+}
+
+// TestSuffixStripsBeforeAliasing. A suffix says how a target is presented and an
+// alias says where it lives; stripping after aliasing would mean writing every
+// alias twice, once per presentation.
+func TestSuffixStripsBeforeAliasing(t *testing.T) {
+	cfg := Config{
+		Attributes:  []string{"data-view"},
+		Suffixes:    []string{"iframe"},
+		Aliases:     map[string][]string{"ui.web": {"kiosk"}},
+		Controllers: []ControllerRule{{Component: "c.${1}-${2}", Method: "${3+:concat}"}},
+	}
+	w := fake{components: map[string][]string{"c.kiosk-lms": {"grades"}}}
+	r := &Resolver{Config: cfg, Lookups: w.lookups()}
+
+	got := r.Resolve("ui.web.lms.grades.iframe")
+	if len(got) != 1 {
+		t.Fatalf("resolved to %+v", got)
+	}
+
+	if got[0].Component != "c.kiosk-lms" || got[0].Method != "grades" {
+		t.Errorf("target = %+v", got[0])
+	}
+}

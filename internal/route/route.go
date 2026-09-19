@@ -62,6 +62,15 @@ type Config struct {
 	// maps to *several* replacements and every one is a candidate.
 	Aliases map[string][]string `json:"aliases,omitempty"`
 
+	// Suffixes are trailing segments that wrap a route rather than being part of
+	// it. TASS writes "kiosk.lms.lms_grades.iframe" for the route
+	// kiosk.lms.lms_grades loaded inside an iframe container: the suffix says how
+	// the target is presented, not what it is.
+	//
+	// The route is tried as written first, so a suffix that is also a real
+	// trailing segment somewhere keeps resolving the way it did.
+	Suffixes []string `json:"suffixes,omitempty"`
+
 	// Controllers are tried in order; the first whose component resolves to a file
 	// that declares the method wins.
 	Controllers []ControllerRule `json:"controllers,omitempty"`
@@ -366,8 +375,13 @@ type expansion struct {
 	segs  []string
 }
 
-// expansions returns the readings to try: the route as written, then one per
-// alias replacement whose key matches a leading run of segments.
+// expansions returns the readings to try: the route as written, each suffix
+// stripped from it, and for every one of those each alias replacement whose key
+// matches a leading run of segments.
+//
+// Suffixes are stripped before aliases are applied, because a suffix says how a
+// target is presented and an alias says where it lives — stripping after would
+// mean writing every alias twice, once for each presentation.
 //
 // Alias keys are sorted longest-first and then lexically. Sorting at all is the
 // point: ranging over the map directly made the winner depend on Go's randomised
@@ -376,7 +390,27 @@ type expansion struct {
 // a broader one ("ui.web") that also matches, and the replacements inside one
 // alias stay in the order the config lists them, which is the author's priority.
 func (c Config) expansions(segs []string) []expansion {
-	out := []expansion{{segs: segs}}
+	// The route as written comes first, then each suffix-stripped reading, so a
+	// suffix that is also a genuine trailing segment somewhere still resolves the
+	// way it did before the suffix was configured.
+	readings := []expansion{{segs: segs}}
+
+	if len(segs) > 1 {
+		last := segs[len(segs)-1]
+		for _, suffix := range c.Suffixes {
+			if strings.EqualFold(last, strings.TrimSpace(suffix)) {
+				readings = append(readings, expansion{
+					alias: "-." + last,
+					segs:  segs[:len(segs)-1],
+				})
+
+				break
+			}
+		}
+	}
+
+	out := make([]expansion, 0, len(readings))
+	out = append(out, readings...)
 
 	keys := make([]string, 0, len(c.Aliases))
 	for k := range c.Aliases {
@@ -392,27 +426,34 @@ func (c Config) expansions(segs []string) []expansion {
 		return keys[i] < keys[j]
 	})
 
-	for _, key := range keys {
-		keySegs := Split(key)
-		if len(keySegs) == 0 || len(keySegs) > len(segs) {
-			continue
-		}
-
-		if !slices.Equal(keySegs, segs[:len(keySegs)]) {
-			continue
-		}
-
-		for _, rep := range c.Aliases[key] {
-			repSegs := Split(rep)
-			if len(repSegs) == 0 {
+	for _, reading := range readings {
+		for _, key := range keys {
+			keySegs := Split(key)
+			if len(keySegs) == 0 || len(keySegs) > len(reading.segs) {
 				continue
 			}
 
-			expanded := make([]string, 0, len(repSegs)+len(segs)-len(keySegs))
-			expanded = append(expanded, repSegs...)
-			expanded = append(expanded, segs[len(keySegs):]...)
+			if !slices.Equal(keySegs, reading.segs[:len(keySegs)]) {
+				continue
+			}
 
-			out = append(out, expansion{alias: key + " -> " + rep, segs: expanded})
+			for _, rep := range c.Aliases[key] {
+				repSegs := Split(rep)
+				if len(repSegs) == 0 {
+					continue
+				}
+
+				tail := reading.segs[len(keySegs):]
+
+				expanded := make([]string, 0, len(repSegs)+len(tail))
+				expanded = append(expanded, repSegs...)
+				expanded = append(expanded, tail...)
+
+				out = append(out, expansion{
+					alias: strings.TrimPrefix(reading.alias+" ", " ") + key + " -> " + rep,
+					segs:  expanded,
+				})
+			}
 		}
 	}
 
