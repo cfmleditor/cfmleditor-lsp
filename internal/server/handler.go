@@ -42,8 +42,15 @@ func (s *Server) Handler() jsonrpc2.Handler {
 		case protocol.MethodInitialized:
 			return s.handleInitialized(ctx)
 		case protocol.MethodShutdown:
+			// Stop forwarding before the connection goes: a notification written
+			// to a closing connection is at best ignored and at worst an error
+			// logged about logging.
+			s.detachLogSink()
+
 			return nil, nil
 		case protocol.MethodExit:
+			s.detachLogSink()
+
 			return nil, nil
 		case protocol.MethodTextDocumentDidOpen:
 			return s.handleDidOpen(ctx, req.Params())
@@ -149,6 +156,12 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// gives the goroutines a happens-before edge to them, so no locking is
 	// needed for config that is only written here.
 	s.configureSession(s.editorConfig(params.InitializationOptions))
+
+	// From here the client can receive window/logMessage, so the server's own
+	// logs stop being indistinguishable from failures in its Output panel.
+	// Attached after configureSession and before anything is logged about the
+	// session, so the first line a reader sees is the one below.
+	s.attachLogSink()
 
 	s.safeGo("indexWorkspace", s.indexWorkspace)
 	s.safeGo("initLinter", s.initLinter)
