@@ -12,7 +12,7 @@
 
   FW/1 and TASS are both expressible, and `TestFw1Convention` resolves FW/1 through the same machinery to keep the grammar from quietly becoming one framework's rules.
 
-- **`cfmleditor-lsp routes`** — reports every framework route found in a workspace and what it resolves to, with `--unresolved` grouping the rest by leading segments so a missing *rule* is visible: one unresolved route is usually noise, forty sharing a prefix is a shape the config does not cover.
+- **`cfmleditor-lsp routes`** — reports every framework route found in a workspace and what it resolves to. `--format md --out routes.md` writes a report worth keeping: it groups the unresolved ones by *shape* (how many carry a `dialog` segment, a `popup`, an action verb), because a whole row is usually one missing rule rather than one problem per route, and it separates prefixes that resolve on other routes — where the controller is found and only the method name is underivable — from prefixes that resolve nowhere, which is a different fix. Every route is cited with file and line. `--format json` for scripts, plain text for the terminal.
 
 - **Routes in the editor** — go-to-definition on a route string jumps to the controller method's declaration or the view file, and every unambiguously-resolvable route in a document gets a link. Ambiguous routes are left to go-to-definition, where the editor can present the choice, rather than a link silently picking one of several products.
 

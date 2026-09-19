@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,10 +22,17 @@ Report the framework routes found in a workspace and what they resolve to,
 so the "routes" block in .cfmleditor.json can be checked against the code
 rather than guessed at.
 
+  --format <f>   text (default), md, json
+  --out <file>   write here instead of stdout
   --unresolved   list only the routes that resolved to nothing
-  --json         machine-readable output
-  --limit <n>    examples per group (default 5)
+  --json         shorthand for --format json
+  --limit <n>    routes listed per group, 0 for all (default 5)
   --quiet        no progress on stderr
+
+The md report is the one to keep: it groups what did not resolve by shape
+and by leading segments, says which prefixes resolve elsewhere, and cites
+every site, so it can be committed beside the config or handed to whoever
+knows the framework.
 
 A route resolving to nothing is not always a defect: these attributes and
 functions carry panel ids and runtime expressions too. What matters is
@@ -42,7 +51,8 @@ type routeFinding struct {
 func cmdRoutes(args []string) {
 	var (
 		onlyUnresolved bool
-		asJSON         bool
+		format         = "text"
+		outPath        string
 		quiet          bool
 		limit          = 5
 		paths          []string
@@ -53,7 +63,21 @@ func cmdRoutes(args []string) {
 		case "--unresolved":
 			onlyUnresolved = true
 		case "--json":
-			asJSON = true
+			format = "json"
+		case "--format":
+			if i+1 >= len(args) {
+				fatalf("--format needs a value\n\n%s", routesUsage)
+			}
+
+			i++
+			format = args[i]
+		case "--out":
+			if i+1 >= len(args) {
+				fatalf("--out needs a value\n\n%s", routesUsage)
+			}
+
+			i++
+			outPath = args[i]
 		case "--quiet":
 			quiet = true
 		case "--limit":
@@ -86,16 +110,47 @@ func cmdRoutes(args []string) {
 
 	resolved, unresolved, scanned := scanRoutes(paths, quiet)
 
-	if asJSON {
-		out := map[string]any{"scanned": scanned, "resolved": resolved, "unresolved": unresolved}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(out)
+	out := os.Stdout
 
-		return
+	if outPath != "" {
+		file, err := os.Create(outPath)
+		if err != nil {
+			fatalf("creating %s: %v\n", outPath, err)
+		}
+
+		defer func() { _ = file.Close() }()
+
+		out = file
 	}
 
-	printRouteReport(resolved, unresolved, scanned, onlyUnresolved, limit)
+	w := bufio.NewWriter(out)
+
+	var err error
+
+	switch format {
+	case "json":
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		err = enc.Encode(map[string]any{"scanned": scanned, "resolved": resolved, "unresolved": unresolved})
+	case "md", "markdown":
+		err = writeRouteMarkdown(w, resolved, unresolved, scanned, limit)
+	case "text":
+		err = writeRouteText(w, resolved, unresolved, scanned, onlyUnresolved, limit)
+	default:
+		fatalf("unknown format %q (want text, md or json)\n", format)
+	}
+
+	if err != nil {
+		fatalf("%v\n", err)
+	}
+
+	if err := w.Flush(); err != nil {
+		fatalf("writing output: %v\n", err)
+	}
+
+	if outPath != "" && !quiet {
+		fmt.Fprintf(os.Stderr, "Wrote %s (%d unresolved of %d routes)\n", outPath, len(unresolved), scanned)
+	}
 }
 
 // scanRoutes walks the workspace once, resolving every route it finds under the
@@ -199,11 +254,13 @@ func routeScanSetup(fsys vfs.FS, root string, paths []string, quiet bool) (*conf
 // printRouteReport groups the findings by the leading segments of the route,
 // which is what makes a missing *shape* visible: one unresolved route is usually
 // noise, forty sharing a prefix is a rule the config does not have.
-func printRouteReport(resolved, unresolved []routeFinding, scanned int, onlyUnresolved bool, limit int) {
-	fmt.Printf("%d routes found, %d resolved, %d not\n", scanned, len(resolved), len(unresolved))
+func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned int, onlyUnresolved bool, limit int) error {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "%d routes found, %d resolved, %d not\n", scanned, len(resolved), len(unresolved))
 
 	if scanned > 0 {
-		fmt.Printf("  %.1f%% resolved\n", float64(len(resolved))*100/float64(scanned))
+		fmt.Fprintf(&b, "  %.1f%% resolved\n", float64(len(resolved))*100/float64(scanned))
 	}
 
 	bySource := map[string][2]int{}
@@ -225,27 +282,29 @@ func printRouteReport(resolved, unresolved []routeFinding, scanned int, onlyUnre
 
 	sort.Strings(kinds)
 
-	fmt.Println("\nBy source:")
+	b.WriteString("\nBy source:\n")
 
 	for _, k := range kinds {
 		c := bySource[k]
-		fmt.Printf("  %-10s %5d resolved, %5d not\n", k, c[0], c[1])
+		fmt.Fprintf(&b, "  %-10s %5d resolved, %5d not\n", k, c[0], c[1])
 	}
 
 	if !onlyUnresolved && len(resolved) > 0 {
-		fmt.Printf("\nResolved, for example:\n")
+		fmt.Fprintf(&b, "\nResolved, for example:\n")
 
 		for i, f := range resolved {
 			if i >= limit {
 				break
 			}
 
-			fmt.Printf("  %s\n    -> %s\n", f.Route, strings.Join(f.Targets, "\n    -> "))
+			fmt.Fprintf(&b, "  %s\n    -> %s\n", f.Route, strings.Join(f.Targets, "\n    -> "))
 		}
 	}
 
 	if len(unresolved) == 0 {
-		return
+		_, err := io.WriteString(w, b.String())
+
+		return err
 	}
 
 	groups := map[string][]routeFinding{}
@@ -274,11 +333,11 @@ func printRouteReport(resolved, unresolved []routeFinding, scanned int, onlyUnre
 		return keys[i] < keys[j]
 	})
 
-	fmt.Printf("\nUnresolved, grouped by leading segments:\n")
+	fmt.Fprintf(&b, "\nUnresolved, grouped by leading segments:\n")
 
 	for _, k := range keys {
 		g := groups[k]
-		fmt.Printf("\n  %-34s %d\n", k+".*", len(g))
+		fmt.Fprintf(&b, "\n  %-34s %d\n", k+".*", len(g))
 
 		seen := map[string]bool{}
 		shown := 0
@@ -291,7 +350,11 @@ func printRouteReport(resolved, unresolved []routeFinding, scanned int, onlyUnre
 			seen[f.Route] = true
 			shown++
 
-			fmt.Printf("      %s\n        %s:%d  (%s %s)\n", f.Route, f.File, f.Line, f.Source, f.Name)
+			fmt.Fprintf(&b, "      %s\n        %s:%d  (%s %s)\n", f.Route, f.File, f.Line, f.Source, f.Name)
 		}
 	}
+
+	_, err := io.WriteString(w, b.String())
+
+	return err
 }

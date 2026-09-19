@@ -214,8 +214,19 @@ unresolved route is usually noise, forty sharing a prefix is a shape the config
 does not cover.
 
 ```sh
-cfmleditor-lsp routes --unresolved --limit 3 .
+cfmleditor-lsp routes --unresolved .                        # to the terminal
+cfmleditor-lsp routes --format md --out routes.md .          # a report to keep
+cfmleditor-lsp routes --format json . | jq                   # for a script
 ```
+
+The markdown report is the one to keep. It groups by *shape* — how many unresolved
+routes have a `dialog` segment, a `popup`, an action verb — because a whole row is
+usually one missing rule rather than one problem per route. It also separates the
+prefixes that resolve elsewhere from the ones that never do: the first means the
+controller is found and only the method name is underivable, the second means the
+config cannot locate the controller at all, and those are different fixes. Every
+route is cited with its file and line, so it can be committed beside the config or
+handed to whoever knows the framework.
 
 The build reports the same share. A low one means the config describes a different
 convention from the one in use, and the route edges are worth correspondingly
