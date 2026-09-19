@@ -424,3 +424,87 @@ func TestSearchPicksTheMethodThatExists(t *testing.T) {
 		}
 	}
 }
+
+// TestFunctionArgsAreNameAgnostic. A route may be passed positionally, or as
+// route="a.b.c", or as r="a.b.c" — the parameter name is the caller's business,
+// and a scanner that had to be told it would need a config entry per function per
+// codebase. Every string in the argument list is taken and Plausible rejects the
+// rest.
+func TestFunctionArgsAreNameAgnostic(t *testing.T) {
+	cfg := Config{Functions: []string{"setRequestContext", "redirect"}}
+
+	cases := map[string][]string{
+		`setRequestContext("a.b.c")`:                    {"a.b.c"},
+		`setRequestContext(route="a.b.c")`:              {"a.b.c"},
+		`setRequestContext(r="a.b.c")`:                  {"a.b.c"},
+		`setRequestContext(x=1, route='a.b.c', y=2)`:    {"a.b.c"},
+		`setRequestContext(context=ctx, route="a.b.c")`: {"a.b.c"},
+		`redirect(buildRoute("a.b.c"))`:                 {"a.b.c"},
+		`redirect("a.b.c", "d.e.f")`:                    {"a.b.c", "d.e.f"},
+		`setRequestContext(route="a.b.c&x=1")`:          {"a.b.c"},
+	}
+
+	for src, want := range cases {
+		var got []string
+
+		for _, r := range Scan(src, cfg) {
+			got = append(got, r.Value)
+		}
+
+		if len(got) != len(want) {
+			t.Errorf("%s: found %v, want %v", src, got, want)
+
+			continue
+		}
+
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%s: value %d = %q, want %q", src, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+// TestUnclosedCallIsNotScanned. A missing paren would otherwise walk to the end
+// of the file for every call — in generated code, in a fragment inside a string,
+// in a file caught mid-write.
+func TestUnclosedCallIsNotScanned(t *testing.T) {
+	cfg := Config{Functions: []string{"redirect"}}
+
+	for _, src := range []string{
+		`redirect("a.b.c"`,       // never closes
+		`redirect('a.b.c)`,       // unclosed quote
+		"redirect(\n\"a.b.c\"\n", // unclosed across lines
+	} {
+		if refs := Scan(src, cfg); len(refs) != 0 {
+			t.Errorf("%q produced %+v", src, refs)
+		}
+	}
+
+	// A call closing just inside the budget is still read.
+	long := "redirect(" + strings.Repeat("x=1, ", 200) + `route="a.b.c")`
+	if refs := Scan(long, cfg); len(refs) != 1 || refs[0].Value != "a.b.c" {
+		t.Errorf("a long but valid argument list was not read: %+v", refs)
+	}
+}
+
+// TestNonRouteArgumentsAreRejected: taking every string means Plausible is what
+// stands between the scan and nonsense, so it has to hold for the shapes that
+// actually appear beside a route.
+func TestNonRouteArgumentsAreRejected(t *testing.T) {
+	cfg := Config{Functions: []string{"setRequestContext"}}
+
+	src := `setRequestContext(route="a.b.c", title="Some Title Here", flag="yes", n="42", expr="#var#")`
+
+	var got []string
+
+	for _, r := range Scan(src, cfg) {
+		if Plausible(r.Value) {
+			got = append(got, r.Value)
+		}
+	}
+
+	if len(got) != 1 || got[0] != "a.b.c" {
+		t.Errorf("plausible values = %v, want just a.b.c", got)
+	}
+}

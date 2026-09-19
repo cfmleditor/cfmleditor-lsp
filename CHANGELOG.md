@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Only a function's first argument was read for a route.** A route is as often passed by name — `setRequestContext(route="a.b.c")`, `setRequestContext(r="a.b.c")` — or one call down in `redirect(buildRoute("a.b.c"))`, and none of those were found. Every string in the argument list is read now, with the route grammar rejecting the rest: a parameter name is the caller's business, and a scanner that had to be told it would need a config entry per function per codebase. On one workspace this took function-sourced routes from 11 occurrences to 151, `setPrint` alone from 2 to 95.
+
+  The scan stops at the call's closing paren, or gives up if it does not find one within a fixed budget — an unbalanced paren in generated code or in a fragment inside a string would otherwise walk to the end of the file for every call.
+
 ### Added
 
 - **Two views that do not render the whole map**, because at 54,000 nodes none of the others can. **Drill-down** starts at the top-level directories and expands one level at a time, so what is on screen is a function of what you opened rather than how big the map is — the first frame of a 54,000-node map is a dozen circles. **Focus** draws one node and everything within *n* hops, on a ring per hop, and clicking any node re-centres. Neither is capped, because neither was ever going to draw more than you asked for.

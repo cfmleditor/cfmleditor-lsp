@@ -353,26 +353,30 @@ func scanFunctionArgs(content string, names []string) []Ref {
 			continue
 		}
 
-		name, start, end, next := matchCallArg(content, i, names)
+		name, spans, next := matchCallArgs(content, i, names)
 		if name == "" {
 			continue
 		}
 
-		// Trim at the delimiter, keeping Start/End on what is left so an editor
-		// underlines the route and not the query string after it.
-		value := content[start:end]
-		for j := 0; j < len(value); j++ {
-			if isURLDelimiter(value[j]) {
-				value = value[:j]
+		for _, span := range spans {
+			// Trim at the delimiter, keeping Start/End on what is left so an editor
+			// underlines the route and not the query string after it.
+			value := content[span[0]:span[1]]
+			for j := 0; j < len(value); j++ {
+				if isURLDelimiter(value[j]) {
+					value = value[:j]
 
-				break
+					break
+				}
 			}
-		}
 
-		if value != "" {
+			if value == "" {
+				continue
+			}
+
 			out = append(out, Ref{
 				Source: SourceFunctionArg, Name: name, Value: value,
-				Start: uint32(start), End: uint32(start + len(value)),
+				Start: uint32(span[0]), End: uint32(span[0] + len(value)),
 			})
 		}
 
@@ -382,8 +386,27 @@ func scanFunctionArgs(content string, names []string) []Ref {
 	return out
 }
 
-// matchCallArg reads `name("value"` at i.
-func matchCallArg(content string, i int, names []string) (string, int, int, int) {
+// callArgBudget bounds how far past a call's opening paren the scan will look for
+// its close. A missing or mismatched paren — in generated code, in a fragment
+// inside a string, in a file the scan reached mid-write — would otherwise walk to
+// the end of the file for every call. The budget is generous enough for the
+// longest real argument list and finite, which is the property that matters.
+const callArgBudget = 4000
+
+// matchCallArgs reads `name(...)` at i and returns the bounds of every quoted
+// string in the argument list.
+//
+// Every argument, not the first, and regardless of how it is named. A route may
+// be passed positionally, or as route="a.b.c", or as r="a.b.c" — the parameter
+// name is the caller's business and a scanner that had to be told it would need a
+// config entry per function per codebase. Taking every string literal and letting
+// Plausible and resolution reject the rest costs an unresolvable route, which
+// produces no edge; requiring the name costs every call that spells it
+// differently.
+//
+// Nested calls are included: redirect(buildRoute("a.b.c")) puts the route one
+// level down, and there is no reading of that where the string is not the route.
+func matchCallArgs(content string, i int, names []string) (string, [][2]int, int) {
 	for _, name := range names {
 		if len(content)-i < len(name)+3 || !strings.EqualFold(content[i:i+len(name)], name) {
 			continue
@@ -399,27 +422,58 @@ func matchCallArg(content string, i int, names []string) (string, int, int, int)
 			continue
 		}
 
-		j = skipSpace(content, j+1)
-		if j >= len(content) || (content[j] != '"' && content[j] != '\'') {
+		spans, next, ok := stringsInCall(content, j)
+		if !ok {
 			continue
 		}
 
-		quote := content[j]
-		j++
-		start := j
-
-		for j < len(content) && content[j] != quote && content[j] != '\n' {
-			j++
-		}
-
-		if j >= len(content) || content[j] != quote {
-			continue
-		}
-
-		return name, start, j, j + 1
+		return name, spans, next
 	}
 
-	return "", 0, 0, 0
+	return "", nil, 0
+}
+
+// stringsInCall walks from the opening paren to its match, collecting quoted
+// strings. It reports false when the call does not close within the budget.
+func stringsInCall(content string, open int) ([][2]int, int, bool) {
+	var spans [][2]int
+
+	depth := 0
+	limit := min(open+callArgBudget, len(content))
+
+	for j := open; j < limit; j++ {
+		switch c := content[j]; c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+
+			if depth == 0 {
+				return spans, j + 1, true
+			}
+		case '"', '\'':
+			// A quoted string ends at its own quote or at a newline: an unclosed
+			// quote is a broken fragment, not a string running to the next one.
+			start := j + 1
+
+			k := start
+			for k < limit && content[k] != c && content[k] != '\n' {
+				k++
+			}
+
+			if k >= limit || content[k] != c {
+				return nil, 0, false
+			}
+
+			if k > start {
+				spans = append(spans, [2]int{start, k})
+			}
+
+			j = k
+		}
+	}
+
+	return nil, 0, false
 }
 
 func isURLDelimiter(c byte) bool {
