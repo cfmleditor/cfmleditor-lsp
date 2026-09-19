@@ -225,3 +225,68 @@ func TestDisabledConfigResolvesNothing(t *testing.T) {
 		t.Error("a config with sources but no rules reports itself enabled")
 	}
 }
+
+// TestViewPathTemplateKeepsDottedNames. The view template controls its own
+// separators: a literal "/" between directories and whatever join the segment
+// reference asks for inside a name. Rewriting every dot to a slash — which this
+// did — made a dotted file name impossible to express, and that is exactly what
+// "webroot/${2}/${3+}" needs: a directory called assessment holding
+// dialog.objectivegroup.setup.cfm, not a directory called dialog.
+func TestViewPathTemplateKeepsDottedNames(t *testing.T) {
+	cfg := Config{
+		Attributes: []string{"data-view"},
+		Views:      []ViewRule{{Path: "webroot/${2}/${3+}", Ext: []string{".cfm"}}},
+	}
+	w := fake{files: map[string]bool{
+		"webroot/assessment/dialog.objectivegroup.setup.cfm": true,
+	}}
+	r := &Resolver{Config: cfg, Lookups: w.lookups()}
+
+	got := r.Resolve("tassweb.assessment.dialog.objectivegroup.setup")
+	if len(got) != 1 {
+		t.Fatalf("resolved to %+v", got)
+	}
+
+	if got[0].Path != "/w/webroot/assessment/dialog.objectivegroup.setup.cfm" {
+		t.Errorf("path = %q; the dots in the file name were rewritten", got[0].Path)
+	}
+
+	// A template with only literal slashes — the FW/1 shape — must still work.
+	fw1 := &Resolver{
+		Config:  Config{Attributes: []string{"x"}, Views: []ViewRule{{Path: "views/${1}/${2}", Ext: []string{".cfm"}}}},
+		Lookups: fake{files: map[string]bool{"views/section/item.cfm": true}}.lookups(),
+	}
+
+	if got := fw1.Resolve("section.item"); len(got) != 1 {
+		t.Errorf("the slash-only template broke: %+v", got)
+	}
+}
+
+// TestLongerAliasWins covers a module abbreviation sitting under a broader alias:
+// "ui.web" means the product, but "ui.web.extracurric" names the extracurricular
+// controller outright, and the specific key has to be tried first or it never
+// gets a chance.
+func TestLongerAliasWins(t *testing.T) {
+	cfg := Config{
+		Attributes: []string{"data-view"},
+		Aliases: map[string][]string{
+			"ui.web":             {"tassweb"},
+			"ui.web.extracurric": {"extracurricular"},
+		},
+		Controllers: []ControllerRule{{Component: "c.${1}", Method: "${2+:search}"}},
+	}
+	w := fake{components: map[string][]string{
+		"c.extracurricular": {"dialogExtracurricularActivityCloneRead"},
+		"c.tassweb":         {},
+	}}
+	r := &Resolver{Config: cfg, Lookups: w.lookups()}
+
+	got := r.Resolve("ui.web.extracurric.dialog.extracurricular.activity.clone.read")
+	if len(got) != 1 {
+		t.Fatalf("resolved to %+v", got)
+	}
+
+	if got[0].Component != "c.extracurricular" {
+		t.Errorf("component = %q; the broader ui.web alias shadowed the specific one", got[0].Component)
+	}
+}

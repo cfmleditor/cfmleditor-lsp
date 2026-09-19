@@ -206,6 +206,12 @@ this page", and a view shared between products reaches whichever one is running 
 which cannot be known statically. All of them are returned, the code map marks
 the edge as a guess, and go-to-definition offers the choice.
 
+A `path` template controls its own separators: a literal `/` between directories,
+and whatever join the segment reference asks for inside a name. So
+`"webroot/${2}/${3+}"` resolves `tassweb.assessment.dialog.objectivegroup.setup`
+to `webroot/assessment/dialog.objectivegroup.setup.cfm` — a directory called
+`assessment` holding a dotted file name, not a directory called `dialog`.
+
 `views` either takes a `path` template or `longestDir`, which finds the longest
 leading run of segments that names a real directory and treats the rest as a
 dotted file name (`ui.web.general.popup.lookup.filter` is

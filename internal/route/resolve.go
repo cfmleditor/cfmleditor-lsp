@@ -137,22 +137,21 @@ func (r *Resolver) view(rule ViewRule, segs []string) (Target, bool) {
 		return Target{}, false
 	}
 
+	// The template controls its own separators: literal "/" between directories,
+	// and whatever join the segment reference asks for inside a name. Rewriting
+	// every dot to a slash here — which this did — made a dotted file name
+	// impossible to express, and a dotted file name is exactly what a convention
+	// like "webroot/${2}/${3+}" needs: webroot/assessment plus
+	// dialog.objectivegroup.setup.cfm, not a directory called dialog.
 	rel, ok := expand(rule.Path, segs)
 	if !ok || rel == "" {
 		return Target{}, false
 	}
 
-	rel = strings.ReplaceAll(rel, ".", "/")
-
 	for _, ext := range exts {
 		if p := r.findFile(rule.Root, rel+ext); p != "" {
 			return Target{Kind: KindView, Path: p}, true
 		}
-	}
-
-	// A template that already carries its extension is used as written.
-	if p := r.findFile(rule.Root, strings.ReplaceAll(rel, "/", ".")); p != "" {
-		return Target{Kind: KindView, Path: p}, true
 	}
 
 	return Target{}, false
