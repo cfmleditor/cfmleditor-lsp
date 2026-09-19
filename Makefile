@@ -13,7 +13,7 @@ GOBIN_DIR := $(shell go env GOPATH)/bin
 LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 
-.PHONY: build build-wasm test corpus shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test conformance conformance-summary corpus shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -123,6 +123,27 @@ build-wasm: generate
 
 test:
 	go test ./...
+	@$(MAKE) --no-print-directory conformance-summary
+
+# Replays the cfmleditor extension's own go-to-definition suite against this
+# server and prints every case. The extension stands its own providers down
+# whenever this server runs, so a case it answers and this server does not is
+# something a user loses by enabling the server -- this says which.
+#
+# It runs under plain `go test ./...` too; the point of a target of its own is
+# the report. A skipped case is a known gap and names its reason.
+conformance:
+	go test -v -count=1 -run 'TestDefinitionConformance|TestKnownGapsAreRealCases' ./internal/server/
+
+# The one-line score, appended to `make test` so the gap count is visible on
+# every run rather than only when someone goes looking for it.
+conformance-summary:
+	@out=$$(go test -v -count=1 -run TestDefinitionConformance ./internal/server/ 2>&1); \
+	pass=$$(printf '%s\n' "$$out" | grep -c -- '    --- PASS' || true); \
+	skip=$$(printf '%s\n' "$$out" | grep -c -- '    --- SKIP' || true); \
+	fail=$$(printf '%s\n' "$$out" | grep -c -- '    --- FAIL' || true); \
+	echo "definition conformance vs the extension: $$pass/$$((pass+skip+fail)) cases answered, $$skip known gaps ('make conformance' for the list)"; \
+	test "$$fail" -eq 0
 
 visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
