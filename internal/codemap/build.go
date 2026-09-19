@@ -492,7 +492,7 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 		return
 	}
 
-	for _, ref := range route.Scan(content, cfg.Routes.Config.SourceAttributes()) {
+	for _, ref := range route.Scan(content, cfg.Routes.Config) {
 		if !route.Plausible(ref.Value) {
 			continue
 		}

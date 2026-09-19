@@ -300,6 +300,26 @@ Three things carry their reasons, each with a test:
   `ui.web` means the product serving the page, which is a runtime fact; the map
   marks such an edge `Dynamic` and go-to-definition returns several locations.
 
+Routes are written four ways and the scanner handles all of them: HTML attributes,
+`?do=` query parameters (unquoted, so they end at a URL delimiter, `&amp;` included),
+JavaScript object keys quoted or bare, and function arguments (cut at the first
+delimiter, since `redirect('a.b.c&x=1')` names `a.b.c`). Two boundary rules earn
+their tests: `isNamePart` counts `:` as part of a name, which is right for
+`xlink:href` and exactly wrong for a JS key where the colon *ends* the name, so
+properties use `isPropNamePart`; and of two overlapping matches the **shorter**
+wins, or every `href` swallows the `?do=` inside it.
+
+`${N+:search}` enumerates method start points longest-first, because a route does
+not say where the controller's name stops and the method's begins. It replaced one
+hand-written rule per start point and is safe only because each candidate is still
+checked against the component's real methods.
+
+`cfmleditor-lsp routes --unresolved` groups what did not resolve by leading
+segments. On tassweb: 82% of 2,741 occurrences resolve, and 257 of the 292
+unresolved distinct routes share their first two segments with routes that *do* —
+so the controller is found and the method name is what the route does not spell.
+`dialog`-segment routes are 46% of the remainder.
+
 `longestDir` exists because the view split cannot be templated: the file name
 carries dots of its own, so the split between directory and file depends on what
 is on disk. Measured on a real workspace: 79% of 1,022 route occurrences resolve.

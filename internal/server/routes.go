@@ -114,7 +114,7 @@ func (s *Server) routeAtPosition(content string, line, char int) (route.Ref, boo
 		return route.Ref{}, false
 	}
 
-	for _, ref := range route.Scan(content, r.Config.SourceAttributes()) {
+	for _, ref := range route.Scan(content, r.Config) {
 		if int(ref.Line) != line {
 			continue
 		}
@@ -190,18 +190,18 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 
 	var links []protocol.DocumentLink
 
-	for _, ref := range route.Scan(docContent, r.Config.SourceAttributes()) {
+	for _, ref := range route.Scan(docContent, r.Config) {
 		if !route.Plausible(ref.Value) {
 			continue
 		}
 
-		targets := r.Resolve(ref.Value)
-		if len(targets) != 1 {
+		best, ok := linkTarget(r.Resolve(ref.Value))
+		if !ok {
 			continue
 		}
 
-		target := cfpath.ToURI(targets[0].Path)
-		tip := routeTooltip(targets[0])
+		target := cfpath.ToURI(best.Path)
+		tip := routeTooltip(best)
 		targetRef := &target
 
 		links = append(links, protocol.DocumentLink{
@@ -215,6 +215,39 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 	}
 
 	return links
+}
+
+// linkTarget picks the one destination a document link can have.
+//
+// A route resolving to both a controller method and a view is not ambiguous, it
+// is complete — the method renders the template — so the controller wins, because
+// that is where the code is. Genuine ambiguity is several *controllers*, which is
+// a shared view reaching into more than one product; there a link would send the
+// reader to the wrong one without saying so, and go-to-definition handles it
+// instead by offering every location.
+func linkTarget(targets []route.Target) (route.Target, bool) {
+	var (
+		controllers []route.Target
+		views       []route.Target
+	)
+
+	for _, t := range targets {
+		if t.Kind == route.KindController {
+			controllers = append(controllers, t)
+		} else {
+			views = append(views, t)
+		}
+	}
+
+	if len(controllers) == 1 {
+		return controllers[0], true
+	}
+
+	if len(controllers) == 0 && len(views) == 1 {
+		return views[0], true
+	}
+
+	return route.Target{}, false
 }
 
 func routeTooltip(t route.Target) string {

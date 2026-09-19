@@ -28,9 +28,33 @@ import (
 
 // Config is the "routes" block of .cfmleditor.json.
 type Config struct {
-	// Sources are the HTML attribute names that carry a route, e.g. "data-view"
-	// and "data-read". Matching is case-insensitive.
-	Sources []string `json:"sources,omitempty"`
+	// Attributes are the HTML attribute names that carry a route, e.g. "data-view",
+	// "data-read" and "data-process". Matching is case-insensitive.
+	Attributes []string `json:"attributes,omitempty"`
+
+	// QueryParams are URL parameter names that carry a route, e.g. "do" for links
+	// written href="index.cfm?do=kiosk.lms.main.learningobjects". Such a value sits
+	// inside the href's own quotes, so it runs to the next URL delimiter rather
+	// than to a quote.
+	QueryParams []string `json:"queryParams,omitempty"`
+
+	// Properties are JavaScript object keys that carry a route, e.g. "read",
+	// "view" and "process" in { view: "ui.web.user.dialog.login" }. The key may be
+	// quoted or bare.
+	//
+	// These are the loosest of the three, and the reason Plausible exists: "read"
+	// and "view" are ordinary words, so scanning for them finds plenty of object
+	// keys holding something that is not a route at all.
+	Properties []string `json:"properties,omitempty"`
+
+	// Functions are function names whose first string argument is a route, in
+	// CFML or in JavaScript: redirect("intranet.ims.main.incidents"),
+	// setPrint("fundraising.fundraising.event_print_action").
+	//
+	// A route passed this way often carries a query string or a fragment after it
+	// — redirect('intranet.client.detail&customercode=x') — so the value is cut at
+	// the first URL delimiter rather than rejected for containing one.
+	Functions []string `json:"functions,omitempty"`
 
 	// Aliases rewrite a leading portion of a route before any rule is tried. TASS
 	// spells "the product this page is being served by" as "ui.web", and a view
@@ -99,14 +123,73 @@ type Target struct {
 
 // segRef is one ${...} reference in a template.
 type segRef struct {
-	from int    // 1-based first segment
-	to   int    // last segment, or 0 for "to the end"
-	join string // "." (default), "" for concat, "/" for slash
-	fold string // "", "lower", "upper"
+	from   int    // 1-based first segment
+	to     int    // last segment, or 0 for "to the end"
+	join   string // "." (default), "" for concat, "/" for slash
+	fold   string // "", "lower", "upper"
+	search bool   // try every later start point too, longest first
 }
 
 // tmplRx matches ${N}, ${N+}, ${N-M}, each with an optional :mode suffix.
 var tmplRx = regexp.MustCompile(`\$\{(\d+)(\+|-\d+)?(?::([a-z]+))?\}`)
+
+// expandAll returns every candidate a template produces, most specific first.
+//
+// Only :search yields more than one. A route's segments do not say where the
+// controller's name stops and the method's begins: TASS spells
+// "kiosk.student.main.student" as both studentMainStudent() and mainStudent()
+// depending on the controller, and the difference is not visible in the route.
+// Enumerating start points is how a single rule covers both, instead of one
+// hand-written rule per start point — and because each candidate is still checked
+// against the component's real methods, a wrong guess resolves to nothing rather
+// than to an edge.
+//
+// Longest first, so the most specific name wins: studentmainstudent before
+// mainstudent before student. A short trailing segment like "read" or "view"
+// would otherwise match a common method on entirely the wrong route.
+func expandAll(tmpl string, segs []string) []string {
+	ref, ok := searchRef(tmpl)
+	if !ok {
+		if v, ok := expand(tmpl, segs); ok {
+			return []string{v}
+		}
+
+		return nil
+	}
+
+	var out []string
+
+	for from := ref.from; from <= len(segs); from++ {
+		shifted := segRef{from: from, to: 0, join: ref.join, fold: ref.fold}
+
+		v, valid := shifted.apply(segs)
+		if !valid || v == "" {
+			continue
+		}
+
+		out = append(out, v)
+	}
+
+	return out
+}
+
+// searchRef reports the reference when a template is exactly one :search ref and
+// nothing else. A :search mixed into a larger template is not supported, because
+// the candidates would multiply against whatever else the template holds for no
+// use anyone has asked for.
+func searchRef(tmpl string) (segRef, bool) {
+	m := tmplRx.FindStringSubmatchIndex(tmpl)
+	if m == nil || m[0] != 0 || m[1] != len(tmpl) {
+		return segRef{}, false
+	}
+
+	ref, err := parseRef(tmpl[m[2]:m[3]], group(tmpl, m, 4), group(tmpl, m, 6))
+	if err != nil || !ref.search {
+		return segRef{}, false
+	}
+
+	return ref, true
+}
 
 // expand fills a template from the route's segments. It reports false when the
 // template references a segment the route does not have, which is how a rule
@@ -183,6 +266,14 @@ func parseRef(first, span, mode string) (segRef, error) {
 		ref.join = "/"
 	case "lower", "upper":
 		ref.fold = mode
+	case "search":
+		// Only meaningful on an open-ended ${N+}: it is the span that varies.
+		if ref.to != 0 {
+			return segRef{}, fmt.Errorf("mode :search needs an open span like ${%d+}", from)
+		}
+
+		ref.join = ""
+		ref.search = true
 	default:
 		return segRef{}, fmt.Errorf("unknown segment mode %q", mode)
 	}

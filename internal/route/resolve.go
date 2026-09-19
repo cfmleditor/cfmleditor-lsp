@@ -99,8 +99,8 @@ func (r *Resolver) controller(rule ControllerRule, segs []string) (Target, bool)
 		return Target{}, false
 	}
 
-	method, ok := expand(rule.Method, segs)
-	if !ok || method == "" {
+	methods := expandAll(rule.Method, segs)
+	if len(methods) == 0 {
 		return Target{}, false
 	}
 
@@ -112,12 +112,15 @@ func (r *Resolver) controller(rule ControllerRule, segs []string) (Target, bool)
 	// The method check is not optional. A component template built from the first
 	// segment or two matches far more routes than it should — every route starting
 	// "tassweb." resolves tassweb.cfc — so without it a rule would claim routes it
-	// has no method for and bury the rules below it that do.
-	if !r.Lookups.HasMethod(path, method) {
-		return Target{}, false
+	// has no method for and bury the rules below it that do. It is also what makes
+	// :search safe: a start point that names nothing simply does not match.
+	for _, method := range methods {
+		if r.Lookups.HasMethod(path, method) {
+			return Target{Kind: KindController, Component: component, Method: method, Path: path}, true
+		}
 	}
 
-	return Target{Kind: KindController, Component: component, Method: method, Path: path}, true
+	return Target{}, false
 }
 
 func (r *Resolver) view(rule ViewRule, segs []string) (Target, bool) {
@@ -202,15 +205,18 @@ func (r *Resolver) findFile(root, rel string) string {
 
 // Enabled reports whether the config does anything.
 func (c Config) Enabled() bool {
-	return len(c.Sources) > 0 && (len(c.Controllers) > 0 || len(c.Views) > 0)
+	hasSource := len(c.Attributes) > 0 || len(c.QueryParams) > 0 ||
+		len(c.Properties) > 0 || len(c.Functions) > 0
+
+	return hasSource && (len(c.Controllers) > 0 || len(c.Views) > 0)
 }
 
-// SourceAttributes returns the attribute names to scan for, lower-cased.
-func (c Config) SourceAttributes() []string {
-	out := make([]string, 0, len(c.Sources))
-	for _, s := range c.Sources {
-		if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
-			out = append(out, s)
+func normalise(names []string) []string {
+	out := make([]string, 0, len(names))
+
+	for _, n := range names {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			out = append(out, n)
 		}
 	}
 

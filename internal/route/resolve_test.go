@@ -47,8 +47,8 @@ func (f fake) lookups() Lookups {
 // controller rules and a longest-directory view rule.
 func tassConfig() Config {
 	return Config{
-		Sources: []string{"data-view", "data-read"},
-		Aliases: map[string][]string{"ui.web": {"tassweb", "kiosk", "parentportal"}},
+		Attributes: []string{"data-view", "data-read"},
+		Aliases:    map[string][]string{"ui.web": {"tassweb", "kiosk", "parentportal"}},
 		Controllers: []ControllerRule{
 			{Component: "packages.tass.${1}-${2}", Method: "${3+:concat}"},
 			{Component: "packages.tass.${2}", Method: "${3+:concat}"},
@@ -169,7 +169,7 @@ func TestMethodMustExist(t *testing.T) {
 // Go change, the config grammar is not general enough.
 func TestFw1Convention(t *testing.T) {
 	cfg := Config{
-		Sources:     []string{"data-route"},
+		Attributes:  []string{"data-route"},
 		Controllers: []ControllerRule{{Component: "controllers.${1}", Method: "${2}"}},
 		Views:       []ViewRule{{Path: "views/${1}/${2}", Ext: []string{".cfm"}}},
 	}
@@ -221,7 +221,7 @@ func TestDisabledConfigResolvesNothing(t *testing.T) {
 		t.Errorf("an empty config resolved %+v", got)
 	}
 
-	if (Config{Sources: []string{"data-view"}}).Enabled() {
+	if (Config{Attributes: []string{"data-view"}}).Enabled() {
 		t.Error("a config with sources but no rules reports itself enabled")
 	}
 }

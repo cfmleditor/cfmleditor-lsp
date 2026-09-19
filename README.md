@@ -150,22 +150,43 @@ from go-to-definition, and a document link on each resolvable route.
 
 ```jsonc
 "routes": {
-  "sources": ["data-view", "data-read"],
+  // where routes are written — all four are optional
+  "attributes":  ["data-view", "data-read", "data-process"],
+  "queryParams": ["do"],                        // href="x.cfm?do=a.b.c"
+  "properties":  ["read", "view", "process"],   // { view: "a.b.c" }
+  "functions":   ["redirect", "setPrint"],      // redirect("a.b.c")
+
   "aliases": { "ui.web": ["tassweb", "kiosk", "parentportal"] },
   "controllers": [
-    { "component": "packages.tass.${1}-${2}", "method": "${3+:concat}" },
-    { "component": "packages.tass.${2}",      "method": "${3+:concat}" },
-    { "component": "packages.tass.${1}",      "method": "${2+:concat}" }
+    { "component": "packages.tass.${1}-${2}", "method": "${3+:search}" },
+    { "component": "packages.tass.${2}",      "method": "${3+:search}" },
+    { "component": "packages.tass.${1}",      "method": "${2+:search}" }
   ],
-  "views": [ { "longestDir": true, "ext": [".cfm"] } ]
+  "views": [
+    { "longestDir": true, "ext": [".cfm"] },
+    { "longestDir": true, "root": "..", "ext": [".cfm"] }
+  ]
 }
 ```
+
+**Four syntaxes, because routes are not written one way.** A URL parameter's value
+sits inside the enclosing `href`'s quotes, so it runs to the next delimiter rather
+than to a quote; a function argument often carries a query string or fragment after
+the route, so it is cut at the first delimiter rather than rejected for holding
+one. JavaScript properties are the loosest — `read` and `view` are ordinary words —
+which is why a value must look like a route before it is resolved at all.
 
 `${N}` is one segment, `${N+}` everything from N on, `${N-M}` a span. A `:concat`
 suffix joins without the dots (`dialog.custom.roll` → `dialogCustomRoll`),
 `:slash` with them, `:lower`/`:upper` fold the case; the default joins with dots.
 A rule that reaches past the end of a route declines it rather than matching a
 truncated path.
+
+**`:search` enumerates start points**, longest first. A route's segments do not say
+where the controller's name stops and the method's begins — the same shape is
+spelled `studentMainStudent()` on one controller and `mainStudent()` on another —
+so one rule covers both instead of one rule per start point. It is safe only
+because every candidate is still checked against the component's real methods.
 
 **Controller rules are tried in order and the method must exist**, which is what
 makes the order safe: a component template built from the first segment matches
@@ -187,9 +208,18 @@ The same grammar covers FW/1 — `{ "component": "controllers.${1}", "method":
 "${2}" }` with `{ "path": "views/${1}/${2}" }` — which is the test that keeps it
 from being one framework's rules in disguise.
 
-The build reports how many routes it found and resolved. A low share means the
-config describes a different convention from the one in use, and the route edges
-are worth correspondingly less.
+`cfmleditor-lsp routes <dir>` reports what was found and what it resolved to, and
+`--unresolved` groups what it could not so a missing *rule* is visible: one
+unresolved route is usually noise, forty sharing a prefix is a shape the config
+does not cover.
+
+```sh
+cfmleditor-lsp routes --unresolved --limit 3 .
+```
+
+The build reports the same share. A low one means the config describes a different
+convention from the one in use, and the route edges are worth correspondingly
+less.
 
 ### Per-application configs, and code a runner invokes
 
