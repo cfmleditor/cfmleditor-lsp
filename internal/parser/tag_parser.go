@@ -52,20 +52,7 @@ func newTagParser(src, fileURI string) *tagParser {
 }
 
 func (p *tagParser) buildLineIndex() {
-	n := 1
-
-	for i := 0; i < len(p.src); i++ {
-		if p.src[i] == '\n' {
-			n++
-		}
-	}
-
-	p.lineIndex = make([]int, 1, n)
-	for i := 0; i < len(p.src); i++ {
-		if p.src[i] == '\n' {
-			p.lineIndex = append(p.lineIndex, i+1)
-		}
-	}
+	p.lineIndex = buildLineIdx(p.src)
 }
 
 // lineAt returns the 0-based line number for a byte offset using binary search.
