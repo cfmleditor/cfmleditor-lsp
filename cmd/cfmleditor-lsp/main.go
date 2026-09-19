@@ -55,6 +55,10 @@ func main() {
 			cmdMCP(os.Args[2:])
 
 			return
+		case "routes":
+			cmdRoutes(os.Args[2:])
+
+			return
 		case "refs":
 			cmdRefs(os.Args[2:])
 
@@ -95,6 +99,7 @@ Commands:
   deps         Print component dependency info
   graph        Build a whole-project map of functions and their connections
   mcp          Serve that map over the Model Context Protocol on stdio
+  routes       Report framework routes and what they resolve to
   explain      Explain how a call site's component was resolved
   version      Print version
   help         Show this help

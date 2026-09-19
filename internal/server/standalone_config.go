@@ -201,6 +201,10 @@ func (s *Server) applyConfig(r *config.Resolved) {
 		s.ServicePropertyResolvers = r.ServicePropertyResolvers
 	}
 
+	if r.Routes.Enabled() && !s.Routes.Enabled() {
+		s.Routes = r.Routes
+	}
+
 	s.ComponentResolvers = append(s.ComponentResolvers, r.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, r.PropertyResolvers...)
 

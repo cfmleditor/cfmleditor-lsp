@@ -32,6 +32,24 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	line := int(params.Position.Line)
 	char := int(params.Position.Character)
 
+	// Routes are checked before the word under the cursor, because a route is a
+	// dotted string that WordAtPosition reads as a fragment: the cursor inside
+	// "tassweb.admin.changelogsgridview.read" yields one segment, which then
+	// resolves as an unrelated component path or not at all. The whole attribute
+	// value is the thing being pointed at.
+	if ref, ok := s.routeAtPosition(content, line, char); ok {
+		if locs := s.routeDefinitions(ref); len(locs) > 0 {
+			s.log.Debug("definition: route resolved",
+				cflog.String("route", ref.Value), cflog.Int("targets", len(locs)))
+
+			if len(locs) == 1 {
+				return locs[0], nil
+			}
+
+			return locs, nil
+		}
+	}
+
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
 		return nil, nil

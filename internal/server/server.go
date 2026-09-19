@@ -20,6 +20,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -54,9 +55,12 @@ type Server struct {
 	Mappings                 map[string]string         // component path mappings (key -> abs path)
 	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
 	ServicePropertyResolvers map[string]string         // "@serviceproperty" annotation kind → dot-path template
+	Routes                   route.Config              // framework routing convention (see internal/route)
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
 	resolverMu               sync.Mutex                // guards resolver, cachedResolvers, cachedResolverSet
+	routeMu                  sync.Mutex                // guards cachedRoutes
+	cachedRoutes             *route.Resolver           // memoised; dropped by invalidateRoutes
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
@@ -341,6 +345,10 @@ func (s *Server) getResolver() *resolve.Resolver {
 // and every resolver a .cfmleditor.json contributed would be silently ignored
 // for the rest of the session.
 func (s *Server) invalidateResolver() {
+	// The route resolver closes over the index and the workspace roots too, so it
+	// goes stale on exactly the same events.
+	s.invalidateRoutes()
+
 	s.resolverMu.Lock()
 	s.resolver = nil
 	s.cachedResolvers = nil

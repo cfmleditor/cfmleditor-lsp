@@ -61,6 +61,11 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 		})
 	}
 
+	// Route links are appended rather than merged into docLinks: they already
+	// carry a resolved Target, so they need no resolve round trip, and a route is
+	// not a file path the parser could have produced.
+	links = append(links, s.routeLinks(content)...)
+
 	return links, nil
 }
 

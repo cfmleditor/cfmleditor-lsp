@@ -189,6 +189,8 @@ func colorFor(kind EdgeKind) string {
 		return "#2e7d32"
 	case EdgeIncludes:
 		return "#ef6c00"
+	case EdgeRoute:
+		return "#00838f"
 	case EdgeContains:
 		return "#bdbdbd"
 	default:
@@ -230,6 +232,12 @@ func (m *Map) WriteText(w io.Writer, limit int) error {
 
 	if m.Stats.Unreadable > 0 {
 		fmt.Fprintf(&b, "  %d files unreadable or binary\n", m.Stats.Unreadable)
+	}
+
+	if m.Stats.Routes > 0 {
+		resolved := m.Stats.Routes - m.Stats.RoutesUnresolved
+		fmt.Fprintf(&b, "  %d framework routes: %d resolved (%.1f%%), %d not\n",
+			m.Stats.Routes, resolved, float64(resolved)*100/float64(m.Stats.Routes), m.Stats.RoutesUnresolved)
 	}
 
 	fmt.Fprintf(&b, "  %d islands, %d nodes no entry point reaches\n", m.Stats.Islands, m.Stats.Detached)

@@ -137,6 +137,125 @@ A map collapsed with `--level file` or `--level package` has no function nodes i
 it, so searching one for a function name can only come back empty; the HTML report
 says so rather than showing nothing.
 
+### Framework routes
+
+Convention-based routing is invisible to static analysis. A dispatcher reads a
+dotted route out of a URL or an HTML attribute, builds a component path and a
+method name from it and invokes them — nothing in the source names either, so
+every routed controller method looks uncalled and every view unreferenced.
+
+`routes` in `.cfmleditor.json` describes the convention, and the LSP then follows
+it: route edges in the code map, ctrl-click to the controller method or the view
+from go-to-definition, and a document link on each resolvable route.
+
+```jsonc
+"routes": {
+  // where routes are written — all four are optional
+  "attributes":  ["data-view", "data-read", "data-process"],
+  "queryParams": ["do"],                        // href="x.cfm?do=a.b.c"
+  "properties":  ["read", "view", "process"],   // { view: "a.b.c" }
+  "functions":   ["redirect", "setPrint"],      // redirect("a.b.c")
+
+  // a trailing segment that says how a target is shown, not what it is
+  "suffixes": ["iframe"],
+
+  "aliases": { "ui.web": ["tassweb", "kiosk", "parentportal"] },
+  // prefer a mapped path over one relative to the workspace root
+  "controllers": [
+    { "component": "tassweb.packages.tass.${1}-${2}", "method": "${3+:search}" },
+    { "component": "tassweb.packages.tass.${2}",      "method": "${3+:search}" },
+    { "component": "tassweb.packages.tass.${1}",      "method": "${2+:search}" }
+  ],
+  "views": [
+    { "longestDir": true, "ext": [".cfm"] },
+    { "longestDir": true, "root": "..", "ext": [".cfm"] }
+  ]
+}
+```
+
+**Four syntaxes, because routes are not written one way.** A URL parameter's value
+sits inside the enclosing `href`'s quotes, so it runs to the next delimiter rather
+than to a quote; a function argument often carries a query string or fragment after
+the route, so it is cut at the first delimiter rather than rejected for holding
+one. JavaScript properties are the loosest — `read` and `view` are ordinary words —
+which is why a value must look like a route before it is resolved at all.
+
+`${N}` is one segment, `${N+}` everything from N on, `${N-M}` a span. A `:concat`
+suffix joins without the dots (`dialog.custom.roll` → `dialogCustomRoll`),
+`:slash` with them, `:lower`/`:upper` fold the case; the default joins with dots.
+A rule that reaches past the end of a route declines it rather than matching a
+truncated path.
+
+**Write a controller template through a `mappings` entry** — `tassweb.packages.tass.${1}`
+rather than `packages.tass.${1}` — when one exists. A route names a component
+globally, so it is resolved against one base directory for the whole workspace
+rather than against the directory of the file it was written in; both spellings
+work when that base is the application itself, and only the mapped one keeps
+working for a route written in a sibling application's file.
+
+**`:search` enumerates start points**, longest first. A route's segments do not say
+where the controller's name stops and the method's begins — the same shape is
+spelled `studentMainStudent()` on one controller and `mainStudent()` on another —
+so one rule covers both instead of one rule per start point. It is safe only
+because every candidate is still checked against the component's real methods.
+
+**Controller rules are tried in order and the method must exist**, which is what
+makes the order safe: a component template built from the first segment matches
+enormous numbers of routes, so without the method check it would shadow every
+rule below it.
+
+**`suffixes` strips a trailing segment that says how a target is presented rather
+than what it is.** TASS writes `kiosk.lms.lms_grades.iframe` for the route
+`kiosk.lms.lms_grades` loaded inside an iframe container. The route is tried as
+written first, so a suffix that is also a genuine trailing segment somewhere keeps
+resolving as it did; suffixes are stripped before aliases are applied, so an alias
+does not have to be written once per presentation.
+
+**Aliases can name several replacements.** `ui.web` means "the product serving
+this page", and a view shared between products reaches whichever one is running —
+which cannot be known statically. All of them are returned, the code map marks
+the edge as a guess, and go-to-definition offers the choice.
+
+A `path` template controls its own separators: a literal `/` between directories,
+and whatever join the segment reference asks for inside a name. So
+`"webroot/${2}/${3+}"` resolves `tassweb.assessment.dialog.objectivegroup.setup`
+to `webroot/assessment/dialog.objectivegroup.setup.cfm` — a directory called
+`assessment` holding a dotted file name, not a directory called `dialog`.
+
+`views` either takes a `path` template or `longestDir`, which finds the longest
+leading run of segments that names a real directory and treats the rest as a
+dotted file name (`ui.web.general.popup.lookup.filter` is
+`ui/web/general/popup.lookup.filter.cfm`). No template can express that, because
+the split depends on what is on disk.
+
+The same grammar covers FW/1 — `{ "component": "controllers.${1}", "method":
+"${2}" }` with `{ "path": "views/${1}/${2}" }` — which is the test that keeps it
+from being one framework's rules in disguise.
+
+`cfmleditor-lsp routes <dir>` reports what was found and what it resolved to, and
+`--unresolved` groups what it could not so a missing *rule* is visible: one
+unresolved route is usually noise, forty sharing a prefix is a shape the config
+does not cover.
+
+```sh
+cfmleditor-lsp routes --unresolved .                        # to the terminal
+cfmleditor-lsp routes --format md --out routes.md .          # a report to keep
+cfmleditor-lsp routes --format json . | jq                   # for a script
+```
+
+The markdown report is the one to keep. It groups by *shape* — how many unresolved
+routes have a `dialog` segment, a `popup`, an action verb — because a whole row is
+usually one missing rule rather than one problem per route. It also separates the
+prefixes that resolve elsewhere from the ones that never do: the first means the
+controller is found and only the method name is underivable, the second means the
+config cannot locate the controller at all, and those are different fixes. Every
+route is cited with its file and line, so it can be committed beside the config or
+handed to whoever knows the framework.
+
+The build reports the same share. A low one means the config describes a different
+convention from the one in use, and the route edges are worth correspondingly
+less.
+
 ### Per-application configs, and code a runner invokes
 
 A workspace is often several applications side by side, each with its own

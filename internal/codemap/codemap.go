@@ -69,6 +69,13 @@ const (
 	// EdgeIncludes is a cfinclude or equivalent file reference.
 	EdgeIncludes EdgeKind = "includes"
 
+	// EdgeRoute is a framework route: a page naming a controller method or a view
+	// that a dispatcher will reach at runtime. Nothing in the source calls either,
+	// so without this edge every routed controller method looks uncalled and every
+	// view unreferenced. Kept distinct from EdgeCalls because it *is* less certain
+	// — it is a convention resolving, not a call site parsing.
+	EdgeRoute EdgeKind = "route"
+
 	// EdgeContains joins a file to the functions it declares. It is emitted only at
 	// function level, where it is what gives a renderer the hierarchy to group by.
 	EdgeContains EdgeKind = "contains"
@@ -139,6 +146,13 @@ type Stats struct {
 	Unresolved int `json:"unresolved"`
 	Builtin    int `json:"builtin"`
 	Unreadable int `json:"unreadable"`
+
+	// Routes counts the framework route strings found, and RoutesUnresolved how
+	// many named nothing the convention could reach. A high unresolved share means
+	// the routes config describes a different convention from the one in use, and
+	// the route edges are worth correspondingly less.
+	Routes           int `json:"routes"`
+	RoutesUnresolved int `json:"routesUnresolved"`
 
 	// Cached counts files served from a [Cache] instead of parsed. A rebuild where
 	// this is near Files is the fast path working.

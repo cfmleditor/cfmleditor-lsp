@@ -16,6 +16,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -50,6 +51,10 @@ type FileConfig struct {
 	Resolvers                []parser.Resolver
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+
+	// Routes, when set, resolves the framework routes found in this file's
+	// source. Nil leaves route edges out entirely.
+	Routes *route.Resolver
 }
 
 // Options configures a build.
@@ -388,6 +393,7 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 	res.addRefs(cfg, pr, rel, baseDir, root)
 	res.addIncludes(opts, cfg, pr, rel, baseDir, root)
 	res.addCalls(opts, cfg, pr, rel, baseDir, root, content)
+	res.addRoutes(cfg, rel, root, content)
 
 	if opts.Cache != nil {
 		// A cache write that fails is a slow next build, not a wrong one, so it is
@@ -466,6 +472,75 @@ func (res *FileGraph) addRefs(cfg FileConfig, pr *parser.ParseResult, rel, baseD
 			Count: 1,
 		})
 	}
+}
+
+// addRoutes resolves the framework routes written in this file and joins the file
+// to what a dispatcher will reach through them.
+//
+// The edge is from the *file*, not from whichever function the attribute sits in.
+// A route in a page's markup is reached when the page is rendered, and attributing
+// it to the enclosing function would claim the function invokes it, which is a
+// different and usually false statement.
+//
+// Every target is emitted, not just the first. A view shared between products
+// resolves into whichever product serves the page and that cannot be known
+// statically, so picking one would be a guess presented as a fact; all of them
+// marked Dynamic is the honest shape. On one workspace 497 of 523 resolvable
+// routes had exactly one target anyway.
+func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
+	if cfg.Routes == nil || !cfg.Routes.Config.Enabled() {
+		return
+	}
+
+	for _, ref := range route.Scan(content, cfg.Routes.Config) {
+		if !route.Plausible(ref.Value) {
+			continue
+		}
+
+		res.Stats.Routes++
+
+		targets := cfg.Routes.Resolve(ref.Value)
+		if len(targets) == 0 {
+			res.Stats.RoutesUnresolved++
+
+			continue
+		}
+
+		for _, t := range targets {
+			toRel := relPath(root, t.Path)
+
+			to := FileID(toRel)
+			if t.Kind == route.KindController && t.Method != "" {
+				to = FuncID(toRel, t.Method)
+			}
+
+			res.Provisional = append(res.Provisional, Node{
+				ID: to, Kind: nodeKindFor(t), Name: routeNodeName(t, toRel),
+				File: toRel, Component: t.Component,
+			})
+
+			res.Edges = append(res.Edges, Edge{
+				From: FileID(rel), To: to, Kind: EdgeRoute, Count: 1,
+				Dynamic: len(targets) > 1,
+			})
+		}
+	}
+}
+
+func nodeKindFor(t route.Target) NodeKind {
+	if t.Kind == route.KindController && t.Method != "" {
+		return KindFunction
+	}
+
+	return KindFile
+}
+
+func routeNodeName(t route.Target, rel string) string {
+	if t.Kind == route.KindController && t.Method != "" {
+		return t.Method
+	}
+
+	return filepath.Base(rel)
 }
 
 // addIncludes emits an edge only for a link that resolves to a real CFML file.
@@ -776,6 +851,8 @@ func (c *collector) merge(r *FileGraph) {
 	c.m.Stats.Builtin += r.Stats.Builtin
 	c.m.Stats.Unreadable += r.Stats.Unreadable
 	c.m.Stats.Cached += r.Stats.Cached
+	c.m.Stats.Routes += r.Stats.Routes
+	c.m.Stats.RoutesUnresolved += r.Stats.RoutesUnresolved
 }
 
 // finish sorts everything. A map that came out of a parallel scan is in whatever

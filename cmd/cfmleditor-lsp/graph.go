@@ -203,60 +203,11 @@ func buildGraph(f graphFlags) (*codemap.Map, error) {
 		root = filepath.Dir(root)
 	}
 
-	cfg, _ := daemon.FindConfig(root)
-
-	var (
-		resolvers                []parser.Resolver
-		mappings                 map[string]string
-		expressionMappings       map[string]string
-		servicePropertyResolvers map[string]string
-		workspaceFolders         []string
-	)
-
-	if cfg != nil {
-		workspaceFolders = cfg.WorkspaceFolders()
-		mappings = cfg.Mappings()
-		expressionMappings = cfg.ExpressionMappings()
-		servicePropertyResolvers = cfg.ServicePropertyResolvers()
-
-		for _, r := range cfg.ComponentResolvers() {
-			resolvers = append(resolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored,
-			})
-		}
-
-		if !f.quiet {
-			fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
-		}
-	}
-
-	scanRoots := workspaceFolders
-	if len(scanRoots) == 0 {
-		scanRoots = f.paths
-	}
+	scanRoots, fallback, shared := routeWorkspace(fsys, root, f)
 
 	files := collectCFMLFiles(fsys, scanRoots)
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no CFML files found under %s", strings.Join(scanRoots, ", "))
-	}
-
-	// One index for the whole scan, shared by every config: function signatures are
-	// a property of the workspace, not of whose resolvers you read them under.
-	shared := index.New()
-
-	fallback := codemap.FileConfig{
-		Resolver: &resolve.Resolver{
-			FS:                 fsys,
-			Index:              shared,
-			Resolvers:          resolvers,
-			Mappings:           mappings,
-			ExpressionMappings: expressionMappings,
-			WorkspaceFolders:   workspaceFolders,
-		},
-		Resolvers:                resolvers,
-		ExpressionMappings:       expressionMappings,
-		ServicePropertyResolvers: servicePropertyResolvers,
 	}
 
 	configs := newConfigSet(fsys, shared, fallback)
@@ -271,8 +222,6 @@ func buildGraph(f graphFlags) (*codemap.Map, error) {
 			}
 		}
 	}
-
-	resolver := fallback.Resolver
 
 	var (
 		db    *store.Store
@@ -296,10 +245,10 @@ func buildGraph(f graphFlags) (*codemap.Map, error) {
 		Root:                     root,
 		Files:                    files,
 		FS:                       fsys,
-		Resolver:                 resolver,
-		Resolvers:                resolvers,
-		ExpressionMappings:       expressionMappings,
-		ServicePropertyResolvers: servicePropertyResolvers,
+		Resolver:                 fallback.Resolver,
+		Resolvers:                fallback.Resolvers,
+		ExpressionMappings:       fallback.ExpressionMappings,
+		ServicePropertyResolvers: fallback.ServicePropertyResolvers,
 		Workers:                  f.workers,
 		ConfigExtra:              configs.Fingerprint(),
 		EntryGlobs:               f.entryGlobs,
@@ -455,4 +404,65 @@ func writeGraph(m *codemap.Map, f graphFlags) error {
 	}
 
 	return nil
+}
+
+// routeWorkspace loads the config governing root, collects the files to scan, and
+// builds the fallback resolution environment.
+//
+// Shared by `graph` and `routes` so the two cannot disagree about which config
+// governs a file — a diagnostic that scanned a different workspace from the build
+// it is meant to explain would be worse than none.
+func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string, fallback codemap.FileConfig, shared *index.Index) {
+	cfg, _ := daemon.FindConfig(root)
+
+	var (
+		resolvers                []parser.Resolver
+		mappings                 map[string]string
+		expressionMappings       map[string]string
+		servicePropertyResolvers map[string]string
+		workspaceFolders         []string
+	)
+
+	if cfg != nil {
+		workspaceFolders = cfg.WorkspaceFolders()
+		mappings = cfg.Mappings()
+		expressionMappings = cfg.ExpressionMappings()
+		servicePropertyResolvers = cfg.ServicePropertyResolvers()
+
+		for _, r := range cfg.ComponentResolvers() {
+			resolvers = append(resolvers, parser.Resolver{
+				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
+				NoFollow: r.NoFollow, Anchored: r.Anchored,
+			})
+		}
+
+		if !f.quiet {
+			fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
+		}
+	}
+
+	scanRoots = workspaceFolders
+	if len(scanRoots) == 0 {
+		scanRoots = f.paths
+	}
+
+	// One index for the whole scan, shared by every config: function signatures are
+	// a property of the workspace, not of whose resolvers you read them under.
+	shared = index.New()
+
+	fallback = codemap.FileConfig{
+		Resolver: &resolve.Resolver{
+			FS:                 fsys,
+			Index:              shared,
+			Resolvers:          resolvers,
+			Mappings:           mappings,
+			ExpressionMappings: expressionMappings,
+			WorkspaceFolders:   workspaceFolders,
+		},
+		Resolvers:                resolvers,
+		ExpressionMappings:       expressionMappings,
+		ServicePropertyResolvers: servicePropertyResolvers,
+	}
+
+	return scanRoots, fallback, shared
 }
