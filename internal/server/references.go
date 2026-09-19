@@ -314,8 +314,16 @@ func nameRange(lines []string, line uint32, name string) protocol.Range {
 func entryRange(lines []string, line uint32, name string) (protocol.Range, bool) {
 	text := ""
 	if int(line) < len(lines) {
-		text = strings.TrimSuffix(lines[line], "\r")
+		text = lines[line]
 	}
+
+	return rangeInLine(text, line, name)
+}
+
+// rangeInLine is entryRange for a caller that has the one line rather than all
+// of them, so it need not split a document to look at a single row of it.
+func rangeInLine(text string, line uint32, name string) (protocol.Range, bool) {
+	text = strings.TrimSuffix(text, "\r")
 
 	if start, end, ok := identSpan(text, name); ok {
 		return protocol.Range{
