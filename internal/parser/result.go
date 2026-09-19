@@ -160,10 +160,14 @@ func (pr *ParseResult) extractSignatures() {
 	// (which splits the file into separate Tag/Script/Tag... regions) still
 	// gets a correct end line and in-function tracking in every region it
 	// spans — not just the region containing its opening <cffunction> tag.
-	var tagScopes []FuncScope
+	var (
+		tagScopes    []FuncScope
+		hasTagRegion bool
+	)
 
 	for _, r := range pr.Regions {
 		if r.Kind == RegionTag {
+			hasTagRegion = true
 			tagScopes = findTagFuncScopes(pr.Content, 0)
 
 			break
@@ -269,17 +273,17 @@ func (pr *ParseResult) extractSignatures() {
 
 			// If this region starts partway through a function whose opening
 			// <cffunction> tag was in an earlier region (interrupted by a
-			// nested <cfscript> region split), seed inFunc/localVarSet so refs
+			// nested <cfscript> region split), seed inFunc/localVars so refs
 			// in this region still route to function scope instead of global.
 			for _, s := range tagScopes {
 				if s.Start < r.StartLine && r.StartLine <= s.End {
 					tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
-					tp.localVarSet = make(map[string]bool)
+					tp.localVars = nil
 
 					for i := range pr.Funcs {
 						if int(pr.Funcs[i].Line) == s.Start {
 							for _, arg := range pr.Funcs[i].Arguments {
-								tp.localVarSet[strings.ToLower(arg.Name)] = true
+								tp.markVarLocal(arg.Name)
 							}
 
 							break
@@ -424,33 +428,29 @@ func (pr *ParseResult) extractSignatures() {
 
 	// Detect tag-based function scopes from full content (handles functions
 	// that span region boundaries, e.g. containing <cfscript> blocks).
-	hasTagRegion := false
-
-	for _, r := range pr.Regions {
-		if r.Kind == RegionTag {
-			hasTagRegion = true
-
-			break
-		}
-	}
-
+	//
+	// tagScopes and hasTagRegion are the ones computed at the top of this
+	// function. findTagFuncScopes used to run here as well, over the same
+	// pr.Content, under a guard testing the same condition — 18% of everything a
+	// tag parse allocated, spent scanning the file a second time for an answer
+	// already in hand.
 	if hasTagRegion {
-		tagScopes := findTagFuncScopes(pr.Content, 0)
+		// Which start lines are already recorded, rather than a scan of pr.Scopes
+		// per candidate: both lists are one entry per function, so the pair was
+		// quadratic in a component's method count.
+		seen := make(map[int]struct{}, len(pr.Scopes))
+		for _, existing := range pr.Scopes {
+			seen[existing.Start] = struct{}{}
+		}
 
-		for _, s := range tagScopes {
-			duplicate := false
-
-			for _, existing := range pr.Scopes {
-				if existing.Start == s.Start {
-					duplicate = true
-
-					break
-				}
+		for _, sc := range tagScopes {
+			if _, dup := seen[sc.Start]; dup {
+				continue
 			}
 
-			if !duplicate {
-				pr.Scopes = append(pr.Scopes, s)
-			}
+			seen[sc.Start] = struct{}{}
+
+			pr.Scopes = append(pr.Scopes, sc)
 		}
 	}
 
