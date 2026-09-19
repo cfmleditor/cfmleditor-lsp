@@ -88,11 +88,15 @@ var conformanceCases = []conformanceCase{
 	{"cfm/cfloop-index-scoped", "cfml/VariableDefinitions.cfm", `ref = variables.|loopIndex`, "cfml/VariableDefinitions.cfm"},
 	{"cfm/cfloop-index-unscoped", "cfml/VariableDefinitions.cfm", `ref = |loopIndex`, "cfml/VariableDefinitions.cfm"},
 
-	// global-scope variable definitions
-	{"global/application", "cfml/GlobalVariables.cfm", `<cfset ref = application.|applicationVariable>`, "cfml/GlobalVariables.cfm"},
-	{"global/request", "cfml/GlobalVariables.cfm", `<cfset ref = request.|requestVariable>`, "cfml/GlobalVariables.cfm"},
-	{"global/session", "cfml/GlobalVariables.cfm", `<cfset ref = session.|sessionVariable>`, "cfml/GlobalVariables.cfm"},
-	{"global/server", "cfml/GlobalVariables.cfm", `<cfset ref = server.|serverVariable>`, "cfml/GlobalVariables.cfm"},
+	// Global-scope variable definitions. These four resolve into another file,
+	// which is the point of them: GlobalVariables.cfm only reads the names, and
+	// the extension asserts the target *text* — the assignment in Application.cfc
+	// and Server.cfc. A case here that named the reading file would be asserting
+	// the opposite of what the scope means.
+	{"global/application", "cfml/GlobalVariables.cfm", `<cfset ref = application.|applicationVariable>`, "cfml/Application.cfc"},
+	{"global/request", "cfml/GlobalVariables.cfm", `<cfset ref = request.|requestVariable>`, "cfml/Application.cfc"},
+	{"global/session", "cfml/GlobalVariables.cfm", `<cfset ref = session.|sessionVariable>`, "cfml/Application.cfc"},
+	{"global/server", "cfml/GlobalVariables.cfm", `<cfset ref = server.|serverVariable>`, "Server.cfc"},
 }
 
 // knownGaps are cases the extension answers and this server does not, each with
@@ -101,30 +105,11 @@ var conformanceCases = []conformanceCase{
 // stops meaning anything, and the whole point here is to be able to say what
 // enabling the server costs.
 //
-// All sixteen are one gap: handleDefinition has no variable branch at all. It
-// answers components, file paths, and function names; a cursor on a variable
-// falls through to the function-name lookup, finds nothing, and returns nil.
-// Closing it means resolving an identifier against the enclosing function's
-// vars, then the file's, then the declaration sites a `<cfparam>` or a
-// `<cfloop index>` creates.
-var knownGaps = map[string]string{
-	"var/argument":              "no variable branch: <cfargument> declarations are not definition targets",
-	"var/local":                 "no variable branch: local.x assignments are not definition targets",
-	"var/var":                   "no variable branch: var x assignments are not definition targets",
-	"var/variables":             "no variable branch: variables.x assignments are not definition targets",
-	"cfm/variables-scoped":      "no variable branch",
-	"cfm/variables-unscoped":    "no variable branch, and unscoped needs the scope search order",
-	"cfm/url-scoped":            "no variable branch",
-	"cfm/url-unscoped":          "no variable branch, and unscoped needs the scope search order",
-	"cfm/cfparam-scoped":        "no variable branch: <cfparam name> is not a declaration site",
-	"cfm/cfparam-unscoped":      "no variable branch: <cfparam name> is not a declaration site",
-	"cfm/cfloop-index-scoped":   "no variable branch: <cfloop index> is not a declaration site",
-	"cfm/cfloop-index-unscoped": "no variable branch: <cfloop index> is not a declaration site",
-	"global/application":        "no variable branch: application-scope assignments are not definition targets",
-	"global/request":            "no variable branch: request-scope assignments are not definition targets",
-	"global/session":            "no variable branch: session-scope assignments are not definition targets",
-	"global/server":             "no variable branch: server-scope assignments are not definition targets",
-}
+// It is empty: every case the extension answers, this server now answers too.
+// Leave the mechanism in place rather than deleting it — the next capability
+// measured this way will need somewhere to record what it does not do yet, and
+// an empty list that fails loudly is the thing that keeps this at zero.
+var knownGaps = map[string]string{}
 
 // conformanceDir is the package's own testdata, not the repo-root testdata every
 // other server test reads. The fixtures are a whole second workspace — a

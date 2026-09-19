@@ -57,6 +57,8 @@ type ParseResult struct {
 	varsDone      bool
 	thisVars      []string
 	thisDone      bool
+	allVars       []VarDef
+	allVarsDone   bool
 
 	// anyScopedVars caches, per Scope, every name ever assigned in that scope
 	// anywhere in the file (see HasScopedAssignment) — unlike variablesVars/thisVars,
@@ -971,6 +973,27 @@ func (pr *ParseResult) ThisVars() []string {
 	}
 
 	return pr.thisVars
+}
+
+// AllVars returns every variable declaration in the file, with its scope, line,
+// and enclosing function range.
+//
+// Memoised behind the same lock and invalidated by the same edit paths as
+// VariablesVars and ThisVars, because it is the same scan: go-to-definition on a
+// variable asks for it once per request, and a request is cheap only if the
+// answer is not a fresh parse of the whole document every time. The siblings
+// return names; this returns the declarations, which is what a caller needing a
+// line to jump to requires.
+func (pr *ParseResult) AllVars() []VarDef {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+
+	if !pr.allVarsDone {
+		pr.allVars = ParseVars(pr.Content)
+		pr.allVarsDone = true
+	}
+
+	return pr.allVars
 }
 
 // FuncVars returns local/arguments variable names within the function at [start, end].

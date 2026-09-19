@@ -97,6 +97,20 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 		}
 	}
 
+	// Variables, before the function-name paths.
+	//
+	// Before, because the two namespaces overlap and the cursor says which is
+	// meant: `total` on its own is a variable even in a component that declares
+	// a `total()`, and resolveVariableDef declines anything followed by a paren
+	// so a call never reaches it. After the component and file-path checks,
+	// because a scope keyword is not a component and those checks are narrower.
+	if locs := s.resolveVariableDef(content, line, char, word, docURI); len(locs) > 0 {
+		s.log.Debug("definition: variable resolved",
+			cflog.String("word", word), cflog.String("target", string(locs[0].URI)))
+
+		return locs[0], nil
+	}
+
 	// Check if there's a dot qualifier (e.g. persist.templateFunction)
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))

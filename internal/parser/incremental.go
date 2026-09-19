@@ -187,6 +187,7 @@ func (pr *ParseResult) resetGlobalCaches() {
 	pr.globalDone = false
 	pr.varsDone = false
 	pr.thisDone = false
+	pr.allVarsDone = false
 	pr.globalVars = nil
 	pr.variablesVars = nil
 	pr.thisVars = nil
