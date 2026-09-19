@@ -185,10 +185,21 @@ func (p *tagParser) parse() {
 
 		// Check for CF tags we care about
 		if idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f' {
-			// Fast skip: only process tags starting with cfc/cff/cfp/cfs/cfo/cfi/cfr
-			// (cfcomponent, cffunction, cfproperty, cfset, cfobject, cfinvoke, cfreturn)
+			// Fast skip on the fourth byte: only tags starting cfc/cff/cfl/cfp/cfs/
+			// cfo/cfi/cfr reach the switch below (cfcomponent, cffunction, cfloop,
+			// cfparam/cfproperty, cfset, cfobject, cfinvoke, cfreturn).
+			//
+			// 'l' is the expensive letter to admit and it is admitted for exactly
+			// one tag: <cfloop index="x"> declares x, so go-to-definition on a loop
+			// index has nowhere to land without it. The cost is that every
+			// <cfloop>, <cflock>, <cflog>, <cflocation> and <cfldap> now pays an
+			// IndexByte for its '>' and a lineAt, and <cfloop> is among the most
+			// common tags in CFML. Measured on the parser benchmarks it is within
+			// noise, because that work is a byte scan over a tag that was going to
+			// be scanned past anyway — but it is the one letter here worth
+			// re-measuring if this loop ever shows up in a profile again.
 			ch := toLowerByte(p.src[idx+3])
-			if ch != 'c' && ch != 'f' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != '/' {
+			if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != '/' {
 				pos = idx + 1
 
 				continue
@@ -220,59 +231,56 @@ func (p *tagParser) parse() {
 				continue
 			}
 
-			switch {
-			case hasCFTagPrefix(tag, "<cfcomponent"):
-				p.extends = getAttr(tag, "extends")
-				if isTruthy(getAttr(tag, "persistent")) {
-					p.persistent = true
-				}
-			case hasCFTagPrefix(tag, "<cffunction"):
-				p.parseCFFunction(tag, idx, tagEnd, line)
-				// Find end of function to set scope
-				endLine := -1
-
-				if closeIdx := indexCFTag(p.src[tagEnd:], "/cffunction"); closeIdx >= 0 {
-					endLine = p.lineAt(tagEnd + closeIdx)
-				} else {
-					// Not found within this region's text — the function body
-					// is interrupted by a nested <cfscript> region split.
-					// Fall back to the whole-file pre-scan for the real end.
-					absStart := p.baseLine + line
-
-					for _, s := range p.knownScopes {
-						if s.Start == absStart {
-							endLine = s.End - p.baseLine
-
-							break
-						}
+			// Dispatch on the fourth byte the fast skip already read, rather than
+			// testing each prefix in turn. The chain this replaces ran up to nine
+			// EqualFold calls for every tag that got this far; the byte narrows it
+			// to one or two, which is what pays for <cfloop> now being admitted to
+			// the scan at all.
+			//
+			// The letters here must stay in step with the fast skip above: a tag
+			// admitted there with no case here is scanned and then dropped, and a
+			// case here whose letter the skip rejects is unreachable.
+			// TestTagDispatchMatchesTheFastSkip fails on either.
+			switch ch {
+			case 'c':
+				if hasCFTagPrefix(tag, "<cfcomponent") {
+					p.extends = getAttr(tag, "extends")
+					if isTruthy(getAttr(tag, "persistent")) {
+						p.persistent = true
 					}
 				}
-
-				if endLine >= 0 {
-					p.inFunc = funcKey(line, endLine)
-					p.scopes = append(p.scopes, FuncScope{Start: line, End: endLine})
-					p.localVarSet = make(map[string]bool)
-					// Add function arguments to local var set
-					if len(p.funcs) > 0 {
-						for _, arg := range p.funcs[len(p.funcs)-1].Arguments {
-							p.localVarSet[strings.ToLower(arg.Name)] = true
-						}
-					}
+			case 'f':
+				if hasCFTagPrefix(tag, "<cffunction") {
+					p.parseCFFunction(tag, idx, tagEnd, line)
+					p.enterFunctionScope(tagEnd, line)
 				}
-
-				pos = tagEnd
-
-				continue
-			case hasCFTagPrefix(tag, "<cfproperty"):
-				p.parseCFProperty(tag, line)
-			case hasCFTagPrefix(tag, "<cfset"):
-				p.parseCFSet(tag, line)
-			case hasCFTagPrefix(tag, "<cfreturn"):
-				p.parseCFReturn(tag)
-			case hasCFTagPrefix(tag, "<cfobject"):
-				p.parseCFObject(tag, line)
-			case hasCFTagPrefix(tag, "<cfinvoke"):
-				p.parseCFInvoke(tag, line)
+			case 'l':
+				if hasCFTagPrefix(tag, "<cfloop") {
+					p.parseScopedAttrVar(tag, "index", line)
+				}
+			case 'p':
+				switch {
+				case hasCFTagPrefix(tag, "<cfproperty"):
+					p.parseCFProperty(tag, line)
+				case hasCFTagPrefix(tag, "<cfparam"):
+					p.parseScopedAttrVar(tag, "name", line)
+				}
+			case 's':
+				if hasCFTagPrefix(tag, "<cfset") {
+					p.parseCFSet(tag, line)
+				}
+			case 'o':
+				if hasCFTagPrefix(tag, "<cfobject") {
+					p.parseCFObject(tag, line)
+				}
+			case 'i':
+				if hasCFTagPrefix(tag, "<cfinvoke") {
+					p.parseCFInvoke(tag, line)
+				}
+			case 'r':
+				if hasCFTagPrefix(tag, "<cfreturn") {
+					p.parseCFReturn(tag)
+				}
 			}
 
 			pos = tagEnd
@@ -283,6 +291,44 @@ func (p *tagParser) parse() {
 
 	if p.extractLinks {
 		p.extractAllLinks()
+	}
+}
+
+// enterFunctionScope records the <cffunction> the parser has just entered, so
+// assignments inside it are attributed to the function rather than the file.
+func (p *tagParser) enterFunctionScope(tagEnd, line int) {
+	endLine := -1
+
+	if closeIdx := indexCFTag(p.src[tagEnd:], "/cffunction"); closeIdx >= 0 {
+		endLine = p.lineAt(tagEnd + closeIdx)
+	} else {
+		// Not found within this region's text — the function body is interrupted
+		// by a nested <cfscript> region split. Fall back to the whole-file
+		// pre-scan for the real end.
+		absStart := p.baseLine + line
+
+		for _, s := range p.knownScopes {
+			if s.Start == absStart {
+				endLine = s.End - p.baseLine
+
+				break
+			}
+		}
+	}
+
+	if endLine < 0 {
+		return
+	}
+
+	p.inFunc = funcKey(line, endLine)
+	p.scopes = append(p.scopes, FuncScope{Start: line, End: endLine})
+	p.localVarSet = make(map[string]bool)
+
+	// Add function arguments to local var set
+	if len(p.funcs) > 0 {
+		for _, arg := range p.funcs[len(p.funcs)-1].Arguments {
+			p.localVarSet[strings.ToLower(arg.Name)] = true
+		}
 	}
 }
 
@@ -310,7 +356,7 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 
 	block := rest[:end]
 
-	args := p.parseCFArguments(block)
+	args := p.parseCFArguments(block, tagEnd)
 
 	// Apply JSDoc @param {type} annotations
 	if docComment != "" {
@@ -407,7 +453,11 @@ func (p *tagParser) precedingComment(idx int) string {
 	return p.src[start+5 : i-3]
 }
 
-func (p *tagParser) parseCFArguments(block string) []Argument {
+// blockStart is the offset of block within p.src, so each <cfargument> can be
+// recorded at the line it is written on. An argument is a declaration — it is
+// what `ref = argumentVariable` refers to — and without a line there is nowhere
+// for go-to-definition to land.
+func (p *tagParser) parseCFArguments(block string, blockStart int) []Argument {
 	var args []Argument
 
 	pos := 0
@@ -440,12 +490,74 @@ func (p *tagParser) parseCFArguments(block string) []Argument {
 			}
 
 			args = append(args, a)
+
+			p.vars = append(p.vars, VarDef{
+				Name: name, Scope: ScopeArguments,
+				Line: uint32(p.lineAt(blockStart + idx)),
+			})
 		}
 
 		pos = idx + end + 1
 	}
 
 	return args
+}
+
+// parseReadOnlyScopeSet records `<cfset application.x = ...>` and its siblings,
+// returning whether it matched so parseCFSet's switch can use it as a case.
+//
+// One helper over a case per scope: the scopes behave identically here, and nine
+// near-identical branches is the shape that acquires an inconsistency nobody
+// notices.
+func (p *tagParser) parseReadOnlyScopeSet(inner string, line int) bool {
+	dot := strings.IndexByte(inner, '.')
+	if dot <= 0 {
+		return false
+	}
+
+	scope, ok := readOnlyScopePrefixes[strings.ToLower(strings.TrimSpace(inner[:dot]))]
+	if !ok {
+		return false
+	}
+
+	name, _ := splitAssign(inner[dot+1:])
+	if name == "" {
+		return false
+	}
+
+	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: uint32(line)})
+
+	return true
+}
+
+// parseScopedAttrVar records the variable a tag attribute declares —
+// `<cfparam name="url.x">` and `<cfloop index="variables.i">`. Both write a
+// scope-qualified name into an attribute, and both create the variable rather
+// than referring to one, which is what makes them definition targets.
+//
+// An unqualified value (`<cfloop index="i">`) lands in the variables scope,
+// which is where CFML puts it.
+func (p *tagParser) parseScopedAttrVar(tag, attr string, line int) {
+	value := getAttr(tag, attr)
+	if value == "" {
+		return
+	}
+
+	scope := ScopeVariables
+	name := value
+
+	if dot := strings.IndexByte(value, '.'); dot > 0 {
+		if sc, ok := ScopeForPrefix(value[:dot]); ok {
+			scope = sc
+			name = value[dot+1:]
+		}
+	}
+
+	if name == "" || strings.ContainsAny(name, ".[#") {
+		return
+	}
+
+	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: uint32(line)})
 }
 
 // parseCFSet handles <cfset var x = ...>, <cfset local.x = ...>, etc.
@@ -513,6 +625,10 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 			p.checkSetRHSStr(rhs, name, line)
 			p.forceGlobal = false
 		}
+	case p.parseReadOnlyScopeSet(inner, line):
+		// Handled: an assignment into url./application./request./session./etc.
+		// These carry no component type, so there is no RHS to follow — the
+		// point is only that the name was declared here.
 	default:
 		name, rhs := splitAssign(inner)
 		if name != "" && !isKeyword(name) {
@@ -835,20 +951,26 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 
 // getAttr extracts an attribute value from a tag string (case-insensitive).
 func getAttr(tag, attr string) string {
-	lower := strings.ToLower(tag)
-	attrLower := strings.ToLower(attr)
-
+	// Scanned case-insensitively in place rather than against a lowercased copy
+	// of the tag.
+	//
+	// Two reasons, and the second is a correctness one. A <cffunction> tag is
+	// asked for five or six attributes, so the copy was made five or six times
+	// for one tag — strings.ToLower was 10% of tag parsing in a profile, the
+	// largest single cost in it, and getAttr 13% including it. And the offsets
+	// from that copy were then used to index `tag`, which only holds while
+	// folding preserves length: it does not universally (U+0130 lowercases to
+	// two runes), so a tag carrying one desynchronised every offset after it.
+	//
 	// Find the attribute name followed by optional whitespace and =
 	idx := -1
 	searchFrom := 0
 
 	for {
-		i := strings.Index(lower[searchFrom:], attrLower)
+		i := indexFoldFrom(tag, attr, searchFrom)
 		if i < 0 {
 			break
 		}
-
-		i += searchFrom
 
 		// The name has to start a word. Only the text *after* the match used to
 		// be checked, so a plain substring hit inside a longer attribute name
@@ -863,7 +985,7 @@ func getAttr(tag, attr string) string {
 			continue
 		}
 
-		j := i + len(attrLower)
+		j := i + len(attr)
 		for j < len(tag) && isWhitespace(tag[j]) {
 			j++
 		}
@@ -882,7 +1004,7 @@ func getAttr(tag, attr string) string {
 	}
 
 	// Skip past attr name, whitespace, =, whitespace to reach the value
-	valStart := idx + len(attrLower)
+	valStart := idx + len(attr)
 	for valStart < len(tag) && isWhitespace(tag[valStart]) {
 		valStart++
 	}
