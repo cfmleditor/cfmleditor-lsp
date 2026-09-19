@@ -15,6 +15,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -103,15 +104,18 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		})
 	}
 
+	resolver := &resolve.Resolver{
+		FS:                 cs.fsys,
+		Index:              cs.shared,
+		Resolvers:          resolvers,
+		Mappings:           found.Mappings(),
+		ExpressionMappings: found.ExpressionMappings(),
+		WorkspaceFolders:   found.WorkspaceFolders(),
+	}
+
 	cfg = codemap.FileConfig{
-		Resolver: &resolve.Resolver{
-			FS:                 cs.fsys,
-			Index:              cs.shared,
-			Resolvers:          resolvers,
-			Mappings:           found.Mappings(),
-			ExpressionMappings: found.ExpressionMappings(),
-			WorkspaceFolders:   found.WorkspaceFolders(),
-		},
+		Resolver:                 resolver,
+		Routes:                   routeResolver(cs.fsys, resolver, found),
 		Resolvers:                resolvers,
 		ExpressionMappings:       found.ExpressionMappings(),
 		ServicePropertyResolvers: found.ServicePropertyResolvers(),
@@ -196,5 +200,81 @@ func (cs *configSet) preload(roots []string) {
 
 			return nil
 		})
+	}
+}
+
+// routeResolver wires the "routes" config to the workspace.
+//
+// The lookups are closures over the resolver rather than a dependency from
+// internal/route onto internal/resolve, because the same convention has to be
+// applied from the code-map builder, from the LSP handlers and from tests, and
+// each knows the workspace differently.
+func routeResolver(fsys vfs.FS, resolver *resolve.Resolver, cfg *daemon.Config) *route.Resolver {
+	rc := cfg.Routes()
+	if !rc.Enabled() {
+		return nil
+	}
+
+	root := filepath.Dir(cfg.Path)
+
+	// Paths are resolved against the config's own directory first and the
+	// workspace folders after, so a route written in a shared view resolves the
+	// same way whichever application's page included it.
+	roots := append([]string{root}, cfg.WorkspaceFolders()...)
+
+	var (
+		mu    sync.Mutex
+		stats = map[string]bool{}
+	)
+
+	return &route.Resolver{
+		Config: rc,
+		Lookups: route.Lookups{
+			ComponentPath: func(component string) string {
+				return resolver.ComponentPath(component, root)
+			},
+			HasMethod: func(cfcPath, method string) bool {
+				for _, fn := range resolver.EnsureIndexed(cfcPath) {
+					if strings.EqualFold(fn.Name, method) {
+						return true
+					}
+				}
+
+				return false
+			},
+			DirExists: func(rel string) bool {
+				mu.Lock()
+				defer mu.Unlock()
+
+				key := "d\x00" + rel
+				if v, ok := stats[key]; ok {
+					return v
+				}
+
+				found := false
+
+				for _, r := range roots {
+					if info, err := fsys.Stat(filepath.Join(r, filepath.FromSlash(rel))); err == nil && info.IsDir() {
+						found = true
+
+						break
+					}
+				}
+
+				stats[key] = found
+
+				return found
+			},
+			FindFile: func(rel string) string {
+				for _, r := range roots {
+					p := filepath.Join(r, filepath.FromSlash(rel))
+					if info, err := fsys.Stat(p); err == nil && !info.IsDir() {
+						return p
+					}
+				}
+
+				return ""
+			},
+		},
 	}
 }

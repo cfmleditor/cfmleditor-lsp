@@ -1,9 +1,12 @@
 // Package config defines the shared .cfmleditor.json configuration types.
 package config
 
-import "maps"
+import (
+	"maps"
+	"path/filepath"
 
-import "path/filepath"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+)
 
 // JSON is the on-disk shape of .cfmleditor.json.
 type JSON struct {
@@ -20,9 +23,15 @@ type JSON struct {
 	// objGLJournal service|gljournal" into a ComponentRef for objGLJournal pointing at
 	// "tassweb.packages.gljournal.service".
 	ServicePropertyResolvers map[string]string `json:"servicePropertyResolvers"`
-	ComponentResolvers       []Resolver        `json:"componentResolvers"`
-	PropertyResolvers        []PropResolver    `json:"propertyResolvers"`
-	BeanPaths                map[string]string `json:"beanPaths"`
+
+	// Routes describes a framework's convention for turning a dotted route string
+	// into a component, a method and a view file. Static analysis cannot follow a
+	// dispatcher, so without it every controller method in a routed application
+	// looks uncalled and every view unreferenced. See internal/route.
+	Routes             route.Config      `json:"routes"`
+	ComponentResolvers []Resolver        `json:"componentResolvers"`
+	PropertyResolvers  []PropResolver    `json:"propertyResolvers"`
+	BeanPaths          map[string]string `json:"beanPaths"`
 	// JavaStubsPath is the dot-path prefix under which java stub CFCs live
 	// (e.g. "tassweb.packages.tass.javastubs"). When set, createObject("java",
 	// "X") calls are automatically resolved to "<JavaStubsPath>.X" without
@@ -296,6 +305,7 @@ type Resolved struct {
 	Mappings                 map[string]string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	Routes                   route.Config
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
@@ -346,6 +356,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 
 	if len(cfg.ServicePropertyResolvers) > 0 {
 		r.ServicePropertyResolvers = cfg.ServicePropertyResolvers
+	}
+
+	if cfg.Routes.Enabled() {
+		r.Routes = cfg.Routes
 	}
 
 	for _, cr := range cfg.ComponentResolvers {
@@ -476,6 +490,16 @@ func Merge(base, over *JSON) *JSON {
 	out.Mappings = mergeStringMap(base.Mappings, over.Mappings)
 	out.ExpressionMappings = mergeStringMap(base.ExpressionMappings, over.ExpressionMappings)
 	out.ServicePropertyResolvers = mergeStringMap(base.ServicePropertyResolvers, over.ServicePropertyResolvers)
+
+	// A routes block is taken whole rather than merged key by key. The rule list
+	// is ordered and the order is load-bearing — a rule that matches early stops
+	// the ones below it — so interleaving two projects' lists would produce a
+	// convention neither of them wrote.
+	out.Routes = base.Routes
+	if over.Routes.Enabled() {
+		out.Routes = over.Routes
+	}
+
 	out.BeanPaths = mergeStringMap(base.BeanPaths, over.BeanPaths)
 
 	// Resolvers from both sides stay active. Order is priority — the first

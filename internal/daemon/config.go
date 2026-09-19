@@ -10,6 +10,8 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
 
 // configJSON is the on-disk shape of .cfmleditor.json.
@@ -130,6 +132,17 @@ func (c *Config) ServicePropertyResolvers() map[string]string {
 	}
 
 	return raw.ServicePropertyResolvers
+}
+
+// Routes returns the framework routing convention from config (see
+// config.JSON.Routes).
+func (c *Config) Routes() route.Config {
+	raw := c.raw()
+	if raw == nil {
+		return route.Config{}
+	}
+
+	return raw.Routes
 }
 
 // Debug returns whether debug logging is enabled in config.

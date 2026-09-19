@@ -147,6 +147,7 @@ Editor document change
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
+| `internal/route` | Convention-based framework routing: the `routes` config grammar, the source scanner, and resolution to a controller method or a view |
 | `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
 | `internal/codemap/mcp` | Read-only MCP server over the store |
@@ -281,6 +282,27 @@ a visited set shared across branches — SQLite can only stop a trail revisiting
 own nodes — so a search from a high-fanout node with no answer to find is
 exponential in the depth limit, and "is there any path" is asked most often about
 pairs that have none.
+
+**Framework routes (`internal/route`) are how routed code stops looking dead.** A
+dispatcher's target is named nowhere in the source, so every routed controller
+method reads as uncalled. The convention lives in the `routes` config block, not
+in Go — `TestFw1Convention` resolves FW/1 with the same machinery as TASS, and is
+there to stop the grammar quietly becoming one framework's rules.
+
+Three things carry their reasons, each with a test:
+- **The method must exist** before a controller rule claims a route. A component
+  template built from `${1}` matches every route starting with that segment, so
+  without the check the first rule shadows all the ones below it.
+- **Alias keys are sorted, longest first.** Ranging the map directly made the
+  winner depend on Go's randomised map order, so the same route resolved
+  differently between runs of one build.
+- **An alias may have several replacements and all of them are returned.**
+  `ui.web` means the product serving the page, which is a runtime fact; the map
+  marks such an edge `Dynamic` and go-to-definition returns several locations.
+
+`longestDir` exists because the view split cannot be templated: the file name
+carries dots of its own, so the split between directory and file depends on what
+is on disk. Measured on a real workspace: 79% of 1,022 route occurrences resolve.
 
 **Each file is resolved under its own `.cfmleditor.json` (`Options.ConfigFor`).**
 A workspace of several applications has one config each, and every one lists the

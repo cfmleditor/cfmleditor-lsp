@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Framework routes (`routes` in `.cfmleditor.json`)** — convention-based routing is invisible to static analysis. A dispatcher reads a dotted route out of a URL or an HTML attribute, builds a component path and a method name from it and invokes them; nothing in the source names either, so every routed controller method looks uncalled and every view unreferenced. On one real workspace, teaching the LSP the convention revealed **542 controller methods reached only by a route** — every one of them a false positive in the unreferenced list before.
+
+  The convention is configuration, not code. `${N}` is one segment, `${N+}` everything from N on, `${N-M}` a span; `:concat` joins without the dots, `:slash` with slashes, `:lower`/`:upper` fold case. Controller rules are tried in order and the method has to exist, which is what makes the order safe — a component template built from the first segment matches enormous numbers of routes and would otherwise shadow every rule below it. An alias may name several replacements, for a route segment that means "whichever product is serving this page": all of them resolve, the code map marks the edge as a guess, and go-to-definition offers the choice. Views take either a path template or `longestDir`, which finds the longest leading run of segments naming a real directory and treats the rest as a dotted file name — a split no template can express, because it depends on what is on disk.
+
+  FW/1 and TASS are both expressible, and `TestFw1Convention` resolves FW/1 through the same machinery to keep the grammar from quietly becoming one framework's rules.
+
+- **Routes in the editor** — go-to-definition on a route string jumps to the controller method's declaration or the view file, and every unambiguously-resolvable route in a document gets a link. Ambiguous routes are left to go-to-definition, where the editor can present the choice, rather than a link silently picking one of several products.
+
+- **Route edges in the code map**, distinct from calls because they are a convention resolving rather than a call site parsing. The build reports how many routes it found and resolved: a low share means the config describes a different convention from the one in use, and the route edges are worth correspondingly less.
+
 - **`cfmleditor-lsp graph` — a whole-project code map.** Every function and file, and the calls, instantiations, inheritance and includes between them, in one streaming pass. On an 11,769-file workspace that is 60,439 nodes and 105,622 edges in about ten seconds. Four levels (`function`, the default hybrid of functions *and* files; `call`, the strict call graph; `file`; `package`) and six formats (`text`, `json`, `jsonl`, `dot`, `mermaid`, `html`).
 
   **Every declared function is in the map whether or not anything calls it.** Unreachable code is not dropped and not folded into the main graph: it becomes its own island with its own root, which `--detached` lists and the HTML report draws as a separate tree. A map that quietly omitted what it could not connect would describe a tidier codebase than the one on disk.

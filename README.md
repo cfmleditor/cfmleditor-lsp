@@ -137,6 +137,60 @@ A map collapsed with `--level file` or `--level package` has no function nodes i
 it, so searching one for a function name can only come back empty; the HTML report
 says so rather than showing nothing.
 
+### Framework routes
+
+Convention-based routing is invisible to static analysis. A dispatcher reads a
+dotted route out of a URL or an HTML attribute, builds a component path and a
+method name from it and invokes them — nothing in the source names either, so
+every routed controller method looks uncalled and every view unreferenced.
+
+`routes` in `.cfmleditor.json` describes the convention, and the LSP then follows
+it: route edges in the code map, ctrl-click to the controller method or the view
+from go-to-definition, and a document link on each resolvable route.
+
+```jsonc
+"routes": {
+  "sources": ["data-view", "data-read"],
+  "aliases": { "ui.web": ["tassweb", "kiosk", "parentportal"] },
+  "controllers": [
+    { "component": "packages.tass.${1}-${2}", "method": "${3+:concat}" },
+    { "component": "packages.tass.${2}",      "method": "${3+:concat}" },
+    { "component": "packages.tass.${1}",      "method": "${2+:concat}" }
+  ],
+  "views": [ { "longestDir": true, "ext": [".cfm"] } ]
+}
+```
+
+`${N}` is one segment, `${N+}` everything from N on, `${N-M}` a span. A `:concat`
+suffix joins without the dots (`dialog.custom.roll` → `dialogCustomRoll`),
+`:slash` with them, `:lower`/`:upper` fold the case; the default joins with dots.
+A rule that reaches past the end of a route declines it rather than matching a
+truncated path.
+
+**Controller rules are tried in order and the method must exist**, which is what
+makes the order safe: a component template built from the first segment matches
+enormous numbers of routes, so without the method check it would shadow every
+rule below it.
+
+**Aliases can name several replacements.** `ui.web` means "the product serving
+this page", and a view shared between products reaches whichever one is running —
+which cannot be known statically. All of them are returned, the code map marks
+the edge as a guess, and go-to-definition offers the choice.
+
+`views` either takes a `path` template or `longestDir`, which finds the longest
+leading run of segments that names a real directory and treats the rest as a
+dotted file name (`ui.web.general.popup.lookup.filter` is
+`ui/web/general/popup.lookup.filter.cfm`). No template can express that, because
+the split depends on what is on disk.
+
+The same grammar covers FW/1 — `{ "component": "controllers.${1}", "method":
+"${2}" }` with `{ "path": "views/${1}/${2}" }` — which is the test that keeps it
+from being one framework's rules in disguise.
+
+The build reports how many routes it found and resolved. A low share means the
+config describes a different convention from the one in use, and the route edges
+are worth correspondingly less.
+
 ### Per-application configs, and code a runner invokes
 
 A workspace is often several applications side by side, each with its own
