@@ -333,8 +333,7 @@ func collectCFMLFiles(fsys vfs.FS, roots []string) []string {
 			}
 
 			if info.IsDir() {
-				name := info.Name()
-				if name == ".git" || name == "node_modules" || name == ".svn" || name == "target" || name == "vendor" {
+				if path != root && skipDir(info.Name()) {
 					return filepath.SkipDir
 				}
 
@@ -350,4 +349,29 @@ func collectCFMLFiles(fsys vfs.FS, roots []string) []string {
 	}
 
 	return files
+}
+
+// skipDir reports whether a directory is one no scan should descend into.
+//
+// Every dot-directory is skipped, not a hand-kept list of them. The list was
+// ".git", ".svn", "node_modules", "target" and "vendor", and on a real workspace
+// it let in ".claude/worktrees" — git worktrees living inside the project, each a
+// complete second copy of the codebase. A whole-project map built over that counts
+// every component twice, reports every function as having a mysterious duplicate,
+// and inflates the unreferenced list with thousands of entries from a checkout
+// nobody is editing. The same applies to any other tool's dot-directory, which is
+// why this is a rule rather than another name on a list.
+//
+// The root itself is exempt, so pointing a scan at a dot-directory still works.
+func skipDir(name string) bool {
+	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
+		return true
+	}
+
+	switch name {
+	case "node_modules", "target", "vendor", "bower_components":
+		return true
+	default:
+		return false
+	}
 }

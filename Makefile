@@ -92,6 +92,26 @@ update-grammar: generate
 	@curl -sL "https://raw.githubusercontent.com/cfmleditor/tree-sitter-cfml/$$(grep tree-sitter-cfml go.mod | awk '{print $$2}')/cfml/queries/injections.scm" -o internal/language/queries/injections.scm
 	@echo "Updated injections.scm from tree-sitter-cfml"
 
+# Rebuilds the JavaScript the generated code-map viewer embeds. Needs Node; the
+# bundle it produces is committed, which is what keeps `go build` free of that
+# requirement and every generated report free of a network fetch. Run it after
+# adding a D3 function to VENDOR/entry.js, or the call is undefined at runtime.
+VENDOR := internal/codemap/assets/vendor
+
+.PHONY: update-d3
+update-d3:
+	@command -v npm >/dev/null || { echo "npm is required to rebuild the viewer bundle"; exit 1; }
+	@# npm ci when the lock file is there, so the bundle is reproducible from the
+	@# exact dependency tree that was committed; npm install only to create it.
+	cd $(VENDOR) && { test -f package-lock.json && npm ci --no-audit --no-fund --silent \
+		|| npm install --no-audit --no-fund --silent; }
+	cd $(VENDOR) && npx --yes esbuild entry.js --bundle --minify --format=iife \
+		--global-name=d3 --outfile=d3.bundle.js --legal-comments=none
+	@rm -rf $(VENDOR)/node_modules
+	@grep -qi '</script' $(VENDOR)/d3.bundle.js \
+		&& { echo "ERROR: the bundle contains </script and cannot be inlined"; exit 1; } || true
+	@echo "Rebuilt $(VENDOR)/d3.bundle.js ($$(wc -c < $(VENDOR)/d3.bundle.js) bytes) - commit it"
+
 build: generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp

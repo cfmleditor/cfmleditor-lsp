@@ -16,6 +16,8 @@ make link           # build + symlink onto PATH for local editor use (LINK_DIR=<
 make unlink         # remove that symlink
 make link-status    # show the link, the build, and what PATH resolves cfmleditor-lsp to
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
+make update-d3      # rebuild the code-map viewer's D3 bundle from assets/vendor/entry.js
+                    # (needs Node; the bundle is committed so `go build` does not)
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
 make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]
@@ -86,6 +88,8 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 | `unresolved` | `unresolved [--json] [--verbose] [--global-defs] <dir> [...]` — batch scan for unresolvable component/method calls |
 | `refs` | `refs [--mermaid] <component-or-function> <dir> [...]` — find references |
 | `deps` | `deps [--mermaid] <dir-or-file> [...]` — transitive dependency graph, built through `deps.Build` so the CLI and `cfmleditor.exportDeps` answer alike |
+| `graph` | `graph [--level function\|call\|file\|package] [--format text\|json\|jsonl\|dot\|mermaid\|html] [--db <file>] [--out <f>] [--live\|--detached\|--from <id>] [--under <p>] <dir> [...]` — whole-project code map |
+| `mcp` | `mcp --db <file> [--root <dir>] [--no-explain]` — serve that map over MCP on stdio, read-only |
 | `explain` | `explain [--root <dir>] <file> <line> [call-substring]` — trace how a call site resolved |
 | `version`, `help` | |
 
@@ -143,6 +147,9 @@ Editor document change
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
+| `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
+| `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
+| `internal/codemap/mcp` | Read-only MCP server over the store |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
@@ -200,6 +207,121 @@ replaced file's permission bits, re-checks that the file on disk still matches w
 and renames over the target — following a symlink to its target rather than replacing the link.
 Unchanged output is not written at all, so formatting an already-clean file leaves its mtime
 alone.
+
+### Code map (`internal/codemap`)
+
+**It is not `deps` run once per file, and the difference is node identity.**
+`deps.Build` is a *seeded* BFS whose labels carry the call's line number
+(`Base.cfc (line 42)`) so repeated refs stay distinct inside one tree. Run it per
+file and the same method becomes a different node in every seed's graph, so tens of
+thousands of definitions become hundreds of thousands of unjoinable nodes.
+`codemap.Build` is the inverted shape: one streaming pass over every file emitting
+canonically-identified nodes and deduplicated edges — structurally the pass
+`unresolved` already makes, carrying edges instead of error records.
+
+**Node identity is the file path, never the component dot-path.** Dot-paths are
+many-to-one (mappings, per-directory resolution, expression substitution) and one
+spelling can name different files from different base directories. A function is
+`<relpath>::<lowercased name>`; dot-paths ride along as display labels.
+
+**Unreachable code stays in the map.** Every declared function is a node whether or
+not anything calls it. `Node.Reachable` says whether an entry point reaches it and
+`Node.Island` groups it, so a renderer draws a detached subsystem as its own tree
+rather than the map quietly describing a tidier codebase than the one on disk.
+`Reachable(nil)` and `Detached()` are the two destructive views and neither is the
+default.
+
+**Two walks, two different edge sets, and swapping them breaks both** (each has a
+test that fails if you do):
+- **Islands** count `contains` (file→function). Without it every uncalled helper is
+  a one-node island and the count becomes a count of uncalled functions — 103
+  islands on `testdata`, against 18 with it.
+- **Reachability** does *not*. Reaching a file must not reach the functions it
+  declares, or every method of every live component is "reachable" and the map
+  reports a codebase with no dead code at all. A `.cfm`'s top-level code needs no
+  special case: `callerID` attributes a call outside any function to the file node,
+  so the file node *is* that code.
+
+**Cost.** `indexPass` reads every `.cfc` twice over (index + fingerprint) and the
+scan is parallel and **streaming** — a ParseResult is turned into edges and dropped
+before the next file is read, because a few thousand `ExtractCalls` trees held at
+once is gigabytes. Roughly 10s for 11,769 files / 48,715 functions, 7s warm.
+
+**`resolve.ResolveCallTarget`** is the one new resolver entry point: it runs exactly
+what `CanResolveCall` runs and also reports where the call landed. `canResolveCall`
+already computed the callee and threw it away. Rather than widen its return across
+twenty-odd `return ""` sites — the hand-maintained parallel list this file warns
+about elsewhere — each accept path calls `tr.hit(...)` beside its existing
+`tr.add(...)`, and **`TestEveryAcceptPathRecordsATarget` parses the source** and
+fails on a `return ""` with no preceding hit. A forgotten hit costs a graph edge,
+not a wrong one.
+
+**The HTML viewer embeds its JavaScript.** `assets/vendor/d3.bundle.js` is a 76KB
+esbuild bundle of the eight D3 modules the four views use, committed so `go build`
+needs no Node and a report opens with no network. `make update-d3` rebuilds it from
+`entry.js` — **adding a `d3.` call to the viewer means adding its module there**, or
+it is undefined at runtime. `TestEmbeddedBundleCannotCloseTheScriptElement` fails if
+a re-bundle ever introduces `</script`, which cannot be escaped inside inline JS.
+
+**The wire format is compact, and it has to be.** 60,000 nodes as JSON objects with
+full string ids was a 25MB page; interning every string, addressing edge endpoints
+by node position, deriving a node's id when possible, and dropping `contains`
+entirely makes it 4.4MB. `compact.go` and the viewer's `decode()` are two halves of
+one format — `TestCompactRoundTripsEveryNode` and `TestCompactFlagsMatchTheViewer`
+pin them together.
+
+**The store's cache has a two-part key.** Content hash *and* a fingerprint of every
+indexed `.cfc`, because resolving a call site reads the index built from every other
+component: keying on content alone serves a stale edge set after an unrelated file
+moves a method. Editing any `.cfc` therefore invalidates everything; editing `.cfm`
+pages does not. `PruneCache` keeps one generation, since older ones can never match.
+
+**`Store.Path` is a Go BFS, not a recursive CTE.** A CTE can express the walk but not
+a visited set shared across branches — SQLite can only stop a trail revisiting its
+own nodes — so a search from a high-fanout node with no answer to find is
+exponential in the depth limit, and "is there any path" is asked most often about
+pairs that have none.
+
+**Each file is resolved under its own `.cfmleditor.json` (`Options.ConfigFor`).**
+A workspace of several applications has one config each, and every one lists the
+others in `workspacePaths`, so a scan rooted anywhere reads all of them. Under a
+single config the other applications' `componentResolvers` never fire — it does not
+error, it just resolves nothing. `cmd/cfmleditor-lsp/graph_config.go` memoises a
+`resolve.Resolver` per config file, **all sharing one `index.Index`** (signatures
+are a property of the workspace, not of whose resolvers you read them under), and
+mixes every config's content hash into the cache fingerprint via `ConfigExtra`,
+since the resolver chain decides what an edge points at. `--one-config` opts out.
+
+**`Options.EntryGlobs` marks code a runner invokes by a constructed name.** No
+static analysis can see `createObject("component", "prs" & version)`, so those
+files look unreferenced and are not. On one workspace `../prs` alone was 10,639 of
+11,374 apparently-unreferenced functions — 2,600 release scripts, correctly
+unreferenced and entirely wrong to read as dead code. A bare directory name matches
+everything beneath it, because `path.Match` has no `**`. Private methods are never
+marked.
+
+**A file node is a caller, not just a container.** Top-level `.cfm` code has no
+enclosing function, so `callerID` attributes it to the file — and that is the
+larger half of the graph, not an edge case: 74,226 of 107,683 call sites on a real
+workspace come from file-level callers. `TestTopLevelPageCodeIsACaller` pins it.
+
+**`--under` keeps boundary nodes, and the strict version is the trap.**
+`FilterUnder` keeps a node outside the prefix when an edge crosses into it
+(`Node.Boundary`). `Filter` — keeping only edges with *both* ends inside — drops
+every caller from elsewhere, which is what you scoped the map down to find: on
+`packages/tass/core` that was 472 edges against 7,999. A scoped map with no callers
+reads as a broken tool rather than a narrow view.
+
+**The builtin check runs *after* resolution, not before.** About sixty names in one
+real workspace (`init`, `add`, `close`, `get`, `isValid`, the `onXxx` handlers) are
+both declared functions and something `isBuiltin` recognises. Testing the name
+first discarded every bare call to them before anything looked for a definition.
+
+**`collectCFMLFiles` skips every dot-directory**, not a list of named ones. The list
+was `.git`/`.svn`/`node_modules`/`target`/`vendor`, and on a real workspace it let in
+`.claude/worktrees` — git worktrees holding a complete second copy of the codebase,
+which doubled every count and added thousands of phantom entries to the unreferenced
+list.
 
 ## Key structural notes
 

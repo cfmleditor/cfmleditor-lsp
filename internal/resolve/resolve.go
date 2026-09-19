@@ -336,20 +336,31 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 // or FuncLookup hop fired, and why the final method check succeeded or failed. Intended
 // for the `explain` CLI command; not used on the hot lint path.
 func (r *Resolver) ExplainCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
-	tr := &traceRecorder{}
+	tr := &callTrace{}
 	reason := r.canResolveCall(call, pr, baseDir, tr)
 
 	return reason, tr.steps
 }
 
-// traceRecorder accumulates human-readable resolution steps. A nil *traceRecorder
-// is always safe to call add on (no-op), so canResolveCall can be shared between the
-// hot lint path (tr == nil) and ExplainCall (tr != nil) without extra branching.
-type traceRecorder struct {
-	steps []string
+// callTrace accumulates what canResolveCall learned on the way to its verdict: a
+// human-readable step list for [Resolver.ExplainCall], and the callee it landed on
+// for [Resolver.ResolveCallTarget]. A nil *callTrace is always safe to call add or
+// hit on (both no-op), so canResolveCall can be shared between the hot lint path
+// (tr == nil) and its two introspecting callers without extra branching.
+//
+// Recording the target here rather than widening canResolveCall's return is
+// deliberate: the function has twenty-odd `return ""` sites, and threading a second
+// value through every one of them is exactly the kind of hand-maintained parallel
+// list this codebase keeps getting bitten by. A recorder lets each site opt in where
+// it already opts in to a trace step, and a site that forgets degrades to
+// TargetNone — an edge the call graph reports as unresolved — rather than to a wrong
+// edge. TestEveryAcceptPathRecordsATarget pins the set that must not forget.
+type callTrace struct {
+	steps  []string
+	target CallTarget
 }
 
-func (t *traceRecorder) add(format string, args ...any) {
+func (t *callTrace) add(format string, args ...any) {
 	if t == nil {
 		return
 	}
@@ -357,7 +368,24 @@ func (t *traceRecorder) add(format string, args ...any) {
 	t.steps = append(t.steps, fmt.Sprintf(format, args...))
 }
 
-func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string, tr *traceRecorder) string {
+// hit records where a call site resolved to. def may be nil for the dynamic kinds,
+// where there is a component (or not even that) but no definition to point at.
+func (t *callTrace) hit(kind TargetKind, component string, def *parser.FunctionDef) {
+	if t == nil {
+		return
+	}
+
+	t.target.Kind = kind
+	t.target.Component = component
+
+	if def != nil {
+		t.target.URI = def.URI
+		t.target.FuncName = def.Name
+		t.target.Line = def.Line
+	}
+}
+
+func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
 	funcName := call.FuncName
 	variable := call.Variable
 
@@ -366,8 +394,9 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	if variable == "" && call.Component == "" {
 		tr.add("unqualified call to %q — checking same file", funcName)
 
-		for _, f := range pr.Funcs {
-			if strings.EqualFold(f.Name, funcName) {
+		for i := range pr.Funcs {
+			if strings.EqualFold(pr.Funcs[i].Name, funcName) {
+				tr.hit(TargetSameFile, "", &pr.Funcs[i])
 				tr.add("found %q defined in this file", funcName)
 
 				return ""
@@ -388,6 +417,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			for _, v := range pr.FuncVars(scope.Start, scope.End) {
 				if strings.EqualFold(v, funcName) {
 					tr.add("%q is a declared local variable/argument in the enclosing function — treating as a call through a function-reference value, not a missing function", funcName)
+					tr.hit(TargetDynamic, "", nil)
 
 					return ""
 				}
@@ -398,7 +428,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		if pr.Extends != "" {
 			tr.add("not in this file — checking extends chain (%s)", pr.Extends)
 
-			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+			if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+				tr.hit(TargetExtends, pr.Extends, def)
 				tr.add("found %q in extends chain", funcName)
 
 				return ""
@@ -414,8 +445,10 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	if strings.EqualFold(variable, "this") {
 		tr.add("'this' qualifier — checking same file")
 
-		for _, f := range pr.Funcs {
-			if strings.EqualFold(f.Name, funcName) {
+		for i := range pr.Funcs {
+			if strings.EqualFold(pr.Funcs[i].Name, funcName) {
+				tr.hit(TargetSameFile, "", &pr.Funcs[i])
+
 				return ""
 			}
 		}
@@ -423,7 +456,9 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		if pr.Extends != "" {
 			tr.add("not in this file — checking extends chain (%s)", pr.Extends)
 
-			if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+			if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+				tr.hit(TargetExtends, pr.Extends, def)
+
 				return ""
 			}
 		}
@@ -439,7 +474,9 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 		tr.add("'super' qualifier — checking extends chain (%s)", pr.Extends)
 
-		if r.ResolveFunc(pr.Extends, funcName, baseDir) != nil {
+		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+			tr.hit(TargetExtends, pr.Extends, def)
+
 			return ""
 		}
 
@@ -460,6 +497,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 		if pr.HasScopedAssignment(parser.ScopeVariables, funcName) {
 			tr.add("%q was assigned in VARIABLES scope — treating as a call through a function-reference property", funcName)
+			tr.hit(TargetDynamic, "", nil)
 
 			return ""
 		}
@@ -475,6 +513,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			if strings.EqualFold(f.Name, call.Caller) {
 				for _, arg := range f.Arguments {
 					if strings.EqualFold(arg.Name, funcName) {
+						tr.hit(TargetDynamic, "", nil)
+
 						return ""
 					}
 				}
@@ -599,6 +639,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 							// a string argument's .toCharArray()) — no component
 							// is needed to verify it.
 							tr.add("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
+							tr.hit(TargetMember, "", nil)
 
 							return ""
 						}
@@ -672,6 +713,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		}
 
 		if noFollow && comp != "" {
+			tr.hit(TargetDynamic, comp, nil)
+
 			return ""
 		}
 	}
@@ -690,6 +733,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		}
 
 		if noFollow && comp != "" {
+			tr.hit(TargetDynamic, comp, nil)
+
 			return ""
 		}
 	}
@@ -732,6 +777,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				}
 
 				if noFollow && ret != "" {
+					tr.hit(TargetDynamic, ret, nil)
+
 					return ""
 				}
 			}
@@ -751,6 +798,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// Dynamic return type — method called on a result of a function returning "any".
 	if comp == "$any" {
 		tr.add("component is $any (dynamic) — accepted without a method check")
+		tr.hit(TargetDynamic, "$any", nil)
 
 		return ""
 	}
@@ -759,6 +807,8 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	if strings.HasPrefix(comp, "$builtin.") {
 		builtinName := comp[9:]
 		if docs.LookupBuiltinMethod(builtinName, funcName) {
+			tr.hit(TargetBuiltin, comp, nil)
+
 			return ""
 		}
 
@@ -767,12 +817,15 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	tr.add("checking whether %q defines method %q", comp, funcName)
 
-	if r.ResolveFunc(comp, funcName, baseDir) != nil {
+	if def := r.ResolveFunc(comp, funcName, baseDir); def != nil {
+		tr.hit(TargetComponent, comp, def)
+
 		return ""
 	}
 
 	if parser.IsMemberMethod(funcName) {
 		tr.add("%q is a known member/Java-interop method — accepted without finding it in %q", funcName, comp)
+		tr.hit(TargetMember, comp, nil)
 
 		return ""
 	}
@@ -780,6 +833,7 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// Component defines onMissingMethod — any method call is valid.
 	if r.ResolveFunc(comp, "onMissingMethod", baseDir) != nil {
 		tr.add("%q defines onMissingMethod — any method call accepted", comp)
+		tr.hit(TargetDynamic, comp, nil)
 
 		return ""
 	}
@@ -791,7 +845,15 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	if altComp, altNoFollow := parser.ResolveFromCallFull(variable, r.Resolvers); altComp != "" && altComp != comp {
 		tr.add("%q not found in %q — trying altComp fallback: componentResolver on variable name gives %q (noFollow=%v)", funcName, comp, altComp, altNoFollow)
 
-		if altNoFollow || r.ResolveFunc(altComp, funcName, baseDir) != nil {
+		if altNoFollow {
+			tr.hit(TargetDynamic, altComp, nil)
+
+			return ""
+		}
+
+		if altDef := r.ResolveFunc(altComp, funcName, baseDir); altDef != nil {
+			tr.hit(TargetComponent, altComp, altDef)
+
 			return ""
 		}
 	}
