@@ -25,10 +25,14 @@ import "strings"
 // the viewer discards them on load, and they are nearly half of all edges. Every
 // answer they carried is already baked into each node's file and island.
 type compactMap struct {
-	Title   string   `json:"title"`
-	Root    string   `json:"root"`
-	Level   Level    `json:"level"`
-	Stats   Stats    `json:"stats"`
+	Title string `json:"title"`
+	Root  string `json:"root"`
+	Level Level  `json:"level"`
+	Stats Stats  `json:"stats"`
+	// HideUtility opens the report with the utility toggle off. It is a starting
+	// position, not a filter — the nodes are all present.
+	HideUtility bool `json:"hideUtility,omitempty"`
+
 	Strings []string `json:"s"`
 	Kinds   []string `json:"nk"`
 	Edges   []string `json:"ek"`
@@ -51,6 +55,7 @@ const (
 	flagRoot
 	flagAbstract
 	flagBoundary
+	flagUtility
 )
 
 type interner struct {
@@ -127,6 +132,10 @@ func (m *Map) compact(title string) *compactMap {
 
 		if n.Boundary {
 			flags |= flagBoundary
+		}
+
+		if n.Utility {
+			flags |= flagUtility
 		}
 
 		id := -1

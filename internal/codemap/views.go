@@ -50,6 +50,11 @@ func (m *Map) Collapse(level Level) *Map {
 		// reachable from outside, and a collapse that forgot that would report the
 		// whole package as dead code.
 		existing.Entry = existing.Entry || target.Entry
+
+		// Utility does the opposite: a package is infrastructure only if all of it
+		// is. One utility file among twenty application ones does not make the
+		// package something a reader can set aside.
+		existing.Utility = existing.Utility && target.Utility
 	}
 
 	edges := make(map[edgeKey]*Edge)
@@ -98,6 +103,7 @@ func collapseTarget(n *Node, level Level) Node {
 		return Node{
 			ID: FileID(n.File), Kind: KindFile, Name: path.Base(n.File),
 			File: n.File, Component: n.Component, Entry: n.Entry && n.Kind != KindFunction,
+			Utility: n.Utility,
 		}
 	case LevelPackage:
 		if n.Kind == KindExternal {
@@ -108,7 +114,7 @@ func collapseTarget(n *Node, level Level) Node {
 
 		return Node{
 			ID: PackageID(dir), Kind: KindPackage, Name: dir, File: dir,
-			Entry: n.Entry, Abstract: true,
+			Entry: n.Entry, Abstract: true, Utility: n.Utility,
 		}
 	case LevelFunction, LevelCall:
 		// Neither is a collapse: LevelFunction is the built level, and LevelCall is
@@ -509,7 +515,22 @@ func sortedEdges(byKey map[edgeKey]*Edge) []Edge {
 	return out
 }
 
-// CallGraph reduces the map to functions and the calls between them.
+// invokes reports whether an edge means "this runs that".
+//
+// A route is an invocation, not a lesser relationship: a page names a route and
+// the dispatcher calls the controller method. Excluding it from the call graph
+// would drop exactly the paths route resolution exists to recover — on one
+// workspace, 779 edges reaching 542 controller methods that nothing else calls —
+// and leave the strict call graph reporting them as unreachable again.
+//
+// It stays a distinct EdgeKind so a reader can still tell a parsed call site from
+// a resolved convention, and the viewer can filter one from the other.
+func invokes(kind EdgeKind) bool {
+	return kind == EdgeCalls || kind == EdgeRoute
+}
+
+// CallGraph reduces the map to functions and the calls between them, including
+// the calls a dispatcher makes on a route's behalf.
 //
 // LevelFunction is deliberately a hybrid — functions *and* files — because three
 // of the four relationships a codebase has are between files, not functions. A
@@ -532,7 +553,7 @@ func (m *Map) CallGraph() *Map {
 
 	for i := range m.Edges {
 		e := &m.Edges[i]
-		if e.Kind != EdgeCalls {
+		if !invokes(e.Kind) {
 			continue
 		}
 
@@ -559,7 +580,7 @@ func (m *Map) CallGraph() *Map {
 
 	for i := range m.Edges {
 		e := &m.Edges[i]
-		if e.Kind == EdgeCalls && keep[e.From] && keep[e.To] {
+		if invokes(e.Kind) && keep[e.From] && keep[e.To] {
 			out.Edges = append(out.Edges, *e)
 		}
 	}

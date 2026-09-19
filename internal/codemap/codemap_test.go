@@ -381,3 +381,81 @@ func TestEntryGlobMarksRunnerInvokedCode(t *testing.T) {
 		t.Error("the services glob changed entry points under models/")
 	}
 }
+
+// TestUtilityIsMarkedNotExcluded. The point of the flag is that it is a label.
+// These are genuinely the most-depended-on code in a workspace, so a map that
+// dropped them would misreport what depends on what — the counts, the rankings
+// and the islands all have to keep counting them.
+func TestUtilityIsMarkedNotExcluded(t *testing.T) {
+	root := testdataDir(t)
+
+	var files []string
+
+	walk(t, root, &files)
+
+	build := func(globs ...string) *codemap.Map {
+		fsys := vfs.OS{}
+
+		return codemap.Build(codemap.Options{
+			Root: root, Files: files, FS: fsys, Workers: 2, UtilityGlobs: globs,
+			Resolver: &resolve.Resolver{FS: fsys, Index: index.New(), WorkspaceFolders: []string{root}},
+		})
+	}
+
+	plain := build()
+	marked := build("models")
+
+	if len(plain.Nodes) != len(marked.Nodes) || len(plain.Edges) != len(marked.Edges) {
+		t.Fatalf("marking changed the graph: %d/%d nodes, %d/%d edges",
+			len(plain.Nodes), len(marked.Nodes), len(plain.Edges), len(marked.Edges))
+	}
+
+	if marked.Stats.Utility == 0 {
+		t.Fatal("--utility models marked nothing")
+	}
+
+	if plain.Stats.Utility != 0 {
+		t.Error("nodes were marked utility with no globs given")
+	}
+
+	// Everything under the glob, and nothing outside it.
+	for i := range marked.Nodes {
+		n := &marked.Nodes[i]
+		under := strings.HasPrefix(n.File, "models")
+
+		if n.Utility != under {
+			t.Errorf("%s: Utility=%v but under models=%v", n.ID, n.Utility, under)
+		}
+	}
+
+	// And the in-degrees are untouched, which is what "not excluded" means.
+	if a, b := plain.InDegree(), marked.InDegree(); len(a) != len(b) {
+		t.Errorf("in-degree map changed size: %d vs %d", len(a), len(b))
+	}
+}
+
+// TestCollapseTreatsAPackageAsUtilityOnlyIfAllOfItIs. One utility file among
+// twenty application ones does not make the package something a reader can set
+// aside, so utility-ness intersects on a merge where entry-ness unions.
+func TestCollapseTreatsAPackageAsUtilityOnlyIfAllOfItIs(t *testing.T) {
+	m := &codemap.Map{
+		Nodes: []codemap.Node{
+			{ID: "pkg/a.cfc", Kind: codemap.KindFile, Name: "a.cfc", File: "pkg/a.cfc", Utility: true},
+			{ID: "pkg/b.cfc", Kind: codemap.KindFile, Name: "b.cfc", File: "pkg/b.cfc"},
+			{ID: "util/c.cfc", Kind: codemap.KindFile, Name: "c.cfc", File: "util/c.cfc", Utility: true},
+			{ID: "util/d.cfc", Kind: codemap.KindFile, Name: "d.cfc", File: "util/d.cfc", Utility: true},
+		},
+		Edges: []codemap.Edge{{From: "pkg/a.cfc", To: "util/c.cfc", Kind: codemap.EdgeCalls, Count: 1}},
+	}
+	m.Annotate()
+
+	idx := m.Collapse(codemap.LevelPackage).NodeIndex()
+
+	if n := idx["pkg"]; n == nil || n.Utility {
+		t.Error("a mixed package collapsed to utility")
+	}
+
+	if n := idx["util"]; n == nil || !n.Utility {
+		t.Error("an all-utility package did not collapse to utility")
+	}
+}

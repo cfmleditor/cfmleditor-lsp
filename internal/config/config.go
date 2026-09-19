@@ -8,6 +8,33 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
 
+// CodeMap is the "codemap" block of .cfmleditor.json.
+//
+// These are properties of the codebase, not of one invocation: which directories
+// hold code a runner invokes, which components are infrastructure. Keeping them in
+// config rather than on a command line means every person and every tool that
+// builds the map describes the same codebase — a map built without them reports
+// different dead code and a different set of hubs, and nothing about the result
+// says which run was configured correctly.
+//
+// It lives here rather than in internal/codemap because internal/config is the
+// leaf every other package reads: codemap imports parser, and parser's tests
+// import config, so config importing codemap is a cycle.
+type CodeMap struct {
+	// Entry marks files as entry points by path, for code a runner invokes by a
+	// constructed name — release scripts, scheduled tasks, plugin directories.
+	Entry []string `json:"entry,omitempty"`
+
+	// Utility marks files as infrastructure rather than application code: the
+	// logging, the PDF writer, the context accessor every request touches. They
+	// are marked, never excluded — see codemap.Options.UtilityGlobs.
+	Utility []string `json:"utility,omitempty"`
+
+	// HideUtility opens a generated HTML report with utility code switched off.
+	// The toggle is still there and the nodes are still in the page.
+	HideUtility bool `json:"hideUtility,omitempty"`
+}
+
 // JSON is the on-disk shape of .cfmleditor.json.
 type JSON struct {
 	WorkspaceName       string            `json:"workspaceName"`
@@ -28,7 +55,14 @@ type JSON struct {
 	// into a component, a method and a view file. Static analysis cannot follow a
 	// dispatcher, so without it every controller method in a routed application
 	// looks uncalled and every view unreferenced. See internal/route.
-	Routes             route.Config      `json:"routes"`
+	Routes route.Config `json:"routes"`
+
+	// CodeMap holds the entry and utility globs the `graph` command uses. They
+	// describe the codebase rather than one invocation, so they belong beside the
+	// mappings and resolvers rather than on a command line somebody has to
+	// remember to repeat.
+	CodeMap CodeMap `json:"codemap"`
+
 	ComponentResolvers []Resolver        `json:"componentResolvers"`
 	PropertyResolvers  []PropResolver    `json:"propertyResolvers"`
 	BeanPaths          map[string]string `json:"beanPaths"`

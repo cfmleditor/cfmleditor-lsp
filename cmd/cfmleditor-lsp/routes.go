@@ -243,7 +243,7 @@ func scanRoutes(paths []string, quiet bool) (resolved, unresolved []routeFinding
 func routeScanSetup(fsys vfs.FS, root string, paths []string, quiet bool) (*configSet, []string) {
 	f := graphFlags{paths: paths, quiet: quiet}
 
-	scanRoots, fallback, shared := routeWorkspace(fsys, root, f)
+	scanRoots, fallback, shared, _ := routeWorkspace(fsys, root, f)
 
 	configs := newConfigSet(fsys, shared, fallback)
 	configs.preload(scanRoots)
