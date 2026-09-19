@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.1]
+
 ### Added
 
 - **`cfmleditor.resolveRoute`** — answers "where does this route go" for a route the caller supplies, rather than one found in a document. It exists so an editor command that takes a route by hand and go-to-definition on a route in source resolve through the same code: an editor keeping its own copy of the convention was the state of things before, and two resolvers reading two different configs disagree quietly — the one that is wrong still opens a file, just not the right one. Returns every target with its URI, component, method and declaration range, so a caller can reveal the method rather than the top of a ten-thousand-line controller.
