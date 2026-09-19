@@ -72,13 +72,22 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 
 	merged := config.Merge(editorCfg, fileCfg)
 
-	// config.Resolve leaves an absent formatting block at its zero value on
-	// purpose (see config.DefaultResolvedFormatting), which is not what the
-	// daemon resolved for the same file: daemon.Config's accessors apply each
-	// field's default whether or not the block exists. Applying the zero value
-	// would hand the session WhitespaceOnly=false — the formatter's safety
-	// guard, off — whenever neither side mentions formatting.
-	prevFormatting := s.Formatting
+	// Every optional block a config can leave out, remembered so it can be put
+	// back if this config does not mention it.
+	//
+	// config.Resolve turns an absent block into that block's defaults, which is
+	// right for a session configured from one file and wrong for this path: the
+	// daemon has already applied the config it started from, and applying
+	// defaults over the top erases it. A workspace-root config with no
+	// `features` block silently switched every feature back on, whatever the
+	// config the daemon was started with said — which is how a switch could read
+	// off in the file and on in the server.
+	//
+	// Formatting had this treatment already, for its own reason (an absent block
+	// resolves to WhitespaceOnly=false, the formatter's safety guard off). The
+	// others did not, so they lost the setting rather than turning a guard off,
+	// which is quieter and was not noticed.
+	prev := s.optionalBlocks()
 
 	s.Mappings = nil
 	s.ExpressionMappings = nil
@@ -88,9 +97,65 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 	s.BeanPaths = nil
 
 	s.applyConfig(config.Resolve(merged, dir))
+	s.restoreUnmentionedBlocks(merged, prev)
+}
 
+// optionalBlockState is what a config can leave out, and what has to survive a
+// config that does.
+type optionalBlockState struct {
+	Formatting               config.ResolvedFormatting
+	Features                 config.ResolvedFeatures
+	Linting                  bool
+	LintMinSeverity          string
+	References               bool
+	TagSnippets              bool
+	FunctionSnippets         bool
+	GlobalFunctionResolution bool
+}
+
+func (s *Server) optionalBlocks() optionalBlockState {
+	return optionalBlockState{
+		Formatting:               s.Formatting,
+		Features:                 s.Features,
+		Linting:                  s.Linting,
+		LintMinSeverity:          s.LintMinSeverity,
+		References:               s.References,
+		TagSnippets:              s.TagSnippets,
+		FunctionSnippets:         s.FunctionSnippets,
+		GlobalFunctionResolution: s.GlobalFunctionResolution,
+	}
+}
+
+// restoreUnmentionedBlocks puts back every setting whose block this config did
+// not contain.
+//
+// Per block, not per field: a block that is present is taken whole, because
+// within one block config.Merge has already decided what an absent key means.
+// What it cannot express is a block that was never written at all, which is the
+// difference between "this config turns the feature on" and "this config has
+// nothing to say about the feature".
+func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev optionalBlockState) {
 	if merged.Formatting == nil {
-		s.Formatting = prevFormatting
+		s.Formatting = prev.Formatting
+	}
+
+	if merged.Features == nil {
+		s.Features = prev.Features
+	}
+
+	if merged.Linting == nil {
+		s.Linting = prev.Linting
+		s.LintMinSeverity = prev.LintMinSeverity
+	}
+
+	if merged.References == nil {
+		s.References = prev.References
+	}
+
+	if merged.Completions == nil {
+		s.TagSnippets = prev.TagSnippets
+		s.FunctionSnippets = prev.FunctionSnippets
+		s.GlobalFunctionResolution = prev.GlobalFunctionResolution
 	}
 }
 
