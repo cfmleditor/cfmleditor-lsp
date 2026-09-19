@@ -210,7 +210,23 @@ func (m *Map) Orphans() []Node {
 // Hubs ranks nodes by how many distinct nodes depend on them, most first. The top
 // of this list is the codebase's de-facto API, whether or not anyone declared it
 // one, and it is where a breaking change costs the most.
+//
+// Everything is ranked, utility included. Splitting the two is the caller's job
+// because which one is wanted depends on the question: [Map.HubsWhere] does it.
 func (m *Map) Hubs(limit int) []Node {
+	return m.HubsWhere(limit, nil)
+}
+
+// HubsWhere ranks only the nodes keep accepts.
+//
+// It exists for the one split that is always wanted. Infrastructure outranks
+// everything — on one workspace the top twelve were all of it, a context accessor
+// with 1,436 callers ahead of the most-used application function at 290 — so an
+// unsplit ranking answers "what is the logging component" every time, which
+// nobody asked. Ranking application code separately is the question people mean,
+// and ranking infrastructure separately is still worth seeing, so neither is
+// dropped.
+func (m *Map) HubsWhere(limit int, keep func(*Node) bool) []Node {
 	in := make(map[string]int, len(m.Nodes))
 
 	for i := range m.Edges {
@@ -223,9 +239,12 @@ func (m *Map) Hubs(limit int) []Node {
 	idx := m.NodeIndex()
 
 	for id := range in {
-		if n, ok := idx[id]; ok {
-			ranked = append(ranked, *n)
+		n, ok := idx[id]
+		if !ok || (keep != nil && !keep(n)) {
+			continue
 		}
+
+		ranked = append(ranked, *n)
 	}
 
 	sort.Slice(ranked, func(i, j int) bool {

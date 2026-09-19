@@ -422,3 +422,44 @@ func TestOrphansStillListUtility(t *testing.T) {
 		t.Error("an unreferenced application function is missing from Orphans")
 	}
 }
+
+// TestHubsSplitByUtility. Infrastructure outranks everything — on a real
+// workspace the top twelve were all of it — so an unsplit ranking answers "what
+// is the logging component" every time, which is not the question. Both lists
+// exist because neither answer is worth discarding.
+func TestHubsSplitByUtility(t *testing.T) {
+	m := &codemap.Map{
+		Nodes: []codemap.Node{
+			{ID: "a", Kind: codemap.KindFunction, Name: "a"},
+			{ID: "b", Kind: codemap.KindFunction, Name: "b"},
+			{ID: "log", Kind: codemap.KindFunction, Name: "log", Utility: true},
+			{ID: "app", Kind: codemap.KindFunction, Name: "app"},
+		},
+		Edges: []codemap.Edge{
+			{From: "a", To: "log", Kind: codemap.EdgeCalls, Count: 1},
+			{From: "b", To: "log", Kind: codemap.EdgeCalls, Count: 1},
+			{From: "a", To: "app", Kind: codemap.EdgeCalls, Count: 1},
+		},
+	}
+	m.Annotate()
+
+	// Unfiltered, the utility function wins — which is the problem.
+	if all := m.Hubs(5); len(all) == 0 || all[0].ID != "log" {
+		t.Fatalf("Hubs ranked %+v; expected the utility function first", all)
+	}
+
+	app := m.HubsWhere(5, func(n *codemap.Node) bool { return !n.Utility })
+	if len(app) != 1 || app[0].ID != "app" {
+		t.Errorf("application ranking = %+v, want just app", app)
+	}
+
+	util := m.HubsWhere(5, func(n *codemap.Node) bool { return n.Utility })
+	if len(util) != 1 || util[0].ID != "log" {
+		t.Errorf("utility ranking = %+v, want just log", util)
+	}
+
+	// Neither list drops anything the other holds: together they are Hubs.
+	if len(app)+len(util) != len(m.Hubs(5)) {
+		t.Error("the two rankings do not account for every hub")
+	}
+}

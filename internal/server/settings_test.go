@@ -11,6 +11,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
 
 // Every field of Settings must reach the Server. The failure this guards was
@@ -40,6 +41,11 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		TagSnippets:              true,
 		FunctionSnippets:         true,
 		GlobalFunctionResolution: true,
+		Routes: route.Config{
+			Attributes:  []string{"data-view"},
+			Controllers: []route.ControllerRule{{Component: "c.${1}", Method: "${2+:concat}"}},
+		},
+		CodeMap: config.CodeMap{Entry: []string{"../prs"}, Utility: []string{"core"}},
 	}
 
 	srv := NewServer(nil, cflog.NewLogger(false))

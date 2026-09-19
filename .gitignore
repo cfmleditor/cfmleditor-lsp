@@ -49,3 +49,9 @@ internal/formatter/zz_*_test.go
 *.codemap.db-shm
 .cfmleditor/codemap.db*
 internal/codemap/assets/vendor/node_modules/
+
+# Generated code-map reports
+codemap.html
+*-functions.html
+*-codemap.html
+.cfmleditor/

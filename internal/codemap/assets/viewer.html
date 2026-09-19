@@ -380,6 +380,7 @@ function draw() {
   document.getElementById("utilnote").textContent = utils
     ? utils.toLocaleString() + " nodes are marked utility" + (state.utility ? "" : " and hidden")
     : "nothing is marked utility (see --utility)";
+  renderHubs();
   document.getElementById("viewcap").textContent =
     "this view is legible to about " + VIEW_LIMIT[state.view]().toLocaleString() + " nodes";
 
@@ -902,10 +903,20 @@ function renderStats() {
     .join("");
 }
 
+// The hub list follows the utility toggle, for the same reason the chart does:
+// infrastructure outranks everything, so with it included the ranking is the same
+// handful of components no matter what you are looking at.
 function renderHubs() {
-  const top = [...inDeg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
-  document.getElementById("hubs").innerHTML = top.map(([id, c]) =>
-    `<li data-id="${id}"><span class="n">${shortName(BY_ID.get(id))}</span><span class="c">${c}</span></li>`).join("");
+  const top = [...inDeg.entries()]
+    .filter(([id]) => state.utility || !(BY_ID.get(id) || {}).utility)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 14);
+
+  document.getElementById("hubs").innerHTML = top.map(([id, c]) => {
+    const n = BY_ID.get(id);
+    const tag = n && n.utility ? ' <span class="tag">util</span>' : "";
+    return `<li data-id="${id}"><span class="n">${shortName(n)}${tag}</span><span class="c">${c}</span></li>`;
+  }).join("");
 }
 
 function renderIslandList() {

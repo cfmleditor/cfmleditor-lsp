@@ -1203,6 +1203,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		})
 
 		return mermaid, nil
+	case "cfmleditor.generateCodeMap":
+		return s.handleGenerateCodeMap(params.Arguments)
+	case "cfmleditor.showCodeMapStats":
+		return s.handleCodeMapStats(ctx, params.Arguments)
 	case "cfmleditor.scanWorkspace":
 		// Same reasoning as runDiagnostics: this goroutine outlives the
 		// handler, so the request ctx (pooled/reset on return) is unsafe here.

@@ -21,7 +21,12 @@ const fullConfig = `{
 	"formatting": {"enabled": true},
 	"linting": {"enabled": true, "minSeverity": "WARNING"},
 	"references": {"enabled": true},
-	"completions": {"tagSnippets": true, "functionSnippets": true, "globalFunctionResolution": true}
+	"completions": {"tagSnippets": true, "functionSnippets": true, "globalFunctionResolution": true},
+	"routes": {
+		"attributes": ["data-view"],
+		"controllers": [{"component": "controllers.${1}", "method": "${2}"}]
+	},
+	"codemap": {"entry": ["../prs"], "utility": ["core"], "hideUtility": true}
 }`
 
 // TestSettingsFromFillsEveryField is the recurrence guard for the defect this

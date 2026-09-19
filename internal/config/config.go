@@ -340,6 +340,7 @@ type Resolved struct {
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
 	Routes                   route.Config
+	CodeMap                  CodeMap
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
@@ -394,6 +395,10 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 
 	if cfg.Routes.Enabled() {
 		r.Routes = cfg.Routes
+	}
+
+	if len(cfg.CodeMap.Entry)+len(cfg.CodeMap.Utility) > 0 || cfg.CodeMap.HideUtility {
+		r.CodeMap = cfg.CodeMap
 	}
 
 	for _, cr := range cfg.ComponentResolvers {
@@ -532,6 +537,13 @@ func Merge(base, over *JSON) *JSON {
 	out.Routes = base.Routes
 	if over.Routes.Enabled() {
 		out.Routes = over.Routes
+	}
+
+	// Taken whole for the same reason: the globs are a description of one
+	// codebase, and interleaving two projects' lists describes neither.
+	out.CodeMap = base.CodeMap
+	if len(over.CodeMap.Entry)+len(over.CodeMap.Utility) > 0 || over.CodeMap.HideUtility {
+		out.CodeMap = over.CodeMap
 	}
 
 	out.BeanPaths = mergeStringMap(base.BeanPaths, over.BeanPaths)

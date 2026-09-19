@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cfmleditor.generateCodeMap` and `cfmleditor.showCodeMapStats`** — build a code map from the editor, with no CLI and no rebuilt binary on a PATH. Both take an optional options object (`level`, `format`, `out`, `under`, `from`, `live`, `detached`, `open`) and both work invoked with no arguments, so an editor can bind either to a menu item. Entry globs, utility globs and `hideUtility` come from the `codemap` config block exactly as they do for the CLI.
+
+  The build reuses the server's own index rather than making one. That index is already current — `didChange` and the watched-file handler maintain it — so the generate skips the index pass, the more expensive half of a cold CLI run. It runs on its own goroutine and reports through `window/showMessage`, because a map of a large workspace takes seconds and a blocking `executeCommand` freezes the editor. Output is confined to the workspace: a command an editor invokes with arbitrary arguments is one that can be asked to write anywhere.
+
+- **The "most depended on" ranking is split by utility.** Infrastructure outranks everything — on one workspace the top twelve were all of it, a context accessor with 1,436 callers ahead of the most-used application function at 290 — so a single list answers "what is the logging component" every time. Application code and utility are now ranked separately, in the text report and in the HTML sidebar, and the sidebar follows the utility toggle. Neither list is dropped; `Map.HubsWhere` is the API.
+
+### Fixed
+
+- **Framework routing never reached a daemon-mode session.** `routes` was parsed from config and `SettingsFrom` never copied it, so the convention applied in a standalone session and nowhere else — and a missing setting is indistinguishable from a convention that does not match. The same omission would have shipped for the new `codemap` settings; both reflective settings tests caught it, which is what they exist for.
+
+- **Utility is tagged in the unreferenced list.** Infrastructure is routinely unreferenced and correctly so: a Java stub exists to be method-checked and is never called. On one workspace 1,580 of 20,776 unreferenced functions are utility, and an untagged list reads as a far longer dead-code report than the codebase deserves. Tagged, not removed — marking has never been a filter.
+
 ### Fixed
 
 - **The SQLite store dropped `utility` and `boundary`.** Both are carried on every node in the map and neither reached the schema, so the question a utility marking exists for — rank what everything depends on, with the infrastructure separable — could not be written as SQL at all, and nothing said why. Both are columns now, with an index on `(utility, in_degree)` for that ranking, and a test that fails if a node flag stops round-tripping.

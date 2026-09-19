@@ -565,7 +565,16 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
   `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
   `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
-  `.scanWorkspace`.
+  `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`.
+
+  **`generateCodeMap` reuses the server's index instead of building one** — it is
+  already current, and re-reading every `.cfc` is the more expensive half of a cold
+  CLI run. It runs on `safeGo` with `context.Background()` (the handler's ctx is
+  pooled and reset on return, same reasoning as `scanWorkspace`) and reports through
+  `window/showMessage`, because a blocking `executeCommand` freezes the editor for
+  the ten-plus seconds a large workspace takes. `codeMapOutputPath` refuses a target
+  outside the workspace: the arguments come from whatever asked the editor to run
+  the command.
 
 ## Configuration (`.cfmleditor.json`)
 

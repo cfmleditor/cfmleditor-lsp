@@ -125,6 +125,27 @@ The report embeds its JavaScript — a 76KB D3 bundle of just the modules these 
 use, built from `internal/codemap/assets/vendor` and committed. No CDN, no network:
 the file opens the same on an air-gapped machine and still renders years later.
 
+### From the editor
+
+`cfmleditor.generateCodeMap` builds a report from the running server, so nothing
+needs a CLI on a PATH:
+
+```jsonc
+// workspace/executeCommand — every field optional
+{ "level": "call", "format": "html", "out": "reports/map.html",
+  "under": "packages/tass", "live": true, "open": true }
+```
+
+Defaults are `level: function`, `format: html`, output `.cfmleditor/codemap.html`,
+and the `codemap` config block supplies the rest. `cfmleditor.showCodeMapStats`
+answers the cheap question — how much of this workspace the map resolves — without
+writing anything.
+
+It reuses the server's index, which `didChange` and the watched-file handler
+already keep current, so it skips the index pass a cold CLI run pays for. It
+returns immediately and reports through `window/showMessage`, and it will not
+write outside the workspace.
+
 ### Scoping
 
 `--under <path>` narrows the map to a prefix **and keeps the nodes just outside it
