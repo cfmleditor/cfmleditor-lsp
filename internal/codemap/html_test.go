@@ -3,6 +3,7 @@ package codemap
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -179,5 +180,45 @@ func TestPayloadIsInertInsideAScript(t *testing.T) {
 	want := `</script><img src=x onerror=alert(1)>`
 	if !slices.Contains(decoded.Strings, want) {
 		t.Errorf("escaping changed the data; the string table is %q", decoded.Strings)
+	}
+}
+
+// TestEveryEdgeKindIsEncodable. The compact encoder maps an edge kind to its index
+// in a list, and a kind missing from that list comes back -1 — which the viewer
+// decodes as the *first* kind, so a route edge silently became a call. That is the
+// one distinction the route work exists to keep, and nothing about it fails
+// loudly: the picture just quietly tells you something untrue.
+func TestEveryEdgeKindIsEncodable(t *testing.T) {
+	all := []EdgeKind{EdgeCalls, EdgeInstantiates, EdgeExtends, EdgeIncludes, EdgeRoute, EdgeContains}
+
+	m := &Map{Root: "/w", Level: LevelFunction}
+
+	for i, kind := range all {
+		from := Node{ID: fmt.Sprintf("a%d.cfc", i), Kind: KindFile, Name: "a", File: fmt.Sprintf("a%d.cfc", i)}
+		to := Node{ID: fmt.Sprintf("b%d.cfc", i), Kind: KindFile, Name: "b", File: fmt.Sprintf("b%d.cfc", i)}
+		m.Nodes = append(m.Nodes, from, to)
+		m.Edges = append(m.Edges, Edge{From: from.ID, To: to.ID, Kind: kind, Count: 1})
+	}
+
+	c := m.compact("t")
+
+	for _, row := range c.E {
+		if row[2] < 0 || row[2] >= len(c.Edges) {
+			t.Fatalf("an edge encoded with kind index %d, outside the %d-entry kind list; "+
+				"add the missing EdgeKind to compact()'s edgeKinds", row[2], len(c.Edges))
+		}
+	}
+
+	// EdgeContains is dropped on purpose, so one fewer edge than kinds.
+	if len(c.E) != len(all)-1 {
+		t.Errorf("encoded %d edges from %d kinds; expected all but contains", len(c.E), len(all))
+	}
+
+	// And the viewer must offer a filter for each encoded kind, or an edge it
+	// decodes is invisible with no way to switch it on.
+	for _, kind := range c.Edges {
+		if !strings.Contains(viewerHTML, `"`+kind+`"`) {
+			t.Errorf("edge kind %q is encoded but the viewer's KINDS list does not mention it", kind)
+		}
 	}
 }

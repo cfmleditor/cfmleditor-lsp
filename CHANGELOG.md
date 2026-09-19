@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Route edges were drawn as calls in the HTML report.** The compact encoder maps each edge kind to its index in a list, and `route` was missing from that list — so its index came back `-1` and the viewer decoded it as the first kind instead. Nothing failed: the picture simply said `calls` where the map held `route`, which is the one distinction the route work exists to keep. The viewer also offered no filter for them. `TestEveryEdgeKindIsEncodable` now checks every kind round-trips and that the viewer offers a filter for each.
+
 ### Added
 
 - **Framework routes (`routes` in `.cfmleditor.json`)** — convention-based routing is invisible to static analysis. A dispatcher reads a dotted route out of a URL or an HTML attribute, builds a component path and a method name from it and invokes them; nothing in the source names either, so every routed controller method looks uncalled and every view unreferenced. On one real workspace, teaching the LSP the convention revealed **542 controller methods reached only by a route** — every one of them a false positive in the unreferenced list before.
