@@ -20,6 +20,7 @@ type Symbol struct {
 	Component string `json:"component,omitempty"`
 	Entry     bool   `json:"entry,omitempty"`
 	Reachable bool   `json:"reachable"`
+	Utility   bool   `json:"utility,omitempty"`
 	Island    int    `json:"island"`
 	InDegree  int    `json:"inDegree"`
 	OutDegree int    `json:"outDegree"`

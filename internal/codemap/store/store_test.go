@@ -269,3 +269,41 @@ func TestStatsSurviveTheRoundTrip(t *testing.T) {
 		t.Errorf("stats came back as %+v", stats)
 	}
 }
+
+// TestUtilityReachesTheStore. The store is the queryable artifact, and the
+// question a utility marking exists for — rank what everything depends on, with
+// the infrastructure separable — is a SQL query. A flag the map carries and the
+// store drops makes that query impossible to write and says nothing about why.
+func TestUtilityReachesTheStore(t *testing.T) {
+	s := open(t)
+
+	m := sample()
+	for i := range m.Nodes {
+		if m.Nodes[i].ID == "svc/user.cfc::getuser" {
+			m.Nodes[i].Utility = true
+		}
+	}
+
+	if err := s.Save(m); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	found, err := s.SearchSymbols(store.SearchOptions{Query: "getUser"})
+	if err != nil {
+		t.Fatalf("SearchSymbols: %v", err)
+	}
+
+	if len(found) != 1 || !found[0].Utility {
+		t.Fatalf("the utility flag did not survive the round trip: %+v", found)
+	}
+
+	// And it has to be queryable, not merely stored.
+	var n int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM nodes WHERE utility = 1`).Scan(&n); err != nil {
+		t.Fatalf("querying the utility column: %v", err)
+	}
+
+	if n != 1 {
+		t.Errorf("SELECT ... WHERE utility = 1 found %d rows, want 1", n)
+	}
+}

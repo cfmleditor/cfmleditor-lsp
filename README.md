@@ -280,6 +280,26 @@ drop the project's own settings. `--hide-utility` sets the toggle's starting
 position; the nodes are in the page either way, so a reader can always switch
 them back on and see what was set aside.
 
+The store carries the marking, so the ranking is a query:
+
+```sql
+-- the most-depended-on application code, infrastructure set aside
+SELECT id, in_degree FROM nodes
+WHERE kind = 'function' AND utility = 0
+ORDER BY in_degree DESC LIMIT 20;
+
+-- whether a file is infrastructure, by how concentrated its fan-in is:
+-- utility has few functions each called by many, application code the reverse
+SELECT file, SUM(in_degree) AS fan_in, COUNT(*) AS fns,
+       CAST(SUM(in_degree) AS REAL) / COUNT(*) AS per_fn, MAX(utility)
+FROM nodes WHERE kind = 'function' GROUP BY file ORDER BY per_fn DESC;
+```
+
+That second query is how to choose the list in the first place. Total fan-in does
+not discriminate — a large application component accumulates plenty — but
+concentration does: on one workspace the infrastructure sat at 9 to 75 incoming
+dependencies per function while application code sat below 2.
+
 Collapsing treats a package as utility only when all of it is — one utility file
 among twenty application ones is not something a reader can set aside.
 
