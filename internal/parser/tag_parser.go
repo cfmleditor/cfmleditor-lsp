@@ -21,7 +21,7 @@ type tagParser struct {
 	properties          []propertyDef
 	extends             string
 	persistent          bool
-	lineIndex           []int // byte offset of each line start
+	lineIndex           []int32 // byte offset of each line start
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
@@ -65,7 +65,7 @@ func (p *tagParser) lineAt(offset int) int {
 	lo, hi := 0, len(p.lineIndex)
 	for lo < hi {
 		mid := (lo + hi) / 2
-		if p.lineIndex[mid] <= offset {
+		if int(p.lineIndex[mid]) <= offset {
 			lo = mid + 1
 		} else {
 			hi = mid

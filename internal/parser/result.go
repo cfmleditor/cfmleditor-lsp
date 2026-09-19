@@ -49,6 +49,11 @@ type ParseResult struct {
 	scanAllScopes            bool     // scan all lines including function bodies
 	shallow                  bool     // minimal parse mode
 
+	// contentLineIdx is the line index ClassifyRegions built over Content on its
+	// way to the regions, kept so extractSignatures does not build a second one
+	// over the same string. nil for a script file, which never needs it.
+	contentLineIdx []int32
+
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
 	globalVars    []string
@@ -106,7 +111,7 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 	}
 
 	start := time.Now()
-	pr.Regions = ClassifyRegions(content)
+	pr.Regions, pr.contentLineIdx = ClassifyRegionsIdx(content)
 	pr.extractSignatures()
 	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
@@ -138,7 +143,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 	}
 
 	start := time.Now()
-	pr.Regions = ClassifyRegions(content)
+	pr.Regions, pr.contentLineIdx = ClassifyRegionsIdx(content)
 	pr.extractSignatures()
 	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
@@ -168,7 +173,7 @@ func (pr *ParseResult) extractSignatures() {
 	for _, r := range pr.Regions {
 		if r.Kind == RegionTag {
 			hasTagRegion = true
-			tagScopes = findTagFuncScopes(pr.Content, 0)
+			tagScopes = findTagFuncScopesIdx(pr.Content, 0, pr.contentLineIdx)
 
 			break
 		}
