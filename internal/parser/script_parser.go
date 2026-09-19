@@ -430,8 +430,8 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 	prevIdent := ""
 	lastIdent := rhs.Value
 
-	var fullChain strings.Builder
-	fullChain.WriteString(rhs.Value)
+	var fullChain chainBuilder
+	fullChain.reset(rhs.Value)
 
 chainWalk:
 	for {
@@ -447,7 +447,7 @@ chainWalk:
 				return
 			}
 
-			fullChain.WriteString("[]")
+			fullChain.writeString("[]")
 		case TokDot:
 			p.sc.NextSkipComments() // consume .
 
@@ -458,8 +458,8 @@ chainWalk:
 				prevIdent = lastIdent
 				lastIdent = next.Value
 
-				fullChain.WriteByte('.')
-				fullChain.WriteString(next.Value)
+				fullChain.writeDot()
+				fullChain.writeString(next.Value)
 			} else {
 				break chainWalk
 			}
@@ -537,10 +537,10 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	if eq.Kind != TokEquals {
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if p.extractCalls && eq.Kind == TokDot {
-			var fullChain strings.Builder
-			fullChain.WriteString(tok.Value)
-			fullChain.WriteByte('.')
-			fullChain.WriteString(nameTok.Value)
+			var fullChain chainBuilder
+			fullChain.reset(tok.Value)
+			fullChain.writeDot()
+			fullChain.writeString(nameTok.Value)
 
 			for p.sc.PeekSkipComments().Kind == TokDot {
 				p.sc.NextSkipComments()
@@ -549,8 +549,8 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 				if next.Kind == TokIdent {
 					p.sc.NextSkipComments()
 
-					fullChain.WriteByte('.')
-					fullChain.WriteString(next.Value)
+					fullChain.writeDot()
+					fullChain.writeString(next.Value)
 				} else {
 					break
 				}
@@ -666,8 +666,8 @@ func (p *scriptParser) parse() {
 				p.parseFunction(tok, "", tok.Value)
 			case peek.Kind == TokDot:
 				// Walk the dot chain — could be dotted return type or bare call
-				var retVal strings.Builder
-				retVal.WriteString(tok.Value)
+				var retVal chainBuilder
+				retVal.reset(tok.Value)
 
 				lastIdent := tok.Value
 				prevIdent := ""
@@ -682,8 +682,8 @@ func (p *scriptParser) parse() {
 						prevIdent = lastIdent
 						lastIdent = seg.Value
 
-						retVal.WriteByte('.')
-						retVal.WriteString(seg.Value)
+						retVal.writeDot()
+						retVal.writeString(seg.Value)
 					} else {
 						break
 					}
@@ -890,8 +890,8 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 
 	retType := p.sc.NextSkipComments()
 
-	var retVal strings.Builder
-	retVal.WriteString(retType.Value)
+	var retVal chainBuilder
+	retVal.reset(retType.Value)
 
 	// Handle dotted return types (e.g. models.User)
 	for p.sc.PeekSkipComments().Kind == TokDot {
@@ -899,8 +899,8 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 
 		seg := p.sc.NextSkipComments()
 		if seg.Kind == TokIdent {
-			retVal.WriteByte('.')
-			retVal.WriteString(seg.Value)
+			retVal.writeDot()
+			retVal.writeString(seg.Value)
 		}
 	}
 
@@ -961,7 +961,7 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 }
 
 func (p *scriptParser) parseArgList() []Argument {
-	var args []Argument
+	args := make([]Argument, 0, 4)
 
 	for {
 		tok := p.sc.NextSkipComments()
@@ -981,7 +981,11 @@ func (p *scriptParser) parseArgList() []Argument {
 
 		var typeName, name string
 
-		idents := []string{tok.Value}
+		// Capacity 3 because the loop below stops there: an argument is at most
+		// `required type name`. Built from a literal of one, it reallocated twice
+		// for every argument of every function in the file.
+		idents := make([]string, 1, 3)
+		idents[0] = tok.Value
 
 	loop:
 		for {
@@ -1274,8 +1278,8 @@ func (p *scriptParser) checkReturnComponent() {
 
 			nextKind := p.sc.PeekSkipComments().Kind
 			if nextKind == TokDot {
-				var fullChain strings.Builder
-				fullChain.WriteString(peek.Value)
+				var fullChain chainBuilder
+				fullChain.reset(peek.Value)
 
 				for p.sc.PeekSkipComments().Kind == TokDot {
 					p.sc.NextSkipComments() // consume .
@@ -1284,8 +1288,8 @@ func (p *scriptParser) checkReturnComponent() {
 					if seg.Kind == TokIdent {
 						p.sc.NextSkipComments()
 
-						fullChain.WriteByte('.')
-						fullChain.WriteString(seg.Value)
+						fullChain.writeDot()
+						fullChain.writeString(seg.Value)
 					} else {
 						break
 					}
@@ -1363,9 +1367,9 @@ func (p *scriptParser) readDottedPath(tok Token) string {
 		return ""
 	}
 
-	var comp strings.Builder
+	var comp chainBuilder
 
-	comp.WriteString(tok.Value)
+	comp.reset(tok.Value)
 
 	for {
 		if p.sc.PeekSkipComments().Kind == TokDot {
@@ -1373,8 +1377,8 @@ func (p *scriptParser) readDottedPath(tok Token) string {
 
 			next := p.sc.NextSkipComments()
 			if next.Kind == TokIdent {
-				comp.WriteByte('.')
-				comp.WriteString(next.Value)
+				comp.writeDot()
+				comp.writeString(next.Value)
 			}
 		} else {
 			break
@@ -1490,8 +1494,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 			prevIdent := ""
 			lastIdent := rhs.Value
 
-			var fullChain strings.Builder
-			fullChain.WriteString(rhs.Value)
+			var fullChain chainBuilder
+			fullChain.reset(rhs.Value)
 
 		chainWalk:
 			for {
@@ -1504,7 +1508,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						return
 					}
 
-					fullChain.WriteString("[]")
+					fullChain.writeString("[]")
 				case TokDot:
 					p.sc.NextSkipComments()
 
@@ -1515,8 +1519,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						prevIdent = lastIdent
 						lastIdent = next.Value
 
-						fullChain.WriteByte('.')
-						fullChain.WriteString(next.Value)
+						fullChain.writeDot()
+						fullChain.writeString(next.Value)
 					} else {
 						break chainWalk
 					}
@@ -1606,10 +1610,10 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	if eq.Kind != TokEquals {
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if p.extractCalls && eq.Kind == TokDot {
-			var fullChain strings.Builder
-			fullChain.WriteString(scopeTok.Value)
-			fullChain.WriteByte('.')
-			fullChain.WriteString(nameTok.Value)
+			var fullChain chainBuilder
+			fullChain.reset(scopeTok.Value)
+			fullChain.writeDot()
+			fullChain.writeString(nameTok.Value)
 
 		chainWalk:
 			for {
@@ -1620,7 +1624,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 						return
 					}
 
-					fullChain.WriteString("[]")
+					fullChain.writeString("[]")
 				case TokDot:
 					p.sc.NextSkipComments()
 
@@ -1628,8 +1632,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 					if next.Kind == TokIdent {
 						p.sc.NextSkipComments()
 
-						fullChain.WriteByte('.')
-						fullChain.WriteString(next.Value)
+						fullChain.writeDot()
+						fullChain.writeString(next.Value)
 					} else {
 						break chainWalk
 					}
@@ -1697,8 +1701,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 				prevIdent := ""
 				lastIdent := rhs.Value
 
-				var fullChain strings.Builder
-				fullChain.WriteString(rhs.Value)
+				var fullChain chainBuilder
+				fullChain.reset(rhs.Value)
 
 			chainWalk2:
 				for {
@@ -1709,7 +1713,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 							return
 						}
 
-						fullChain.WriteString("[]")
+						fullChain.writeString("[]")
 					case TokDot:
 						p.sc.NextSkipComments()
 
@@ -1720,8 +1724,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 							prevIdent = lastIdent
 							lastIdent = next.Value
 
-							fullChain.WriteByte('.')
-							fullChain.WriteString(next.Value)
+							fullChain.writeDot()
+							fullChain.writeString(next.Value)
 						} else {
 							break chainWalk2
 						}
@@ -1938,8 +1942,8 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			prevIdent := ""
 			lastIdent := rhs.Value
 
-			var fullChain strings.Builder
-			fullChain.WriteString(rhs.Value)
+			var fullChain chainBuilder
+			fullChain.reset(rhs.Value)
 
 		chainWalk:
 			for {
@@ -1952,7 +1956,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 						return
 					}
 
-					fullChain.WriteString("[]")
+					fullChain.writeString("[]")
 				case TokDot:
 					p.sc.NextSkipComments() // consume .
 
@@ -1963,8 +1967,8 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 						prevIdent = lastIdent
 						lastIdent = next.Value
 
-						fullChain.WriteByte('.')
-						fullChain.WriteString(next.Value)
+						fullChain.writeDot()
+						fullChain.writeString(next.Value)
 					} else {
 						break chainWalk
 					}
@@ -2646,10 +2650,10 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 
 	p.sc.NextSkipComments() // consume method name
 
-	var extChain strings.Builder
-	extChain.WriteString(chain)
-	extChain.WriteByte('.')
-	extChain.WriteString(next.Value)
+	var extChain chainBuilder
+	extChain.reset(chain)
+	extChain.writeDot()
+	extChain.writeString(next.Value)
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments()
@@ -2661,8 +2665,8 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 
 		p.sc.NextSkipComments()
 
-		extChain.WriteByte('.')
-		extChain.WriteString(n2.Value)
+		extChain.writeDot()
+		extChain.writeString(n2.Value)
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
