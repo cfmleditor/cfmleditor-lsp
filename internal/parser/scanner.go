@@ -60,6 +60,29 @@ type Scanner struct {
 	pos              int
 	line             int
 	LastBlockComment string // most recent /** ... */ or /* ... */ comment value
+
+	// One token of lookahead, filled by PeekSkipComments and consumed by
+	// NextSkipComments. The parsers reach the scanner through those two and
+	// nothing else, and they overwhelmingly peek at a token and then take it:
+	// 105 peek sites against 165 next sites, most of them paired. Without this
+	// the pair tokenises the same bytes twice and skips the same comments and
+	// newlines twice, which made the two of them 57% of a parse.
+	//
+	// peekComment records what the peeked scan did to LastBlockComment rather
+	// than just its value, because a peek's effect on that field has always
+	// outlived the peek — PeekSkipComments restores pos and line and leaves
+	// LastBlockComment set — and parseFunction reads and clears the field
+	// between a peek and the matching next. Replaying the assignment only when
+	// the scan actually made one keeps both orderings answering as before: a
+	// scan that crossed a block comment re-sets the field over the clear, and
+	// one that crossed none leaves whatever the clear left.
+	peeked         bool
+	peekTok        Token
+	peekPos        int
+	peekLine       int
+	peekComment    string
+	peekSetComment bool
+	commentSeq     uint32
 }
 
 // NewScanner creates a scanner for the given source.
@@ -79,13 +102,17 @@ type ScannerState struct {
 	line int
 }
 
-// Save returns the current scanner state for later restoration.
+// Save returns the current scanner state for later restoration. A pending
+// lookahead needs no saving: PeekSkipComments leaves pos and line where they
+// were, so the state recorded here is the one in front of the peeked token.
 func (s *Scanner) Save() ScannerState { return ScannerState{pos: s.pos, line: s.line} }
 
-// Restore resets the scanner to a previously saved state.
-func (s *Scanner) Restore(st ScannerState) { s.pos = st.pos; s.line = st.line }
+// Restore resets the scanner to a previously saved state, dropping any cached
+// lookahead — it describes a position this may be moving away from.
+func (s *Scanner) Restore(st ScannerState) { s.pos = st.pos; s.line = st.line; s.peeked = false }
 
-// Peek returns the next token without advancing.
+// Peek returns the next raw token, comments and newlines included, without
+// advancing.
 func (s *Scanner) Peek() Token {
 	pos, line := s.pos, s.line
 	tok := s.Next()
@@ -94,8 +121,19 @@ func (s *Scanner) Peek() Token {
 	return tok
 }
 
-// Next returns the next token and advances the scanner.
+// Next returns the next raw token and advances the scanner. It discards any
+// token PeekSkipComments has cached: that token is the next token past the
+// comments, which is not what this returns, and advancing past it here would
+// leave the cached position describing bytes already consumed.
 func (s *Scanner) Next() Token {
+	s.peeked = false
+
+	return s.next()
+}
+
+// next is Next without the cache bookkeeping, for the callers inside this file
+// that drive the cache themselves.
+func (s *Scanner) next() Token {
 	s.skipWhitespaceNoNewline()
 
 	if s.pos >= len(s.src) {
@@ -161,13 +199,33 @@ var singleByteStrings = func() [256]string {
 	return table
 }()
 
-// NextSkipComments returns the next non-comment, non-newline token.
+// NextSkipComments returns the next non-comment, non-newline token, taking the
+// one PeekSkipComments already scanned when there is one.
+//
+// The scanning loop is written out here rather than shared with
+// PeekSkipComments through a helper that also reports what it did to
+// LastBlockComment. That helper cost more than the cache saved on this path:
+// skipPastScope takes tokens without ever peeking, so it always misses, and
+// handing back a Token plus a string and a bool copied 64 bytes through an
+// extra frame for every token in every function body the parser skips.
 func (s *Scanner) NextSkipComments() Token {
+	if s.peeked {
+		s.peeked = false
+		s.pos, s.line = s.peekPos, s.peekLine
+
+		if s.peekSetComment {
+			s.LastBlockComment = s.peekComment
+		}
+
+		return s.peekTok
+	}
+
 	for {
-		tok := s.Next()
+		tok := s.next()
 		switch tok.Kind { //nolint:exhaustive
 		case TokBlockComment:
 			s.LastBlockComment = tok.Value
+			s.commentSeq++
 
 			continue
 		case TokCFComment, TokLineComment, TokNewline:
@@ -178,10 +236,24 @@ func (s *Scanner) NextSkipComments() Token {
 	}
 }
 
-// PeekSkipComments peeks at the next non-comment, non-newline token.
+// PeekSkipComments peeks at the next non-comment, non-newline token, caching it
+// so the matching NextSkipComments does not scan the same bytes again.
 func (s *Scanner) PeekSkipComments() Token {
+	if s.peeked {
+		return s.peekTok
+	}
+
 	pos, line := s.pos, s.line
+	seq := s.commentSeq
 	tok := s.NextSkipComments()
+
+	s.peekTok, s.peekPos, s.peekLine = tok, s.pos, s.line
+	// Whether the scan assigned LastBlockComment, not whether the value came
+	// out different: two identical block comments in a row would look like no
+	// assignment at all, and the replay below would then let an intervening
+	// clear stand where the old re-scan overwrote it.
+	s.peekComment, s.peekSetComment = s.LastBlockComment, s.commentSeq != seq
+	s.peeked = true
 	s.pos, s.line = pos, line
 
 	return tok
