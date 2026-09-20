@@ -3,8 +3,8 @@
 Three costs found while profiling the per-keystroke paths for
 [#101](https://github.com/cfmleditor/cfmleditor-lsp/pull/101), none of them
 acted on. Two change what a client receives and so are not tune-ups; the third
-is not worth what it costs to write. Sections 2 and 4 are settled decisions;
-section 3 is the one still open.
+is not worth what it costs to write. Section 4 is settled; sections 2 and 3 are
+deferred, and section 2 records what a reader should know before picking it up.
 
 This file exists so they are not rediscovered from scratch, and so the reasons
 are on record rather than remembered. Every number below is measured, and the
@@ -58,12 +58,16 @@ shape is what carries over, not the multiplier: matching is a case-folded
 *substring* test over every distinct name, so short queries match a large share
 of a real workspace too, and short queries are the ones always sent.
 
-## 2. `workspace/symbol` sends the whole match set — capping it was declined
+## 2. `workspace/symbol` sends the whole match set — deferred
 
-**This is the largest cost on this page by an order of magnitude, and the
-decision is not to fix it by capping.** The measurements below are kept in
-full because the cost is real and has not gone anywhere; what follows them is
-why paying it is the better trade for now, and what would reopen it.
+**This is the largest cost on this page by an order of magnitude, and it is
+not being worked on: other things come first.** That is the whole of the
+reason, and it is worth stating plainly rather than dressing as a technical
+judgement — nothing below argues the cap is wrong, only what a reader should
+know before picking it up.
+
+The measurements are kept in full because the cost is real and has not gone
+anywhere.
 
 `handleWorkspaceSymbol` (`internal/server/symbol.go`) turns every matching
 definition into a `protocol.SymbolInformation` and returns all of them. The
@@ -118,36 +122,40 @@ handler, but it composes with (a) and it costs the user nothing.
 until the query is worth answering. Cheap, but it makes the picker feel broken
 rather than fast.
 
-### The decision: none of them, for now
+### What to know before picking this up
 
-A cap is the only option that touches the real cost, and it buys latency in a
-feature whose entire job is *finding things* by making some things unfindable.
-That is not a trade a performance number settles — a symbol search that is fast
-and silently incomplete is worse than one that is slow, because the user cannot
-tell the difference between "no such symbol" and "past the cut". Ranking makes
-the survivors the plausible ones rather than the arbitrary ones, but it does not
-change that a match the user wanted can be absent, and it cannot, because
-ranking is a guess about intent.
+The cost is real, the fix is known, and it is a priority call rather than a
+technical one. Three things about the shape of it, so whoever gets to it is not
+starting from the top:
 
-Two things make paying the cost tolerable meanwhile:
-
+- **A cap is the only option that touches the real cost, and it is not free.**
+  It buys latency in a feature whose entire job is *finding things*, by making
+  some things unfindable — and a symbol search that is fast and silently
+  incomplete is a harder failure to notice than one that is slow, because the
+  user cannot tell "no such symbol" from "past the cut". Ranking before the cut
+  makes the survivors plausible rather than arbitrary, which is the difference
+  between a defensible cap and a careless one, but it does not make the cut
+  lossless. That is what makes the default a judgement rather than a constant:
+  gopls settled on 100, rust-analyzer on 128, and the repo's convention would
+  be a documented default with a config key over it.
 - **The headline number is synthetic.** Every definition in the bench index is
   named `method0`–`method7`, so the query `m` matches all 40,000 and the 26ms
-  is a worst case constructed to be one. A real workspace has varied names; the
-  shape carries over (substring matching over every distinct name, short
-  queries matching a large share) but the multiplier does not, and nobody has
-  measured it on a real one.
-- **The picker is used deliberately, not continuously.** It is a per-keystroke
-  cost inside a burst the user has chosen to start, unlike the parse and index
-  paths, which run while they are simply typing code. A slow symbol search is
-  felt once per search; a slow keystroke path is felt always.
+  is a worst case built to be one. A real workspace has varied names; the shape
+  carries over (case-folded substring matching over every distinct name, so
+  short queries match a large share) but the multiplier does not, and nobody
+  has measured a real one. Measuring that first would say how urgent this
+  actually is, and is much cheaper than building the cap.
+- **The picker is used deliberately, not continuously**, which is the main
+  reason this can wait while the parse and index paths could not. It is a
+  per-keystroke cost inside a burst the user chose to start; those run while
+  someone is simply typing code. A slow symbol search is felt once per search.
 
 Option (b) — the LSP 3.17 `WorkspaceSymbol` with a URI-only location — is the
-one that costs a user nothing, and it remains available. It is not done here
-because on its own it halves a number that needs an order of magnitude, and it
-wants a client that advertises `workspace.symbol.resolveSupport` to be worth
-building. If this is revisited, it is the piece to build first, since it is
-the only one with no downside.
+one piece with no downside to the user, and is the place to start if this is
+picked up: it drops the range from every entry with no result lost. On its own
+it halves a number that needs an order of magnitude, and it wants a client
+advertising `workspace.symbol.resolveSupport` to be worth the handler, which
+is why it is not a fix by itself.
 
 ## 3. Completion sends documentation and detail for every item
 
@@ -224,11 +232,11 @@ not to make the scan 18% faster.
 
 ## 5. What would change these decisions
 
-- **Section 2** — a measurement on a *real* workspace showing what a one- or
-  two-character query actually matches there, or a report of the symbol picker
-  being felt as slow. Either turns the synthetic worst case into a real one and
-  changes the trade. A client advertising `workspace.symbol.resolveSupport`
-  also reopens it, for option (b) alone, which costs the user nothing.
+- **Section 2** — room to do it. It is deferred on priority, not on evidence,
+  so nothing has to happen first. What would move it up the list: a report of
+  the symbol picker being felt as slow, or a measurement on a real workspace
+  showing what a one- or two-character query matches there — the cheap step
+  that would say whether the synthetic 26ms is anywhere near the real one.
 - **Section 3** — a client in use that advertises `resolveSupport`, or a
   workspace where completion latency is being felt. The saving is known and
   large; only the build cost is holding it.
