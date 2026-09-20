@@ -137,10 +137,9 @@ func TestBraceStyleIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestBraceStyleLeavesABareBlockAlone covers Lucee's one-word `elseif`, as
-// spelled in its own Query.cfc. The grammar has no such keyword, so it reads
-// `elseif ( … )` as an ordinary call and the block that follows is left
-// standing as a statement of its own, attached to nothing.
+// TestBraceStyleLeavesABareBlockAlone covers a `{ … }` the grammar could not
+// attach to anything — a block standing as a statement of its own, with no
+// header above it.
 //
 // braceStyle must not reach a block like that: "next-line" means "under the
 // header", and there is no header. Moving it anyway made formatting
@@ -149,7 +148,7 @@ func TestBraceStyleIsIdempotent(t *testing.T) {
 func TestBraceStyleLeavesABareBlockAlone(t *testing.T) {
 	t.Parallel()
 
-	src := "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tif ( a )\n\t\t{\n\t\t\tx();\n\t\t}\n\t\t// why\n\t\telseif ( b )\n\t\t{\n\t\t\ty();\n\t\t}\n\t}\n}\n</cfscript>\n"
+	src := "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tif ( a )\n\t\t{\n\t\t\tx();\n\t\t}\n\t\t// why\n\t\t{\n\t\t\ty();\n\t\t}\n\t}\n}\n</cfscript>\n"
 
 	for _, style := range []string{"", "next-line"} {
 		once := formatWithBraces(t, src, style)
