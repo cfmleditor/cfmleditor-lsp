@@ -481,12 +481,16 @@ func (s *Server) findUnclosedTagsScoped(content string, docURI uri.URI, line, ch
 // duplicateGtCompletion offers to remove a duplicate '>' when the user types
 // '>' immediately after an existing tag-closing '>'.
 func duplicateGtCompletion(content string, line, char int) (protocol.CompletionItem, bool) {
-	lines := strings.SplitAfter(content, "\n")
-	if line >= len(lines) || char < 2 {
+	if char < 2 {
 		return protocol.CompletionItem{}, false
 	}
 
-	lineText := lines[line]
+	// One line, taken directly. Splitting the document to read a single row of
+	// it costs a string header per line — 516KB on a 32,000-line component, on
+	// a path that runs every time a '>' is typed, alongside two more doing the
+	// same thing. A line past the end comes back empty, which the length guard
+	// below rejects as it would an empty line.
+	lineText := parser.LineTextAt(content, line)
 	if char > len(lineText) || lineText[char-2] != '>' {
 		return protocol.CompletionItem{}, false
 	}
@@ -525,12 +529,8 @@ func duplicateGtCompletion(content string, line, char int) (protocol.CompletionI
 // with non-whitespace content between the typed '>' and the tag's existing '>'.
 // The completion moves the content before the '>' and removes the duplicate.
 func closeTagCompletion(content string, line, char int) (protocol.CompletionItem, bool) {
-	lines := strings.SplitAfter(content, "\n")
-	if line >= len(lines) {
-		return protocol.CompletionItem{}, false
-	}
-
-	lineText := lines[line]
+	// One line, for the reason duplicateGtCompletion gives.
+	lineText := parser.LineTextAt(content, line)
 	if char >= len(lineText) {
 		return protocol.CompletionItem{}, false
 	}
