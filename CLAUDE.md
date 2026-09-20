@@ -1051,6 +1051,17 @@ for the life of the index, and the tests say so rather than claiming otherwise.
 file's entries sit at the front of every bucket, where a search finds them at
 once, so a sweep and a search look alike on it.
 
+**A handler benchmark is not a request.** For the two responses that carry a
+lot of items, encoding the answer dwarfs computing it: `workspace/symbol` on a
+5,000-file index is 0.24ms of handler against 3.02ms of marshal, and completion
+is 0.002ms against 0.63ms. So a saving inside either handler is rounding error,
+and the only thing that makes them cheaper is sending fewer bytes.
+`BenchmarkWorkspaceSymbolWithMarshal` and `BenchmarkCompletionWithMarshal`
+measure them end to end; the handler-only benchmarks beside them are for
+changes to the handler, not for what the request costs. `PERFORMANCE-GAPS.md`
+records the three costs measured this way and not acted on, with what each
+option would save and what it would cost the user.
+
 **Benchmarks in one process contaminate each other, so isolate before believing
 a regression.** A run of the whole benchmark set here reported `ScopesToFuncRanges`
 69% slower, `documentSymbol` 29%, `workspace/symbol` 27% and `Keystroke` 21%
