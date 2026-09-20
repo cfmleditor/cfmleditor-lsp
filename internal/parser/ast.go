@@ -78,7 +78,11 @@ var readOnlyScopePrefixes = map[string]Scope{
 // one at all. It covers every scope, not only the read-only ones, so a caller
 // reading a qualifier from source has one answer to consult.
 func ScopeForPrefix(name string) (Scope, bool) {
-	switch strings.ToLower(name) {
+	var buf foldScratch
+
+	lowered := buf.lowerFold(name)
+
+	switch string(lowered) {
 	case "local", "var":
 		return ScopeLocal, true
 	case "arguments":
@@ -89,7 +93,7 @@ func ScopeForPrefix(name string) (Scope, bool) {
 		return ScopeVariables, true
 	}
 
-	sc, ok := readOnlyScopePrefixes[strings.ToLower(name)]
+	sc, ok := readOnlyScopePrefixes[string(lowered)]
 
 	return sc, ok
 }
