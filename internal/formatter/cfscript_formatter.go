@@ -667,6 +667,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
 		cmts := f.delimitedComments(n)
+		gapLifted := false
 
 		if op == "" {
 			// gapOperator lifts the raw source between the operands, so
@@ -674,9 +675,26 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			// carried across. Adding them again would emit them twice.
 			op = f.gapOperator(n, left, right)
 			cmts = ""
+			gapLifted = true
 		}
 
-		return fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
+		joined := fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
+
+		// A `//` comment between the operands is neither the left nor the
+		// right field, and delimitedComments deliberately refuses to re-emit
+		// one inline: it runs to end of line, so putting it back between the
+		// operator and the right operand comments the rest of the expression
+		// out. Dropping it was left to the guard — which is what rejected
+		// ColdBox's Router.cfc, where `) & // multi-host` lost its comment
+		// outright. Reproduce the expression as written instead, the same
+		// fallback ternary_expression takes for a comment parked before its
+		// `:`. Skipped when gapOperator already lifted the gap verbatim, since
+		// then nothing was dropped and the source text is what was emitted.
+		if !gapLifted && !f.keptLineComments(n, joined) {
+			return f.text(n)
+		}
+
+		return joined
 
 	case "unary_expression":
 		op := n.ChildByFieldName("operator")
@@ -2699,89 +2717,105 @@ func (f *Formatter) scriptContinue(n *sitter.Node) {
 
 // scriptIf renders if / else if / else chains.
 func (f *Formatter) scriptIf(n *sitter.Node) {
-	cond := n.ChildByFieldName("condition")
-	cons := n.ChildByFieldName("consequence")
-	alt := n.ChildByFieldName("alternative")
-
-	f.iLine(fmt.Sprintf("if %s", f.parenExpr(cond)))
-	f.deferBlockComments(n, cond, cons)
-	f.scriptBlockOf2(cons)
-
-	if alt != nil {
-		lead := f.elseLead(n, cons, alt)
-
-		switch alt.Kind() {
-		case "else_clause":
-			// else if or else
-			inner := f.elseBody(alt)
-			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(lead + " ")
-				// Re-use scriptIf but write inline (no leading newline/indent).
-				f.scriptIfInline(inner)
-			} else {
-				f.scriptWrite(lead)
-				f.scriptBlockOf2(inner)
-			}
-		case "if_statement":
-			f.scriptWrite(lead + " ")
-			f.scriptIfInline(alt)
-		default:
-			f.scriptWrite(lead)
-			f.scriptBlockOf2(alt)
-		}
-	}
-
+	f.iLine("if ")
+	f.scriptIfTail(n)
 	f.scriptWrite("\n")
-}
-
-// elseLead emits any comments sitting between the consequence and the
-// alternative, and returns the text to introduce the `else` with: attached to
-// the closing brace normally, or starting a fresh line once a comment has
-// been written between them, or under braceStyle "next-line" (attachedKeyword).
-func (f *Formatter) elseLead(n, cons, alt *sitter.Node) string {
-	if cons == nil || alt == nil {
-		return f.attachedKeyword("else")
-	}
-
-	if !f.writeInterveningComments(n, cons.EndByte(), alt.StartByte()) {
-		return f.attachedKeyword("else")
-	}
-
-	f.scriptWrite("\n")
-	f.writeIndent()
-
-	return "else"
 }
 
 // scriptIfInline is like scriptIf but does not prefix a newline+indent
 // (used for `else if` continuation on the same line).
 func (f *Formatter) scriptIfInline(n *sitter.Node) {
+	f.scriptWrite("if ")
+	f.scriptIfTail(n)
+}
+
+// scriptIfTail renders everything after the introducing keyword: the
+// condition, the body, and whatever alternative follows. It is shared by
+// `if_statement` and by Lucee's `else_if_clause`, which the grammar gives the
+// same three fields; the two used to be walked by a pair of near-identical
+// copies of this code, and the copies had already drifted — only one of them
+// handled an alternative that was a bare `if_statement`.
+func (f *Formatter) scriptIfTail(n *sitter.Node) {
 	cond := n.ChildByFieldName("condition")
 	cons := n.ChildByFieldName("consequence")
 	alt := n.ChildByFieldName("alternative")
 
-	f.scriptWrite(fmt.Sprintf("if %s", f.parenExpr(cond)))
+	f.scriptWrite(f.parenExpr(cond))
 	f.deferBlockComments(n, cond, cons)
 	f.scriptBlockOf2(cons)
 
 	if alt != nil {
-		lead := f.elseLead(n, cons, alt)
-
-		switch alt.Kind() {
-		case "else_clause":
-			inner := f.elseBody(alt)
-			if inner != nil && inner.Kind() == "if_statement" {
-				f.scriptWrite(lead + " ")
-				f.scriptIfInline(inner)
-			} else {
-				f.scriptWrite(lead)
-				f.scriptBlockOf2(inner)
-			}
-		default:
-			f.scriptWrite(lead)
-			f.scriptBlockOf2(alt)
-		}
+		f.scriptElseChain(n, cons, alt)
 	}
+}
+
+// scriptElseChain renders a conditional's alternative: the keyword that
+// introduces it, whatever follows, and any further alternatives beyond that.
+func (f *Formatter) scriptElseChain(n, cons, alt *sitter.Node) {
+	lead := f.elseLead(n, cons, alt, elseKeyword(alt))
+
+	switch alt.Kind() {
+	// Lucee's one-word `elseif`, which the grammar reads as a clause of its
+	// own with an if_statement's fields rather than as an `else_clause`
+	// wrapping one — there is no `else` token for that wrapper to match. It
+	// is emitted as written: rewriting it to `else if` is a change no setting
+	// asked for, and the reverse would break ACF, which has no such keyword.
+	//
+	// Before the grammar grew the clause this fell through to the default
+	// arm, which wrote `else` and then rendered the whole `elseif ( b ) { … }`
+	// as the statement inside it — the condition and its keyword emitted as
+	// code in the body.
+	case "else_if_clause":
+		f.scriptWrite(lead + " ")
+		f.scriptIfTail(alt)
+	case "else_clause":
+		inner := f.elseBody(alt)
+		if inner != nil && inner.Kind() == "if_statement" {
+			f.scriptWrite(lead + " ")
+			f.scriptIfInline(inner)
+
+			return
+		}
+
+		f.scriptWrite(lead)
+		f.scriptBlockOf2(inner)
+	case "if_statement":
+		f.scriptWrite(lead + " ")
+		f.scriptIfInline(alt)
+	default:
+		f.scriptWrite(lead)
+		f.scriptBlockOf2(alt)
+	}
+}
+
+// elseKeyword is the word that introduces alt. Only Lucee's one-word clause
+// spells it anything but `else`; an `else if` is an `else_clause` holding an
+// if_statement, so its `if` is written by that statement rather than here.
+func elseKeyword(alt *sitter.Node) string {
+	if alt != nil && alt.Kind() == "else_if_clause" {
+		return "elseif"
+	}
+
+	return "else"
+}
+
+// elseLead emits any comments sitting between the consequence and the
+// alternative, and returns the text to introduce keyword with: attached to
+// the closing brace normally, or starting a fresh line once a comment has
+// been written between them, or under braceStyle "next-line" (attachedKeyword).
+func (f *Formatter) elseLead(n, cons, alt *sitter.Node, keyword string) string {
+	if cons == nil || alt == nil {
+		return f.attachedKeyword(keyword)
+	}
+
+	if !f.writeInterveningComments(n, cons.EndByte(), alt.StartByte()) {
+		return f.attachedKeyword(keyword)
+	}
+
+	f.scriptWrite("\n")
+	f.writeIndent()
+
+	return keyword
 }
 
 // scriptBlockOf2 renders a statement as a braced block attached to the

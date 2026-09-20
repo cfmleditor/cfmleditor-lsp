@@ -36,10 +36,10 @@ cleanly were then formatted a second time to check idempotency.
 | | Before | After the audit | Current |
 |---|---|---|---|
 | Formatted cleanly | 3,863 | 5,450 | **5,563** |
-| Rejected by the guard | 1,671 | 84 | **2** |
-| Refused: grammar cannot parse | 86 | 86 | **54** |
-| Not idempotent | 390 † | 36 | **2** |
-| Malformed output | — † | — † | **0** |
+| Rejected by the guard | 1,671 | 84 | **0** |
+| Refused: grammar cannot parse | 86 | 86 | **50** |
+| Not idempotent | 390 † | 36 | **0** |
+| Malformed output | — † | — † | **1** |
 | Panics | 0 | 0 | **0** |
 
 The malformed row has no earlier figure because the check that produces it did
@@ -52,8 +52,8 @@ check. Comparing like for like, the same 5,450 files went from 390 unstable to
 36.
 
 The "current" column is what `make corpus` prints today (section 5), against the
-same six projects at their current HEAD. It counts the grammar's 54 refusals in
-two buckets rather than one — 22 documents the CFML grammar cannot parse, and 32
+same six projects at their current HEAD. It counts the grammar's 50 refusals in
+two buckets rather than one — 23 documents the CFML grammar cannot parse, and 27
 that parse as documents but whose embedded cfscript or cfquery the sub-grammar
 cannot — because the two are different work and the second is invisible from the
 outside: the document parses, the formatter runs, and whatever it renders for
@@ -68,16 +68,28 @@ grammar and upstream changes alone. The v0.26.35 bump then took script-refused t
 32 — and moved five of those files into the formatter's own defect columns, since
 a construct the grammar starts parsing is one the formatter starts rendering.
 
+The v0.26.36 bump took it to 27, and cost one formatter defect for the same
+reason: Lucee's one-word `elseif` became a clause of its own, the formatter did
+not know it, and `org/lucee/cfml/Query.cfc` — clean on v0.26.35 — came back
+guard-rejected. That is fixed in 3.8. Net across the bump, six files moved to
+clean and the not-idempotent column emptied; the two files in 4.2 both left it,
+one to clean and one to the malformed column it had been masking.
+
+Running the corpus for that fix is what reduced the last guard rejection, which
+had been sitting unreduced in 4.1 — a defect older than either grammar bump. It
+is fixed in 3.9, and the guard-rejected column is now **0**.
+
 Per project, current:
 
-| Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Skipped |
-|---|---|---|---|---|---|---|---|
-| Lucee | 3,776 | 3,721 | 20 | 30 | 1 | 1 | 3 |
-| ContentBox | 724 | 720 | 2 | 1 | 0 | 1 | 0 |
-| ColdBox | 657 | 655 | 0 | 1 | 1 | 0 | 0 |
-| FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 |
-| TestBox | 146 | 146 | 0 | 0 | 0 | 0 | 0 |
-| cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 | 0 |
+| Project | Files | Clean | Parse-refused | Script-refused | Guard-rejected | Unstable | Malformed | Skipped |
+|---|---|---|---|---|---|---|---|---|
+| Lucee | 3,775 | 3,725 | 21 | 25 | 0 | 0 | 1 | 3 |
+| ContentBox | 724 | 721 | 2 | 1 | 0 | 0 | 0 | 0 |
+| ColdBox | 652 | 651 | 0 | 1 | 0 | 0 | 0 | 0 |
+| FW/1 | 305 | 305 | 0 | 0 | 0 | 0 | 0 | 0 |
+| TestBox | 145 | 145 | 0 | 0 | 0 | 0 | 0 | 0 |
+| cfmleditor | 16 | 16 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **TOTAL** | **5,617** | **5,563** | **23** | **27** | **0** | **0** | **1** | **3** |
 
 The repository's own `testdata/` went from 30/39 clean to 38/39, the last being
 `DefinitionTestTag.cfc`, which the grammar cannot parse (see 2.1).
@@ -545,10 +557,93 @@ formatting real elements whenever a `//` appears in adjacent prose:
 over-reach for the common case in order to serve the rare one, so it is left
 undone deliberately rather than overlooked.
 
-The file therefore stays on the not-idempotent list. What changed is the
+The file therefore stayed on the not-idempotent list. What changed is the
 severity: it is no longer a file the formatter destroys, but one it leaves three
-comments wrong in.
+comments wrong in. On v0.26.36 the grammar reads the residue and the file leaves
+that list for the malformed one — see 4.2, which is where the reflow it was
+masking is now counted.
 
+
+### 3.8 Lucee's one-word `elseif`
+
+`if ( a ) { … } elseif ( b ) { … }` is Lucee's spelling, used in its own
+`org/lucee/cfml/Query.cfc`. tree-sitter-cfml v0.26.36 started parsing it, as
+`else_if_clause` — a clause carrying an if_statement's
+`condition`/`consequence`/`alternative` rather than an `else_clause` wrapping an
+if_statement, because there is no `else` token for that wrapper to match.
+
+The formatter knew the two shapes that existed before and fell through to its
+arm for "some statement after `else`". So it wrote `else`, opened a block, and
+rendered the whole clause *inside* it — keyword, condition and all, as code in
+the body:
+
+```cfml
+}
+// why
+else {
+    elseif ( b )
+    {
+    y();
+    }
+}
+```
+
+That is a non-whitespace change, so the guard caught it and `Query.cfc` came
+back guard-rejected rather than corrupted — a file that was clean on v0.26.35.
+It is the standing pattern this file records twice already: a construct the
+grammar starts parsing is one the formatter starts rendering, and the arm it
+lands in until someone writes its own is whichever `default` is nearest.
+
+**The word is emitted as written rather than expanded to `else if`.** Both pass
+the guard, which skips whitespace, so the choice is not forced by it: expanding
+is a rewrite no setting asked for, and contracting would break ACF, which has no
+such keyword.
+
+Fixing it also merged `scriptIf` and `scriptIfInline`, which were near-identical
+copies of the same walk and had already drifted — only one of them handled an
+alternative that was a bare `if_statement`. The condition/body/alternative tail
+is now written once (`scriptIfTail`), and the chain of alternatives once
+(`scriptElseChain`), so a clause added by a future grammar bump has one place to
+be taught rather than two.
+
+### 3.9 A `//` comment between two operands of a binary expression
+
+The last guard rejection in the corpus, and older than the two grammar bumps
+above it. ColdBox's `Router.cfc` labels each piece of the URL it composes:
+
+```cfml
+return (
+    // Protocol
+    …isSSL() ? "https://" : "http://"
+) &
+(
+    …headers[ "x-forwarded-host" ] : CGI.HTTP_HOST
+) & // multi-host
+composeRoutingPath(); // Routing Path
+```
+
+`// multi-host` came out **deleted**. It is neither the `left` nor the `right`
+field of the `binary_expression` holding it, and `delimitedComments` — which
+re-emits a `/* … */` found in that gap — deliberately refuses to re-emit a line
+comment, because one runs to end of line and would comment out everything after
+it. Its comment said the loss was "left to the guard", and the guard did reject
+the file, so nothing was written.
+
+That is the same root cause as the `&&` condition case (`comment_join_test.go`)
+and the ternary case (3.5), and it takes the same fix: render the expression,
+check the result against the source's own comments with `keptLineComments`, and
+reproduce the node as written when any went missing.
+
+**The check is skipped when `gapOperator` fired.** That path lifts the raw
+source between the operands, comments included, so nothing was dropped and the
+text already *is* the source — running the fallback there would be a second,
+pointless verbatim copy of what had just been copied verbatim.
+
+Closing this emptied the guard-rejected column: **0 of 5,617**, from 1,671 at
+the audit. Worth stating plainly, because the guard is a backstop and not a
+target — an empty column means no file in the corpus is being silently altered
+*in a way this check can see*, which is not the same as none being altered. The
+one malformed file in 4.2 is exactly that distinction.
 
 ## 4. Outstanding
 
@@ -556,10 +651,11 @@ Counts from the current `make corpus` run (section 5).
 
 | Issue | Files | Notes |
 |---|---|---|
-| Grammar cannot parse the document | 22 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. Reduced to constructs in `GRAMMAR-GAPS.md`. |
-| Grammar cannot parse embedded cfscript/cfquery | 32 (see `GRAMMAR-GAPS.md`) | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
-| Guard-rejected, long tail | 2 | Both characterised in 4.1. One is a grammar gap that produces no ERROR node rather than a formatter defect; the other is the last unreduced comment-text case. |
-| Not idempotent | 2 | Both are files whose formatted output the grammar can no longer read, and in both the guard confirmed the output is whitespace-only. `filelisting.cfm` is unharmed, so only a re-format is refused (4.2). `jquery.blockUI.js.cfm` is JavaScript in a `.cfm`; the formatter no longer reflows it as prose (3.7), which took its comments from 4 of 81 intact to 78 of 81, but three whose text the grammar tokenises still have their tails split onto the next line as code. The two whose second pass was refused by the cfscript sub-parser are fixed — both were the comment defects in 3.6. |
+| Grammar cannot parse the document | 23 | Refused safely rather than corrupted. Needs grammar work in `tree-sitter-cfml`, not the formatter. Reduced to constructs in `GRAMMAR-GAPS.md`. |
+| Grammar cannot parse embedded cfscript/cfquery | 27 (see `GRAMMAR-GAPS.md`) | The document parses, so the formatter runs and renders those regions blind. Also grammar work, but the failure mode is worse: some of these files are also guard-rejected, and the rest are formatted from a tree with an `ERROR` node in it. |
+| Guard-rejected, long tail | 0 | **The bucket is empty.** The last two left together: the unquoted-struct attribute now produces an `ERROR` node on v0.26.36 and is refused outright rather than rendered from a wrong parse, and the last comment-text case is fixed in 3.9. |
+| Not idempotent | 0 | Both files that were here left on the v0.26.36 bump (4.2). |
+| Malformed output | 1 | `jquery.blockUI.js.cfm`, the JavaScript-in-a-`.cfm` described in 4.2. It is not a new defect: the file is mangled the way it always was, and the malformed rule is simply the only check still able to say so now that the output settles. |
 | `final abstract component` refused | — | Not a formatter bug, and no longer a silent one. `final component` — the case this row used to describe — now parses and formats normally, as do `FINAL component` and `abstract component`; the grammar bump fixed it (tree-sitter-cfml #77). What is left is *two* modifiers: the document grammar accepts the header, but the cfscript sub-parse of the body errors, so the formatter refuses the file outright. Loud rather than silent, which is the safe direction. Upstream measured widening the rule and declined it. See 6.2. |
 
 Fixed since the audit table above, all found by re-running the harness:
@@ -761,14 +857,17 @@ Fixed since the audit table above, all found by re-running the harness:
   a call's arguments — and the formatter joined them with `", "`, inserting
   commas that were never in the source. 11 files.
 
-### 4.1 The remaining guard rejections, characterised
+### 4.1 The guard rejections, characterised (both now closed)
 
 Reduced the same way section 6 reduces the refusals — the smallest contiguous
 line range that still fails *with the same verdict*, which matters because
 cutting a component in half turns a guard rejection into a parse refusal and
 reads as a much smaller repro than it is.
 
-**One is a grammar gap that produces no ERROR node**, the class 6.2 describes.
+**One was a grammar gap that produced no ERROR node**, the class 6.2 describes.
+On v0.26.36 it produces one, so the file is refused rather than rendered from a
+wrong parse and it has left this list for the parse-refused column. The tree
+below is what it did, and is kept because the shape is the thing worth filing:
 `<cfcomponent output="false" javasettings={ maven: [...] }>` — an unquoted
 struct as a tag attribute — is not parsed as one value. The grammar shreds it
 into a run of bogus attributes and ends the tag with a
@@ -783,34 +882,51 @@ into a run of bogus attributes and ends the tag with a
   (cf_selfclose_void_tag_end))
 ```
 
-The formatter renders that faithfully and the result is garbage —
+The formatter rendered that faithfully and the result was garbage —
 `javasettings="{"` followed by `maven:` and `[` as separate attributes, with the
-array's contents dropped. There is nothing to fix downstream: any reconstruction
-is a reconstruction of a wrong parse. `tree-sitter-cfml` work, and worth filing
-with the tree above, since the bogus self-close marker is the part that makes
-the failure invisible from the outside.
+array's contents dropped. There was nothing to fix downstream: any reconstruction
+is a reconstruction of a wrong parse. The bogus self-close marker was the part
+that made the failure invisible from the outside, and it is what the newer
+grammar stopped emitting.
 `Lucee/test/tickets/LDEV5763/LDEV5763_tag_unquoted_struct.cfc`.
 
-**The remaining two** are single-file causes:
+**The other** was a single-file cause:
 
 | Cause | File |
 |---|---|
-| Grammar gap producing no ERROR node, described above | `LDEV5763_tag_unquoted_struct.cfc` |
-| Comment text, not yet reduced — the last of the bucket 3.5 emptied | `Router.cfc` |
+| Comment text — the last of the bucket 3.5 emptied | `Router.cfc` |
 
-### 4.2 The two files whose output the grammar cannot re-read
+It is reduced and fixed in 3.9, so this bucket is now empty. The refusal above
+is `LDEV5763_tag_unquoted_struct.cfc`, the no-ERROR-node grammar gap; on
+v0.26.36 it errors and is refused, so it is counted with the parse refusals now
+rather than here.
+
+### 4.2 The two files whose output the grammar could not re-read
 
 Counted as **not idempotent**, and worth separating from the rejections: in both
-the guard passed, so the output differs from the source in whitespace only and
-the file itself is unharmed. What fails is the *second* parse — tree-sitter
-cannot read back a file it could read before, so a re-format is refused.
+the guard passed, so the output differed from the source in whitespace only and
+the file itself was unharmed. What failed was the *second* parse — tree-sitter
+could not read back a file it had read before, so a re-format was refused.
 
-`jquery.blockUI.js.cfm` is JavaScript in a `.cfm` and has been on this list
+**Both left this list on the v0.26.36 bump, and the column is now empty.** They
+left it in opposite directions, which is the part worth keeping.
+
+`jquery.blockUI.js.cfm` is JavaScript in a `.cfm` and had been on this list
 since the audit. The second parse failing was always a symptom rather than the
 problem: the cause was the formatter reflowing JavaScript as prose and folding
 code into `//` comments, which the guard cannot see. That is fixed in 3.7, bar a
-residue of three comments described there, and the file stays counted here
-because the residue still leaves the output unparseable.
+residue of three comments described there, and the file stayed counted here
+because the residue still left the output unparseable. The newer grammar reads
+that residue, so the output now re-parses and the second pass is byte-identical.
+
+**The file is not fixed — it is reclassified, and downwards.** What is left is
+the reflow itself, which no check could see while the idempotency check was
+failing first: the header comment is rewrapped as prose and `;(function($) {` is
+split so the brace lands in column one, which is exactly what `malformedShape`
+(4.3) exists to catch. So the file moves from the not-idempotent column to the
+malformed one, and the malformed count goes from 0 to 1 without the formatter
+changing. A check that fires only once an earlier check stops firing is worth
+remembering when a column empties.
 
 `filelisting.cfm` reduces to two lines, and the cause is a literal `<-` used as
 a back-arrow glyph in body text:

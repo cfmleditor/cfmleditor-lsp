@@ -248,3 +248,44 @@ func TestLineCommentAmongFunctionExpressionAnnotationsIsNotInlined(t *testing.T)
 
 	assertReparses(t, out)
 }
+
+// TestBinaryExpressionKeepsALineComment covers a `//` comment sitting between
+// two operands of a `&` chain — how ColdBox's own Router.cfc labels each piece
+// of the URL it is composing:
+//
+//	) & // multi-host
+//	composeRoutingPath();
+//
+// The comment is neither the left nor the right field of the binary_expression
+// holding it, and delimitedComments deliberately refuses to re-emit a line
+// comment inline, since it runs to end of line and would comment out the rest
+// of the expression. So it was dropped outright and the loss "left to the
+// guard" — which rejected the file, making Router.cfc the last guard rejection
+// in the corpus.
+//
+// The fix is the one ternary_expression already uses for a comment parked
+// before its `:`: check the rendering against the source's own comments and
+// reproduce the expression as written when any went missing.
+func TestBinaryExpressionKeepsALineComment(t *testing.T) {
+	t.Parallel()
+
+	src := "<cfscript>\ncomponent {\n\tstring function composeUrl() {\n\t\treturn (\n\t\t\tisSSL() ? \"https://\" : \"http://\"\n\t\t) &\n\t\t(\n\t\t\tCGI.HTTP_HOST\n\t\t) & // multi-host\n\t\tcomposeRoutingPath();\n\t}\n}\n</cfscript>\n"
+
+	out := formatGuarded(t, src)
+
+	assertContains(t, out, "// multi-host")
+	assertReparses(t, out)
+}
+
+// TestBinaryExpressionWithoutCommentsStillCollapses is the boundary: only an
+// expression that would lose a comment is reproduced verbatim. Every other one
+// is still rendered and re-spaced normally, so the fallback cannot quietly
+// become "stop formatting binary expressions".
+func TestBinaryExpressionWithoutCommentsStillCollapses(t *testing.T) {
+	t.Parallel()
+
+	out := format(t, "<cfscript>\nx = a&b;\ny = ( c==1 ) and d;\n</cfscript>\n")
+
+	assertContains(t, out, "x = a & b;")
+	assertContains(t, out, "y = ( c == 1 ) and d;")
+}
