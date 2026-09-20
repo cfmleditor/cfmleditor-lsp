@@ -221,8 +221,12 @@ func runServer() {
 			ct.Remove()
 		}()
 
-		// Shut down when all clients have disconnected
-		<-ct.Done()
+		// Shut down when all clients have disconnected — but not on a zero
+		// that a new client is already arriving into. Closing one editor
+		// window while another opens leaves exactly that, and taking it as
+		// final killed the arriving client: it was accepted and counted, then
+		// cut off by a shutdown it could not cancel. See ConnTracker.
+		daemon.WaitForLastClient(ctx, ct, daemon.DrainGrace)
 		cancel()
 
 		return
