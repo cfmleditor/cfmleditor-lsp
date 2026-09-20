@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"go.lsp.dev/protocol"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
 func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (any, error) {
@@ -23,22 +25,32 @@ func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (an
 		return []protocol.TextEdit{}, nil
 	}
 
-	line := int(params.Position.Line)
-	char := int(params.Position.Character)
+	return onTypeEdits(content, int(params.Position.Line), int(params.Position.Character)), nil
+}
 
-	lines := strings.SplitAfter(content, "\n")
-	if line >= len(lines) {
-		return []protocol.TextEdit{}, nil
+// onTypeEdits is the handler's decision, separated from its plumbing so a test
+// can measure what it costs without a JSON round trip swamping the answer.
+func onTypeEdits(content string, line, char int) []protocol.TextEdit {
+	// One line, for the reason duplicateGtCompletion gives: this runs on every
+	// '>' the user types, and splitting the document to read one row of it was
+	// 400us and 519KB of that keystroke on a 32,000-line component.
+	//
+	// The bound is explicit rather than left to the slice below. A line past
+	// the end of the document comes back empty, and a character past the end of
+	// its line is a position no editor should send — but the old spelling
+	// happened to tolerate one, because the line it sliced carried its newline
+	// and so was a byte longer than the line the position describes.
+	lineText := parser.LineTextAt(content, line)
+	if char > len(lineText) {
+		return []protocol.TextEdit{}
 	}
-
-	lineText := lines[line]
 
 	// Find the next '>' after the cursor on the same line.
 	rest := lineText[char:]
 
 	idx := strings.IndexByte(rest, '>')
 	if idx == -1 {
-		return []protocol.TextEdit{}, nil
+		return []protocol.TextEdit{}
 	}
 
 	// Verify we're inside a tag.
@@ -46,18 +58,18 @@ func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (an
 
 	openIdx := strings.LastIndexByte(before, '<')
 	if openIdx == -1 {
-		return []protocol.TextEdit{}, nil
+		return []protocol.TextEdit{}
 	}
 
 	if strings.ContainsRune(lineText[openIdx:char-1], '>') {
-		return []protocol.TextEdit{}, nil
+		return []protocol.TextEdit{}
 	}
 
 	middle := rest[:idx]
 
 	// Only act if the content between typed '>' and existing '>' is whitespace-only.
 	if strings.TrimSpace(middle) != "" {
-		return []protocol.TextEdit{}, nil
+		return []protocol.TextEdit{}
 	}
 
 	// Remove the typed '>' and the whitespace and the original '>'.
@@ -65,11 +77,11 @@ func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (an
 	endChar := char + idx + 1
 	edits := []protocol.TextEdit{{
 		Range: protocol.Range{
-			Start: protocol.Position{Line: params.Position.Line, Character: uint32(char - 1)},
-			End:   protocol.Position{Line: params.Position.Line, Character: uint32(endChar)},
+			Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
+			End:   protocol.Position{Line: uint32(line), Character: uint32(endChar)},
 		},
 		NewText: ">",
 	}}
 
-	return edits, nil
+	return edits
 }

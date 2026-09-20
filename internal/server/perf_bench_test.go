@@ -107,6 +107,51 @@ func BenchmarkWorkspaceSymbol(b *testing.B) {
 	}
 }
 
+// What a workspace/symbol response actually costs end to end, and the reason
+// the handler-only benchmark above is not that number: on a 5,000-file index
+// the handler is 6% of the request and marshalling its answer is the rest. The
+// short queries are the point — the picker sends m, me, met on the way to
+// anything, and a one-character query matches every definition in the
+// workspace. See PERFORMANCE-GAPS.md.
+func BenchmarkWorkspaceSymbolWithMarshal(b *testing.B) {
+	s := benchLoadedServer(5000, 8)
+
+	for _, q := range []string{"m", "method3", "zzz"} {
+		b.Run("query_"+q, func(b *testing.B) {
+			req, err := json.Marshal(protocol.WorkspaceSymbolParams{Query: q})
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			res, err := s.handleWorkspaceSymbol(context.Background(), req)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			out, err := json.Marshal(res)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.Logf("response: %d symbols, %d bytes of JSON", len(res.([]protocol.SymbolInformation)), len(out))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				r, err := s.handleWorkspaceSymbol(context.Background(), req)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if _, err := json.Marshal(r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkCompletion(b *testing.B) {
 	s := benchLoadedServer(5000, 8)
 	docURI := uri.File("/ws/open/Doc.cfc")
