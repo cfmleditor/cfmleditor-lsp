@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.2]
+
 ### Added
 
 - **Go-to-definition now answers variables.** `<cfargument>`, `var`/`local.`/`variables.`/`this.` assignments, `<cfparam name>`, `<cfloop index>`, and the `url`/`form`/`cgi`/`cookie`/`client`/`application`/`request`/`session`/`server` scopes, written scoped or bare. An unscoped name follows CFML's own search order — local and arguments before variables, variables before the request scopes — so a bare `total` inside a function with `var total` resolves to its own rather than to a `url.total` on the page. A declaration inside the enclosing function outranks one outside it, and among several the nearest at or before the cursor wins, which is the rule component refs already followed.
