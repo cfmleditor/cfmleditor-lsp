@@ -326,7 +326,9 @@ func (p *scriptParser) isVarDeclaredLocal(name string) bool {
 		return false
 	}
 
-	return p.localVarSet[strings.ToLower(name)]
+	var buf foldScratch
+
+	return p.localVarSet[string(buf.lowerFold(name))]
 }
 
 // extractAllLinks scans source lines for document links, routing them to
@@ -399,7 +401,8 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 		return
 	}
 
-	switch strings.ToLower(rhs.Value) {
+	var buf foldScratch
+	switch string(buf.lowerFold(rhs.Value)) {
 	case "new":
 		p.sc.NextSkipComments()
 		p.parseNewRef(nameTok.Value, tok.Line)
@@ -583,7 +586,8 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	// Check RHS for component refs
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind == TokIdent {
-		switch strings.ToLower(rhs.Value) {
+		var buf foldScratch
+		switch string(buf.lowerFold(rhs.Value)) {
 		case "new":
 			p.sc.NextSkipComments()
 			p.parseNewRef(nameTok.Value, tok.Line)
@@ -629,8 +633,8 @@ func (p *scriptParser) parse() {
 			continue
 		}
 
-		lower := strings.ToLower(tok.Value)
-		switch lower {
+		var buf foldScratch
+		switch string(buf.lowerFold(tok.Value)) {
 		case "function":
 			p.parseFunction(tok, "", "")
 		case "public", "private", "remote", "package":
@@ -1192,8 +1196,8 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 
 // handleBodyToken processes an identifier inside a function body.
 func (p *scriptParser) handleBodyToken(tok Token, depth int) {
-	lower := strings.ToLower(tok.Value)
-	switch lower {
+	var buf foldScratch
+	switch string(buf.lowerFold(tok.Value)) {
 	case "var":
 		p.parseBodyVarDecl(tok)
 	case "local":
@@ -1243,7 +1247,8 @@ func (p *scriptParser) checkReturnComponent() {
 
 	var comp string
 
-	switch strings.ToLower(peek.Value) {
+	var buf foldScratch
+	switch string(buf.lowerFold(peek.Value)) {
 	case "new":
 		p.sc.NextSkipComments()
 
@@ -1473,8 +1478,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 		return
 	}
 
-	rhsLower := strings.ToLower(rhs.Value)
-	switch rhsLower {
+	var buf foldScratch
+	switch string(buf.lowerFold(rhs.Value)) {
 	case "new":
 		p.sc.NextSkipComments()
 		p.parseNewRef(nameTok.Value, varTok.Line)
@@ -1667,7 +1672,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	// Check RHS for component refs
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind == TokIdent {
-		switch strings.ToLower(rhs.Value) {
+		var buf foldScratch
+		switch string(buf.lowerFold(rhs.Value)) {
 		case "new":
 			p.sc.NextSkipComments()
 			p.parseNewRef(nameTok.Value, scopeTok.Line)
@@ -1771,9 +1777,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 // skipNestedFunction skips a nested function declaration and its body.
 func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
-	lower := strings.ToLower(tok.Value)
 	// Handle access modifier before function keyword
-	if lower != "function" {
+	if !identEq(tok.Value, "function") {
 		next := p.sc.PeekSkipComments()
 		if next.Kind != TokIdent {
 			return
@@ -1919,8 +1924,8 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		return
 	}
 
-	lower := strings.ToLower(rhs.Value)
-	switch lower {
+	var buf foldScratch
+	switch string(buf.lowerFold(rhs.Value)) {
 	case "new":
 		p.sc.NextSkipComments()
 		p.parseNewRef(tok.Value, tok.Line)
@@ -2330,8 +2335,8 @@ func (p *globalScriptParser) parse() {
 			continue
 		}
 
-		lower := strings.ToLower(tok.Value)
-		switch lower {
+		var buf foldScratch
+		switch string(buf.lowerFold(tok.Value)) {
 		case "var":
 			p.parseVar(tok)
 		case "local":
@@ -2442,7 +2447,8 @@ func looksLikeCFCType(t string) bool {
 		return true
 	}
 
-	switch strings.ToLower(t) {
+	var buf foldScratch
+	switch string(buf.lowerFold(t)) {
 	case "string", "numeric", "boolean", "date", "struct", "array", "query",
 		"binary", "guid", "uuid", "void", "any", "xml", "function":
 		return false
@@ -2718,7 +2724,8 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 }
 
 func isKeyword(s string) bool {
-	switch strings.ToLower(s) {
+	var buf foldScratch
+	switch string(buf.lowerFold(s)) {
 	case "var", "local", "if", "else", "for", "while", "do", "switch", "case",
 		"try", "catch", "finally", "return", "break", "continue", "function",
 		"component", "interface", "new", "throw", "import", "true", "false",

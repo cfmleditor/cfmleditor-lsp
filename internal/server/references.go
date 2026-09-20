@@ -353,7 +353,17 @@ func identSpanFrom(text, name string, from int) (start, end int, ok bool) {
 		return 0, 0, false
 	}
 
+	// Skip to the positions a match could begin at, rather than asking
+	// EqualFold about every one. documentHighlight runs this over the whole
+	// open document on every cursor move, and EqualFold decodes UTF-8 to
+	// answer, so paying it at each byte position was 21% of the request.
+	seek := newFoldSeek(text, name[0], len(text)-len(name))
+
 	for i := max(from, 0); i+len(name) <= len(text); i++ {
+		if i = seek.at(i); i < 0 {
+			return 0, 0, false
+		}
+
 		// EqualFold on equal-length byte slices, rather than lowercasing the
 		// line first: folding can change a string's length (U+0130 lowercases
 		// to two runes), which would desynchronise every offset after it.
@@ -369,6 +379,102 @@ func identSpanFrom(text, name string, from int) (start, end int, ok bool) {
 	}
 
 	return 0, 0, false
+}
+
+// foldSeek walks the positions where a case-insensitive match for a name can
+// begin: those holding either case of the name's first byte.
+//
+// It holds a cursor per case because the obvious spelling — IndexByte for each
+// case, take the lower — is quadratic on ordinary input. The letter the search
+// is for is usually all over the document in one case and absent in the other,
+// and the absent one's IndexByte scans to the end of the text every time it is
+// asked, once per candidate position. A file with 5,000 lowercase g's and no
+// capital G would scan 5,000 times over.
+//
+// Held, each cursor only moves forward and each search starts where the last
+// one stopped, so the total is one pass per case however many candidates there
+// are.
+type foldSeek struct {
+	text     string
+	lo, up   byte
+	loAt     int // next occurrence at or after the last query, -1 once exhausted
+	upAt     int
+	last     int // no match can begin after this
+	byteWise bool
+}
+
+func newFoldSeek(text string, first byte, last int) foldSeek {
+	// Above 0x80 the first byte is part of a rune whose case pair EqualFold may
+	// spell with entirely different bytes, so there every position stays a
+	// candidate and the scan is what it always was.
+	if first >= 0x80 {
+		return foldSeek{byteWise: true}
+	}
+
+	return foldSeek{
+		text: text,
+		lo:   lowerASCIIByte(first), up: upperASCIIByte(first),
+		loAt: -2, upAt: -2,
+		last: last,
+	}
+}
+
+// at returns the first candidate position at or after i, or -1 when there is
+// none left.
+func (s *foldSeek) at(i int) int {
+	if s.byteWise {
+		return i
+	}
+
+	s.loAt = s.advance(s.loAt, s.lo, i)
+	if s.lo == s.up {
+		return s.loAt
+	}
+
+	s.upAt = s.advance(s.upAt, s.up, i)
+
+	switch {
+	case s.loAt < 0:
+		return s.upAt
+	case s.upAt < 0:
+		return s.loAt
+	default:
+		return min(s.loAt, s.upAt)
+	}
+}
+
+// advance moves one cursor to the next occurrence of c at or after i.
+//
+// at doubles as the cache and the sentinel: a position at or after i is still
+// the answer and costs no search, and -1 means this case does not occur again
+// anywhere ahead. Every search therefore starts at the caller's i and stops at
+// the position it returns, and i only moves forward, so the scans are disjoint
+// and the cursor costs one pass over the text however often it is asked.
+func (s *foldSeek) advance(at int, c byte, i int) int {
+	if at == -1 || at >= i {
+		return at
+	}
+
+	if i > s.last {
+		return -1
+	}
+
+	found := strings.IndexByte(s.text[i:s.last+1], c)
+	if found < 0 {
+		return -1
+	}
+
+	return i + found
+}
+
+// upperASCIIByte is lowerASCIIByte's other half, for the two bytes a
+// case-insensitive match can begin with.
+func upperASCIIByte(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		return b - 32
+	}
+
+	return b
 }
 
 func byteAt(s string, i int) byte {

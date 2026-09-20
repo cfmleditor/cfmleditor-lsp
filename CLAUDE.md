@@ -175,6 +175,28 @@ the *formatter*, not the parser.
   fall back to a shallow re-parse rather than crashing the daemon.
 - `edit_parser.go` holds cursor-context helpers (`FindCallContext`) used by signature help and
   completion.
+- **The scanner's API is `NextSkipComments`/`PeekSkipComments`, `Save`/`Restore` and
+  `LastBlockComment` — nothing else.** The raw `Next`, `Peek`, `Pos`, `Line` and `Rest` are
+  exported and have no caller in or out of the package. That is what makes the one-token
+  lookahead safe: a peek caches the token and the position past it, and the matching next takes
+  it rather than scanning the same bytes again. A peeked token carries the assignment it made to
+  `LastBlockComment`, because a peek's effect on that field has always outlived the peek and
+  `parseFunction` reads and clears it between the two. Adding a scanner entry point that moves
+  `pos` means clearing `peeked`, as `Restore` and the raw `Next` do.
+- **Don't write `switch strings.ToLower(x)` on a parse path.** `strings.ToLower` returns its
+  argument untouched when there is nothing to lower, so such a switch is free on all-lowercase
+  source and allocates a throwaway string for every identifier with a capital in it — which is
+  `getUser`, `userDAO`, every `ARGUMENTS` and `VARIABLES`. It was 22% of everything a parse
+  allocated. Use `var buf foldScratch` and `switch string(buf.lowerFold(x))` (`fold.go`): the
+  compiler elides the conversion in `switch string(b)` and in `m[string(b)]`, and the array stays
+  on the stack. Spell the fold inside the switch expression — binding it to a name invites
+  holding it across a nested fold. `TestFoldingAnIdentifierDoesNotAllocate` parses one document
+  mixed-case and lowercased and fails if the capitals cost allocations.
+- **A local `var buf [N]byte` stays on the stack; a struct holding a slice of its own array does
+  not.** `chainBuilder` accumulates into an array addressed by length for that reason — the
+  shorter `c.rest = c.arr[:0]` defeats escape analysis and moved all eleven of its call sites'
+  builders to the heap, which cost more than the buffer growth it saved. Check with
+  `go build -gcflags=-m` rather than assuming.
 
 ### Formatter (`internal/formatter`)
 
@@ -1012,6 +1034,30 @@ the size of a real workspace, which is the axis a handler benchmark on an
 empty server cannot see. Pin the shape, not the clock, when it matters:
 `TestIndexFileFromResultDoesNotScaleWithIndexSize` compares allocations at
 two index sizes, so it fails on the regression rather than on a busy runner.
+
+**Search for the entries you are holding; do not sweep the bucket for them.**
+Both index writers on the keystroke path — `removeFileEntries` on every
+re-index, `ShiftLines` under the write lock on every edit that changes a line
+count — looped over every entry filed under a name asking "is this one of
+mine". For the names workspaces share, that bucket is one entry per file, so
+the loop was the workspace and the answer was a handful. Worse, the per-entry
+work was a *call* (a closure, then a `slices.Contains` over a one-element
+group), not a compare. Inverted — `slices.Index` per entry actually touched —
+the comparisons are the same and a 4,000-file shared-name workspace goes from
+164µs to 28µs for a re-index and 101µs to 24µs for a shift. Neither is *flat*;
+flat needs a pointer-to-position map beside the buckets, a few megabytes held
+for the life of the index, and the tests say so rather than claiming otherwise.
+**Measure such a thing on a file from the middle of the workspace** — the first
+file's entries sit at the front of every bucket, where a search finds them at
+once, so a sweep and a search look alike on it.
+
+**Benchmarks in one process contaminate each other, so isolate before believing
+a regression.** A run of the whole benchmark set here reported `ScopesToFuncRanges`
+69% slower, `documentSymbol` 29%, `workspace/symbol` 27% and `Keystroke` 21%
+*faster* — none of which were real. The allocation-dominated ones inherit
+whatever heap the benchmarks before them left live, and `benchLoadedServer`
+leaves a 5,000-file index. Re-run the single benchmark on its own, both sides,
+before acting on any of it. The same caution applies to wins.
 
 **A cost that scales with the document wants a scaling test, not a timing one.**
 Every defect behind the three-second go-to-definition was invisible to the tests

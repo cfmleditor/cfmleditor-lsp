@@ -2102,7 +2102,9 @@ func IsMemberMethod(name string) bool {
 // isMemberMethod returns true if the method name is a known CFML member function
 // on native types (Array, Struct, Query, String, List).
 func isMemberMethod(name string) bool {
-	switch strings.ToLower(name) {
+	var buf foldScratch
+
+	switch string(buf.lowerFold(name)) {
 	// Array
 	case "append", "prepend", "clear", "delete", "deleteat", "each", "every", "filter",
 		"find", "findall", "findallnocase", "findnocase", "first", "getat", "indexexists",
