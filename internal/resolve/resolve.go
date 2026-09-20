@@ -26,6 +26,7 @@ type Resolver struct {
 	mu                 sync.RWMutex
 	appRootCache       map[string]string // dir → Application.cfc root
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
+	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -92,20 +93,45 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 	return result
 }
 
+// dirs returns the resolver's directory-listing cache, creating it on first
+// use. Its lifetime is the resolver's: the server drops the whole Resolver
+// wherever it decides a path answer may have gone stale, which is what the
+// cache needs and what resolveCache beside it already relies on.
+func (r *Resolver) dirs() *cfpath.DirCache {
+	r.mu.RLock()
+	c := r.dirCache
+	r.mu.RUnlock()
+
+	if c != nil {
+		return c
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.dirCache == nil {
+		r.dirCache = cfpath.NewDirCache()
+	}
+
+	return r.dirCache
+}
+
 func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	mappings := r.effectiveMappings(baseDir)
-	if p := cfpath.ResolvePath(component, baseDir, mappings); p != "" {
+	dirs := r.dirs()
+
+	if p := cfpath.ResolvePathCached(component, baseDir, mappings, dirs); p != "" {
 		return p
 	}
 
 	if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
-		if p := cfpath.ResolvePath(component, appDir, mappings); p != "" {
+		if p := cfpath.ResolvePathCached(component, appDir, mappings, dirs); p != "" {
 			return p
 		}
 	}
 
 	for _, root := range r.WorkspaceFolders {
-		if p := cfpath.ResolvePath(component, root, mappings); p != "" {
+		if p := cfpath.ResolvePathCached(component, root, mappings, dirs); p != "" {
 			return p
 		}
 	}
