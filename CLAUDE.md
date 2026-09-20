@@ -1060,7 +1060,10 @@ and the only thing that makes them cheaper is sending fewer bytes.
 measure them end to end; the handler-only benchmarks beside them are for
 changes to the handler, not for what the request costs. `PERFORMANCE-GAPS.md`
 records the three costs measured this way and not acted on, with what each
-option would save and what it would cost the user.
+option would save and what it would cost the user. Capping `workspace/symbol`
+is the obvious fix and was declined rather than overlooked — read section 2
+before building it, because the cost of a cap is that a symbol the user wanted
+can be silently absent from a search whose whole job is finding it.
 
 **Benchmarks in one process contaminate each other, so isolate before believing
 a regression.** A run of the whole benchmark set here reported `ScopesToFuncRanges`
