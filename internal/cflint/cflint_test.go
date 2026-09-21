@@ -1,7 +1,17 @@
 package cflint
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -260,4 +270,254 @@ func TestBinaryNameForUnpublishedPlatform(t *testing.T) {
 			t.Errorf("binaryNameFor(%q, %q) = %q, want an empty string", platform[0], platform[1], got)
 		}
 	}
+}
+
+// TestAssetsForPrefersCompressed states the order the downloader asks in. The
+// compressed assets are ~28 MB against ~90 MB, and they appeared only
+// recently, so the raw binary has to stay reachable behind them.
+func TestAssetsForPrefersCompressed(t *testing.T) {
+	cases := map[[2]string][]asset{
+		{"darwin", "amd64"}: {
+			{name: "cflint-macos-amd64.tar.gz", kind: tarGz},
+			{name: "cflint-macos-amd64", kind: rawBinary},
+		},
+		{"linux", "arm64"}: {
+			{name: "cflint-linux-aarch64.tar.gz", kind: tarGz},
+			{name: "cflint-linux-aarch64", kind: rawBinary},
+		},
+		// The zip holds `cflint.exe`, and the raw asset *is* `cflint.exe`, so
+		// the archive name is the binary's without the extension.
+		{"windows", "amd64"}: {
+			{name: "cflint-windows-amd64.zip", kind: zipped},
+			{name: "cflint-windows-amd64.exe", kind: rawBinary},
+		},
+	}
+
+	for platform, want := range cases {
+		got := assetsFor(platform[0], platform[1])
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("assetsFor(%q, %q) = %v, want %v", platform[0], platform[1], got, want)
+		}
+	}
+
+	if got := assetsFor("plan9", "amd64"); got != nil {
+		t.Errorf("assetsFor on an unpublished platform = %v, want nil", got)
+	}
+}
+
+// TestFetchAssetUnpacks covers the three shapes an asset arrives in. The
+// executable has to end up at binPath whichever one it came from, because
+// everything downstream only knows that path.
+func TestFetchAssetUnpacks(t *testing.T) {
+	want := []byte("#!/bin/sh\necho CFLint\n")
+
+	cases := map[string]struct {
+		body []byte
+		kind assetKind
+	}{
+		"raw":    {body: want, kind: rawBinary},
+		"tar.gz": {body: tarGzOf(t, "cflint", want), kind: tarGz},
+		"zip":    {body: zipOf(t, "cflint.exe", want), kind: zipped},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(tc.body)
+			}))
+			defer server.Close()
+
+			binPath := filepath.Join(t.TempDir(), "cflint-test")
+			if err := fetchAsset(server.URL, binPath, tc.kind); err != nil {
+				t.Fatalf("fetchAsset: %v", err)
+			}
+
+			got, err := os.ReadFile(binPath) //nolint:gosec // test temp dir
+			if err != nil {
+				t.Fatalf("reading the binary: %v", err)
+			}
+
+			if !bytes.Equal(got, want) {
+				t.Errorf("binary = %q, want %q", got, want)
+			}
+
+			// Downloaded and unpacked is no use if it cannot be executed.
+			info, err := os.Stat(binPath)
+			if err != nil {
+				t.Fatalf("stat: %v", err)
+			}
+
+			if info.Mode().Perm()&0o111 == 0 {
+				t.Errorf("mode = %v, want an executable", info.Mode().Perm())
+			}
+		})
+	}
+}
+
+// A release without the compressed asset has to fall through to the raw
+// binary rather than failing: 1.5.16 shipped without an arm64 macOS tar.gz,
+// which is exactly this case on real hardware.
+func TestFetchAssetReportsAMissingAssetSeparately(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	err := fetchAsset(server.URL, filepath.Join(t.TempDir(), "cflint-test"), tarGz)
+	if !errors.Is(err, errAssetMissing) {
+		t.Errorf("fetchAsset on a 404 = %v, want errAssetMissing", err)
+	}
+}
+
+// Any other failure is not worth retrying with a different asset, and must not
+// be mistaken for one that is.
+func TestFetchAssetDoesNotTreatOtherFailuresAsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := fetchAsset(server.URL, filepath.Join(t.TempDir(), "cflint-test"), rawBinary)
+	if err == nil || errors.Is(err, errAssetMissing) {
+		t.Errorf("fetchAsset on a 500 = %v, want a plain error", err)
+	}
+}
+
+// An archive that unpacks to nothing must fail rather than leave an empty file
+// where a linter should be.
+func TestFetchAssetRejectsAnArchiveWithNoBinary(t *testing.T) {
+	empty := tarGzOf(t, "", nil)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(empty)
+	}))
+	defer server.Close()
+
+	binPath := filepath.Join(t.TempDir(), "cflint-test")
+	if err := fetchAsset(server.URL, binPath, tarGz); err == nil {
+		t.Error("fetchAsset on an empty archive = nil, want an error")
+	}
+
+	if _, err := os.Stat(binPath); err == nil {
+		t.Error("a failed download left a file behind at the cached path")
+	}
+}
+
+func tarGzOf(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	gz := gzip.NewWriter(&buf)
+	archive := tar.NewWriter(gz)
+
+	if name != "" {
+		header := &tar.Header{Name: name, Mode: 0o755, Size: int64(len(content)), Typeflag: tar.TypeReg}
+		if err := archive.WriteHeader(header); err != nil {
+			t.Fatalf("writing the tar header: %v", err)
+		}
+
+		if _, err := archive.Write(content); err != nil {
+			t.Fatalf("writing the tar entry: %v", err)
+		}
+	}
+
+	if err := archive.Close(); err != nil {
+		t.Fatalf("closing the tar: %v", err)
+	}
+
+	if err := gz.Close(); err != nil {
+		t.Fatalf("closing the gzip: %v", err)
+	}
+
+	return buf.Bytes()
+}
+
+func zipOf(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	archive := zip.NewWriter(&buf)
+
+	entry, err := archive.Create(name)
+	if err != nil {
+		t.Fatalf("creating the zip entry: %v", err)
+	}
+
+	if _, err := entry.Write(content); err != nil {
+		t.Fatalf("writing the zip entry: %v", err)
+	}
+
+	if err := archive.Close(); err != nil {
+		t.Fatalf("closing the zip: %v", err)
+	}
+
+	return buf.Bytes()
+}
+
+// TestTagFromRedirect states the shapes GitHub's redirect arrives in, and the
+// ones that have to be refused. A tag read out of a response that was not a
+// redirect would become a download URL for a release that does not exist.
+func TestTagFromRedirect(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17":       "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17?x=1":   "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17#notes": "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/v1.0%2Bbuild": "v1.0+build",
+		"": "",
+		"https://github.com/cfmleditor/CFLint/releases": "",
+		"https://example.com/":                          "",
+	}
+
+	for location, want := range cases {
+		if got := tagFromRedirect(location); got != want {
+			t.Errorf("tagFromRedirect(%q) = %q, want %q", location, got, want)
+		}
+	}
+}
+
+// TestLatestVersionFrom covers the request itself: the redirect has to be read
+// rather than followed, and anything else has to land on fallbackVersion
+// rather than failing the lint.
+func TestLatestVersionFrom(t *testing.T) {
+	t.Run("reads the tag from the redirect", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "https://github.com/cfmleditor/CFLint/releases/tag/1.5.17")
+			w.WriteHeader(http.StatusFound)
+		}))
+		defer server.Close()
+
+		if got := latestVersionFrom(server.URL); got != "1.5.17" {
+			t.Errorf("latestVersionFrom = %q, want 1.5.17", got)
+		}
+	})
+
+	// Rate limiting used to arrive as an HTTP 403 from the API. Whatever the
+	// shape, an answer that is not a redirect to a tag means carrying on with
+	// the version that is compiled in.
+	t.Run("falls back when the answer is not a redirect", func(t *testing.T) {
+		for _, status := range []int{http.StatusOK, http.StatusForbidden, http.StatusInternalServerError} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+
+			got := latestVersionFrom(server.URL)
+			server.Close()
+
+			if got != fallbackVersion {
+				t.Errorf("latestVersionFrom on HTTP %d = %q, want %q", status, got, fallbackVersion)
+			}
+		}
+	})
+
+	t.Run("falls back when nobody answers", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		url := server.URL
+		server.Close()
+
+		if got := latestVersionFrom(url); got != fallbackVersion {
+			t.Errorf("latestVersionFrom against a closed server = %q, want %q", got, fallbackVersion)
+		}
+	})
 }

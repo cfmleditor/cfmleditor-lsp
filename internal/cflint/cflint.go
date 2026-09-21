@@ -2,11 +2,16 @@
 package cflint
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +27,7 @@ const (
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
 	fallbackVersion = "1.5.16"
-	releasesAPI     = "https://api.github.com/repos/cfmleditor/CFLint/releases/latest"
+	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
 	downloadBase    = "https://github.com/cfmleditor/CFLint/releases/download/"
 )
 
@@ -272,27 +277,122 @@ func cacheDir(version string) (string, error) {
 // the linting it was setting up — hung for the life of the process.
 var downloadClient = &http.Client{Timeout: 5 * time.Minute}
 
+// releaseClient reads a redirect rather than following it, which is what makes
+// latestVersion work. Deliberately not downloadClient: an asset URL redirects
+// to the object store, so downloads have to follow them.
+var releaseClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func latestVersion() string {
-	resp, err := downloadClient.Get(releasesAPI) //nolint:gosec // trusted URL
+	return latestVersionFrom(latestRelease)
+}
+
+// latestVersionFrom reads the tag `latest` points at, from GitHub's own
+// redirect.
+//
+// Deliberately not the releases API. That endpoint is rate limited to 60
+// requests an hour per IP for unauthenticated callers, shared by everyone
+// behind one NAT, and an office that hits it spends the rest of the hour
+// pinned to fallbackVersion with nothing saying why. `/releases/latest`
+// redirects to `/releases/tag/<tag>` with no API involved and no limit.
+func latestVersionFrom(url string) string {
+	resp, err := releaseClient.Get(url) //nolint:gosec // trusted URL
 	if err != nil {
 		return fallbackVersion
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
+	// The redirect is the answer, so the body is of no interest.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	tag := tagFromRedirect(resp.Header.Get("Location"))
+	if tag == "" {
 		return fallbackVersion
 	}
 
-	var release struct {
-		TagName string `json:"tag_name"`
+	return tag
+}
+
+// tagFromRedirect pulls the tag out of the URL `/releases/latest` redirects to,
+// and returns an empty string for anything that is not one — an empty Location
+// from a response that was not a redirect at all, or a redirect somewhere
+// unexpected, both of which have to fall back rather than build a download URL
+// out of nonsense.
+func tagFromRedirect(location string) string {
+	const marker = "/releases/tag/"
+
+	at := strings.Index(location, marker)
+	if at < 0 {
+		return ""
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil || release.TagName == "" {
-		return fallbackVersion
+	tag := location[at+len(marker):]
+	if end := strings.IndexAny(tag, "?#"); end >= 0 {
+		tag = tag[:end]
 	}
 
-	return release.TagName
+	unescaped, err := neturl.PathUnescape(tag)
+	if err != nil {
+		return tag
+	}
+
+	return unescaped
+}
+
+// assetKind is how a release asset has to be unpacked.
+type assetKind int
+
+const (
+	// rawBinary is the executable itself, published with no container.
+	rawBinary assetKind = iota
+	// tarGz and zipped hold the executable under its plain name.
+	tarGz
+	zipped
+)
+
+// maxDownloadSize caps what is written out of an asset. CFLint is a GraalVM
+// image, so ~90 MB is normal and this is generous — it is here so a corrupt or
+// hostile archive cannot fill the disk while claiming to be a linter.
+const maxDownloadSize = 512 << 20
+
+// errAssetMissing is the one download failure worth trying another asset for.
+var errAssetMissing = errors.New("asset not published for this release")
+
+// asset is one candidate download for a platform's CFLint build.
+type asset struct {
+	name string
+	kind assetKind
+}
+
+// assetsFor lists what to try, best first.
+//
+// The compressed assets are ~28 MB against ~90 MB for the raw binary — a
+// GraalVM image is mostly zeroes and repeated metadata — so they are worth
+// preferring for a download that happens in the middle of somebody's first
+// edit. They are recent, though, and not every published build has one yet, so
+// the raw binary stays as the fallback rather than the lint simply failing.
+func assetsFor(goos, goarch string) []asset {
+	name := binaryNameFor(goos, goarch)
+	if name == "" {
+		return nil
+	}
+
+	if goos == "windows" {
+		return []asset{
+			{name: strings.TrimSuffix(name, ".exe") + ".zip", kind: zipped},
+			{name: name, kind: rawBinary},
+		}
+	}
+
+	return []asset{
+		{name: name + ".tar.gz", kind: tarGz},
+		{name: name, kind: rawBinary},
+	}
 }
 
 func ensureBinary() (string, error) {
@@ -318,28 +418,62 @@ func ensureBinary() (string, error) {
 		return binPath, nil
 	}
 
-	url := downloadBase + version + "/" + name
+	var missing error
 
+	for _, a := range assetsFor(runtime.GOOS, runtime.GOARCH) {
+		err := fetchAsset(downloadBase+version+"/"+a.name, binPath, a.kind)
+		if err == nil {
+			return binPath, nil
+		}
+
+		// Only a release that does not carry this asset is worth asking for
+		// another one. A refused connection or a timeout would fail the same
+		// way twice.
+		if errors.Is(err, errAssetMissing) {
+			missing = err
+
+			continue
+		}
+
+		return "", err
+	}
+
+	if missing != nil {
+		return "", fmt.Errorf("downloading cflint: %w", missing)
+	}
+
+	return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+// fetchAsset downloads one asset and leaves the executable at binPath.
+//
+// Written beside the target and renamed into place. Writing binPath directly
+// meant an interruption — the process killed, the machine losing power, two
+// sessions downloading at once — left a truncated file at exactly the path
+// ensureBinary accepts as a cached binary, so linting stayed broken for every
+// later run until someone deleted it by hand. Rename is atomic within a
+// directory, so binPath either does not exist or is a complete download.
+func fetchAsset(url, binPath string, kind assetKind) error {
 	resp, err := downloadClient.Get(url) //nolint:gosec // trusted URL
 	if err != nil {
-		return "", fmt.Errorf("downloading cflint: %w", err)
+		return fmt.Errorf("downloading cflint: %w", err)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("downloading cflint: HTTP %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%s: %w", url, errAssetMissing)
 	}
 
-	// Download beside the target and rename into place. Writing binPath directly
-	// meant an interruption — the process killed, the machine losing power, two
-	// sessions downloading at once — left a truncated file at exactly the path
-	// the Stat above accepts as a cached binary, so linting stayed broken for
-	// every later run until someone deleted it by hand. Rename is atomic within
-	// a directory, so binPath either does not exist or is a complete download.
-	tmp, err := os.CreateTemp(dir, name+".part-*")
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("downloading cflint: HTTP %d", resp.StatusCode)
+	}
+
+	dir := filepath.Dir(binPath)
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(binPath)+".part-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	tmpPath := tmp.Name()
@@ -349,21 +483,128 @@ func ensureBinary() (string, error) {
 		_ = os.Remove(tmpPath) // no-op once the rename below has succeeded
 	}()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		return "", err
+	if err := writeBinary(tmp, resp.Body, kind, dir); err != nil {
+		return err
 	}
 
 	if err := tmp.Close(); err != nil {
-		return "", err
+		return err
 	}
 
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return "", err
+		return err
 	}
 
-	if err := os.Rename(tmpPath, binPath); err != nil {
-		return "", err
+	return os.Rename(tmpPath, binPath)
+}
+
+// writeBinary copies the executable out of a downloaded asset.
+func writeBinary(dst io.Writer, src io.Reader, kind assetKind, tmpDir string) error {
+	switch kind {
+	case rawBinary:
+		return copyBinary(dst, src)
+	case tarGz:
+		return copyFromTarGz(dst, src)
+	case zipped:
+		return copyFromZip(dst, src, tmpDir)
+	default:
+		return fmt.Errorf("unknown asset kind %d", kind)
+	}
+}
+
+// copyBinary copies up to maxDownloadSize, and treats reaching it as a failure
+// rather than quietly installing a truncated executable.
+func copyBinary(dst io.Writer, src io.Reader) error {
+	written, err := io.Copy(dst, io.LimitReader(src, maxDownloadSize+1))
+	if err != nil {
+		return err
 	}
 
-	return binPath, nil
+	if written > maxDownloadSize {
+		return fmt.Errorf("cflint is larger than %d bytes, refusing it", int64(maxDownloadSize))
+	}
+
+	return nil
+}
+
+// copyFromTarGz pulls the first regular file out of the archive. The release
+// archives hold exactly one, the executable under its plain name, so this does
+// not have to know what the platform calls it.
+func copyFromTarGz(dst io.Writer, src io.Reader) error {
+	gz, err := gzip.NewReader(src)
+	if err != nil {
+		return fmt.Errorf("reading cflint archive: %w", err)
+	}
+
+	defer func() { _ = gz.Close() }()
+
+	archive := tar.NewReader(gz)
+
+	for {
+		header, err := archive.Next()
+		if errors.Is(err, io.EOF) {
+			return errors.New("cflint archive held no executable")
+		}
+
+		if err != nil {
+			return fmt.Errorf("reading cflint archive: %w", err)
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			return copyBinary(dst, archive)
+		}
+	}
+}
+
+// copyFromZip does the same for a zip, which cannot be streamed: the central
+// directory is at the end, so the archive is spooled to disk first.
+func copyFromZip(dst io.Writer, src io.Reader, tmpDir string) error {
+	spool, err := os.CreateTemp(tmpDir, "cflint-zip-*")
+	if err != nil {
+		return err
+	}
+
+	spoolPath := spool.Name()
+
+	defer func() {
+		_ = spool.Close()
+		_ = os.Remove(spoolPath)
+	}()
+
+	size, err := io.Copy(spool, io.LimitReader(src, maxDownloadSize+1))
+	if err != nil {
+		return err
+	}
+
+	if size > maxDownloadSize {
+		return fmt.Errorf("cflint archive is larger than %d bytes, refusing it", int64(maxDownloadSize))
+	}
+
+	archive, err := zip.NewReader(spool, size)
+	if err != nil {
+		return fmt.Errorf("reading cflint archive: %w", err)
+	}
+
+	var executable *zip.File
+
+	for _, file := range archive.File {
+		if !file.FileInfo().IsDir() {
+			executable = file
+
+			break
+		}
+	}
+
+	if executable == nil {
+		return errors.New("cflint archive held no executable")
+	}
+
+	entry, err := executable.Open()
+	if err != nil {
+		return fmt.Errorf("reading cflint archive: %w", err)
+	}
+
+	defer func() { _ = entry.Close() }()
+
+	return copyBinary(dst, entry)
 }
