@@ -139,3 +139,10 @@ func TestInstantiationInAnArgumentList(t *testing.T) {
 	assertCalls(t, `register(new "models.User"());`, []string{"?.register"})
 	assertCalls(t, `register(new models.User(dao.seed()));`, []string{"?.register", "dao.seed"})
 }
+
+// A chained hop's arguments are a third argument list, and they had a third
+// copy of the paren loop scanning them. `a().b(svc.c())` lost svc.c long after
+// `a(svc.c())` and `x.a().b(svc.c())` were found.
+func TestCallsInsideAChainedHopsArgumentsAreFound(t *testing.T) {
+	assertCalls(t, `a().b(svc.c());`, []string{"?.a", "?.b", "svc.c"})
+}

@@ -33,6 +33,7 @@ type scriptParser struct {
 	extractLinks        bool // whether to extract document links
 	extractCalls        bool // whether to extract all call sites
 	argNesting          int  // recursion depth of skipParenBody's scan, bounded by maxArgNesting
+	afterLT             bool // previous token was '<' — see looksLikeTagAttrs
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
@@ -80,6 +81,16 @@ func (p *scriptParser) addRef(ref ComponentRef) {
 }
 
 func (p *scriptParser) addCall(call CallSite) {
+	// The single gate on recording a call. Consuming one is not gated: the
+	// dispatch that walks a call and its argument list runs in every mode,
+	// because a (...) group left unconsumed is not skipped — it is scanned as
+	// if it were statements, and `svc.save(force = true)` then declares a
+	// variable called `force`. See parseScriptTagAttrs for the other half of
+	// that class of bug.
+	if !p.extractCalls {
+		return
+	}
+
 	if p.inFunc == "" {
 		p.calls = append(p.calls, call)
 	} else {
@@ -180,23 +191,14 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 				Resolved:  comp != "",
 			})
 
-			// Skip these parens too for further chaining
+			// Consume this hop's arguments too, so the chain walk can
+			// continue — through the same scan, so a call written inside
+			// them is found: this was the third copy of the paren loop and
+			// the last one still losing `a().b(svc.c())`.
 			p.sc.NextSkipComments() // consume (
 
-			pd := 1
-
-			for pd > 0 {
-				t := p.sc.NextSkipComments()
-				if t.Kind == TokEOF {
-					return
-				}
-
-				switch t.Kind { //nolint:exhaustive
-				case TokLParen:
-					pd++
-				case TokRParen:
-					pd--
-				}
+			if _, ok := p.scanParenBody(); !ok {
+				return
 			}
 		} else {
 			break
@@ -207,10 +209,6 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 // recordCallFromChain records a call site when a dot chain ending in ( is detected.
 // fullChain is e.g. "VARIABLES.service.GetData" or just "GetData", line is the source line.
 func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
-	if !p.extractCalls {
-		return
-	}
-
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
@@ -384,6 +382,8 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 	})
 
 	// Check RHS for component refs
+	p.skipLiteralGroup()
+
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind != TokIdent {
 		return
@@ -510,7 +510,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
 		// See parseBodyScopedVar's identical case for why.
-		if p.extractCalls && dot.Kind == TokLBracket {
+		if dot.Kind == TokLBracket {
 			p.checkBareCall(tok)
 		}
 
@@ -527,7 +527,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
 		// Not an assignment — check for method call chain: scope.name.method(...)
-		if p.extractCalls && eq.Kind == TokDot {
+		if eq.Kind == TokDot {
 			var fullChain chainBuilder
 			fullChain.reset(tok.Value)
 			fullChain.writeDot()
@@ -549,6 +549,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
 				p.recordCallFromChain(fullChain.String(), tok.Line)
+				p.skipParens()
 			}
 		}
 
@@ -572,6 +573,8 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	}
 
 	// Check RHS for component refs
+	p.skipLiteralGroup()
+
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind == TokIdent {
 		var buf foldScratch
@@ -616,6 +619,9 @@ func (p *scriptParser) parse() {
 		if tok.Kind == TokEOF {
 			break
 		}
+
+		afterLT := p.afterLT
+		p.afterLT = tok.Kind == TokLT
 
 		if tok.Kind != TokIdent {
 			continue
@@ -685,7 +691,7 @@ func (p *scriptParser) parse() {
 				if next.Kind == TokIdent && identEq(next.Value, "function") {
 					p.sc.NextSkipComments()
 					p.parseFunction(tok, "", retVal.String())
-				} else if p.extractCalls && next.Kind == TokLParen && !isKeyword(tok.Value) {
+				} else if next.Kind == TokLParen && !isKeyword(tok.Value) {
 					_ = prevIdent
 
 					varName := ""
@@ -747,8 +753,10 @@ func (p *scriptParser) parse() {
 						})
 					}
 				}
-			case p.extractCalls && peek.Kind == TokLParen && !isKeyword(tok.Value):
+			case peek.Kind == TokLParen && !isKeyword(tok.Value):
 				p.recordBareCallAndChain(tok)
+			case !afterLT && peek.Kind == TokIdent && !isKeyword(tok.Value) && looksLikeTagAttrs(p.sc):
+				p.parseScriptTagAttrs()
 			default:
 				p.checkAssignRef(tok)
 			}
@@ -1102,6 +1110,9 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			return t.Line
 		}
 
+		afterLT := p.afterLT
+		p.afterLT = t.Kind == TokLT
+
 		switch t.Kind { //nolint:exhaustive
 		case TokLBrace:
 			depth++
@@ -1112,7 +1123,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			}
 		case TokIdent:
 			if depth > 0 {
-				p.handleBodyToken(t, depth)
+				p.handleBodyToken(t, depth, afterLT)
 			}
 		}
 	}
@@ -1183,7 +1194,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 }
 
 // handleBodyToken processes an identifier inside a function body.
-func (p *scriptParser) handleBodyToken(tok Token, depth int) {
+func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 	var buf foldScratch
 	switch string(buf.lowerFold(tok.Value)) {
 	case "var":
@@ -1216,8 +1227,14 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int) {
 		p.skipNestedFunction(tok, depth)
 	default:
 		peek := p.sc.PeekSkipComments()
-		if p.extractCalls && !isKeyword(tok.Value) && peek.Kind == TokLParen {
+		if !isKeyword(tok.Value) && peek.Kind == TokLParen {
 			p.recordBareCallAndChain(tok)
+
+			return
+		}
+
+		if !afterLT && peek.Kind == TokIdent && !isKeyword(tok.Value) && looksLikeTagAttrs(p.sc) {
+			p.parseScriptTagAttrs()
 
 			return
 		}
@@ -1265,8 +1282,8 @@ func (p *scriptParser) checkReturnComponent() {
 
 		p.scanChainedCalls(comp, peek.Line)
 	default:
-		// Check for return obj.method(...) or return func(...) if extractCalls
-		if p.extractCalls && !isKeyword(peek.Value) {
+		// Check for return obj.method(...) or return func(...).
+		if !isKeyword(peek.Value) {
 			p.sc.NextSkipComments() // consume first ident
 
 			nextKind := p.sc.PeekSkipComments().Kind
@@ -1461,6 +1478,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 	})
 
 	// Check RHS for component refs
+	p.skipLiteralGroup()
+
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind != TokIdent {
 		return
@@ -1585,7 +1604,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		// checkBareCall knows how to skip the "[...]" group and poison the
 		// receiver; without this, the scanner is left stuck at "[" and the
 		// trailing ".method()" gets rediscovered as an orphaned bare call.
-		if p.extractCalls && dot.Kind == TokLBracket {
+		if dot.Kind == TokLBracket {
 			p.checkBareCall(scopeTok)
 		}
 
@@ -1602,7 +1621,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
 		// Not an assignment — check for method call chain: scope.name.method(...)
-		if p.extractCalls && eq.Kind == TokDot {
+		if eq.Kind == TokDot {
 			var fullChain chainBuilder
 			fullChain.reset(scopeTok.Value)
 			fullChain.writeDot()
@@ -1637,6 +1656,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
 				p.recordCallFromChain(fullChain.String(), scopeTok.Line)
+				p.skipParens()
 			}
 		}
 
@@ -1658,6 +1678,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	}
 
 	// Check RHS for component refs
+	p.skipLiteralGroup()
+
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind == TokIdent {
 		var buf foldScratch
@@ -1885,7 +1907,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		// knows how to skip the "[...]" group; without TokLBracket here, a bare
 		// statement starting with obj[key]... never reaches checkBareCall at all
 		// and the scanner is left stuck at "[".
-		if p.extractCalls && (peek.Kind == TokDot || peek.Kind == TokLBracket) {
+		if peek.Kind == TokDot || peek.Kind == TokLBracket {
 			p.checkBareCall(tok)
 		}
 
@@ -1904,6 +1926,8 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	if p.inFunc != "" && !p.isVarDeclaredLocal(tok.Value) {
 		p.forceGlobal = true
 	}
+
+	p.skipLiteralGroup()
 
 	rhs := p.sc.PeekSkipComments()
 	if rhs.Kind != TokIdent {
@@ -2207,10 +2231,6 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 // scanChainedCalls records resolved CallSites for any .method() chains following
 // a constructor or factory call whose component is already known.
 func (p *scriptParser) scanChainedCalls(component string, line int) {
-	if !p.extractCalls {
-		return
-	}
-
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
@@ -2287,7 +2307,15 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 	}
 }
 
-// globalScriptParser extracts only variable declarations outside function bodies.
+// globalScriptParser extracts only variable declarations outside function
+// bodies. It is a second, much smaller scan than scriptParser's, which is what
+// makes VariablesVars/ThisVars cheap enough to answer per keystroke — it skips
+// every function body outright rather than parsing it.
+//
+// Being a second implementation, it is also a second place every rule about
+// what does *not* declare a variable has to hold: named arguments, struct
+// literal keys and script-tag attributes all fooled both.
+// TestBothVariableScansAgree pins them together.
 type globalScriptParser struct {
 	sc       *Scanner
 	vars     []VarDef
@@ -2304,11 +2332,16 @@ func newGlobalScriptParser(src string, baseLine int, scopes []FuncScope) *global
 }
 
 func (p *globalScriptParser) parse() {
+	afterLT := false
+
 	for {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokEOF {
 			return
 		}
+
+		wasLT := afterLT
+		afterLT = tok.Kind == TokLT
 
 		if tok.Kind != TokIdent {
 			continue
@@ -2344,7 +2377,7 @@ func (p *globalScriptParser) parse() {
 				}
 			}
 		default:
-			p.parsePlain(tok)
+			p.parsePlain(tok, wasLT)
 		}
 	}
 }
@@ -2382,6 +2415,8 @@ func (p *globalScriptParser) parseVar(tok Token) {
 		Name: name.Value, Scope: ScopeVariables,
 		Line: uint32(p.baseLine + tok.Line),
 	})
+
+	p.consumeAssignment()
 }
 
 func (p *globalScriptParser) parseDot(tok Token, scope Scope) {
@@ -2406,15 +2441,30 @@ func (p *globalScriptParser) parseDot(tok Token, scope Scope) {
 		Name: name.Value, Scope: scope,
 		Line: uint32(p.baseLine + tok.Line),
 	})
+
+	p.consumeAssignment()
 }
 
-func (p *globalScriptParser) parsePlain(tok Token) {
+func (p *globalScriptParser) parsePlain(tok Token, afterLT bool) {
 	if isKeyword(tok.Value) {
 		return
 	}
 
 	eq := p.sc.PeekSkipComments()
-	if eq.Kind != TokEquals {
+
+	switch {
+	case eq.Kind == TokLParen:
+		// A call. Its argument list is not statements, and a named argument
+		// written `f(force = true)` declares nothing.
+		p.skipGroup()
+
+		return
+	case !afterLT && eq.Kind == TokIdent && looksLikeTagAttrs(p.sc):
+		// A script-syntax CF tag. See scriptParser.parseScriptTagAttrs.
+		p.skipTagAttrs()
+
+		return
+	case eq.Kind != TokEquals:
 		return
 	}
 
@@ -2422,6 +2472,108 @@ func (p *globalScriptParser) parsePlain(tok Token) {
 		Name: tok.Value, Scope: ScopeVariables,
 		Line: uint32(p.baseLine + tok.Line),
 	})
+
+	p.consumeAssignment()
+}
+
+// consumeAssignment takes the "=" its three callers have only peeked at, and
+// with it a struct or array literal standing as the right-hand side.
+//
+// This scan reads a bare `ident =` as a declaration, so anything it walks into
+// that spells one declares a variable — and `{force = true}` spells one.
+func (p *globalScriptParser) consumeAssignment() {
+	p.sc.NextSkipComments() // consume =
+
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	case TokLBrace, TokLBracket:
+		p.skipGroup()
+	default:
+	}
+}
+
+// skipGroup consumes a balanced (...), {...} or [...] group that the scanner is
+// positioned on. Returns false if it is on none of them, or the group is
+// unclosed.
+func (p *globalScriptParser) skipGroup() bool {
+	var open, closing TokenKind
+
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	case TokLParen:
+		open, closing = TokLParen, TokRParen
+	case TokLBrace:
+		open, closing = TokLBrace, TokRBrace
+	case TokLBracket:
+		open, closing = TokLBracket, TokRBracket
+	default:
+		return false
+	}
+
+	p.sc.NextSkipComments() // consume the opener
+
+	depth := 1
+
+	for depth > 0 {
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		case TokEOF:
+			return false
+		case open:
+			depth++
+		case closing:
+			depth--
+		}
+	}
+
+	return true
+}
+
+// skipTagAttrs consumes a script-syntax CF tag's attribute list, stopping
+// before the body or the terminating semicolon.
+func (p *globalScriptParser) skipTagAttrs() {
+	for looksLikeTagAttrs(p.sc) {
+		p.sc.NextSkipComments() // attribute name
+		p.sc.NextSkipComments() // =
+
+		if !p.skipTagAttrValue() {
+			return
+		}
+	}
+}
+
+// skipTagAttrValue consumes one attribute value. See the scriptParser method of
+// the same name for why it stops where it does.
+func (p *globalScriptParser) skipTagAttrValue() bool {
+	for {
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
+			return false
+		case TokHash:
+			p.sc.NextSkipComments() // consume the opening #
+
+			for {
+				tok := p.sc.NextSkipComments()
+				if tok.Kind == TokEOF || tok.Kind == TokLBrace ||
+					tok.Kind == TokLT || tok.Kind == TokGT {
+					return false
+				}
+
+				if tok.Kind == TokHash {
+					break
+				}
+			}
+		case TokLParen, TokLBracket:
+			if !p.skipGroup() {
+				return false
+			}
+		default:
+			p.sc.NextSkipComments()
+		}
+
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
+		default:
+			return true
+		}
+	}
 }
 
 func isTruthy(s string) bool {
@@ -2624,7 +2776,7 @@ func (p *scriptParser) scanParenBody() (firstArg string, ok bool) {
 // scanNestedCall dispatches an identifier met inside an argument list to the
 // call-recording helpers, when it begins one.
 func (p *scriptParser) scanNestedCall(tok Token) {
-	if !p.extractCalls || p.argNesting >= maxArgNesting {
+	if p.argNesting >= maxArgNesting {
 		return
 	}
 
@@ -2691,6 +2843,147 @@ func (p *scriptParser) skipInstantiation() {
 // at a '[' or the group is unclosed (EOF reached first) — callers should
 // treat false as "nothing to skip" / "malformed, bail" respectively (the
 // only way to tell them apart is checking the token before calling).
+// skipLiteralGroup consumes a struct or array literal standing as an
+// assignment's right-hand side, recording any calls written inside it.
+//
+// A struct literal's keys may be spelled `{force = true}` as well as
+// `{force: true}`, and nothing else consumes the group — `{` is not an
+// identifier, so the statement scan walked straight through it and read the
+// first spelling as an assignment, declaring a variable called `force`. Only
+// the `=` spelling was ever affected, which is why the two look like different
+// constructs in a `.cfc` and are the same one.
+func (p *scriptParser) skipLiteralGroup() {
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	case TokLBrace, TokLBracket:
+	default:
+		return
+	}
+
+	p.sc.NextSkipComments() // consume { or [
+
+	depth := 1
+
+	for depth > 0 {
+		tok := p.sc.NextSkipComments()
+
+		switch tok.Kind { //nolint:exhaustive
+		case TokEOF:
+			return
+		case TokLBrace, TokLBracket:
+			depth++
+		case TokRBrace, TokRBracket:
+			depth--
+		case TokLParen:
+			// Hand a nested (...) to the scan that knows it, so a call written
+			// inside a literal's value is still found.
+			if !p.skipParenBody() {
+				return
+			}
+		case TokIdent:
+			p.scanNestedCall(tok)
+		}
+	}
+}
+
+// looksLikeTagAttrs reports whether the scanner sits on `ident =`, without
+// moving it.
+//
+// That is two tokens of lookahead and the scanner offers one, so this saves and
+// restores rather than peeking twice. It is a free function because both script
+// parsers need it — see the note on globalScriptParser.
+func looksLikeTagAttrs(sc *Scanner) bool {
+	saved := sc.Save()
+	defer sc.Restore(saved)
+
+	if sc.NextSkipComments().Kind != TokIdent {
+		return false
+	}
+
+	return sc.PeekSkipComments().Kind == TokEquals
+}
+
+// parseScriptTagAttrs consumes the attribute list of a script-syntax CF tag —
+// `query name="q" datasource="ds" { … }`, `savecontent variable="out" { … }`,
+// `lock name="l" timeout="5" { … }`, `param name="form.id" default="0";` — and
+// stops before the body or the terminating semicolon, which the caller's loop
+// goes on to read as usual.
+//
+// The tag name is an ordinary identifier to the scanner and the parser holds no
+// list of tag names, so without this the attributes were read as statements and
+// every one of them declared a variable: go-to-definition on `name` anywhere in
+// a file containing a `<cfquery>` written in script jumped to that tag's
+// attribute. A list of tag names would be the other way to recognise this, and
+// is worse: `internal/docs` is generated and would have to be imported into a
+// package kept deliberately dependency-light, and a tag it does not list would
+// silently go back to declaring variables.
+//
+// `ident ident =` is what identifies the shape, and it spells nothing else in
+// CFScript — a typed declaration is `var x = …`, and a return-typed function is
+// caught by the `function` case that runs before this one.
+func (p *scriptParser) parseScriptTagAttrs() {
+	for looksLikeTagAttrs(p.sc) {
+		p.sc.NextSkipComments() // attribute name
+		p.sc.NextSkipComments() // =
+
+		if !p.skipTagAttrValue() {
+			return
+		}
+	}
+}
+
+// skipTagAttrValue consumes one attribute value and reports whether the scan
+// can continue.
+//
+// It takes one token, one #...# interpolation or one balanced group, and then
+// keeps going only through the operators that genuinely extend a value — a
+// call, an index, a dot or an `&` concatenation. Consuming "everything up to
+// the body" instead is what an earlier version did, and on the tag text that
+// parseFuncBody hands this parser it swallowed a whole `<cffunction>` body
+// along with the `<cfset var x = 1>` inside it.
+func (p *scriptParser) skipTagAttrValue() bool {
+	for {
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
+			return false
+		case TokHash:
+			if !p.skipHashExpr() {
+				return false
+			}
+		case TokLParen:
+			if !p.skipParens() {
+				return false
+			}
+		case TokLBracket:
+			if !p.skipBracketIndex() {
+				return false
+			}
+		default:
+			p.sc.NextSkipComments()
+		}
+
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
+		default:
+			return true
+		}
+	}
+}
+
+// skipHashExpr consumes a #...# interpolation, which an attribute value may be
+// written as: `directory="#root#"` unquoted is `directory=#root#`.
+func (p *scriptParser) skipHashExpr() bool {
+	p.sc.NextSkipComments() // consume the opening #
+
+	for {
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		case TokEOF, TokSemicolon, TokLBrace, TokLT, TokGT:
+			return false
+		case TokHash:
+			return true
+		}
+	}
+}
+
 func (p *scriptParser) skipBracketIndex() bool {
 	if p.sc.PeekSkipComments().Kind != TokLBracket {
 		return false

@@ -197,6 +197,41 @@ the *formatter*, not the parser.
   shorter `c.rest = c.arr[:0]` defeats escape analysis and moved all eleven of its call sites'
   builders to the heap, which cost more than the buffer growth it saved. Check with
   `go build -gcflags=-m` rather than assuming.
+- **Recording a call is gated on `ExtractCalls`; consuming one is not.** The gate lives in
+  `addCall` alone, and every dispatch that walks a call and its argument list runs in every
+  mode. It used to sit on the dispatch itself, at nine sites, and the consequence was not that
+  an argument list was skipped — nothing skips it — but that it was scanned as if it were
+  statements. `svc.save(force = true)` then declared a variable called `force`, and
+  go-to-definition on `force` anywhere in the file landed on that argument. The same shape is
+  why `{force = true}` needs `skipLiteralGroup` and a script-syntax `<cfquery>`'s attributes
+  need `parseScriptTagAttrs`: a group the scan walks *into* rather than *over* is read as code.
+- **An argument list is the one place a call could hide.** `skipParenBody` discarded a `(...)`
+  group a token at a time, so `writeOutput(svc.getName())` recorded only `writeOutput` — on a
+  realistic function body 7 of the 12 calls present. A condition, a return, an assignment's
+  RHS, a concatenation, a struct or array literal and a ternary all extract correctly. The
+  cost was not completeness: a method called only from inside an argument list had no edge
+  into it, so `internal/codemap` read it as unreachable and `unresolved` never checked it.
+  There were **three** copies of that paren loop and fixing two left `a().b(svc.c())` losing
+  `svc.c`; they are one function now. The scan recurses, so `maxArgNesting` caps it at 64 —
+  Go cannot `recover()` from stack exhaustion, so the guard on every parse entry point would
+  not catch a runaway.
+- **`new` needs its own arm wherever a chain is walked.** Treat it as an ordinary keyword and
+  the scan meets `models.User(` on its own and invents a call to `User` on `models` — a made-up
+  answer, which is worse than the missing one it replaced.
+- **There are two variable scans and both must agree.** `scriptParser` is the full one;
+  `globalScriptParser` is a much smaller one that skips every function body outright, which is
+  what makes `VariablesVars`/`ThisVars` answerable per keystroke. Every rule about what does
+  *not* declare a variable therefore has to hold twice — named arguments, struct-literal keys
+  and script-tag attributes fooled both, and fixing one left the other reporting the same
+  phantom names. `TestBothVariableScansAgree` pins them together.
+- **`ident ident =` is what identifies a script-syntax CF tag**, not a list of tag names.
+  Importing `internal/docs` for one would pull a generated 6,582-line file with an `init()`
+  into a package kept deliberately dependency-light, and a tag it did not list would silently
+  go back to declaring variables. The spelling is unambiguous in CFScript. It needs one guard:
+  `parseFuncBody` runs the *script* parser over a tag function's raw text, so
+  `<cffunction name="save">` reaches the same test — hence the `afterLT` flag, and why the
+  attribute scan consumes **pairs** rather than everything up to the body. An earlier version
+  that swallowed "up to the body" ate whole `<cffunction>` bodies and every local inside them.
 
 ### Formatter (`internal/formatter`)
 
