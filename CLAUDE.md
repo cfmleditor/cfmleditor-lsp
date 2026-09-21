@@ -232,6 +232,37 @@ the *formatter*, not the parser.
   `<cffunction name="save">` reaches the same test — hence the `afterLT` flag, and why the
   attribute scan consumes **pairs** rather than everything up to the body. An earlier version
   that swallowed "up to the body" ate whole `<cffunction>` bodies and every local inside them.
+- **A function assigned to a name is a method.** `this.helper = function(a) { … }` and
+  `variables.helper = (a) => a` are how a component exposes a method it builds rather than
+  declares, and the parser recorded only a variable — so `Funcs` held none of them and the
+  component had no completion, no signature help, no go-to-definition and nothing in the index
+  for any of them. `parseFunctionValue` fires only outside a function body and only for `this.`,
+  `variables.` and an unscoped name: a `var`- or `local.`-scoped closure is a local value, and
+  declaring one as a method would put a helper private to one function into every caller's
+  completion list. The paren-less single-argument arrow (`this.x = a => a * 2`) is deliberately
+  not recognised — telling it from `this.x = a` needs three tokens of lookahead on every
+  assignment whose RHS is a bare identifier, which is most of them.
+- **Not every binding is an assignment.** The var-decl parsers only ever looked for `=`, so
+  `for (var row in qry)` declared nothing — in every for-in loop, which is how CFML iterates a
+  query, an array and a struct. `catch (any e)` was the same, in every catch block there is.
+  `declareVar` files both; outside a function body they land in variables scope, since there is
+  no local scope to put them in, and an unscoped `for (row in qry)` lands there wherever it is,
+  which is CFML's rule for any unscoped assignment.
+- **Two-character operators are the scanner's job, and the two are not alike.** `?.` is folded
+  into `TokDot`, so every chain walk sees `svc?.save()` as `svc.save()` without a case of its
+  own — a receiver missed in one of them is recorded as a *bare* call, which resolves as an
+  unqualified function: a wrong answer, not a missing one. Adjacency is required, so a ternary
+  keeps its `?`. `::` is *not* folded, because its qualifier is a component rather than a
+  variable holding one: `TokDoubleColon` exists so the call site carries `Component` and
+  resolution looks for the method in `Foo` instead of among the file's own functions. It used
+  to be two unrecognised tokens, and `Foo::bar()` was reported as
+  `bar (no qualifier, not in file)` — naming the wrong problem and unresolvable even with the
+  component on disk.
+- **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
+  `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
+  the case in all of them. Three of the five were still reporting a bare `bar` when the first
+  two handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
+  reason; add to it rather than fixing one walk.
 
 ### Formatter (`internal/formatter`)
 

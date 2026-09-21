@@ -44,6 +44,7 @@ const (
 	TokBlockComment // /* ... */
 	TokLineComment  // // ...
 	TokOther        // anything else
+	TokDoubleColon  // :: (static member access)
 )
 
 // Token is a lexical token with position info.
@@ -168,6 +169,28 @@ func (s *Scanner) next() Token {
 
 	case isIdentStart(ch):
 		return s.scanIdent(start, startLine)
+
+	// Safe navigation. Emitting `?.` as a plain dot is what lets every chain
+	// walk in the parser see `svc?.save()` as `svc.save()` — the alternative is
+	// a TokQuestion arm in each of the dozen places a chain is walked, and a
+	// receiver missed in one of them is recorded as a *bare* call, which then
+	// resolves as an unqualified function: a wrong answer rather than a missing
+	// one.
+	//
+	// Adjacency is required, so a ternary keeps its question mark: `a ? .5 : 1`
+	// is unaffected, and `a ?.5` is not something anyone writes.
+	case ch == '?' && s.pos+1 < len(s.src) && s.src[s.pos+1] == '.':
+		s.pos += 2
+
+		return Token{Kind: TokDot, Value: ".", Offset: start, Line: startLine}
+
+	// Static member access. Unlike `?.` this is *not* folded into a dot: the
+	// qualifier is a component, not a variable holding one, so the call site it
+	// produces carries a component rather than a receiver name.
+	case ch == ':' && s.pos+1 < len(s.src) && s.src[s.pos+1] == ':':
+		s.pos += 2
+
+		return Token{Kind: TokDoubleColon, Value: "::", Offset: start, Line: startLine}
 
 	default:
 		s.pos++

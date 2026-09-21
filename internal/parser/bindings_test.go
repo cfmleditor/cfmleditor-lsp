@@ -1,0 +1,227 @@
+package parser
+
+import (
+	"slices"
+	"testing"
+)
+
+// A component may expose a method it builds rather than declares. The parser
+// recorded only a variable, so Funcs held none of them — no completion, no
+// signature help, no go-to-definition and nothing in the index.
+func TestFunctionValuedAssignmentsDeclareAMethod(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+		args int
+	}{
+		{"this scope", `this.helper = function(required string a) { return a; };`, "helper", 1},
+		{"variables scope", `variables.helper = function(a, b) { return a; };`, "helper", 2},
+		{"unscoped", `helper = function(a) { return a; };`, "helper", 1},
+		{"arrow", `this.helper = (a) => a;`, "helper", 1},
+		{"no arguments", `this.helper = function() { return 1; };`, "helper", 0},
+		{"named function expression", `this.helper = function helper(a) { return a; };`, "helper", 1},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pr := Parse(testURI, "component {\n"+c.body+"\n}\n")
+
+			if len(pr.Funcs) != 1 {
+				t.Fatalf("expected one function, got %+v", pr.Funcs)
+			}
+
+			if pr.Funcs[0].Name != c.want {
+				t.Errorf("name: got %q want %q", pr.Funcs[0].Name, c.want)
+			}
+
+			if len(pr.Funcs[0].Arguments) != c.args {
+				t.Errorf("arguments: got %d want %d (%+v)",
+					len(pr.Funcs[0].Arguments), c.args, pr.Funcs[0].Arguments)
+			}
+
+			if len(pr.Scopes) != 1 {
+				t.Errorf("expected one scope, got %+v", pr.Scopes)
+			}
+		})
+	}
+}
+
+// A local closure is a value, not a method. Declaring one would put a helper
+// private to a single function into every caller's completion list.
+func TestLocalClosuresAreNotMethods(t *testing.T) {
+	cases := []string{
+		"component {\nvar helper = function(a) { return a; };\n}\n",
+		"component {\nfunction go() {\n var helper = function(a) { return a; };\n}\n}\n",
+		"component {\nfunction go() {\n local.helper = function(a) { return a; };\n}\n}\n",
+	}
+
+	for _, src := range cases {
+		pr := Parse(testURI, src)
+		for _, f := range pr.Funcs {
+			if f.Name == "helper" {
+				t.Errorf("%s\n  declared a method for a local closure", src)
+			}
+		}
+	}
+}
+
+// An expression that merely starts with a paren is not an arrow function.
+func TestParenthesisedExpressionsAreNotArrowFunctions(t *testing.T) {
+	pr := Parse(testURI, "component {\nthis.total = (a + b) * c;\n}\n")
+	if len(pr.Funcs) != 0 {
+		t.Errorf("expected no functions, got %+v", pr.Funcs)
+	}
+}
+
+// `for (var row in qry)` binds through `in`, and the var-decl parsers only ever
+// looked for `=` — so the loop variable of every for-in loop was undeclared.
+// `catch (any e)` was the same, in every catch block there is.
+func TestLoopAndCatchVariablesAreDeclared(t *testing.T) {
+	cases := []struct {
+		body string
+		want string
+	}{
+		{`for (var row in qry) { writeOutput(row); }`, "row"},
+		{`for (var k in data) { writeOutput(k); }`, "k"},
+		{`try { x(); } catch (any e) { writeOutput(e); }`, "e"},
+		{`try { x(); } catch (e) { writeOutput(e); }`, "e"},
+		{`try { x(); } catch (org.Foo err) { writeOutput(err); }`, "err"},
+		{`for (var i = 1; i <= 10; i++) { writeOutput(i); }`, "i"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			pr := Parse(testURI, "component {\n function go() {\n  "+c.body+"\n }\n}\n")
+
+			scope := pr.Scopes[0]
+
+			got := pr.FuncVars(scope.Start, scope.End)
+			if !slices.Contains(got, c.want) {
+				t.Errorf("expected %q in FuncVars, got %v", c.want, got)
+			}
+		})
+	}
+}
+
+// Unscoped, the loop variable is a variables-scope binding — CFML's rule for
+// any unscoped assignment, and the reason the `var` form is the one to write.
+func TestUnscopedLoopVariableIsVariablesScoped(t *testing.T) {
+	pr := Parse(testURI, "component {\n function go() {\n  for (row in qry) { writeOutput(row); }\n }\n}\n")
+
+	var found bool
+
+	for _, v := range pr.AllVars() {
+		if v.Name == "row" && v.Scope == ScopeVariables {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Errorf("expected a variables-scope 'row', got %+v", pr.AllVars())
+	}
+}
+
+func callTargets(t *testing.T, body string) []string {
+	t.Helper()
+
+	pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+body+"\n }\n}\n",
+		ParseOptions{ExtractCalls: true})
+	scope := pr.Scopes[0]
+
+	var got []string
+
+	for _, c := range pr.FuncCalls(scope.Start, scope.End) {
+		switch {
+		case c.Variable != "":
+			got = append(got, c.Variable+"."+c.FuncName)
+		case c.Component != "":
+			got = append(got, c.Component+"::"+c.FuncName)
+		default:
+			got = append(got, "?."+c.FuncName)
+		}
+	}
+
+	return got
+}
+
+// `?.` was two unrecognised tokens, so the receiver was dropped and the call
+// was recorded as a bare one — an unqualified function call, which is a wrong
+// answer rather than a missing one. The scanner folds it into a dot, so every
+// chain walk sees it without a case of its own.
+func TestSafeNavigationKeepsTheReceiver(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`svc?.save();`, []string{"svc.save"}},
+		{`svc?.a()?.b();`, []string{"svc.a", "svc.b"}},
+		{`svc?.save(force = true);`, []string{"svc.save"}},
+		{`variables.svc?.save();`, []string{"variables.svc.save"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			if got := callTargets(t, c.body); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A ternary's question mark is not safe navigation. Adjacency is what tells
+// them apart, so only `?.` folds.
+func TestTernaryIsNotSafeNavigation(t *testing.T) {
+	sc := NewScanner("a ? b : c")
+
+	var kinds []TokenKind
+
+	for {
+		tok := sc.NextSkipComments()
+		if tok.Kind == TokEOF {
+			break
+		}
+
+		kinds = append(kinds, tok.Kind)
+	}
+
+	want := []TokenKind{TokIdent, TokQuestion, TokIdent, TokColon, TokIdent}
+	if !slices.Equal(kinds, want) {
+		t.Errorf("got %v want %v", kinds, want)
+	}
+}
+
+// Static member access is qualified by a *component*, not by a variable holding
+// one. Dropping the `::` reported `Foo::bar()` as `bar (no qualifier, not in
+// file)`, which names the wrong problem, and left the call unresolvable even
+// when the component was right there on disk.
+//
+// Every assignment form is listed because the parser walks a chain in five
+// separate places and each one needs the case: three of the five were still
+// reporting a bare `bar` when the first two were done.
+func TestStaticCallCarriesItsComponent(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`Foo::bar();`, []string{"Foo::bar"}},
+		{`models.Foo::bar();`, []string{"models.Foo::bar"}},
+		{`x = Foo::bar();`, []string{"Foo::bar"}},
+		{`var x = models.Foo::bar();`, []string{"models.Foo::bar"}},
+		{`variables.x = Foo::bar();`, []string{"Foo::bar"}},
+		{`local.x = models.Foo::bar();`, []string{"models.Foo::bar"}},
+		{`this.x = Foo::bar();`, []string{"Foo::bar"}},
+
+		// Controls: a single colon is not static access.
+		{`svc.bar();`, []string{"svc.bar"}},
+		{`x = cond ? a() : b();`, []string{"?.a", "?.b"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			if got := callTargets(t, c.body); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}

@@ -367,6 +367,8 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
+		p.declareLoopVar(nameTok, peek)
+
 		return
 	}
 
@@ -439,6 +441,13 @@ chainWalk:
 			}
 
 			fullChain.writeString("[]")
+		case TokDoubleColon:
+			// `var x = models.Foo::bar()`. The chain so far is a component,
+			// not a receiver — see parseStaticCall. The assignment's own type
+			// inference stops here, as it already did.
+			p.recordStaticCall(fullChain.String(), Token{Line: line})
+
+			return
 		case TokDot:
 			p.sc.NextSkipComments() // consume .
 
@@ -573,6 +582,11 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	}
 
 	// Check RHS for component refs
+	if (scope == ScopeThis || scope == ScopeVariables) &&
+		p.parseFunctionValue(nameTok.Value, tok) {
+		return
+	}
+
 	p.skipLiteralGroup()
 
 	rhs := p.sc.PeekSkipComments()
@@ -655,6 +669,8 @@ func (p *scriptParser) parse() {
 			p.parseScopedVar(tok, ScopeVariables)
 		case "new":
 			p.parseStandaloneNew(tok)
+		case "catch":
+			p.parseCatchVar()
 		default:
 			// Check for returnType function pattern (e.g. "string function getName()")
 			peek := p.sc.PeekSkipComments()
@@ -753,6 +769,8 @@ func (p *scriptParser) parse() {
 						})
 					}
 				}
+			case peek.Kind == TokDoubleColon:
+				p.parseStaticCall(tok)
 			case peek.Kind == TokLParen && !isKeyword(tok.Value):
 				p.recordBareCallAndChain(tok)
 			case !afterLT && peek.Kind == TokIdent && !isKeyword(tok.Value) && looksLikeTagAttrs(p.sc):
@@ -958,6 +976,266 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	// Process body: set inFunc scope, parse assignments, then clear
 	endLine := p.parseBody(funcLine, args)
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Access: access, ReturnType: returnType, Start: funcLine, End: p.baseLine + endLine})
+}
+
+// parseFunctionValue declares a method for a function assigned to a name, and
+// reports whether it consumed one.
+//
+// `this.helper = function(a) { … }` and `variables.helper = (a) => a` are how a
+// component exposes a method it builds rather than declares, and the parser
+// recorded only a variable: no FunctionDef, so the component had none of those
+// methods in Funcs — no completion, no signature help, no go-to-definition and
+// nothing in the index.
+//
+// It fires only outside a function body, and only for `this.`, `variables.` and
+// an unscoped name. A `var`- or `local.`-scoped closure is a local value, not a
+// method of the component, and declaring one as a method would put a helper
+// private to one function into every caller's completion list.
+//
+// The paren-less single-argument arrow (`this.x = a => a * 2`) is not
+// recognised: telling it from an ordinary `this.x = a` needs three tokens of
+// lookahead on every assignment whose right-hand side is a bare identifier,
+// which is most of them.
+func (p *scriptParser) parseFunctionValue(name string, startTok Token) bool {
+	if p.inFunc != "" {
+		return false
+	}
+
+	// The docblock sits before the assignment, not before the `function`
+	// keyword, so it is read here rather than where parseFunction reads it.
+	docComment := p.sc.LastBlockComment
+
+	rhs := p.sc.PeekSkipComments()
+
+	switch {
+	case rhs.Kind == TokIdent && identEq(rhs.Value, "function"):
+		p.sc.NextSkipComments() // consume `function`
+
+		// A named function expression: `this.x = function x() { … }`.
+		if p.sc.PeekSkipComments().Kind == TokIdent {
+			p.sc.NextSkipComments()
+		}
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			return false
+		}
+
+		p.sc.NextSkipComments() // consume (
+
+	case rhs.Kind == TokLParen && p.arrowFollowsParens():
+		p.sc.NextSkipComments() // consume (
+
+	default:
+		return false
+	}
+
+	p.sc.LastBlockComment = ""
+
+	args := p.parseArgList()
+	if docComment != "" {
+		applyJSDocParams(docComment, args)
+	}
+
+	if rhs.Kind == TokLParen {
+		// The `=>` the lookahead found, now that the argument list is consumed.
+		p.sc.NextSkipComments()
+		p.sc.NextSkipComments()
+	}
+
+	p.recordFunctionValue(name, startTok, args)
+
+	return true
+}
+
+// arrowFollowsParens reports whether the (...) the scanner is positioned on is
+// an arrow function's argument list, without moving it.
+//
+// `=>` is two tokens to this scanner, and the parentheses have to be walked to
+// reach them, so this is the one place a rewound scan is worth its cost: an
+// assignment whose right-hand side opens with a paren is uncommon, and telling
+// `(a) => a` from `(a + b) * c` has no cheaper test.
+func (p *scriptParser) arrowFollowsParens() bool {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	if !p.skipParensQuiet() {
+		return false
+	}
+
+	if p.sc.PeekSkipComments().Kind != TokEquals {
+		return false
+	}
+
+	p.sc.NextSkipComments()
+
+	return p.sc.PeekSkipComments().Kind == TokGT
+}
+
+// skipParensQuiet consumes a balanced (...) group without recording anything,
+// for a lookahead that will be rewound — scanParenBody would record every call
+// inside the group twice over.
+func (p *scriptParser) skipParensQuiet() bool {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return false
+	}
+
+	p.sc.NextSkipComments() // consume (
+
+	depth := 1
+
+	for depth > 0 {
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		case TokEOF:
+			return false
+		case TokLParen:
+			depth++
+		case TokRParen:
+			depth--
+		}
+	}
+
+	return true
+}
+
+// recordFunctionValue files the declaration and walks the body, as
+// parseFunction does for a declared method.
+func (p *scriptParser) recordFunctionValue(name string, startTok Token, args []Argument) {
+	funcLine := p.baseLine + startTok.Line
+
+	for _, a := range args {
+		if isComponentType(a.Type) {
+			p.componentRefs = append(p.componentRefs, ComponentRef{
+				Variable:  a.Name,
+				Component: a.Type,
+				URI:       uriFromString(p.fileURI),
+				Line:      uint32(funcLine),
+			})
+		}
+	}
+
+	p.funcs = append(p.funcs, FunctionDef{
+		Name:      name,
+		URI:       uriFromString(p.fileURI),
+		Line:      uint32(funcLine),
+		Arguments: args,
+	})
+
+	endLine := p.parseBody(funcLine, args)
+	p.scopes = append(p.scopes, FuncScope{Name: name, Start: funcLine, End: p.baseLine + endLine})
+}
+
+// declareLoopVar declares the loop variable of `for (var row in qry)`.
+//
+// The two var-decl parsers only ever looked for `=`, so a `var` that binds
+// through `in` declared nothing and go-to-definition on the loop variable
+// failed — in every for-in loop, which is how CFML iterates a query, an array
+// and a struct.
+func (p *scriptParser) declareLoopVar(nameTok, next Token) {
+	if next.Kind != TokIdent || !identEq(next.Value, "in") {
+		return
+	}
+
+	p.declareVar(nameTok, ScopeLocal)
+}
+
+// parseCatchVar declares a catch block's exception variable.
+//
+// `catch (any e)` and `catch (e)` bind `e` for the block, and neither was
+// declared: go-to-definition on the exception variable failed in every catch
+// block there is.
+func (p *scriptParser) parseCatchVar() {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return
+	}
+
+	p.sc.NextSkipComments() // consume (
+
+	// The **last** identifier before the closing paren is the variable, and
+	// whatever precedes it is the type — which is how one rule reads `catch (e)`,
+	// `catch (any e)` and a dotted `catch (org.Foo e)` alike.
+	var last Token
+
+	for {
+		tok := p.sc.NextSkipComments()
+
+		switch tok.Kind { //nolint:exhaustive
+		case TokIdent:
+			last = tok
+		case TokDot:
+		case TokRParen, TokEOF:
+			if last.Kind == TokIdent {
+				p.declareVar(last, ScopeLocal)
+			}
+
+			return
+		default:
+			return
+		}
+	}
+}
+
+// declareVar records a binding that is neither an assignment nor an argument —
+// a loop variable or a caught exception. Outside a function body there is no
+// local scope to put it in, so it lands where an unscoped assignment would.
+func (p *scriptParser) declareVar(nameTok Token, scope Scope) {
+	if p.inFunc == "" {
+		scope = ScopeVariables
+	} else if scope == ScopeLocal && p.localVarSet != nil {
+		p.localVarSet[strings.ToLower(nameTok.Value)] = true
+	}
+
+	p.vars = append(p.vars, VarDef{
+		Name: nameTok.Value, Scope: scope,
+		Line: uint32(p.baseLine + nameTok.Line),
+	})
+}
+
+// parseStaticCall records `Foo::bar()`, Lucee's and ACF's static member access.
+//
+// The `::` was two unrecognised tokens, so `Foo` was dropped and the call was
+// recorded as a bare `bar()` — reported as `bar (no qualifier, not in file)`,
+// which names the wrong problem: the call *is* qualified, and by a component
+// rather than a variable. The CallSite therefore carries Component, not
+// Variable, so resolution looks for the method in `Foo` instead of among the
+// file's own functions.
+//
+// Only the statement form is recognised. A static call in an expression
+// (`x = Foo::bar()`) is left where it was, since the chain walks that would
+// have to learn about it each hold a receiver *name* and this has none.
+func (p *scriptParser) parseStaticCall(qualifier Token) {
+	p.recordStaticCall(qualifier.Value, qualifier)
+}
+
+// recordStaticCall consumes `::method(...)` from the scanner and files the call
+// against component, which the caller has already read.
+func (p *scriptParser) recordStaticCall(component string, startTok Token) {
+	p.sc.NextSkipComments() // consume ::
+
+	methTok := p.sc.PeekSkipComments()
+	if methTok.Kind != TokIdent {
+		return
+	}
+
+	p.sc.NextSkipComments()
+
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return
+	}
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	p.addCall(CallSite{
+		FuncName:  methTok.Value,
+		Component: component,
+		Line:      uint32(p.baseLine + startTok.Line),
+		Caller:    caller,
+		Resolved:  true,
+	})
+
+	p.skipParens()
 }
 
 func (p *scriptParser) parseArgList() []Argument {
@@ -1225,8 +1503,16 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 	case "function", "public", "private", "remote", "package":
 		// Nested function — skip its entire body
 		p.skipNestedFunction(tok, depth)
+	case "catch":
+		p.parseCatchVar()
 	default:
 		peek := p.sc.PeekSkipComments()
+		if peek.Kind == TokDoubleColon {
+			p.parseStaticCall(tok)
+
+			return
+		}
+
 		if !isKeyword(tok.Value) && peek.Kind == TokLParen {
 			p.recordBareCallAndChain(tok)
 
@@ -1466,6 +1752,8 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
+		p.declareLoopVar(nameTok, peek)
+
 		return
 	}
 
@@ -1521,6 +1809,11 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 					}
 
 					fullChain.writeString("[]")
+				case TokDoubleColon:
+					// See checkVarRHS's identical case.
+					p.recordStaticCall(fullChain.String(), varTok)
+
+					return
 				case TokDot:
 					p.sc.NextSkipComments()
 
@@ -1730,6 +2023,11 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 						}
 
 						fullChain.writeString("[]")
+					case TokDoubleColon:
+						// See checkVarRHS's identical case.
+						p.recordStaticCall(fullChain.String(), scopeTok)
+
+						return
 					case TokDot:
 						p.sc.NextSkipComments()
 
@@ -1902,6 +2200,15 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokEquals {
+		// `for (row in qry)` without `var`. Unscoped, so it is a variables-scope
+		// binding, which is CFML's rule for any unscoped assignment and the
+		// reason the `var` form is the one to write.
+		if peek.Kind == TokIdent && identEq(peek.Value, "in") {
+			p.declareVar(tok, ScopeVariables)
+
+			return
+		}
+
 		// Check for bare dotted call: obj.method() — also routes a bracket-indexed
 		// receiver (obj[key].method()) through checkBareCall, whose own chain-walk
 		// knows how to skip the "[...]" group; without TokLBracket here, a bare
@@ -1925,6 +2232,12 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	// If inside a function and variable is NOT declared local, route to componentRefs
 	if p.inFunc != "" && !p.isVarDeclaredLocal(tok.Value) {
 		p.forceGlobal = true
+	}
+
+	if p.parseFunctionValue(tok.Value, tok) {
+		p.forceGlobal = false
+
+		return
 	}
 
 	p.skipLiteralGroup()
@@ -1974,6 +2287,11 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 					}
 
 					fullChain.writeString("[]")
+				case TokDoubleColon:
+					// See checkVarRHS's identical case.
+					p.recordStaticCall(fullChain.String(), tok)
+
+					return
 				case TokDot:
 					p.sc.NextSkipComments() // consume .
 
@@ -2062,6 +2380,12 @@ chainWalk:
 			p.sc.NextSkipComments()
 
 			identChain = append(identChain, next.Value)
+		case TokDoubleColon:
+			// `models.Foo::bar()`. Everything walked so far is the component,
+			// not a receiver — see parseStaticCall.
+			p.recordStaticCall(strings.Join(identChain, "."), tok)
+
+			return
 		default:
 			break chainWalk
 		}
