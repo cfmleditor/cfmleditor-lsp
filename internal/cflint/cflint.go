@@ -232,17 +232,24 @@ func mapSeverity(s string) protocol.DiagnosticSeverity {
 }
 
 func binaryName() string {
-	os := runtime.GOOS
-	arch := runtime.GOARCH
+	return binaryNameFor(runtime.GOOS, runtime.GOARCH)
+}
 
+// binaryNameFor is binaryName with the platform passed in, so the mapping can
+// be tested from a machine that is only ever one of them. An asset that is
+// named wrong here is not a build error anywhere: it is an HTTP 404 at the
+// first lint, on someone else's hardware.
+func binaryNameFor(goos, goarch string) string {
 	switch {
-	case os == "darwin" && arch == "arm64":
+	case goos == "darwin" && goarch == "arm64":
 		return "cflint-macos-aarch64"
-	case os == "linux" && arch == "arm64":
+	case goos == "darwin" && goarch == "amd64":
+		return "cflint-macos-amd64"
+	case goos == "linux" && goarch == "arm64":
 		return "cflint-linux-aarch64"
-	case os == "linux" && arch == "amd64":
+	case goos == "linux" && goarch == "amd64":
 		return "cflint-linux-amd64"
-	case os == "windows" && arch == "amd64":
+	case goos == "windows" && goarch == "amd64":
 		return "cflint-windows-amd64.exe"
 	default:
 		return ""
