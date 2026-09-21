@@ -13,7 +13,7 @@ GOBIN_DIR := $(shell go env GOPATH)/bin
 LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 
-.PHONY: build build-wasm test conformance conformance-summary corpus shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test conformance conformance-summary corpus gapcheck shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -147,6 +147,18 @@ conformance-summary:
 
 visualtest:
 	go test -v -run TestFormatOutput ./internal/formatter/
+
+# Compares what internal/parser extracts from a CFML file against what the
+# tree-sitter grammar sees in the same file. The two are independent
+# implementations, so where they disagree about a call one of them is wrong.
+#
+# Without CORPUS it holds the repo's fixtures to the differences recorded in
+# expectedDifferences, and fails on a new one or on a listed one that has been
+# fixed. With CORPUS=<dir>[:<dir>...] it reports instead, which is how to size a
+# gap against real code.
+gapcheck:
+	CORPUS="$(CORPUS)" go test -v -count=1 -timeout 30m -run TestGrammarAndParserAgreeOnCalls ./internal/tsoracle/
+
 
 # Formats a corpus of real-world CFML and reports what the formatter did to each
 # file: clean, refused by the grammar, rejected by the whitespaceOnly guard, or not

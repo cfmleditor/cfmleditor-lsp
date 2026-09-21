@@ -20,6 +20,10 @@ make update-d3      # rebuild the code-map viewer's D3 bundle from assets/vendor
                     # (needs Node; the bundle is committed so `go build` does not)
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
+make gapcheck [CORPUS=<dir>[:<dir>...]]
+                    # diff what internal/parser extracts against what the tree-sitter
+                    # grammar sees in the same file. Without CORPUS it holds the repo's
+                    # fixtures to a recorded list of differences; with one it reports.
 make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]
                     # format a real-world CFML corpus and report what the formatter did to
                     # each file (clean / grammar-refused / guard-rejected / not idempotent /
@@ -152,6 +156,7 @@ Editor document change
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
 | `internal/codemap/mcp` | Read-only MCP server over the store |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
+| `internal/tsoracle` | Differential check: what `internal/parser` extracted vs what the tree-sitter grammar saw in the same file. See the note under Verification discipline |
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
@@ -1206,6 +1211,41 @@ rule, and without the second half every route path short-circuits and the test
 passes whatever the code does. And a window test needs both documents to present
 a **full** window, or it compares a five-line window against a fifty-line one and
 fails for that instead.
+
+**The grammar is a second opinion on the parser, and `make gapcheck` asks it.**
+`internal/parser` and the tree-sitter grammar are independent implementations of
+"what is a call", so where they disagree one of them is wrong. Every call-losing
+defect fixed here so far was found by hand-probing constructs one at a time;
+this asks the question over a corpus instead. It found, in minutes on the repo's
+own 40 fixtures, a class nobody had probed: in **tag syntax** a call in a
+`<cfif>`/`<cfelseif>` condition, in a `<cfreturn>`, or chained onto an
+instantiation (`<cfset d = createObject(…).init("ds")>`) is recorded nowhere,
+while the same code in script syntax is. `TestKnownTagSyntaxGaps` states each
+shape and fails when one starts working.
+
+Three things about it, each of which cost a wrong conclusion first:
+
+- **Calibrate before believing it.** The first run reported nine calls the
+  parser had "invented" — every one a `queryExecute`, which the grammar gives a
+  `query_expression` node of its own so SQL can be injected into it. That was
+  the oracle's mistake, not the parser's.
+- **Deliberate differences are not gaps.** `createObject(…)` is a `ComponentRef`
+  to the parser and a call to the grammar, on purpose. `expectedDifferences`
+  records both kinds with a reason each, and the test fails both on a *new*
+  difference and on a listed one that no longer differs — so a gap cannot be
+  closed unnoticed and the list cannot rot into decoration.
+- **The declaration axis is much weaker than the call axis, and it is measured
+  rather than assumed.** Of the phantom-variable shapes fixed in this parser,
+  the grammar disagrees with the old behaviour on exactly one
+  (`component extends=`). For the rest it agrees with the *bug*: `force` in
+  `svc.save(force = true)` is an `assignment_expression` to the grammar too, and
+  so is `name` in `query name="q"`. Those distinctions are semantic, not
+  syntactic, so a syntax oracle cannot arbitrate them.
+  `TestDeclarationAxisIsWeakerThanTheCallAxis` pins that ratio.
+
+It cannot check resolution at all — the grammar has no idea what a dot-path
+points at — and it is only as good as the corpus: the repo's fixtures contain
+zero interpolated calls, which is why the size of that gap is still unmeasured.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in
