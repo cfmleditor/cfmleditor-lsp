@@ -30,10 +30,11 @@ type scriptParser struct {
 	baseLine            int
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
-	extractLinks        bool // whether to extract document links
-	extractCalls        bool // whether to extract all call sites
-	argNesting          int  // recursion depth of skipParenBody's scan, bounded by maxArgNesting
-	afterLT             bool // previous token was '<' — see looksLikeTagAttrs
+	extractLinks        bool              // whether to extract document links
+	extractCalls        bool              // whether to extract all call sites
+	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
+	afterLT             bool              // previous token was '<' — see looksLikeTagAttrs
+	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
@@ -638,6 +639,8 @@ func (p *scriptParser) parse() {
 		p.afterLT = tok.Kind == TokLT
 
 		if tok.Kind != TokIdent {
+			p.handleLiteralToken(tok)
+
 			continue
 		}
 
@@ -647,7 +650,10 @@ func (p *scriptParser) parse() {
 			p.parseFunction(tok, "", "")
 		case "public", "private", "remote", "package":
 			p.parseAccessModified(tok)
-		case "component":
+		case "component", "interface":
+			// An interface's attribute list is a component's — `interface
+			// extends="IBase"` left `extends` to be read as an assignment, and
+			// declared a variable called `extends`.
 			p.parseComponentAttrs()
 		case "property":
 			p.parseProperty(tok)
@@ -667,10 +673,14 @@ func (p *scriptParser) parse() {
 			// assignment falls through to the bare-call path and its RHS
 			// component type is silently dropped.
 			p.parseScopedVar(tok, ScopeVariables)
+		case "import":
+			p.parseImport()
 		case "new":
 			p.parseStandaloneNew(tok)
 		case "catch":
 			p.parseCatchVar()
+		case "throw":
+			p.consumeThrowArgs()
 		default:
 			// Check for returnType function pattern (e.g. "string function getName()")
 			peek := p.sc.PeekSkipComments()
@@ -1238,6 +1248,190 @@ func (p *scriptParser) recordStaticCall(component string, startTok Token) {
 	p.skipParens()
 }
 
+// consumeThrowArgs consumes `throw(...)`'s argument list.
+//
+// `throw` is the one CFScript keyword invoked like a function, and being a
+// keyword it never reached the dispatch that consumes an argument list — so
+// `throw(type = "x", message = "y")` declared variables called `type` and
+// `message`, and `throw(object = new errors.Bad())` recorded a component ref
+// for a variable called `object`. The other keywords that take parentheses
+// (`if`, `while`, `switch`) hold an expression rather than named arguments, and
+// the statement scan reads those correctly as it is.
+//
+// `throw "message";` and `throw new Foo();` take no parentheses, and are left
+// for the loop to carry on with.
+func (p *scriptParser) consumeThrowArgs() {
+	if p.sc.PeekSkipComments().Kind == TokLParen {
+		p.skipParens()
+	}
+}
+
+// handleLiteralToken is what every token loop does with a string or a closing
+// bracket: scan a string's #...# interpolations for calls, and record a member
+// function called on the literal.
+//
+// It is one function because there are six loops that walk tokens — parse,
+// parseBody, scanParenBody, scanNestedFunctionBody, skipLiteralGroup and
+// skipDefault — and a literal reaches all of them.
+// TestEveryTokenLoopHandlesLiterals fails if one stops routing through here.
+func (p *scriptParser) handleLiteralToken(tok Token) {
+	if tok.Kind == TokString {
+		p.scanInterpolation(tok)
+	}
+
+	if isLiteralReceiver(tok.Kind) && p.sc.PeekSkipComments().Kind == TokDot {
+		p.recordLiteralMemberCall(tok)
+	}
+}
+
+// scanInterpolation records the calls written inside a string's #...# spans.
+//
+// The scanner takes a quoted string as one token, so everything in it was
+// invisible: `writeOutput("id #svc.getName()#")` recorded only writeOutput.
+// That is idiomatic CFML rather than an edge case — interpolation is how a
+// computed value reaches a string — and it cost the same as the argument-list
+// gap did: no edge into the callee, so the code map read it as unreachable and
+// `unresolved` never checked it.
+//
+// Each span is scanned by the same parser over a scanner of its own, so the
+// calls land in the enclosing function's bucket with the resolver machinery
+// that a call outside a string gets. Line numbers within a multi-line string
+// collapse onto the line the string starts at.
+func (p *scriptParser) scanInterpolation(tok Token) {
+	// A span with no '(' in it cannot hold a call, and a call is the only thing
+	// this records — `"#user.name#"` and `"#i#"` are most of the interpolation
+	// in any CFML file, so rejecting them on one byte scan is what keeps this
+	// off the profile.
+	if strings.IndexByte(tok.Value, '#') < 0 || strings.IndexByte(tok.Value, '(') < 0 ||
+		p.argNesting >= maxArgNesting {
+		return
+	}
+
+	outerScanner, outerBase := p.sc, p.baseLine
+
+	p.argNesting++
+
+	defer func() {
+		p.sc, p.baseLine = outerScanner, outerBase
+		p.argNesting--
+	}()
+
+	p.baseLine += tok.Line
+
+	for _, span := range interpolatedSpans(tok.Value) {
+		p.sc = NewScanner(tok.Value[span.start:span.end])
+
+		for {
+			t := p.sc.NextSkipComments()
+			if t.Kind == TokEOF {
+				break
+			}
+
+			switch t.Kind { //nolint:exhaustive
+			case TokIdent:
+				p.scanNestedCall(t)
+			case TokString, TokRBracket:
+				p.handleLiteralToken(t)
+			}
+		}
+	}
+}
+
+// hashSpan is the half-open byte range between a pair of interpolation hashes.
+// The tag parser needs the offsets to place a line number, so the ranges rather
+// than the substrings are what this returns.
+type hashSpan struct{ start, end int }
+
+// interpolatedSpans returns the range inside each #...# of a piece of source.
+//
+// `##` is CFML's escape for a literal hash and opens nothing, which is what
+// stops `"a ## b"` being read as a span containing " ".
+func interpolatedSpans(s string) []hashSpan {
+	var spans []hashSpan
+
+	for i := 0; i < len(s); i++ {
+		if s[i] != '#' {
+			continue
+		}
+
+		if i+1 < len(s) && s[i+1] == '#' {
+			i++ // an escaped hash: skip the pair
+
+			continue
+		}
+
+		end := -1
+
+		for j := i + 1; j < len(s); j++ {
+			if s[j] == '#' {
+				end = j
+
+				break
+			}
+		}
+
+		if end < 0 {
+			break
+		}
+
+		if end > i+1 {
+			spans = append(spans, hashSpan{start: i + 1, end: end})
+		}
+
+		i = end
+	}
+
+	return spans
+}
+
+// isLiteralReceiver reports whether a token can close a literal that a member
+// function is then called on.
+func isLiteralReceiver(k TokenKind) bool {
+	return k == TokString || k == TokRBracket
+}
+
+// recordLiteralMemberCall records `"abc".ucase()` and `[1,2].map(f)`.
+//
+// The receiver is a value rather than a variable, so the scan walked past it
+// and recorded a *bare* `ucase()` — indistinguishable from an unqualified call
+// to a function of that name, which in a component that happens to declare one
+// is an edge to it that does not exist. The component is `$any`, the existing
+// spelling for "genuinely dynamic", so the method-exists check is skipped the
+// way it is for any other value whose type is not static.
+func (p *scriptParser) recordLiteralMemberCall(recv Token) {
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			return
+		}
+
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			continue // a property read, e.g. `"a,b".listLen` — nothing to record
+		}
+
+		p.addCall(CallSite{
+			FuncName:  methTok.Value,
+			Component: "$any",
+			Line:      uint32(p.baseLine + recv.Line),
+			Caller:    caller,
+			Resolved:  true,
+		})
+
+		if !p.skipParens() {
+			return
+		}
+	}
+}
+
 func (p *scriptParser) parseArgList() []Argument {
 	args := make([]Argument, 0, 4)
 
@@ -1319,6 +1513,9 @@ func (p *scriptParser) parseArgList() []Argument {
 	return args
 }
 
+// skipDefault consumes an argument's default value, recording any calls written
+// in it: `function load(id, dao = newDao())` calls newDao on every invocation
+// that omits it, and the scan walked past it a token at a time.
 func (p *scriptParser) skipDefault() {
 	depth := 0
 
@@ -1339,6 +1536,10 @@ func (p *scriptParser) skipDefault() {
 			depth++
 		case TokRParen, TokRBrace, TokRBracket:
 			depth--
+		case TokIdent:
+			p.scanNestedCall(peek)
+		case TokString:
+			p.handleLiteralToken(peek)
 		}
 	}
 }
@@ -1402,6 +1603,10 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		case TokIdent:
 			if depth > 0 {
 				p.handleBodyToken(t, depth, afterLT)
+			}
+		case TokString, TokRBracket:
+			if depth > 0 {
+				p.handleLiteralToken(t)
 			}
 		}
 	}
@@ -1505,6 +1710,8 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		p.skipNestedFunction(tok, depth)
 	case "catch":
 		p.parseCatchVar()
+	case "throw":
+		p.consumeThrowArgs()
 	default:
 		peek := p.sc.PeekSkipComments()
 		if peek.Kind == TokDoubleColon {
@@ -1641,7 +1848,7 @@ func (p *scriptParser) readNewComponent() string {
 		path := p.readDottedPath(p.sc.NextSkipComments())
 
 		if identEq(tok.Value, "cfml") {
-			return path
+			return p.applyImport(path)
 		}
 
 		// `java:` names a Java class, so it resolves through the same
@@ -1653,7 +1860,52 @@ func (p *scriptParser) readNewComponent() string {
 		return p.resolveCall("createObject(\"java\",\"" + path + "\")")
 	}
 
-	return p.readDottedPath(tok)
+	return p.applyImport(p.readDottedPath(tok))
+}
+
+// parseImport records `import models.User;`, so a later `new User()` resolves
+// to models.User rather than to a component literally called User.
+//
+// Only the explicit form is recorded. `import models.*;` names a directory, and
+// which component a bare name then refers to is a question about what is on
+// disk — the parser has no filesystem and guessing would produce a confident
+// wrong path, so a wildcard import is left to resolve as it did.
+func (p *scriptParser) parseImport() {
+	path := p.readDottedPath(p.sc.NextSkipComments())
+	if path == "" {
+		return
+	}
+
+	dot := strings.LastIndexByte(path, '.')
+	if dot < 0 {
+		return
+	}
+
+	last := path[dot+1:]
+	if last == "" || last == "*" {
+		return
+	}
+
+	if p.imports == nil {
+		p.imports = make(map[string]string, 4)
+	}
+
+	p.imports[strings.ToLower(last)] = path
+}
+
+// applyImport rewrites a bare component name that an import brought into scope.
+// A dotted path is already qualified and is left alone.
+func (p *scriptParser) applyImport(comp string) string {
+	if comp == "" || len(p.imports) == 0 || strings.ContainsRune(comp, '.') {
+		return comp
+	}
+
+	var buf foldScratch
+	if full, ok := p.imports[string(buf.lowerFold(comp))]; ok {
+		return full
+	}
+
+	return comp
 }
 
 // readDottedPath continues a dotted path from an identifier already read,
@@ -2109,25 +2361,14 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	// Skip name (or handle anonymous function)
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind == TokLParen {
-		// Anonymous function: function() { ... }
-		// Already consumed (, skip args
-		pd := 1
-		for pd > 0 {
-			t := p.sc.NextSkipComments()
-			if t.Kind == TokEOF {
-				return
-			}
-
-			if t.Kind == TokLParen {
-				pd++
-			}
-
-			if t.Kind == TokRParen {
-				pd--
-			}
+		// Anonymous function: function() { ... }. The '(' is already consumed,
+		// so the argument list is scanned from inside it — an argument default
+		// there holds calls like any other.
+		if _, ok := p.scanParenBody(); !ok {
+			return
 		}
 
-		p.skipBody()
+		p.scanNestedFunctionBody()
 
 		return
 	}
@@ -2141,27 +2382,27 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 		return
 	}
 
-	pd := 1
-	for pd > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
-		}
-
-		if t.Kind == TokLParen {
-			pd++
-		}
-
-		if t.Kind == TokRParen {
-			pd--
-		}
+	if _, ok := p.scanParenBody(); !ok {
+		return
 	}
-	// Skip body
-	p.skipBody()
+
+	p.scanNestedFunctionBody()
 }
 
-// skipBody skips { ... } or ; without processing content.
-func (p *scriptParser) skipBody() {
+// scanNestedFunctionBody consumes a nested function's `{ ... }` or `;`,
+// recording the calls written inside it.
+//
+// It used to discard the body, so an immediately-invoked function lost
+// everything it called: `return (function(){ return svc.x(); })();` recorded
+// nothing at all, while the same closure passed as an argument recorded
+// svc.x — because that path counts parentheses rather than skipping the
+// function.
+//
+// The calls are attributed to the *enclosing* function, which is where the
+// closure's code runs from and matches what an argument-position closure
+// already did. Its own scope is not declared: a nested function is not a method
+// of the component, for the reason parseFunctionValue gives.
+func (p *scriptParser) scanNestedFunctionBody() {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
@@ -2179,16 +2420,18 @@ func (p *scriptParser) skipBody() {
 
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
+
+		switch t.Kind { //nolint:exhaustive
+		case TokEOF:
 			return
-		}
-
-		if t.Kind == TokLBrace {
+		case TokLBrace:
 			depth++
-		}
-
-		if t.Kind == TokRBrace {
+		case TokRBrace:
 			depth--
+		case TokIdent:
+			p.scanNestedCall(t)
+		case TokString, TokRBracket:
+			p.handleLiteralToken(t)
 		}
 	}
 }
@@ -2690,6 +2933,14 @@ func (p *globalScriptParser) parse() {
 			p.parseDot(tok, ScopeThis)
 		case "variables":
 			p.parseDot(tok, ScopeVariables)
+		case "component", "interface":
+			// Their attribute lists are not assignments. parsePlain's keyword
+			// guard runs before its tag-attribute check and both names are
+			// keywords, so without this arm `component extends="models.Base"
+			// accessors="true"` put `extends` and `accessors` into
+			// VariablesVars — which is what completion offers and what the
+			// index stores.
+			p.skipTagAttrs()
 		case "function", "public", "private", "remote", "package":
 			// skip function declarations
 		case "property":
@@ -3091,6 +3342,8 @@ func (p *scriptParser) scanParenBody() (firstArg string, ok bool) {
 			depth--
 		case TokIdent:
 			p.scanNestedCall(tok)
+		case TokString, TokRBracket:
+			p.handleLiteralToken(tok)
 		}
 	}
 
@@ -3205,6 +3458,8 @@ func (p *scriptParser) skipLiteralGroup() {
 			}
 		case TokIdent:
 			p.scanNestedCall(tok)
+		case TokString:
+			p.handleLiteralToken(tok)
 		}
 	}
 }

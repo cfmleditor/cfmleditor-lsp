@@ -265,7 +265,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 
 	found := 0
 
-	for _, call := range pr.FuncCalls(0, strings.Count(content, "\n")) {
+	for _, call := range pr.AllCalls() {
 		if call.Line != target {
 			continue
 		}

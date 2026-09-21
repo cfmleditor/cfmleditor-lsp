@@ -215,9 +215,7 @@ func cmdUnresolved(args []string) {
 
 			pr.FuncLookup = funcLookup
 
-			lastLine := strings.Count(content, "\n")
-
-			calls := pr.FuncCalls(0, lastLine)
+			calls := pr.AllCalls()
 			for _, call := range calls {
 				reason := resolver.CanResolveCall(call, pr, baseDir)
 				if reason == "" {

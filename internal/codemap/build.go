@@ -407,7 +407,7 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 	res.addExtends(cfg, pr, rel, baseDir, root)
 	res.addRefs(cfg, pr, rel, baseDir, root)
 	res.addIncludes(opts, cfg, pr, rel, baseDir, root)
-	res.addCalls(opts, cfg, pr, rel, baseDir, root, content)
+	res.addCalls(opts, cfg, pr, rel, baseDir, root)
 	res.addRoutes(cfg, rel, root, content)
 
 	if opts.Cache != nil {
@@ -582,10 +582,8 @@ func (res *FileGraph) addIncludes(opts Options, cfg FileConfig, pr *parser.Parse
 	}
 }
 
-func (res *FileGraph) addCalls(opts Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root, content string) {
-	lastLine := strings.Count(content, "\n")
-
-	for _, call := range pr.FuncCalls(0, lastLine) {
+func (res *FileGraph) addCalls(opts Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+	for _, call := range pr.AllCalls() {
 		res.Stats.CallSites++
 
 		target, reason := cfg.Resolver.ResolveCallTarget(call, pr, baseDir)

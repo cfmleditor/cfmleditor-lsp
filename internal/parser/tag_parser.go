@@ -83,10 +83,22 @@ func (p *tagParser) parse() {
 		// Find next < that could be a CF tag
 		idx := strings.IndexByte(p.src[pos:], '<')
 		if idx < 0 {
+			// Trailing text, which is also where the attribute list of the last
+			// declined tag in the file ends up.
+			p.scanInterpolatedText(p.src[pos:], pos)
+
 			break
 		}
 
 		idx += pos
+
+		// Everything between the previous tag and this one is text, and in a
+		// tag file that is where #...# interpolation lives: a <cfoutput> body,
+		// and the attribute list of any tag the fast skip below declines (which
+		// becomes text before the *next* tag). Scanning it here rather than
+		// after the walk is what keeps p.inFunc live, so a call inside a
+		// function's <cfoutput> is filed against that function.
+		p.scanInterpolatedText(p.src[pos:idx], pos)
 
 		// Skip CFML comments (nested)
 		if idx+4 < len(p.src) && p.src[idx:idx+5] == "<!---" {
@@ -207,6 +219,10 @@ func (p *tagParser) parse() {
 			tagEnd += idx + 1 // past the >
 			tag := p.src[idx:tagEnd]
 			line := p.lineAt(idx)
+
+			// A handled tag is stepped over whole, so its own attributes are in
+			// no text gap: `<cfloop array="#svc.list()#">` is scanned here.
+			p.scanInterpolatedText(tag, idx)
 
 			// Detect </cffunction> to exit function scope.
 			//
@@ -1459,4 +1475,49 @@ func hasCFTagPrefix(tag, prefix string) bool {
 	c := tag[n]
 
 	return isWhitespace(c)
+}
+
+// scanInterpolatedText records the calls written inside #...# spans of a piece
+// of tag-region source, at byte offset `offset` within p.src.
+//
+// `<cfoutput>#svc.getName()#</cfoutput>` is how tag-syntax CFML emits a
+// computed value, and none of it was visible: the tag parser matches tags and
+// never tokenises text. The cost was the argument-list gap's — no edge into the
+// callee, so the code map read it as unreachable and `unresolved` never checked
+// it.
+//
+// Each span is handed to a scriptParser, the same way a <cfscript> body already
+// is, so one implementation of "what is a call" serves both. A span that is not
+// an expression yields no calls and is dropped, which is what keeps a stray
+// pair of hashes in prose or a CSS colour from inventing one.
+func (p *tagParser) scanInterpolatedText(text string, offset int) {
+	// Only calls are merged below, and a call needs a '('. Most interpolation in
+	// a tag file is `#user.name#` or `#i#`, so rejecting a chunk on one byte
+	// scan is what keeps this from costing a fifth of a tag parse.
+	if !p.extractCalls || strings.IndexByte(text, '#') < 0 || strings.IndexByte(text, '(') < 0 {
+		return
+	}
+
+	for _, span := range interpolatedSpans(text) {
+		spanText := text[span.start:span.end]
+		if strings.IndexByte(spanText, '(') < 0 {
+			continue
+		}
+
+		sub := newScriptParser(spanText, p.fileURI,
+			p.lineAt(offset+span.start), p.resolvers)
+		sub.resolverSet = p.resolverSet
+		sub.extractCalls = true
+		sub.parse()
+
+		for _, c := range sub.calls {
+			p.addCall(c)
+		}
+
+		for _, calls := range sub.funcCalls {
+			for _, c := range calls {
+				p.addCall(c)
+			}
+		}
+	}
 }

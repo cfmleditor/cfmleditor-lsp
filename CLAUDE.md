@@ -263,6 +263,50 @@ the *formatter*, not the parser.
   the case in all of them. Three of the five were still reporting a bare `bar` when the first
   two handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
   reason; add to it rather than fixing one walk.
+- **"This function calls nothing" is not "this is not a function".** `FuncCalls`
+  answered both by falling back to every call in the file, so a leaf method was
+  handed its siblings' calls — `deps` drew an edge out of an empty function,
+  labelled with another function's line number. A whole-file scan asks
+  `AllCalls` by name instead, and that one sorts by line, because its four
+  callers (`unresolved`, `explain`, the code map, the MCP server) each write a
+  report meant to be diffed against an earlier one and the buckets come out of a
+  map.
+- **`#...#` is where a computed value reaches a string, and both parsers were
+  blind to it.** The scanner takes a quoted string as one token and the tag
+  parser never tokenises text, so `writeOutput("id #svc.getName()#")` and
+  `<cfoutput>#svc.getName()#</cfoutput>` recorded nothing. Both now hand each
+  span to a scriptParser — the tag side reusing the path a `<cfscript>` body
+  already takes, during the walk rather than after it so `p.inFunc` is live and
+  the call lands in the right function. **A span with no `(` is rejected on a
+  byte scan**: only calls are recorded, `#user.name#` and `#i#` are most of the
+  interpolation in any file, and without that guard tag parsing with call
+  extraction cost 21% more rather than 4.6%.
+- **Six loops walk tokens and a literal reaches all of them**, so a string or a
+  closing bracket goes through `handleLiteralToken` rather than each loop
+  growing its own copy of the rule. `TestEveryTokenLoopHandlesLiterals` parses
+  the source and fails on a loop that dispatches identifiers to
+  `scanNestedCall` without a `TokString` arm beside it.
+- **A member call on a literal has a receiver that is a value.** `"abc".ucase()`
+  recorded a *bare* `ucase()`, indistinguishable from an unqualified call to a
+  function of that name — in a component that declares one, an edge to it that
+  does not exist. The component is `$any`, the existing spelling for "genuinely
+  dynamic".
+- **`throw` is the one keyword invoked like a function**, so it is the one that
+  needs its argument list consumed: `throw(type = "x")` declared a variable
+  called `type`. `if`, `while` and `switch` hold an expression, which the
+  statement scan reads correctly as it is.
+- **A component's or interface's attribute list is not a run of assignments**,
+  and `parsePlain`'s keyword guard runs *before* its tag-attribute check — both
+  names are keywords, so `component extends="models.Base"` put `extends` into
+  `VariablesVars`, which is what completion offers and what the index stores.
+  Each needs its own arm in both scans.
+- **A nested function's body is scanned, not skipped.** An immediately-invoked
+  function lost everything it called while the same closure passed as an
+  argument kept it, because that path counts parentheses instead. The calls are
+  attributed to the enclosing function, which is where the closure runs from.
+- **`import models.User;` qualifies a later bare `new User()`.** `import
+  models.*;` does not: which component a bare name then means is a question
+  about what is on disk, and the parser has no filesystem.
 
 ### Formatter (`internal/formatter`)
 

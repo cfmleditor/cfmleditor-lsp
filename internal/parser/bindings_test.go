@@ -225,3 +225,156 @@ func TestStaticCallCarriesItsComponent(t *testing.T) {
 		})
 	}
 }
+
+// A component's or interface's attribute list is not a run of assignments.
+// parsePlain's keyword guard runs before its tag-attribute check and both names
+// are keywords, so `component extends="models.Base" accessors="true"` put
+// `extends` and `accessors` into VariablesVars — which is what completion
+// offers and what the index stores.
+func TestComponentAttributesAreNotVariables(t *testing.T) {
+	cases := []struct {
+		src     string
+		want    []string
+		extends string
+	}{
+		{"component extends=\"models.Base\" accessors=\"true\" output=\"false\" {\n\tvariables.real = 1;\n}\n",
+			[]string{"real"}, "models.Base"},
+		{"interface extends=\"IBase\" {\n\tpublic string function getName();\n}\n", nil, "IBase"},
+		{"component {\n\tvariables.real = 1;\n}\n", []string{"real"}, ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.src, func(t *testing.T) {
+			pr := Parse(testURI, c.src)
+			if got := pr.VariablesVars(); !slices.Equal(got, c.want) {
+				t.Errorf("VariablesVars: got %v want %v", got, c.want)
+			}
+
+			var names []string
+			for _, v := range ParseVars(c.src) {
+				names = append(names, v.Name)
+			}
+
+			if !slices.Equal(names, c.want) {
+				t.Errorf("ParseVars: got %v want %v", names, c.want)
+			}
+
+			if pr.Extends != c.extends {
+				t.Errorf("Extends: got %q want %q", pr.Extends, c.extends)
+			}
+		})
+	}
+}
+
+// `throw` is the one CFScript keyword invoked like a function, and being a
+// keyword it never reached the dispatch that consumes an argument list — so its
+// named arguments were read as statements.
+func TestThrowArgumentsAreNotDeclarations(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`throw(type = "x", message = "y");`, nil},
+		{`throw(object = new errors.Bad());`, nil},
+		{`throw(message = svc.describe());`, nil},
+
+		// Controls: the other keywords that take parentheses hold an
+		// expression, and the statement scan reads those correctly as is.
+		{`if (svc.check()) { hits = 1; }`, []string{"hits"}},
+		{`for (var i = 1; i <= 3; i++) { use(i); }`, []string{"i"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			src := "component {\n function go() {\n  " + c.body + "\n }\n}\n"
+
+			var got []string
+			for _, v := range ParseVars(src) {
+				got = append(got, v.Name)
+			}
+
+			if !slices.Equal(got, c.want) {
+				t.Errorf("vars: got %v want %v", got, c.want)
+			}
+
+			pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+			for _, r := range pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End) {
+				if r.Variable == "object" {
+					t.Errorf("recorded a component ref for a named argument: %s -> %s", r.Variable, r.Component)
+				}
+			}
+		})
+	}
+}
+
+// A nested function's body used to be discarded, so an immediately-invoked
+// function lost everything it called — while the same closure passed as an
+// argument kept its calls, because that path counts parentheses instead.
+func TestNestedFunctionBodiesAreScanned(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`return (function(){ return svc.x(); })();`, []string{"svc.x"}},
+		{`var f = function() { return svc.y(); }; return f();`, []string{"?.f", "svc.y"}},
+		{`arrayEach(list, function(i) { svc.use(i); });`, []string{"?.arrayEach", "svc.use"}},
+		{`function inner(a = dao.make()) { return a; } return inner();`, []string{"?.inner", "dao.make"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			got := interpCalls(t, "component {\n function go() {\n  "+c.body+"\n }\n}\n")
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// An argument's default runs on every call that omits it, so a call in one is
+// a call.
+func TestArgumentDefaultsAreScannedForCalls(t *testing.T) {
+	got := interpCalls(t, "component {\n function load(id, dao = newDao()) { return dao; }\n}\n")
+	if !slices.Equal(got, []string{"?.newDao"}) {
+		t.Errorf("got %v want [?.newDao]", got)
+	}
+}
+
+// `import models.User;` puts User in scope, and `new User()` then names
+// models.User — not a component literally called User, which is what the
+// resolver went looking for.
+func TestImportQualifiesABareComponentName(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"import models.User;\ncomponent { function go() { var u = new User(); } }", "models.User"},
+		{"import models.User;\ncomponent { function go() { var u = new cfml:User(); } }", "models.User"},
+
+		// A dotted path is already qualified; a wildcard names a directory and
+		// which component a bare name then means is a question about disk.
+		{"import models.User;\ncomponent { function go() { var u = new other.User(); } }", "other.User"},
+		{"import models.*;\ncomponent { function go() { var u = new User(); } }", "User"},
+		{"component { function go() { var u = new User(); } }", "User"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.src, func(t *testing.T) {
+			pr := Parse(testURI, c.src)
+
+			var got string
+
+			for _, sc := range pr.Scopes {
+				for _, r := range pr.FuncComponentRefs(sc.Start, sc.End) {
+					if r.Variable == "u" {
+						got = r.Component
+					}
+				}
+			}
+
+			if got != c.want {
+				t.Errorf("got %q want %q", got, c.want)
+			}
+		})
+	}
+}
