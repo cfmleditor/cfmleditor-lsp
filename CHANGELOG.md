@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- **CFLint downloads the compressed asset when a release has one** — about 29MB against 92MB, since a GraalVM image is mostly zeroes. The raw binary stays as the fallback, so a release published before the archives existed still works.
+
+- **CFLint runs on Intel macOS.** `darwin/amd64` had no case in the asset mapping, so every lint there stopped at "unsupported platform".
+
+### Fixed
+
+- **The formatter rendered Lucee's one-word `elseif` as code inside an `else` block.** tree-sitter-cfml v0.26.36 started parsing it as a clause of its own, which the formatter did not know, so it wrote `else`, opened a block, and put the keyword and condition inside it. The guard caught it, so the symptom was format-on-save doing nothing on a file that had formatted cleanly the release before.
+
+- **The formatter dropped a `//` comment written between two operands.** It belongs to neither side of the expression and was discarded outright; the expression is now reproduced as written when a comment would be lost.
+
+- **The daemon exited while a client was still connecting.** Reaching zero clients was treated as final, so an editor opening as another closed was accepted, counted, and then cut off by a shutdown it could not cancel — the editor reported a dropped connection and re-indexed the workspace.
+
+- **A departing daemon unlinked its successor's socket**, leaving a daemon that worked for itself and was unreachable to everyone else, so each later editor started its own with its own copy of the index.
+
+- **`textDocument/didOpen` is 3.5x faster and allocates 2.8x less** (57.7ms/35.8MB to 16.4ms/12.6MB on a 540KB component). Walking the extends chain read and fully re-parsed each base component to take one field off the result, once per unresolved call site; the value comes from the index now.
+
+- **CFLint falls back to the pinned version when the newest release has no asset for this platform.** Assets upload one platform at a time, and a release has shipped incomplete before, so the newest version is not always one this platform can download from.
+
 ## [0.3.2]
 
 ### Added
