@@ -455,3 +455,69 @@ func zipOf(t *testing.T, name string, content []byte) []byte {
 
 	return buf.Bytes()
 }
+
+// TestTagFromRedirect states the shapes GitHub's redirect arrives in, and the
+// ones that have to be refused. A tag read out of a response that was not a
+// redirect would become a download URL for a release that does not exist.
+func TestTagFromRedirect(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17":       "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17?x=1":   "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/1.5.17#notes": "1.5.17",
+		"https://github.com/cfmleditor/CFLint/releases/tag/v1.0%2Bbuild": "v1.0+build",
+		"": "",
+		"https://github.com/cfmleditor/CFLint/releases": "",
+		"https://example.com/":                          "",
+	}
+
+	for location, want := range cases {
+		if got := tagFromRedirect(location); got != want {
+			t.Errorf("tagFromRedirect(%q) = %q, want %q", location, got, want)
+		}
+	}
+}
+
+// TestLatestVersionFrom covers the request itself: the redirect has to be read
+// rather than followed, and anything else has to land on fallbackVersion
+// rather than failing the lint.
+func TestLatestVersionFrom(t *testing.T) {
+	t.Run("reads the tag from the redirect", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "https://github.com/cfmleditor/CFLint/releases/tag/1.5.17")
+			w.WriteHeader(http.StatusFound)
+		}))
+		defer server.Close()
+
+		if got := latestVersionFrom(server.URL); got != "1.5.17" {
+			t.Errorf("latestVersionFrom = %q, want 1.5.17", got)
+		}
+	})
+
+	// Rate limiting used to arrive as an HTTP 403 from the API. Whatever the
+	// shape, an answer that is not a redirect to a tag means carrying on with
+	// the version that is compiled in.
+	t.Run("falls back when the answer is not a redirect", func(t *testing.T) {
+		for _, status := range []int{http.StatusOK, http.StatusForbidden, http.StatusInternalServerError} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+
+			got := latestVersionFrom(server.URL)
+			server.Close()
+
+			if got != fallbackVersion {
+				t.Errorf("latestVersionFrom on HTTP %d = %q, want %q", status, got, fallbackVersion)
+			}
+		}
+	})
+
+	t.Run("falls back when nobody answers", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		url := server.URL
+		server.Close()
+
+		if got := latestVersionFrom(url); got != fallbackVersion {
+			t.Errorf("latestVersionFrom against a closed server = %q, want %q", got, fallbackVersion)
+		}
+	})
+}

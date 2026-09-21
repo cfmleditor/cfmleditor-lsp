@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ const (
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
 	fallbackVersion = "1.5.16"
-	releasesAPI     = "https://api.github.com/repos/cfmleditor/CFLint/releases/latest"
+	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
 	downloadBase    = "https://github.com/cfmleditor/CFLint/releases/download/"
 )
 
@@ -276,27 +277,71 @@ func cacheDir(version string) (string, error) {
 // the linting it was setting up — hung for the life of the process.
 var downloadClient = &http.Client{Timeout: 5 * time.Minute}
 
+// releaseClient reads a redirect rather than following it, which is what makes
+// latestVersion work. Deliberately not downloadClient: an asset URL redirects
+// to the object store, so downloads have to follow them.
+var releaseClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func latestVersion() string {
-	resp, err := downloadClient.Get(releasesAPI) //nolint:gosec // trusted URL
+	return latestVersionFrom(latestRelease)
+}
+
+// latestVersionFrom reads the tag `latest` points at, from GitHub's own
+// redirect.
+//
+// Deliberately not the releases API. That endpoint is rate limited to 60
+// requests an hour per IP for unauthenticated callers, shared by everyone
+// behind one NAT, and an office that hits it spends the rest of the hour
+// pinned to fallbackVersion with nothing saying why. `/releases/latest`
+// redirects to `/releases/tag/<tag>` with no API involved and no limit.
+func latestVersionFrom(url string) string {
+	resp, err := releaseClient.Get(url) //nolint:gosec // trusted URL
 	if err != nil {
 		return fallbackVersion
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
+	// The redirect is the answer, so the body is of no interest.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	tag := tagFromRedirect(resp.Header.Get("Location"))
+	if tag == "" {
 		return fallbackVersion
 	}
 
-	var release struct {
-		TagName string `json:"tag_name"`
+	return tag
+}
+
+// tagFromRedirect pulls the tag out of the URL `/releases/latest` redirects to,
+// and returns an empty string for anything that is not one — an empty Location
+// from a response that was not a redirect at all, or a redirect somewhere
+// unexpected, both of which have to fall back rather than build a download URL
+// out of nonsense.
+func tagFromRedirect(location string) string {
+	const marker = "/releases/tag/"
+
+	at := strings.Index(location, marker)
+	if at < 0 {
+		return ""
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil || release.TagName == "" {
-		return fallbackVersion
+	tag := location[at+len(marker):]
+	if end := strings.IndexAny(tag, "?#"); end >= 0 {
+		tag = tag[:end]
 	}
 
-	return release.TagName
+	unescaped, err := neturl.PathUnescape(tag)
+	if err != nil {
+		return tag
+	}
+
+	return unescaped
 }
 
 // assetKind is how a release asset has to be unpacked.
