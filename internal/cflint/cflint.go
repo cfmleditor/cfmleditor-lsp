@@ -415,11 +415,27 @@ func ensureBinary() (string, error) {
 // binaryWithFallback fetches the binary for a version, and settles for the
 // version compiled in when that release has nothing for this platform.
 //
-// Builds do go missing from a single release: 1.5.17 shipped without either
-// macOS Intel asset, which under the old code meant Intel Macs went from a
-// working linter to none the moment that release became current. The version
-// in fallbackVersion is one this build is known to have been released
-// against, so it is a better answer than an error.
+// Two things make the newest release a version this platform may not be able
+// to download from, and only the second is rare.
+//
+// A release's assets upload one platform at a time, so for the minutes between
+// the release appearing and the last upload finishing, the newest version
+// genuinely 404s for whichever platforms have not landed yet. macOS is
+// routinely last. Any client that asks in that window sees exactly what a
+// dropped platform looks like.
+//
+// And a release really can ship without one: 1.5.16 went out with no
+// cflint-macos-amd64 at all, because the Intel job targeted a retired runner
+// image, never got a runner, and was auto-cancelled while the other four
+// uploaded and left the release looking complete. Upstream has since fixed the
+// job and backfilled the asset, but nothing stops it happening again.
+//
+// The version in fallbackVersion is one this build is known to have been
+// released against, so it is a better answer than an error in both cases.
+//
+// An earlier version of this comment cited 1.5.17 as having dropped macOS. It
+// did not — that reading came from listing its assets while they were still
+// uploading, which is the first case above rather than the second.
 //
 // Only a missing asset falls back. A refused connection or a timeout would
 // fail the same way against any version, and trying a second one only doubles
