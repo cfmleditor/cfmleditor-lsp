@@ -224,3 +224,40 @@ func TestMinSeverityKeepsUnrecognisedLevels(t *testing.T) {
 		}
 	}
 }
+
+// TestBinaryNameForEveryPublishedPlatform pins the asset names against what
+// cfmleditor/CFLint actually publishes. The mapping is easy to get wrong in a
+// way nothing local catches: CFLint says "macos" where Go says "darwin", and
+// "aarch64" where Go says "arm64", so a mistake compiles, passes review, and
+// then 404s at the first lint on hardware the author does not have.
+func TestBinaryNameForEveryPublishedPlatform(t *testing.T) {
+	cases := map[[2]string]string{
+		{"darwin", "arm64"}:  "cflint-macos-aarch64",
+		{"darwin", "amd64"}:  "cflint-macos-amd64",
+		{"linux", "arm64"}:   "cflint-linux-aarch64",
+		{"linux", "amd64"}:   "cflint-linux-amd64",
+		{"windows", "amd64"}: "cflint-windows-amd64.exe",
+	}
+
+	for platform, want := range cases {
+		if got := binaryNameFor(platform[0], platform[1]); got != want {
+			t.Errorf("binaryNameFor(%q, %q) = %q, want %q", platform[0], platform[1], got, want)
+		}
+	}
+}
+
+// A platform CFLint publishes nothing for has to come back empty rather than
+// guess: ensureBinary turns that into "unsupported platform", which is the
+// truth, where a guessed name would be an HTTP 404 that reads like the release
+// is broken.
+func TestBinaryNameForUnpublishedPlatform(t *testing.T) {
+	for _, platform := range [][2]string{
+		{"windows", "arm64"},
+		{"linux", "386"},
+		{"freebsd", "amd64"},
+	} {
+		if got := binaryNameFor(platform[0], platform[1]); got != "" {
+			t.Errorf("binaryNameFor(%q, %q) = %q, want an empty string", platform[0], platform[1], got)
+		}
+	}
+}
