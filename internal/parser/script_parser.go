@@ -32,6 +32,7 @@ type scriptParser struct {
 	resolverSet         *ResolverSet
 	extractLinks        bool // whether to extract document links
 	extractCalls        bool // whether to extract all call sites
+	argNesting          int  // recursion depth of skipParenBody's scan, bounded by maxArgNesting
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
@@ -103,29 +104,16 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 		Caller:   caller,
 	})
 
-	// Skip balanced parens, capture first string arg for resolver
+	// Consume the argument list, capturing the first string arg for the
+	// resolver and recording any calls written inside it. This used to be a
+	// second copy of scanParenBody's loop, which is why a call nested in a
+	// *bare* call's arguments stayed invisible after the dotted path learned to
+	// see one: writeOutput(svc.getName()) recorded only writeOutput.
 	p.sc.NextSkipComments() // consume (
 
-	var firstArg string
-
-	parenDepth := 1
-
-	for parenDepth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
-		}
-
-		if t.Kind == TokString && firstArg == "" && parenDepth == 1 {
-			firstArg = unquote(t.Value)
-		}
-
-		switch t.Kind { //nolint:exhaustive
-		case TokLParen:
-			parenDepth++
-		case TokRParen:
-			parenDepth--
-		}
+	firstArg, ok := p.scanParenBody()
+	if !ok {
+		return
 	}
 
 	// Build call expression for resolver: funcName("arg")
@@ -2566,16 +2554,58 @@ func (p *scriptParser) skipParens() bool {
 	return p.skipParenBody()
 }
 
+// maxArgNesting bounds how deep the scan below will recurse into nested
+// argument lists.
+//
+// The recursion is driven by the source, and Go cannot recover from stack
+// exhaustion — it is a fatal runtime error, not a panic, so the recover() that
+// guards every parse entry point would not catch it. Real CFML does not nest
+// calls anywhere near this deep; a file that does gets its innermost calls
+// skipped, which is what this did everywhere before.
+const maxArgNesting = 64
+
 // skipParenBody consumes the rest of a (...) group whose opening '(' has
-// already been consumed (depth starts at 1). Returns false if the group is
-// unclosed (EOF reached first).
+// already been consumed (depth starts at 1), recording any calls written
+// inside it. Returns false if the group is unclosed (EOF reached first).
+//
+// It used to discard the group a token at a time, which made every call in an
+// argument list invisible: `writeOutput(svc.getName())` recorded only
+// writeOutput, and `arrayAppend(rows, dao.load(id))` only arrayAppend. Nothing
+// else lost calls this way — a condition, a return, an assignment's RHS, a
+// string concatenation, a struct or array literal and a ternary all extract
+// correctly — so an argument list was the one place a call could hide.
+//
+// What it cost was not completeness for its own sake. A method called only
+// from inside an argument list had no edge into it, so internal/codemap read
+// it as unreachable and the `unresolved` scan never checked it; a broken call
+// there was reported nowhere.
+//
+// Nested calls are dispatched back through the same two helpers the statement
+// path uses, which consume the call and its own argument list whole. That is
+// what makes the depth counter here stay correct through a recursive call, and
+// it is also what makes a closure passed as an argument work without a case of
+// its own: its body is just more tokens to scan.
 func (p *scriptParser) skipParenBody() bool {
+	_, ok := p.scanParenBody()
+
+	return ok
+}
+
+// scanParenBody is skipParenBody's body, and also reports the first string
+// argument at the top level of the group — which the bare-call path resolves
+// componentResolvers against, and which is the only reason it used to keep a
+// loop of its own.
+func (p *scriptParser) scanParenBody() (firstArg string, ok bool) {
 	depth := 1
 
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokEOF {
-			return false
+			return "", false
+		}
+
+		if tok.Kind == TokString && firstArg == "" && depth == 1 {
+			firstArg = unquote(tok.Value)
 		}
 
 		switch tok.Kind { //nolint:exhaustive
@@ -2583,10 +2613,76 @@ func (p *scriptParser) skipParenBody() bool {
 			depth++
 		case TokRParen:
 			depth--
+		case TokIdent:
+			p.scanNestedCall(tok)
 		}
 	}
 
-	return true
+	return firstArg, true
+}
+
+// scanNestedCall dispatches an identifier met inside an argument list to the
+// call-recording helpers, when it begins one.
+func (p *scriptParser) scanNestedCall(tok Token) {
+	if !p.extractCalls || p.argNesting >= maxArgNesting {
+		return
+	}
+
+	p.argNesting++
+	defer func() { p.argNesting-- }()
+
+	// `new a.b.C()` is an instantiation, and its path is not a receiver and a
+	// method. Skipping the `new` keyword and letting the scan meet `a.b.C(`
+	// on its own invents a call to C on a — which the test for this found
+	// before the change was committed, and which is the same class of made-up
+	// answer this scan exists to stop losing.
+	if identEq(tok.Value, "new") {
+		p.skipInstantiation()
+
+		return
+	}
+
+	// Any other keyword is handled by what follows it rather than by being
+	// read as a receiver: `function` opens a closure whose body is just more
+	// tokens in this group.
+	if isKeyword(tok.Value) {
+		return
+	}
+
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	case TokLParen:
+		p.recordBareCallAndChain(tok)
+	case TokDot, TokLBracket:
+		// A dotted or bracket-indexed receiver. checkBareCall walks the chain
+		// and records only when it ends at a '(' — a bare `a.b` property read
+		// is consumed and dropped, which is the same thing the old scan did to
+		// it.
+		p.checkBareCall(tok)
+	}
+}
+
+// skipInstantiation consumes the component path of a `new` expression and its
+// constructor arguments, whose own contents are still scanned for calls.
+func (p *scriptParser) skipInstantiation() {
+	// The path: an identifier, then any number of `.ident` hops. A quoted path
+	// (`new "a.b.C"()`) is a single string token instead.
+	if p.sc.PeekSkipComments().Kind == TokString {
+		p.sc.NextSkipComments()
+	} else {
+		for p.sc.PeekSkipComments().Kind == TokIdent {
+			p.sc.NextSkipComments()
+
+			if p.sc.PeekSkipComments().Kind != TokDot {
+				break
+			}
+
+			p.sc.NextSkipComments() // consume .
+		}
+	}
+
+	if p.sc.PeekSkipComments().Kind == TokLParen {
+		p.skipParens()
+	}
 }
 
 // skipBracketIndex consumes a balanced [...] group from the current scanner
