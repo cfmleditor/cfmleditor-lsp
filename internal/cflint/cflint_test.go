@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -520,4 +522,136 @@ func TestLatestVersionFrom(t *testing.T) {
 			t.Errorf("latestVersionFrom against a closed server = %q, want %q", got, fallbackVersion)
 		}
 	})
+}
+
+// TestBinaryWithFallback covers what happens when a release is missing this
+// platform's build. 1.5.17 shipped without either macOS Intel asset, and
+// before the fallback that took Intel Macs from a working linter to none the
+// moment it became the current release.
+func TestBinaryWithFallback(t *testing.T) {
+	name := binaryName()
+	if name == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	want := []byte("#!/bin/sh\necho CFLint\n")
+
+	t.Run("settles for the compiled-in version", func(t *testing.T) {
+		useTempCache(t)
+
+		var asked []string
+
+		// Only the fallback release has anything for this platform.
+		useFakeReleases(t, func(w http.ResponseWriter, r *http.Request) {
+			asked = append(asked, r.URL.Path)
+
+			if !strings.Contains(r.URL.Path, "/"+fallbackVersion+"/") {
+				w.WriteHeader(http.StatusNotFound)
+
+				return
+			}
+
+			_, _ = w.Write(assetBody(t, r.URL.Path, want))
+		})
+
+		binPath, err := binaryWithFallback("9.9.9", name)
+		if err != nil {
+			t.Fatalf("binaryWithFallback: %v", err)
+		}
+
+		got, err := os.ReadFile(binPath) //nolint:gosec // test temp dir
+		if err != nil {
+			t.Fatalf("reading the binary: %v", err)
+		}
+
+		if !bytes.Equal(got, want) {
+			t.Errorf("binary = %q, want %q", got, want)
+		}
+
+		// The version asked for is tried first and in full, so the fallback is
+		// genuinely a last resort rather than the usual path.
+		if !strings.Contains(asked[0], "/9.9.9/") {
+			t.Errorf("first request was %q, want the version asked for", asked[0])
+		}
+	})
+
+	// A version that has the build must not reach the fallback at all — an
+	// older linter quietly standing in for the current one would be worse than
+	// the bug this fixes.
+	t.Run("does not fall back when the release has the build", func(t *testing.T) {
+		useTempCache(t)
+
+		var versions []string
+
+		useFakeReleases(t, func(w http.ResponseWriter, r *http.Request) {
+			versions = append(versions, r.URL.Path)
+			_, _ = w.Write(assetBody(t, r.URL.Path, want))
+		})
+
+		if _, err := binaryWithFallback("9.9.9", name); err != nil {
+			t.Fatalf("binaryWithFallback: %v", err)
+		}
+
+		for _, path := range versions {
+			if strings.Contains(path, "/"+fallbackVersion+"/") {
+				t.Errorf("asked for %q when the release asked for had the build", path)
+			}
+		}
+	})
+
+	// Nothing anywhere has to stay an error, reported against the version that
+	// was actually wanted.
+	t.Run("reports the version asked for when neither has it", func(t *testing.T) {
+		useTempCache(t)
+
+		useFakeReleases(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		_, err := binaryWithFallback("9.9.9", name)
+		if err == nil || !strings.Contains(err.Error(), "9.9.9") {
+			t.Errorf("binaryWithFallback = %v, want an error naming 9.9.9", err)
+		}
+	})
+}
+
+// assetBody packs the executable the way the asset at that path would hold it,
+// so the fake releases exercise the same unpacking the real ones do.
+func assetBody(t *testing.T, path string, executable []byte) []byte {
+	t.Helper()
+
+	switch {
+	case strings.HasSuffix(path, ".tar.gz"):
+		return tarGzOf(t, "cflint", executable)
+	case strings.HasSuffix(path, ".zip"):
+		return zipOf(t, "cflint.exe", executable)
+	default:
+		return executable
+	}
+}
+
+// useFakeReleases points the downloader at a local server for one test.
+func useFakeReleases(t *testing.T, handler http.HandlerFunc) {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	previous := downloadBase
+	downloadBase = server.URL + "/"
+
+	t.Cleanup(func() {
+		downloadBase = previous
+
+		server.Close()
+	})
+}
+
+// useTempCache keeps downloads out of the real user cache directory, and out
+// of each other's way.
+func useTempCache(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	t.Setenv("LocalAppData", filepath.Join(dir, "cache"))
 }

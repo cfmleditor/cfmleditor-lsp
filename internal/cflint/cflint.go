@@ -28,8 +28,11 @@ const (
 	// anyway, so an offline first run does not start several releases behind.
 	fallbackVersion = "1.5.16"
 	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
-	downloadBase    = "https://github.com/cfmleditor/CFLint/releases/download/"
 )
+
+// downloadBase is where release assets are fetched from. A var rather than a
+// const so a test can point it somewhere that is not the internet.
+var downloadBase = "https://github.com/cfmleditor/CFLint/releases/download/"
 
 // Result represents CFLint JSON output.
 type Result struct {
@@ -406,8 +409,44 @@ func ensureBinary() (string, error) {
 		return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	version := latestVersion()
+	return binaryWithFallback(latestVersion(), name)
+}
 
+// binaryWithFallback fetches the binary for a version, and settles for the
+// version compiled in when that release has nothing for this platform.
+//
+// Builds do go missing from a single release: 1.5.17 shipped without either
+// macOS Intel asset, which under the old code meant Intel Macs went from a
+// working linter to none the moment that release became current. The version
+// in fallbackVersion is one this build is known to have been released
+// against, so it is a better answer than an error.
+//
+// Only a missing asset falls back. A refused connection or a timeout would
+// fail the same way against any version, and trying a second one only doubles
+// the wait.
+func binaryWithFallback(version, name string) (string, error) {
+	binPath, err := binaryForVersion(version, name)
+	if err == nil {
+		return binPath, nil
+	}
+
+	if !errors.Is(err, errAssetMissing) || version == fallbackVersion {
+		return "", err
+	}
+
+	binPath, fallbackErr := binaryForVersion(fallbackVersion, name)
+	if fallbackErr != nil {
+		// The error from the version actually asked for is the one worth
+		// reporting; the fallback failing too is a detail of the attempt.
+		return "", err
+	}
+
+	return binPath, nil
+}
+
+// binaryForVersion returns the cached binary for one release, downloading it
+// if this is the first time that version has been asked for.
+func binaryForVersion(version, name string) (string, error) {
 	dir, err := cacheDir(version)
 	if err != nil {
 		return "", err
@@ -418,9 +457,14 @@ func ensureBinary() (string, error) {
 		return binPath, nil
 	}
 
+	assets := assetsFor(runtime.GOOS, runtime.GOARCH)
+	if len(assets) == 0 {
+		return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
 	var missing error
 
-	for _, a := range assetsFor(runtime.GOOS, runtime.GOARCH) {
+	for _, a := range assets {
 		err := fetchAsset(downloadBase+version+"/"+a.name, binPath, a.kind)
 		if err == nil {
 			return binPath, nil
@@ -438,11 +482,7 @@ func ensureBinary() (string, error) {
 		return "", err
 	}
 
-	if missing != nil {
-		return "", fmt.Errorf("downloading cflint: %w", missing)
-	}
-
-	return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	return "", fmt.Errorf("cflint %s: %w", version, missing)
 }
 
 // fetchAsset downloads one asset and leaves the executable at binPath.
