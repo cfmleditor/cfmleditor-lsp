@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.3]
+
 ### Added
 
 - **CFLint downloads the compressed asset when a release has one** — about 29MB against 92MB, since a GraalVM image is mostly zeroes. The raw binary stays as the fallback, so a release published before the archives existed still works.
