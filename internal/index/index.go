@@ -21,6 +21,7 @@ type Index struct {
 	fileRefs  map[string][]*parser.ComponentRef            // lowercase URI -> refs in that file
 	thisVars  map[string][]string                          // lowercase URI -> this-scoped var names
 	scopeRefs map[string]map[string][]*parser.ComponentRef // lowercase URI -> function scope key -> refs
+	extends   map[string]string                            // lowercase URI -> that component's extends, "" for none
 	beans     map[string]string                            // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                           // lowercase entity name -> file URI
 }
@@ -34,6 +35,7 @@ func New() *Index {
 		fileRefs:  make(map[string][]*parser.ComponentRef),
 		thisVars:  make(map[string][]string),
 		scopeRefs: make(map[string]map[string][]*parser.ComponentRef),
+		extends:   make(map[string]string),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
 	}
@@ -451,6 +453,10 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	idx.removeFileEntries(fileURI)
 	fk := uriKey(fileURI)
 	idx.thisVars[fk] = pr.ThisVars()
+	// Free here — this door has already parsed. strings.Clone for the reason
+	// IndexFileFromResult documents at length: a parsed string is a slice of
+	// the file's source, and one retained substring keeps the whole file alive.
+	idx.extends[fk] = strings.Clone(pr.Extends)
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
 
@@ -643,6 +649,10 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	key := uriKey(fileURI)
 	delete(idx.thisVars, key)
 	delete(idx.scopeRefs, key)
+	// Dropped with everything else, which is what makes the extends record
+	// self-invalidating: a re-index of any kind forgets it, and the next
+	// lookup re-establishes it from the file as it now stands.
+	delete(idx.extends, key)
 
 	// Grouped by bucket, not pooled into one set of everything this file
 	// declares. Both spellings visit the same bucket entries; the difference is
@@ -950,4 +960,32 @@ func (idx *Index) FindFilesByBasename(name string) []string {
 	}
 
 	return paths
+}
+
+// ExtendsForFile returns the component this file extends, and whether the index
+// knows. An empty string with ok true means the component extends nothing; ok
+// false means nobody has recorded it yet.
+//
+// The distinction matters because only one of the two doors into the index can
+// fill this in for free. IndexFile parses, so it knows; IndexFileFromResult is
+// handed funcs and refs by a caller that already parsed, and threading the
+// value through it would touch every call site in the tree for a value almost
+// none of them care about. So "unknown" is a real state, and the reader is
+// expected to establish the value and record it with SetExtends.
+func (idx *Index) ExtendsForFile(fileURI uri.URI) (string, bool) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	ext, ok := idx.extends[uriKey(fileURI)]
+
+	return ext, ok
+}
+
+// SetExtends records what a file extends, for a reader that had to work it out.
+// The value is cloned: see IndexFile.
+func (idx *Index) SetExtends(fileURI uri.URI, extends string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.extends[uriKey(fileURI)] = strings.Clone(extends)
 }
