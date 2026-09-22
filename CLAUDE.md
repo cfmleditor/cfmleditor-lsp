@@ -388,6 +388,23 @@ the *formatter*, not the parser.
   function lost everything it called while the same closure passed as an
   argument kept it, because that path counts parentheses instead. The calls are
   attributed to the enclosing function, which is where the closure runs from.
+- **A *named* nested function is a declaration; an anonymous one is a value.**
+  CFML hoists `function setup(){…}` written inside another function into the
+  component's variables scope, which is what lets the enclosing function call it
+  above the line it is written on. The script parser recorded nothing — no index
+  entry, no completion, no go-to-definition — while the tag parser had always
+  recorded it, so the same code meant different things in the two syntaxes.
+  `skipNestedFunction` files a `FunctionDef` and a `FuncScope` for the named
+  case, and `scanNestedCall` dispatches `function` *before* the `isKeyword`
+  guard so the rule holds in every one of the six token loops — a helper
+  declared inside a TestBox `describe(…, function(){ … })` is the common shape.
+  The calls such a function makes stay attributed to the enclosing function, per
+  the bullet above; only the declaration is new. A method of an inline
+  `new component { … }` becomes a method of the enclosing component, which
+  over-declares by one name and matches both the grammar and the tag parser.
+  **The call axis could not see this**: the calls were already recorded at the
+  right lines under the wrong function, so `make gapcheck` agreed. Asking the
+  grammar which *names* it declares found it in one run.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -1097,6 +1114,15 @@ through it: `<cfset x = array( f( "a<br>b" ), g( "c" ) )>` no longer ends at the
 `<br>`. Comments between attributes are still missed, and the other sites that
 locate a `>` by hand still do.
 
+It answers on a **two-count fast path**, because it runs over every tag in the
+file: a `>` with an even number of each quote before it has every string closed,
+so it is the tag's end. That is exact rather than a heuristic — CFML escapes a
+quote by doubling it, which adds two — and it must count *both* kinds, or
+`<cfset x = "a" & 'b>c'>` ends inside the single-quoted string. The
+quote-by-quote walk it falls back to is `tagEndWalk`, a function of its own so
+`TestTheTagEndFastPathAgreesWithTheWalk` can compare the two rather than restate
+either's answer. Walking every tag quote by quote was 5% of a plain tag parse.
+
 **It is close to unreachable.** One file in the 5,624-file corpus contains the shape —
 `Lucee/test/jira/Jira3190/index.cfm`, a regression test whose comment holds no code — so the
 corpus produces zero false positives from it. Fixing it means one shared `tagEndIndex` helper
@@ -1273,17 +1299,30 @@ whatever heap the benchmarks before them left live, and `benchLoadedServer`
 leaves a 5,000-file index. Re-run the single benchmark on its own, both sides,
 before acting on any of it. The same caution applies to wins.
 
-**Compare against the branch point, not against your last build.** Five parser
-fixes in one round were each reported at around +1% on the tag benchmarks,
-because each was measured against whatever binary was left in the scratch
-directory rather than against `origin/main`. Re-measured from a clean main
-baseline the round was **+9.4%** on the plain tag parse — the editor's keystroke
-path — and the cause was a byte-at-a-time `tagEndIndex` running over every tag
-in the file. No single reading had shown it. A per-commit bisect then split the
-rest honestly: +3.6%, +2.1%, +0.8%, +1.1%, +2.2%, cumulative and none of them a
-regression on its own. **Keep a `main` build in the scratch directory and
-re-measure the whole branch against it**, and treat min, p10 and median
-disagreeing as "not yet measured" rather than as a result.
+**Compare against the branch point, not against your last build, and run the two
+binaries alternately.** Five parser fixes in one round were each reported at
+around +1% on the tag benchmarks, because each was measured against whatever
+binary was left in the scratch directory rather than against `origin/main`.
+Re-measured from a clean main baseline the round was **+9.4%** on the plain tag
+parse — the editor's keystroke path — and the cause was a byte-at-a-time
+`tagEndIndex` running over every tag in the file. No single reading had shown it.
+
+**Then the corrected figure was wrong the other way.** The fix for that was
+recorded as -0.7%, measured by running all of one binary's samples and then all
+of the other's. Interleaved — one sample of each, alternately, twenty-five times
+— the same pair reads **+10%**, because the machine drifts between the two runs
+by more than the effect. A sequential A-then-B comparison is not a measurement,
+however many samples each half has. Interleaving also settles the contamination
+warning below: a `git worktree` of `origin/main` built into the scratch
+directory gives a second `.test` binary to alternate with.
+
+So: **keep a `main` build in the scratch directory, re-measure the whole branch
+against it, and alternate**; treat min, p10 and median disagreeing as "not yet
+measured" rather than as a result. A per-commit bisect then splits a cumulative
+cost honestly — which is how the tag walk's +10% came apart into +3.2% for
+bracket indexes, +5.1% for stepping over spans and +5% for the quote-aware tag
+end, none of them a regression on its own, and how `tagEndIndex`'s two-count
+fast path was shown to take the whole thing back to about +4%.
 
 **A cost that scales with the document wants a scaling test, not a timing one.**
 Every defect behind the three-second go-to-definition was invisible to the tests

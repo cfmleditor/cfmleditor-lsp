@@ -41,11 +41,11 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.3 | After §3.7 | After §3.14 |
+| | Before | After §3.3 | After §3.7 | After §3.15 |
 |---|---:|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **517 (9.2%)** |
+| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **492 (8.7%)** |
 | Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **985** |
-| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 657 |
+| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 605 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
 figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **624** after
@@ -70,6 +70,7 @@ The per-step figures are:
 | §3.12 a line comment ends at CR | 554 | 1,129 | 772 | 652 |
 | §3.13 a quote-aware tag end | 551 | 1,109 | 748 | 657 |
 | §3.14 a skipped `<script>`'s interpolation | 517 | 985 | 624 | 657 |
+| §3.15 a named nested function is declared | 492 | 985 | 624 | 605 |
 
 The difference between the two keyings is **line skew**: a multi-line `<cfset>`
 or `<cfif>` records its calls at the tag's starting line while the grammar puts
@@ -83,31 +84,53 @@ What it fixed was a wrong answer, and the only trace of that in the tally is the
 line: 251 sites where a rediscovered bare call landed somewhere the grammar did
 not put it.
 
-### What §3.8 – §3.14 cost
+**§3.15 moves neither figure**, for a sharper version of the same reason: it is
+not a call gap at all. It was found on the *declaration* axis, and it shows up
+here only in the parser-only column, because the calls a nested function makes
+were already being recorded — attributed to the enclosing function, which is
+where a closure's code runs from. Right lines, right methods, wrong function.
+A comparison keyed on `(line, method)` cannot see that, which is the clearest
+statement of what this oracle measures.
 
-Measured against `origin/main`, 21 interleaved samples, min/p10/median in
-agreement:
+### What §3.8 – §3.15 cost
+
+Measured against a build of `origin/main`, 25 samples of each side **run
+alternately**, min/p10/p25/median in agreement:
 
 | | |
 |---|---:|
-| `Parse_TagCFC` | **-0.7%** |
-| `Parse_TagCFC_ExtractCalls` | **+8.8%** |
-| `Parse_ScriptCFC` | -0.4% |
-| `Parse_ScriptCFC_ExtractCalls` | -0.7% |
+| `Parse_TagCFC` | **+3 to +5%** |
+| `Parse_TagCFC_ExtractCalls` | **+4 to +6%** |
+| `Parse_ScriptCFC` | +1% |
+| `Parse_ScriptCFC_ExtractCalls` | +1% |
 
-The 8.8% is **cumulative rather than one regression** — +3.6% for scanning
-bracket indexes, +2.1% for stepping over spans in the tag walk, +0.8% for
-nesting-aware hash matching, +1.1% for the quote-aware tag end, +2.2% for
-parsing script regions. Each is work the parser did not do before because it was
-not looking where the calls were. It lands on `unresolved`, the code map and
-`deps`; the editor parses without `ExtractCalls` and is flat.
+It is **cumulative rather than one regression**, and a per-commit bisect splits
+it: +3.2% for scanning bracket indexes, +5.1% for stepping over spans in the tag
+walk, +5% more for the quote-aware tag end and the CR-terminated line comment,
+the rest inside noise. Each is work the parser did not do before because it was
+not looking where the calls were, and all of it lands on the tag walk.
 
-**Measure each of these against `main`, not against the last build you made.**
-Three of these steps were first reported at around +1%, because each was
-compared with whatever binary was in the scratch directory rather than with the
-branch point, so the drift never appeared in any single reading. It was a
-byte-at-a-time `tagEndIndex` costing 9.4% of a *plain* tag parse that finally
-showed up, and only in a clean comparison.
+`tagEndIndex` carries a fast path for it: a `>` with every quote before it
+already closed is the tag's end, which two `strings.Count` calls settle for a
+whole attribute list, where the quote-by-quote walk costs three calls per
+attribute on strings short enough that the call *is* the cost. That took the tag
+benchmarks from about +10% to about +4%.
+
+Memoising the `#` scan across calls to `nextTagStart` — one scan per hash rather
+than one per tag — is the obvious next step and does not work: it was
+implemented, measured and removed, because it changed nothing. What is left is
+the `<` scan's own call overhead, once per tag, which is the shape of the walk
+rather than a cost inside it.
+
+**Measure each of these against `main`, not against the last build you made, and
+run the two binaries alternately.** Both halves of that rule were learned here.
+Three of these steps were first reported at around +1% because each was compared
+with whatever binary was in the scratch directory rather than with the branch
+point. Then the corrected figure — a flat "-0.7%" recorded in this table for one
+round — turned out to be wrong the other way, because the two binaries were
+benchmarked one after the other rather than interleaved, and the machine drifted
+between them by more than the effect. Interleaved, the same pair reads +10%.
+A sequential A-then-B comparison is not a measurement.
 
 ## 3. Fixed
 
@@ -515,6 +538,53 @@ code, because it could not be told apart from its absence — identical over all
 the case it was written for, which is not a skip region precisely because it
 contains `<cf`.
 
+### 3.15 A named function nested inside another is a declaration
+
+```cfml
+component {
+    function run() {
+        setup();
+        function setup( required string a ) { … }
+    }
+}
+```
+
+CFML hoists `setup` into the component's variables scope, which is what lets
+`run` call it on the line above the one it is written on. The tag parser had
+always recorded it; the script parser recorded nothing at all — so there was no
+index entry, no completion, no signature help and nowhere for go-to-definition
+to land, and the same code meant different things in the two syntaxes.
+
+**This is the one gap the call axis could not find**, and it is why the oracle
+grew a second one. The calls such a function makes were already being recorded,
+attributed to the enclosing function — which is the right rule for an anonymous
+closure and is left alone. A `(line, method)` comparison therefore saw nothing
+wrong. Asking the grammar which *names* it declares found it at once: 61
+declarations over the corpus that the grammar had and the parser did not, and
+one left afterwards.
+
+`skipNestedFunction` now records a `FunctionDef` and a `FuncScope` for the named
+case, taking its arguments through `parseArgList` so the signature is real, and
+`scanNestedFunctionBody` reports the line of its closing brace because it is the
+only thing that consumed it. `scanNestedCall` dispatches `function` before the
+keyword guard it used to fall into, which is what makes the rule hold in every
+one of the six token loops — `describe( "x", function(){ function helper(){…} })`
+is how TestBox specs declare a helper.
+
+An anonymous function stays a value, for the reason `parseFunctionValue` gives:
+a `var`-scoped closure is private to the one function, and declaring it would
+put it in every caller's completion list.
+
+**One shape over-declares.** A method of an inline component —
+`var c = new component { function subTest(){…} }` — becomes a method of the
+enclosing component. The grammar reads it the same way and the tag parser always
+did, so it is consistent rather than special-cased; telling it apart needs the
+`new component` body tracked through every group the scan walks. It offers one
+extra completion item; the status quo offered none at all.
+
+**25 fewer files differing and 52 fewer parser-only sites**, with no name-keyed
+change — see the note in §2 about why those columns cannot move.
+
 ## 4. Known and not fixed
 
 ### 4.1 `createObject`, `entityNew`, `entityLoad` — 545 sites, deliberate
@@ -560,7 +630,7 @@ distinguishable from the other locally: both cross lines, both hold quotes, both
 hold a `(`. Telling them apart needs to know that the first string's `#` is not
 interpolation at all, which is a question about the *enclosing* expression.
 
-### 4.3 The parser records 657 sites the grammar does not
+### 4.3 The parser records 605 sites the grammar does not
 
 Three causes, none of them a wrong answer about code that runs:
 
@@ -573,6 +643,15 @@ Three causes, none of them a wrong answer about code that runs:
 - **The grammar's own gaps**, as in §3.6's `expandPath` case.
 
 ## 5. What would change these decisions
+
+- **The declaration axis** — §3.15 was found by asking the grammar which *names*
+  it declares, and one grammar-only declaration is left over the corpus. That
+  axis is not a landed corpus check, because the reverse direction is dominated
+  by 4,905 parser-only names that are `<cfproperty>` accessors the parser
+  synthesises and the grammar has no idea about; holding it to a list means
+  classifying those first. `TestDeclarationAxisIsWeakerThanTheCallAxis` records
+  why it is the weaker axis in general, and `TestNestedNamedFunctionsAreDeclaredByBoth`
+  pins the one case it settled.
 
 - **§4.2** — a rule that can tell a Markdown `#` from an interpolation. The
   measurement above is the starting point: the one-line rule is already tried
