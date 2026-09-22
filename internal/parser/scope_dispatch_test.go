@@ -101,7 +101,7 @@ func TestBothDispatchSwitchesHandleEveryScope(t *testing.T) {
 
 	switches := map[string]string{
 		"scriptParser.parse":           funcBody(t, src, "func (p *scriptParser) parse() {"),
-		"scriptParser.handleBodyToken": funcBody(t, src, "func (p *scriptParser) handleBodyToken(tok Token, depth int) {"),
+		"scriptParser.handleBodyToken": funcBody(t, src, "func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {"),
 	}
 
 	for name, body := range switches {

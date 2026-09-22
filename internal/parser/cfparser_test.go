@@ -149,7 +149,7 @@ func TestParse_ScriptTagNoCF_NoBogusCallSites(t *testing.T) {
 		}
 	}
 
-	for _, call := range pr.FuncCalls(0, 10) {
+	for _, call := range pr.AllCalls() {
 		if call.Variable == "$matrix" {
 			t.Errorf("expected no CallSite for $matrix, got %+v", call)
 		}
@@ -3147,7 +3147,7 @@ func TestTagParser_BareCallAssignment_ExtractCalls(t *testing.T) {
 
 	found := false
 
-	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+	for _, call := range pr.AllCalls() {
 		if call.FuncName == "getAndUpdateDisplayName" && call.Variable == "" {
 			found = true
 		}
@@ -3289,7 +3289,7 @@ func TestTagParser_DottedCallAssignment_UsesEarlierComponentRef(t *testing.T) {
 
 	found := false
 
-	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+	for _, call := range pr.AllCalls() {
 		if call.FuncName == "updatePerson" && call.Variable == "psService" {
 			found = true
 
@@ -3324,7 +3324,7 @@ func TestTagParser_BareCallStatement_UsesEarlierComponentRef(t *testing.T) {
 
 	found := false
 
-	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+	for _, call := range pr.AllCalls() {
 		if call.FuncName == "updatePerson" && call.Variable == "psService" {
 			found = true
 
@@ -3357,7 +3357,7 @@ func TestTagParser_ConcatenatedAssignment_NoSpuriousCall(t *testing.T) {
 
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
-	for _, call := range pr.FuncCalls(0, len(strings.Split(content, "\n"))) {
+	for _, call := range pr.AllCalls() {
 		if strings.EqualFold(call.FuncName, "temp") {
 			t.Errorf("expected no CallSite for bare variable 'temp', got %+v", call)
 		}
@@ -3478,8 +3478,7 @@ func TestCheckBareCall_DeepChainTracksReceiver(t *testing.T) {
 
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
-	lastLine := len(strings.Split(content, "\n"))
-	calls := pr.FuncCalls(0, lastLine)
+	calls := pr.AllCalls()
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range calls {
@@ -3521,7 +3520,7 @@ func TestChainedAssignRHS_FailedFirstHopContinuesChain(t *testing.T) {
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 
@@ -3559,7 +3558,7 @@ func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
 	})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 
@@ -3592,7 +3591,7 @@ func TestBracketIndexedChain_AssignmentRHS(t *testing.T) {
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 
@@ -3621,7 +3620,7 @@ func TestBracketIndexedChain_BareCall(t *testing.T) {
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 
@@ -3649,7 +3648,7 @@ func TestBracketIndexedChain_VarDecl(t *testing.T) {
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 
@@ -3677,7 +3676,7 @@ func TestBracketIndexedChain_ScopedAssignment(t *testing.T) {
 	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
-	for _, c := range pr.FuncCalls(0, 10) {
+	for _, c := range pr.AllCalls() {
 		byFunc[c.FuncName] = c
 	}
 

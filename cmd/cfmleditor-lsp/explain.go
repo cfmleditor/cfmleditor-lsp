@@ -167,8 +167,7 @@ func cmdExplain(args []string) {
 	})
 	pr.FuncLookup = funcLookup
 
-	lastLine := strings.Count(content, "\n")
-	calls := pr.FuncCalls(0, lastLine)
+	calls := pr.AllCalls()
 
 	var matches []parser.CallSite
 

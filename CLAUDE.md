@@ -20,6 +20,11 @@ make update-d3      # rebuild the code-map viewer's D3 bundle from assets/vendor
                     # (needs Node; the bundle is committed so `go build` does not)
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
 make visualtest     # go test -v -run TestFormatOutput ./internal/formatter/
+make gapcheck [CORPUS=<dir>[:<dir>...]]
+                    # diff what internal/parser extracts against what the tree-sitter
+                    # grammar sees in the same file. Without CORPUS it holds the repo's
+                    # fixtures to a recorded list of differences; with one it reports.
+                    # 6s over 5,629 files. See PARSER-GAPS.md
 make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]
                     # format a real-world CFML corpus and report what the formatter did to
                     # each file (clean / grammar-refused / guard-rejected / not idempotent /
@@ -152,6 +157,7 @@ Editor document change
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
 | `internal/codemap/mcp` | Read-only MCP server over the store |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
+| `internal/tsoracle` | Differential check: what `internal/parser` extracted vs what the tree-sitter grammar saw in the same file. See the note under Verification discipline |
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
@@ -197,6 +203,133 @@ the *formatter*, not the parser.
   shorter `c.rest = c.arr[:0]` defeats escape analysis and moved all eleven of its call sites'
   builders to the heap, which cost more than the buffer growth it saved. Check with
   `go build -gcflags=-m` rather than assuming.
+- **Recording a call is gated on `ExtractCalls`; consuming one is not.** The gate lives in
+  `addCall` alone, and every dispatch that walks a call and its argument list runs in every
+  mode. It used to sit on the dispatch itself, at nine sites, and the consequence was not that
+  an argument list was skipped — nothing skips it — but that it was scanned as if it were
+  statements. `svc.save(force = true)` then declared a variable called `force`, and
+  go-to-definition on `force` anywhere in the file landed on that argument. The same shape is
+  why `{force = true}` needs `skipLiteralGroup` and a script-syntax `<cfquery>`'s attributes
+  need `parseScriptTagAttrs`: a group the scan walks *into* rather than *over* is read as code.
+- **An argument list is the one place a call could hide.** `skipParenBody` discarded a `(...)`
+  group a token at a time, so `writeOutput(svc.getName())` recorded only `writeOutput` — on a
+  realistic function body 7 of the 12 calls present. A condition, a return, an assignment's
+  RHS, a concatenation, a struct or array literal and a ternary all extract correctly. The
+  cost was not completeness: a method called only from inside an argument list had no edge
+  into it, so `internal/codemap` read it as unreachable and `unresolved` never checked it.
+  There were **three** copies of that paren loop and fixing two left `a().b(svc.c())` losing
+  `svc.c`; they are one function now. The scan recurses, so `maxArgNesting` caps it at 64 —
+  Go cannot `recover()` from stack exhaustion, so the guard on every parse entry point would
+  not catch a runaway.
+- **`new` needs its own arm wherever a chain is walked.** Treat it as an ordinary keyword and
+  the scan meets `models.User(` on its own and invents a call to `User` on `models` — a made-up
+  answer, which is worse than the missing one it replaced.
+- **There are two variable scans and both must agree.** `scriptParser` is the full one;
+  `globalScriptParser` is a much smaller one that skips every function body outright, which is
+  what makes `VariablesVars`/`ThisVars` answerable per keystroke. Every rule about what does
+  *not* declare a variable therefore has to hold twice — named arguments, struct-literal keys
+  and script-tag attributes fooled both, and fixing one left the other reporting the same
+  phantom names. `TestBothVariableScansAgree` pins them together.
+- **`ident ident =` is what identifies a script-syntax CF tag**, not a list of tag names.
+  Importing `internal/docs` for one would pull a generated 6,582-line file with an `init()`
+  into a package kept deliberately dependency-light, and a tag it did not list would silently
+  go back to declaring variables. The spelling is unambiguous in CFScript. It needs one guard:
+  `parseFuncBody` runs the *script* parser over a tag function's raw text, so
+  `<cffunction name="save">` reaches the same test — hence the `afterLT` flag, and why the
+  attribute scan consumes **pairs** rather than everything up to the body. An earlier version
+  that swallowed "up to the body" ate whole `<cffunction>` bodies and every local inside them.
+- **A function assigned to a name is a method.** `this.helper = function(a) { … }` and
+  `variables.helper = (a) => a` are how a component exposes a method it builds rather than
+  declares, and the parser recorded only a variable — so `Funcs` held none of them and the
+  component had no completion, no signature help, no go-to-definition and nothing in the index
+  for any of them. `parseFunctionValue` fires only outside a function body and only for `this.`,
+  `variables.` and an unscoped name: a `var`- or `local.`-scoped closure is a local value, and
+  declaring one as a method would put a helper private to one function into every caller's
+  completion list. The paren-less single-argument arrow (`this.x = a => a * 2`) is deliberately
+  not recognised — telling it from `this.x = a` needs three tokens of lookahead on every
+  assignment whose RHS is a bare identifier, which is most of them.
+- **Not every binding is an assignment.** The var-decl parsers only ever looked for `=`, so
+  `for (var row in qry)` declared nothing — in every for-in loop, which is how CFML iterates a
+  query, an array and a struct. `catch (any e)` was the same, in every catch block there is.
+  `declareVar` files both; outside a function body they land in variables scope, since there is
+  no local scope to put them in, and an unscoped `for (row in qry)` lands there wherever it is,
+  which is CFML's rule for any unscoped assignment.
+- **Two-character operators are the scanner's job, and the two are not alike.** `?.` is folded
+  into `TokDot`, so every chain walk sees `svc?.save()` as `svc.save()` without a case of its
+  own — a receiver missed in one of them is recorded as a *bare* call, which resolves as an
+  unqualified function: a wrong answer, not a missing one. Adjacency is required, so a ternary
+  keeps its `?`. `::` is *not* folded, because its qualifier is a component rather than a
+  variable holding one: `TokDoubleColon` exists so the call site carries `Component` and
+  resolution looks for the method in `Foo` instead of among the file's own functions. It used
+  to be two unrecognised tokens, and `Foo::bar()` was reported as
+  `bar (no qualifier, not in file)` — naming the wrong problem and unresolvable even with the
+  component on disk.
+- **A string can hold an expression that holds a string, and only CFScript may
+  assume so.** `"#DayOfWeek("{ts '2000-1-1'}")#"` is one token; taking the first
+  matching quote as the end left `"#DayOfWeek("`, so the interpolation had no
+  closing `#` and its call was invisible — and the swallowed terminator took the
+  rest of the construct with it, 3,165 sites over 461 corpus files. `scanString`
+  now steps *over* a `#...#` and over any string opened inside it. It is
+  **opt-in** (`Scanner.interpStrings`, set by `scriptParser.asCFScript()`)
+  because text that is not CFScript reaches the same scanner — `parseFuncBody`
+  hands a tag function's raw body to the script parser — and on markup the rule
+  is a *wrong* answer rather than a coarse one: `<a href="#top">x</a><a
+  href="#bot">y</a>` pairs the two fragment hashes and swallows the tags between
+  them. `newGlobalScriptParser` opts in for correctness, not for calls: the two
+  variable scans must tokenise a file alike, and without it `variables.a =
+  "#f("x=1")#"` declares a phantom `x` in variables scope. The scan is
+  speculative — unclosed nesting falls back to the plain quote-to-quote scan, so
+  a token is never worse than before — and capped at `maxStringNesting` for the
+  reason `maxArgNesting` exists.
+- **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
+  `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
+  the case in all of them. Three of the five were still reporting a bare `bar` when the first
+  two handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
+  reason; add to it rather than fixing one walk.
+- **"This function calls nothing" is not "this is not a function".** `FuncCalls`
+  answered both by falling back to every call in the file, so a leaf method was
+  handed its siblings' calls — `deps` drew an edge out of an empty function,
+  labelled with another function's line number. A whole-file scan asks
+  `AllCalls` by name instead, and that one sorts by line, because its four
+  callers (`unresolved`, `explain`, the code map, the MCP server) each write a
+  report meant to be diffed against an earlier one and the buckets come out of a
+  map.
+- **`#...#` is where a computed value reaches a string, and both parsers were
+  blind to it.** The scanner takes a quoted string as one token and the tag
+  parser never tokenises text, so `writeOutput("id #svc.getName()#")` and
+  `<cfoutput>#svc.getName()#</cfoutput>` recorded nothing. Both now hand each
+  span to a scriptParser — the tag side reusing the path a `<cfscript>` body
+  already takes, during the walk rather than after it so `p.inFunc` is live and
+  the call lands in the right function. **A span with no `(` is rejected on a
+  byte scan**: only calls are recorded, `#user.name#` and `#i#` are most of the
+  interpolation in any file, and without that guard tag parsing with call
+  extraction cost 21% more rather than 4.6%.
+- **Six loops walk tokens and a literal reaches all of them**, so a string or a
+  closing bracket goes through `handleLiteralToken` rather than each loop
+  growing its own copy of the rule. `TestEveryTokenLoopHandlesLiterals` parses
+  the source and fails on a loop that dispatches identifiers to
+  `scanNestedCall` without a `TokString` arm beside it.
+- **A member call on a literal has a receiver that is a value.** `"abc".ucase()`
+  recorded a *bare* `ucase()`, indistinguishable from an unqualified call to a
+  function of that name — in a component that declares one, an edge to it that
+  does not exist. The component is `$any`, the existing spelling for "genuinely
+  dynamic".
+- **`throw` is the one keyword invoked like a function**, so it is the one that
+  needs its argument list consumed: `throw(type = "x")` declared a variable
+  called `type`. `if`, `while` and `switch` hold an expression, which the
+  statement scan reads correctly as it is.
+- **A component's or interface's attribute list is not a run of assignments**,
+  and `parsePlain`'s keyword guard runs *before* its tag-attribute check — both
+  names are keywords, so `component extends="models.Base"` put `extends` into
+  `VariablesVars`, which is what completion offers and what the index stores.
+  Each needs its own arm in both scans.
+- **A nested function's body is scanned, not skipped.** An immediately-invoked
+  function lost everything it called while the same closure passed as an
+  argument kept it, because that path counts parentheses instead. The calls are
+  attributed to the enclosing function, which is where the closure runs from.
+- **`import models.User;` qualifies a later bare `new User()`.** `import
+  models.*;` does not: which component a bare name then means is a question
+  about what is on disk, and the parser has no filesystem.
 
 ### Formatter (`internal/formatter`)
 
@@ -1096,6 +1229,65 @@ rule, and without the second half every route path short-circuits and the test
 passes whatever the code does. And a window test needs both documents to present
 a **full** window, or it compares a five-line window against a fifty-line one and
 fails for that instead.
+
+**Where a tag holds an expression, hand it to the script parser.** The tag
+parser matches tags and pulls attributes out with string searches; it has no
+expression parser and should not grow one. A `<cfif>` condition, a `<cfelseif>`,
+a `<cfreturn>`, a `<cfset>` and a `#...#` span all go to a `scriptParser` that
+keeps only the calls, which is what a `<cfscript>` body has always done. One
+implementation of "what is a call" then serves both syntaxes, and a fix to it
+reaches tag files for free. On the six-project corpus that was 3,100 call sites
+for `<cfset>` alone — a bare `<cfset arrayAppend(a, b)>`, a call after a
+concatenation, a nested call in an argument list, any scope-prefixed left-hand
+side — and 207 more for a script tag's attribute *value*, where the identifier
+was consumed as a plain token and only its argument list was scanned, so
+`array=structKeyArray(rows)` recorded what was inside the parens and never the
+call. PARSER-GAPS.md has the measurement and what is still missing.
+
+**Only `<cfset>` tops up, and that distinction is the subtle one.** Its string
+paths run first and carry the refs and pending calls that decide what a variable
+now holds, resolving a receiver against *this file's* refs in a way a fresh
+sub-parse cannot — so the sub-parse subtracts the count already recorded for
+each name on the line and adds only the excess. Counting rather than testing
+presence is what keeps `<cfset x = f() + f()>` at two. Doing the same for a
+`#...#` span is *wrong*: `#getColdBoxSetting("a")# #getColdBoxSetting("b")#` is
+two calls on one line, and the shared merge with the tally on cost the second
+one. **A unit test on one span could not have caught that; the corpus did.**
+
+**The grammar is a second opinion on the parser, and `make gapcheck` asks it.**
+`internal/parser` and the tree-sitter grammar are independent implementations of
+"what is a call", so where they disagree one of them is wrong. Every call-losing
+defect fixed here so far was found by hand-probing constructs one at a time;
+this asks the question over a corpus instead. It found, in minutes on the repo's
+own 40 fixtures, a class nobody had probed: in **tag syntax** a call in a
+`<cfif>`/`<cfelseif>` condition, in a `<cfreturn>`, or chained onto an
+instantiation (`<cfset d = createObject(…).init("ds")>`) is recorded nowhere,
+while the same code in script syntax is. `TestKnownTagSyntaxGaps` states each
+shape and fails when one starts working.
+
+Three things about it, each of which cost a wrong conclusion first:
+
+- **Calibrate before believing it.** The first run reported nine calls the
+  parser had "invented" — every one a `queryExecute`, which the grammar gives a
+  `query_expression` node of its own so SQL can be injected into it. That was
+  the oracle's mistake, not the parser's.
+- **Deliberate differences are not gaps.** `createObject(…)` is a `ComponentRef`
+  to the parser and a call to the grammar, on purpose. `expectedDifferences`
+  records both kinds with a reason each, and the test fails both on a *new*
+  difference and on a listed one that no longer differs — so a gap cannot be
+  closed unnoticed and the list cannot rot into decoration.
+- **The declaration axis is much weaker than the call axis, and it is measured
+  rather than assumed.** Of the phantom-variable shapes fixed in this parser,
+  the grammar disagrees with the old behaviour on exactly one
+  (`component extends=`). For the rest it agrees with the *bug*: `force` in
+  `svc.save(force = true)` is an `assignment_expression` to the grammar too, and
+  so is `name` in `query name="q"`. Those distinctions are semantic, not
+  syntactic, so a syntax oracle cannot arbitrate them.
+  `TestDeclarationAxisIsWeakerThanTheCallAxis` pins that ratio.
+
+It cannot check resolution at all — the grammar has no idea what a dot-path
+points at — and it is only as good as the corpus: the repo's fixtures contain
+zero interpolated calls, which is why the size of that gap is still unmeasured.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in

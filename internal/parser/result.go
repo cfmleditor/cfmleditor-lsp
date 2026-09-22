@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,7 +186,7 @@ func (pr *ParseResult) extractSignatures() {
 		}
 
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
+			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
 			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
 			sp.extractCalls = pr.extractCalls
@@ -1833,26 +1834,61 @@ func isValidVarChain(s string) bool {
 
 // FuncCalls returns all variable.method() calls recorded for a function scope.
 // Requires ExtractCalls: true in parse options.
+//
+// A function that calls nothing has no entry, and that is not the same question
+// as "is this a function scope at all". This used to answer both by falling
+// back to every call in the file, so a leaf method was handed its siblings'
+// calls — `deps` drew an edge out of an empty function, labelled with another
+// function's line. Callers wanting the whole file ask AllCalls for it.
 func (pr *ParseResult) FuncCalls(funcStart, funcEnd int) []CallSite {
 	if pr.extractCalls {
-		key := funcKey(funcStart, funcEnd)
-		if calls, ok := pr.funcCallsMap[key]; ok {
-			return calls
-		}
-
-		// Key not found — aggregate all calls (full-file scan)
-		var all []CallSite
-
-		all = append(all, pr.Calls...)
-
-		for _, calls := range pr.funcCallsMap {
-			all = append(all, calls...)
-		}
-
-		return all
+		return pr.funcCallsMap[funcKey(funcStart, funcEnd)]
 	}
 
 	return pr.funcCallsUncached(funcStart, funcEnd)
+}
+
+// AllCalls returns every call site in the file, wherever it was made: the ones
+// outside any function and the ones inside each.
+//
+// This is what a whole-file scan wants — `unresolved`, `explain`, the code map
+// and the MCP server each check or attribute every call in a file, and each
+// used to ask FuncCalls for a line range covering the file and rely on the key
+// missing. Requires ExtractCalls: true; without it there is nothing recorded to
+// return.
+func (pr *ParseResult) AllCalls() []CallSite {
+	if !pr.extractCalls {
+		return nil
+	}
+
+	n := len(pr.Calls)
+	for _, calls := range pr.funcCallsMap {
+		n += len(calls)
+	}
+
+	all := make([]CallSite, 0, n)
+	all = append(all, pr.Calls...)
+
+	for _, calls := range pr.funcCallsMap {
+		all = append(all, calls...)
+	}
+
+	// The buckets come out of a map, so without this the order changes between
+	// runs of one build — and every caller here writes a report a reader is
+	// meant to diff against an earlier one.
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].Line != all[j].Line {
+			return all[i].Line < all[j].Line
+		}
+
+		if all[i].Variable != all[j].Variable {
+			return all[i].Variable < all[j].Variable
+		}
+
+		return all[i].FuncName < all[j].FuncName
+	})
+
+	return all
 }
 
 // funcCallsUncached parses a function body on-demand to extract call sites.

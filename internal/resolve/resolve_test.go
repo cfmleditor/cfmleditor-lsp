@@ -103,7 +103,7 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 	baseDir := dir
 
 	// Find the objFile.open() call site.
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var openCall *parser.CallSite
 
@@ -178,7 +178,7 @@ func TestCanResolveCall_DeepChainWalksEachHopsReturnType(t *testing.T) {
 
 	baseDir := filepath.Join(dir, "chain")
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var getParamsCall *parser.CallSite
 
@@ -265,7 +265,7 @@ func TestCanResolveCall_ExtendsChainRefLookupWithoutPreIndex(t *testing.T) {
 
 	baseDir := dir
 
-	calls := pr.FuncCalls(0, 20)
+	calls := pr.AllCalls()
 
 	var openCall *parser.CallSite
 
@@ -348,7 +348,7 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 	childURI := uri.URI("file://" + filepath.Join(dir, "ChildSpec.cfc"))
 	pr := parser.ParseWithOptions(childURI, childContent, parser.ParseOptions{ExtractCalls: true})
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var assertCall *parser.CallSite
 
@@ -438,7 +438,7 @@ func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
 		WorkspaceFolders: []string{dir},
 	}
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var openCall *parser.CallSite
 
@@ -484,7 +484,7 @@ func TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod(t *testing.T) {
 		WorkspaceFolders: []string{dir},
 	}
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var call *parser.CallSite
 
@@ -542,7 +542,7 @@ func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
 		WorkspaceFolders: []string{dir},
 	}
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var setDocCall *parser.CallSite
 
@@ -586,7 +586,7 @@ func TestCanResolveCall_NoFollowSkipsMethodVerification(t *testing.T) {
 		ExtractCalls: true,
 	})
 
-	calls := pr.FuncCalls(0, 10)
+	calls := pr.AllCalls()
 
 	var call *parser.CallSite
 
