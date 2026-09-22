@@ -41,19 +41,33 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.1 | After §3.2 | After §3.3 |
-|---|---:|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 1,340 | 1,297 (23.0%) | **837 (14.9%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | 8,707 | 8,500 | **5,357** |
-| Sites the parser records and the grammar does not | 1,065 | 1,070 | 1,067 | 1,098 |
+| | Before | After §3.3 | After §3.7 |
+|---|---:|---:|---:|
+| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | **693 (12.3%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | **1,798** |
+| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before, 7,982 after §3.1, 7,775 after §3.2 and **4,602** after §3.3,
-and the parser-only figure falls to 343. The difference between the two keyings,
-around 750 sites, is **line skew**: a multi-line `<cfset>` or `<cfif>` records
-its calls at the tag's starting line while the grammar puts each on its own.
-Cosmetic, but it is why a report of this keyed on lines cannot be diffed
-cleanly against another.
+figure is 9,726 before, 4,602 after §3.3 and **1,188** after §3.7, and the
+parser-only figure falls from 343 to 293. Of the 1,188 that remain, **545 are
+the deliberate differences in §4.1**, so about 640 are real.
+
+The per-step figures are:
+
+| After | files | missed | name-keyed | parser-only |
+|---|---:|---:|---:|---:|
+| §3.1 `<cfset>` expressions | 1,340 | 8,707 | 7,982 | 1,070 |
+| §3.2 script-tag attribute values | 1,297 | 8,500 | 7,775 | 1,067 |
+| §3.3 nested strings in `#...#` | 837 | 5,357 | 4,602 | 1,098 |
+| §3.4 CFML string escapes | 781 | 2,736 | 2,122 | 908 |
+| §3.5 a leading BOM | 780 | 2,254 | 1,641 | 905 |
+| §3.6 constructor arguments | 746 | 2,102 | 1,489 | 906 |
+| §3.7 a call on a scope | 693 | 1,798 | 1,188 | 903 |
+
+The difference between the two keyings is **line skew**: a multi-line `<cfset>`
+or `<cfif>` records its calls at the tag's starting line while the grammar puts
+each on its own. Cosmetic, but it is why a report of this keyed on lines cannot
+be diffed cleanly against another.
 
 ## 3. Fixed
 
@@ -204,26 +218,169 @@ bytes of a string that contains a `#`, not a new object. `GlobalVars` is the one
 that moves because it is the smallest benchmark and is almost entirely string
 scanning; the whole-file parses absorb it into noise.
 
+### 3.4 CFML's string escapes are not C's
+
+```cfml
+listLast( uri, "/\" )                   <!-- ends in a backslash -->
+getTempDirectory() & "lucee-tests\" & id
+x = "say ""hi"""                        <!-- CFML's real escape -->
+```
+
+The scanner honoured `\` as a string escape. CFML has none: a quote is escaped
+by **doubling** it, and a backslash is an ordinary character. So a string ending
+in a backslash did not close where it ends — it closed at the next quote
+anywhere in the file, swallowing every call in between.
+
+One occurrence of `listLast( uri, "/\" )` in ContentBox's `BaseContent.cfc`
+cost **333 call sites**: everything from line 774 to the end of a 1,918-line
+component. The same two characters run through Lucee's test suite and ColdBox's
+`Builder.cfc`.
+
+Doubling is checked from *inside* the string, which is what keeps a bare `""` the
+empty string and makes `""""` a string holding one quote. Applied to the opening
+quote instead, `f("", "b")` becomes one argument.
+
+A `""`-escaped string is also how CFML writes markup across several lines, so a
+string token spanning lines is ordinary once the rule is right.
+`scanInterpolation` therefore places each `#...#` span at the token's start plus
+the newlines before it, rather than reporting every call in a multi-line string
+at the line the string opened.
+
+**2,480 name-keyed sites.** Free: within noise on all five parse benchmarks and
+slightly faster on three, since the hot loop loses a branch.
+
+### 3.5 A leading UTF-8 BOM
+
+`ClassifyRegions` decides script vs tag syntax by asking the scanner for the
+first token and testing it against `component`. A BOM is invisible in an editor,
+**561 of the 5,629 corpus files carry one**, and the scanner stopped at it — so
+those files answered "not a component" and went to the tag splitter.
+
+Harmless until the file also mentions `<script>`, which `isScriptFile` reads as
+evidence of an HTML page. ColdBox's `HTMLHelperSpec.cfc` only mentions it inside
+the string literals the spec asserts against, and came apart into eight regions
+each parsed from the middle of an expression: no function found in 800 lines.
+
+**481 name-keyed sites.** The skip lives in `NewScanner` rather than in
+`isScriptFile`, because a BOM should not be a token anywhere.
+
+### 3.6 A constructor's argument list
+
+```cfml
+var q = new Query( datasource = getDatasource() );
+var c = new X().g( svc.f() );
+```
+
+`skipParenBody` replaced the discard-a-token-at-a-time paren loop everywhere a
+call could hide — except in the four paths that read a `new` expression, which
+each kept a `skipBalancedParens` of their own: `parseNewRef`,
+`parseStandaloneNew`, `checkReturnComponent` and `scanChainedCalls`. They were
+reached from the `new` arm rather than from the argument scan, which is how they
+survived the consolidation.
+
+`new Query( datasource = getDatasource() )` is how ContentBox's migrations reach
+a datasource: **118 sites under that one method name, 152 in all.** The
+instantiation itself stays a `ComponentRef` — the deliberate difference in §4.1
+— so only the arguments change.
+
+It also produced a difference in the *other* direction where the parser is
+right: testbox's `compat-directory-runner.cfm` has
+`directory="#expandPath( '…' )#"` inside a `<cfset>`, which the parser now
+records and the grammar does not see as a call at all.
+
+### 3.7 A call made directly on a scope
+
+```cfml
+this.init();
+variables.buildCache();
+request.getRemoteClients();
+```
+
+Both scoped-var handlers read `scope` `.` `name` and then looked only for `=`
+(an assignment) or `.` (a longer chain). The shape where the statement *is* the
+call had no arm, so it recorded nothing. `x = request.getRemote()` and
+`request.a.getRemote()` both worked, which is why it survived — and the bare
+statement form is how a component calls its own method with an explicit scope.
+
+Where the call lands depends on the scope, and getting that wrong is worse than
+the miss:
+
+- `this.` and `variables.` name a member of the component being parsed, so the
+  call is recorded **unqualified** and resolves against the file's own functions
+  — including the ones `parseFunctionValue` files from
+  `this.helper = function(){}`.
+- Every other scope holds a value put there at runtime, so the receiver is
+  **`$any`**: the call site is recorded and the method-exists check is skipped,
+  as it already is for a literal receiver. Recorded unqualified instead,
+  `request.getRemote()` in a file that declares a `getRemote` would be an edge to
+  a function the call never reaches.
+
+The scope is read from the **token**, not from the `Scope` value the dispatch
+passes: `request`, `session` and `application` are all dispatched as
+`ScopeVariables`, deliberately, so an assignment through one keeps the component
+its right-hand side establishes. Testing the enum put every one of them in the
+first group.
+
+**301 name-keyed sites**, 109 of them under `getRemoteClients` alone.
+
 ## 4. Known and not fixed
 
-### 4.1 `createObject` — 435 sites, deliberate
+### 4.1 `createObject`, `entityNew`, `entityLoad` — 545 sites, deliberate
 
-The parser records a `ComponentRef`, not a `CallSite`. This is the one entry in
-`expectedDifferences` that is a design difference rather than a gap.
+The parser records a `ComponentRef`, not a `CallSite`. These are the three
+entries in `expectedDifferences` that are design differences rather than gaps,
+and they are **46% of what is left**.
 
-### 4.2 The parser records 1,098 sites the grammar does not
+`entityNew` and `entityLoad` were recorded only after a second corpus run
+re-investigated them from scratch, which is the cost of a deliberate difference
+nobody writes down. Their fixture lines sit at the end of
+`testdata/DefinitionTest.cfc` because `definition_testdata_test.go` addresses
+that file by line number.
 
-Two causes, both pre-existing and neither a wrong answer about code that runs:
+### 4.2 Markup inside a `#...#` span in tag text
+
+```cfml
+#ETH.author( content = "<strong>@name@</strong>" )#
+
+#ETH.divider()#
+```
+
+The tag walk finds the next `<` and treats what precedes it as text, so a span
+holding markup is split: `scanInterpolatedText` gets a chunk with an
+unterminated `#` and the call is lost, and the leftover hashes mis-pair with the
+next span so the call after it is lost too. That is most of what remains of
+ContentBox's email templates.
+
+**The obvious fix is wrong, and the corpus is what says so.** Making the walk
+step over a `#...#` span — even guarded on the span containing a `(`, since a
+call is the only thing a span contributes here — took missed sites from 1,798
+to **3,025** and newly broke 113 files. Hashes interpolate inside `<cfoutput>`
+and in a tag's attributes, and this walk tracks neither, so an unbounded pairing
+swallows real tags: `value="#thisSite[ 'siteID' ]#"` followed by a `<cfif` whose
+condition ends in `getsiteID()` is enough.
+
+Fixing it properly means the walk knowing where interpolation is live, which is
+`<cfoutput>` nesting plus attribute context — a real change to the riskiest code
+in the parser. Worth doing with the corpus in hand, not before.
+
+### 4.3 The parser records 903 sites the grammar does not
+
+Three causes, none of them a wrong answer about code that runs:
 
 - **Line skew**, as in §2.
 - **Tag-shaped text inside a string.** `coldbox-platform/system/aop/Mixer.cfc`
-  builds CFML source as a string literal; the tag parser scans `<cfset structDelete(…)>`
-  inside it as a live tag, and the grammar knows it is a string. That is the
-  same class as the comment-in-an-attribute-list note in CLAUDE.md: the tag
-  parser matches tags wherever they look like tags.
+  builds CFML source as a string literal; the tag parser scans
+  `<cfset structDelete(…)>` inside it as a live tag, and the grammar knows it is
+  a string. That is the same class as the comment-in-an-attribute-list note in
+  CLAUDE.md: the tag parser matches tags wherever they look like tags.
+- **The grammar's own gaps**, as in §3.6's `expandPath` case.
 
 ## 5. What would change these decisions
 
+- **§4.2** — the walk would have to track where interpolation is live. The
+  measurement above is the starting point: any attempt must be diffed per file
+  in both directions, because the naive version *looks* right on the email
+  templates it was written for.
 - **§3.1's cost** — if `unresolved` or the code map ever shows the sub-parse in a
   profile, the answer is to reuse one `scriptParser` per file rather than
   building one per `<cfset>`.
