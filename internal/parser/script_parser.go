@@ -1328,9 +1328,13 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 		p.argNesting--
 	}()
 
-	p.baseLine += tok.Line
+	tokBase := p.baseLine + tok.Line
 
 	for _, span := range interpolatedSpans(tok.Value) {
+		// A string token can span lines — CFML's `""` escape is what makes a
+		// multi-line one ordinary — so the span's own line is the token's start
+		// plus the newlines before it, not the token's start.
+		p.baseLine = tokBase + countNewlines(tok.Value[:span.start])
 		p.sc = NewScanner(tok.Value[span.start:span.end])
 		p.sc.interpStrings = true
 
@@ -1348,6 +1352,11 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 			}
 		}
 	}
+}
+
+// countNewlines reports how many lines a byte range spans past its first.
+func countNewlines(s string) int {
+	return strings.Count(s, "\n")
 }
 
 // hashSpan is the half-open byte range between a pair of interpolation hashes.
