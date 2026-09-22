@@ -92,8 +92,24 @@ type Scanner struct {
 
 // NewScanner creates a scanner for the given source.
 func NewScanner(src string) *Scanner {
-	return &Scanner{src: src}
+	// A UTF-8 BOM is an encoding marker, not a token. It is invisible in an
+	// editor and 561 of the 5,629 corpus files carry one, so a scanner that
+	// stops at it answers "the first token is not `component`" — which is what
+	// ClassifyRegions asks to decide whether a `.cfc` is script or tag syntax.
+	// Such a file then went to the tag splitter, and one that mentions
+	// `<script>` inside a string literal came apart into regions parsed from
+	// the middle of an expression: 800 lines of ColdBox's HTMLHelperSpec with
+	// no function and almost no call found.
+	sc := &Scanner{src: src}
+	if strings.HasPrefix(src, bomUTF8) {
+		sc.pos = len(bomUTF8)
+	}
+
+	return sc
 }
+
+// bomUTF8 is the UTF-8 byte order mark.
+const bomUTF8 = "\xef\xbb\xbf"
 
 // Pos returns the current byte offset.
 func (s *Scanner) Pos() int { return s.pos }
