@@ -238,3 +238,57 @@ func TestALineCommentEndsAtACarriageReturn(t *testing.T) {
 		t.Errorf("CRLF: got %v want [getLogger]", got)
 	}
 }
+
+// A literal <script> block with no CFML tag of its own is a RegionSkip: opaque,
+// so its JavaScript is never read as CFML. Its `#...#` spans are CFML all the
+// same — a <script> body inside <cfoutput> is where a page writes
+// `var id = "#prc.oContent.getContentID()#";` — and dropping the region dropped
+// those with it. ContentBox's themes and admin panels are full of them: 124
+// name-keyed sites over 34 corpus files, the largest single class left when it
+// was found.
+//
+// The region stays opaque for everything else, which is the point: scanning the
+// JavaScript would invent a call for every function it defines or calls.
+func TestAScriptRegionGivesUpItsInterpolation(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			"interpolation in a script tag's attribute",
+			`<script src="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#"></script>`,
+			[]string{"elixirPath", "themeRoot", "themeRoot"},
+		},
+		{
+			"interpolation in a script body",
+			"<cfoutput>\n<script>\nvar x = \"#prc.o.getContentID()#\";\nvar y = \"#prc.o.getSite().getSlug()#\";\n</script>\n</cfoutput>",
+			[]string{"getContentID", "getSite", "getSlug"},
+		},
+
+		// The JavaScript around the spans stays opaque. Without that, every
+		// function a page defines or calls becomes a CFML call site.
+		{"plain JavaScript is not CFML", `<script>var a = 1; foo(); bar();</script>`, nil},
+		{"a function declaration is not CFML", `<script>function notACall(){ jsOnly(); }</script>`, nil},
+		{"a jQuery id selector invents nothing", `<script>$( '#search' ).typeahead( x );</script>`, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := tagFileCalls(t, c.src)
+			if len(got) == 0 && c.want == nil {
+				return
+			}
+
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+
+	// A <script> holding a CFML tag is deliberately *not* a skip region, so it
+	// parses as ordinary tag content. That carve-out predates this and must
+	// keep working.
+	src := "<cfoutput>\n<script>\nvar x = \"#prc.o.getContentID()#\";\n<cfif len( q )>a</cfif>\n</script>\n</cfoutput>"
+	if got := tagFileCalls(t, src); !slices.Equal(got, []string{"getContentID", "len"}) {
+		t.Errorf("script holding CFML: got %v want [getContentID len]", got)
+	}
+}
