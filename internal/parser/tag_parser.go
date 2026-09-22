@@ -613,6 +613,16 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	inner = strings.TrimSuffix(strings.TrimSpace(inner), "/")
 	inner = strings.TrimSpace(inner)
 
+	// A <cfset> holds an expression, and the shapes matched below are a few of
+	// the ways one can hold a call. Measured against six open-source projects,
+	// they missed about 3,100 call sites: a bare `<cfset arrayAppend(a, b)>`, a
+	// call after a concatenation, a nested call in an argument list, and any
+	// assignment whose left-hand side is scope-prefixed. The expression goes to
+	// the script parser afterwards for the rest, which is what <cfif> and
+	// <cfreturn> already do; the string paths stay because they carry the refs
+	// and pending calls that decide what a variable now holds.
+	defer p.scanSetExpressionCalls(inner, line)
+
 	switch {
 	case hasPrefixFold(inner, "var "):
 		rest := strings.TrimSpace(inner[4:])
@@ -803,7 +813,6 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 
-		p.scanChainedInstantiation(comp, rhs, line)
 	case hasPrefixFold(rhs, "createobject("):
 		comp := extractCreateObjectArg(rhs[13:])
 		if comp != "" {
@@ -820,7 +829,6 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			}
 		}
 
-		p.scanChainedInstantiation(comp, rhs, line)
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
 		if comp != "" {
@@ -1541,6 +1549,41 @@ func (p *tagParser) scanInterpolatedText(text string, offset int) {
 // whatever the tag handler already recorded for them, and taking them here
 // would record each one twice.
 func (p *tagParser) scanExpressionCalls(expr string, line int) {
+	p.mergeExpressionCalls(expr, line, false)
+}
+
+// scanSetExpressionCalls is scanExpressionCalls for a <cfset>, whose own
+// string-matched shapes have already been recorded by the time it runs.
+//
+// Only <cfset> needs this. A #...# span and a <cfif> condition have nothing
+// recorded before them, and deduping there is actively wrong: two
+// interpolations of the same function on one line —
+// `#getColdBoxSetting("a")# #getColdBoxSetting("b")#` — are two calls, and
+// running the shared merge with the tally on cost the second one. The corpus
+// caught that; a unit test on one span could not have.
+func (p *tagParser) scanSetExpressionCalls(expr string, line int) {
+	p.mergeExpressionCalls(expr, line, true)
+}
+
+// mergeExpressionCalls parses one CFML expression and records the calls in it.
+//
+// The tag parser matches tags and pulls attributes out with string searches; it
+// has no expression parser and should not grow one. Where a tag *holds* an
+// expression — a <cfif> condition, a <cfreturn>, a <cfset>, a #...# span — it
+// hands the text to a scriptParser and keeps the calls, which is the same thing
+// a <cfscript> body already does. One implementation of "what is a call" then
+// serves both syntaxes, and a fix to it reaches tag files for free.
+//
+// Only calls are merged. The refs and vars a sub-parse also produces belong to
+// whatever the tag handler already recorded for them, and taking them here
+// would record each one twice.
+//
+// With topUp, the count already recorded on the starting line for each name is
+// subtracted and only the excess is added, so a <cfset> keeps the component its
+// own string path resolved against this file's refs while still gaining the
+// calls that path never matched. Counting rather than testing presence is what
+// keeps `<cfset x = f() + f()>` at two.
+func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 	if !p.extractCalls || strings.IndexByte(expr, '(') < 0 {
 		return
 	}
@@ -1550,115 +1593,52 @@ func (p *tagParser) scanExpressionCalls(expr string, line int) {
 	sub.extractCalls = true
 	sub.parse()
 
-	for _, c := range sub.calls {
+	have := map[string]int{}
+
+	if topUp {
+		for _, c := range p.callsOnLine(uint32(line)) {
+			have[strings.ToLower(c.FuncName)]++
+		}
+	}
+
+	emit := func(c CallSite) {
+		k := strings.ToLower(c.FuncName)
+		if have[k] > 0 {
+			have[k]--
+
+			return
+		}
+
 		p.addCall(c)
+	}
+
+	for _, c := range sub.calls {
+		emit(c)
 	}
 
 	for _, calls := range sub.funcCalls {
 		for _, c := range calls {
-			p.addCall(c)
+			emit(c)
 		}
 	}
 }
 
-// scanChainedInstantiation records a method called straight off an
-// instantiation: `<cfset d = createObject("component","models.Dao").init("ds")>`
-// and `<cfset d = new models.Dao().init("ds")>`.
-//
-// Both arms above record the component the variable now holds and stop there,
-// so the `.init()` — a real call, and usually the one that matters — was
-// recorded nowhere.
-//
-// It is a string scan rather than a sub-parse because the component is already
-// known here: the only thing left to read is the method names after the
-// instantiation's closing paren. Handing the expression to a scriptParser
-// instead measured +35% on a tag parse with call extraction, since the
-// benchmark fixture — like a lot of real CFML — builds one of these per
-// function.
-func (p *tagParser) scanChainedInstantiation(comp, rhs string, line int) {
-	if !p.extractCalls || !strings.Contains(rhs, ").") {
-		return
+// callsOnLine returns the calls already recorded in the current bucket for a
+// line. Calls are appended in source order, so the run at the end of the bucket
+// is the whole answer and this costs what it finds rather than what the file
+// holds.
+func (p *tagParser) callsOnLine(line uint32) []CallSite {
+	bucket := p.calls
+	if p.inFunc != "" {
+		bucket = p.funcCalls[p.inFunc]
 	}
 
-	rest := afterBalancedParens(rhs)
-
-	caller := ""
-	if p.inFunc != "" && len(p.funcs) > 0 {
-		caller = p.funcs[len(p.funcs)-1].Name
+	i := len(bucket)
+	for i > 0 && bucket[i-1].Line == line {
+		i--
 	}
 
-	var hops []string
-
-	for strings.HasPrefix(rest, ".") {
-		name, open := cutIdent(rest[1:])
-		if name == "" || !strings.HasPrefix(open, "(") {
-			return
-		}
-
-		// Component stays the instantiated one and the methods before this hop
-		// accumulate in Chain, which is how the script parser records the same
-		// shape: resolution walks each hop's return type forward rather than
-		// testing every method against the base component. Without it a
-		// `.init().reset()` would claim reset exists on the component, which is
-		// true only when init returns `this`.
-		var chain []string
-		if len(hops) > 0 {
-			chain = make([]string, len(hops))
-			copy(chain, hops)
-		}
-
-		p.addCall(CallSite{
-			FuncName:  name,
-			Component: comp,
-			Chain:     chain,
-			Resolved:  comp != "",
-			Line:      uint32(line),
-			Caller:    caller,
-		})
-
-		hops = append(hops, name)
-		rest = afterBalancedParens(open)
-	}
-}
-
-// afterBalancedParens returns what follows the first balanced (...) group in s,
-// or "" if there is none. Parens inside a quoted string do not count —
-// `createObject("component", "a(b)")` closes where the quotes say it does.
-func afterBalancedParens(s string) string {
-	depth, quote := 0, byte(0)
-
-	for i := range len(s) {
-		c := s[i]
-
-		switch {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			}
-		case c == '"' || c == '\'':
-			quote = c
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-
-			if depth == 0 {
-				return s[i+1:]
-			}
-		}
-	}
-
-	return ""
-}
-
-// cutIdent splits a leading identifier off s, returning it and the remainder.
-func cutIdent(s string) (string, string) {
-	i := 0
-	for i < len(s) && isIdentPart(s[i]) {
-		i++
-	}
-
-	return s[:i], s[i:]
+	return bucket[i:]
 }
 
 // tagBody returns what a tag holds between its name and its closing '>': the

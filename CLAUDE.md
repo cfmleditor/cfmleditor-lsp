@@ -24,6 +24,7 @@ make gapcheck [CORPUS=<dir>[:<dir>...]]
                     # diff what internal/parser extracts against what the tree-sitter
                     # grammar sees in the same file. Without CORPUS it holds the repo's
                     # fixtures to a recorded list of differences; with one it reports.
+                    # 6s over 5,629 files. See PARSER-GAPS.md
 make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,...]
                     # format a real-world CFML corpus and report what the formatter did to
                     # each file (clean / grammar-refused / guard-rejected / not idempotent /
@@ -1214,24 +1215,24 @@ fails for that instead.
 
 **Where a tag holds an expression, hand it to the script parser.** The tag
 parser matches tags and pulls attributes out with string searches; it has no
-expression parser and should not grow one. `<cfif svc.isValid(x)>`,
-`<cfelseif …>` and `<cfreturn svc.value()>` recorded no calls at all, while the
-same test in script syntax recorded them — so `scanExpressionCalls` hands the
-text to a `scriptParser` and keeps only the calls, which is what a `<cfscript>`
-body and a `#...#` span already do. One implementation of "what is a call" then
-serves both syntaxes.
+expression parser and should not grow one. A `<cfif>` condition, a `<cfelseif>`,
+a `<cfreturn>`, a `<cfset>` and a `#...#` span all go to a `scriptParser` that
+keeps only the calls, which is what a `<cfscript>` body has always done. One
+implementation of "what is a call" then serves both syntaxes, and a fix to it
+reaches tag files for free. On the six-project corpus that was 3,100 call sites
+for `<cfset>` alone — a bare `<cfset arrayAppend(a, b)>`, a call after a
+concatenation, a nested call in an argument list, any scope-prefixed left-hand
+side. PARSER-GAPS.md has the measurement and what is still missing.
 
-The exception is a method chained straight off an instantiation
-(`<cfset d = createObject("component","x").init("ds")>`), and it is an exception
-on measurement rather than taste: the component is *already known* at that
-point, so the only thing left to read is the method names after the closing
-paren. A sub-parse there cost **+35%** on a tag parse with call extraction,
-because the benchmark fixture — like a lot of real CFML — builds one per
-function; the string scan costs +13%, which is the 20 previously-invisible calls
-being recorded rather than overhead. `afterBalancedParens` skips quoted spans, so
-`createObject("component", "a(b)")` closes where the quotes say it does, and
-later hops carry `Chain` so resolution walks each return type forward instead of
-claiming every method exists on the base component.
+**Only `<cfset>` tops up, and that distinction is the subtle one.** Its string
+paths run first and carry the refs and pending calls that decide what a variable
+now holds, resolving a receiver against *this file's* refs in a way a fresh
+sub-parse cannot — so the sub-parse subtracts the count already recorded for
+each name on the line and adds only the excess. Counting rather than testing
+presence is what keeps `<cfset x = f() + f()>` at two. Doing the same for a
+`#...#` span is *wrong*: `#getColdBoxSetting("a")# #getColdBoxSetting("b")#` is
+two calls on one line, and the shared merge with the tally on cost the second
+one. **A unit test on one span could not have caught that; the corpus did.**
 
 **The grammar is a second opinion on the parser, and `make gapcheck` asks it.**
 `internal/parser` and the tree-sitter grammar are independent implementations of

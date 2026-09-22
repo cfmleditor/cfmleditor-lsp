@@ -258,3 +258,63 @@ func TestDeclarationAxisIsWeakerThanTheCallAxis(t *testing.T) {
 		t.Errorf("the declaration axis caught %d of %d shapes; the note above says one", caught, len(cases))
 	}
 }
+
+// A <cfset> holds an expression, and the string paths that read one matched a
+// few shapes and let the rest through — about 3,100 call sites on the corpus in
+// PARSER-GAPS.md. It goes to the script parser now, topping up what those paths
+// already recorded rather than replacing it.
+func TestSetExpressionsRecordTheirCalls(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{`<cfset arrayAppend(ret, prefix & "." & key) />`, []string{"arrayappend"}},
+		{`<cfset var name="test"&createuniqueid()>`, []string{"createuniqueid"}},
+		{`<cfset attributes.req.list=cfc.listApplications()>`, []string{"listapplications"}},
+		{`<cfset k = evaluate(fileread(v.indexFile)) />`, []string{"evaluate", "fileread"}},
+		{`<cfset d = createObject("component","models.Dao").init("ds")>`, []string{"init"}},
+		{`<cfset d = new models.Dao().init("ds")>`, []string{"init"}},
+
+		// The shape the string path already matched stays at one call, not two.
+		{`<cfset x = svc.y()>`, []string{"y"}},
+
+		// And a genuine repeat stays at two, which is why the top-up counts
+		// rather than tests presence.
+		{`<cfset x = f() + f()>`, []string{"f", "f"}},
+
+		// Controls.
+		{`<cfset x = 1>`, nil},
+		{`<cfset d = new models.Dao()>`, nil},
+	}
+
+	for _, c := range cases {
+		t.Run(c.src, func(t *testing.T) {
+			var got []string
+			for _, call := range parserCalls("/t.cfm", []byte(c.src)) {
+				got = append(got, call.Method)
+			}
+
+			sort.Strings(got)
+
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// Two interpolations of the same function on one line are two calls. The
+// <cfset> top-up must not reach them — running the shared merge with its tally
+// on cost the second one, and only the corpus showed it.
+func TestRepeatedInterpolationOnOneLineIsNotDeduped(t *testing.T) {
+	for _, src := range []string{
+		`<cfoutput>#getColdBoxSetting("a")# #getColdBoxSetting("b")#</cfoutput>`,
+		`<li>#f("a")# (#f("b")#)</li>`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if got := parserCalls("/t.cfm", []byte(src)); len(got) != 2 {
+				t.Errorf("got %v, want two calls", got)
+			}
+		})
+	}
+}
