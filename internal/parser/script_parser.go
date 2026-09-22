@@ -3536,6 +3536,16 @@ func (p *scriptParser) skipTagAttrValue() bool {
 			if !p.skipBracketIndex() {
 				return false
 			}
+		case TokIdent:
+			// An attribute value can be a call: `array=structKeyArray(rows)`,
+			// `result=serializeJson(body.data)`. Consuming the identifier
+			// without dispatching it recorded the calls *inside* its argument
+			// list — skipParens scans those — and never the call itself.
+			tok := p.sc.NextSkipComments()
+			p.scanNestedCall(tok)
+		case TokString:
+			tok := p.sc.NextSkipComments()
+			p.handleLiteralToken(tok)
 		default:
 			p.sc.NextSkipComments()
 		}

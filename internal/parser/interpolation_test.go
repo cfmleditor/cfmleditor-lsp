@@ -168,11 +168,14 @@ func TestEveryTokenLoopHandlesLiterals(t *testing.T) {
 
 	// Every arm that dispatches an identifier to the nested-call scan is a
 	// token loop, and each must have a literal arm beside it.
-	loops := regexp.MustCompile(`(?s)case TokIdent:\n\t+p\.scanNestedCall\((\w+)\)\n(.{0,160}?)\n\t+\}`)
+	// The dispatch may read the token first, as skipTagAttrValue does, since
+	// that loop peeks at its terminator rather than consuming it.
+	loops := regexp.MustCompile(
+		`(?s)case TokIdent:\n(?:\t+//[^\n]*\n)*(?:\t+\w+ := [^\n]+\n)?\t+p\.scanNestedCall\((\w+)\)\n(.{0,200}?)\n\t+\}`)
 
 	matches := loops.FindAllStringSubmatch(string(src), -1)
-	if len(matches) < 4 {
-		t.Fatalf("expected at least four nested-call dispatch sites, found %d — this test's anchor needs updating", len(matches))
+	if len(matches) < 6 {
+		t.Fatalf("expected at least six nested-call dispatch sites, found %d — this test's anchor needs updating", len(matches))
 	}
 
 	for _, m := range matches {
@@ -180,4 +183,51 @@ func TestEveryTokenLoopHandlesLiterals(t *testing.T) {
 			t.Errorf("a token loop dispatching %s to scanNestedCall has no TokString arm:\n%s", m[1], m[0])
 		}
 	}
+}
+
+// A script-syntax CF tag's attribute value is an expression too. skipTagAttrValue
+// consumed the identifier and handed only its *argument list* to the scan that
+// finds calls, so `array=structKeyArray(rows)` recorded whatever was inside the
+// parens and never structKeyArray itself.
+func TestScriptTagAttributeValuesRecordTheirCalls(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`loop array=structKeyArray(rowData) item="local.col" { x(); }`,
+			[]string{"?.structKeyArray", "?.x"}},
+		{`http url="u" result=serializeJson(body.data) {}`, []string{"?.serializeJson"}},
+		{`query name="q" datasource=getDatasource() { }`, []string{"?.getDatasource"}},
+		{`lock name="l" timeout=calcTimeout(x) { }`, []string{"?.calcTimeout"}},
+
+		// An interpolated value reaches the same arm through the string.
+		{`query name="q" datasource="#svc.ds()#" { }`, []string{"svc.ds"}},
+
+		// Controls: a plain value declares nothing and calls nothing, and the
+		// body's own calls are unaffected.
+		{`loop array=arr item=local.col { }`, nil},
+		{`query name="q" datasource="ds" { writeOutput("x"); }`, []string{"?.writeOutput"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			src := "component {\n function go() {\n  " + c.body + "\n }\n}\n"
+
+			if got := interpCalls(t, src); !slices.Equal(got, sorted(c.want)) {
+				t.Errorf("got %v want %v", got, sorted(c.want))
+			}
+
+			// The attribute names must still not become variables.
+			for _, v := range ParseVars(src) {
+				t.Errorf("%s declared a variable %q", c.body, v.Name)
+			}
+		})
+	}
+}
+
+func sorted(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+
+	return out
 }

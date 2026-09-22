@@ -41,20 +41,22 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3 |
-|---|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | **1,340 (23.8%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | **8,707** |
-| Sites the parser records and the grammar does not | 1,065 | 1,070 |
+| | Before | After §3.1 | After §3.2 |
+|---|---:|---:|---:|
+| Files where the two disagree | 1,506 (26.8%) | 1,340 | **1,297 (23.0%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 8,707 | **8,500** |
+| Sites the parser records and the grammar does not | 1,065 | 1,070 | 1,067 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before and 7,982 after. The difference between the two keyings,
+figure is 9,726 before and 7,982 after §3.1. The difference between the two keyings,
 around 700 sites, is **line skew**: a multi-line `<cfset>` or `<cfif>` records
 its calls at the tag's starting line while the grammar puts each on its own.
 Cosmetic, but it is why a report of this keyed on lines cannot be diffed
 cleanly against another.
 
-## 3. Fixed: expressions a `<cfset>` holds
+## 3. Fixed
+
+### 3.1 Expressions a `<cfset>` holds
 
 About 3,100 of the missed sites were the largest single class, and all of one
 shape: `parseCFSet` matched a few ways an expression can hold a call with string
@@ -91,7 +93,7 @@ It also made `scanChainedInstantiation` redundant —
 sub-parse, which resolves the instantiation itself — so that string scan and its
 two helpers are gone.
 
-### Cost
+#### Cost
 
 Measured interleaved, alternating builds, minimum of nine, one benchmark per
 process:
@@ -106,6 +108,27 @@ every `<cfset>`. With call extraction it is **+15.9%**, which is one sub-parse
 per `<cfset>` holding a `(` — ten of them in that fixture. That cost lands on
 `unresolved`, the code map and `deps`, not on the editor's keystroke path, which
 parses without `ExtractCalls`.
+
+### 3.2 Calls in a script-tag attribute value
+
+```cfml
+loop array=structKeyArray(rowData) item="local.col" { … }
+http url="u" result=serializeJson(body.data) {}
+query name="q" datasource=getDatasource() { }
+```
+
+`skipTagAttrValue` consumed the value's identifier as a plain token and handed
+only its *argument list* to the scan that finds calls — so it recorded whatever
+was inside the parens and never the call itself. It dispatches the identifier
+through `scanNestedCall` now, and a quoted value through `handleLiteralToken`,
+which also picks up `datasource="#svc.ds()#"`.
+
+207 sites, 43 files. Allocations are identical and the timings are within noise
+on all three parse benchmarks, so this one is free.
+
+`TestEveryTokenLoopHandlesLiterals` grew to cover it: the loop peeks at its
+terminator rather than consuming it, so its dispatch reads the token first, and
+the test's anchor now accepts that shape. There are six such loops.
 
 ## 4. Known and not fixed
 
@@ -130,23 +153,12 @@ which is a real change to the one function every parse path runs through.
 Nearly all of it is Lucee's test suite writing dates this way. Worth revisiting
 if it shows up outside that idiom.
 
-### 4.2 Calls in a script-tag attribute value
-
-```cfml
-loop array=structKeyArray(rowData) item="local.col" { … }
-http url="u" result=serializeJson(body.data) {}
-```
-
-`skipTagAttrValue` consumes the value and hands nested parens to the scan that
-finds calls inside them, but the value's own outer call is consumed as a plain
-token. The fix is the same shape as §3.
-
-### 4.3 `createObject` — 435 sites, deliberate
+### 4.2 `createObject` — 435 sites, deliberate
 
 The parser records a `ComponentRef`, not a `CallSite`. This is the one entry in
 `expectedDifferences` that is a design difference rather than a gap.
 
-### 4.4 The parser records 1,070 sites the grammar does not
+### 4.3 The parser records 1,067 sites the grammar does not
 
 Two causes, both pre-existing and neither a wrong answer about code that runs:
 
@@ -161,9 +173,7 @@ Two causes, both pre-existing and neither a wrong answer about code that runs:
 
 - **§4.1** — the shape appearing outside Lucee's date tests. It is 56 files
   today, and the fix touches the scanner every parse path runs through.
-- **§4.2** — it is small, and the fix is the one §3 already demonstrates, so it
-  is worth doing the next time someone is in `parseScriptTagAttrs`.
-- **§3's cost** — if `unresolved` or the code map ever shows the sub-parse in a
+- **§3.1's cost** — if `unresolved` or the code map ever shows the sub-parse in a
   profile, the answer is to reuse one `scriptParser` per file rather than
   building one per `<cfset>`.
 

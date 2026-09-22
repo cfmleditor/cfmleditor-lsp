@@ -1222,7 +1222,10 @@ implementation of "what is a call" then serves both syntaxes, and a fix to it
 reaches tag files for free. On the six-project corpus that was 3,100 call sites
 for `<cfset>` alone — a bare `<cfset arrayAppend(a, b)>`, a call after a
 concatenation, a nested call in an argument list, any scope-prefixed left-hand
-side. PARSER-GAPS.md has the measurement and what is still missing.
+side — and 207 more for a script tag's attribute *value*, where the identifier
+was consumed as a plain token and only its argument list was scanned, so
+`array=structKeyArray(rows)` recorded what was inside the parens and never the
+call. PARSER-GAPS.md has the measurement and what is still missing.
 
 **Only `<cfset>` tops up, and that distinction is the subtle one.** Its string
 paths run first and carry the refs and pending calls that decide what a variable
