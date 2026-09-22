@@ -292,3 +292,48 @@ func TestAScriptRegionGivesUpItsInterpolation(t *testing.T) {
 		t.Errorf("script holding CFML: got %v want [getContentID len]", got)
 	}
 }
+
+// tagEndIndex answers a '>' with every quote before it already closed on a
+// two-count fast path, because the quote-by-quote walk costs three calls per
+// attribute — on strings short enough that the call is most of the cost — and
+// a tag whose attributes are ordinarily quoted is nearly every tag in a file.
+// It was 5% of a tag parse.
+//
+// The fast path is only sound because it is exact, so this compares the two
+// implementations rather than restating either's answer: a shape where they
+// disagree is a shape the walk should have been left to handle.
+func TestTheTagEndFastPathAgreesWithTheWalk(t *testing.T) {
+	cases := []string{
+		`<cffunction name="getData" returntype="query" access="public" output="false">`,
+		`<cfquery name="qry" datasource="#variables.dsn#">`,
+		`<cfset x = array( f( "a<br>b" ), g( "c" ) )>`,
+		`<cfset x = array( f( 'a<br>b' ), g( 'c' ) )>`,
+
+		// An apostrophe in prose leaves the single-quote count odd, so the fast
+		// path declines and the walk finds the same '>'.
+		`<cfset msg = "it's here">`,
+
+		// A doubled quote is CFML's escape and adds two, so parity survives it.
+		`<cfset x = array( f( "a""b<br>c" ), g( "d" ) )>`,
+
+		// Quotes of one kind inside the other, in both orders. The second is
+		// what makes the fast path count *both* kinds: the double quotes are
+		// balanced there, so counting them alone would accept the '>' inside
+		// the single-quoted string.
+		`<cfset x = "a>b" & 'c>d'>`,
+		`<cfset x = "a" & 'b>c'>`,
+		`<cfset x = 'a"b'>`,
+
+		// The two degenerate inputs: no '>' at all, and one that never closes.
+		`<cfset x = 1`,
+		"<cfset x = f( \"a )>\n<cfset y = g()>",
+	}
+
+	for _, s := range cases {
+		t.Run(s, func(t *testing.T) {
+			if got, want := tagEndIndex(s), tagEndWalk(s); got != want {
+				t.Errorf("fast path %d, walk %d", got, want)
+			}
+		})
+	}
+}

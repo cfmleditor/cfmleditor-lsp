@@ -114,6 +114,29 @@ func tagEndIndex(s string) int {
 	// what makes a false end possible, and only then is there anything to skip.
 	// A byte-at-a-time version of this cost 9% of a tag parse — it ran over
 	// every tag in the file, most of which hold no quote at all.
+	gt := strings.IndexByte(s, '>')
+	if gt < 0 {
+		return -1
+	}
+
+	// A '>' with every quote before it already closed is the tag's end, and
+	// two counts settle that for the whole attribute list at once. The walk
+	// below costs three calls per attribute instead, on short strings where
+	// the call is most of the cost — and a tag whose attributes are all
+	// ordinarily quoted is nearly every tag in a file. Parity is exact rather
+	// than a heuristic: CFML escapes a quote by doubling it, which adds two.
+	if strings.Count(s[:gt], `"`)%2 == 0 && strings.Count(s[:gt], "'")%2 == 0 {
+		return gt
+	}
+
+	return tagEndWalk(s)
+}
+
+// tagEndWalk is the quote-by-quote scan tagEndIndex falls back to. It is a
+// function of its own so the fast path above can be compared against it
+// directly — restating it in a test would be the parallel list this codebase
+// keeps warning about.
+func tagEndWalk(s string) int {
 	for pos := 0; ; {
 		gt := strings.IndexByte(s[pos:], '>')
 		if gt < 0 {
@@ -166,6 +189,11 @@ func nextTagStart(s string) int {
 	// what makes a span possible, and only then is there anything to resolve —
 	// on a file with no interpolation this is the same two byte scans the walk
 	// always did.
+	//
+	// Memoising the '#' scan across calls — one scan per hash rather than one
+	// per tag — is the obvious next step and was measured: it changed nothing
+	// on the tag benchmarks, because what this costs is the '<' scan's call
+	// overhead on short strings, not the hash scan.
 	for pos := 0; ; {
 		lt := strings.IndexByte(s[pos:], '<')
 
