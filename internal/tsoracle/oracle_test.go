@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -25,11 +26,6 @@ import (
 // own, and the parser deliberately models some things differently.
 var expectedDifferences = map[string]string{
 	"createobject": "deliberate: the parser records a ComponentRef, not a CallSite",
-
-	"init":      "gap: `.init()` chained after createObject(...) in a <cfset> is not recorded",
-	"len":       "gap: a call in a <cfif>/<cfelseif> condition is not recorded",
-	"trim":      "gap: same, nested inside that condition",
-	"isdefined": "gap: same, in a <cfelseif>",
 }
 
 func parserCalls(path string, src []byte) []Call {
@@ -159,33 +155,54 @@ func TestGrammarAndParserAgreeOnCalls(t *testing.T) {
 	}
 }
 
-// TestKnownTagSyntaxGaps states the shapes the oracle turned up, so each fails
-// when it starts working.
+// TestTagSyntaxRecordsCallsInExpressions covers the class this check turned up
+// and that is now fixed: in tag syntax a call in a condition, in a <cfreturn>,
+// or chained onto an instantiation was recorded nowhere, while the same code in
+// script syntax was.
 //
-// They are one class: in tag syntax a call in a condition, in a <cfreturn>, or
-// chained onto an instantiation is not recorded, while the same code in script
-// syntax is.
-func TestKnownTagSyntaxGaps(t *testing.T) {
-	for _, src := range []string{
-		`<cfif svc.isValid(x)><cfset y = 1></cfif>`,
-		`<cfif NOT svc.check()>x</cfif>`,
-		`<cfreturn svc.value()>`,
-		`<cfset d = createObject("component","models.Dao").init("ds")>`,
-		`<cfset d = new models.Dao().init("ds")>`,
-	} {
-		t.Run(src, func(t *testing.T) {
-			if got := parserCalls("/t.cfm", []byte(src)); len(got) != 0 {
-				t.Errorf("this gap is closed — record it and delete the case: got %v", got)
+// These began as a known-gaps list that failed when a gap started working. They
+// all started working, so they are regression tests now — which is the whole
+// point of stating a gap as a test rather than a comment.
+func TestTagSyntaxRecordsCallsInExpressions(t *testing.T) {
+	cases := []struct {
+		src  string
+		want []string
+	}{
+		{`<cfif svc.isValid(x)><cfset y = 1></cfif>`, []string{"isvalid"}},
+		{`<cfif NOT svc.check()>x</cfif>`, []string{"check"}},
+		{`<cfif len(trim(u)) GT 0>x</cfif>`, []string{"len", "trim"}},
+		{`<cfif a><cfelseif svc.other()>x</cfif>`, []string{"other"}},
+		{`<cfreturn svc.value()>`, []string{"value"}},
+		{`<cfset d = createObject("component","models.Dao").init("ds")>`, []string{"init"}},
+		{`<cfset d = new models.Dao().init("ds")>`, []string{"init"}},
+
+		// Controls. A condition with no call, an instantiation with no chain,
+		// and a <cfelse> — which the fast skip now admits for <cfelseif>'s sake
+		// — must all stay empty, and an ordinary <cfset> call must stay exactly
+		// one rather than becoming two.
+		{`<cfif a GT b>x</cfif>`, nil},
+		{`<cfset d = new models.Dao()>`, nil},
+		{`<cfset d = createObject("component","models.Dao")>`, nil},
+		{`<cfelse>x`, nil},
+		{`<cfset x = svc.y()>`, []string{"y"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.src, func(t *testing.T) {
+			var got []string
+			for _, call := range parserCalls("/t.cfm", []byte(c.src)) {
+				got = append(got, call.Method)
 			}
 
-			if len(GrammarCalls([]byte(src))) == 0 {
-				t.Errorf("the grammar sees nothing either, so this case proves nothing")
+			sort.Strings(got)
+
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
 			}
 		})
 	}
 
-	// The control: the same shape in script syntax works, which is what makes
-	// the above a gap in the tag parser rather than a decision.
+	// The script control that made these gaps rather than decisions.
 	script := `component { function go() { if (svc.isValid(x)) { y = 1; } } }`
 	if got := parserCalls("/t.cfc", []byte(script)); len(got) != 1 {
 		t.Errorf("script control: got %v, want one call", got)

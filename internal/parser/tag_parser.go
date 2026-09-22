@@ -190,20 +190,23 @@ func (p *tagParser) parse() {
 		// Check for CF tags we care about
 		if idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f' {
 			// Fast skip on the fourth byte: only tags starting cfc/cff/cfl/cfp/cfs/
-			// cfo/cfi/cfr reach the switch below (cfcomponent, cffunction, cfloop,
-			// cfparam/cfproperty, cfset, cfobject, cfinvoke, cfreturn).
+			// cfo/cfi/cfr/cfe reach the switch below (cfcomponent, cffunction,
+			// cfloop, cfparam/cfproperty, cfset, cfobject, cfif/cfinvoke,
+			// cfreturn, cfelseif).
 			//
-			// 'l' is the expensive letter to admit and it is admitted for exactly
-			// one tag: <cfloop index="x"> declares x, so go-to-definition on a loop
-			// index has nowhere to land without it. The cost is that every
-			// <cfloop>, <cflock>, <cflog>, <cflocation> and <cfldap> now pays an
-			// IndexByte for its '>' and a lineAt, and <cfloop> is among the most
-			// common tags in CFML. Measured on the parser benchmarks it is within
-			// noise, because that work is a byte scan over a tag that was going to
-			// be scanned past anyway — but it is the one letter here worth
-			// re-measuring if this loop ever shows up in a profile again.
+			// 'l' and 'e' are the two admitted for a single tag each, and they are
+			// the ones to re-measure if this loop ever shows up in a profile.
+			// <cfloop index="x"> declares x, so go-to-definition on a loop index
+			// has nowhere to land without 'l'; the cost is that every <cflock>,
+			// <cflog>, <cflocation> and <cfldap> now pays an IndexByte for its '>'
+			// and a lineAt, and <cfloop> is among the most common tags in CFML.
+			// 'e' is admitted for <cfelseif>, whose condition holds calls like any
+			// other expression, and charges the same to <cfelse>, <cfexit> and
+			// <cferror>. Both measured within noise on the parser benchmarks,
+			// because that work is a byte scan over a tag that was going to be
+			// scanned past anyway.
 			ch := toLowerByte(p.src[idx+3])
-			if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != '/' {
+			if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != 'e' && ch != '/' {
 				pos = idx + 1
 
 				continue
@@ -282,12 +285,26 @@ func (p *tagParser) parse() {
 					p.parseCFObject(tag, line)
 				}
 			case 'i':
-				if hasCFTagPrefix(tag, "<cfinvoke") {
+				switch {
+				case hasCFTagPrefix(tag, "<cfinvoke"):
 					p.parseCFInvoke(tag, line)
+				case hasCFTagPrefix(tag, "<cfif"):
+					// A condition is an expression, and `<cfif svc.isValid(x)>`
+					// recorded nothing while the same test in script syntax
+					// recorded the call.
+					p.scanExpressionCalls(tagBody(tag), line)
+				}
+			case 'e':
+				// 'e' is admitted for this one tag, the way 'l' is for <cfloop>.
+				// The cost is an IndexByte and a lineAt on every <cfelse>,
+				// <cfexit> and <cferror>; the alternative is that the second
+				// half of every if/else chain in tag syntax has no calls in it.
+				if hasCFTagPrefix(tag, "<cfelseif") {
+					p.scanExpressionCalls(tagBody(tag), line)
 				}
 			case 'r':
 				if hasCFTagPrefix(tag, "<cfreturn") {
-					p.parseCFReturn(tag)
+					p.parseCFReturn(tag, line)
 				}
 			}
 
@@ -707,7 +724,15 @@ func (p *tagParser) parseCFInvoke(tag string, line int) {
 }
 
 // parseCFReturn handles <cfreturn expr /> to infer function return component.
-func (p *tagParser) parseCFReturn(tag string) {
+func (p *tagParser) parseCFReturn(tag string, line int) {
+	inner := tagBody(tag)
+
+	// A returned expression holds calls whether or not this is the return that
+	// sets the component, and whether or not we are inside a function at all —
+	// so the scan happens before every early exit below. `<cfreturn
+	// svc.value()>` used to record nothing.
+	p.scanExpressionCalls(inner, line)
+
 	if p.inFunc == "" || len(p.funcs) == 0 {
 		return
 	}
@@ -716,16 +741,7 @@ func (p *tagParser) parseCFReturn(tag string) {
 	if f.ReturnComponent != "" || f.returnVar != "" {
 		return // already set from an earlier return
 	}
-	// Extract the expression: strip <cfreturn and trailing /> or >
-	inner := tag
-	if i := strings.IndexByte(inner, ' '); i >= 0 {
-		inner = inner[i+1:]
-	}
 
-	inner = strings.TrimSuffix(inner, "/>")
-	inner = strings.TrimSuffix(inner, ">")
-
-	inner = strings.TrimSpace(inner)
 	if inner == "" {
 		return
 	}
@@ -786,6 +802,8 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
 		}
+
+		p.scanChainedInstantiation(comp, rhs, line)
 	case hasPrefixFold(rhs, "createobject("):
 		comp := extractCreateObjectArg(rhs[13:])
 		if comp != "" {
@@ -801,6 +819,8 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				})
 			}
 		}
+
+		p.scanChainedInstantiation(comp, rhs, line)
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
 		if comp != "" {
@@ -1504,20 +1524,156 @@ func (p *tagParser) scanInterpolatedText(text string, offset int) {
 			continue
 		}
 
-		sub := newScriptParser(spanText, p.fileURI,
-			p.lineAt(offset+span.start), p.resolvers)
-		sub.resolverSet = p.resolverSet
-		sub.extractCalls = true
-		sub.parse()
+		p.scanExpressionCalls(spanText, p.lineAt(offset+span.start))
+	}
+}
 
-		for _, c := range sub.calls {
+// scanExpressionCalls records the calls written in one CFML expression.
+//
+// The tag parser matches tags and pulls attributes out with string searches; it
+// has no expression parser and should not grow one. Where a tag *holds* an
+// expression — a <cfif> condition, a <cfreturn>, a #...# span — it hands the
+// text to a scriptParser and keeps the calls, which is the same thing a
+// <cfscript> body already does. One implementation of "what is a call" then
+// serves both syntaxes, and a fix to it reaches tag files for free.
+//
+// Only calls are merged. The refs and vars a sub-parse also produces belong to
+// whatever the tag handler already recorded for them, and taking them here
+// would record each one twice.
+func (p *tagParser) scanExpressionCalls(expr string, line int) {
+	if !p.extractCalls || strings.IndexByte(expr, '(') < 0 {
+		return
+	}
+
+	sub := newScriptParser(expr, p.fileURI, line, p.resolvers)
+	sub.resolverSet = p.resolverSet
+	sub.extractCalls = true
+	sub.parse()
+
+	for _, c := range sub.calls {
+		p.addCall(c)
+	}
+
+	for _, calls := range sub.funcCalls {
+		for _, c := range calls {
 			p.addCall(c)
 		}
+	}
+}
 
-		for _, calls := range sub.funcCalls {
-			for _, c := range calls {
-				p.addCall(c)
+// scanChainedInstantiation records a method called straight off an
+// instantiation: `<cfset d = createObject("component","models.Dao").init("ds")>`
+// and `<cfset d = new models.Dao().init("ds")>`.
+//
+// Both arms above record the component the variable now holds and stop there,
+// so the `.init()` — a real call, and usually the one that matters — was
+// recorded nowhere.
+//
+// It is a string scan rather than a sub-parse because the component is already
+// known here: the only thing left to read is the method names after the
+// instantiation's closing paren. Handing the expression to a scriptParser
+// instead measured +35% on a tag parse with call extraction, since the
+// benchmark fixture — like a lot of real CFML — builds one of these per
+// function.
+func (p *tagParser) scanChainedInstantiation(comp, rhs string, line int) {
+	if !p.extractCalls || !strings.Contains(rhs, ").") {
+		return
+	}
+
+	rest := afterBalancedParens(rhs)
+
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	var hops []string
+
+	for strings.HasPrefix(rest, ".") {
+		name, open := cutIdent(rest[1:])
+		if name == "" || !strings.HasPrefix(open, "(") {
+			return
+		}
+
+		// Component stays the instantiated one and the methods before this hop
+		// accumulate in Chain, which is how the script parser records the same
+		// shape: resolution walks each hop's return type forward rather than
+		// testing every method against the base component. Without it a
+		// `.init().reset()` would claim reset exists on the component, which is
+		// true only when init returns `this`.
+		var chain []string
+		if len(hops) > 0 {
+			chain = make([]string, len(hops))
+			copy(chain, hops)
+		}
+
+		p.addCall(CallSite{
+			FuncName:  name,
+			Component: comp,
+			Chain:     chain,
+			Resolved:  comp != "",
+			Line:      uint32(line),
+			Caller:    caller,
+		})
+
+		hops = append(hops, name)
+		rest = afterBalancedParens(open)
+	}
+}
+
+// afterBalancedParens returns what follows the first balanced (...) group in s,
+// or "" if there is none. Parens inside a quoted string do not count —
+// `createObject("component", "a(b)")` closes where the quotes say it does.
+func afterBalancedParens(s string) string {
+	depth, quote := 0, byte(0)
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+
+			if depth == 0 {
+				return s[i+1:]
 			}
 		}
 	}
+
+	return ""
+}
+
+// cutIdent splits a leading identifier off s, returning it and the remainder.
+func cutIdent(s string) (string, string) {
+	i := 0
+	for i < len(s) && isIdentPart(s[i]) {
+		i++
+	}
+
+	return s[:i], s[i:]
+}
+
+// tagBody returns what a tag holds between its name and its closing '>': the
+// condition of a <cfif>, the expression of a <cfreturn>.
+func tagBody(tag string) string {
+	inner := tag
+
+	if i := strings.IndexByte(inner, ' '); i >= 0 {
+		inner = inner[i+1:]
+	} else {
+		return ""
+	}
+
+	inner = strings.TrimSuffix(inner, ">")
+	inner = strings.TrimSuffix(inner, "/")
+
+	return strings.TrimSpace(inner)
 }

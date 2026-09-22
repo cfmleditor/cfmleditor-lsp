@@ -1212,6 +1212,27 @@ passes whatever the code does. And a window test needs both documents to present
 a **full** window, or it compares a five-line window against a fifty-line one and
 fails for that instead.
 
+**Where a tag holds an expression, hand it to the script parser.** The tag
+parser matches tags and pulls attributes out with string searches; it has no
+expression parser and should not grow one. `<cfif svc.isValid(x)>`,
+`<cfelseif …>` and `<cfreturn svc.value()>` recorded no calls at all, while the
+same test in script syntax recorded them — so `scanExpressionCalls` hands the
+text to a `scriptParser` and keeps only the calls, which is what a `<cfscript>`
+body and a `#...#` span already do. One implementation of "what is a call" then
+serves both syntaxes.
+
+The exception is a method chained straight off an instantiation
+(`<cfset d = createObject("component","x").init("ds")>`), and it is an exception
+on measurement rather than taste: the component is *already known* at that
+point, so the only thing left to read is the method names after the closing
+paren. A sub-parse there cost **+35%** on a tag parse with call extraction,
+because the benchmark fixture — like a lot of real CFML — builds one per
+function; the string scan costs +13%, which is the 20 previously-invisible calls
+being recorded rather than overhead. `afterBalancedParens` skips quoted spans, so
+`createObject("component", "a(b)")` closes where the quotes say it does, and
+later hops carry `Chain` so resolution walks each return type forward instead of
+claiming every method exists on the base component.
+
 **The grammar is a second opinion on the parser, and `make gapcheck` asks it.**
 `internal/parser` and the tree-sitter grammar are independent implementations of
 "what is a call", so where they disagree one of them is wrong. Every call-losing
