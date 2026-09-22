@@ -61,4 +61,14 @@ component {
         var name = createObject("component", "models.Widget").getName();
     }
 
+    // The ORM entity factories resolve the way createObject does, and are here
+    // so internal/tsoracle can record them as deliberate differences rather
+    // than as gaps — the grammar reads them as calls. They sit at the end of
+    // the file because definition_testdata_test.go addresses this fixture by
+    // line number, so anything inserted above moves every one of its cases.
+    function testEntityFactories() {
+        var made = entityNew("models.User");
+        var found = entityLoad("models.User");
+    }
+
 }
