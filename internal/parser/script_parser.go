@@ -320,6 +320,30 @@ func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line in
 	}
 }
 
+// recordChainFromScope records `scope.name.method(...)` and then any further
+// hops chained onto it.
+//
+// Both scoped-var handlers recorded the first call and then merely skipped its
+// argument list, so the `.c()` in `variables.a.b().c()` was left for the outer
+// loop to rediscover as an orphaned *bare* call. That is a wrong answer rather
+// than a missing one: in a component that declares a `c`, it is an edge the
+// call never takes. `continueChainCalls` exists to stop exactly this on the
+// unscoped path; this routes the scoped path through the same helper.
+func (p *scriptParser) recordChainFromScope(fullChain string, line int) {
+	p.recordCallFromChain(fullChain, line)
+
+	if !p.skipParens() {
+		return
+	}
+
+	base, name := "", fullChain
+	if dot := strings.LastIndexByte(fullChain, '.'); dot >= 0 {
+		base, name = fullChain[:dot], fullChain[dot+1:]
+	}
+
+	p.recordChainContinuation(base, name, line)
+}
+
 func (p *scriptParser) isVarDeclaredLocal(name string) bool {
 	if p.localVarSet == nil {
 		return false
@@ -570,7 +594,57 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	}
 
 	p.addCall(call)
-	p.skipParens()
+
+	if !p.skipParens() {
+		return
+	}
+
+	// A hop chained onto it is a call on what the first one returned, and
+	// leaving it to the outer loop makes it an orphaned bare call — the same
+	// wrong answer recordChainFromScope exists to stop. A member of this
+	// component walks the chain through its declared return type; a dynamic
+	// receiver stays dynamic all the way down, as a literal receiver's chain
+	// already does.
+	if call.Component == "" {
+		p.recordChainContinuation("", nameTok.Value, scopeTok.Line)
+
+		return
+	}
+
+	p.recordDynamicChain(call.Variable, scopeTok.Line, caller)
+}
+
+// recordDynamicChain records the hops chained onto a call whose receiver is
+// dynamic, keeping every one of them dynamic. The scanner must sit just past
+// the first call's ')'.
+func (p *scriptParser) recordDynamicChain(recv string, line int, caller string) {
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			return
+		}
+
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			return
+		}
+
+		p.addCall(CallSite{
+			FuncName:  methTok.Value,
+			Variable:  recv,
+			Component: "$any",
+			Line:      uint32(p.baseLine + line),
+			Caller:    caller,
+			Resolved:  true,
+		})
+
+		if !p.skipParens() {
+			return
+		}
+	}
 }
 
 func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
@@ -621,8 +695,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), tok.Line)
-				p.skipParens()
+				p.recordChainFromScope(fullChain.String(), tok.Line)
 			}
 		}
 
@@ -2279,8 +2352,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), scopeTok.Line)
-				p.skipParens()
+				p.recordChainFromScope(fullChain.String(), scopeTok.Line)
 			}
 		}
 
@@ -3633,6 +3705,20 @@ func (p *scriptParser) skipHashExpr() bool {
 	}
 }
 
+// skipBracketIndex consumes a balanced [...] group, recording any calls written
+// inside it.
+//
+// It mirrored skipParens — the *old* skipParens, which discarded its group a
+// token at a time. An index is an expression like any other, so
+// `sorted[ sorted.len() ]`, `arr[ f() ]` and `a.b[ f() ]` recorded nothing at
+// all, and `g( arr[ f() ] )` recorded only `g`. That is the same defect
+// skipParenBody exists to have fixed, left in the one group the consolidation
+// did not reach.
+//
+// The chain text the callers build is unaffected: a bracket still poisons it
+// with the literal "[]" marker, so `REQUEST[key].method()` still falls through
+// to an honest "no component ref" rather than resolving as `REQUEST.method()`.
+// What changes is only that the key expression is read rather than thrown away.
 func (p *scriptParser) skipBracketIndex() bool {
 	if p.sc.PeekSkipComments().Kind != TokLBracket {
 		return false
@@ -3653,6 +3739,10 @@ func (p *scriptParser) skipBracketIndex() bool {
 			depth++
 		case TokRBracket:
 			depth--
+		case TokIdent:
+			p.scanNestedCall(tok)
+		case TokString:
+			p.handleLiteralToken(tok)
 		}
 	}
 
