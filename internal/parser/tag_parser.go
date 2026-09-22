@@ -110,21 +110,30 @@ func looksLikeCallSpan(body string) bool {
 // cannot swallow the rest of the file — the tag is read exactly as it was
 // before, which is the behaviour this replaces.
 func tagEndIndex(s string) int {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '>':
-			return i
-		case '"', '\'':
-			j := skipQuotedIn(s, i)
-			if j < 0 {
-				return strings.IndexByte(s, '>')
-			}
-
-			i = j
+	// The bulk of the scan stays an IndexByte: a quote before the next '>' is
+	// what makes a false end possible, and only then is there anything to skip.
+	// A byte-at-a-time version of this cost 9% of a tag parse — it ran over
+	// every tag in the file, most of which hold no quote at all.
+	for pos := 0; ; {
+		gt := strings.IndexByte(s[pos:], '>')
+		if gt < 0 {
+			return -1
 		}
-	}
 
-	return -1
+		end := pos + gt
+
+		q := indexQuote(s[pos:end])
+		if q < 0 {
+			return end
+		}
+
+		j := skipQuotedIn(s, pos+q)
+		if j < 0 {
+			return strings.IndexByte(s, '>')
+		}
+
+		pos = j + 1
+	}
 }
 
 // nextTagStart finds the next '<' that could open a tag, stepping over a
