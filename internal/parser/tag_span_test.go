@@ -2,6 +2,7 @@ package parser
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -172,5 +173,68 @@ func TestAnInterpolatedSpanMayHoldAStringHoldingASpan(t *testing.T) {
 				t.Errorf("got %v want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// A CF tag holds an expression, and an expression holds strings — so the `>`
+// that closes the tag is not always the first one. `<cfset>` ended at the first
+// `>` anywhere, so everything after it was in no tag and in no text the walk
+// scans, and was recorded nowhere. Lucee's cache-driver components and its
+// `<P>`-asserting tests are both written this way.
+func TestATagEndsAtAQuoteAwareAngleBracket(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{"markup in a cfset's string", `<cfset x = array( f( "a<br>b" ), g( "c" ) )>`,
+			[]string{"array", "f", "g"}},
+		{"an entity then a bracket", `<cfset x = array( f( "p&lt;new line>" ), g( "c" ) )>`,
+			[]string{"array", "f", "g"}},
+		{"spanning lines", "<cfset x = array(\n f( \"a<br>b\" )\n ,g( \"c\" )\n)>",
+			[]string{"array", "f", "g"}},
+		{"single quotes", `<cfset x = array( f( 'a<br>b' ), g( 'c' ) )>`,
+			[]string{"array", "f", "g"}},
+
+		// A doubled quote is CFML's escape, so it does not close the string and
+		// the `>` after it is still inside one.
+		{"a doubled quote inside the string", `<cfset x = array( f( "a""b<br>c" ), g( "d" ) )>`,
+			[]string{"array", "f", "g"}},
+
+		// A quote that never closes falls back to the plain scan, so a
+		// malformed tag cannot swallow the rest of the file.
+		{"an unterminated quote does not run away", "<cfset x = f( \"a )>\n<cfset y = g()>",
+			[]string{"f", "g"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tagFileCalls(t, c.src); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A bare CR ends a line too. Five of the 5,629 corpus files use CR-only
+// endings, and in one the first `//` swallowed everything after it — the whole
+// of ColdBox's EventHandler.cfc, 2.5KB on what the scanner read as one line.
+//
+// Only the comment's end moves: line numbers still count `\n` alone, which is
+// what tree-sitter does, so the two keep agreeing about where a call is.
+func TestALineCommentEndsAtACarriageReturn(t *testing.T) {
+	src := "component {\r" +
+		"\t// Register the controller\r" +
+		"\tfunction init() {\r" +
+		"\t\tvariables.log = svc.getLogger();\r" +
+		"\t}\r" +
+		"}\r"
+
+	if got := tagFileCalls(t, src); !slices.Equal(got, []string{"getLogger"}) {
+		t.Errorf("got %v want [getLogger]", got)
+	}
+
+	// CRLF was never affected and must stay that way.
+	crlf := strings.ReplaceAll(src, "\r", "\r\n")
+	if got := tagFileCalls(t, crlf); !slices.Equal(got, []string{"getLogger"}) {
+		t.Errorf("CRLF: got %v want [getLogger]", got)
 	}
 }

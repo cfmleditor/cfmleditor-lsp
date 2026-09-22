@@ -75,33 +75,6 @@ func (p *tagParser) lineAt(offset int) int {
 	return lo - 1
 }
 
-// parse scans through tag-based CFML extracting definitions.
-// nextTagStart finds the next '<' that could open a tag, stepping over a
-// `#...#` span rather than through it.
-//
-// Markup written inside a span is an argument, not a tag:
-//
-//	#ETH.author( content = "<strong>@name@</strong>" )#
-//
-// Splitting there hands scanInterpolatedText a chunk with an unterminated `#`,
-// so the call is lost — and the hashes left over mis-pair with the next span,
-// so the call after it is lost too.
-//
-// Two rules, and getting either wrong loses tags rather than finding calls:
-//
-//   - **A span's hashes pair whether or not its contents are stepped over.** A
-//     first version advanced only past the *opening* hash of a span it declined,
-//     so the closing hash became the next opening one and everything after was
-//     inverted: `#local.iconType#` left its second hash to pair with the `#`
-//     three lines later, and the `</i><cfif isSimpleValue( … )>` between them
-//     was swallowed. That alone was 173 files.
-//   - **A span holding no `(` does not hide a tag.** Hashes interpolate inside
-//     <cfoutput> and in a tag's attributes and this walk tracks neither, so in
-//     prose a `#` is just a character and `item #1 <b>x</b> #2` must keep its
-//     markup. A call is the only thing a span contributes here —
-//     scanInterpolatedText rejects the rest on the same byte scan — so a span
-//     with no `(` still pairs, but a `<` inside it is returned as a tag.
-//
 // looksLikeCallSpan reports whether the text between two hashes is worth
 // treating as opaque: a CFML expression holding a call, rather than two
 // unrelated hashes that happened to pair.
@@ -123,6 +96,62 @@ func looksLikeCallSpan(body string) bool {
 	return strings.Count(body, `"`)%2 == 0 && strings.Count(body, "'")%2 == 0
 }
 
+// tagEndIndex finds the '>' that closes a tag, skipping over quoted strings.
+//
+// A bare IndexByte stops at the first '>' anywhere, and a CF tag holds an
+// expression that may contain one:
+//
+//	<cfset fields = array( field( "Host:Port&lt;new line><br>" ), field( "b" ) )>
+//
+// cut there, the second `field` is in no tag and in no text the walk scans, so
+// it is recorded nowhere. Lucee's cache-driver components are written this way.
+//
+// It falls back to the plain scan when a quote never closes, so a malformed tag
+// cannot swallow the rest of the file — the tag is read exactly as it was
+// before, which is the behaviour this replaces.
+func tagEndIndex(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '>':
+			return i
+		case '"', '\'':
+			j := skipQuotedIn(s, i)
+			if j < 0 {
+				return strings.IndexByte(s, '>')
+			}
+
+			i = j
+		}
+	}
+
+	return -1
+}
+
+// nextTagStart finds the next '<' that could open a tag, stepping over a
+// `#...#` span rather than through it.
+//
+// Markup written inside a span is an argument, not a tag:
+//
+//	#ETH.author( content = "<strong>@name@</strong>" )#
+//
+// Splitting there hands scanInterpolatedText a chunk with an unterminated `#`,
+// so the call is lost — and the hashes left over mis-pair with the next span,
+// so the call after it is lost too.
+//
+// Two rules, and getting either wrong loses tags rather than finding calls:
+//
+//   - **A span's hashes pair whether or not its contents are stepped over.** A
+//     first version advanced only past the *opening* hash of a span it declined,
+//     so the closing hash became the next opening one and everything after was
+//     inverted: `#local.iconType#` left its second hash to pair with the `#`
+//     three lines later, and the `</i><cfif isSimpleValue( … )>` between them
+//     was swallowed. That alone was 141 files.
+//   - **A span holding no `(` does not hide a tag.** Hashes interpolate inside
+//     <cfoutput> and in a tag's attributes and this walk tracks neither, so in
+//     prose a `#` is just a character and `item #1 <b>x</b> #2` must keep its
+//     markup. A call is the only thing a span contributes here —
+//     scanInterpolatedText rejects the rest on the same byte scan — so a span
+//     with no `(` still pairs, but a `<` inside it is returned as a tag.
 func nextTagStart(s string) int {
 	// The bulk of the scan stays an IndexByte. A '#' before the next '<' is
 	// what makes a span possible, and only then is there anything to resolve —
@@ -184,6 +213,7 @@ func nextTagStart(s string) int {
 	}
 }
 
+// parse scans through tag-based CFML extracting definitions.
 func (p *tagParser) parse() {
 	pos := 0
 
@@ -320,7 +350,7 @@ func (p *tagParser) parse() {
 				continue
 			}
 
-			tagEnd := strings.IndexByte(p.src[idx:], '>')
+			tagEnd := tagEndIndex(p.src[idx:])
 			if tagEnd < 0 {
 				pos = idx + 1
 
