@@ -324,6 +324,24 @@ the *formatter*, not the parser.
   `session` and `application` are all dispatched as `ScopeVariables` so an
   assignment through one keeps its right-hand side's component, and testing the
   enum put every one of them in the first group.
+- **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
+  `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
+  and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the
+  defect `skipParenBody` exists to have fixed, left in the one group the
+  consolidation did not reach. The `[]` poison marker is unaffected — a dynamic
+  key still falls through to an honest "no component ref"; only the key
+  expression is read rather than thrown away.
+- **A hop chained onto a scoped call needs its receiver carried.** Both
+  scoped-var handlers recorded the first call and skipped its argument list, so
+  the `.c()` in `variables.a.b().c()` was rediscovered by the outer loop as an
+  orphaned *bare* call — in a component declaring a `c`, an edge the call never
+  takes. `continueChainCalls` exists to stop that on the unscoped path, so the
+  scoped path goes through the same helper rather than growing a second one; a
+  call made directly on a scope carries the receiver its first call earns
+  (`variables.helper().c()` walks the declared return type, `request.get().c()`
+  stays `$any`). **`make gapcheck` cannot see this**: it compares line and method
+  name and deliberately not the receiver, so a call against the wrong receiver
+  still counts as found.
 - **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
   `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
   the case in all of them. Three of the five were still reporting a bare `bar` when the first
@@ -1332,18 +1350,27 @@ It cannot check resolution at all — the grammar has no idea what a dot-path
 points at — and it is only as good as the corpus: the repo's fixtures contain
 zero interpolated calls, which is why the size of that gap is still unmeasured.
 
-**An obviously-right fix to the tag walk is the one to measure hardest.**
-Markup inside a `#...#` span splits the span, so
-`#ETH.author( content = "<strong>x</strong>" )#` loses its call *and* mis-pairs
-its leftover hashes with the next span, losing that one too. Making the walk
-step over a span — guarded on the span holding a `(`, since a call is the only
-thing it contributes there — fixed every file it was written for and took missed
-sites from 1,798 to **3,025**, newly breaking 113 others. Hashes interpolate
-inside `<cfoutput>` and in a tag's attributes and the walk tracks neither, so the
-pairing runs through real tags: `value="#thisSite[ 'siteID' ]#"` before a
-`<cfif>` whose condition ends in `getsiteID()` is enough. It is reverted and
-recorded in PARSER-GAPS.md §4.2 with the numbers, because the next person to
-look at those email templates will reach for the same fix.
+**A `#...#` span is not a tag boundary, and the two scans that say where one
+ends are deliberately different.** Markup inside a span is an argument:
+`#ETH.author( content = "<strong>x</strong>" )#` was split at the `<`, losing
+that call and — through the hashes left over — the call after it. The walk steps
+over a span now, under three rules each measured by removing it: a span's hashes
+**pair** whether or not its contents are stepped over (removing this costs 141
+files, and it is the one-line mistake that made an earlier attempt take missed
+sites from 1,798 to 3,025); a span with **no `(`** does not hide a tag, so a
+stylesheet's `#sidebar ul {` stays markup; and a span with **unbalanced quotes**
+does not either, so `$( '#search' ).typeahead(` stays a jQuery selector. Hashes
+interpolate only inside `<cfoutput>` and in a tag's attributes and the walk
+tracks neither, so these are heuristics — chosen so that being wrong costs a
+call rather than a tag.
+
+`interpolatedSpans` follows CFML's *nesting* instead — a string inside a span may
+hold a span (`#html.elixirPath( root='#cb.themeRoot()#/inc' )#`), which is what
+`Scanner.scanHashExpr` already does for CFScript. **Do not make the tag walk
+share that rule**: it fixed one corpus site and broke thirty-six, because
+skipping quoted strings runs a span much further in markup. A wrong span costs
+the walk a tag and costs `interpolatedSpans` a call, and they are tuned for their
+own error.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in

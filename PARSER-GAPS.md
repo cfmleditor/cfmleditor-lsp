@@ -41,16 +41,16 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.3 | After §3.7 |
-|---|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | **693 (12.3%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | **1,798** |
-| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 |
+| | Before | After §3.3 | After §3.7 | After §3.11 |
+|---|---:|---:|---:|---:|
+| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **556 (9.9%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **1,144** |
+| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 652 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before, 4,602 after §3.3 and **1,188** after §3.7, and the
-parser-only figure falls from 343 to 293. Of the 1,188 that remain, **545 are
-the deliberate differences in §4.1**, so about 640 are real.
+figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **787** after
+§3.11, and the parser-only figure falls from 343 to 295. Of the 787 that remain,
+**545 are the deliberate differences in §4.1**, so about 240 are real.
 
 The per-step figures are:
 
@@ -63,11 +63,22 @@ The per-step figures are:
 | §3.5 a leading BOM | 780 | 2,254 | 1,641 | 905 |
 | §3.6 constructor arguments | 746 | 2,102 | 1,489 | 906 |
 | §3.7 a call on a scope | 693 | 1,798 | 1,188 | 903 |
+| §3.8 a bracket index | 666 | 1,661 | 1,051 | 903 |
+| §3.9 a scoped chain's receiver | 639 | 1,408 | 1,051 | 650 |
+| §3.10 a span is not a tag boundary | 599 | 1,267 | 910 | 650 |
+| §3.11 a span may hold a nested span | 556 | 1,144 | 787 | 652 |
 
 The difference between the two keyings is **line skew**: a multi-line `<cfset>`
 or `<cfif>` records its calls at the tag's starting line while the grammar puts
 each on its own. Cosmetic, but it is why a report of this keyed on lines cannot
 be diffed cleanly against another.
+
+**Note what §3.9 does and does not move.** Its name-keyed figure is unchanged,
+because the oracle compares line and method name and deliberately *not* the
+receiver — a call recorded against the wrong receiver still counts as found.
+What it fixed was a wrong answer, and the only trace of that in the tally is the
+line: 251 sites where a rediscovered bare call landed somewhere the grammar did
+not put it.
 
 ## 3. Fixed
 
@@ -323,21 +334,44 @@ first group.
 
 **301 name-keyed sites**, 109 of them under `getRemoteClients` alone.
 
-## 4. Known and not fixed
+### 3.8 A call inside a bracket index
 
-### 4.1 `createObject`, `entityNew`, `entityLoad` — 545 sites, deliberate
+```cfml
+max : sorted[ sorted.len() ],
+avg : round( total / times.len() )
+```
 
-The parser records a `ComponentRef`, not a `CallSite`. These are the three
-entries in `expectedDifferences` that are design differences rather than gaps,
-and they are **46% of what is left**.
+`skipBracketIndex` mirrored the *old* `skipParens`: it discarded its group a
+token at a time. An index is an expression like any other, so
+`sorted[ sorted.len() ]`, `arr[ f() ]` and `a.b[ f() ]` recorded nothing at all,
+and `g( arr[ f() ] )` recorded only `g` — the same defect `skipParenBody` exists
+to have fixed, left in the one group the consolidation did not reach.
 
-`entityNew` and `entityLoad` were recorded only after a second corpus run
-re-investigated them from scratch, which is the cost of a deliberate difference
-nobody writes down. Their fixture lines sit at the end of
-`testdata/DefinitionTest.cfc` because `definition_testdata_test.go` addresses
-that file by line number.
+The chain text callers build is unchanged: a bracket still poisons it with the
+literal `[]` marker, so `REQUEST[key].method()` still falls through to an honest
+"no component ref" rather than resolving as `REQUEST.method()`. Only the key
+expression is read rather than thrown away. **137 name-keyed sites.**
 
-### 4.2 Markup inside a `#...#` span in tag text
+### 3.9 The receiver of a hop chained onto a scoped call
+
+```cfml
+variables.a.b().c();
+variables.helper().c();
+request.get().c();
+```
+
+Both scoped-var handlers recorded the first call and then merely skipped its
+argument list, so the `.c()` was left for the outer loop to rediscover as an
+orphaned *bare* call — in a component that declares a `c`, an edge the call never
+takes. `continueChainCalls` exists to stop exactly this on the unscoped path, so
+the scoped path goes through the same helper rather than growing a second one.
+A call made directly on a scope needed the same, with the receiver its first call
+already earns: `variables.helper().c()` walks the chain through the member's
+declared return type, `request.get().c()` stays dynamic all the way down.
+
+**This is the fix `make gapcheck` can least see** — see the note under §2.
+
+### 3.10 A `#...#` span is not a tag boundary
 
 ```cfml
 #ETH.author( content = "<strong>@name@</strong>" )#
@@ -345,25 +379,72 @@ that file by line number.
 #ETH.divider()#
 ```
 
-The tag walk finds the next `<` and treats what precedes it as text, so a span
-holding markup is split: `scanInterpolatedText` gets a chunk with an
-unterminated `#` and the call is lost, and the leftover hashes mis-pair with the
-next span so the call after it is lost too. That is most of what remains of
-ContentBox's email templates.
+Markup written inside a span is an argument, not a tag. The walk found the next
+`<` without regard for the span, so `scanInterpolatedText` got a chunk with an
+unterminated `#` — losing that call — and the hashes left over mis-paired with
+the next span, losing the call after it too.
 
-**The obvious fix is wrong, and the corpus is what says so.** Making the walk
-step over a `#...#` span — even guarded on the span containing a `(`, since a
-call is the only thing a span contributes here — took missed sites from 1,798
-to **3,025** and newly broke 113 files. Hashes interpolate inside `<cfoutput>`
-and in a tag's attributes, and this walk tracks neither, so an unbounded pairing
-swallows real tags: `value="#thisSite[ 'siteID' ]#"` followed by a `<cfif` whose
-condition ends in `getsiteID()` is enough.
+This is the §4.2 entry a previous round recorded as known-and-not-fixed after an
+attempt took missed sites from 1,798 to 3,025. **That attempt was wrong in one
+line**: it advanced only past the *opening* hash of a span it declined, so the
+closing hash became the next opening one and every pairing after it was
+inverted. Two plain interpolations on one line start the cascade —
+`<li><b>#myKey#</b>: #prc.info[ k ]#</li>` swallowed the `<cfif>` below it, which
+is 141 files and 773 sites on its own.
 
-Fixing it properly means the walk knowing where interpolation is live, which is
-`<cfoutput>` nesting plus attribute context — a real change to the riskiest code
-in the parser. Worth doing with the corpus in hand, not before.
+Three rules, each measured by removing it and re-running the corpus:
 
-### 4.3 The parser records 903 sites the grammar does not
+| Rule | cost of removing it |
+|---|---|
+| A span's hashes pair whether or not its contents are stepped over | 141 files, 773 sites |
+| A span with no `(` does not hide a tag (a stylesheet rule holds none) | 5 files |
+| A span with unbalanced quotes does not either (`$( '#search' )`) | 7 files |
+
+Hashes interpolate inside `<cfoutput>` and in a tag's attributes and this walk
+tracks neither, so these are heuristics rather than a parse. They are chosen so
+that being wrong costs a call rather than a tag, and the corpus says they are
+right everywhere in 5,629 files. **141 name-keyed sites**, and the bulk of the
+scan stays an `IndexByte`: a byte-at-a-time version cost +6.9% on
+`Parse_TagCFC_ExtractCalls`, this one is flat.
+
+### 3.11 A span may hold a string that holds a span
+
+```cfml
+<link href="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#">
+```
+
+`interpolatedSpans` took the first `#` it met as the close, so the *inner*
+opening hash terminated the outer span and every pairing after it on the line
+was inverted. `Scanner.scanHashExpr` already reads CFScript this way;
+`matchingHash` is the same rule for the text a tag parser hands over, and the two
+were parallel implementations of it.
+
+**`nextTagStart` deliberately does not share that rule.** The two scans optimise
+different errors: a wrong span in the tag walk costs a *tag*, so it stays
+conservative and pairs hashes as they come; a wrong span here costs at most a
+call. Making the walk share `matchingHash` fixed one corpus site and broke
+thirty-six, because skipping quoted strings runs a span much further in markup.
+
+**123 name-keyed sites**, against one lost in `services.updateold.cfm` where the
+walk's conservative pairing splits a span this scan would read whole.
+`Parse_TagCFC` +1.4% on the minimum of 25 interleaved samples, which is the one
+cost in this round that lands on the editor's keystroke path.
+
+## 4. Known and not fixed
+
+### 4.1 `createObject`, `entityNew`, `entityLoad` — 545 sites, deliberate
+
+The parser records a `ComponentRef`, not a `CallSite`. These are the three
+entries in `expectedDifferences` that are design differences rather than gaps,
+and they are now **69% of what is left**.
+
+`entityNew` and `entityLoad` were recorded only after a second corpus run
+re-investigated them from scratch, which is the cost of a deliberate difference
+nobody writes down. Their fixture lines sit at the end of
+`testdata/DefinitionTest.cfc` because `definition_testdata_test.go` addresses
+that file by line number.
+
+### 4.2 The parser records 652 sites the grammar does not
 
 Three causes, none of them a wrong answer about code that runs:
 
@@ -377,10 +458,10 @@ Three causes, none of them a wrong answer about code that runs:
 
 ## 5. What would change these decisions
 
-- **§4.2** — the walk would have to track where interpolation is live. The
-  measurement above is the starting point: any attempt must be diffed per file
-  in both directions, because the naive version *looks* right on the email
-  templates it was written for.
+- **§3.10 and §3.11's heuristics** — the honest fix is the tag walk knowing where
+  interpolation is *live*, which is `<cfoutput>` nesting plus attribute context.
+  Until then the two scans stay deliberately different, and the table in §3.10 is
+  what any replacement has to beat.
 - **§3.1's cost** — if `unresolved` or the code map ever shows the sub-parse in a
   profile, the answer is to reuse one `scriptParser` per file rather than
   building one per `<cfset>`.
