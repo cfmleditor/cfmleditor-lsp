@@ -324,6 +324,24 @@ the *formatter*, not the parser.
   `session` and `application` are all dispatched as `ScopeVariables` so an
   assignment through one keeps its right-hand side's component, and testing the
   enum put every one of them in the first group.
+- **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
+  `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
+  and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the
+  defect `skipParenBody` exists to have fixed, left in the one group the
+  consolidation did not reach. The `[]` poison marker is unaffected — a dynamic
+  key still falls through to an honest "no component ref"; only the key
+  expression is read rather than thrown away.
+- **A hop chained onto a scoped call needs its receiver carried.** Both
+  scoped-var handlers recorded the first call and skipped its argument list, so
+  the `.c()` in `variables.a.b().c()` was rediscovered by the outer loop as an
+  orphaned *bare* call — in a component declaring a `c`, an edge the call never
+  takes. `continueChainCalls` exists to stop that on the unscoped path, so the
+  scoped path goes through the same helper rather than growing a second one; a
+  call made directly on a scope carries the receiver its first call earns
+  (`variables.helper().c()` walks the declared return type, `request.get().c()`
+  stays `$any`). **`make gapcheck` cannot see this**: it compares line and method
+  name and deliberately not the receiver, so a call against the wrong receiver
+  still counts as found.
 - **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
   `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
   the case in all of them. Three of the five were still reporting a bare `bar` when the first
@@ -370,6 +388,23 @@ the *formatter*, not the parser.
   function lost everything it called while the same closure passed as an
   argument kept it, because that path counts parentheses instead. The calls are
   attributed to the enclosing function, which is where the closure runs from.
+- **A *named* nested function is a declaration; an anonymous one is a value.**
+  CFML hoists `function setup(){…}` written inside another function into the
+  component's variables scope, which is what lets the enclosing function call it
+  above the line it is written on. The script parser recorded nothing — no index
+  entry, no completion, no go-to-definition — while the tag parser had always
+  recorded it, so the same code meant different things in the two syntaxes.
+  `skipNestedFunction` files a `FunctionDef` and a `FuncScope` for the named
+  case, and `scanNestedCall` dispatches `function` *before* the `isKeyword`
+  guard so the rule holds in every one of the six token loops — a helper
+  declared inside a TestBox `describe(…, function(){ … })` is the common shape.
+  The calls such a function makes stay attributed to the enclosing function, per
+  the bullet above; only the declaration is new. A method of an inline
+  `new component { … }` becomes a method of the enclosing component, which
+  over-declares by one name and matches both the grammar and the tag parser.
+  **The call axis could not see this**: the calls were already recorded at the
+  right lines under the wrong function, so `make gapcheck` agreed. Asking the
+  grammar which *names* it declares found it in one run.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -1073,6 +1108,21 @@ is treated as ended and the rest of the comment is scanned as live tags — repo
 as an unresolved call. Quoted attribute values *are* handled (`<cfset s = "a > b">`,
 `hint="returns a > b"` and `<a title="x > y">` all parse correctly); only comments are missed.
 
+**The `>`-in-a-string half of this is fixed.** `tagEndIndex` is the shared
+quote-skipping scan that note asked for, and the walk's one tag-end site goes
+through it: `<cfset x = array( f( "a<br>b" ), g( "c" ) )>` no longer ends at the
+`<br>`. Comments between attributes are still missed, and the other sites that
+locate a `>` by hand still do.
+
+It answers on a **two-count fast path**, because it runs over every tag in the
+file: a `>` with an even number of each quote before it has every string closed,
+so it is the tag's end. That is exact rather than a heuristic — CFML escapes a
+quote by doubling it, which adds two — and it must count *both* kinds, or
+`<cfset x = "a" & 'b>c'>` ends inside the single-quoted string. The
+quote-by-quote walk it falls back to is `tagEndWalk`, a function of its own so
+`TestTheTagEndFastPathAgreesWithTheWalk` can compare the two rather than restate
+either's answer. Walking every tag quote by quote was 5% of a plain tag parse.
+
 **It is close to unreachable.** One file in the 5,624-file corpus contains the shape —
 `Lucee/test/jira/Jira3190/index.cfm`, a regression test whose comment holds no code — so the
 corpus produces zero false positives from it. Fixing it means one shared `tagEndIndex` helper
@@ -1249,6 +1299,31 @@ whatever heap the benchmarks before them left live, and `benchLoadedServer`
 leaves a 5,000-file index. Re-run the single benchmark on its own, both sides,
 before acting on any of it. The same caution applies to wins.
 
+**Compare against the branch point, not against your last build, and run the two
+binaries alternately.** Five parser fixes in one round were each reported at
+around +1% on the tag benchmarks, because each was measured against whatever
+binary was left in the scratch directory rather than against `origin/main`.
+Re-measured from a clean main baseline the round was **+9.4%** on the plain tag
+parse — the editor's keystroke path — and the cause was a byte-at-a-time
+`tagEndIndex` running over every tag in the file. No single reading had shown it.
+
+**Then the corrected figure was wrong the other way.** The fix for that was
+recorded as -0.7%, measured by running all of one binary's samples and then all
+of the other's. Interleaved — one sample of each, alternately, twenty-five times
+— the same pair reads **+10%**, because the machine drifts between the two runs
+by more than the effect. A sequential A-then-B comparison is not a measurement,
+however many samples each half has. Interleaving also settles the contamination
+warning below: a `git worktree` of `origin/main` built into the scratch
+directory gives a second `.test` binary to alternate with.
+
+So: **keep a `main` build in the scratch directory, re-measure the whole branch
+against it, and alternate**; treat min, p10 and median disagreeing as "not yet
+measured" rather than as a result. A per-commit bisect then splits a cumulative
+cost honestly — which is how the tag walk's +10% came apart into +3.2% for
+bracket indexes, +5.1% for stepping over spans and +5% for the quote-aware tag
+end, none of them a regression on its own, and how `tagEndIndex`'s two-count
+fast path was shown to take the whole thing back to about +4%.
+
 **A cost that scales with the document wants a scaling test, not a timing one.**
 Every defect behind the three-second go-to-definition was invisible to the tests
 that existed, because all of them returned the right answer. `routepkg.Scan`
@@ -1332,18 +1407,51 @@ It cannot check resolution at all — the grammar has no idea what a dot-path
 points at — and it is only as good as the corpus: the repo's fixtures contain
 zero interpolated calls, which is why the size of that gap is still unmeasured.
 
-**An obviously-right fix to the tag walk is the one to measure hardest.**
-Markup inside a `#...#` span splits the span, so
-`#ETH.author( content = "<strong>x</strong>" )#` loses its call *and* mis-pairs
-its leftover hashes with the next span, losing that one too. Making the walk
-step over a span — guarded on the span holding a `(`, since a call is the only
-thing it contributes there — fixed every file it was written for and took missed
-sites from 1,798 to **3,025**, newly breaking 113 others. Hashes interpolate
-inside `<cfoutput>` and in a tag's attributes and the walk tracks neither, so the
-pairing runs through real tags: `value="#thisSite[ 'siteID' ]#"` before a
-`<cfif>` whose condition ends in `getsiteID()` is enough. It is reverted and
-recorded in PARSER-GAPS.md §4.2 with the numbers, because the next person to
-look at those email templates will reach for the same fix.
+**A `#...#` span is not a tag boundary, and the two scans that say where one
+ends are deliberately different.** Markup inside a span is an argument:
+`#ETH.author( content = "<strong>x</strong>" )#` was split at the `<`, losing
+that call and — through the hashes left over — the call after it. The walk steps
+over a span now, under three rules each measured by removing it: a span's hashes
+**pair** whether or not its contents are stepped over (removing this costs 141
+files, and it is the one-line mistake that made an earlier attempt take missed
+sites from 1,798 to 3,025); a span with **no `(`** does not hide a tag, so a
+stylesheet's `#sidebar ul {` stays markup; and a span with **unbalanced quotes**
+does not either, so `$( '#search' ).typeahead(` stays a jQuery selector. Hashes
+interpolate only inside `<cfoutput>` and in a tag's attributes and the walk
+tracks neither, so these are heuristics — chosen so that being wrong costs a
+call rather than a tag.
+
+`interpolatedSpans` follows CFML's *nesting* instead — a string inside a span may
+hold a span (`#html.elixirPath( root='#cb.themeRoot()#/inc' )#`), which is what
+`Scanner.scanHashExpr` already does for CFScript. **Do not make the tag walk
+share that rule**: it fixed one corpus site and broke thirty-six, because
+skipping quoted strings runs a span much further in markup. A wrong span costs
+the walk a tag and costs `interpolatedSpans` a call, and they are tuned for their
+own error.
+
+**A `RegionSkip` is a literal `<script>` block, and dropping it dropped its
+interpolation.** The region exists so JavaScript is never fed to the CFScript
+scanner, and the region was then not parsed at all — but a `<script>` body
+inside `<cfoutput>` is exactly where a page writes
+`var id = "#prc.oContent.getContentID()#";`. It goes to the tag parser now and
+needs no mode of its own: `findScriptSkipSpans` only makes a span of a block
+holding no `<cf` tag at all, so the walk can find nothing in one *but* its
+interpolation. A flag restricting it to the spans was written first and removed,
+because it measured identically over the whole corpus *and* against the
+tag-shaped-text-in-a-JS-string case it was written for — which is not a skip
+region precisely because it contains `<cf`. 124 sites over 34 files with no
+invented call.
+
+**A lone `#` in a CFML string is invalid, Lucee tolerates it, and the scanner
+cannot tell it from interpolation.** `md.append( "# ColdBox Performance Report" )`
+opens a span that closes at the next *real* interpolation two lines below,
+swallowing every call between. Requiring a span to open and close on one line
+looks obviously right and costs 45 sites net over the corpus, because a span
+that genuinely wraps a line is how ContentBox writes a form field —
+`#html.inputField(\n name = "authorEmail",\n …\n)#`. Both shapes cross lines,
+hold quotes and hold a `(`; telling them apart needs to know the first `#` was
+never interpolation, which is a fact about the enclosing expression rather than
+the string. PARSER-GAPS.md §4.2 has the measurement.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in

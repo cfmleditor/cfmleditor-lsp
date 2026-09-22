@@ -320,6 +320,30 @@ func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line in
 	}
 }
 
+// recordChainFromScope records `scope.name.method(...)` and then any further
+// hops chained onto it.
+//
+// Both scoped-var handlers recorded the first call and then merely skipped its
+// argument list, so the `.c()` in `variables.a.b().c()` was left for the outer
+// loop to rediscover as an orphaned *bare* call. That is a wrong answer rather
+// than a missing one: in a component that declares a `c`, it is an edge the
+// call never takes. `continueChainCalls` exists to stop exactly this on the
+// unscoped path; this routes the scoped path through the same helper.
+func (p *scriptParser) recordChainFromScope(fullChain string, line int) {
+	p.recordCallFromChain(fullChain, line)
+
+	if !p.skipParens() {
+		return
+	}
+
+	base, name := "", fullChain
+	if dot := strings.LastIndexByte(fullChain, '.'); dot >= 0 {
+		base, name = fullChain[:dot], fullChain[dot+1:]
+	}
+
+	p.recordChainContinuation(base, name, line)
+}
+
 func (p *scriptParser) isVarDeclaredLocal(name string) bool {
 	if p.localVarSet == nil {
 		return false
@@ -570,7 +594,57 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	}
 
 	p.addCall(call)
-	p.skipParens()
+
+	if !p.skipParens() {
+		return
+	}
+
+	// A hop chained onto it is a call on what the first one returned, and
+	// leaving it to the outer loop makes it an orphaned bare call — the same
+	// wrong answer recordChainFromScope exists to stop. A member of this
+	// component walks the chain through its declared return type; a dynamic
+	// receiver stays dynamic all the way down, as a literal receiver's chain
+	// already does.
+	if call.Component == "" {
+		p.recordChainContinuation("", nameTok.Value, scopeTok.Line)
+
+		return
+	}
+
+	p.recordDynamicChain(call.Variable, scopeTok.Line, caller)
+}
+
+// recordDynamicChain records the hops chained onto a call whose receiver is
+// dynamic, keeping every one of them dynamic. The scanner must sit just past
+// the first call's ')'.
+func (p *scriptParser) recordDynamicChain(recv string, line int, caller string) {
+	for p.sc.PeekSkipComments().Kind == TokDot {
+		p.sc.NextSkipComments() // consume .
+
+		methTok := p.sc.PeekSkipComments()
+		if methTok.Kind != TokIdent {
+			return
+		}
+
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokLParen {
+			return
+		}
+
+		p.addCall(CallSite{
+			FuncName:  methTok.Value,
+			Variable:  recv,
+			Component: "$any",
+			Line:      uint32(p.baseLine + line),
+			Caller:    caller,
+			Resolved:  true,
+		})
+
+		if !p.skipParens() {
+			return
+		}
+	}
 }
 
 func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
@@ -621,8 +695,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), tok.Line)
-				p.skipParens()
+				p.recordChainFromScope(fullChain.String(), tok.Line)
 			}
 		}
 
@@ -1433,18 +1506,13 @@ func interpolatedSpans(s string) []hashSpan {
 			continue
 		}
 
-		end := -1
-
-		for j := i + 1; j < len(s); j++ {
-			if s[j] == '#' {
-				end = j
-
-				break
-			}
-		}
-
+		end := matchingHash(s, i+1)
 		if end < 0 {
-			break
+			// A lone `#` — a CSS colour, a jQuery id selector, prose. It opens
+			// nothing, and the spans after it are still spans: this used to
+			// give up on the whole remainder, which lost every interpolation
+			// later in the chunk.
+			continue
 		}
 
 		if end > i+1 {
@@ -1455,6 +1523,83 @@ func interpolatedSpans(s string) []hashSpan {
 	}
 
 	return spans
+}
+
+// matchingHash finds the `#` that closes a span opened just before from,
+// stepping over any quoted string on the way.
+//
+// A string inside a span may hold a span of its own — CFML nests them:
+//
+//	var u = "#html.elixirPath( root = '#cb.themeRoot()#/includes' )#";
+//
+// and taking the first `#` as the close made the *inner* opening hash the
+// outer's terminator, so the outer call was sub-parsed from a fragment and
+// every pairing after it on the line was inverted. Scanner.scanHashExpr already
+// reads CFScript this way; this is the same rule for the text a tag parser
+// hands over.
+func matchingHash(s string, from int) int {
+	// Both scans are IndexByte: a quote before the next `#` is what makes
+	// nesting possible, and only then is there anything to step over. A span
+	// with no quote in it — which is nearly all of them — costs the same two
+	// byte scans the single loop this replaces cost as one.
+	for i := from; ; {
+		h := strings.IndexByte(s[i:], '#')
+		if h < 0 {
+			return -1
+		}
+
+		end := i + h
+
+		q := indexQuote(s[i:end])
+		if q < 0 {
+			return end
+		}
+
+		j := skipQuotedIn(s, i+q)
+		if j < 0 {
+			return -1
+		}
+
+		i = j + 1
+	}
+}
+
+// indexQuote returns the offset of the first single or double quote, or -1.
+func indexQuote(s string) int {
+	d := strings.IndexByte(s, '"')
+
+	sq := strings.IndexByte(s, '\'')
+	if d < 0 {
+		return sq
+	}
+
+	if sq < 0 || d < sq {
+		return d
+	}
+
+	return sq
+}
+
+// skipQuotedIn returns the index of the quote closing the string opened at i,
+// honouring CFML's doubled-quote escape, or -1 if it never closes.
+func skipQuotedIn(s string, i int) int {
+	q := s[i]
+
+	for j := i + 1; j < len(s); j++ {
+		if s[j] != q {
+			continue
+		}
+
+		if j+1 < len(s) && s[j+1] == q {
+			j++
+
+			continue
+		}
+
+		return j
+	}
+
+	return -1
 }
 
 // isLiteralReceiver reports whether a token can close a literal that a member
@@ -2279,8 +2424,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			}
 
 			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), scopeTok.Line)
-				p.skipParens()
+				p.recordChainFromScope(fullChain.String(), scopeTok.Line)
 			}
 		}
 
@@ -2414,7 +2558,9 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	p.forceGlobal = false
 }
 
-// skipNestedFunction skips a nested function declaration and its body.
+// skipNestedFunction handles a function met inside another function's body or
+// inside a group. An anonymous one is a value and only its body is scanned; a
+// named one is declared, for the reason the named branch gives.
 func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	// Handle access modifier before function keyword
 	if !identEq(tok.Value, "function") {
@@ -2455,17 +2601,34 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	if nameTok.Kind != TokIdent {
 		return
 	}
-	// Skip args
+
 	lp := p.sc.NextSkipComments()
 	if lp.Kind != TokLParen {
 		return
 	}
 
-	if _, ok := p.scanParenBody(); !ok {
-		return
-	}
+	// A *named* nested function is a declaration, not a value. CFML hoists it
+	// into the enclosing component's variables scope, which is what lets
+	// `function run(){ setup(); function setup(){…} }` call it before the line
+	// it is written on — and the tag parser has always recorded it, so the two
+	// syntaxes disagreed about the same code. Without it there is no index
+	// entry, no completion and nowhere for go-to-definition to land.
+	//
+	// The argument list goes through parseArgList rather than scanParenBody so
+	// the signature reaches signature help; both record the calls an argument
+	// default holds, since parseArgList routes one through skipDefault.
+	args := p.parseArgList()
+	funcLine := p.baseLine + tok.Line
 
-	p.scanNestedFunctionBody()
+	p.funcs = append(p.funcs, FunctionDef{
+		Name:      nameTok.Value,
+		URI:       uriFromString(p.fileURI),
+		Line:      uint32(funcLine),
+		Arguments: args,
+	})
+
+	endLine := p.scanNestedFunctionBody()
+	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Start: funcLine, End: p.baseLine + endLine})
 }
 
 // scanNestedFunctionBody consumes a nested function's `{ ... }` or `;`,
@@ -2479,30 +2642,33 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 //
 // The calls are attributed to the *enclosing* function, which is where the
 // closure's code runs from and matches what an argument-position closure
-// already did. Its own scope is not declared: a nested function is not a method
-// of the component, for the reason parseFunctionValue gives.
-func (p *scriptParser) scanNestedFunctionBody() {
+// already did. An anonymous closure declares no scope of its own — it is a
+// value, for the reason parseFunctionValue gives — so the line this returns is
+// read only by the named branch, which does.
+func (p *scriptParser) scanNestedFunctionBody() int {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
 
-		return
+		return tok.Line
 	}
 
 	if tok.Kind != TokLBrace {
-		return
+		return tok.Line
 	}
 
 	p.sc.NextSkipComments()
 
 	depth := 1
+	last := tok.Line
 
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
+		last = t.Line
 
 		switch t.Kind { //nolint:exhaustive
 		case TokEOF:
-			return
+			return last
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -2513,6 +2679,8 @@ func (p *scriptParser) scanNestedFunctionBody() {
 			p.handleLiteralToken(t)
 		}
 	}
+
+	return last
 }
 
 func (p *scriptParser) checkAssignRef(tok Token) {
@@ -3431,9 +3599,20 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		return
 	}
 
+	// A named function met inside a group is a declaration, and CFML hoists it
+	// into the enclosing component's variables scope however deeply it is
+	// nested — `it( function(){ function helper(){…} })` declares `helper`.
+	// Reaching skipNestedFunction from here is what makes that true in every
+	// group, since this is the one place all six token loops dispatch an
+	// identifier through.
+	if identEq(tok.Value, "function") {
+		p.skipNestedFunction(tok, 0)
+
+		return
+	}
+
 	// Any other keyword is handled by what follows it rather than by being
-	// read as a receiver: `function` opens a closure whose body is just more
-	// tokens in this group.
+	// read as a receiver.
 	if isKeyword(tok.Value) {
 		return
 	}
@@ -3633,6 +3812,20 @@ func (p *scriptParser) skipHashExpr() bool {
 	}
 }
 
+// skipBracketIndex consumes a balanced [...] group, recording any calls written
+// inside it.
+//
+// It mirrored skipParens — the *old* skipParens, which discarded its group a
+// token at a time. An index is an expression like any other, so
+// `sorted[ sorted.len() ]`, `arr[ f() ]` and `a.b[ f() ]` recorded nothing at
+// all, and `g( arr[ f() ] )` recorded only `g`. That is the same defect
+// skipParenBody exists to have fixed, left in the one group the consolidation
+// did not reach.
+//
+// The chain text the callers build is unaffected: a bracket still poisons it
+// with the literal "[]" marker, so `REQUEST[key].method()` still falls through
+// to an honest "no component ref" rather than resolving as `REQUEST.method()`.
+// What changes is only that the key expression is read rather than thrown away.
 func (p *scriptParser) skipBracketIndex() bool {
 	if p.sc.PeekSkipComments().Kind != TokLBracket {
 		return false
@@ -3653,6 +3846,10 @@ func (p *scriptParser) skipBracketIndex() bool {
 			depth++
 		case TokRBracket:
 			depth--
+		case TokIdent:
+			p.scanNestedCall(tok)
+		case TokString:
+			p.handleLiteralToken(tok)
 		}
 	}
 

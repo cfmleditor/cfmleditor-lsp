@@ -204,3 +204,50 @@ func TestConstructorNamedArgumentsDoNotDeclareVariables(t *testing.T) {
 		t.Errorf("FuncVars: got %v want %v", got, want)
 	}
 }
+
+// An index is an expression like any other, and `skipBracketIndex` mirrored the
+// *old* `skipParens`: it discarded its group a token at a time. So
+// `sorted[ sorted.len() ]` recorded nothing at all, and `g( arr[ f() ] )`
+// recorded only `g` — the same defect `skipParenBody` exists to have fixed,
+// left in the one group the consolidation did not reach. 137 sites on the
+// corpus.
+func TestCallsInsideABracketIndexAreFound(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"method on the indexed variable", `x = sorted[ sorted.len() ];`, []string{"sorted.len"}},
+		{"bare call as the key", `x = arr[ f() ];`, []string{"?.f"}},
+		{"dotted receiver", `x = a.b[ svc.key() ];`, []string{"svc.key"}},
+		{"nested", `x = arr[ f( svc.g() ) ];`, []string{"?.f", "svc.g"}},
+		{"inside an argument list", `g( arr[ svc.f() ] );`, []string{"?.g", "svc.f"}},
+		{"inside a struct literal", `x = { a: arr[ svc.len() ] };`, []string{"svc.len"}},
+		{"interpolated key", `x = st[ "#svc.key()#" ];`, []string{"svc.key"}},
+
+		// Controls: a plain index calls nothing.
+		{"plain numeric index", `x = arr[ 1 ];`, nil},
+		{"plain name index", `x = st[ key ];`, nil},
+
+		// The chain text is unaffected: a bracket still poisons it with the
+		// literal "[]" marker, so a dynamic key still falls through to an
+		// honest "no component ref" rather than resolving as `REQUEST.method()`.
+		{"poison marker survives", `REQUEST[ key ].method();`, []string{"REQUEST[].method"}},
+		{"poison marker with a call in the key", `REQUEST[ svc.k() ].method();`,
+			[]string{"REQUEST[].method", "svc.k"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.want == nil {
+				if got := callsIn(t, c.body); len(got) != 0 {
+					t.Errorf("%s recorded %v, want nothing", c.body, got)
+				}
+
+				return
+			}
+
+			assertCalls(t, c.body, c.want)
+		})
+	}
+}

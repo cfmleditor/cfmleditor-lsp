@@ -75,13 +75,188 @@ func (p *tagParser) lineAt(offset int) int {
 	return lo - 1
 }
 
+// looksLikeCallSpan reports whether the text between two hashes is worth
+// treating as opaque: a CFML expression holding a call, rather than two
+// unrelated hashes that happened to pair.
+//
+// Two tests, and each is here for a shape the corpus produced:
+//
+//   - a `(`, because a call is the only thing a span contributes to the tag
+//     walk and scanInterpolatedText rejects the rest on the same byte scan;
+//   - balanced quotes, because a lone `#` inside a quoted string is how an
+//     embedded page writes a jQuery id selector — `$( '#search' ).typeahead(`
+//     has both a quote and a paren, and pairing its hash with the next one in
+//     the file swallowed four tags of Lucee's doc pages. A CSS `#01798A` needs
+//     no test of its own: it has no paren.
+func looksLikeCallSpan(body string) bool {
+	if strings.IndexByte(body, '(') < 0 {
+		return false
+	}
+
+	return strings.Count(body, `"`)%2 == 0 && strings.Count(body, "'")%2 == 0
+}
+
+// tagEndIndex finds the '>' that closes a tag, skipping over quoted strings.
+//
+// A bare IndexByte stops at the first '>' anywhere, and a CF tag holds an
+// expression that may contain one:
+//
+//	<cfset fields = array( field( "Host:Port&lt;new line><br>" ), field( "b" ) )>
+//
+// cut there, the second `field` is in no tag and in no text the walk scans, so
+// it is recorded nowhere. Lucee's cache-driver components are written this way.
+//
+// It falls back to the plain scan when a quote never closes, so a malformed tag
+// cannot swallow the rest of the file — the tag is read exactly as it was
+// before, which is the behaviour this replaces.
+func tagEndIndex(s string) int {
+	// The bulk of the scan stays an IndexByte: a quote before the next '>' is
+	// what makes a false end possible, and only then is there anything to skip.
+	// A byte-at-a-time version of this cost 9% of a tag parse — it ran over
+	// every tag in the file, most of which hold no quote at all.
+	gt := strings.IndexByte(s, '>')
+	if gt < 0 {
+		return -1
+	}
+
+	// A '>' with every quote before it already closed is the tag's end, and
+	// two counts settle that for the whole attribute list at once. The walk
+	// below costs three calls per attribute instead, on short strings where
+	// the call is most of the cost — and a tag whose attributes are all
+	// ordinarily quoted is nearly every tag in a file. Parity is exact rather
+	// than a heuristic: CFML escapes a quote by doubling it, which adds two.
+	if strings.Count(s[:gt], `"`)%2 == 0 && strings.Count(s[:gt], "'")%2 == 0 {
+		return gt
+	}
+
+	return tagEndWalk(s)
+}
+
+// tagEndWalk is the quote-by-quote scan tagEndIndex falls back to. It is a
+// function of its own so the fast path above can be compared against it
+// directly — restating it in a test would be the parallel list this codebase
+// keeps warning about.
+func tagEndWalk(s string) int {
+	for pos := 0; ; {
+		gt := strings.IndexByte(s[pos:], '>')
+		if gt < 0 {
+			return -1
+		}
+
+		end := pos + gt
+
+		q := indexQuote(s[pos:end])
+		if q < 0 {
+			return end
+		}
+
+		j := skipQuotedIn(s, pos+q)
+		if j < 0 {
+			return strings.IndexByte(s, '>')
+		}
+
+		pos = j + 1
+	}
+}
+
+// nextTagStart finds the next '<' that could open a tag, stepping over a
+// `#...#` span rather than through it.
+//
+// Markup written inside a span is an argument, not a tag:
+//
+//	#ETH.author( content = "<strong>@name@</strong>" )#
+//
+// Splitting there hands scanInterpolatedText a chunk with an unterminated `#`,
+// so the call is lost — and the hashes left over mis-pair with the next span,
+// so the call after it is lost too.
+//
+// Two rules, and getting either wrong loses tags rather than finding calls:
+//
+//   - **A span's hashes pair whether or not its contents are stepped over.** A
+//     first version advanced only past the *opening* hash of a span it declined,
+//     so the closing hash became the next opening one and everything after was
+//     inverted: `#local.iconType#` left its second hash to pair with the `#`
+//     three lines later, and the `</i><cfif isSimpleValue( … )>` between them
+//     was swallowed. That alone was 141 files.
+//   - **A span holding no `(` does not hide a tag.** Hashes interpolate inside
+//     <cfoutput> and in a tag's attributes and this walk tracks neither, so in
+//     prose a `#` is just a character and `item #1 <b>x</b> #2` must keep its
+//     markup. A call is the only thing a span contributes here —
+//     scanInterpolatedText rejects the rest on the same byte scan — so a span
+//     with no `(` still pairs, but a `<` inside it is returned as a tag.
+func nextTagStart(s string) int {
+	// The bulk of the scan stays an IndexByte. A '#' before the next '<' is
+	// what makes a span possible, and only then is there anything to resolve —
+	// on a file with no interpolation this is the same two byte scans the walk
+	// always did.
+	//
+	// Memoising the '#' scan across calls — one scan per hash rather than one
+	// per tag — is the obvious next step and was measured: it changed nothing
+	// on the tag benchmarks, because what this costs is the '<' scan's call
+	// overhead on short strings, not the hash scan.
+	for pos := 0; ; {
+		lt := strings.IndexByte(s[pos:], '<')
+
+		end := len(s)
+		if lt >= 0 {
+			end = pos + lt
+		}
+
+		h := strings.IndexByte(s[pos:end], '#')
+		if h < 0 {
+			if lt < 0 {
+				return -1
+			}
+
+			return pos + lt
+		}
+
+		at := pos + h
+
+		// `##` is CFML's escaped hash and opens nothing.
+		if at+1 < len(s) && s[at+1] == '#' {
+			pos = at + 2
+
+			continue
+		}
+
+		// The next '#', not matchingHash: the two scans legitimately differ,
+		// because they optimise different errors. A wrong span here costs a
+		// *tag* — everything between the hashes stops being markup — so this
+		// one stays conservative and pairs hashes as they come. A wrong span
+		// in interpolatedSpans costs at most a call, so that one follows CFML's
+		// nesting through quoted strings. Making this share that rule fixed one
+		// corpus site and broke thirty-six: skipping quoted strings runs a span
+		// much further in markup, and Lucee's doc pages lost their tags to it.
+		rel := strings.IndexByte(s[at+1:], '#')
+		if rel < 0 {
+			// Unterminated: the chunk is a fragment of some tag's attribute
+			// list, and the '#' is just a byte.
+			pos = at + 1
+
+			continue
+		}
+
+		spanEnd := at + 1 + rel
+
+		body := s[at+1 : spanEnd]
+		if !looksLikeCallSpan(body) {
+			if i := strings.IndexByte(body, '<'); i >= 0 {
+				return at + 1 + i
+			}
+		}
+
+		pos = spanEnd + 1
+	}
+}
+
 // parse scans through tag-based CFML extracting definitions.
 func (p *tagParser) parse() {
 	pos := 0
 
 	for pos < len(p.src) {
 		// Find next < that could be a CF tag
-		idx := strings.IndexByte(p.src[pos:], '<')
+		idx := nextTagStart(p.src[pos:])
 		if idx < 0 {
 			// Trailing text, which is also where the attribute list of the last
 			// declined tag in the file ends up.
@@ -212,7 +387,7 @@ func (p *tagParser) parse() {
 				continue
 			}
 
-			tagEnd := strings.IndexByte(p.src[idx:], '>')
+			tagEnd := tagEndIndex(p.src[idx:])
 			if tagEnd < 0 {
 				pos = idx + 1
 

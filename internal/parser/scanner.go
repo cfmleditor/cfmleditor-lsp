@@ -363,7 +363,17 @@ func (s *Scanner) scanBlockComment(start, startLine int) Token {
 
 func (s *Scanner) scanLineComment(start, startLine int) Token {
 	s.pos += 2 // skip //
-	for s.pos < len(s.src) && s.src[s.pos] != '\n' {
+
+	// A bare CR ends a line too. Five of the 5,629 corpus files use CR-only
+	// endings, and in one of them the first `//` in the file swallowed
+	// everything after it — the whole of ColdBox's EventHandler.cfc, which is
+	// 2.5KB on what this scanner read as a single line.
+	//
+	// Only the comment's *end* moves. Line numbers still count `\n` alone,
+	// which is what tree-sitter does, so the two keep agreeing about where a
+	// call is; changing that is a question about editor positions rather than
+	// about parsing, and these files are 0.09% of the corpus.
+	for s.pos < len(s.src) && s.src[s.pos] != '\n' && s.src[s.pos] != '\r' {
 		s.pos++
 	}
 

@@ -320,3 +320,31 @@ func TestRepeatedInterpolationOnOneLineIsNotDeduped(t *testing.T) {
 		})
 	}
 }
+
+// TestNestedNamedFunctionsAreDeclaredByBoth pins the one gap the declaration
+// axis found that the call axis could not see.
+//
+// A function named inside another function's body is a function_declaration to
+// the grammar and a hoisted method to CFML, and the script parser recorded
+// nothing at all. The call axis stayed silent because the calls written inside
+// such a function were already being attributed to the enclosing one — the
+// right lines, filed under the wrong function, which is exactly the shape a
+// line-and-method comparison cannot see.
+func TestNestedNamedFunctionsAreDeclaredByBoth(t *testing.T) {
+	src := []byte(`component { function run() { setup(); function setup() { return 1; } } }`)
+
+	if !slices.Contains(grammarDecls(src), "setup") {
+		t.Fatal("the grammar does not declare setup, so this case is the oracle's mistake")
+	}
+
+	pr := parser.ParseWithOptions(uri.File("/t.cfc"), string(src), parser.ParseOptions{})
+
+	got := make([]string, 0, len(pr.Funcs))
+	for _, f := range pr.Funcs {
+		got = append(got, strings.ToLower(f.Name))
+	}
+
+	if !slices.Contains(got, "setup") {
+		t.Errorf("parser declared %v, want setup among them", got)
+	}
+}

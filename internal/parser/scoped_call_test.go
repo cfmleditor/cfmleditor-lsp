@@ -2,6 +2,7 @@ package parser
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -129,4 +130,126 @@ func TestARequestScopedCallIsNotTakenForAFileLocalFunction(t *testing.T) {
 	}
 
 	t.Fatal("request.getRemote() was not recorded at all")
+}
+
+// chainOf renders each call as "receiver[chain].method", so a test can assert
+// what a hop was called *on* rather than only that it was recorded.
+func chainOf(t *testing.T, stmt string) []string {
+	t.Helper()
+
+	pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+stmt+"\n }\n}\n",
+		ParseOptions{ExtractCalls: true})
+
+	out := make([]string, 0, 4)
+
+	for _, c := range pr.AllCalls() {
+		v := c.Variable
+		if v == "" {
+			v = "?"
+		}
+
+		if len(c.Chain) > 0 {
+			v += "[" + strings.Join(c.Chain, " ") + "]"
+		}
+
+		out = append(out, v+"."+c.FuncName)
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// A hop chained onto a scope-prefixed call kept no receiver. Both scoped-var
+// handlers recorded the first call and then merely skipped its argument list,
+// so the `.c()` in `variables.a.b().c()` was left for the outer loop to
+// rediscover as an orphaned *bare* call.
+//
+// That is a wrong answer rather than a missing one — in a component that
+// declares a `c`, it is an edge the call never takes — and it is the exact
+// thing `continueChainCalls` exists to stop on the unscoped path, which is why
+// the fix routes the scoped path through the same helper rather than growing a
+// second one.
+//
+// `make gapcheck` cannot see most of this: it compares line and method name and
+// deliberately not the receiver, so a call recorded against the wrong receiver
+// still counts as found. What the corpus did show is the line: 251 sites where
+// the rediscovered bare call landed somewhere the grammar did not put it.
+func TestAHopChainedOntoAScopedCallKeepsItsReceiver(t *testing.T) {
+	for _, c := range []struct {
+		stmt string
+		want []string
+	}{
+		{`variables.a.b().c();`, []string{"variables.a.b", "variables.a[b].c"}},
+		{`arguments.a.b().c();`, []string{"arguments.a.b", "arguments.a[b].c"}},
+		{`local.a.b().c();`, []string{"local.a.b", "local.a[b].c"}},
+		{`this.a.b().c();`, []string{"this.a.b", "this.a[b].c"}},
+		{`variables.a.b().c().d();`, []string{"variables.a.b", "variables.a[b c].d", "variables.a[b].c"}},
+
+		// The unscoped path, which already behaved this way and is what the
+		// scoped one is now matched against.
+		{`x.y().z();`, []string{"x.y", "x[y].z"}},
+	} {
+		t.Run(c.stmt, func(t *testing.T) {
+			if got := chainOf(t, c.stmt); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A hop chained onto a call made *directly* on a scope is the same wrong-answer
+// class, and the receiver it deserves differs by scope for the same reason the
+// first call's does. A member of this component walks the chain through its
+// declared return type; a dynamic receiver stays dynamic all the way down, as a
+// literal receiver's chain already does.
+//
+// Two corpus sites, so this is not here for the tally — it is here because
+// `?.c` is an edge to a file-local `c` that the call never takes.
+func TestAHopChainedOntoAScopeMemberCallKeepsItsReceiver(t *testing.T) {
+	render := func(stmt string) []string {
+		pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+stmt+"\n }\n}\n",
+			ParseOptions{ExtractCalls: true})
+
+		out := make([]string, 0, 4)
+
+		for _, c := range pr.AllCalls() {
+			v := c.Variable
+			if v == "" {
+				v = "?"
+			}
+
+			if c.Component != "" {
+				v += "{" + c.Component + "}"
+			}
+
+			if len(c.Chain) > 0 {
+				v += "[" + strings.Join(c.Chain, " ") + "]"
+			}
+
+			out = append(out, v+"."+c.FuncName)
+		}
+
+		slices.Sort(out)
+
+		return out
+	}
+
+	for _, c := range []struct {
+		stmt string
+		want []string
+	}{
+		{`variables.helper().c();`, []string{"?.helper", "?[helper].c"}},
+		{`this.init().run();`, []string{"?.init", "?[init].run"}},
+		{`variables.helper().c().d();`, []string{"?.helper", "?[helper c].d", "?[helper].c"}},
+		{`request.get().c();`, []string{"request{$any}.c", "request{$any}.get"}},
+		{`request.get().c().d();`, []string{"request{$any}.c", "request{$any}.d", "request{$any}.get"}},
+		{`local.fn().c();`, []string{"local{$any}.c", "local{$any}.fn"}},
+	} {
+		t.Run(c.stmt, func(t *testing.T) {
+			if got := render(c.stmt); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
 }

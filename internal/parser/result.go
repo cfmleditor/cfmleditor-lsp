@@ -181,7 +181,20 @@ func (pr *ParseResult) extractSignatures() {
 	}
 
 	for _, r := range pr.Regions {
-		if r.Kind == RegionSkip {
+		// A RegionSkip is a literal <script> block, left out of the script
+		// regions so its JavaScript is never fed to the CFScript scanner. Its
+		// `#...#` spans are CFML all the same — a <script> body inside
+		// <cfoutput> is where a page writes `var id = "#o.getContentID()#";` —
+		// and dropping the region dropped those with it.
+		//
+		// It goes to the tag parser below, which needs no mode of its own:
+		// findScriptSkipSpans only makes a span of a block that holds no `<cf`
+		// tag at all, so the walk can find nothing in one *but* its
+		// interpolation. A flag restricting it to the spans measured
+		// identically over the corpus and against tag-shaped text inside a JS
+		// string, which is the case it was written for — and which is not a
+		// skip region, because it contains `<cf`.
+		if r.Kind == RegionSkip && !pr.extractCalls {
 			continue
 		}
 
