@@ -15,7 +15,7 @@ func ParseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 
 	for _, r := range regions {
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil)
+			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil).asCFScript()
 			sp.parse()
 			defs = append(defs, sp.funcs...)
 		} else {
@@ -41,7 +41,7 @@ func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 
 	for _, r := range regions {
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil)
+			sp := newScriptParser(r.Text, string(fileURI), r.StartLine, nil).asCFScript()
 			sp.parse()
 			refs = append(refs, sp.componentRefs...)
 		} else {
@@ -79,7 +79,7 @@ func ParseVars(content string) []VarDef {
 		var regionVars []VarDef
 
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, "", r.StartLine, nil)
+			sp := newScriptParser(r.Text, "", r.StartLine, nil).asCFScript()
 			sp.parse()
 			regionVars = sp.vars
 		} else {

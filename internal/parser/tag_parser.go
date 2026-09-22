@@ -137,7 +137,7 @@ func (p *tagParser) parse() {
 			}
 
 			baseLine := p.lineAt(bodyStart)
-			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, p.resolvers)
+			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, p.resolvers).asCFScript()
 			sp.resolverSet = p.resolverSet
 			sp.extractCalls = p.extractCalls
 			sp.parse()
@@ -1588,7 +1588,7 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 		return
 	}
 
-	sub := newScriptParser(expr, p.fileURI, line, p.resolvers)
+	sub := newScriptParser(expr, p.fileURI, line, p.resolvers).asCFScript()
 	sub.resolverSet = p.resolverSet
 	sub.extractCalls = true
 	sub.parse()

@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -230,4 +231,136 @@ func sorted(s []string) []string {
 	slices.Sort(out)
 
 	return out
+}
+
+// A `#` inside a string opens an expression, and a string may be opened inside
+// *that* with the same quote character. Closing the outer string at the inner
+// quote left `"#DayOfWeek("`, so the interpolation had no closing `#` and the
+// call in it was invisible — 3,165 call sites over 461 files on the corpus,
+// measured in PARSER-GAPS.md §3.3.
+func TestStringsNestInsideInterpolation(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`assertEquals("7", "#DayOfWeek("{ts '2000-1-1'}")#");`,
+			[]string{"?.assertEquals", "?.DayOfWeek"}},
+		{`x = "#f("a")#";`, []string{"?.f"}},
+		{`x = "#f("a")# and #g("b")#";`, []string{"?.f", "?.g"}},
+		{`x = "#f('a')#";`, []string{"?.f"}},
+
+		// Controls: an escaped hash opens nothing, a plain string is a plain
+		// string, and a balanced interpolation still works.
+		{`x = "a ## b";`, nil},
+		{`x = "plain";`, nil},
+		{`x = "#a#";`, nil},
+		{`x = "#svc.get()#";`, []string{"svc.get"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			got := interpCalls(t, "component {\n function go() {\n  "+c.body+"\n }\n}\n")
+			if !slices.Equal(got, sorted(c.want)) {
+				t.Errorf("got %v want %v", got, sorted(c.want))
+			}
+		})
+	}
+}
+
+// The rule is off unless the text is known to be CFScript, because text that is
+// not reaches the scanner: parseFuncBody hands a tag function's raw body to the
+// script parser. Applied to markup it is actively wrong — two `href="#…"`
+// fragments on one line pair their hashes and swallow what is between them.
+func TestMarkupHashesAreNotInterpolation(t *testing.T) {
+	for _, src := range []string{
+		`<a href="#top">x</a><a href="#bot">y</a>`,
+		`<div id="x">#1 seller, #2 runner</div>`,
+		`<style>a { color: #fff; background: #000; }</style>`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if got := interpCalls(t, src); got != nil {
+				t.Errorf("got %v, want no calls", got)
+			}
+
+			// The markup must also still tokenise into separate strings rather
+			// than one that swallows the tags between them.
+			sc := NewScanner(src)
+			for {
+				tok := sc.NextSkipComments()
+				if tok.Kind == TokEOF {
+					break
+				}
+
+				if tok.Kind == TokString && strings.Contains(tok.Value, "<") {
+					t.Errorf("a string token swallowed markup: %q", tok.Value)
+				}
+			}
+		})
+	}
+}
+
+// The two variable scans must tokenise a file the same way, which is why
+// globalScriptParser opts in too. Without it `"#f("x=1")#"` tokenises as
+// `"#f("`, `x`, `=`, `1`, `")#"` — and a scan that records a bare `ident =` as
+// a declaration takes `x` for a variables-scope variable, which is what
+// completion offers and what the index stores.
+func TestInterpolatedStringDoesNotDeclareAVariable(t *testing.T) {
+	for _, src := range []string{
+		"component {\n variables.a = \"#f(\"x=1\")#\";\n}\n",
+		"component {\n variables.a = \"#buildLink(\"page=home\")#\";\n}\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			pr := Parse(testURI, src)
+			if got := pr.VariablesVars(); !slices.Equal(got, []string{"a"}) {
+				t.Errorf("VariablesVars: got %v want [a]", got)
+			}
+
+			var names []string
+			for _, v := range ParseVars(src) {
+				names = append(names, v.Name)
+			}
+
+			if !slices.Equal(names, []string{"a"}) {
+				t.Errorf("ParseVars: got %v want [a]", names)
+			}
+		})
+	}
+}
+
+// The nesting is driven by the source and Go cannot recover from stack
+// exhaustion, so the mutual recursion is capped — and past the cap the
+// speculative scan is abandoned for the plain one rather than failing. That
+// makes the cap observable: below it the whole nested string is one token,
+// above it the token is the plain quote-to-quote one the scanner always
+// produced.
+//
+// Asserting *that* is the point. A test that fed in a very deep string and
+// asserted only that the scan returned passed with the cap removed as well —
+// 2,000 levels of two small frames do not come close to Go's 1GB stack, so
+// nothing short of a 64MB input would have exercised it.
+func TestInterpolationNestingIsCapped(t *testing.T) {
+	nested := func(n int) string {
+		return `"` + strings.Repeat(`#f("`, n) + "a" + strings.Repeat(`")#`, n) + `"`
+	}
+
+	tokenFor := func(src string) string {
+		sc := NewScanner(src)
+		sc.interpStrings = true
+
+		return sc.NextSkipComments().Value
+	}
+
+	// maxStringNesting counts both halves of the recursion, so each `#f("`
+	// level costs two.
+	deepest := maxStringNesting/2 - 1
+
+	if src := nested(deepest); tokenFor(src) != src {
+		t.Errorf("at depth %d the string should scan whole, got %q", deepest, tokenFor(src))
+	}
+
+	for _, n := range []int{deepest + 1, maxStringNesting, 2000} {
+		if got := tokenFor(nested(n)); got != `"#f("` {
+			t.Errorf("at depth %d: got %q, want the plain scan's %q", n, got, `"#f("`)
+		}
+	}
 }

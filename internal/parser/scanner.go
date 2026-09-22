@@ -57,7 +57,11 @@ type Token struct {
 
 // Scanner tokenizes CFML/CFScript source.
 type Scanner struct {
-	src              string
+	src string
+	// interpStrings makes a `#` inside a string open an expression, in which a
+	// string may be opened with the same quote character. Off by default and
+	// turned on only where the text is known to be CFScript — see scanString.
+	interpStrings    bool
 	pos              int
 	line             int
 	LastBlockComment string // most recent /** ... */ or /* ... */ comment value
@@ -350,7 +354,51 @@ func (s *Scanner) scanLineComment(start, startLine int) Token {
 	return Token{Kind: TokLineComment, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
+// maxStringNesting bounds the mutual recursion between scanQuoted and
+// scanHashExpr. A string holds an expression holds a string, and the nesting is
+// driven by the source, so — as with maxArgNesting — Go's inability to recover
+// from stack exhaustion is what makes a cap necessary rather than tidy.
+const maxStringNesting = 32
+
 func (s *Scanner) scanString(start, startLine int) Token {
+	// A `#` inside a string opens an expression, and a string may be opened
+	// inside *that*: `"#DayOfWeek("{ts '2000-1-1'}")#"` is one token, and
+	// closing it at the inner quote left `"#DayOfWeek("` — so the interpolation
+	// had no closing `#` to find and the call in it was invisible — 3,165 sites
+	// over 461 files on the corpus, measured in PARSER-GAPS.md §3.3.
+	//
+	// It is **off unless the text is known to be CFScript**, because text that
+	// is not reaches this function: parseFuncBody hands a tag function's raw
+	// body to the script parser, and there a `#` opens nothing. Applied to
+	// markup the rule is actively wrong —
+	//
+	//	<a href="#top">x</a><a href="#bot">y</a>
+	//
+	// pairs the two fragment hashes and swallows the markup between them into
+	// one string token. That is a wrong answer where the old behaviour was
+	// merely a coarse one, so the callers that know they hold CFScript opt in
+	// with asCFScript and everything else keeps the plain scan.
+	//
+	// The scan is speculative even then: when the nesting does not close before
+	// EOF the attempt is abandoned and the plain quote-to-quote scan runs from
+	// the same place, so a token can never be worse than it was.
+	if s.interpStrings {
+		savedPos, savedLine := s.pos, s.line
+		if s.scanQuoted(0) {
+			return Token{Kind: TokString, Value: s.src[start:s.pos], Offset: start, Line: startLine}
+		}
+
+		s.pos, s.line = savedPos, savedLine
+	}
+
+	s.scanQuotedPlain()
+
+	return Token{Kind: TokString, Value: s.src[start:s.pos], Offset: start, Line: startLine}
+}
+
+// scanQuotedPlain consumes a quoted string, taking the first unescaped matching
+// quote as the end. This is what the scanner always did.
+func (s *Scanner) scanQuotedPlain() {
 	q := s.src[s.pos]
 	s.pos++
 
@@ -369,8 +417,80 @@ func (s *Scanner) scanString(start, startLine int) Token {
 	if s.pos < len(s.src) {
 		s.pos++ // closing quote
 	}
+}
 
-	return Token{Kind: TokString, Value: s.src[start:s.pos], Offset: start, Line: startLine}
+// scanQuoted consumes a quoted string, stepping over any #...# expression in it
+// rather than through it. Reports whether the string closed.
+func (s *Scanner) scanQuoted(depth int) bool {
+	if depth >= maxStringNesting {
+		return false
+	}
+
+	q := s.src[s.pos]
+	s.pos++
+
+	for s.pos < len(s.src) {
+		switch c := s.src[s.pos]; {
+		case c == q:
+			s.pos++
+
+			return true
+		case c == '\\' && s.pos+1 < len(s.src):
+			if s.src[s.pos+1] == '\n' {
+				s.line++
+			}
+
+			s.pos += 2
+		case c == '#':
+			// `##` is CFML's escaped hash and opens nothing.
+			if s.pos+1 < len(s.src) && s.src[s.pos+1] == '#' {
+				s.pos += 2
+
+				continue
+			}
+
+			if !s.scanHashExpr(depth + 1) {
+				return false
+			}
+		case c == '\n':
+			s.line++
+			s.pos++
+		default:
+			s.pos++
+		}
+	}
+
+	return false
+}
+
+// scanHashExpr consumes a #...# expression from its opening hash, including any
+// string opened inside it. Reports whether it closed.
+func (s *Scanner) scanHashExpr(depth int) bool {
+	if depth >= maxStringNesting {
+		return false
+	}
+
+	s.pos++ // the opening #
+
+	for s.pos < len(s.src) {
+		switch s.src[s.pos] {
+		case '#':
+			s.pos++
+
+			return true
+		case '"', '\'':
+			if !s.scanQuoted(depth + 1) {
+				return false
+			}
+		case '\n':
+			s.line++
+			s.pos++
+		default:
+			s.pos++
+		}
+	}
+
+	return false
 }
 
 func (s *Scanner) scanNumber(start, startLine int) Token {

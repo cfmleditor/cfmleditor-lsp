@@ -41,15 +41,16 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.1 | After §3.2 |
-|---|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 1,340 | **1,297 (23.0%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | 8,707 | **8,500** |
-| Sites the parser records and the grammar does not | 1,065 | 1,070 | 1,067 |
+| | Before | After §3.1 | After §3.2 | After §3.3 |
+|---|---:|---:|---:|---:|
+| Files where the two disagree | 1,506 (26.8%) | 1,340 | 1,297 (23.0%) | **837 (14.9%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 8,707 | 8,500 | **5,357** |
+| Sites the parser records and the grammar does not | 1,065 | 1,070 | 1,067 | 1,098 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before and 7,982 after §3.1. The difference between the two keyings,
-around 700 sites, is **line skew**: a multi-line `<cfset>` or `<cfif>` records
+figure is 9,726 before, 7,982 after §3.1, 7,775 after §3.2 and **4,602** after §3.3,
+and the parser-only figure falls to 343. The difference between the two keyings,
+around 750 sites, is **line skew**: a multi-line `<cfset>` or `<cfif>` records
 its calls at the tag's starting line while the grammar puts each on its own.
 Cosmetic, but it is why a report of this keyed on lines cannot be diffed
 cleanly against another.
@@ -130,35 +131,87 @@ on all three parse benchmarks, so this one is free.
 terminator rather than consuming it, so its dispatch reads the token first, and
 the test's anchor now accepts that shape. There are six such loops.
 
-## 4. Known and not fixed
-
-### 4.1 A same-quoted string opened inside `#...#` — 888 sites, 56 files
+### 3.3 A same-quoted string opened inside `#...#`
 
 ```cfml
 assertEquals("7", "#DayOfWeek("{ts '2000-1-1 17:26:03'}")#");
+name = "logMessage_#replace( createUUID(), "-", "", "all" )#"
+writeOutput( "#cb.menu( slug = arguments.slug, type = "html" )#" );
 ```
 
-The scanner closes the outer string at the inner quote, so the token is
-`"#DayOfWeek("` and the interpolation never has a closing `#` to find:
+`scanString` took the first matching quote as the end, so the token was
+`"#DayOfWeek("` and the interpolation never had a closing `#` to find:
 
 ```
 "#DayOfWeek("   {   ts   '2000-1-1'   }   ")#"
 ```
 
-This is a **scanner** limitation, not an interpolation one — `'…'` inside
-`"…"` works, and so does `"#DayOfWeek(d1)#"`. Fixing it means making
-`scanString` aware that a `#` opens an expression in which a string may nest,
-which is a real change to the one function every parse path runs through.
+It is a **scanner** gap rather than an interpolation one — `'…'` inside `"…"`
+already worked, and so did `"#DayOfWeek(d1)#"`. `scanString` now steps *over* a
+`#...#` expression, and over any string opened inside it, through a pair of
+mutually recursive helpers (`scanQuoted`/`scanHashExpr`).
 
-Nearly all of it is Lucee's test suite writing dates this way. Worth revisiting
-if it shows up outside that idiom.
+Three things it needed:
 
-### 4.2 `createObject` — 435 sites, deliberate
+- **It is opt-in, via `scriptParser.asCFScript()`.** Text that is not CFScript
+  reaches the same scanner — `parseFuncBody` hands a tag function's raw body to
+  the script parser — and applied to markup the rule is actively *wrong*:
+
+  ```html
+  <a href="#top">x</a><a href="#bot">y</a>
+  ```
+
+  pairs the two fragment hashes and swallows the markup between them into one
+  string token. That is a wrong answer where the old behaviour was merely a
+  coarse one. The callers that know they hold CFScript opt in — the six
+  region-guarded construction sites, the interpolated-span sub-parser, and
+  `newGlobalScriptParser`.
+- **`newGlobalScriptParser` opts in for correctness, not for calls.** The two
+  variable scans must tokenise a file the same way. Without the flag
+  `variables.a = "#f("x=1")#"` tokenises as `"#f("`, `x`, `=`, `1`, `")#"`, and
+  a scan that reads a bare `ident =` as a declaration files `x` as a
+  variables-scope variable — which is what completion offers and what the index
+  stores.
+- **The scan is speculative.** When the nesting does not close before EOF the
+  attempt is abandoned and the plain quote-to-quote scan runs from the same
+  place, so a token can never come out worse than it was. The recursion is
+  capped at `maxStringNesting`, for the reason `maxArgNesting` is: the depth
+  comes from the source and Go cannot `recover()` from stack exhaustion.
+
+**3,165 sites across 461 files**, which is far more than the 888 the shape
+itself accounts for: a string that swallows its terminator takes the rest of
+the line — often the rest of the construct — with it, so the recovery reaches
+calls that have nothing to do with interpolation. 442 of those files are
+Lucee's date tests, but the other 19 are the idiom appearing in ordinary code
+(the ColdBox and ContentBox lines above), which is exactly the condition §5
+named for revisiting this.
+
+#### Cost
+
+Measured interleaved, alternating builds, minimum of nine, one benchmark per
+process:
+
+| | before | after |
+|---|---:|---:|
+| `BenchmarkParse_GlobalVars` | 42.3µs | **47.8µs (+12.8%)** |
+| `BenchmarkParse_ScriptCFC` | | +1.3% |
+| `BenchmarkParse_ScriptCFC_ExtractCalls` | | −2.9% |
+| `BenchmarkParse_TagCFC` | | −0.4% |
+| `BenchmarkParse_TagCFC_ExtractCalls` | | −1.6% |
+
+Allocations are identical everywhere — the extra work is a second pass over the
+bytes of a string that contains a `#`, not a new object. `GlobalVars` is the one
+that moves because it is the smallest benchmark and is almost entirely string
+scanning; the whole-file parses absorb it into noise.
+
+## 4. Known and not fixed
+
+### 4.1 `createObject` — 435 sites, deliberate
 
 The parser records a `ComponentRef`, not a `CallSite`. This is the one entry in
 `expectedDifferences` that is a design difference rather than a gap.
 
-### 4.3 The parser records 1,067 sites the grammar does not
+### 4.2 The parser records 1,098 sites the grammar does not
 
 Two causes, both pre-existing and neither a wrong answer about code that runs:
 
@@ -171,11 +224,13 @@ Two causes, both pre-existing and neither a wrong answer about code that runs:
 
 ## 5. What would change these decisions
 
-- **§4.1** — the shape appearing outside Lucee's date tests. It is 56 files
-  today, and the fix touches the scanner every parse path runs through.
 - **§3.1's cost** — if `unresolved` or the code map ever shows the sub-parse in a
   profile, the answer is to reuse one `scriptParser` per file rather than
   building one per `<cfset>`.
+- **§3.3's opt-in** — it is a flag on the scanner because one caller
+  (`parseFuncBody`) feeds it markup. If that path ever stops reusing the script
+  parser for a tag function's body, the flag stops earning its keep and the rule
+  can be unconditional.
 
 Re-run `make gapcheck CORPUS=…` after anything here; it is 6 seconds, and the
 `expectedDifferences` list in `internal/tsoracle` fails on a difference that is

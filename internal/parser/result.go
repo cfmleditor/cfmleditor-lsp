@@ -186,7 +186,7 @@ func (pr *ParseResult) extractSignatures() {
 		}
 
 		if r.Kind == RegionScript {
-			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers)
+			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
 			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
 			sp.extractCalls = pr.extractCalls

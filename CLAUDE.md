@@ -264,6 +264,23 @@ the *formatter*, not the parser.
   to be two unrecognised tokens, and `Foo::bar()` was reported as
   `bar (no qualifier, not in file)` — naming the wrong problem and unresolvable even with the
   component on disk.
+- **A string can hold an expression that holds a string, and only CFScript may
+  assume so.** `"#DayOfWeek("{ts '2000-1-1'}")#"` is one token; taking the first
+  matching quote as the end left `"#DayOfWeek("`, so the interpolation had no
+  closing `#` and its call was invisible — and the swallowed terminator took the
+  rest of the construct with it, 3,165 sites over 461 corpus files. `scanString`
+  now steps *over* a `#...#` and over any string opened inside it. It is
+  **opt-in** (`Scanner.interpStrings`, set by `scriptParser.asCFScript()`)
+  because text that is not CFScript reaches the same scanner — `parseFuncBody`
+  hands a tag function's raw body to the script parser — and on markup the rule
+  is a *wrong* answer rather than a coarse one: `<a href="#top">x</a><a
+  href="#bot">y</a>` pairs the two fragment hashes and swallows the tags between
+  them. `newGlobalScriptParser` opts in for correctness, not for calls: the two
+  variable scans must tokenise a file alike, and without it `variables.a =
+  "#f("x=1")#"` declares a phantom `x` in variables scope. The scan is
+  speculative — unclosed nesting falls back to the plain quote-to-quote scan, so
+  a token is never worse than before — and capped at `maxStringNesting` for the
+  reason `maxArgNesting` exists.
 - **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
   `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
   the case in all of them. Three of the five were still reporting a bare `bar` when the first

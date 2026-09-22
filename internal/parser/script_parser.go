@@ -103,6 +103,18 @@ func (p *scriptParser) addCall(call CallSite) {
 	}
 }
 
+// asCFScript marks the parser's text as genuine CFScript rather than a tag
+// function's raw body, which turns on interpolation-aware string scanning.
+//
+// It is opt-in so that a caller which has not thought about it gets the safe
+// scan: applied to markup the rule pairs the hashes of two `href="#…"`
+// fragments and swallows what is between them. See Scanner.scanString.
+func (p *scriptParser) asCFScript() *scriptParser {
+	p.sc.interpStrings = true
+
+	return p
+}
+
 // recordBareCallAndChain handles funcName(...) optionally followed by .method(...) chains.
 func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	caller := ""
@@ -1320,6 +1332,7 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 
 	for _, span := range interpolatedSpans(tok.Value) {
 		p.sc = NewScanner(tok.Value[span.start:span.end])
+		p.sc.interpStrings = true
 
 		for {
 			t := p.sc.NextSkipComments()
@@ -2890,9 +2903,15 @@ type globalScriptParser struct {
 	scopes   []FuncScope
 }
 
+// newGlobalScriptParser is only ever handed a RegionScript's text, so its
+// scanner reads interpolated strings the way scriptParser's does — otherwise
+// the two variable scans would tokenise the same file differently.
 func newGlobalScriptParser(src string, baseLine int, scopes []FuncScope) *globalScriptParser {
+	sc := NewScanner(src)
+	sc.interpStrings = true
+
 	return &globalScriptParser{
-		sc:       NewScanner(src),
+		sc:       sc,
 		baseLine: baseLine,
 		scopes:   scopes,
 	}
