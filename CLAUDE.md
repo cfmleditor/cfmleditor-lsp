@@ -1091,6 +1091,12 @@ is treated as ended and the rest of the comment is scanned as live tags — repo
 as an unresolved call. Quoted attribute values *are* handled (`<cfset s = "a > b">`,
 `hint="returns a > b"` and `<a title="x > y">` all parse correctly); only comments are missed.
 
+**The `>`-in-a-string half of this is fixed.** `tagEndIndex` is the shared
+quote-skipping scan that note asked for, and the walk's one tag-end site goes
+through it: `<cfset x = array( f( "a<br>b" ), g( "c" ) )>` no longer ends at the
+`<br>`. Comments between attributes are still missed, and the other sites that
+locate a `>` by hand still do.
+
 **It is close to unreachable.** One file in the 5,624-file corpus contains the shape —
 `Lucee/test/jira/Jira3190/index.cfm`, a regression test whose comment holds no code — so the
 corpus produces zero false positives from it. Fixing it means one shared `tagEndIndex` helper
@@ -1371,6 +1377,17 @@ share that rule**: it fixed one corpus site and broke thirty-six, because
 skipping quoted strings runs a span much further in markup. A wrong span costs
 the walk a tag and costs `interpolatedSpans` a call, and they are tuned for their
 own error.
+
+**A lone `#` in a CFML string is invalid, Lucee tolerates it, and the scanner
+cannot tell it from interpolation.** `md.append( "# ColdBox Performance Report" )`
+opens a span that closes at the next *real* interpolation two lines below,
+swallowing every call between. Requiring a span to open and close on one line
+looks obviously right and costs 45 sites net over the corpus, because a span
+that genuinely wraps a line is how ContentBox writes a form field —
+`#html.inputField(\n name = "authorEmail",\n …\n)#`. Both shapes cross lines,
+hold quotes and hold a `(`; telling them apart needs to know the first `#` was
+never interpolation, which is a fact about the enclosing expression rather than
+the string. PARSER-GAPS.md §4.2 has the measurement.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in

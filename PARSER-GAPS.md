@@ -41,16 +41,16 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.3 | After §3.7 | After §3.11 |
+| | Before | After §3.3 | After §3.7 | After §3.13 |
 |---|---:|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **556 (9.9%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **1,144** |
-| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 652 |
+| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **551 (9.8%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **1,109** |
+| Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 657 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **787** after
-§3.11, and the parser-only figure falls from 343 to 295. Of the 787 that remain,
-**545 are the deliberate differences in §4.1**, so about 240 are real.
+figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **748** after
+§3.13. Of those 748, **545 are the deliberate differences in §4.1**, so about
+**200 are real**.
 
 The per-step figures are:
 
@@ -67,6 +67,8 @@ The per-step figures are:
 | §3.9 a scoped chain's receiver | 639 | 1,408 | 1,051 | 650 |
 | §3.10 a span is not a tag boundary | 599 | 1,267 | 910 | 650 |
 | §3.11 a span may hold a nested span | 556 | 1,144 | 787 | 652 |
+| §3.12 a line comment ends at CR | 554 | 1,129 | 772 | 652 |
+| §3.13 a quote-aware tag end | 551 | 1,109 | 748 | 657 |
 
 The difference between the two keyings is **line skew**: a multi-line `<cfset>`
 or `<cfif>` records its calls at the tag's starting line while the grammar puts
@@ -384,7 +386,7 @@ Markup written inside a span is an argument, not a tag. The walk found the next
 unterminated `#` — losing that call — and the hashes left over mis-paired with
 the next span, losing the call after it too.
 
-This is the §4.2 entry a previous round recorded as known-and-not-fixed after an
+This is the entry a previous round recorded as known-and-not-fixed after an
 attempt took missed sites from 1,798 to 3,025. **That attempt was wrong in one
 line**: it advanced only past the *opening* hash of a span it declined, so the
 closing hash became the next opening one and every pairing after it was
@@ -430,6 +432,37 @@ walk's conservative pairing splits a span this scan would read whole.
 `Parse_TagCFC` +1.4% on the minimum of 25 interleaved samples, which is the one
 cost in this round that lands on the editor's keystroke path.
 
+### 3.12 A line comment ends at a carriage return
+
+Five of the 5,629 corpus files use CR-only line endings, and the scanner's `//`
+scan looked for `\n` alone — so the first comment in such a file swallowed
+everything after it. In ColdBox's `EventHandler.cfc` that was the whole
+component: 2.5KB on what the scanner read as one line.
+
+Only the comment's **end** moves. Line numbers still count `\n` alone, which is
+what tree-sitter does, so the two keep agreeing about where a call is; making
+CR a line break as well is a question about editor positions rather than about
+parsing, and these files are 0.09% of the corpus. **15 name-keyed sites.**
+
+### 3.13 A tag's closing `>` is not always the first one
+
+```cfml
+<cfset fields = array( field( "Host:Port&lt;new line><br>" ), field( "b" ) )>
+<cfset assertEquals( "yyx<P>", rereplace( paragraphFormat( x ), "s", "", "all" ) )>
+```
+
+A CF tag holds an expression and an expression holds strings. Cut at the `>`
+inside one, everything after it is in no tag and in no text the walk scans, so
+it is recorded nowhere. Lucee's cache-driver components and its `<P>`-asserting
+tests are both written this way.
+
+`tagEndIndex` is the shared helper the comment-in-an-attribute-list note in
+CLAUDE.md asks for, routed through the walk's one tag-end site. A quote that
+never closes falls back to the plain scan, so a malformed tag reads exactly as
+it did before. **24 name-keyed sites**, and five new parser-only entries that
+are the multi-line `<cfset>` line skew in §2 — the calls are found, at the tag's
+starting line.
+
 ## 4. Known and not fixed
 
 ### 4.1 `createObject`, `entityNew`, `entityLoad` — 545 sites, deliberate
@@ -444,7 +477,38 @@ nobody writes down. Their fixture lines sit at the end of
 `testdata/DefinitionTest.cfc` because `definition_testdata_test.go` addresses
 that file by line number.
 
-### 4.2 The parser records 652 sites the grammar does not
+### 4.2 A lone `#` in a CFScript string — 36 sites, one file
+
+```cfml
+md.append( "# ColdBox Performance Analysis Report" )
+md.append( "" )
+md.append( "Generated: #ts# | Iterations: #r.iterations#" )
+```
+
+A single unescaped `#` in a CFML string is invalid — the escape is `##` — and
+Lucee tolerates it, which is how Markdown headings reach `md.append`. The
+interpolation-aware scan (§3.3) takes it as opening a span, and the span closes
+at the next *real* interpolation two lines below, swallowing every call in
+between. All 36 sites are ColdBox's `PerformanceSuite.cfc`, and they are the
+largest single file left.
+
+**The obvious rule costs more than it saves.** Requiring a span to open and
+close on one line takes the name-keyed figure from 748 to **793** and breaks 17
+files: a span that genuinely wraps a line is how ContentBox writes a form —
+
+```cfml
+#html.inputField(
+        name  = "authorEmail",
+        value = event.getValue( "authorEmail", oCurrentAuthor.getEmail() )
+    )#
+```
+
+and that is 23 sites in `CommentForm.cfc` alone. Neither shape is
+distinguishable from the other locally: both cross lines, both hold quotes, both
+hold a `(`. Telling them apart needs to know that the first string's `#` is not
+interpolation at all, which is a question about the *enclosing* expression.
+
+### 4.3 The parser records 657 sites the grammar does not
 
 Three causes, none of them a wrong answer about code that runs:
 
@@ -458,6 +522,9 @@ Three causes, none of them a wrong answer about code that runs:
 
 ## 5. What would change these decisions
 
+- **§4.2** — a rule that can tell a Markdown `#` from an interpolation. The
+  measurement above is the starting point: the one-line rule is already tried
+  and costs 45 sites net.
 - **§3.10 and §3.11's heuristics** — the honest fix is the tag walk knowing where
   interpolation is *live*, which is `<cfoutput>` nesting plus attribute context.
   Until then the two scans stay deliberately different, and the table in §3.10 is
