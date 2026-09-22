@@ -2558,7 +2558,9 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	p.forceGlobal = false
 }
 
-// skipNestedFunction skips a nested function declaration and its body.
+// skipNestedFunction handles a function met inside another function's body or
+// inside a group. An anonymous one is a value and only its body is scanned; a
+// named one is declared, for the reason the named branch gives.
 func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	// Handle access modifier before function keyword
 	if !identEq(tok.Value, "function") {
@@ -2599,17 +2601,34 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	if nameTok.Kind != TokIdent {
 		return
 	}
-	// Skip args
+
 	lp := p.sc.NextSkipComments()
 	if lp.Kind != TokLParen {
 		return
 	}
 
-	if _, ok := p.scanParenBody(); !ok {
-		return
-	}
+	// A *named* nested function is a declaration, not a value. CFML hoists it
+	// into the enclosing component's variables scope, which is what lets
+	// `function run(){ setup(); function setup(){…} }` call it before the line
+	// it is written on — and the tag parser has always recorded it, so the two
+	// syntaxes disagreed about the same code. Without it there is no index
+	// entry, no completion and nowhere for go-to-definition to land.
+	//
+	// The argument list goes through parseArgList rather than scanParenBody so
+	// the signature reaches signature help; both record the calls an argument
+	// default holds, since parseArgList routes one through skipDefault.
+	args := p.parseArgList()
+	funcLine := p.baseLine + tok.Line
 
-	p.scanNestedFunctionBody()
+	p.funcs = append(p.funcs, FunctionDef{
+		Name:      nameTok.Value,
+		URI:       uriFromString(p.fileURI),
+		Line:      uint32(funcLine),
+		Arguments: args,
+	})
+
+	endLine := p.scanNestedFunctionBody()
+	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Start: funcLine, End: p.baseLine + endLine})
 }
 
 // scanNestedFunctionBody consumes a nested function's `{ ... }` or `;`,
@@ -2623,30 +2642,33 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 //
 // The calls are attributed to the *enclosing* function, which is where the
 // closure's code runs from and matches what an argument-position closure
-// already did. Its own scope is not declared: a nested function is not a method
-// of the component, for the reason parseFunctionValue gives.
-func (p *scriptParser) scanNestedFunctionBody() {
+// already did. An anonymous closure declares no scope of its own — it is a
+// value, for the reason parseFunctionValue gives — so the line this returns is
+// read only by the named branch, which does.
+func (p *scriptParser) scanNestedFunctionBody() int {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
 
-		return
+		return tok.Line
 	}
 
 	if tok.Kind != TokLBrace {
-		return
+		return tok.Line
 	}
 
 	p.sc.NextSkipComments()
 
 	depth := 1
+	last := tok.Line
 
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
+		last = t.Line
 
 		switch t.Kind { //nolint:exhaustive
 		case TokEOF:
-			return
+			return last
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -2657,6 +2679,8 @@ func (p *scriptParser) scanNestedFunctionBody() {
 			p.handleLiteralToken(t)
 		}
 	}
+
+	return last
 }
 
 func (p *scriptParser) checkAssignRef(tok Token) {
@@ -3575,9 +3599,20 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		return
 	}
 
+	// A named function met inside a group is a declaration, and CFML hoists it
+	// into the enclosing component's variables scope however deeply it is
+	// nested — `it( function(){ function helper(){…} })` declares `helper`.
+	// Reaching skipNestedFunction from here is what makes that true in every
+	// group, since this is the one place all six token loops dispatch an
+	// identifier through.
+	if identEq(tok.Value, "function") {
+		p.skipNestedFunction(tok, 0)
+
+		return
+	}
+
 	// Any other keyword is handled by what follows it rather than by being
-	// read as a receiver: `function` opens a closure whose body is just more
-	// tokens in this group.
+	// read as a receiver.
 	if isKeyword(tok.Value) {
 		return
 	}

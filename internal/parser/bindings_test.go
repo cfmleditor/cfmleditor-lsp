@@ -378,3 +378,82 @@ func TestImportQualifiesABareComponentName(t *testing.T) {
 		})
 	}
 }
+
+// A *named* function declared inside another function's body is a declaration,
+// not a value: CFML hoists it into the component's variables scope, which is
+// what lets the enclosing function call it before the line it is written on.
+// The parser recorded nothing, so there was no index entry, no completion and
+// nowhere for go-to-definition to land — while the tag parser had always
+// recorded the same code, so the two syntaxes disagreed.
+func TestNamedNestedFunctionsAreDeclared(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+		args int
+	}{
+		{
+			"called before it is written",
+			"setup();\n  function setup(required string a) { return a; }",
+			[]string{"run", "setup"}, 1,
+		},
+		{
+			"inside a closure argument",
+			"describe(\"x\", function() { function helper(b, c) { return b; } });",
+			[]string{"run", "helper"}, 2,
+		},
+		{
+			"with an access modifier",
+			"private function helper(b) { return b; }",
+			[]string{"run", "helper"}, 1,
+		},
+
+		// An anonymous function is a value, not a declaration — a var-scoped
+		// closure is private to the one function, and declaring it would put it
+		// in every caller's completion list.
+		{"anonymous stays a value", "var f = function(a) { return a; };", []string{"run"}, 0},
+		{"anonymous arrow stays a value", "var f = (a) => a;", []string{"run"}, 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pr := Parse(testURI, "component {\n function run() {\n  "+c.body+"\n }\n}\n")
+
+			got := make([]string, 0, len(pr.Funcs))
+			for _, f := range pr.Funcs {
+				got = append(got, f.Name)
+			}
+
+			if !slices.Equal(got, c.want) {
+				t.Fatalf("funcs: got %v want %v", got, c.want)
+			}
+
+			if len(c.want) > 1 {
+				if n := len(pr.Funcs[1].Arguments); n != c.args {
+					t.Errorf("arguments: got %d want %d", n, c.args)
+				}
+			}
+		})
+	}
+}
+
+// The nested function's scope has to end at its own closing brace, not at the
+// enclosing function's — scanNestedFunctionBody reports that line because it is
+// the only thing that consumed it.
+func TestANestedFunctionScopeEndsAtItsOwnBrace(t *testing.T) {
+	src := "component {\n" + // 0
+		" function run() {\n" + // 1
+		"  function setup() {\n" + // 2
+		"   return 1;\n" + // 3
+		"  }\n" + // 4
+		"  return setup();\n" + // 5
+		" }\n" + // 6
+		"}\n" // 7
+
+	pr := Parse(testURI, src)
+
+	want := []FuncScope{{Name: "run", Start: 1, End: 6}, {Name: "setup", Start: 2, End: 4}}
+	if !slices.Equal(pr.Scopes, want) {
+		t.Errorf("got %v want %v", pr.Scopes, want)
+	}
+}
