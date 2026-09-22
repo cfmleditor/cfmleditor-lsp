@@ -92,8 +92,24 @@ type Scanner struct {
 
 // NewScanner creates a scanner for the given source.
 func NewScanner(src string) *Scanner {
-	return &Scanner{src: src}
+	// A UTF-8 BOM is an encoding marker, not a token. It is invisible in an
+	// editor and 561 of the 5,629 corpus files carry one, so a scanner that
+	// stops at it answers "the first token is not `component`" — which is what
+	// ClassifyRegions asks to decide whether a `.cfc` is script or tag syntax.
+	// Such a file then went to the tag splitter, and one that mentions
+	// `<script>` inside a string literal came apart into regions parsed from
+	// the middle of an expression: 800 lines of ColdBox's HTMLHelperSpec with
+	// no function and almost no call found.
+	sc := &Scanner{src: src}
+	if strings.HasPrefix(src, bomUTF8) {
+		sc.pos = len(bomUTF8)
+	}
+
+	return sc
 }
+
+// bomUTF8 is the UTF-8 byte order mark.
+const bomUTF8 = "\xef\xbb\xbf"
 
 // Pos returns the current byte offset.
 func (s *Scanner) Pos() int { return s.pos }
@@ -396,26 +412,39 @@ func (s *Scanner) scanString(start, startLine int) Token {
 	return Token{Kind: TokString, Value: s.src[start:s.pos], Offset: start, Line: startLine}
 }
 
-// scanQuotedPlain consumes a quoted string, taking the first unescaped matching
-// quote as the end. This is what the scanner always did.
+// scanQuotedPlain consumes a quoted string, taking the first matching quote that
+// is not doubled as the end.
+//
+// **CFML escapes a quote by doubling it and has no backslash escape at all.**
+// The scanner honoured `\\` instead, which is C's rule and not this language's,
+// so a string ending in a backslash — a Windows path, a regex class, the
+// `listLast( uri, "/\\" )` idiom — did not close where it ends. It closed at the
+// *next* quote anywhere in the file, swallowing every call in between: one
+// two-character string cost 333 call sites in one corpus component. Doubling is
+// checked from inside the string, so a bare `""` is still the empty string and
+// `""""` is a string holding one quote.
 func (s *Scanner) scanQuotedPlain() {
 	q := s.src[s.pos]
 	s.pos++
 
-	for s.pos < len(s.src) && s.src[s.pos] != q {
-		if s.src[s.pos] == '\\' && s.pos+1 < len(s.src) {
+	for s.pos < len(s.src) {
+		switch s.src[s.pos] {
+		case q:
+			if s.pos+1 < len(s.src) && s.src[s.pos+1] == q {
+				s.pos += 2
+
+				continue
+			}
+
+			s.pos++
+
+			return
+		case '\n':
+			s.line++
+			s.pos++
+		default:
 			s.pos++
 		}
-
-		if s.src[s.pos] == '\n' {
-			s.line++
-		}
-
-		s.pos++
-	}
-
-	if s.pos < len(s.src) {
-		s.pos++ // closing quote
 	}
 }
 
@@ -430,18 +459,19 @@ func (s *Scanner) scanQuoted(depth int) bool {
 	s.pos++
 
 	for s.pos < len(s.src) {
-		switch c := s.src[s.pos]; {
-		case c == q:
+		switch s.src[s.pos] {
+		case q:
+			// A doubled quote is CFML's escape; see scanQuotedPlain.
+			if s.pos+1 < len(s.src) && s.src[s.pos+1] == q {
+				s.pos += 2
+
+				continue
+			}
+
 			s.pos++
 
 			return true
-		case c == '\\' && s.pos+1 < len(s.src):
-			if s.src[s.pos+1] == '\n' {
-				s.line++
-			}
-
-			s.pos += 2
-		case c == '#':
+		case '#':
 			// `##` is CFML's escaped hash and opens nothing.
 			if s.pos+1 < len(s.src) && s.src[s.pos+1] == '#' {
 				s.pos += 2
@@ -452,7 +482,7 @@ func (s *Scanner) scanQuoted(depth int) bool {
 			if !s.scanHashExpr(depth + 1) {
 				return false
 			}
-		case c == '\n':
+		case '\n':
 			s.line++
 			s.pos++
 		default:

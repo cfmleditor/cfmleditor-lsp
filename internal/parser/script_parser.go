@@ -528,6 +528,51 @@ chainWalk:
 }
 
 // parseScopedVar handles: scope.name = expr (local., arguments., this., variables.)
+// recordScopedMemberCall records `scope.name(...)` — a call whose whole
+// receiver is a scope.
+//
+// Both scoped-var handlers read `scope` `.` `name` and then looked only for
+// `=` (an assignment) or `.` (a longer chain), so the shape where the statement
+// *is* the call recorded nothing: `this.init()`, `variables.buildCache()`,
+// `request.getRemoteClients()`. `x = request.getRemote()` and
+// `request.a.getRemote()` both worked, which is why this survived — it is only
+// the bare statement form that was lost, and that is how a component calls its
+// own method with an explicit scope.
+//
+// `this.` and `variables.` name a member of the component being parsed, so the
+// call is recorded unqualified and resolves against the file's own functions —
+// including the ones `parseFunctionValue` files from `this.helper = function(){}`.
+// Every other scope holds a value put there at runtime, so the receiver is
+// `$any`: the call site is recorded, and the method-exists check is skipped
+// rather than answered wrongly against a same-named function elsewhere.
+func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	call := CallSite{
+		FuncName: nameTok.Value,
+		Line:     uint32(p.baseLine + scopeTok.Line),
+		Caller:   caller,
+	}
+
+	// The scope is read from the token rather than from the Scope value the
+	// dispatch passed: `request`, `session` and `application` are all dispatched
+	// as ScopeVariables, deliberately, so that an assignment through one keeps
+	// the component its right-hand side establishes. They are not this
+	// component's members, and testing the enum would record every one of them
+	// as a call to a function of that name in this file.
+	if !identEq(scopeTok.Value, "this") && !identEq(scopeTok.Value, "variables") {
+		call.Variable = scopeTok.Value
+		call.Component = "$any"
+		call.Resolved = true
+	}
+
+	p.addCall(call)
+	p.skipParens()
+}
+
 func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
@@ -548,6 +593,12 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		if eq.Kind == TokLParen {
+			p.recordScopedMemberCall(tok, nameTok)
+
+			return
+		}
+
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if eq.Kind == TokDot {
 			var fullChain chainBuilder
@@ -1328,9 +1379,13 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 		p.argNesting--
 	}()
 
-	p.baseLine += tok.Line
+	tokBase := p.baseLine + tok.Line
 
 	for _, span := range interpolatedSpans(tok.Value) {
+		// A string token can span lines — CFML's `""` escape is what makes a
+		// multi-line one ordinary — so the span's own line is the token's start
+		// plus the newlines before it, not the token's start.
+		p.baseLine = tokBase + countNewlines(tok.Value[:span.start])
 		p.sc = NewScanner(tok.Value[span.start:span.end])
 		p.sc.interpStrings = true
 
@@ -1348,6 +1403,11 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 			}
 		}
 	}
+}
+
+// countNewlines reports how many lines a byte range spans past its first.
+func countNewlines(s string) int {
+	return strings.Count(s, "\n")
 }
 
 // hashSpan is the half-open byte range between a pair of interpolation hashes.
@@ -1765,7 +1825,7 @@ func (p *scriptParser) checkReturnComponent() {
 
 		comp = p.readNewComponent()
 		if p.sc.PeekSkipComments().Kind == TokLParen {
-			p.skipBalancedParens()
+			p.skipParens()
 		}
 
 		p.scanChainedCalls(comp, peek.Line)
@@ -2178,6 +2238,12 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		if eq.Kind == TokLParen {
+			p.recordScopedMemberCall(scopeTok, nameTok)
+
+			return
+		}
+
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if eq.Kind == TokDot {
 			var fullChain chainBuilder
@@ -2727,7 +2793,7 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 	// with no javaStubsPath, say), or the scanner would be left sitting on
 	// the "(" and the rest of the statement would be read as its own.
 	if p.sc.PeekSkipComments().Kind == TokLParen {
-		p.skipBalancedParens()
+		p.skipParens()
 
 		if component != "" {
 			p.scanChainedCalls(component, line)
@@ -2838,32 +2904,7 @@ func (p *scriptParser) scanChainedCalls(component string, line int) {
 			Resolved:  true,
 		})
 
-		p.skipBalancedParens()
-	}
-}
-
-// skipBalancedParens consumes a balanced (...) sequence from the scanner.
-func (p *scriptParser) skipBalancedParens() {
-	if p.sc.PeekSkipComments().Kind != TokLParen {
-		return
-	}
-
-	p.sc.NextSkipComments() // consume (
-
-	depth := 1
-
-	for depth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
-		}
-
-		switch t.Kind { //nolint:exhaustive
-		case TokLParen:
-			depth++
-		case TokRParen:
-			depth--
-		}
+		p.skipParens()
 	}
 }
 
@@ -3711,7 +3752,7 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 		return
 	}
 
-	p.skipBalancedParens()
+	p.skipParens()
 
 	if component == "" {
 		return

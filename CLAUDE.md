@@ -281,6 +281,49 @@ the *formatter*, not the parser.
   speculative — unclosed nesting falls back to the plain quote-to-quote scan, so
   a token is never worse than before — and capped at `maxStringNesting` for the
   reason `maxArgNesting` exists.
+- **CFML's string escapes are not C's, and the scanner used C's.** A quote is
+  escaped by **doubling** it (`"say ""hi"""`); a backslash is an ordinary
+  character. Honouring `\` meant a string ending in one — `listLast( uri, "/\" )`,
+  `"lucee-tests\" & id`, a regex class, any Windows path — did not close where it
+  ends: it closed at the next quote anywhere in the file and swallowed every call
+  in between. One occurrence cost 333 call sites in a 1,918-line component. The
+  doubling is checked *from inside* the string, which is what keeps a bare `""`
+  the empty string and `f("", "b")` two arguments. Both scanners must apply it:
+  `scanString` tries `scanQuoted` first and falls back to `scanQuotedPlain`, so a
+  `scanQuoted` still honouring the backslash is *hidden* by the fallback —
+  `TestBothStringScannersApplyTheSameEscapeRule` asserts the token text under the
+  flag because a test that only parsed a component passed with that half
+  reverted.
+- **A UTF-8 BOM is not a token, and 561 of the 5,629 corpus files carry one.**
+  `ClassifyRegions` decides script vs tag syntax by asking the scanner for the
+  first token and testing it against `component`; a scanner that stops at the BOM
+  answers "not a component" and the file goes to the tag splitter. That is
+  harmless until the file mentions `<script>`, which `isScriptFile` reads as an
+  HTML page — ColdBox's HTMLHelperSpec.cfc mentions it only inside the string
+  literals it asserts against and came apart into eight regions, each parsed from
+  the middle of an expression. `NewScanner` skips it, rather than `isScriptFile`,
+  because it should not be a token anywhere.
+- **A `new` expression's argument list is an argument list.** The four paths that
+  read one — `parseNewRef`, `parseStandaloneNew`, `checkReturnComponent`,
+  `scanChainedCalls` — each kept a `skipBalancedParens` of their own, the
+  discard-a-token-at-a-time loop `skipParenBody` replaced everywhere else. They
+  were reached from the `new` arm rather than from the argument scan, which is
+  how they survived the consolidation, and
+  `new Query( datasource = getDatasource() )` recorded no call at all. They go
+  through `skipParens` now and that function is gone.
+- **A call made directly on a scope needs its own arm, and which receiver it gets
+  is the whole question.** `this.init()`, `variables.buildCache()`,
+  `request.getRemoteClients()` recorded nothing: both scoped-var handlers read
+  `scope` `.` `name` and then looked only for `=` or `.`, so the shape where the
+  statement *is* the call fell through. `this.` and `variables.` name a member of
+  the component being parsed, so the call is recorded **unqualified** and resolves
+  against the file's own functions; every other scope holds a runtime value, so
+  the receiver is **`$any`** — recorded unqualified, `request.getRemote()` in a
+  file that declares a `getRemote` is an edge to a function the call never
+  reaches. **Read the scope from the token, not the `Scope` value**: `request`,
+  `session` and `application` are all dispatched as `ScopeVariables` so an
+  assignment through one keeps its right-hand side's component, and testing the
+  enum put every one of them in the first group.
 - **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
   `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
   the case in all of them. Three of the five were still reporting a bare `bar` when the first
@@ -1288,6 +1331,19 @@ Three things about it, each of which cost a wrong conclusion first:
 It cannot check resolution at all — the grammar has no idea what a dot-path
 points at — and it is only as good as the corpus: the repo's fixtures contain
 zero interpolated calls, which is why the size of that gap is still unmeasured.
+
+**An obviously-right fix to the tag walk is the one to measure hardest.**
+Markup inside a `#...#` span splits the span, so
+`#ETH.author( content = "<strong>x</strong>" )#` loses its call *and* mis-pairs
+its leftover hashes with the next span, losing that one too. Making the walk
+step over a span — guarded on the span holding a `(`, since a call is the only
+thing it contributes there — fixed every file it was written for and took missed
+sites from 1,798 to **3,025**, newly breaking 113 others. Hashes interpolate
+inside `<cfoutput>` and in a tag's attributes and the walk tracks neither, so the
+pairing runs through real tags: `value="#thisSite[ 'siteID' ]#"` before a
+`<cfif>` whose condition ends in `getsiteID()` is enough. It is reverted and
+recorded in PARSER-GAPS.md §4.2 with the numbers, because the next person to
+look at those email templates will reach for the same fix.
 
 **A hand-maintained parallel list wants a reflective test.** Wherever the same
 names must appear in two or more places, enumerate them in a test rather than in

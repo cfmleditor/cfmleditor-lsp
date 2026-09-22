@@ -26,6 +26,8 @@ import (
 // own, and the parser deliberately models some things differently.
 var expectedDifferences = map[string]string{
 	"createobject": "deliberate: the parser records a ComponentRef, not a CallSite",
+	"entitynew":    "deliberate: an ORM entity factory, recorded as a ComponentRef like createObject",
+	"entityload":   "deliberate: an ORM entity factory, recorded as a ComponentRef like createObject",
 }
 
 func parserCalls(path string, src []byte) []Call {
