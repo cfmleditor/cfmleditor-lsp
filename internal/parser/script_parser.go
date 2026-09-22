@@ -528,6 +528,51 @@ chainWalk:
 }
 
 // parseScopedVar handles: scope.name = expr (local., arguments., this., variables.)
+// recordScopedMemberCall records `scope.name(...)` — a call whose whole
+// receiver is a scope.
+//
+// Both scoped-var handlers read `scope` `.` `name` and then looked only for
+// `=` (an assignment) or `.` (a longer chain), so the shape where the statement
+// *is* the call recorded nothing: `this.init()`, `variables.buildCache()`,
+// `request.getRemoteClients()`. `x = request.getRemote()` and
+// `request.a.getRemote()` both worked, which is why this survived — it is only
+// the bare statement form that was lost, and that is how a component calls its
+// own method with an explicit scope.
+//
+// `this.` and `variables.` name a member of the component being parsed, so the
+// call is recorded unqualified and resolves against the file's own functions —
+// including the ones `parseFunctionValue` files from `this.helper = function(){}`.
+// Every other scope holds a value put there at runtime, so the receiver is
+// `$any`: the call site is recorded, and the method-exists check is skipped
+// rather than answered wrongly against a same-named function elsewhere.
+func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	call := CallSite{
+		FuncName: nameTok.Value,
+		Line:     uint32(p.baseLine + scopeTok.Line),
+		Caller:   caller,
+	}
+
+	// The scope is read from the token rather than from the Scope value the
+	// dispatch passed: `request`, `session` and `application` are all dispatched
+	// as ScopeVariables, deliberately, so that an assignment through one keeps
+	// the component its right-hand side establishes. They are not this
+	// component's members, and testing the enum would record every one of them
+	// as a call to a function of that name in this file.
+	if !identEq(scopeTok.Value, "this") && !identEq(scopeTok.Value, "variables") {
+		call.Variable = scopeTok.Value
+		call.Component = "$any"
+		call.Resolved = true
+	}
+
+	p.addCall(call)
+	p.skipParens()
+}
+
 func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
@@ -548,6 +593,12 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		if eq.Kind == TokLParen {
+			p.recordScopedMemberCall(tok, nameTok)
+
+			return
+		}
+
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if eq.Kind == TokDot {
 			var fullChain chainBuilder
@@ -2187,6 +2238,12 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 	eq := p.sc.PeekSkipComments()
 	if eq.Kind != TokEquals {
+		if eq.Kind == TokLParen {
+			p.recordScopedMemberCall(scopeTok, nameTok)
+
+			return
+		}
+
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if eq.Kind == TokDot {
 			var fullChain chainBuilder
