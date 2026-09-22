@@ -127,3 +127,50 @@ func TestHashesThatAreNotASpanDoNotSwallowTags(t *testing.T) {
 		})
 	}
 }
+
+// A string inside a `#...#` span may hold a span of its own — CFML nests them —
+// and `interpolatedSpans` took the first `#` it met as the close. So the *inner*
+// opening hash terminated the outer span, the outer call was sub-parsed from a
+// fragment, and every pairing after it on the line was inverted.
+//
+// `Scanner.scanHashExpr` already reads CFScript this way. This is the same rule
+// for the text a tag parser hands over, and the two are the parallel
+// implementations CLAUDE.md warns about.
+func TestAnInterpolatedSpanMayHoldAStringHoldingASpan(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			// ContentBox's themes write asset paths this way: 24 sites.
+			"nested span in a quoted argument",
+			`<link href="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#">`,
+			[]string{"elixirPath", "themeRoot", "themeRoot"},
+		},
+		{
+			"doubled quotes inside the nested span's argument",
+			`<div>#replace("#a.b#","{u}","<a href=""h"">x</a>")#</div>`,
+			[]string{"replace"},
+		},
+		{
+			// matchingHash gives up on an unterminated quote, and the scan used
+			// to give up with it — losing every span later in the same chunk.
+			// An apostrophe in prose is enough to reach that.
+			"an unterminated quote does not end the scan",
+			"<cfoutput>Rule #1: don't #svc.load()# #svc.save()#</cfoutput>",
+			[]string{"load", "save"},
+		},
+		{
+			"a plain span is unaffected",
+			`<cfoutput>#svc.load( "a" )#</cfoutput>`,
+			[]string{"load"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tagFileCalls(t, c.src); !slices.Equal(got, c.want) {
+				t.Errorf("got %v want %v", got, c.want)
+			}
+		})
+	}
+}

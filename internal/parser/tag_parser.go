@@ -154,6 +154,14 @@ func nextTagStart(s string) int {
 			continue
 		}
 
+		// The next '#', not matchingHash: the two scans legitimately differ,
+		// because they optimise different errors. A wrong span here costs a
+		// *tag* — everything between the hashes stops being markup — so this
+		// one stays conservative and pairs hashes as they come. A wrong span
+		// in interpolatedSpans costs at most a call, so that one follows CFML's
+		// nesting through quoted strings. Making this share that rule fixed one
+		// corpus site and broke thirty-six: skipping quoted strings runs a span
+		// much further in markup, and Lucee's doc pages lost their tags to it.
 		rel := strings.IndexByte(s[at+1:], '#')
 		if rel < 0 {
 			// Unterminated: the chunk is a fragment of some tag's attribute

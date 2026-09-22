@@ -1506,18 +1506,13 @@ func interpolatedSpans(s string) []hashSpan {
 			continue
 		}
 
-		end := -1
-
-		for j := i + 1; j < len(s); j++ {
-			if s[j] == '#' {
-				end = j
-
-				break
-			}
-		}
-
+		end := matchingHash(s, i+1)
 		if end < 0 {
-			break
+			// A lone `#` — a CSS colour, a jQuery id selector, prose. It opens
+			// nothing, and the spans after it are still spans: this used to
+			// give up on the whole remainder, which lost every interpolation
+			// later in the chunk.
+			continue
 		}
 
 		if end > i+1 {
@@ -1528,6 +1523,83 @@ func interpolatedSpans(s string) []hashSpan {
 	}
 
 	return spans
+}
+
+// matchingHash finds the `#` that closes a span opened just before from,
+// stepping over any quoted string on the way.
+//
+// A string inside a span may hold a span of its own — CFML nests them:
+//
+//	var u = "#html.elixirPath( root = '#cb.themeRoot()#/includes' )#";
+//
+// and taking the first `#` as the close made the *inner* opening hash the
+// outer's terminator, so the outer call was sub-parsed from a fragment and
+// every pairing after it on the line was inverted. Scanner.scanHashExpr already
+// reads CFScript this way; this is the same rule for the text a tag parser
+// hands over.
+func matchingHash(s string, from int) int {
+	// Both scans are IndexByte: a quote before the next `#` is what makes
+	// nesting possible, and only then is there anything to step over. A span
+	// with no quote in it — which is nearly all of them — costs the same two
+	// byte scans the single loop this replaces cost as one.
+	for i := from; ; {
+		h := strings.IndexByte(s[i:], '#')
+		if h < 0 {
+			return -1
+		}
+
+		end := i + h
+
+		q := indexQuote(s[i:end])
+		if q < 0 {
+			return end
+		}
+
+		j := skipQuotedIn(s, i+q)
+		if j < 0 {
+			return -1
+		}
+
+		i = j + 1
+	}
+}
+
+// indexQuote returns the offset of the first single or double quote, or -1.
+func indexQuote(s string) int {
+	d := strings.IndexByte(s, '"')
+
+	sq := strings.IndexByte(s, '\'')
+	if d < 0 {
+		return sq
+	}
+
+	if sq < 0 || d < sq {
+		return d
+	}
+
+	return sq
+}
+
+// skipQuotedIn returns the index of the quote closing the string opened at i,
+// honouring CFML's doubled-quote escape, or -1 if it never closes.
+func skipQuotedIn(s string, i int) int {
+	q := s[i]
+
+	for j := i + 1; j < len(s); j++ {
+		if s[j] != q {
+			continue
+		}
+
+		if j+1 < len(s) && s[j+1] == q {
+			j++
+
+			continue
+		}
+
+		return j
+	}
+
+	return -1
 }
 
 // isLiteralReceiver reports whether a token can close a literal that a member
