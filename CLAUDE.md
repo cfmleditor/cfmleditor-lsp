@@ -1273,6 +1273,18 @@ whatever heap the benchmarks before them left live, and `benchLoadedServer`
 leaves a 5,000-file index. Re-run the single benchmark on its own, both sides,
 before acting on any of it. The same caution applies to wins.
 
+**Compare against the branch point, not against your last build.** Five parser
+fixes in one round were each reported at around +1% on the tag benchmarks,
+because each was measured against whatever binary was left in the scratch
+directory rather than against `origin/main`. Re-measured from a clean main
+baseline the round was **+9.4%** on the plain tag parse — the editor's keystroke
+path — and the cause was a byte-at-a-time `tagEndIndex` running over every tag
+in the file. No single reading had shown it. A per-commit bisect then split the
+rest honestly: +3.6%, +2.1%, +0.8%, +1.1%, +2.2%, cumulative and none of them a
+regression on its own. **Keep a `main` build in the scratch directory and
+re-measure the whole branch against it**, and treat min, p10 and median
+disagreeing as "not yet measured" rather than as a result.
+
 **A cost that scales with the document wants a scaling test, not a timing one.**
 Every defect behind the three-second go-to-definition was invisible to the tests
 that existed, because all of them returned the right answer. `routepkg.Scan`
@@ -1377,6 +1389,19 @@ share that rule**: it fixed one corpus site and broke thirty-six, because
 skipping quoted strings runs a span much further in markup. A wrong span costs
 the walk a tag and costs `interpolatedSpans` a call, and they are tuned for their
 own error.
+
+**A `RegionSkip` is a literal `<script>` block, and dropping it dropped its
+interpolation.** The region exists so JavaScript is never fed to the CFScript
+scanner, and the region was then not parsed at all — but a `<script>` body
+inside `<cfoutput>` is exactly where a page writes
+`var id = "#prc.oContent.getContentID()#";`. It goes to the tag parser now and
+needs no mode of its own: `findScriptSkipSpans` only makes a span of a block
+holding no `<cf` tag at all, so the walk can find nothing in one *but* its
+interpolation. A flag restricting it to the spans was written first and removed,
+because it measured identically over the whole corpus *and* against the
+tag-shaped-text-in-a-JS-string case it was written for — which is not a skip
+region precisely because it contains `<cf`. 124 sites over 34 files with no
+invented call.
 
 **A lone `#` in a CFML string is invalid, Lucee tolerates it, and the scanner
 cannot tell it from interpolation.** `md.append( "# ColdBox Performance Report" )`

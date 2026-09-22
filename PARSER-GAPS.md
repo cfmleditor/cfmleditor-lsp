@@ -41,16 +41,16 @@ string-quoting shape loom large below. Read the classes, not the ratios.
 
 ## 2. Results
 
-| | Before | After §3.3 | After §3.7 | After §3.13 |
+| | Before | After §3.3 | After §3.7 | After §3.14 |
 |---|---:|---:|---:|---:|
-| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **551 (9.8%)** |
-| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **1,109** |
+| Files where the two disagree | 1,506 (26.8%) | 837 (14.9%) | 693 (12.3%) | **517 (9.2%)** |
+| Call sites the grammar sees and the parser misses | 10,451 | 5,357 | 1,798 | **985** |
 | Sites the parser records and the grammar does not | 1,065 | 1,098 | 903 | 657 |
 
 Keyed on the method name alone — ignoring which line it landed on — the missed
-figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **748** after
-§3.13. Of those 748, **545 are the deliberate differences in §4.1**, so about
-**200 are real**.
+figure is 9,726 before, 4,602 after §3.3, 1,188 after §3.7 and **624** after
+§3.14. Of those 624, **545 are the deliberate differences in §4.1**, so about
+**80 are real**.
 
 The per-step figures are:
 
@@ -69,6 +69,7 @@ The per-step figures are:
 | §3.11 a span may hold a nested span | 556 | 1,144 | 787 | 652 |
 | §3.12 a line comment ends at CR | 554 | 1,129 | 772 | 652 |
 | §3.13 a quote-aware tag end | 551 | 1,109 | 748 | 657 |
+| §3.14 a skipped `<script>`'s interpolation | 517 | 985 | 624 | 657 |
 
 The difference between the two keyings is **line skew**: a multi-line `<cfset>`
 or `<cfif>` records its calls at the tag's starting line while the grammar puts
@@ -81,6 +82,32 @@ receiver — a call recorded against the wrong receiver still counts as found.
 What it fixed was a wrong answer, and the only trace of that in the tally is the
 line: 251 sites where a rediscovered bare call landed somewhere the grammar did
 not put it.
+
+### What §3.8 – §3.14 cost
+
+Measured against `origin/main`, 21 interleaved samples, min/p10/median in
+agreement:
+
+| | |
+|---|---:|
+| `Parse_TagCFC` | **-0.7%** |
+| `Parse_TagCFC_ExtractCalls` | **+8.8%** |
+| `Parse_ScriptCFC` | -0.4% |
+| `Parse_ScriptCFC_ExtractCalls` | -0.7% |
+
+The 8.8% is **cumulative rather than one regression** — +3.6% for scanning
+bracket indexes, +2.1% for stepping over spans in the tag walk, +0.8% for
+nesting-aware hash matching, +1.1% for the quote-aware tag end, +2.2% for
+parsing script regions. Each is work the parser did not do before because it was
+not looking where the calls were. It lands on `unresolved`, the code map and
+`deps`; the editor parses without `ExtractCalls` and is flat.
+
+**Measure each of these against `main`, not against the last build you made.**
+Three of these steps were first reported at around +1%, because each was
+compared with whatever binary was in the scratch directory rather than with the
+branch point, so the drift never appeared in any single reading. It was a
+byte-at-a-time `tagEndIndex` costing 9.4% of a *plain* tag parse that finally
+showed up, and only in a clean comparison.
 
 ## 3. Fixed
 
@@ -462,6 +489,31 @@ never closes falls back to the plain scan, so a malformed tag reads exactly as
 it did before. **24 name-keyed sites**, and five new parser-only entries that
 are the multi-line `<cfset>` line skew in §2 — the calls are found, at the tag's
 starting line.
+
+### 3.14 A skipped `<script>` block's interpolation
+
+```cfml
+<script src="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#"></script>
+var contentId = "#prc.oContent.getContentID()#";
+```
+
+A literal `<script>` block with no CFML tag of its own becomes a `RegionSkip`,
+kept out of the script regions so its JavaScript is never fed to the CFScript
+scanner. The region was then dropped entirely — and a `<script>` body inside
+`<cfoutput>` is exactly where a page writes a value into its JavaScript.
+ContentBox's themes and admin panels are full of them.
+
+**124 name-keyed sites over 34 files, nothing newly differing and not one
+invented call** — the cleanest ratio of any step here. The region goes to the
+tag parser and needs no mode of its own: `findScriptSkipSpans` only makes a span
+of a block holding no `<cf` tag at all, so the walk can find nothing in one *but*
+its interpolation.
+
+A flag restricting the parse to the spans was written first and is not in the
+code, because it could not be told apart from its absence — identical over all
+5,629 corpus files, and identical against tag-shaped text inside a JS string,
+the case it was written for, which is not a skip region precisely because it
+contains `<cf`.
 
 ## 4. Known and not fixed
 
