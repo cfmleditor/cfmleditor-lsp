@@ -1774,7 +1774,7 @@ func (p *scriptParser) checkReturnComponent() {
 
 		comp = p.readNewComponent()
 		if p.sc.PeekSkipComments().Kind == TokLParen {
-			p.skipBalancedParens()
+			p.skipParens()
 		}
 
 		p.scanChainedCalls(comp, peek.Line)
@@ -2736,7 +2736,7 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 	// with no javaStubsPath, say), or the scanner would be left sitting on
 	// the "(" and the rest of the statement would be read as its own.
 	if p.sc.PeekSkipComments().Kind == TokLParen {
-		p.skipBalancedParens()
+		p.skipParens()
 
 		if component != "" {
 			p.scanChainedCalls(component, line)
@@ -2847,32 +2847,7 @@ func (p *scriptParser) scanChainedCalls(component string, line int) {
 			Resolved:  true,
 		})
 
-		p.skipBalancedParens()
-	}
-}
-
-// skipBalancedParens consumes a balanced (...) sequence from the scanner.
-func (p *scriptParser) skipBalancedParens() {
-	if p.sc.PeekSkipComments().Kind != TokLParen {
-		return
-	}
-
-	p.sc.NextSkipComments() // consume (
-
-	depth := 1
-
-	for depth > 0 {
-		t := p.sc.NextSkipComments()
-		if t.Kind == TokEOF {
-			return
-		}
-
-		switch t.Kind { //nolint:exhaustive
-		case TokLParen:
-			depth++
-		case TokRParen:
-			depth--
-		}
+		p.skipParens()
 	}
 }
 
@@ -3720,7 +3695,7 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 		return
 	}
 
-	p.skipBalancedParens()
+	p.skipParens()
 
 	if component == "" {
 		return

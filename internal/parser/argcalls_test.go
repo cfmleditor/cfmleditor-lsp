@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -145,4 +146,61 @@ func TestInstantiationInAnArgumentList(t *testing.T) {
 // `a(svc.c())` and `x.a().b(svc.c())` were found.
 func TestCallsInsideAChainedHopsArgumentsAreFound(t *testing.T) {
 	assertCalls(t, `a().b(svc.c());`, []string{"?.a", "?.b", "svc.c"})
+}
+
+// A constructor's argument list is an argument list, and the four paths that
+// read a `new` expression still discarded theirs a token at a time — the loop
+// `skipParenBody` replaced everywhere else, left behind in `parseNewRef`,
+// `parseStandaloneNew`, `checkReturnComponent` and `scanChainedCalls` as a
+// `skipBalancedParens` of their own.
+//
+// `new Query( datasource = getDatasource() )` is how ContentBox's migrations
+// reach a datasource, and the call was recorded nowhere: 118 sites on the
+// corpus under that one method name. The instantiation itself stays a
+// ComponentRef rather than a CallSite — the deliberate difference
+// `createObject` already has — so only the arguments change.
+func TestAConstructorsArgumentListIsScannedForCalls(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"var decl", `var c = new X( svc.f() );`, []string{"svc.f"}},
+		{"named argument", `var c = new X( a = svc.f() );`, []string{"svc.f"}},
+		{"bare statement", `new X( svc.f() );`, []string{"svc.f"}},
+		{"return", `return new X( svc.f() );`, []string{"svc.f"}},
+		{"this-scoped assignment", `this.p = new X( svc.f() );`, []string{"svc.f"}},
+		{"nested", `var c = new X( f( svc.g() ) );`, []string{"?.f", "svc.g"}},
+
+		// A call chained onto the instantiation has an argument list of its
+		// own, and it went through the same discarding loop.
+		{"chained hop's arguments", `var c = new X().g( svc.f() );`, []string{"?.g", "svc.f"}},
+
+		// Already correct before this, because it reaches `new` through
+		// scanNestedCall rather than through one of the four paths above. It is
+		// here so a regression in either direction shows up in one test.
+		{"inside another argument list", `a( new X( svc.f() ) );`, []string{"?.a", "svc.f"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assertCalls(t, c.body, c.want)
+		})
+	}
+}
+
+// Scanning a constructor's arguments must not turn its named arguments into
+// variables — the trap the `addCall` gate exists for, and the reason
+// `svc.save( force = true )` once declared `force`.
+func TestConstructorNamedArgumentsDoNotDeclareVariables(t *testing.T) {
+	src := "component {\n\tfunction go() {\n" +
+		"\t\tvar c = new X( datasource = getDS(), table = \"t\" );\n" +
+		"\t}\n}"
+
+	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+
+	got := pr.FuncVars(pr.Scopes[0].Start, pr.Scopes[0].End)
+	if want := []string{"c"}; !slices.Equal(got, want) {
+		t.Errorf("FuncVars: got %v want %v", got, want)
+	}
 }
