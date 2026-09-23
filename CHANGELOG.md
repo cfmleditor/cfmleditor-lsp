@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A bare call resolves through cfinclude.** An included template runs in its includer's variables scope, so a template mixed into a component can call what the component declares, what it extends and what any sibling template declares, and a page can call what it includes. These were all "no qualifier, not in file"; they now resolve, and go-to-definition and the call graph follow them. On tassweb this is 814 of the unresolved entries, with none added.
+
 ## [0.3.3]
 
 ### Added

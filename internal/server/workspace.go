@@ -180,6 +180,7 @@ func mb(b uint64) string {
 func (s *Server) applyIndexResult(fileURI uri.URI, path string, pr *parser.ParseResult) {
 	s.index.IndexFileFromResult(fileURI, pr.Funcs, pr.ComponentRefs)
 	s.index.SetThisVars(fileURI, pr.ThisVars())
+	s.index.SetIncludes(fileURI, parser.ExtractIncludes(pr.Content))
 
 	if pr.Persistent && s.isOrmPath(path) {
 		s.index.SetEntity(cfpath.CfcNameFromURI(string(fileURI)), fileURI)

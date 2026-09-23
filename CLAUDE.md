@@ -142,7 +142,7 @@ Editor document change
 | `internal/parser` | Line-scanner/tag-search parsing → `ParseResult`; resolver matching (`ast.go`) |
 | `internal/server` | LSP handler wiring, completion, definition, hover, symbols, signature help, code actions, document links, formatting, on-type formatting, watched-file reindexing, workspace commands, bean scanning |
 | `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities. `HasFile` answers "indexed at all" — not the same as `FunctionsForFile` returning nothing, since a property-only bean indexes to an empty but present entry. Two views of every entry — the name buckets (`funcs`/`comprefs`) and the per-file lists (`fileFuncs`/`fileRefs`) — hold the same pointers, and **every writer must fill or clear both**; `removeFileEntries` reaches the buckets *through* the per-file lists, so a writer that updates one view alone leaves entries no removal can find. **Accessors return a copy** (`snapshot`), which is what lets writers compact and rewrite buckets in place rather than rebuild a slice that, for a name every component declares, holds one entry per file — pinned by `TestAccessorsReturnStorageWritersDoNotTouch`. On a per-keystroke path reach for `LookupPreferred`/`CountFunctions`, not `Lookup`, which pays that copy. **Bucket order is not an answer**: entries land in the order a parallel workspace scan finished, so it differs between restarts — where several files declare a name and none is the requesting file, `LookupPreferred` picks the nearest by `cfpath.URIDistance` and the lowest URI among equals, and `definition.go` orders its multi-location list the same way |
-| `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain |
+| `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain, cfinclude scope |
 | `internal/path` | Case-insensitive path resolution, mappings, globs, `Application.cfc` mapping/bean/ORM extraction, binary + CFML file detection |
 | `internal/config` | `.cfmleditor.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
 | `internal/daemon` | Unix socket serve/proxy, connection tracking, config discovery |
@@ -906,6 +906,32 @@ factory methods): `indexFold` found the `"get"` prefix inside `"getDirectContent
 whole call, and produced `tassweb.packages.tass.directcontent` — even though it's a genuine
 iText/PdfWriter passthrough getter. `explain` surfaces this as a single `resolved "..." to "..."
 via componentResolver matching the variable name` step.
+
+## cfinclude scope
+
+A bare or `this.` call that neither the file nor its extends chain answers is looked up through
+cfinclude (`internal/resolve/includes.go`), and lands as `TargetInclude`. An included template
+runs in its includer's variables scope, so the scope is every file that includes the calling
+file, transitively, plus everything each of those — and the file itself — includes, plus the
+extends chain of any component among them. A template included into `api.cfc` beside forty
+others reaches `api.cfc`, its base, and every sibling. A file with several includers resolves
+against all of them; which one ran is not in the source.
+
+- `parser.ExtractIncludes` reads only `<cfinclude template>`, `include "…"`, `include
+  template=` and `cfinclude(template=)` naming a `.cfm`/`.cfml`, skipping `#…#` paths and
+  `<!--- --->` comments. Not `ExtractLinks`: `<cfmodule template>` runs in a scope of its own.
+  It runs on every indexed file, so it finds the keyword and matches only there — two
+  whole-file case-insensitive regexes took tassweb's index pass from 1.5s to 5.5s.
+- The index holds each file's raw include paths and an `includeGen` counter; the resolver
+  resolves them (file dir, `Application.cfc` root, mappings by first segment, workspace
+  folders) into a forward and reverse graph and rebuilds it only when the counter moves.
+- **`removeFileEntries` must not touch includes.** Every re-index runs it first, and clearing
+  them there moved the counter on every re-index of an unchanged file, rebuilding the graph —
+  thousands of stats — on each lazy index during a scan and each edit in the editor. Removal
+  goes through `setIncludesLocked(uri, nil)` in `RemoveFile`, which compares before it bumps.
+- A writer that indexes from a parse result calls `Index.SetIncludes` beside `SetThisVars`;
+  `IndexFile` sets them itself. The `unresolved` command records a template's includes without
+  indexing its functions, since a page that includes a helper can call what the helper declares.
 
 ## Component resolvers
 

@@ -7,8 +7,8 @@ import (
 
 // TargetKind classifies how a call site's callee was identified. It is the
 // difference between an edge the call graph can trust and one it has to draw
-// dashed: only TargetSameFile, TargetExtends and TargetComponent name a real
-// definition.
+// dashed: only TargetSameFile, TargetExtends, TargetInclude and
+// TargetComponent name a real definition.
 type TargetKind string
 
 // The kinds a resolved call can land on.
@@ -23,6 +23,11 @@ const (
 
 	// TargetExtends is a call satisfied by walking the extends chain.
 	TargetExtends TargetKind = "extends"
+
+	// TargetInclude is a bare call to a function declared by a file the
+	// calling file shares a variables scope with through cfinclude: its
+	// includer, something that includes, or a component one of those extends.
+	TargetInclude TargetKind = "include"
 
 	// TargetComponent is a qualified call into a component whose file and
 	// definition were both found.
@@ -47,7 +52,7 @@ const (
 // without ever finding one.
 func (k TargetKind) Definite() bool {
 	switch k {
-	case TargetSameFile, TargetExtends, TargetComponent:
+	case TargetSameFile, TargetExtends, TargetInclude, TargetComponent:
 		return true
 	case TargetNone, TargetDynamic, TargetBuiltin, TargetMember:
 		return false
