@@ -116,18 +116,19 @@ func isAbsoluteAnywhere(p string) bool {
 }
 
 // Severity maps a config severity name to the LSP value. Unknown or empty is
-// information, which every editor lists: an LSP hint is not shown in VS Code's
-// Problems panel.
+// warning, the least severe level every editor's problems panel lists: Zed's
+// lists only errors and warnings, and VS Code's leaves out hints. Information
+// was the default, and its entries showed inline in Zed but not in the panel.
 func Severity(name string) protocol.DiagnosticSeverity {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "error":
 		return protocol.DiagnosticSeverityError
-	case "warning", "warn":
-		return protocol.DiagnosticSeverityWarning
+	case "information", "info":
+		return protocol.DiagnosticSeverityInformation
 	case "hint":
 		return protocol.DiagnosticSeverityHint
 	default:
-		return protocol.DiagnosticSeverityInformation
+		return protocol.DiagnosticSeverityWarning
 	}
 }
 

@@ -698,7 +698,7 @@ panel beside everything else:
 {
   "knownIssues": {
     "scope": "open",
-    "severity": "information",
+    "severity": "warning",
     "files": [
       "docs/todo.txt",
       { "file": ".cfmleditor-cflint.txt", "severity": "warning", "scope": "workspace" }
@@ -709,12 +709,12 @@ panel beside everything else:
 
 The block's `scope` and `severity` are what its files inherit. Every key is
 optional: with no block at all, or a block that sets neither, they are `open`
-and `information`.
+and `warning`.
 
 | Key | Meaning |
 |---|---|
 | `scope` | `open` (the default) publishes a file's entries only while it is open, so a long list informs the file being worked on rather than filling the panel. `workspace` publishes every entry at startup, so the panel lists the whole project's |
-| `severity` | `error`, `warning`, `information` (the default) or `hint`. VS Code's Problems panel does not list hints |
+| `severity` | `error`, `warning` (the default), `information` or `hint`. Warning is the least severe level every editor's problems panel lists: Zed's lists only errors and warnings, so `information` entries show inline there but not in the panel, and VS Code's leaves out hints |
 | `files` | The files: each a path relative to the `.cfmleditor.json`, or an object |
 
 A file object:
