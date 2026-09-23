@@ -947,6 +947,13 @@ which every call-extracting `ParseOptions` site must pass.
   unresolved ones: the loss showed as a resolved builtin going missing.
 - **It fails open.** An unclosed output tag runs to the end of the file, and a
   close with nothing open is ignored.
+- **A `<script>` block with no CF tag is a `RegionSkip`, and still read.** It is
+  kept from the CFScript scanner but handed to the tag parser, which finds
+  nothing in it but `#...#` spans, and those only in an output context.
+- **`Caller` is filled from the line.** A sub-parser for a tag expression or a
+  `#...#` span, and a region cut from a function body, name no caller of their
+  own; `fillCallers` gives every call without one the function whose scope holds
+  its line. Before it, 514,852 of 895,451 calls in the TASS workspace had none.
 
 ## cfinclude scope
 

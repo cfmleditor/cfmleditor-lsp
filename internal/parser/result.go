@@ -515,6 +515,10 @@ func (pr *ParseResult) extractSignatures() {
 	// Sort scopes by start line to match function order.
 	sortScopes(pr.Scopes)
 
+	if pr.extractCalls {
+		pr.fillCallers()
+	}
+
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
 	if !pr.shallow {
 		pr.applyExpressionMappings()
@@ -2109,6 +2113,31 @@ func (pr *ParseResult) funcCallsUncached(funcStart, funcEnd int) []CallSite {
 }
 
 // callerAtLine returns the enclosing function name for a given line number.
+// fillCallers names the enclosing function of every call recorded without one.
+//
+// A parser names a call's caller from the functions it has parsed itself, and
+// a region cut from a function body holds none: the <cffunction> tag was in an
+// earlier region. So the calls after a <cfscript> island or a <script> block in
+// a tag function, and every #...# call inside such a block, came back with no
+// caller, and the ARGUMENTS lookup for a function-reference call and the
+// function column of find-references both lost them. The scopes are the
+// file's, so the line answers it for every region alike.
+func (pr *ParseResult) fillCallers() {
+	fill := func(calls []CallSite) {
+		for i := range calls {
+			if calls[i].Caller == "" {
+				calls[i].Caller = pr.callerAtLine(int(calls[i].Line))
+			}
+		}
+	}
+
+	fill(pr.Calls)
+
+	for _, calls := range pr.funcCallsMap {
+		fill(calls)
+	}
+}
+
 func (pr *ParseResult) callerAtLine(lineNum int) string {
 	for _, sc := range pr.Scopes {
 		if lineNum > sc.Start && lineNum < sc.End {
