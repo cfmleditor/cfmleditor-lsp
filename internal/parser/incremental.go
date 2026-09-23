@@ -19,7 +19,31 @@ const (
 // ApplyEdit updates the ParseResult incrementally after a text edit.
 // It updates the content, shifts line numbers, and re-parses only what's needed.
 // Returns the EditKind indicating what was affected.
-func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, newText string) (kind EditKind) {
+func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, newText string) EditKind {
+	return pr.applyEdit(startLine, startChar, endLine, newText, func() string {
+		startOff := posOffset(pr.Content, startLine, startChar)
+		endOff := posOffset(pr.Content, endLine, endChar)
+
+		return pr.Content[:startOff] + newText + pr.Content[endOff:]
+	})
+}
+
+// ApplyEditResult is ApplyEdit for a caller that has already applied the edit
+// to its own copy of the document: edited is the whole text after the edit, and
+// becomes pr.Content as it is.
+//
+// The server keeps the document text and this ParseResult side by side and
+// used to build the edited text once for each — two full copies of the
+// document allocated per keystroke, and two retained for as long as it is
+// open. Taking the caller's string makes them one allocation and one copy. It
+// also makes the caller's text the one the parse sees, which is the right way
+// round: the server's copy is the document, and after a burst of rapid changes
+// it is ahead of Content until the deferred full replace lands.
+func (pr *ParseResult) ApplyEditResult(startLine, startChar, endLine, _ int, newText, edited string) EditKind {
+	return pr.applyEdit(startLine, startChar, endLine, newText, func() string { return edited })
+}
+
+func (pr *ParseResult) applyEdit(startLine, startChar, endLine int, newText string, edited func() string) (kind EditKind) {
 	defer func() {
 		if r := recover(); r != nil {
 			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r))
@@ -39,9 +63,7 @@ func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, new
 	funcIdx := pr.funcContaining(startLine, endLine, startChar)
 
 	// Apply the text edit
-	startOff := posOffset(pr.Content, startLine, startChar)
-	endOff := posOffset(pr.Content, endLine, endChar)
-	pr.Content = pr.Content[:startOff] + newText + pr.Content[endOff:]
+	pr.Content = edited()
 
 	if funcIdx >= 0 {
 		// Edit is inside a function body — just shift and invalidate
@@ -86,7 +108,8 @@ func (pr *ParseResult) funcContaining(startLine, endLine, startChar int) int {
 }
 
 // closingTokenCol returns the column of the closing token (} or </cffunction>)
-// on the given line, or -1 if not found.
+// on the given line, or -1 if not found. The column is in UTF-16 code units,
+// since the edit column funcContaining compares it against is an LSP one.
 func (pr *ParseResult) closingTokenCol(line int) int {
 	lineStart := 0
 	for range line {
@@ -107,11 +130,11 @@ func (pr *ParseResult) closingTokenCol(line int) int {
 
 	// Check for </cffunction (tag-based)
 	if idx := indexCFTag(lineText, "/cffunction"); idx >= 0 {
-		return idx
+		return utf16Len(lineText[:idx])
 	}
 	// Check for closing brace (script-based)
 	if idx := strings.LastIndex(lineText, "}"); idx >= 0 {
-		return idx
+		return utf16Len(lineText[:idx])
 	}
 
 	return -1
@@ -195,22 +218,7 @@ func (pr *ParseResult) resetGlobalCaches() {
 	pr.mu.Unlock()
 }
 
-// posOffset converts line/char to byte offset.
+// posOffset converts an LSP line/character position to a byte offset.
 func posOffset(content string, line, char int) int {
-	off := 0
-	for range line {
-		idx := strings.IndexByte(content[off:], '\n')
-		if idx < 0 {
-			return len(content)
-		}
-
-		off += idx + 1
-	}
-
-	off += char
-	if off > len(content) {
-		off = len(content)
-	}
-
-	return off
+	return PositionToOffset(content, line, char)
 }

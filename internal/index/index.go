@@ -458,23 +458,29 @@ func remap[T comparable](entries []T, reps []replacement[T]) {
 // IndexFile parses the given CFC content and updates the index for that file URI.
 func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	pr := parser.Parse(fileURI, content)
+	// Every string below is cloned, for the reason IndexFileFromResult
+	// documents at length: a parsed string is a slice of the file's source,
+	// and one retained substring keeps the whole file alive. This door is the
+	// one the resolver's lazy EnsureIndexed and the CLI scans go through, and
+	// it stored the parse's own strings — so each file it indexed stayed in
+	// memory whole for the life of the index.
+	funcs := parser.CompactDefs(pr.Funcs)
+	refs := parser.CompactRefs(pr.ComponentRefs)
+	thisVars := cloneStrings(pr.ThisVars())
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
 	fk := uriKey(fileURI)
-	idx.thisVars[fk] = pr.ThisVars()
-	// Free here — this door has already parsed. strings.Clone for the reason
-	// IndexFileFromResult documents at length: a parsed string is a slice of
-	// the file's source, and one retained substring keeps the whole file alive.
+	idx.thisVars[fk] = thisVars
 	idx.extends[fk] = strings.Clone(pr.Extends)
 	idx.setIncludesLocked(fileURI, parser.ExtractIncludes(content))
 
-	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
+	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
 
-	for i := range pr.Funcs {
-		d := new(pr.Funcs[i])
+	for i := range funcs {
+		d := new(funcs[i])
 		key := strings.ToLower(d.Name)
 		idx.funcs[key] = append(idx.funcs[key], d)
 		fileDefs = append(fileDefs, d)
@@ -482,10 +488,10 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 
 	idx.fileFuncs[fk] = fileDefs
 
-	fileRefsList := make([]*parser.ComponentRef, 0, len(pr.ComponentRefs))
+	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 
-	for i := range pr.ComponentRefs {
-		r := new(pr.ComponentRefs[i])
+	for i := range refs {
+		r := new(refs[i])
 		key := strings.ToLower(r.Variable)
 		idx.comprefs[key] = append(idx.comprefs[key], r)
 		fileRefsList = append(fileRefsList, r)
@@ -506,9 +512,10 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	// 0.9x the source it was built from, for data whose own size is a few
 	// megabytes. Copying the strings as they are stored takes it to 55.6MB.
 	//
-	// Done here rather than at each caller because this is the one door into the
-	// index, and a caller that forgot would put the retention back with nothing
-	// to show it had.
+	// Done here rather than at each caller, because a caller that forgot would
+	// put the retention back with nothing to show it had. Every other door that
+	// stores a parsed string clones it too; TestIndexDoesNotRetainTheSource
+	// checks each of them.
 	funcs = parser.CompactDefs(funcs)
 	refs = parser.CompactRefs(refs)
 
@@ -807,11 +814,33 @@ func (idx *Index) ThisVarsForFile(fileURI uri.URI) []string {
 
 // SetThisVars stores this-scoped variable names for a file.
 func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
-	idx.mu.Lock()
 	// Owned, for the reason ownFunc gives: the caller's slice is a live
 	// ParseResult's, and the index must be the only writer of what it stores.
-	idx.thisVars[uriKey(fileURI)] = snapshot(vars)
+	// The strings are copied as well as the slice: they are substrings of the
+	// file's source, and copying only the slice left every component with a
+	// this-scoped variable pinning its whole file — on the workspace scan, which
+	// calls this for every file it indexes.
+	owned := cloneStrings(vars)
+
+	idx.mu.Lock()
+	idx.thisVars[uriKey(fileURI)] = owned
 	idx.mu.Unlock()
+}
+
+// cloneStrings copies a slice of strings and every string in it, so nothing
+// the result holds shares memory with the source the strings were cut from.
+// nil for an empty input, as snapshot answers.
+func cloneStrings(ss []string) []string {
+	if len(ss) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strings.Clone(s)
+	}
+
+	return out
 }
 
 // SetFuncRefs records the component refs found inside one function scope,
@@ -828,6 +857,12 @@ func (idx *Index) SetThisVars(fileURI uri.URI, vars []string) {
 // scopeKey identifies the function within the file; the caller's line range is
 // the natural choice.
 func (idx *Index) SetFuncRefs(fileURI uri.URI, scopeKey string, refs []parser.ComponentRef) {
+	// Cloned for the reason IndexFileFromResult gives. These come from an open
+	// document's ParseResult, so they would pin not the file but the version of
+	// it that was current when the function was last hovered — one superseded
+	// copy of the document per function scope, surviving every later edit.
+	refs = parser.CompactRefs(refs)
+
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 

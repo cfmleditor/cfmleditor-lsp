@@ -36,8 +36,7 @@ func (s *Server) scanFiles() []string {
 			}
 
 			if info.IsDir() {
-				name := info.Name()
-				if name == ".git" || name == "node_modules" || name == ".svn" || name == "target" || name == "vendor" {
+				if path != folder && skipScanDir(info.Name()) {
 					return filepath.SkipDir
 				}
 

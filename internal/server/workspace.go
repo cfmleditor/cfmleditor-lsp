@@ -222,8 +222,13 @@ func (s *Server) collectCFCFiles(root string) []string {
 		}
 
 		if info.IsDir() {
-			name := info.Name()
-			if name == ".git" || name == "node_modules" || name == ".svn" || name == "target" || name == "vendor" {
+			// The code map's rule, so the index and the map see one set of
+			// files. The list this replaced named .git and .svn but let every
+			// other dot-directory in, and a git worktree under .claude/ is a
+			// complete second copy of the codebase: every component indexed
+			// twice, every shared method name's bucket doubled, and
+			// go-to-definition offering the copy beside the original.
+			if path != root && skipScanDir(info.Name()) {
 				return filepath.SkipDir
 			}
 
@@ -253,6 +258,13 @@ func (s *Server) indexRoot(root string) {
 		}
 
 		if info.IsDir() {
+			// The same rule as collectCFCFiles. This walk had none at all, so
+			// a folder added mid-session indexed its node_modules and its
+			// dot-directories that the startup scan would have skipped.
+			if path != root && skipScanDir(info.Name()) {
+				return filepath.SkipDir
+			}
+
 			return nil
 		}
 

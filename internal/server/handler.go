@@ -433,10 +433,12 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 			editLine = int(r.Start.Line)
 
 			if pr != nil {
-				lastKind = pr.ApplyEdit(
+				// The edited text is handed over rather than rebuilt: one copy
+				// of the document per keystroke instead of two.
+				lastKind = pr.ApplyEditResult(
 					int(r.Start.Line), int(r.Start.Character),
 					int(r.End.Line), int(r.End.Character),
-					text,
+					text, content,
 				)
 			}
 		}

@@ -1,8 +1,10 @@
 package parser
 
-import "slices"
-
-import "strings"
+import (
+	"slices"
+	"strings"
+	"unicode/utf8"
+)
 
 // TextBeforeCursor returns all content from the start of the document up to the cursor position.
 func TextBeforeCursor(content string, line, char int) string {
@@ -361,7 +363,19 @@ func WordBeforeDot(content string, line, char int) string {
 	return lineText[start:end]
 }
 
-// PositionToOffset converts a line/character position to a byte offset.
+// PositionToOffset converts an LSP position to a byte offset in content.
+//
+// char counts UTF-16 code units, which is what an LSP character offset is
+// unless the client negotiated otherwise — and this server negotiates nothing.
+// It used to be added to the line's start as a byte count, so an edit on a line
+// holding a non-ASCII character before it landed that many bytes early: an
+// accented name, a curly quote in a comment, an emoji in a string. didChange
+// applies every keystroke through here, so the server's copy of the document
+// then disagreed with the editor's for the rest of the session, and every
+// answer on the lines after it was computed from text the user never wrote.
+//
+// A char past the end of its line stops at the line's end, as the protocol
+// says it should, rather than running on into the next line.
 func PositionToOffset(content string, line, char int) int {
 	offset := 0
 	for range line {
@@ -373,12 +387,44 @@ func PositionToOffset(content string, line, char int) int {
 		offset += idx + 1
 	}
 
-	offset += char
-	if offset > len(content) {
-		offset = len(content)
+	for units := 0; units < char && offset < len(content); {
+		if b := content[offset]; b < utf8.RuneSelf {
+			if b == '\n' {
+				break
+			}
+
+			units++
+			offset++
+
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(content[offset:])
+		units += utf16Units(r)
+		offset += size
 	}
 
 	return offset
+}
+
+// utf16Units is how many UTF-16 code units r takes: two for a rune outside the
+// Basic Multilingual Plane, one for anything else.
+func utf16Units(r rune) int {
+	if r > 0xFFFF {
+		return 2
+	}
+
+	return 1
+}
+
+// utf16Len is the length of s in UTF-16 code units.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16Units(r)
+	}
+
+	return n
 }
 
 // ApplyEdit replaces a range in content with newText.

@@ -188,33 +188,64 @@ func BenchmarkKeystroke(b *testing.B) {
 
 			const editLine = 3
 
-			chg, err := json.Marshal(protocol.DidChangeTextDocumentParams{
-				TextDocument: protocol.VersionedTextDocumentIdentifier{
-					TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
-					Version:                2,
-				},
-				ContentChanges: []protocol.TextDocumentContentChangeEvent{
-					&protocol.TextDocumentContentChangePartial{
-						Range: protocol.Range{
-							Start: protocol.Position{Line: editLine, Character: 0},
-							End:   protocol.Position{Line: editLine, Character: 0},
-						},
-						Text: "\t\tvar zz = 1;\n",
+			// Each op inserts a line and the next one removes it again, so the
+			// document stays the size it was opened at. Inserting every time
+			// grew it by a line per op, and ns/op then depended on b.N.
+			change := func(end protocol.Position, text string) []byte {
+				chg, err := json.Marshal(protocol.DidChangeTextDocumentParams{
+					TextDocument: protocol.VersionedTextDocumentIdentifier{
+						TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+						Version:                2,
 					},
-				},
-			})
-			if err != nil {
-				b.Fatal(err)
+					ContentChanges: []protocol.TextDocumentContentChangeEvent{
+						&protocol.TextDocumentContentChangePartial{
+							Range: protocol.Range{Start: protocol.Position{Line: editLine}, End: end},
+							Text:  text,
+						},
+					},
+				})
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				return chg
+			}
+
+			changes := [2][]byte{
+				change(protocol.Position{Line: editLine}, "\t\tvar zz = 1;\n"),
+				change(protocol.Position{Line: editLine + 1}, ""),
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
+			i := 0
+
 			for b.Loop() {
-				if _, err := s.handleDidChange(context.Background(), chg); err != nil {
+				// More than five changes inside 200ms is a burst, and a burst
+				// takes the path that only applies the text and defers the
+				// reparse. A benchmark issues thousands, so without this every
+				// op after the fifth measured that path instead of a keystroke.
+				s.mu.Lock()
+				delete(s.changeWindowStart, docURI)
+				s.mu.Unlock()
+
+				if _, err := s.handleDidChange(context.Background(), changes[i%2]); err != nil {
 					b.Fatal(err)
 				}
+
+				i++
 			}
+
+			b.StopTimer()
+
+			// The keystroke arms a debounced completion-cache rebuild; stop it
+			// so it does not run into the next benchmark.
+			s.mu.Lock()
+			for _, t := range s.cacheTimers {
+				t.Stop()
+			}
+			s.mu.Unlock()
 		})
 	}
 }
@@ -285,6 +316,9 @@ func BenchmarkFoldingRange(b *testing.B) {
 	for _, funcs := range []int{20, 60} {
 		b.Run(fmt.Sprintf("funcs%d", funcs), func(b *testing.B) {
 			s := newTestServer()
+			// Folding is opt-in, and with the switch off the handler returns
+			// before reading anything: this measured 2ns of early return.
+			s.Features.Folding = true
 			docURI := uri.File("/ws/open/Doc.cfc")
 
 			benchOpen(b, s, docURI, benchDoc(funcs))

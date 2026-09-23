@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The index kept whole source files in memory through three of its doors.** Parsed strings are slices of the file they came from, and a stored one keeps that file alive. `IndexFileFromResult` copied its strings, but `SetThisVars` did not, and the workspace scan calls it for every file, so every component with a `this.` variable held its whole source. `IndexFile`, used by lazy indexing and the CLI scans, and `SetFuncRefs`, which pinned a superseded copy of an open document per hovered function, did not copy theirs either. Each retained 1.1x the source it was given, and now retains under 0.01x.
+- **A function with no arguments kept an empty argument array in the index.** The parser makes room for four arguments up front, and that allocation was carried into the index. Measured on 5,632 components from six public CFML projects, the startup index now holds 9.0MB rather than 12.9MB, and the `IndexFile` path the CLI and lazy indexing use holds 9.7MB rather than 36.4MB.
+- **An edit after a non-ASCII character landed in the wrong place.** LSP positions count UTF-16 code units, and edits were applied by counting bytes, so typing after an `é` or an emoji on the same line inserted the text early. From then on the server's copy of the document disagreed with the editor's until the file was reopened. Edits are now applied in UTF-16 units, as the protocol requires.
+- **Each keystroke built the edited document twice.** The server and the open document's parse result each applied the edit to their own copy. They now share one string, so an open document is held once rather than twice.
+- **The startup index and `scanWorkspace` walked into dot-directories.** Their skip list named `.git` and `.svn`, so a git worktree under `.claude/` was indexed as a second copy of every component. A workspace folder added mid-session skipped nothing, not even `node_modules`. All three walks now use the code map's rule, which the CFLint and unresolved exports already follow.
+
 ## [0.3.4]
 
 ### Added
