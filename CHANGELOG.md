@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`dynamicIfMissing` on a componentResolver.** A broad catch-all such as `get$1()` invents a component for every getter it was not written for, and every call on the result was reported as a missing component. With the option set, a component that resolver produces and that names no file is taken as a dynamic value. Only that resolver's guesses are affected: a missing component named any other way, and a missing method on a component that exists, are still reported. On tassweb, with it set on the two `get…()` catch-alls: 894 unresolved entries to 811, none added.
+
+
 ### Fixed
 
 - **Most calls in tag files had no caller.** A call found in a `<cfif>`, `<cfset>` or `#...#` expression is recorded by a sub-parser that never knew the function it was in, and a region cut from a function body (after a `<cfscript>` island or a `<script>` block) names no caller either, since its `<cffunction>` tag was in an earlier region. Across the TASS workspace that was 514,852 of 895,451 calls. Every call is now given the function whose lines hold it, which is what find-references shows as the calling function and what a call through `ARGUMENTS.fn()` is resolved against.

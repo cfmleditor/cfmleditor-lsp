@@ -140,6 +140,12 @@ func (pr *ParseResult) classifyRegions() ([]Region, []int32) {
 	return ClassifyRegionsIdx(pr.Content)
 }
 
+// IsSoftComponent reports whether comp came, in this parse, from a resolver
+// marked dynamicIfMissing: a component whose absence is not a finding.
+func (pr *ParseResult) IsSoftComponent(comp string) bool {
+	return pr != nil && pr.resolverSet.isSoft(comp)
+}
+
 // outputGate returns the output-context ranges and cfimport prefixes of the
 // file, computed once, and whether text scanning is gated on them at all.
 func (pr *ParseResult) outputGate() (spans [][2]int, prefixes []string, gated bool) {

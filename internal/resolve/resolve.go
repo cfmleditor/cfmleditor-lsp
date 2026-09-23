@@ -596,6 +596,11 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 	// Qualified call — find the component from refs
 	comp := call.Component
+
+	// softComp is a component a dynamicIfMissing resolver produced during this
+	// resolution; the parse records its own (ParseResult.IsSoftComponent).
+	softComp := ""
+
 	if comp != "" {
 		tr.add("call.Component already set to %q (resolved earlier via chained new/createObject)", comp)
 	}
@@ -779,6 +784,10 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		)
 
 		comp, noFollow, idx = parser.ResolveFromCallMatch(variable, r.Resolvers)
+		if idx >= 0 && r.Resolvers[idx].DynamicIfMissing {
+			softComp = comp
+		}
+
 		if comp != "" {
 			tr.add("resolved %q to %q via componentResolver matching the variable name [%s] (noFollow=%v)",
 				variable, comp, r.describeResolver(idx), noFollow)
@@ -799,6 +808,10 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		)
 
 		comp, noFollow, idx = parser.ResolveFromCallMatch(call.Text, r.Resolvers)
+		if idx >= 0 && r.Resolvers[idx].DynamicIfMissing {
+			softComp = comp
+		}
+
 		if comp != "" {
 			tr.add("resolved %q to %q via componentResolver matching the full line text %q [%s] (noFollow=%v)",
 				variable, comp, call.Text, r.describeResolver(idx), noFollow)
@@ -835,6 +848,13 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			fd := r.ResolveFunc(comp, hop, baseDir)
 			if fd == nil {
 				if !r.componentExists(comp, baseDir) {
+					if softMissing(comp, softComp, pr) {
+						tr.add("%q names no file and came from a dynamicIfMissing resolver — the rest of the chain is dynamic", comp)
+						tr.hit(TargetDynamic, comp, nil)
+
+						return ""
+					}
+
 					return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 				}
 
@@ -866,9 +886,16 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			// componentResolver matching the hop's own call shape, same as the
 			// non-chain "altComp" fallback below.
 			if ret == "" {
-				var noFollow bool
+				var (
+					noFollow bool
+					hopIdx   int
+				)
 
-				ret, noFollow = parser.ResolveFromCallFull(hop+"()", r.Resolvers)
+				ret, noFollow, hopIdx = parser.ResolveFromCallMatch(hop+"()", r.Resolvers)
+				if hopIdx >= 0 && r.Resolvers[hopIdx].DynamicIfMissing {
+					softComp = ret
+				}
+
 				if ret != "" {
 					tr.add("chain hop %q on %q: no declared return type — componentResolver matched %q(): %q (noFollow=%v)", hop, comp, hop, ret, noFollow)
 				}
@@ -961,10 +988,27 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// catch-all turning getInjectorController() into tass.injectorcontroller —
 	// so saying so points at the config rather than at the code.
 	if !r.componentExists(comp, baseDir) {
+		// Unless a resolver marked dynamicIfMissing produced it: that is a
+		// broad pattern's guess, and a guess that names nothing says the value
+		// is not one of the components it was written for — not that one is
+		// missing. A component named any other way is still reported.
+		if softMissing(comp, softComp, pr) {
+			tr.add("%q names no file and came from a dynamicIfMissing resolver — accepted as dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
 		return "component '" + comp + "' does not exist (calling '" + funcName + "')"
 	}
 
 	return "method '" + funcName + "' not found in " + comp
+}
+
+// softMissing reports whether comp, which names no file, came from a
+// dynamicIfMissing resolver: during this resolution or during the parse.
+func softMissing(comp, softComp string, pr *parser.ParseResult) bool {
+	return (softComp != "" && strings.EqualFold(comp, softComp)) || pr.IsSoftComponent(comp)
 }
 
 // componentExists reports whether component, or any of its pipe-delimited

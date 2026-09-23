@@ -90,7 +90,7 @@ func cmdUnresolved(args []string) {
 		interpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored})
+			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)

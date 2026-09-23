@@ -1105,6 +1105,8 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 					r := &p.resolvers[i]
 					if r.Prefix != "" && prefixEqualFold(funcName, r.Prefix) {
 						if comp := matchResolverWithCache(funcName, r); comp != "" {
+							p.resolverSet.noteSoft(r, comp)
+
 							p.addRef(ComponentRef{
 								Variable: varName, Component: comp,
 								URI: uriFromString(p.fileURI), Line: uint32(line),

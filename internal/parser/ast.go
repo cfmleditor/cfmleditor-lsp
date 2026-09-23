@@ -237,9 +237,14 @@ type Resolver struct {
 	// Anchored requires Prefix to sit at the very start of the expression rather
 	// than anywhere inside it. See findPrefixPos.
 	Anchored bool
-	re       *regexp.Regexp // compiled regex, lazily initialized
-	simple   bool           // true if pattern is a plain string (no regex, no $N)
-	reOnce   sync.Once
+	// DynamicIfMissing treats a component this resolver produces that names no
+	// file as a dynamic value rather than a missing component. It is for a
+	// broad pattern — `get$1()` → `app.$1` — that is right for the factories it
+	// was written for and invents a path for every other getter.
+	DynamicIfMissing bool
+	re               *regexp.Regexp // compiled regex, lazily initialized
+	simple           bool           // true if pattern is a plain string (no regex, no $N)
+	reOnce           sync.Once
 	// Precomputed for simple matches
 	simplePrefix   string // part before $1
 	simpleSuffix   string // part after $1
@@ -369,6 +374,41 @@ type ResolverSet struct {
 	resolvers []Resolver
 	byByte    [256][]int // lowercase first byte → resolver indices
 	built     bool
+
+	// soft holds the components a DynamicIfMissing resolver produced during
+	// the parse this set belongs to. The parser cannot tell whether a
+	// component names a file, so it records where one came from and the
+	// resolve step, which can, decides.
+	softMu sync.Mutex
+	soft   map[string]bool
+}
+
+// noteSoft records comp as produced by r, when r is DynamicIfMissing.
+func (rs *ResolverSet) noteSoft(r *Resolver, comp string) {
+	if rs == nil || r == nil || !r.DynamicIfMissing || comp == "" {
+		return
+	}
+
+	rs.softMu.Lock()
+	defer rs.softMu.Unlock()
+
+	if rs.soft == nil {
+		rs.soft = make(map[string]bool)
+	}
+
+	rs.soft[strings.ToLower(comp)] = true
+}
+
+// isSoft reports whether a DynamicIfMissing resolver produced comp.
+func (rs *ResolverSet) isSoft(comp string) bool {
+	if rs == nil {
+		return false
+	}
+
+	rs.softMu.Lock()
+	defer rs.softMu.Unlock()
+
+	return rs.soft[strings.ToLower(comp)]
 }
 
 // BuildResolverSet creates an optimized resolver set from a slice of resolvers.
@@ -610,6 +650,8 @@ func (rs *ResolverSet) Resolve(expr string) string {
 		}
 
 		if resolved := matchResolverWithCache(sub, r); resolved != "" {
+			rs.noteSoft(r, resolved)
+
 			return resolved
 		}
 	}

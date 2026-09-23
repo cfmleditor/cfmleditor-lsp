@@ -116,3 +116,69 @@ func TestChainThroughUntypedInitKeepsTheObject(t *testing.T) {
 		t.Errorf("landed on %s %s, want the component's getName", target.Kind, target.FuncName)
 	}
 }
+
+// TestDynamicIfMissingSilencesOnlyItsOwnGuesses covers the config switch for
+// a broad catch-all such as get$1(). A component it produces that names no
+// file is its guess failing, and is accepted as dynamic. A missing component
+// named any other way — a service resolver's, a literal createObject — is
+// still a finding, and so is a missing method on one the catch-all got right.
+func TestDynamicIfMissingSilencesOnlyItsOwnGuesses(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(dir, "packages", "tass"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	tools := filepath.Join(dir, "packages", "tass", "pagetools.cfc")
+	if err := os.WriteFile(tools, []byte(`<cfcomponent><cffunction name="render"></cffunction></cfcomponent>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	resolvers := []parser.Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get", DynamicIfMissing: true},
+	}
+
+	src := `component {
+	function work() {
+		var t = obj.getTable();
+		t.setWidth(1);
+		var s = getService("nope");
+		s.run();
+		var c = createObject("component", "packages.tass.gone");
+		c.go();
+		var p = obj.getPageTools();
+		p.render();
+		p.missingMethod();
+	}
+}`
+
+	file := filepath.Join(dir, "Work.cfc")
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), src, parser.ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	r := &Resolver{FS: vfs.OS{}, Index: index.New(), Resolvers: resolvers, Mappings: map[string]string{"packages": filepath.Join(dir, "packages")}}
+
+	want := map[string]string{
+		"setWidth":      "", // the catch-all's guess names nothing: dynamic
+		"run":           "component 'packages.nope.service' does not exist",
+		"go":            "component 'packages.tass.gone' does not exist",
+		"render":        "", // the catch-all got it right
+		"missingMethod": "method 'missingMethod' not found in packages.tass.pagetools",
+	}
+
+	for _, c := range pr.AllCalls() {
+		w, ok := want[c.FuncName]
+		if !ok {
+			continue
+		}
+
+		delete(want, c.FuncName)
+
+		if _, reason := r.ResolveCallTarget(c, pr, dir); !strings.HasPrefix(reason, w) || (w == "" && reason != "") {
+			t.Errorf("%s: reason %q, want prefix %q", c.FuncName, reason, w)
+		}
+	}
+
+	if len(want) > 0 {
+		t.Errorf("calls not recorded: %v", want)
+	}
+}

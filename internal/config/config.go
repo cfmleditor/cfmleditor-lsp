@@ -89,6 +89,10 @@ type Resolver struct {
 	// instead of anywhere inside it, so a resolver cannot claim an unrelated
 	// identifier that merely contains its prefix.
 	Anchored bool `json:"anchored"`
+	// DynamicIfMissing treats a component this resolver produces that names no
+	// file as dynamic rather than reporting it missing. For a broad catch-all
+	// such as get$1(): see parser.Resolver.
+	DynamicIfMissing bool `json:"dynamicIfMissing"`
 }
 
 // PropResolver maps a property attribute to a component path.

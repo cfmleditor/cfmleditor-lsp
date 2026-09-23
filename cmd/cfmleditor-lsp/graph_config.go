@@ -100,7 +100,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 	for _, r := range found.ComponentResolvers() {
 		resolvers = append(resolvers, parser.Resolver{
 			Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-			NoFollow: r.NoFollow, Anchored: r.Anchored,
+			NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
 		})
 	}
 
