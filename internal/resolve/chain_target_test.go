@@ -116,3 +116,25 @@ func TestChainThroughUntypedInitKeepsTheObject(t *testing.T) {
 		t.Errorf("landed on %s %s, want the component's getName", target.Kind, target.FuncName)
 	}
 }
+
+// TestBareCallToAVariablesScopedFunctionIsDynamic covers
+// `#VARIABLES._renderTemplate(...)#` in a string in a tag file, which the
+// parser records as a bare call. CFML looks a bare name up in the variables
+// scope, so a call to one the file assigns there is a call through that
+// function-reference property, as the qualified form already was.
+func TestBareCallToAVariablesScopedFunctionIsDynamic(t *testing.T) {
+	src := "<cfcomponent>\n<cffunction name=\"init\">\n<cfargument name=\"render\">\n<cfset VARIABLES._render = ARGUMENTS.render>\n</cffunction>\n" +
+		"<cffunction name=\"show\">\n<cfset out = '<div>#VARIABLES._render(1)#</div>'>\n</cffunction>\n</cfcomponent>"
+
+	pr := parser.ParseWithOptions(cfpath.ToURI("/tmp/Thing.cfc"), src, parser.ParseOptions{ExtractCalls: true})
+	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
+
+	target, reason := r.ResolveCallTarget(parser.CallSite{FuncName: "_render", Line: 6}, pr, "/tmp")
+	if reason != "" || target.Kind != TargetDynamic {
+		t.Errorf("got %q %q, want a dynamic target", target.Kind, reason)
+	}
+
+	if _, reason := r.ResolveCallTarget(parser.CallSite{FuncName: "neverAssigned", Line: 6}, pr, "/tmp"); reason == "" {
+		t.Error("a bare call to a name nothing assigns must stay unresolved")
+	}
+}
