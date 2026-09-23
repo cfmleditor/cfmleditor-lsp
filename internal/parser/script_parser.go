@@ -153,9 +153,17 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	//
 	// The argument list is already consumed, so this matches callExpr as
 	// built above rather than going through tryResolveCall, which expects to
-	// read the arguments itself from an unconsumed "(".
+	// read the arguments itself from an unconsumed "(". A call with no string
+	// argument is offered as name() — getObjInit().getMailServer() — the same
+	// form tryResolveCall offers an assignment's right-hand side. It is only
+	// asked when a hop follows, since nothing else reads comp.
 	comp := ""
-	if firstArg != "" && len(p.resolvers) > 0 {
+
+	if len(p.resolvers) > 0 && p.sc.PeekSkipComments().Kind == TokDot {
+		if firstArg == "" {
+			callExpr += "()"
+		}
+
 		comp = p.resolveCall(callExpr)
 	}
 

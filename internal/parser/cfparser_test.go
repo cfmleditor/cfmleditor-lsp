@@ -3626,9 +3626,9 @@ func TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments(t *testing.T) {
 // TestChainedCall_ResolvedFirstHopOutsideAssignment covers the same
 // getService("x").method() chain where it is not an assignment's plain RHS:
 // a statement on its own, a scoped receiver, a struct-member target, a
-// condition, a nested argument and a named argument. Each reached the first
-// hop's "(" through a path that skipped its arguments unread, so the next hop
-// was recorded without the component they name.
+// condition, a nested argument, a named argument and no argument at all.
+// Each reached the first hop's "(" through a path that skipped its arguments
+// unread, so the next hop was recorded without the component they name.
 func TestChainedCall_ResolvedFirstHopOutsideAssignment(t *testing.T) {
 	content := `component {
 	function work() {
@@ -3639,11 +3639,13 @@ func TestChainedCall_ResolvedFirstHopOutsideAssignment(t *testing.T) {
 		if (NOT getService("e").callE()) {}
 		y = compareNoCase(trim(getService("f").callF()), "x");
 		z = getService(service="g").callG();
+		getObjInit().callH();
 	}
 }`
 
 	resolvers := []Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+		{Match: `^getObjInit(?:\(\))?$`, Resolve: "packages.h.service", Prefix: "getObjInit"},
 		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"},
 	}
 
@@ -3658,7 +3660,7 @@ func TestChainedCall_ResolvedFirstHopOutsideAssignment(t *testing.T) {
 		byFunc[c.FuncName] = c
 	}
 
-	for _, l := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+	for _, l := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
 		fn := "call" + strings.ToUpper(l)
 		want := "packages." + l + ".service"
 
