@@ -749,6 +749,16 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   editor falls back to its own behaviour. `rangeFormatting` is a second gate *under*
   `formatting.enabled`, not an alternative to it — it is the only one of the four that writes to
   the buffer, and it shares all its machinery with format-on-save.
+- **Columns are UTF-16 at the edge and bytes inside.** An LSP column counts
+  UTF-16 code units, and every parser helper reads a line in bytes, so a
+  handler converts once where a column arrives (`byteCol`) and once where one
+  leaves (`lineCol`, or a `colMapper` for a response carrying many ranges) —
+  never in between (`internal/server/position.go`). Casting
+  `params.Position.Character` to an int reads the line at the wrong byte on
+  any line with an `é` or an emoji before the cursor;
+  `TestNoHandlerReadsAClientColumnRaw` fails on that cast. `didChange` is
+  the exception by design: it hands its ranges to `parser.ApplyEdit`
+  unconverted, because the parser converts them against text only it holds.
 - **Completion hands its cached items over, it does not copy them.** The
   `inHashExpr` branch and the default branch both return
   `completionFromCache`'s slice directly when there is nothing to merge with it,

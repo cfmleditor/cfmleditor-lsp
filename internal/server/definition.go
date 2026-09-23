@@ -31,7 +31,7 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	line := int(params.Position.Line)
-	char := int(params.Position.Character)
+	char := byteCol(content, line, params.Position.Character)
 
 	// Stage timings, so a slow answer names the stage that was slow. Reported
 	// only when the request was slow; see defTimer.

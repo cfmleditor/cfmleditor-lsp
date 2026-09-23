@@ -50,7 +50,9 @@ func (s *Server) handleDocumentHighlight(_ context.Context, rawParams []byte) (a
 		return nil, nil
 	}
 
-	word := parser.WordAtPosition(content, int(params.Position.Line), int(params.Position.Character))
+	line := int(params.Position.Line)
+
+	word := parser.WordAtPosition(content, line, byteCol(content, line, params.Position.Character))
 	if word == "" {
 		return []protocol.DocumentHighlight{}, nil
 	}

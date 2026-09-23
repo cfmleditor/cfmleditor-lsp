@@ -53,7 +53,7 @@ func (s *Server) handleReferences(_ context.Context, rawParams []byte) (any, err
 
 	var (
 		line  = int(params.Position.Line)
-		char  = int(params.Position.Character)
+		char  = byteCol(content, line, params.Position.Character)
 		start = time.Now()
 	)
 

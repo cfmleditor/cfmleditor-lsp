@@ -25,11 +25,14 @@ func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (an
 		return []protocol.TextEdit{}, nil
 	}
 
-	return onTypeEdits(content, int(params.Position.Line), int(params.Position.Character)), nil
+	line := int(params.Position.Line)
+
+	return onTypeEdits(content, line, byteCol(content, line, params.Position.Character)), nil
 }
 
 // onTypeEdits is the handler's decision, separated from its plumbing so a test
 // can measure what it costs without a JSON round trip swamping the answer.
+// char is a byte column; the edit it returns is in LSP characters.
 func onTypeEdits(content string, line, char int) []protocol.TextEdit {
 	// One line, for the reason duplicateGtCompletion gives: this runs on every
 	// '>' the user types, and splitting the document to read one row of it was
@@ -77,8 +80,8 @@ func onTypeEdits(content string, line, char int) []protocol.TextEdit {
 	endChar := char + idx + 1
 	edits := []protocol.TextEdit{{
 		Range: protocol.Range{
-			Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
-			End:   protocol.Position{Line: uint32(line), Character: uint32(endChar)},
+			Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
+			End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, endChar)},
 		},
 		NewText: ">",
 	}}

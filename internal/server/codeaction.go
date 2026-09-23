@@ -20,7 +20,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 	}
 
 	line := int(params.Range.Start.Line)
-	char := int(params.Range.Start.Character)
+	char := byteCol(content, line, params.Range.Start.Character)
 
 	// The workspace reports come last, and wherever the cursor is: they are
 	// about the project, not the word under it. A client with no way to run a
