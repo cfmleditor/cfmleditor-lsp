@@ -608,6 +608,7 @@ for it.**
 | `folding` | **off** | Syntax-aware folding ranges. With it off the editor folds by indentation, as it did before the feature existed. |
 | `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
 | `rangeFormatting` | on | "Format Selection". Switching it off leaves whole-document formatting and format-on-save working. |
+| `outputContextInterpolation` | on | Reading `#...#` in a tag file's text only where ColdFusion evaluates it: inside `<cfoutput>`, `<cfquery>`, `<cfmail>` and `output="true"` functions, and in the attributes of CF and custom tags. Also reads a `.cfm` template with no CF tags as HTML rather than CFScript. Off, every pair of hashes in text is scanned, which finds calls in JavaScript, CSS and prose between two stray hashes. Unlike the others this changes what the parser reads, not what the server advertises. |
 
 `folding` is opt-in because it is the most expensive request here to answer. A
 script-syntax component reaches the CFML grammar as one opaque region, so

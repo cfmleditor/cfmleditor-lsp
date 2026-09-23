@@ -221,6 +221,11 @@ type Region struct {
 	Kind      RegionKind
 	StartLine int
 	Text      string
+	// Offset is Text's byte offset in the file. A tag region is a slice cut
+	// around <cfscript> blocks, and a <cfoutput> opened before one closes
+	// after it, so whether text is in an output context is a question about
+	// the file, answered at Offset plus the region-local position.
+	Offset int
 }
 
 // Resolver maps a call pattern to a component path.

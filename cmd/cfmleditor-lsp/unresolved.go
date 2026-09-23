@@ -74,6 +74,7 @@ func cmdUnresolved(args []string) {
 		mappings                 map[string]string
 		expressionMappings       map[string]string
 		servicePropertyResolvers map[string]string
+		interpolateAll           bool
 		workspaceFolders         []string
 	)
 
@@ -86,6 +87,8 @@ func cmdUnresolved(args []string) {
 		expressionMappings = cfg.ExpressionMappings()
 
 		servicePropertyResolvers = cfg.ServicePropertyResolvers()
+		interpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
+
 		for _, r := range cfg.ComponentResolvers() {
 			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored})
 		}
@@ -213,6 +216,7 @@ func cmdUnresolved(args []string) {
 				Resolvers:                cfResolvers,
 				ExpressionMappings:       expressionMappings,
 				ServicePropertyResolvers: servicePropertyResolvers,
+				InterpolateAllText:       interpolateAll,
 				ExtractCalls:             true,
 				ScanAllScopes:            true,
 				FuncLookup:               funcLookup,

@@ -6,26 +6,34 @@ import (
 
 // tagParser extracts definitions from CFML tag-based source.
 type tagParser struct {
-	src                 string
-	fileURI             string
-	funcs               []FunctionDef
-	vars                []VarDef
-	componentRefs       []ComponentRef
-	funcRefs            map[string][]ComponentRef // keyed by "start:end"
-	funcLinks           map[string][]DocumentLink // keyed by "start:end"
-	funcCalls           map[string][]CallSite     // keyed by "start:end"
-	links               []DocumentLink            // global scope links
-	calls               []CallSite                // global scope call sites
-	scopes              []FuncScope
-	pendingCalls        []pendingCall
-	properties          []propertyDef
-	extends             string
-	persistent          bool
-	lineIndex           []int32 // byte offset of each line start
-	resolvers           []Resolver
-	resolverSet         *ResolverSet
-	extractLinks        bool // whether to extract document links
-	extractCalls        bool // whether to extract all call sites
+	src           string
+	fileURI       string
+	funcs         []FunctionDef
+	vars          []VarDef
+	componentRefs []ComponentRef
+	funcRefs      map[string][]ComponentRef // keyed by "start:end"
+	funcLinks     map[string][]DocumentLink // keyed by "start:end"
+	funcCalls     map[string][]CallSite     // keyed by "start:end"
+	links         []DocumentLink            // global scope links
+	calls         []CallSite                // global scope call sites
+	scopes        []FuncScope
+	pendingCalls  []pendingCall
+	properties    []propertyDef
+	extends       string
+	persistent    bool
+	lineIndex     []int32 // byte offset of each line start
+	resolvers     []Resolver
+	resolverSet   *ResolverSet
+	extractLinks  bool // whether to extract document links
+	extractCalls  bool // whether to extract all call sites
+	// gated limits #...# scanning of text to outputSpans, the ranges of the
+	// file ColdFusion evaluates; srcOffset is this region's offset in it. The
+	// attributes of CF tags and of importPrefixes custom tags are scanned
+	// wherever they stand. See outputContext.
+	gated               bool
+	outputSpans         [][2]int
+	importPrefixes      []string
+	srcOffset           int
 	builtinReturnLookup func(string) string
 	inFunc              string // current function scope key ("start:end"), empty if global
 	// localVars holds the var'd/local. names declared in the function being
@@ -256,11 +264,13 @@ func (p *tagParser) parse() {
 
 	for pos < len(p.src) {
 		// Find next < that could be a CF tag
-		idx := nextTagStart(p.src[pos:])
+		idx := p.nextTag(pos)
 		if idx < 0 {
 			// Trailing text, which is also where the attribute list of the last
 			// declined tag in the file ends up.
-			p.scanInterpolatedText(p.src[pos:], pos)
+			if p.textEvaluated(pos) {
+				p.scanInterpolatedText(p.src[pos:], pos)
+			}
 
 			break
 		}
@@ -273,7 +283,15 @@ func (p *tagParser) parse() {
 		// becomes text before the *next* tag). Scanning it here rather than
 		// after the walk is what keeps p.inFunc live, so a call inside a
 		// function's <cfoutput> is filed against that function.
-		p.scanInterpolatedText(p.src[pos:idx], pos)
+		//
+		// Gated, it is scanned only where ColdFusion evaluates text. Output
+		// contexts open and close at tags, so a gap lies wholly inside one or
+		// wholly outside; and the attributes of a declined CF or custom tag
+		// are scanned below and stepped over, so a gap holds only text and
+		// HTML attributes, which are evaluated only inside an output context.
+		if p.textEvaluated(pos) {
+			p.scanInterpolatedText(p.src[pos:idx], pos)
+		}
 
 		// Skip CFML comments (nested)
 		if idx+4 < len(p.src) && p.src[idx:idx+5] == "<!---" {
@@ -363,7 +381,8 @@ func (p *tagParser) parse() {
 		}
 
 		// Check for CF tags we care about
-		if idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f' {
+		switch {
+		case idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f':
 			// Fast skip on the fourth byte: only tags starting cfc/cff/cfl/cfp/cfs/
 			// cfo/cfi/cfr/cfe reach the switch below (cfcomponent, cffunction,
 			// cfloop, cfparam/cfproperty, cfset, cfobject, cfif/cfinvoke,
@@ -382,7 +401,7 @@ func (p *tagParser) parse() {
 			// scanned past anyway.
 			ch := toLowerByte(p.src[idx+3])
 			if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != 'e' && ch != '/' {
-				pos = idx + 1
+				pos = p.stepOverEvaluatedTag(idx)
 
 				continue
 			}
@@ -484,7 +503,9 @@ func (p *tagParser) parse() {
 			}
 
 			pos = tagEnd
-		} else {
+		case p.gated && customPrefixTag(p.src[idx:], p.importPrefixes):
+			pos = p.stepOverEvaluatedTag(idx)
+		default:
 			pos = idx + 1
 		}
 	}
@@ -492,6 +513,53 @@ func (p *tagParser) parse() {
 	if p.extractLinks {
 		p.extractAllLinks()
 	}
+}
+
+// nextTag is nextTagStart from pos, or, gated and outside an output context, a
+// plain search for the next '<'.
+//
+// nextTagStart steps over a #...# span because markup inside one is an
+// argument, not a tag. That holds only where hashes are evaluated. Outside an
+// output context a hash is a literal character, and taking one as a span's
+// opening hid real tags: a Handlebars "{{#associated_rolls}}" in a kiosk
+// template paired with a hash far below, the walk stepped over every tag
+// between them, and the <cfif> conditions there lost their calls — which the
+// old reading only recovered by scanning the whole run as one expression.
+func (p *tagParser) nextTag(pos int) int {
+	if p.gated && !p.textEvaluated(pos) {
+		return strings.IndexByte(p.src[pos:], '<')
+	}
+
+	return nextTagStart(p.src[pos:])
+}
+
+// textEvaluated reports whether the text at pos is where ColdFusion evaluates
+// #...#. Ungated, all of it is, as the parser has always read it.
+func (p *tagParser) textEvaluated(pos int) bool {
+	return !p.gated || inSpan(p.outputSpans, p.srcOffset+pos)
+}
+
+// stepOverEvaluatedTag handles a tag the walk has no handler for but whose
+// attributes ColdFusion evaluates in any context: a <cf...> tag the fast skip
+// declines (<cfquery>, <cfmail>, <cfmodule>, <cf_custom>) or a cfimport-prefixed
+// custom tag. Gated, it scans the attributes and returns the offset past the
+// tag, so they are not left in the next text gap for the gate to drop. Ungated,
+// it keeps the old walk, which advances one byte and scans the attributes as
+// part of that gap.
+func (p *tagParser) stepOverEvaluatedTag(idx int) int {
+	if !p.gated {
+		return idx + 1
+	}
+
+	end := tagEndIndex(p.src[idx:])
+	if end < 0 {
+		return idx + 1
+	}
+
+	tagEnd := idx + end + 1
+	p.scanInterpolatedText(p.src[idx:tagEnd], idx)
+
+	return tagEnd
 }
 
 // enterFunctionScope records the <cffunction> the parser has just entered, so

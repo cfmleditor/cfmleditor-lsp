@@ -119,6 +119,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Resolvers:                resolvers,
 		ExpressionMappings:       found.ExpressionMappings(),
 		ServicePropertyResolvers: found.ServicePropertyResolvers(),
+		InterpolateAllText:       !found.ResolvedFeatures().OutputContextInterpolation,
 	}
 
 	hash := ""

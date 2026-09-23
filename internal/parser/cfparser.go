@@ -711,11 +711,11 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) {
 			if nextSkip.start > pos {
 				text := content[pos:nextSkip.start]
 				if strings.TrimSpace(text) != "" {
-					regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
+					regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
 				}
 			}
 
-			regions = append(regions, Region{Kind: RegionSkip, StartLine: lineAtOffset(idx, nextSkip.start), Text: content[nextSkip.start:nextSkip.end]})
+			regions = append(regions, Region{Kind: RegionSkip, StartLine: lineAtOffset(idx, nextSkip.start), Text: content[nextSkip.start:nextSkip.end], Offset: nextSkip.start})
 
 			pos = nextSkip.end
 			skipIdx++
@@ -730,7 +730,7 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) {
 		if openIdx > pos {
 			text := content[pos:openIdx]
 			if strings.TrimSpace(text) != "" {
-				regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
+				regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
 			}
 		}
 
@@ -740,7 +740,7 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) {
 		if closeIdx < 0 {
 			text := content[bodyStart:]
 			if strings.TrimSpace(text) != "" {
-				regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text})
+				regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text, Offset: bodyStart})
 			}
 
 			pos = len(content)
@@ -752,7 +752,7 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) {
 
 		text := content[bodyStart:closeIdx]
 		if strings.TrimSpace(text) != "" {
-			regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text})
+			regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text, Offset: bodyStart})
 		}
 
 		pos = closeIdx + 11 // len("</cfscript>")
@@ -761,7 +761,7 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) {
 	if pos < len(content) {
 		text := content[pos:]
 		if strings.TrimSpace(text) != "" {
-			regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text})
+			regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
 		}
 	}
 

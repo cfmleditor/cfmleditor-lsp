@@ -37,6 +37,10 @@ type DepResult struct {
 	Edges []DepEdge `json:"edges"`
 }
 
+// depsInterpolateAll is the features.outputContextInterpolation switch turned
+// off in the config the deps command found. One command reads one config.
+var depsInterpolateAll bool
+
 func cmdDeps(args []string) {
 	format := "json"
 
@@ -124,6 +128,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 	}
 
 	if cfg, _ := daemon.FindConfig(searchDir); cfg != nil {
+		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		expressionMappings = cfg.ExpressionMappings()
@@ -158,6 +163,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		abs, _ := filepath.Abs(f)
 		pr := parser.ParseWithOptions(uri.File(abs), string(content), parser.ParseOptions{
 			Resolvers: cfResolvers, ExpressionMappings: expressionMappings,
+			InterpolateAllText: depsInterpolateAll,
 		})
 		idx.IndexFileFromResult(pr.URI, pr.Funcs, pr.ComponentRefs)
 	}
@@ -187,7 +193,7 @@ func depsForFile(path string, resolver *resolve.Resolver, idx *index.Index) []gr
 
 	pr := parser.ParseWithOptions(fileURI, string(content), parser.ParseOptions{
 		Resolvers: resolver.Resolvers, ExpressionMappings: resolver.ExpressionMappings,
-		ExtractCalls: true,
+		ExtractCalls: true, InterpolateAllText: depsInterpolateAll,
 	})
 
 	var calls []parser.CallSite
@@ -225,7 +231,7 @@ func depsCallLoader(resolver *resolve.Resolver) func(uri.URI, string) ([]parser.
 
 			pr = parser.ParseWithOptions(fileURI, string(data), parser.ParseOptions{
 				Resolvers: resolver.Resolvers, ExpressionMappings: resolver.ExpressionMappings,
-				ExtractCalls: true,
+				ExtractCalls: true, InterpolateAllText: depsInterpolateAll,
 			})
 			parsed[fileURI] = pr
 		}

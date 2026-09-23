@@ -311,7 +311,9 @@ func TestSetExpressionsRecordTheirCalls(t *testing.T) {
 func TestRepeatedInterpolationOnOneLineIsNotDeduped(t *testing.T) {
 	for _, src := range []string{
 		`<cfoutput>#getColdBoxSetting("a")# #getColdBoxSetting("b")#</cfoutput>`,
-		`<li>#f("a")# (#f("b")#)</li>`,
+		// In <cfoutput>: a tag-free template is literal text to ColdFusion,
+		// and to the parser since it learned that (outputContext).
+		`<cfoutput><li>#f("a")# (#f("b")#)</li></cfoutput>`,
 	} {
 		t.Run(src, func(t *testing.T) {
 			if got := parserCalls("/t.cfm", []byte(src)); len(got) != 2 {

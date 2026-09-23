@@ -50,6 +50,10 @@ type ParseResult struct {
 	findCalls                []string // function names to scan for
 	scanAllScopes            bool     // scan all lines including function bodies
 	shallow                  bool     // minimal parse mode
+	interpolateAll           bool     // ParseOptions.InterpolateAllText
+	outputScanned            bool     // outputSpans and importPrefixes are computed
+	outputSpans              [][2]int // byte ranges whose text ColdFusion evaluates
+	importPrefixes           []string // <cfimport prefix="..."> values, lowercased
 
 	// contentLineIdx is the line index ClassifyRegions built over Content on its
 	// way to the regions, kept so extractSignatures does not build a second one
@@ -98,6 +102,11 @@ type ParseOptions struct {
 	FindCalls                []string                                // function names to find call sites for
 	ScanAllScopes            bool                                    // scan all lines including function bodies (for refs/deps)
 	Shallow                  bool                                    // minimal parse: signatures only, no refs/properties/args
+	// InterpolateAllText scans #...# in all of a tag file's text, as the
+	// parser did before it learned where ColdFusion evaluates it (see
+	// outputContext), and reads a tag-free .cfm template as CFScript. It is
+	// the features.outputContextInterpolation switch turned off.
+	InterpolateAllText bool
 }
 
 // Parse performs a full file parse: extracts function signatures, component refs,
@@ -113,11 +122,37 @@ func Parse(fileURI uri.URI, content string, resolvers ...[]Resolver) *ParseResul
 	}
 
 	start := time.Now()
-	pr.Regions, pr.contentLineIdx = ClassifyRegionsIdx(content)
+	pr.Regions, pr.contentLineIdx = pr.classifyRegions()
 	pr.extractSignatures()
 	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
 	return pr
+}
+
+// classifyRegions is ClassifyRegionsIdx for this file, which also knows its
+// name: a .cfm template with no CF tags that is HTML is text, not CFScript,
+// unless InterpolateAllText asks for the old reading.
+func (pr *ParseResult) classifyRegions() ([]Region, []int32) {
+	if !pr.interpolateAll && isMarkupTemplate(string(pr.URI), pr.Content) {
+		return splitCFScriptBlocks(pr.Content)
+	}
+
+	return ClassifyRegionsIdx(pr.Content)
+}
+
+// outputGate returns the output-context ranges and cfimport prefixes of the
+// file, computed once, and whether text scanning is gated on them at all.
+func (pr *ParseResult) outputGate() (spans [][2]int, prefixes []string, gated bool) {
+	if pr.interpolateAll || !pr.extractCalls {
+		return nil, nil, false
+	}
+
+	if !pr.outputScanned {
+		pr.outputSpans, pr.importPrefixes = outputContext(pr.Content)
+		pr.outputScanned = true
+	}
+
+	return pr.outputSpans, pr.importPrefixes, true
 }
 
 // ParseWithOptions performs a full file parse with extended options.
@@ -139,13 +174,14 @@ func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *Parse
 		findCalls:                opts.FindCalls,
 		scanAllScopes:            opts.ScanAllScopes,
 		shallow:                  opts.Shallow,
+		interpolateAll:           opts.InterpolateAllText,
 	}
 	if len(pr.Resolvers) > 0 {
 		pr.resolverSet = BuildResolverSet(pr.Resolvers)
 	}
 
 	start := time.Now()
-	pr.Regions, pr.contentLineIdx = ClassifyRegionsIdx(content)
+	pr.Regions, pr.contentLineIdx = pr.classifyRegions()
 	pr.extractSignatures()
 	pr.logDebug("parse", "uri", string(fileURI), "funcs", len(pr.Funcs), "refs", len(pr.ComponentRefs), "dur", time.Since(start))
 
@@ -290,6 +326,8 @@ func (pr *ParseResult) extractSignatures() {
 			tp.builtinReturnLookup = pr.BuiltinReturnLookup
 			tp.baseLine = r.StartLine
 			tp.knownScopes = tagScopes
+			tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
+			tp.srcOffset = r.Offset
 
 			// If this region starts partway through a function whose opening
 			// <cffunction> tag was in an earlier region (interrupted by a
