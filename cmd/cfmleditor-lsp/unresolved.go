@@ -126,16 +126,22 @@ func cmdUnresolved(args []string) {
 	indexStart := time.Now()
 
 	for _, f := range files {
-		if !cfpath.IsCFCFile(f) {
-			continue
-		}
-
 		data, err := fsys.ReadFile(f)
 		if err != nil || cfpath.IsBinary(data) {
 			continue
 		}
 
 		fileURI := uri.URI("file://" + f)
+
+		// A template is not indexed for its functions here, but what it
+		// includes is part of the include graph a bare call resolves through:
+		// a page that includes a helper can call what the helper declares.
+		if !cfpath.IsCFCFile(f) {
+			resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
+
+			continue
+		}
+
 		resolver.Index.IndexFile(fileURI, string(data))
 	}
 
