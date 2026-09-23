@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **A chain through a dynamic value stopped being dynamic.** Once a hop returned `$any`, as `getSandBox("x")` does, the walk asked `$any` for the next method and reported it missing: `getSandBox("x").getAttendanceObj().getLog()` was "method 'getAttendanceObj' not found in $any". The rest of the chain is now accepted as dynamic, as a call directly on `$any` already was. 157 entries on tassweb.
+
+- **A component that names no file is reported as missing, not as lacking the method.** It is nearly always a componentResolver producing a path that does not exist, such as a broad `get$1()` catch-all turning `getInjectorController()` into `tass.injectorcontroller`, so "component 'X' does not exist" now points at the config rather than at code. On tassweb, 192 entries changed from one reason to the other, 62 of them java stubs that were never generated.
+
+- **A chain rooted at a bare call offered the resolvers only its first string argument.** `createObject("java", "java.net.URLEncoder").encode(s)` was offered as `createObject("java")`, which the java-stub pattern cannot match, so `encode` was reported as a bare call. The leading run of string arguments is now offered, as the assignment path already did.
+
 - **A call chained off a resolved factory call lost the component its argument named.** In `getService("company").getList()` the resolver matched `getService("company")`, then the next hop was recorded as a chain off the bare name, and chain entries carry no arguments. Resolving it again saw `getService()`, which only a broad `get$1()` catch-all could answer, with the wrong component; a chain rooted at a bare call was reported as "no qualifier, not in file". The hop now starts from the component the first call resolved to, on every path that reaches it: an assignment, a statement, a scoped receiver, a struct-member target, a condition, a nested argument, a named argument (`getService(service="x")`) and no argument at all (`getObjInit().getMailServer()`). The bare-call path also called `tryResolveCall` after its arguments had been consumed, which never matched and consumed the `.` that followed, losing later assignments in the same block. On tassweb, `unresolved` drops from 28,137 to 3,547.
 
 ### Added

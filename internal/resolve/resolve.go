@@ -821,8 +821,23 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	// needing its own declared return type applied before checking funcName below).
 	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") {
 		for _, hop := range call.Chain {
+			// A hop that returned "$any" makes the rest of the chain dynamic.
+			// Walking on asked "$any" for the next method, which it can never
+			// define: getSandBox("x").getAttendanceObj().getLog() was reported
+			// as getAttendanceObj missing from $any. The accept below, after
+			// the walk, is the answer for a dynamic receiver.
+			if comp == "$any" {
+				tr.add("chain hop %q is on a dynamic ($any) value — the rest of the chain is dynamic", hop)
+
+				break
+			}
+
 			fd := r.ResolveFunc(comp, hop, baseDir)
 			if fd == nil {
+				if !r.componentExists(comp, baseDir) {
+					return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
+				}
+
 				return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
 			}
 
@@ -930,5 +945,40 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		}
 	}
 
+	// A component that names no file is a different finding from a method a
+	// real component lacks, and reporting it as the second hid it. It is
+	// almost always a componentResolver producing a path — a broad get$1()
+	// catch-all turning getInjectorController() into tass.injectorcontroller —
+	// so saying so points at the config rather than at the code.
+	if !r.componentExists(comp, baseDir) {
+		return "component '" + comp + "' does not exist (calling '" + funcName + "')"
+	}
+
 	return "method '" + funcName + "' not found in " + comp
+}
+
+// componentExists reports whether component, or any of its pipe-delimited
+// alternatives, names a file. A dynamic or builtin marker counts as existing:
+// it names no file by design.
+func (r *Resolver) componentExists(component, baseDir string) bool {
+	for alt := range strings.SplitSeq(component, "|") {
+		switch {
+		case alt == "":
+			continue
+		case strings.HasPrefix(alt, "$"):
+			return true
+		case filepath.IsAbs(alt):
+			for _, p := range []string{alt, alt + ".cfc"} {
+				if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+					return true
+				}
+			}
+		}
+
+		if r.ComponentPath(alt, baseDir) != "" {
+			return true
+		}
+	}
+
+	return false
 }
