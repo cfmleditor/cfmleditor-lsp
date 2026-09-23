@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Log lines in the editor's Output panel showed raw field structs.** The copy sent over `window/logMessage` read its fields as loose key, value pairs, but nearly every caller passes `zap.Field` values, so a field became the next one's key: `known issues published {file 15 0 /repo/x.txt <nil>}={files 11 969  <nil>}`. Fields are now formatted as `key=value`, as the structured log on stderr shows them, and loose pairs still work.
+
 - **Diagnostics from one source wiped another's.** CFLint on save, the workspace parse scan and `didClose` each published straight to the client, and a publish replaces everything for the file: saving a file cleared its parse errors, and a scan cleared its lint results. They now publish through one store that merges every source per file.
 - **A negative CFLint column put the range past the end of the line.** CFLint reports one for some tag-file issues, and it was cast straight to an unsigned position. It is now taken as the start of the line.
 
