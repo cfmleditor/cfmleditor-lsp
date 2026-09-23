@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.4]
+
 ### Added
 
 - **`cfmleditor-lsp cflint`.** Runs CFLint over a whole project and prints the known-issues report `cfmleditor.exportCFLint` writes, or with `--write` writes it to the same files, for a Zed task, CI or a shell. The CLI and the server share the report code, and both headers name both ways to regenerate it, so a report regenerated either way diffs clean.
