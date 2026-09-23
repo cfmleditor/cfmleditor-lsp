@@ -983,7 +983,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		comp := extractComponentPath(rhs[4:])
 		if comp != "" {
 			p.addRef(ComponentRef{
-				Variable: varName, Component: comp,
+				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
 		}
@@ -992,13 +992,13 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		comp := extractCreateObjectArg(rhs[13:])
 		if comp != "" {
 			p.addRef(ComponentRef{
-				Variable: varName, Component: comp,
+				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
 		} else if len(p.resolvers) > 0 {
 			if comp := p.resolveCall(rhs); comp != "" {
 				p.addRef(ComponentRef{
-					Variable: varName, Component: comp,
+					Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 					URI: uriFromString(p.fileURI), Line: uint32(line),
 				})
 			}
@@ -1090,6 +1090,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 				baseVar:  baseVar,
 				line:     uint32(line),
 				funcKey:  p.inFunc,
+				rest:     trailingCalls(rhs),
 			})
 		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
 			funcName := extractIdent(rhs)
@@ -1127,6 +1128,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 					funcName: funcName,
 					line:     uint32(line),
 					funcKey:  p.inFunc,
+					rest:     trailingCalls(rhs),
 				})
 			}
 		}
@@ -1553,7 +1555,7 @@ func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) stri
 
 	for i := range refs {
 		ref := &refs[i]
-		if !strings.EqualFold(ref.Variable, lookupVar) {
+		if !strings.EqualFold(ref.Variable, lookupVar) || chainPending(ref) {
 			continue
 		}
 
@@ -1571,7 +1573,7 @@ func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) stri
 	}
 
 	for i := range refs {
-		if strings.EqualFold(refs[i].Variable, lookupVar) {
+		if strings.EqualFold(refs[i].Variable, lookupVar) && !chainPending(&refs[i]) {
 			return refs[i].Component
 		}
 	}
@@ -1831,4 +1833,85 @@ func tagBody(tag string) string {
 	inner = strings.TrimSuffix(inner, "/")
 
 	return strings.TrimSpace(inner)
+}
+
+// trailingCalls returns the names of the method calls chained after the first
+// call in expr, in order: for "b.width(1).height(2).build()" it is
+// ["height", "build"], for createObject("java", "x").builder().build()
+// ["builder", "build"]. It stops at anything that is not another .name(...)
+// hop, and returns nil when expr has no complete first call.
+func trailingCalls(expr string) []string {
+	i := strings.IndexByte(expr, '(')
+	if i < 0 {
+		return nil
+	}
+
+	i = skipCallGroup(expr, i)
+
+	var hops []string
+
+	for i >= 0 {
+		j := skipSpace(expr, i)
+		if j >= len(expr) || expr[j] != '.' {
+			break
+		}
+
+		j = skipSpace(expr, j+1)
+		start := j
+
+		for j < len(expr) && isIdentByte(expr[j]) {
+			j++
+		}
+
+		name := expr[start:j]
+
+		j = skipSpace(expr, j)
+		if name == "" || j >= len(expr) || expr[j] != '(' {
+			break
+		}
+
+		hops = append(hops, name)
+		i = skipCallGroup(expr, j)
+	}
+
+	return hops
+}
+
+// skipCallGroup returns the offset just past the ( … ) group opening at open,
+// stepping over quoted strings, or -1 when the group does not close.
+func skipCallGroup(expr string, open int) int {
+	depth := 0
+
+	for i := open; i < len(expr); i++ {
+		switch c := expr[i]; c {
+		case '"', '\'':
+			end := strings.IndexByte(expr[i+1:], c)
+			if end < 0 {
+				return -1
+			}
+
+			i += end + 1
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+
+	return -1
+}
+
+func skipSpace(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+
+	return i
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

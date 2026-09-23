@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -484,6 +485,10 @@ func (pr *ParseResult) extractSignatures() {
 		pr.appendResolverRefs()
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
+	} else {
+		// A shallow parse cannot afford FuncLookup, and a ref typed by the
+		// first call of a longer chain is wrong, so such a ref is dynamic.
+		dropChainRest(pr, dynamicIfTyped)
 	}
 }
 
@@ -562,8 +567,16 @@ func (pr *ParseResult) applyServiceProperties() {
 // componentResolver's guess on the call-site text with the callee's own declared
 // return type when FuncLookup can verify it (e.g. a Java stub's getInstance()
 // modeling its real return type). Runs last so a verified answer always wins.
+//
+// It then walks ChainRest, the calls chained after the one that typed the ref,
+// so "chart = b.width(1).height(2).build()" types chart by build rather than
+// by width. A call it cannot type makes the variable dynamic: keeping the type
+// of an earlier call is the wrong answer this exists to stop, and it reported
+// every method of the real value as missing from the builder.
 func (pr *ParseResult) applyChainedReturnLookup() {
 	if pr.FuncLookup == nil {
+		dropChainRest(pr, dynamicIfTyped)
+
 		return
 	}
 
@@ -605,6 +618,96 @@ func (pr *ParseResult) applyChainedReturnLookup() {
 	for k, refs := range pr.funcRefsMap {
 		override(refs, refs)
 		pr.funcRefsMap[k] = refs
+	}
+
+	dropChainRest(pr, pr.walkChainRest)
+}
+
+// walkChainRest follows comp through the calls in rest by their declared
+// return types. init() is taken to return the object it is called on, which is
+// the convention for a CFC constructor and what a java stub's constructor
+// models.
+func (pr *ParseResult) walkChainRest(comp string, rest []string) string {
+	for _, hop := range rest {
+		switch {
+		case comp == "" || comp == "$any":
+			return comp
+		case strings.HasPrefix(comp, "$builtin."):
+			return "$any"
+		case strings.EqualFold(hop, "init"):
+			continue
+		}
+
+		ret := pr.FuncLookup(comp, hop)
+		if ret == "" {
+			return "$any"
+		}
+
+		comp = ret
+	}
+
+	return comp
+}
+
+// dynamicIfTyped is the answer without FuncLookup: a chain whose rest holds
+// any call but init() ends somewhere unknown.
+func dynamicIfTyped(comp string, rest []string) string {
+	if restTypes(rest) {
+		return "$any"
+	}
+
+	return comp
+}
+
+// restTypes reports whether a chain's rest can change the type it started
+// with: anything but init() calls.
+func restTypes(rest []string) bool {
+	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") })
+}
+
+// settledComponent is ref's Component with any pending chain walked, for a
+// reader during the parse that has FuncLookup to hand — resolvePendingCalls,
+// typing a variable from the one it was called on — so it reads what the
+// finished ref will hold rather than the first call's type.
+func (pr *ParseResult) settledComponent(ref *ComponentRef) string {
+	if !chainPending(ref) {
+		return ref.Component
+	}
+
+	if pr.FuncLookup == nil {
+		return dynamicIfTyped(ref.Component, ref.ChainRest)
+	}
+
+	return pr.walkChainRest(ref.Component, ref.ChainRest)
+}
+
+// chainPending reports whether ref's Component is not yet its answer: it was
+// typed by the first call of a longer chain that applyChainedReturnLookup has
+// still to walk. A lookup made during the parse must not read it — it would
+// hand on the first call's type, which is exactly the wrong answer the walk
+// exists to replace — and gets nothing instead, which the resolve step, run
+// after the walk, answers from the finished ref.
+func chainPending(ref *ComponentRef) bool {
+	return restTypes(ref.ChainRest)
+}
+
+// dropChainRest applies type to every ref carrying a ChainRest, then clears it.
+func dropChainRest(pr *ParseResult, typ func(comp string, rest []string) string) {
+	apply := func(refs []ComponentRef) {
+		for i := range refs {
+			if len(refs[i].ChainRest) == 0 {
+				continue
+			}
+
+			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
+			refs[i].ChainRest = nil
+		}
+	}
+
+	apply(pr.ComponentRefs)
+
+	for _, refs := range pr.funcRefsMap {
+		apply(refs)
 	}
 }
 
@@ -709,7 +812,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
 			for _, ref := range refs {
 				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = ref.Component
+					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(&ref)
 
 					break
 				}
@@ -767,7 +870,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			baseVarLower := strings.ToLower(c.baseVar)
 			for _, ref := range pr.ComponentRefs {
 				if strings.EqualFold(ref.Variable, baseVarLower) {
-					comp = ref.Component
+					comp = pr.settledComponent(&ref)
 
 					break
 				}
@@ -777,7 +880,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 				refs := pr.funcRefsMap[c.funcKey]
 				for _, ref := range refs {
 					if strings.EqualFold(ref.Variable, baseVarLower) {
-						comp = ref.Component
+						comp = pr.settledComponent(&ref)
 
 						break
 					}
@@ -802,7 +905,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		}
 
 		ref := ComponentRef{
-			Variable: c.varName, Component: comp,
+			Variable: c.varName, Component: comp, ChainRest: c.rest,
 			URI: pr.URI, Line: c.line,
 		}
 		if c.funcKey == "" {
@@ -825,7 +928,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
 			for _, ref := range refs {
 				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = ref.Component
+					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(&ref)
 
 					break
 				}
@@ -1670,6 +1773,20 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 	}
 
 	refs = pr.resolveMethodReturnRefs(funcStart, funcEnd, refs)
+
+	// This re-parse never reaches applyChainedReturnLookup, so a chained
+	// assignment is typed by its rest here or it keeps its first call's type.
+	typ := dynamicIfTyped
+	if pr.FuncLookup != nil {
+		typ = pr.walkChainRest
+	}
+
+	for i := range refs {
+		if len(refs[i].ChainRest) > 0 {
+			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
+			refs[i].ChainRest = nil
+		}
+	}
 
 	return refs, links
 }
