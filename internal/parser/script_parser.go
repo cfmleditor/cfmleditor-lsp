@@ -135,16 +135,12 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	// see one: writeOutput(svc.getName()) recorded only writeOutput.
 	p.sc.NextSkipComments() // consume (
 
-	firstArg, ok := p.scanParenBody()
+	firstArg, positional, ok := p.scanParenArgs()
 	if !ok {
 		return
 	}
 
-	// Build call expression for resolver: funcName("arg")
-	callExpr := tok.Value
-	if firstArg != "" {
-		callExpr = tok.Value + "(\"" + firstArg + "\")"
-	}
+	callExpr := resolverCallExpr(tok.Value, firstArg, positional)
 
 	// comp is this bare call's resolved return component (if any); it's the
 	// base receiver for every subsequent chained hop below. Hops beyond the
@@ -160,10 +156,6 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	comp := ""
 
 	if len(p.resolvers) > 0 && p.sc.PeekSkipComments().Kind == TokDot {
-		if firstArg == "" {
-			callExpr += "()"
-		}
-
 		comp = p.resolveCall(callExpr)
 	}
 
@@ -291,8 +283,8 @@ func (p *scriptParser) continueChainCalls(baseVar, funcName string, line int) {
 }
 
 // skipParensResolving is skipParens for the first hop of a chain: it also
-// matches componentResolvers against callExpr with the group's first string
-// argument, so a hop that names its component in an argument —
+// matches componentResolvers against callExpr with the group's string
+// arguments (see resolverCallExpr), so a hop that names its component in an argument —
 // getService("company") — hands the next hop that component. A Chain entry
 // is only a method name, and resolving the hop again from it later sees
 // getService() and can only reach a resolver that ignores which service was
@@ -306,12 +298,12 @@ func (p *scriptParser) skipParensResolving(callExpr string) (comp string, ok boo
 
 	p.sc.NextSkipComments() // consume (
 
-	firstArg, ok := p.scanParenBody()
+	firstArg, positional, ok := p.scanParenArgs()
 	if !ok || firstArg == "" || p.sc.PeekSkipComments().Kind != TokDot {
 		return "", ok
 	}
 
-	return p.resolveCall(callExpr + "(\"" + firstArg + "\")"), true
+	return p.resolveCall(resolverCallExpr(callExpr, firstArg, positional)), true
 }
 
 // recordChainContinuation is continueChainCalls' shared core, factored out so
@@ -3573,17 +3565,50 @@ func (p *scriptParser) skipParenBody() bool {
 // componentResolvers against, and which is the only reason it used to keep a
 // loop of its own.
 func (p *scriptParser) scanParenBody() (firstArg string, ok bool) {
+	firstArg, _, ok = p.scanParenArgs()
+
+	return firstArg, ok
+}
+
+// scanParenArgs is scanParenBody that also reports the leading run of
+// arguments that are each a string literal and nothing else, stopping at the
+// first that is not — the arguments tryResolveCall reads for an assignment.
+// A resolver can need more than one: createObject("java", "java.io.File")
+// names its component in the second, so offering it only the first left
+// createObject("java", "x").m() unresolved as a bare call to m.
+func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok bool) {
 	depth := 1
+	// argStart is true while the scan sits at the start of a top-level
+	// argument; pending holds a string that began one, until what follows it
+	// shows whether it was the whole argument.
+	argStart, collecting := true, true
+	pending, havePending := "", false
 
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokEOF {
-			return "", false
+			return "", nil, false
 		}
 
 		if tok.Kind == TokString && firstArg == "" && depth == 1 {
 			firstArg = unquote(tok.Value)
 		}
+
+		if depth == 1 && collecting {
+			switch {
+			case havePending && (tok.Kind == TokComma || tok.Kind == TokRParen):
+				positional = append(positional, pending)
+				havePending = false
+			case havePending:
+				collecting, havePending = false, false
+			case argStart && tok.Kind == TokString:
+				pending, havePending = unquote(tok.Value), true
+			case argStart && tok.Kind != TokRParen:
+				collecting = false
+			}
+		}
+
+		argStart = depth == 1 && tok.Kind == TokComma
 
 		switch tok.Kind { //nolint:exhaustive
 		case TokLParen:
@@ -3597,7 +3622,22 @@ func (p *scriptParser) scanParenBody() (firstArg string, ok bool) {
 		}
 	}
 
-	return firstArg, true
+	return firstArg, positional, true
+}
+
+// resolverCallExpr builds the expression a first hop is offered to the
+// resolvers as: every leading string argument when there are any, as
+// tryResolveCall builds it, else the first string argument found anywhere —
+// the named getService(service="x") — else name().
+func resolverCallExpr(name, firstArg string, positional []string) string {
+	switch {
+	case len(positional) > 0:
+		return name + `("` + strings.Join(positional, `", "`) + `")`
+	case firstArg != "":
+		return name + `("` + firstArg + `")`
+	default:
+		return name + "()"
+	}
 }
 
 // scanNestedCall dispatches an identifier met inside an argument list to the

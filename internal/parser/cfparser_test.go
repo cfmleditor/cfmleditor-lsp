@@ -4122,3 +4122,51 @@ func TestResolverSet_Anchored(t *testing.T) {
 		t.Errorf("ResolverSet.Resolve(document) = %q, want app.document", got)
 	}
 }
+
+// TestChainedCall_FirstHopOfferedEveryLeadingStringArgument covers
+// createObject("java", "java.net.URLEncoder").encode(x) as a statement and
+// inside an expression. The bare-call path offered the resolvers only the
+// first string argument, createObject("java"), which the java-stub pattern
+// cannot match because the class is the second — so encode was reported as a
+// bare call to a function the file does not declare.
+func TestChainedCall_FirstHopOfferedEveryLeadingStringArgument(t *testing.T) {
+	content := `component {
+	function work() {
+		createObject("java", "java.lang.System").gc();
+		u = "x" & createObject("java", "java.net.URLEncoder").encode(s, "UTF-8");
+		getService(name, "ignored").viaNonString();
+	}
+}`
+
+	resolvers := []Resolver{
+		{
+			Match:   `createObject\s*\(\s*['"]java['"]\s*,\s*['"](.+?)['"]\s*\)`,
+			Resolve: "stubs.$1",
+			Prefix:  "createObject",
+		},
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.AllCalls() {
+		byFunc[c.FuncName] = c
+	}
+
+	for fn, want := range map[string]string{
+		"gc":     "stubs.java.lang.System",
+		"encode": "stubs.java.net.URLEncoder",
+		// A non-string first argument ends the positional run, and the
+		// first string found anywhere is offered instead, as before.
+		"viaNonString": "packages.ignored.service",
+	} {
+		if got := byFunc[fn]; got.Component != want {
+			t.Errorf("expected %s CallSite Component=%s, got %+v", fn, want, got)
+		}
+	}
+}
