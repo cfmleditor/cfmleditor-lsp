@@ -181,3 +181,48 @@ func TestTagCallDoesNotReadAnUnwalkedChainRef(t *testing.T) {
 		t.Errorf("chart -> %q, want stubs.Chart", got)
 	}
 }
+
+// TestAssignedChainKeepsItsReceiverAndHops covers two losses in an assigned
+// chain. The hops were continued from the last name before the first call —
+// "kernel" in REQUEST.kernel.a().b(), "c" in a.b.c.m().n() — rather than the
+// receiver; and when tryExtendChain matched a resolver on `first(...).ext()`,
+// ext was never recorded and the hop after it came back as a bare call.
+func TestAssignedChainKeepsItsReceiverAndHops(t *testing.T) {
+	resolvers := []Resolver{{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"}}
+	content := `component {
+	function work() {
+		VARIABLES.x = REQUEST.kernel.getSandBox("f").getEntityObj().getSelected(a, b);
+		y = a.b.c.m().n();
+	}
+}`
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+
+	want := map[string]struct {
+		recv  string
+		chain string
+	}{
+		"getSandBox":   {"REQUEST.kernel", ""},
+		"getEntityObj": {"REQUEST.kernel", "getSandBox"},
+		"getSelected":  {"REQUEST.kernel", "getSandBox,getEntityObj"},
+		"m":            {"a.b.c", ""},
+		"n":            {"a.b.c", "m"},
+	}
+
+	for _, c := range pr.AllCalls() {
+		w, ok := want[c.FuncName]
+		if !ok {
+			continue
+		}
+
+		delete(want, c.FuncName)
+
+		if c.Variable != w.recv || strings.Join(c.Chain, ",") != w.chain {
+			t.Errorf("%s: Variable %q Chain %v, want %q [%s]", c.FuncName, c.Variable, c.Chain, w.recv, w.chain)
+		}
+	}
+
+	if len(want) > 0 {
+		t.Errorf("calls not recorded: %v", want)
+	}
+}

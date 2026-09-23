@@ -499,6 +499,20 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 			return ""
 		}
 
+		// CFML looks a bare name up in the variables scope, so a bare call to
+		// one the file assigns there — VARIABLES.render = ARGUMENTS.render —
+		// is a call through that function-reference property, the same as the
+		// qualified VARIABLES.render() accepted below. The parser records
+		// VARIABLES.name() as a bare call wherever it reads it as a member of
+		// this component, which is what left `#VARIABLES._renderTemplate()#`
+		// in a string "no qualifier, not in file".
+		if pr.HasScopedAssignment(parser.ScopeVariables, funcName) {
+			tr.add("%q is assigned in VARIABLES scope — a call through a function-reference property", funcName)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		if pr.Extends != "" {
 			return "not found in extends chain"
 		}

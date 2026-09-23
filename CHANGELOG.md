@@ -6,8 +6,11 @@
 
 - **`dynamicIfMissing` on a componentResolver.** A broad catch-all such as `get$1()` invents a component for every getter it was not written for, and every call on the result was reported as a missing component. With the option set, a component that resolver produces and that names no file is taken as a dynamic value. Only that resolver's guesses are affected: a missing component named any other way, and a missing method on a component that exists, are still reported. On tassweb, with it set on the two `get…()` catch-alls: 894 unresolved entries to 811, none added.
 
-
 ### Fixed
+
+- **An assigned chain lost its receiver and, after a resolver match on two calls, its later hops.** In `VARIABLES.x = REQUEST.kernel.getSandBox("f").getEntityObj().getSelected()` the hops were continued from `kernel`, the last name before the first call, rather than `REQUEST.kernel`; and where a resolver matched `getSandBox(...).getEntityObj()` as one, `getEntityObj` was never recorded and `getSelected` came back "no qualifier, not in file". Both calls are now recorded from the receiver and walked through their return types, and the variable is typed by that walk rather than by the resolver's guess at the text. An indexed receiver keeps its `[]`, so `phrase[1].font()` is no longer read as a call on `phrase`.
+
+- **A bare call to a function held in the variables scope was reported missing.** `#VARIABLES._render()#` in a string in a tag file is recorded as a bare call, and CFML looks a bare name up in the variables scope, so a call to a name the file assigns there (`VARIABLES._render = ARGUMENTS.render`) is now accepted as a call through that property, as the qualified form already was.
 
 - **Most calls in tag files had no caller.** A call found in a `<cfif>`, `<cfset>` or `#...#` expression is recorded by a sub-parser that never knew the function it was in, and a region cut from a function body (after a `<cfscript>` island or a `<script>` block) names no caller either, since its `<cffunction>` tag was in an earlier region. Across the TASS workspace that was 514,852 of 895,451 calls. Every call is now given the function whose lines hold it, which is what find-references shows as the calling function and what a call through `ARGUMENTS.fn()` is resolved against.
 

@@ -330,12 +330,19 @@ func (p *scriptParser) skipParensResolving(callExpr string) (comp string, ok boo
 // an assignment keeps on its ref (ComponentRef.ChainRest) so the variable is
 // typed by the last call rather than by funcName.
 func (p *scriptParser) recordChainContinuation(baseVar, funcName, baseComp string, line int) (consumed []string) {
+	return p.recordChainContinuationFrom(baseVar, nil, funcName, baseComp, line)
+}
+
+// recordChainContinuationFrom is recordChainContinuation for a chain that
+// already has hops before funcName: prior is carried at the front of every
+// hop's Chain.
+func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []string, funcName, baseComp string, line int) (consumed []string) {
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	var chainHops []string
+	chainHops := slices.Clone(prior)
 
 	first := true
 
@@ -574,16 +581,16 @@ chainWalk:
 		p.recordCallFromChain(fullChain.String(), line)
 
 		if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-			rest := p.recordChainContinuation(prevIdent, lastIdent, comp, line)
+			rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, line)
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
 				ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
-		} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
+		} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
+			rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, line)
 			p.addRef(ComponentRef{
-				Variable: varName, Component: comp,
-				ChainBase: prevIdent, ChainMethod: lastIdent,
+				Variable: varName, Component: comp, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
 		} else if p.builtinReturnLookup != nil {
@@ -597,14 +604,14 @@ chainWalk:
 					varName: varName, funcName: lastIdent, baseVar: prevIdent,
 					line: uint32(p.baseLine + line), funcKey: p.inFunc,
 				})
-				p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, line)
+				p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
 			}
 		} else {
 			p.pendingCalls = append(p.pendingCalls, pendingCall{
 				varName: varName, funcName: lastIdent, baseVar: prevIdent,
 				line: uint32(p.baseLine + line), funcKey: p.inFunc,
 			})
-			p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, line)
+			p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
 		}
 	} else if len(p.resolvers) > 0 {
 		if comp := p.resolveCall(fullChain.String()); comp != "" {
@@ -2343,16 +2350,16 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 				p.recordCallFromChain(fullChain.String(), varTok.Line)
 
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-					rest := p.recordChainContinuation(prevIdent, lastIdent, comp, varTok.Line)
+					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, varTok.Line)
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
-				} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
+				} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
+					rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, varTok.Line)
 					p.addRef(ComponentRef{
-						Variable: nameTok.Value, Component: comp,
-						ChainBase: prevIdent, ChainMethod: lastIdent,
+						Variable: nameTok.Value, Component: comp, ChainRest: rest,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
 				} else if p.builtinReturnLookup != nil {
@@ -2369,7 +2376,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 							line:     uint32(p.baseLine + varTok.Line),
 							funcKey:  p.inFunc,
 						})
-						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, varTok.Line)
+						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
 					}
 				} else {
 					p.pendingCalls = append(p.pendingCalls, pendingCall{
@@ -2379,7 +2386,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						line:     uint32(p.baseLine + varTok.Line),
 						funcKey:  p.inFunc,
 					})
-					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, varTok.Line)
+					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
 				}
 			} else if len(p.resolvers) > 0 {
 				if comp := p.resolveCall(fullChain.String()); comp != "" {
@@ -2562,7 +2569,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 					p.recordCallFromChain(fullChain.String(), scopeTok.Line)
 
 					if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-						rest := p.recordChainContinuation(prevIdent, lastIdent, comp, scopeTok.Line)
+						rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, scopeTok.Line)
 						p.addRef(ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
@@ -2576,7 +2583,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 							line:     uint32(p.baseLine + scopeTok.Line),
 							funcKey:  p.inFunc,
 						})
-						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, scopeTok.Line)
+						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, scopeTok.Line)
 					}
 				} else if len(p.resolvers) > 0 {
 					if comp := p.resolveCall(fullChain.String()); comp != "" {
@@ -2841,7 +2848,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 				p.recordCallFromChain(fullChain.String(), tok.Line)
 
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-					rest := p.recordChainContinuation(prevIdent, lastIdent, comp, tok.Line)
+					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, tok.Line)
 					p.addRef(ComponentRef{
 						Variable: tok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
@@ -2855,7 +2862,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 						line:     uint32(p.baseLine + tok.Line),
 						funcKey:  p.inFunc,
 					})
-					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(prevIdent, lastIdent, tok.Line)
+					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, tok.Line)
 				}
 			} else if len(p.resolvers) > 0 {
 				// Try generic resolver match on non-call RHS (e.g. "_parent")
@@ -3947,9 +3954,14 @@ func (p *scriptParser) skipBracketIndex() bool {
 // checks for a following '.method(' continuation, and tries tryResolveCall
 // on the extended chain. On success the scanner is advanced past the new
 // call's ')'. On failure the scanner position is unchanged.
-func (p *scriptParser) tryExtendChain(chain string) string {
+//
+// It also returns the names it read past the first call's ')', in order: the
+// method it resolved on, preceded by any property names between the two
+// (`a.b(x).c.d(y)` reads c and d). The caller records that call and carries on
+// from it, since the scanner now sits beyond both.
+func (p *scriptParser) tryExtendChain(chain string) (string, []string) {
 	if len(p.resolvers) == 0 {
-		return ""
+		return "", nil
 	}
 
 	saved := p.sc.Save()
@@ -3957,13 +3969,13 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 	if !p.skipParens() {
 		p.sc.Restore(saved)
 
-		return ""
+		return "", nil
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokDot {
 		p.sc.Restore(saved)
 
-		return ""
+		return "", nil
 	}
 
 	p.sc.NextSkipComments() // consume .
@@ -3972,7 +3984,7 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 	if next.Kind != TokIdent {
 		p.sc.Restore(saved)
 
-		return ""
+		return "", nil
 	}
 
 	p.sc.NextSkipComments() // consume method name
@@ -3981,6 +3993,8 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 	extChain.reset(chain)
 	extChain.writeDot()
 	extChain.writeString(next.Value)
+
+	names := []string{next.Value}
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments()
@@ -3994,19 +4008,79 @@ func (p *scriptParser) tryExtendChain(chain string) string {
 
 		extChain.writeDot()
 		extChain.writeString(n2.Value)
+
+		names = append(names, n2.Value)
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
 		p.sc.Restore(saved)
 
-		return ""
+		return "", nil
 	}
 
 	if comp := p.tryResolveCall(extChain.String()); comp != "" {
-		return comp
+		return comp, names
 	}
 
 	p.sc.Restore(saved)
+
+	return "", nil
+}
+
+// continueExtendedChain records the call tryExtendChain resolved on and every
+// hop chained after it, from recv, the receiver the first call was made on.
+//
+// tryExtendChain reads `first(...).ext(...)` whole to match a resolver against
+// it, and its callers used to take the component and stop: ext was never
+// recorded, and a hop after it was left for the outer loop to rediscover as a
+// bare call. In `VARIABLES.x = REQUEST.kernel.getSandBox("f").getEntityObj()
+// .getSelected()`, getEntityObj went missing and getSelected was reported "no
+// qualifier, not in file". The hops are walked from recv with no component
+// assumed: the component tryExtendChain returns is a resolver's guess at the
+// whole text, and the walk through the declared return types is the better
+// answer. It returns the hops after ext, which the caller's ref walks.
+//
+// A property access between the two calls (`a.b(x).c.d(y)`) breaks the walk:
+// the value of .c is not a return type. The call and what follows are then
+// recorded against a dynamic receiver, as a literal receiver's chain is.
+func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, line int) []string {
+	caller := ""
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		caller = p.funcs[len(p.funcs)-1].Name
+	}
+
+	if len(ext) == 0 {
+		return nil
+	}
+
+	method := ext[len(ext)-1]
+
+	if len(ext) > 1 {
+		p.addCall(CallSite{
+			FuncName: method, Variable: recv, Component: "$any", Resolved: true,
+			Line: uint32(p.baseLine + line), Caller: caller,
+		})
+		p.recordDynamicChain(recv, line, caller)
+
+		return []string{method, "?"} // the rest is dynamic: see dynamicIfTyped
+	}
+
+	p.addCall(CallSite{
+		FuncName: method, Variable: recv, Chain: []string{first},
+		Line: uint32(p.baseLine + line), Caller: caller,
+	})
+
+	return p.recordChainContinuationFrom(recv, []string{first}, method, "", line)
+}
+
+// receiverOf is the receiver of the last call in a dotted chain: "a.b" for
+// "a.b.c", "" for a bare "c". A chain continued from an assignment is walked
+// from it, not from the last name before the call — which in
+// "x = REQUEST.kernel.a().b()" was "kernel".
+func receiverOf(chain string) string {
+	if dot := strings.LastIndexByte(chain, '.'); dot >= 0 {
+		return chain[:dot]
+	}
 
 	return ""
 }
