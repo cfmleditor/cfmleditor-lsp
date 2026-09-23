@@ -19,7 +19,31 @@ const (
 // ApplyEdit updates the ParseResult incrementally after a text edit.
 // It updates the content, shifts line numbers, and re-parses only what's needed.
 // Returns the EditKind indicating what was affected.
-func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, newText string) (kind EditKind) {
+func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, newText string) EditKind {
+	return pr.applyEdit(startLine, startChar, endLine, newText, func() string {
+		startOff := posOffset(pr.Content, startLine, startChar)
+		endOff := posOffset(pr.Content, endLine, endChar)
+
+		return pr.Content[:startOff] + newText + pr.Content[endOff:]
+	})
+}
+
+// ApplyEditResult is ApplyEdit for a caller that has already applied the edit
+// to its own copy of the document: edited is the whole text after the edit, and
+// becomes pr.Content as it is.
+//
+// The server keeps the document text and this ParseResult side by side and
+// used to build the edited text once for each — two full copies of the
+// document allocated per keystroke, and two retained for as long as it is
+// open. Taking the caller's string makes them one allocation and one copy. It
+// also makes the caller's text the one the parse sees, which is the right way
+// round: the server's copy is the document, and after a burst of rapid changes
+// it is ahead of Content until the deferred full replace lands.
+func (pr *ParseResult) ApplyEditResult(startLine, startChar, endLine, _ int, newText, edited string) EditKind {
+	return pr.applyEdit(startLine, startChar, endLine, newText, func() string { return edited })
+}
+
+func (pr *ParseResult) applyEdit(startLine, startChar, endLine int, newText string, edited func() string) (kind EditKind) {
 	defer func() {
 		if r := recover(); r != nil {
 			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r))
@@ -39,9 +63,7 @@ func (pr *ParseResult) ApplyEdit(startLine, startChar, endLine, endChar int, new
 	funcIdx := pr.funcContaining(startLine, endLine, startChar)
 
 	// Apply the text edit
-	startOff := posOffset(pr.Content, startLine, startChar)
-	endOff := posOffset(pr.Content, endLine, endChar)
-	pr.Content = pr.Content[:startOff] + newText + pr.Content[endOff:]
+	pr.Content = edited()
 
 	if funcIdx >= 0 {
 		// Edit is inside a function body — just shift and invalidate

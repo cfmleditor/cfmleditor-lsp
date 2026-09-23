@@ -73,14 +73,23 @@ func BenchmarkParse_TagCFC_ExtractCalls(b *testing.B) {
 	}
 }
 
+// Line 12 is inside the first function's body. This used to edit line 4 — a
+// blank line between the properties and the first function — so it measured
+// the global path (a shallow reparse) under the in-function name, and the two
+// benchmarks reported the same cost. The kind is checked so a change to the
+// fixture cannot make that happen again silently.
 func BenchmarkApplyEdit_InFunc(b *testing.B) {
+	if kind := Parse("file:///bench.cfc", benchScriptCFC).ApplyEdit(12, 0, 12, 0, "\t\tvar z = 1;\n"); kind != EditInFunc {
+		b.Fatalf("edit classified as %v, want EditInFunc", kind)
+	}
+
 	for b.Loop() {
 		b.StopTimer()
 
 		pr := Parse("file:///bench.cfc", benchScriptCFC)
 
 		b.StartTimer()
-		pr.ApplyEdit(4, 0, 4, 0, "\t\tvar z = 1;\n")
+		pr.ApplyEdit(12, 0, 12, 0, "\t\tvar z = 1;\n")
 	}
 }
 
