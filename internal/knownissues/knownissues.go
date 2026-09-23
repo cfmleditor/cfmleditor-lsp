@@ -242,19 +242,28 @@ const reanchorWindow = 25
 // the method on its line, and found again within reanchorWindow lines when an
 // edit has moved it. Anything else covers the line's text.
 func Diagnostic(e Entry, lines []string, severity protocol.DiagnosticSeverity, source string) protocol.Diagnostic {
-	line, start, end := e.Line, 0, 0
+	// start and end are byte offsets into text until the end, where they
+	// become LSP characters, which count UTF-16 units. Sent as bytes, the
+	// underline stopped short of the end of a line holding an é or an emoji,
+	// and landed early on a method written after one.
+	line, start, end, text := e.Line, 0, 0, ""
 
 	if e.Line < len(lines) {
-		end = len(lines[e.Line])
-		start = len(lines[e.Line]) - len(strings.TrimLeft(lines[e.Line], " \t"))
+		text = lines[e.Line]
+		end = len(text)
+		start = len(text) - len(strings.TrimLeft(text, " \t"))
 	}
 
 	if name := calledName(e.Message); name != "" && e.Col < 0 {
 		if l, c, ok := findNear(lines, e.Line, name); ok {
-			line, start, end = l, c, c+len(name)
+			line, start, end, text = l, c, c+len(name), lines[l]
 		}
 	}
 
+	start, end = utf16Len(text[:start]), utf16Len(text[:end])
+
+	// An explicit column is already an LSP one: the CFLint report writes the
+	// column CFLint gave, and CFLint counts UTF-16 units.
 	if e.Col >= 0 {
 		start = e.Col
 		if end < start {
@@ -349,4 +358,20 @@ func wordIndexFold(s, word string) int {
 
 func isWordByte(c byte) bool {
 	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// utf16Len is the length of s in UTF-16 code units, what an LSP character
+// counts: two for a rune outside the Basic Multilingual Plane, one otherwise.
+func utf16Len(s string) int {
+	n := 0
+
+	for _, r := range s {
+		n++
+
+		if r > 0xFFFF {
+			n++
+		}
+	}
+
+	return n
 }

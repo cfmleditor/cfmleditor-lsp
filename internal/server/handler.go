@@ -1109,9 +1109,19 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			}
 		}
 
-		pos := parser.FindMatchingTag(content, line, char)
+		// The arguments are the editor's cursor, so char counts UTF-16 units,
+		// and the answer is a position the editor moves to; FindMatchingTag
+		// reads and answers in bytes. Converted on both sides, as a handler's
+		// params are (see position.go).
+		pos := parser.FindMatchingTag(content, line, byteCol(content, line, uint32(max(char, 0)))) //nolint:gosec // clamped to 0
 		if pos == nil {
 			return nil, nil
+		}
+
+		if l, ok := pos["line"].(int); ok {
+			if c, ok := pos["character"].(int); ok {
+				pos["character"] = lineCol(parser.LineTextAt(content, l), c)
+			}
 		}
 
 		return pos, nil

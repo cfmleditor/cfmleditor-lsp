@@ -303,3 +303,34 @@ func rootIdent(e ast.Expr) string {
 		}
 	}
 }
+
+// cfmleditor.goToMatchingTag takes the editor's cursor as arguments and answers
+// with a position the editor moves to, so both are LSP columns. Read as a byte
+// column, the cursor after two emoji landed four bytes early, inside the
+// string before the tag, and no tag was found.
+func TestGoToMatchingTagCountsUTF16Units(t *testing.T) {
+	srv := newTestServer()
+	line := emojiPrefix + "<cfif a>b</cfif>"
+	docURI := uri.URI("file:///match.cfm")
+	srv.setDocument(docURI, line)
+
+	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
+		Command:   "cfmleditor.goToMatchingTag",
+		Arguments: lspAnyArgs(string(docURI), 0, utf16Of(t, line, "<cfif", 1)),
+	})
+
+	result, err := srv.handleExecuteCommand(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pos, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("no matching tag found: %#v", result)
+	}
+
+	want := utf16Of(t, line, "</cfif", 0)
+	if got, _ := pos["character"].(uint32); pos["line"] != 0 || got != want {
+		t.Errorf("matching tag at %v, want line 0 character %d", pos, want)
+	}
+}

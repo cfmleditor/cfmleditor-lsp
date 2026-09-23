@@ -123,3 +123,30 @@ func TestTaggedEntriesCarryTheirCodeAndSeverity(t *testing.T) {
 		t.Errorf("untagged diagnostic: %+v", d)
 	}
 }
+
+// A diagnostic's columns count UTF-16 units. The underline was computed in
+// bytes, so on a line holding two emoji — eight bytes, four units — it ran four
+// characters past the method it names, and stopped past the end of the line.
+func TestDiagnosticColumnsCountUTF16Units(t *testing.T) {
+	lines := []string{"\t<cfset s = \"😀😀\" & svc.run(a)>"}
+
+	d := Diagnostic(Entry{Line: 0, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
+
+	// `\t<cfset s = "` is 13 units, the emoji 4, `" & svc.` 8.
+	if d.Range.Start.Character != 25 || d.Range.End.Character != 28 {
+		t.Errorf("method underline %+v, want characters 25-28", d.Range)
+	}
+
+	d = Diagnostic(Entry{Line: 0, Col: -1, Message: "TODO tidy this"}, lines, protocol.DiagnosticSeverityInformation, "todo")
+
+	// The whole line after its tab: 1 to 32, where the byte length is 36.
+	if d.Range.Start.Character != 1 || d.Range.End.Character != 32 {
+		t.Errorf("line underline %+v, want characters 1-32", d.Range)
+	}
+
+	// An explicit column is CFLint's, already in UTF-16 units, and kept.
+	d = Diagnostic(Entry{Line: 0, Col: 20, Message: "Avoid something"}, lines, protocol.DiagnosticSeverityWarning, "cflint")
+	if d.Range.Start.Character != 20 || d.Range.End.Character != 32 {
+		t.Errorf("explicit column %+v, want characters 20-32", d.Range)
+	}
+}
