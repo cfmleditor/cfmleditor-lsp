@@ -741,6 +741,7 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) 
 
 	s.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 	s.index.SetThisVars(docURI, pr.ThisVars())
+	s.index.SetIncludes(docURI, parser.ExtractIncludes(pr.Content))
 	// Only register as entity if within ORM scope and workspace
 	if cfpath.IsCFCFile(string(docURI)) && pr.Persistent {
 		filePath := docURI.Path()

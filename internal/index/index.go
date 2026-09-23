@@ -24,6 +24,17 @@ type Index struct {
 	extends   map[string]string                            // lowercase URI -> that component's extends, "" for none
 	beans     map[string]string                            // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                           // lowercase entity name -> file URI
+	includes  map[string]fileIncludes                      // lowercase URI -> the paths that file cfincludes
+	// includeGen counts changes to includes, so a reader that derives something
+	// from all of them — the resolver's reverse map — can tell when to rebuild.
+	includeGen uint64
+}
+
+// fileIncludes is one file's cfinclude paths as written, with the file's own
+// URI: resolving a relative path needs its directory in its real case.
+type fileIncludes struct {
+	uri   uri.URI
+	paths []string
 }
 
 // New creates an empty Index.
@@ -38,6 +49,7 @@ func New() *Index {
 		extends:   make(map[string]string),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
+		includes:  make(map[string]fileIncludes),
 	}
 }
 
@@ -457,6 +469,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	// IndexFileFromResult documents at length: a parsed string is a slice of
 	// the file's source, and one retained substring keeps the whole file alive.
 	idx.extends[fk] = strings.Clone(pr.Extends)
+	idx.setIncludesLocked(fileURI, parser.ExtractIncludes(content))
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(pr.Funcs))
 
@@ -541,6 +554,11 @@ func (idx *Index) RemoveFile(fileURI uri.URI) {
 	defer idx.mu.Unlock()
 
 	idx.removeFileEntries(fileURI)
+	// Not in removeFileEntries: every re-index runs that first, and a file
+	// re-indexed with the includes it already had must not move the generation
+	// and make the resolver rebuild its include graph. The writers that
+	// re-index set includes afresh, and setIncludesLocked compares.
+	idx.setIncludesLocked(fileURI, nil)
 
 	key := uriKey(fileURI)
 	for name, u := range idx.entities {
@@ -617,6 +635,13 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 		if strings.HasPrefix(key, fileKey) {
 			delete(idx.thisVars, key)
 			delete(idx.scopeRefs, key)
+		}
+	}
+
+	for key := range idx.includes {
+		if strings.HasPrefix(key, fileKey) {
+			delete(idx.includes, key)
+			idx.includeGen++
 		}
 	}
 }
@@ -988,4 +1013,66 @@ func (idx *Index) SetExtends(fileURI uri.URI, extends string) {
 	defer idx.mu.Unlock()
 
 	idx.extends[uriKey(fileURI)] = strings.Clone(extends)
+}
+
+// SetIncludes records the paths a file cfincludes, as parser.ExtractIncludes
+// returns them, for a door that indexes from a parse result rather than from
+// the content. IndexFile records them itself.
+func (idx *Index) SetIncludes(fileURI uri.URI, paths []string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.setIncludesLocked(fileURI, paths)
+}
+
+// setIncludesLocked stores paths for fileURI and moves the generation only when
+// they differ from what was held, so an edit that leaves a file's includes
+// alone does not make every reader rebuild. The caller holds mu.
+func (idx *Index) setIncludesLocked(fileURI uri.URI, paths []string) {
+	key := uriKey(fileURI)
+	prev, had := idx.includes[key]
+
+	if len(paths) == 0 {
+		if had {
+			delete(idx.includes, key)
+			idx.includeGen++
+		}
+
+		return
+	}
+
+	if had && slices.Equal(prev.paths, paths) {
+		return
+	}
+
+	cloned := make([]string, len(paths))
+	for i, p := range paths {
+		cloned[i] = strings.Clone(p)
+	}
+
+	idx.includes[key] = fileIncludes{uri: uri.URI(strings.Clone(string(fileURI))), paths: cloned}
+	idx.includeGen++
+}
+
+// IncludeGeneration reports a counter that moves whenever any file's recorded
+// includes change.
+func (idx *Index) IncludeGeneration() uint64 {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	return idx.includeGen
+}
+
+// ForEachInclude calls fn with every file that cfincludes something and the
+// paths it includes, and returns the generation the walk saw. fn must not call
+// back into the index.
+func (idx *Index) ForEachInclude(fn func(fileURI uri.URI, paths []string)) uint64 {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	for _, fi := range idx.includes {
+		fn(fi.uri, fi.paths)
+	}
+
+	return idx.includeGen
 }

@@ -28,6 +28,7 @@ type Resolver struct {
 	appRootCache       map[string]string // dir → Application.cfc root
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
 	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
+	incGraph           *includeGraph     // the index's cfincludes, rebuilt when they change
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -489,7 +490,16 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 				return ""
 			}
+		}
 
+		if def, via := r.findThroughIncludes(pr, funcName); def != nil {
+			tr.hit(TargetInclude, "", def)
+			tr.add("found %q through cfinclude, in %s", funcName, via)
+
+			return ""
+		}
+
+		if pr.Extends != "" {
 			return "not found in extends chain"
 		}
 
@@ -516,6 +526,13 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 
 				return ""
 			}
+		}
+
+		if def, via := r.findThroughIncludes(pr, funcName); def != nil {
+			tr.hit(TargetInclude, "", def)
+			tr.add("found %q through cfinclude, in %s", funcName, via)
+
+			return ""
 		}
 
 		return "method '" + funcName + "' not found in current component"
