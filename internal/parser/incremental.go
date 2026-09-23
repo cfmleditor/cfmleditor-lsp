@@ -149,7 +149,8 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 // replacing Funcs, Refs, Scopes, and Regions. Clears all caches.
 func (pr *ParseResult) reparseShallow() {
 	start := time.Now()
-	pr.Regions = ClassifyRegions(pr.Content)
+	pr.Regions, pr.contentLineIdx = pr.classifyRegions()
+	pr.outputScanned = false
 	pr.Funcs = pr.Funcs[:0]
 	pr.ComponentRefs = pr.ComponentRefs[:0]
 	pr.Scopes = pr.Scopes[:0]

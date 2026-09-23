@@ -156,6 +156,7 @@ type explainConfig struct {
 	resolvers                []parser.Resolver
 	expressionMappings       map[string]string
 	servicePropertyResolvers map[string]string
+	interpolateAll           bool
 }
 
 func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
@@ -177,6 +178,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		mappings = c.Mappings()
 		cfg.expressionMappings = c.ExpressionMappings()
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
+		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range c.ComponentResolvers() {
 			cfg.resolvers = append(cfg.resolvers, parser.Resolver{
@@ -251,6 +253,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 		Resolvers:                cfg.resolvers,
 		ExpressionMappings:       cfg.expressionMappings,
 		ServicePropertyResolvers: cfg.servicePropertyResolvers,
+		InterpolateAllText:       cfg.interpolateAll,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,
 		FuncLookup:               funcLookup,

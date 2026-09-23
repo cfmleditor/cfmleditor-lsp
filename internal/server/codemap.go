@@ -129,6 +129,7 @@ func (s *Server) buildCodeMap(req codeMapRequest, roots []string) (*codemap.Map,
 		ExpressionMappings:       s.ExpressionMappings,
 		ServicePropertyResolvers: s.ServicePropertyResolvers,
 		Routes:                   s.routeResolver(),
+		InterpolateAllText:       !s.Features.OutputContextInterpolation,
 	}
 
 	m := codemap.Build(codemap.Options{

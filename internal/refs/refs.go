@@ -51,6 +51,9 @@ type Options struct {
 	// (call.Component == "") couldn't be resolved at all — reused from the
 	// same resolution engine the `unresolved` command uses, so the two agree.
 	Reason func(call parser.CallSite, pr *parser.ParseResult, fileDir string) string
+	// InterpolateAllText is parser.ParseOptions.InterpolateAllText: the
+	// features.outputContextInterpolation switch turned off.
+	InterpolateAllText bool
 }
 
 // Find scans all CFML files under roots and returns matching references.
@@ -173,10 +176,11 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 			// Parse once with resolvers and call scanning — scan all scopes
 			parseOpts := parser.ParseOptions{
-				Resolvers:         opts.Resolvers,
-				PropertyResolvers: opts.PropertyResolvers,
-				ExtractCalls:      true,
-				ScanAllScopes:     true,
+				Resolvers:          opts.Resolvers,
+				PropertyResolvers:  opts.PropertyResolvers,
+				ExtractCalls:       true,
+				ScanAllScopes:      true,
+				InterpolateAllText: opts.InterpolateAllText,
 			}
 			// Build per-file bean lookup from nearest Application.cfc
 			if opts.BeanLookup != nil {

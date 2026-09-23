@@ -208,16 +208,25 @@ type Features struct {
 	// go-to-definition before the scan was narrowed to the cursor, and document
 	// links still pay the whole-file price because they are the whole file.
 	Routes *bool `json:"routes"`
+	// OutputContextInterpolation reads #...# in a tag file's text only where
+	// ColdFusion evaluates it — output contexts such as <cfoutput>, and the
+	// attributes of CF and custom tags — and reads a tag-free .cfm template as
+	// HTML rather than CFScript. Off, every #...# pair in text is scanned, as
+	// before, which finds calls in JavaScript, CSS and prose between two stray
+	// hashes. It is here for a codebase whose templates do something the
+	// rules do not know; see parser.outputContext for what they are.
+	OutputContextInterpolation *bool `json:"outputContextInterpolation"`
 }
 
 // ResolvedFeatures holds the feature switches with defaults applied.
 type ResolvedFeatures struct {
-	DocumentHighlight   bool
-	Folding             bool
-	WatchedFiles        bool
-	RangeFormatting     bool
-	VariableDefinitions bool
-	Routes              bool
+	DocumentHighlight          bool
+	Folding                    bool
+	WatchedFiles               bool
+	RangeFormatting            bool
+	VariableDefinitions        bool
+	Routes                     bool
+	OutputContextInterpolation bool
 }
 
 // foldingDefault is off. Named rather than inlined so the tests that assert the
@@ -240,12 +249,13 @@ func ResolveFeatures(f *Features) ResolvedFeatures {
 	}
 
 	return ResolvedFeatures{
-		DocumentHighlight:   BoolDefault(f.DocumentHighlight, true),
-		Folding:             BoolDefault(f.Folding, foldingDefault),
-		WatchedFiles:        BoolDefault(f.WatchedFiles, true),
-		RangeFormatting:     BoolDefault(f.RangeFormatting, true),
-		VariableDefinitions: BoolDefault(f.VariableDefinitions, true),
-		Routes:              BoolDefault(f.Routes, true),
+		DocumentHighlight:          BoolDefault(f.DocumentHighlight, true),
+		Folding:                    BoolDefault(f.Folding, foldingDefault),
+		WatchedFiles:               BoolDefault(f.WatchedFiles, true),
+		RangeFormatting:            BoolDefault(f.RangeFormatting, true),
+		VariableDefinitions:        BoolDefault(f.VariableDefinitions, true),
+		Routes:                     BoolDefault(f.Routes, true),
+		OutputContextInterpolation: BoolDefault(f.OutputContextInterpolation, true),
 	}
 }
 
@@ -641,6 +651,7 @@ func mergeFeatures(base, over *Features) *Features {
 		{&out.RangeFormatting, &over.RangeFormatting},
 		{&out.VariableDefinitions, &over.VariableDefinitions},
 		{&out.Routes, &over.Routes},
+		{&out.OutputContextInterpolation, &over.OutputContextInterpolation},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src

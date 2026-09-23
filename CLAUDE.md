@@ -907,6 +907,47 @@ whole call, and produced `tassweb.packages.tass.directcontent` — even though i
 iText/PdfWriter passthrough getter. `explain` surfaces this as a single `resolved "..." to "..."
 via componentResolver matching the variable name` step.
 
+## Where `#...#` in text is CFML
+
+A tag file's text between tags is scanned for `#...#` only inside an output
+context (`internal/parser/output_context.go`), and a `.cfm` with no CF tags that
+holds HTML is a tag region, not CFScript. Outside an output context a hash is a
+literal character, and pairing stray ones (`href="#"`, CSS colours, jQuery
+`$('#id')`, Handlebars `{{#each}}`) swallowed the markup between them and turned
+every `name(` in it into a call. `features.outputContextInterpolation` (default
+on) switches it off; it reaches the parser as `ParseOptions.InterpolateAllText`,
+which every call-extracting `ParseOptions` site must pass.
+
+- **The rules were measured against Adobe ColdFusion, not remembered.** One
+  probe template per context in the `tass_coldfusion` container. Evaluated:
+  `<cfoutput>` (HTML attributes and `<script>` in it included), `<cfquery>`,
+  `<cfmail>`, `<cffunction output="true|yes">`, and the attributes of every
+  `<cf...>`, `<cf_...>`, `<cfmodule>` and cfimport-prefixed tag anywhere. Not
+  evaluated: plain text, HTML attributes and `<script>` outside those,
+  `<cfsavecontent>`, `<cfxml>` and custom-tag bodies, functions with `output`
+  unset or false, and a template `<cfinclude>`d from inside `<cfoutput>`.
+  `<cfdocument*>` and `<cfcomponent output="true">` could not be exercised and are
+  taken as evaluated, because a wrong guess that way costs a false positive and
+  the other way a call.
+- **Attributes are always scanned.** A handled tag scans its own; a declined
+  `<cf...>` tag and a `<prefix:tag>` whose prefix the file `<cfimport>`s scan
+  theirs in `stepOverEvaluatedTag` and are stepped over whole, so the gate never
+  sees them. Leaving them in the next text gap is what the ungated walk does, and
+  gating that gap lost them: tassweb has 3,296 `#fn()#` calls in custom-tag
+  attributes.
+- **Output ranges are file offsets.** A tag region is cut around `<cfscript>`
+  blocks and a `<cfoutput>` can open before one and close after it, so
+  `outputContext` runs on the whole file and each region carries `Offset`.
+- **The tag walk's span stepping is gated too.** `nextTagStart` steps over a
+  `#...#` span because markup inside one is an argument. Outside an output
+  context that is wrong: a Handlebars `{{#` paired with a hash far below and the
+  walk stepped over real `<cfif>` tags, whose calls the old reading recovered
+  only by scanning the whole run as one expression. `nextTag` uses a plain `<`
+  search there. Finding it took a corpus diff of every extracted call, not of
+  unresolved ones: the loss showed as a resolved builtin going missing.
+- **It fails open.** An unclosed output tag runs to the end of the file, and a
+  close with nothing open is ignored.
+
 ## cfinclude scope
 
 A bare or `this.` call that neither the file nor its extends chain answers is looked up through

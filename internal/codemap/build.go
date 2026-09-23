@@ -55,6 +55,10 @@ type FileConfig struct {
 	// Routes, when set, resolves the framework routes found in this file's
 	// source. Nil leaves route edges out entirely.
 	Routes *route.Resolver
+
+	// InterpolateAllText is parser.ParseOptions.InterpolateAllText: the
+	// features.outputContextInterpolation switch turned off.
+	InterpolateAllText bool
 }
 
 // Options configures a build.
@@ -375,6 +379,7 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 		ExtractCalls:             true,
 		ScanAllScopes:            true,
 		ExtractLinks:             true,
+		InterpolateAllText:       cfg.InterpolateAllText,
 		FuncLookup:               funcLookup,
 		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
 	})

@@ -1136,9 +1136,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		r := s.getResolver()
 		sourceFile := uri.URI(sourceURI).Path()
 		findOpts := refs.Options{
-			FuncName:          funcName,
-			Resolvers:         s.cfResolvers(),
-			PropertyResolvers: s.cfPropertyResolvers(),
+			FuncName:           funcName,
+			Resolvers:          s.cfResolvers(),
+			PropertyResolvers:  s.cfPropertyResolvers(),
+			InterpolateAllText: !s.Features.OutputContextInterpolation,
 			VerifyCall: func(component, fn, fileDir string) bool {
 				return r.HasFunction(component, fn, fileDir)
 			},

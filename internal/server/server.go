@@ -656,6 +656,7 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 		ServicePropertyResolvers: s.ServicePropertyResolvers,
 		ExtractLinks:             true,
 		ExtractCalls:             true,
+		InterpolateAllText:       !s.Features.OutputContextInterpolation,
 	})
 }
 

@@ -257,8 +257,15 @@ func TestAScriptRegionGivesUpItsInterpolation(t *testing.T) {
 	}{
 		{
 			"interpolation in a script tag's attribute",
-			`<script src="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#"></script>`,
+			`<cfoutput><script src="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#"></script></cfoutput>`,
 			[]string{"elixirPath", "themeRoot", "themeRoot"},
+		},
+		// An HTML attribute is evaluated only inside an output context, as
+		// ColdFusion itself does it: outside one the hashes are literal.
+		{
+			"interpolation in a script tag's attribute outside cfoutput",
+			`<script src="#cb.themeRoot()#/#html.elixirPath( root='#cb.themeRoot()#/inc' )#"></script>`,
+			nil,
 		},
 		{
 			"interpolation in a script body",
