@@ -764,7 +764,7 @@ Two reports are written by the server rather than by hand:
 | `generate` | Written by | Default file |
 |---|---|---|
 | `unresolved` | `cfmleditor.exportUnresolved`, or `cfmleditor-lsp unresolved --write <project>` | `.cfmleditor-unresolved.txt` |
-| `cflint` | `cfmleditor.exportCFLint` | `.cfmleditor-cflint.txt` |
+| `cflint` | `cfmleditor.exportCFLint`, or `cfmleditor-lsp cflint --write <project>` | `.cfmleditor-cflint.txt` |
 
 Both are also offered as code actions on any CFML file, "Export unresolved
 calls report for the workspace" and "Export CFLint report for the workspace",

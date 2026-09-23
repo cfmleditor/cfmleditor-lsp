@@ -207,6 +207,29 @@ func Write(w io.Writer, header []string, rows []Row) {
 	}
 }
 
+// DeepestTarget is the one of targets, generated report files, whose
+// directory holds file: the deepest when directories nest, empty when none
+// does. It is how a report split across several files decides where a finding
+// goes.
+func DeepestTarget(file string, targets []string) string {
+	best, depth := "", -1
+
+	for _, t := range targets {
+		dir := filepath.Dir(t)
+
+		rel, err := filepath.Rel(dir, file)
+		if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+
+		if len(dir) > depth {
+			best, depth = t, len(dir)
+		}
+	}
+
+	return best
+}
+
 // reanchorWindow is how far from its recorded line an entry's call is looked
 // for when the line no longer holds it: an edit above a finding moves it, and
 // a baseline is only as fresh as its last regeneration.

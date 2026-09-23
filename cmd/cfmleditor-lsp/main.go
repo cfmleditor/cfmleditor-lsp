@@ -67,6 +67,10 @@ func main() {
 			cmdUnresolved(os.Args[2:])
 
 			return
+		case "cflint":
+			cmdCFLint(os.Args[2:])
+
+			return
 		case "explain":
 			cmdExplain(os.Args[2:])
 
@@ -95,6 +99,7 @@ Commands:
   scan         Scan CFML files and report parse errors
   format       Format CFML files (stdout or in-place with -w)
   unresolved   Scan for unresolved component/method calls
+  cflint       Run CFLint over a project as a known-issues report
   refs         Find references to a component or function
   deps         Print component dependency info
   graph        Build a whole-project map of functions and their connections
