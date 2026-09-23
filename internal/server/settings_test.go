@@ -45,7 +45,8 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 			Attributes:  []string{"data-view"},
 			Controllers: []route.ControllerRule{{Component: "c.${1}", Method: "${2+:concat}"}},
 		},
-		CodeMap: config.CodeMap{Entry: []string{"../prs"}, Utility: []string{"core"}},
+		CodeMap:     config.CodeMap{Entry: []string{"../prs"}, Utility: []string{"core"}},
+		KnownIssues: []config.KnownIssues{{File: "/repo/.cfmleditor-unresolved.txt"}},
 	}
 
 	srv := NewServer(nil, cflog.NewLogger(false))

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"encoding/json/v2"
@@ -45,8 +46,17 @@ var watchedGlobs = []string{"**/*.cfc", "**/*.cfm"}
 // extension — any client advertising didChangeWatchedFiles.dynamicRegistration
 // starts watching on its own.
 func (s *Server) registerFileWatchers(ctx context.Context) {
-	watchers := make([]protocol.FileSystemWatcher, 0, len(watchedGlobs))
-	for _, g := range watchedGlobs {
+	globs := slices.Clone(watchedGlobs)
+
+	// A known-issues file is watched by name: an edit to it, or regenerating
+	// it, republishes its entries. The glob matches the name anywhere, and
+	// applyWatchedFileChanges acts only on the configured path.
+	for _, k := range s.KnownIssues {
+		globs = append(globs, "**/"+filepath.Base(k.File))
+	}
+
+	watchers := make([]protocol.FileSystemWatcher, 0, len(globs))
+	for _, g := range globs {
 		watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: protocol.Pattern(g)})
 	}
 
@@ -67,7 +77,7 @@ func (s *Server) registerFileWatchers(ctx context.Context) {
 		}},
 	}, nil)
 
-	s.log.Info("registered file watchers", cflog.Strings("globs", watchedGlobs))
+	s.log.Info("registered file watchers", cflog.Strings("globs", globs))
 }
 
 // handleDidChangeWatchedFiles applies on-disk changes to the index.
@@ -110,7 +120,15 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 
 	var indexed, removed, skipped, appChanged int
 
+	reload := map[string]bool{}
+
 	for _, ev := range changes {
+		if p := filepath.Clean(cfpath.FromURI(string(ev.URI))); s.isKnownIssuesFile(p) {
+			reload[p] = true
+
+			continue
+		}
+
 		switch s.applyWatchedFileChange(ev) {
 		case watchedIndexed:
 			indexed++
@@ -123,6 +141,10 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		if isApplicationFile(cfpath.FromURI(string(ev.URI))) {
 			appChanged++
 		}
+	}
+
+	for file := range reload {
+		s.loadKnownIssuesFile(context.Background(), file)
 	}
 
 	if indexed == 0 && removed == 0 {

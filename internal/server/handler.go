@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -228,6 +229,12 @@ func clientWatchesFiles(caps protocol.ClientCapabilities) bool {
 }
 
 func (s *Server) handleInitialized(_ context.Context) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+	// Known issues are published whether or not files are watched: watching
+	// only decides whether an edit to the file is picked up without a restart.
+	if len(s.KnownIssues) > 0 {
+		s.safeGo("loadKnownIssues", func() { s.loadKnownIssues(context.Background()) })
+	}
+
 	if !s.Features.WatchedFiles {
 		s.log.Info("file watching disabled by config; the index will not track on-disk changes")
 
@@ -266,6 +273,7 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 	defer s.lockDoc(docURI)()
 
 	s.setDocument(docURI, params.TextDocument.Text)
+	s.diagnosticsOpened(context.Background(), docURI)
 
 	pr := s.parseContent(docURI, params.TextDocument.Text)
 	s.log.Debug("document opened: parse result",
@@ -611,13 +619,11 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	// session has opened is the cheaper side of that trade.
 	s.log.Debug("document closed", cflog.String("uri", string(docURI)))
 
-	// Clear diagnostics on close
-	if s.conn != nil {
-		s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
-			URI:         docURI,
-			Diagnostics: []protocol.Diagnostic{},
-		})
-	}
+	// Clear the document's own diagnostics on close. A known issue is about the
+	// file, not the buffer, and stays — unless its source is open-only.
+	s.diagnosticsClosed(docURI)
+	s.storeDiagnostics(docURI, sourceCFLint, nil)
+	s.setDiagnostics(ctx, docURI, sourceParse, nil)
 
 	return nil, nil
 }
@@ -637,6 +643,12 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 
 	if isApplicationFile(filePath) {
 		cfpath.InvalidateAppMappingsCache()
+	}
+
+	// A saved file's known issues are anchored again, since an edit above one
+	// moves the line it is on.
+	if s.hasKnownIssues(docURI) {
+		s.safeGo("loadKnownIssues", func() { s.loadKnownIssues(context.Background()) })
 	}
 
 	if cfpath.IsCFMLFile(filePath) {
@@ -715,10 +727,8 @@ func (s *Server) runDiagnostics(ctx context.Context, docURI uri.URI) {
 
 	s.log.Info("cflint scan complete", cflog.String("file", filePath), cflog.Int("issues", len(diags)))
 
-	s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
-		URI:         docURI,
-		Diagnostics: diags,
-	})
+	s.diagnosticsRan(docURI, sourceCFLint)
+	s.setDiagnostics(ctx, docURI, sourceCFLint, diags)
 }
 
 func (s *Server) reindexIfCFC(docURI uri.URI, content string) {
@@ -1270,6 +1280,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return s.handleResolveRoute(params.Arguments)
 	case "cfmleditor.generateCodeMap":
 		return s.handleGenerateCodeMap(params.Arguments)
+	case "cfmleditor.exportUnresolved":
+		return s.handleExport(config.GenerateUnresolved)
+	case "cfmleditor.exportCFLint":
+		return s.handleExport(config.GenerateCFLint)
 	case "cfmleditor.showCodeMapStats":
 		return s.handleCodeMapStats(ctx, params.Arguments)
 	case "cfmleditor.scanWorkspace":

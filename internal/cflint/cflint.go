@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"go.lsp.dev/protocol"
@@ -121,6 +122,20 @@ func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnost
 func toDiagnostics(result Result, minRank int) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
 
+	eachDiagnostic(result, minRank, func(_ string, d protocol.Diagnostic) {
+		diags = append(diags, d)
+	})
+
+	return diags
+}
+
+// eachDiagnostic calls fn with every issue location that meets the floor, and
+// the file CFLint names for it.
+//
+// A line or column below 1 is taken as the start: CFLint reports a negative
+// column for some tag-file issues, which cast to a uint32 put the range past
+// the end of the line.
+func eachDiagnostic(result Result, minRank int, fn func(file string, d protocol.Diagnostic)) {
 	for _, issue := range result.Issues {
 		if !meetsFloor(issue.Severity, minRank) {
 			continue
@@ -129,20 +144,13 @@ func toDiagnostics(result Result, minRank int) []protocol.Diagnostic {
 		sev := mapSeverity(issue.Severity)
 
 		for _, loc := range issue.Locations {
-			line := loc.Line
-			if line > 0 {
-				line--
-			}
+			line := max(loc.Line-1, 0)
+			col := max(loc.Column-1, 0)
 
-			col := loc.Column
-			if col > 0 {
-				col--
-			}
-
-			diags = append(diags, protocol.Diagnostic{
+			fn(loc.File, protocol.Diagnostic{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(line), Character: uint32(col)},
-					End:   protocol.Position{Line: uint32(line), Character: uint32(col)},
+					Start: protocol.Position{Line: uint32(line), Character: uint32(col)}, //nolint:gosec // clamped to 0 above
+					End:   protocol.Position{Line: uint32(line), Character: uint32(col)}, //nolint:gosec // as above
 				},
 				Severity: sev,
 				Source:   protocol.NewOptional("cflint"),
@@ -151,8 +159,92 @@ func toDiagnostics(result Result, minRank int) []protocol.Diagnostic {
 			})
 		}
 	}
+}
 
-	return diags
+// filesPerRun is how many files one CFLint run for ScanFiles is given. The
+// list goes on the command line, and Windows caps a command line at 32K
+// characters.
+const filesPerRun = 100
+
+// ScanFiles runs CFLint over files, from disk, and returns each file's
+// diagnostics keyed by its cleaned path, for a report over a whole project. A
+// file CFLint finds nothing in has no key.
+//
+// Files are passed by name, several to a run and a few runs at once, rather
+// than as a folder: a folder scan descends into every dot-directory, and a git
+// worktree under .claude/ is a second copy of the project.
+func (r *Runner) ScanFiles(ctx context.Context, files []string) (map[string][]protocol.Diagnostic, error) {
+	out := make(map[string][]protocol.Diagnostic)
+
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		firstErr error
+	)
+
+	sem := make(chan struct{}, 4)
+
+	for start := 0; start < len(files); start += filesPerRun {
+		batch := files[start:min(start+filesPerRun, len(files))]
+
+		wg.Add(1)
+
+		sem <- struct{}{}
+
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result, err := r.run(ctx, "", "-file", strings.Join(batch, ","), "-json", "-stdout", "-q")
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+
+				return
+			}
+
+			eachDiagnostic(result, r.minRank, func(file string, d protocol.Diagnostic) {
+				file = filepath.Clean(file)
+				out[file] = append(out[file], d)
+			})
+		}()
+	}
+
+	wg.Wait()
+
+	if firstErr == nil {
+		firstErr = ctx.Err()
+	}
+
+	return out, firstErr
+}
+
+// run runs the binary with args, in dir when it is not empty, and decodes its
+// JSON report.
+func (r *Runner) run(ctx context.Context, dir string, args ...string) (Result, error) {
+	cmd := exec.CommandContext(ctx, r.binPath, args...)
+	cmd.Dir = dir
+
+	var stderr strings.Builder
+
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return Result{}, fmt.Errorf("cflint failed: %w; stderr: %s", err, stderr.String())
+	}
+
+	var result Result
+	if err := json.Unmarshal(out, &result); err != nil {
+		return Result{}, fmt.Errorf("parsing cflint output: %w\nstdout: %s\nstderr: %s", err, string(out), stderr.String())
+	}
+
+	return result, nil
 }
 
 // noSeverityFloor is the minRank that reports every issue, however trivial. It
