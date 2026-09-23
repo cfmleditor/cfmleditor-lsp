@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A call chained off a resolved factory call lost the component its argument named.** In `getService("company").getList()` the resolver matched `getService("company")`, then the next hop was recorded as a chain off the bare name, and chain entries carry no arguments. Resolving it again saw `getService()`, which only a broad `get$1()` catch-all could answer, with the wrong component; a chain rooted at a bare call was reported as "no qualifier, not in file". The hop now starts from the component the first call resolved to, on every path that reaches it: an assignment, a statement, a scoped receiver, a struct-member target, a condition, a nested argument, a named argument (`getService(service="x")`) and no argument at all (`getObjInit().getMailServer()`). The bare-call path also called `tryResolveCall` after its arguments had been consumed, which never matched and consumed the `.` that followed, losing later assignments in the same block. On tassweb, `unresolved` drops from 28,137 to 3,547.
 ### Added
 
 - **A bare call resolves through cfinclude.** An included template runs in its includer's variables scope, so a template mixed into a component can call what the component declares, what it extends and what any sibling template declares, and a page can call what it includes. These were all "no qualifier, not in file"; they now resolve, and go-to-definition and the call graph follow them. On tassweb this is 814 of the unresolved entries, with none added.
