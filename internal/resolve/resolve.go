@@ -850,6 +850,16 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 				tr.add("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
 			}
 
+			// An init() that declares nothing returns the object it was called
+			// on: the CFC constructor convention, and what the parser assumes
+			// when it types a variable assigned through one. Falling through to
+			// the resolvers offered them init(), which nothing can answer.
+			if ret == "" && strings.EqualFold(hop, "init") {
+				ret = comp
+
+				tr.add("chain hop %q on %q: an untyped init() returns the object it is called on", hop, comp)
+			}
+
 			// The real function's declared return type isn't a component (e.g.
 			// a generic returntype="struct" on a factory method that actually
 			// returns a specific component instance) — fall back to a

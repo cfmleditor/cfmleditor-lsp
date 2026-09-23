@@ -29,6 +29,7 @@ func kernelFixture(t *testing.T) (dir string, r *Resolver) {
 	r.Index.IndexFileFromResult(u, []parser.FunctionDef{
 		{Name: "getSandBox", URI: u, ReturnComponent: "$any"},
 		{Name: "getName", URI: u},
+		{Name: "init", URI: u},
 	}, nil)
 
 	return dir, r
@@ -94,5 +95,24 @@ func TestMissingComponentIsReportedAsMissing(t *testing.T) {
 		if !strings.HasPrefix(reason, tc.want) {
 			t.Errorf("%s: reason %q, want prefix %q", tc.name, reason, tc.want)
 		}
+	}
+}
+
+// TestChainThroughUntypedInitKeepsTheObject covers
+// createObject("java", "CategoryChartBuilder").init().width(1): a stub's or a
+// CFC's init() often declares no return type, and the walk offered init() to
+// the resolvers, which cannot answer it, instead of keeping the object.
+func TestChainThroughUntypedInitKeepsTheObject(t *testing.T) {
+	dir, r := kernelFixture(t)
+
+	call := parser.CallSite{FuncName: "getName", Component: "Kernel", Chain: []string{"init"}}
+
+	target, reason := r.ResolveCallTarget(call, &parser.ParseResult{}, dir)
+	if reason != "" {
+		t.Fatalf("unresolved: %s", reason)
+	}
+
+	if target.Kind != TargetComponent || target.FuncName != "getName" {
+		t.Errorf("landed on %s %s, want the component's getName", target.Kind, target.FuncName)
 	}
 }

@@ -164,6 +164,15 @@ type ComponentRef struct {
 	// type (verified via FuncLookup) over a componentResolver guess on the RHS text.
 	ChainBase   string
 	ChainMethod string
+
+	// ChainRest lists the method calls chained after the one that produced
+	// Component, in order: "x = b.width(1).height(2).build()" records the ref
+	// from width with ChainRest ["height", "build"], and
+	// "x = createObject(...).builder().build()" the created component with
+	// ["builder", "build"]. applyChainedReturnLookup walks it, so x is typed
+	// by the last call rather than the first, and then drops it: nothing after
+	// the parse reads it, and the index keeps refs for the life of a workspace.
+	ChainRest []string
 }
 
 // DocumentLink represents a file path reference in source (cfinclude, href, etc.).

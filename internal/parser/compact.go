@@ -66,6 +66,7 @@ func CompactRefs(refs []ComponentRef) []ComponentRef {
 		r.Component = strings.Clone(r.Component)
 		r.ChainBase = strings.Clone(r.ChainBase)
 		r.ChainMethod = strings.Clone(r.ChainMethod)
+		r.ChainRest = nil
 		out[i] = r
 	}
 
