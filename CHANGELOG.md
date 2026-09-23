@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.5]
+
 ### Changed
 
 - **Known issues default to warning severity.** Zed's diagnostics panel lists only errors and warnings, so entries at the old default, `information`, showed inline but not in the panel. `warning` is listed by every editor's problems panel. Set `"severity": "information"` on the `knownIssues` block or a file to keep the old level.
