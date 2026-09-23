@@ -121,3 +121,50 @@ func TestTagFreeTemplateIsMarkup(t *testing.T) {
 		t.Errorf(".cfc: got %v, want g", got)
 	}
 }
+
+// TestScriptBlockInterpolationFollowsTheOutputContext pins what a <script>
+// block with no CF tag gets: it is a skip region, kept from the CFScript
+// scanner, and its #...# spans are still read, but only where ColdFusion
+// evaluates them.
+func TestScriptBlockInterpolationFollowsTheOutputContext(t *testing.T) {
+	src := "<cfoutput>\n<script>\nvar x = \"#inOutput()#\";\n</script>\n</cfoutput>\n" +
+		"<cffunction name=\"f\" output=\"true\">\n<script>var y = \"#inOutputFunction()#\";</script>\n</cffunction>\n" +
+		"<script>var z = \"#notEvaluated()#\";</script>\n"
+
+	if got := gatedCalls(src); !slices.Equal(got, []string{"inOutput", "inOutputFunction"}) {
+		t.Errorf("got %v want [inOutput inOutputFunction]", got)
+	}
+}
+
+// TestCallsAfterARegionSplitKeepTheirFunction covers the calls in and after a
+// <script> block or a <cfscript> island inside a tag <cffunction>. The body is
+// cut into regions there, a region's parser names a caller only from functions
+// it parsed itself, and the <cffunction> was in the first region: every call
+// from the split on came back with no caller.
+func TestCallsAfterARegionSplitKeepTheirFunction(t *testing.T) {
+	src := "<cfcomponent>\n<cffunction name=\"g\" output=\"true\">\n<cfset a = before()>\n<script>\nvar x = \"#inScript()#\";\n</script>\n" +
+		"<cfset b = afterScript()>\n<cfscript>\nisland();\n</cfscript>\n<cfset c = afterIsland()>\n</cffunction>\n<cfset d = outside()>\n</cfcomponent>"
+
+	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+
+	want := map[string]string{
+		"before": "g", "inScript": "g", "afterScript": "g", "island": "g", "afterIsland": "g", "outside": "",
+	}
+
+	for _, c := range pr.AllCalls() {
+		w, ok := want[c.FuncName]
+		if !ok {
+			continue
+		}
+
+		delete(want, c.FuncName)
+
+		if c.Caller != w {
+			t.Errorf("%s: caller %q, want %q", c.FuncName, c.Caller, w)
+		}
+	}
+
+	if len(want) > 0 {
+		t.Errorf("calls not recorded: %v", want)
+	}
+}
