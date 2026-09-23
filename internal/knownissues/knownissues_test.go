@@ -74,8 +74,9 @@ func TestDiagnosticAnchorsAtTheCallAndFollowsAnEdit(t *testing.T) {
 func TestSeverity(t *testing.T) {
 	for name, want := range map[string]protocol.DiagnosticSeverity{
 		"error": protocol.DiagnosticSeverityError, "Warning": protocol.DiagnosticSeverityWarning,
-		"hint": protocol.DiagnosticSeverityHint, "": protocol.DiagnosticSeverityInformation,
-		"information": protocol.DiagnosticSeverityInformation, "bogus": protocol.DiagnosticSeverityInformation,
+		"hint": protocol.DiagnosticSeverityHint, "": protocol.DiagnosticSeverityWarning,
+		"information": protocol.DiagnosticSeverityInformation, "info": protocol.DiagnosticSeverityInformation,
+		"bogus": protocol.DiagnosticSeverityWarning,
 	} {
 		if got := Severity(name); got != want {
 			t.Errorf("Severity(%q) = %v, want %v", name, got, want)

@@ -93,7 +93,7 @@ type JSON struct {
 //
 //	"knownIssues": {
 //	  "scope": "open",
-//	  "severity": "information",
+//	  "severity": "warning",
 //	  "files": ["docs/todo.txt", {"file": "x.txt", "scope": "workspace", "severity": "inherit"}]
 //	}
 type KnownIssuesConfig struct {
@@ -102,8 +102,9 @@ type KnownIssuesConfig struct {
 	// rather than filling the problems panel. "workspace" publishes every
 	// entry at startup, so the panel lists the whole project's.
 	Scope string `json:"scope"`
-	// Severity is error, warning, information (the default) or hint. VS Code's
-	// Problems panel does not list hints.
+	// Severity is error, warning (the default), information or hint. Warning
+	// is the least severe level every editor's problems panel lists: Zed's lists
+	// only errors and warnings, and VS Code's leaves out hints.
 	Severity string        `json:"severity"`
 	Files    []KnownIssues `json:"files"`
 }
@@ -198,13 +199,13 @@ const Inherit = "inherit"
 // The knownIssues block's defaults.
 const (
 	defaultKnownIssuesScope    = "open"
-	defaultKnownIssuesSeverity = "information"
+	defaultKnownIssuesSeverity = "warning"
 )
 
 // ResolveKnownIssues flattens the knownIssues block into its files, each made
 // absolute against dir, the config file's directory, with its scope and
 // severity settled: a file's own, or the block's when it sets none or
-// "inherit", or the defaults, open and information, when the block sets none
+// "inherit", or the defaults, open and warning, when the block sets none
 // either. Entries that name no file are dropped.
 //
 // The generated reports' default files are implicit: an entry naming one

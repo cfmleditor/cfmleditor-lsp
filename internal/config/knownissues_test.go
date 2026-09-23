@@ -42,14 +42,14 @@ func TestKnownIssuesBlockIsInherited(t *testing.T) {
 	// defaults.
 	got = ResolveKnownIssues(&KnownIssuesConfig{Files: []KnownIssues{{File: "todo.txt", Scope: "inherit"}}}, dir)
 	for _, k := range got {
-		if k.Scope != "open" || k.Severity != "information" {
+		if k.Scope != "open" || k.Severity != "warning" {
 			t.Errorf("block without scope or severity: %+v", k)
 		}
 	}
 
 	// No block at all: the implicit reports, with the defaults.
 	got = ResolveKnownIssues(nil, dir)
-	if len(got) != 2 || got[0].Scope != "open" || got[0].Severity != "information" || got[1].Generate != GenerateCFLint {
+	if len(got) != 2 || got[0].Scope != "open" || got[0].Severity != "warning" || got[1].Generate != GenerateCFLint {
 		t.Errorf("no block: %+v", got)
 	}
 }

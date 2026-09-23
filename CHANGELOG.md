@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Known issues default to warning severity.** Zed's diagnostics panel lists only errors and warnings, so entries at the old default, `information`, showed inline but not in the panel. `warning` is listed by every editor's problems panel. Set `"severity": "information"` on the `knownIssues` block or a file to keep the old level.
+
 ### Fixed
 
 - **Requests read and answered columns in bytes.** LSP columns count UTF-16 code units, so on a line with a non-ASCII character before the cursor, hover, go-to-definition, signature help, completion, highlight, references and code actions looked at the wrong word. Completion and on-type formatting edits replaced the wrong span. Document links, route links and parse-error diagnostics were drawn short of where they belong. Every column is now converted where it enters or leaves the server, and a test fails if a handler reads a request's column without converting it.
