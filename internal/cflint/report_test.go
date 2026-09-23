@@ -29,7 +29,7 @@ func TestReportsSplitByDirectoryAndCarryTheRule(t *testing.T) {
 	found := map[string][]protocol.Diagnostic{
 		filepath.Join(root, "tassweb", "a.cfc"): {issue(9, "MISSING_VAR", "x")},
 		filepath.Join(root, "kiosk", "b.cfm"):   {issue(0, "IMPLICIT_SCOPE", "y")},
-		filepath.FromSlash("/elsewhere/c.cfm"):   {issue(0, "X", "z")},
+		filepath.FromSlash("/elsewhere/c.cfm"):  {issue(0, "X", "z")},
 	}
 
 	reports, left := Reports(found, []string{top, web}, "test")
