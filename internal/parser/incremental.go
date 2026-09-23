@@ -108,7 +108,8 @@ func (pr *ParseResult) funcContaining(startLine, endLine, startChar int) int {
 }
 
 // closingTokenCol returns the column of the closing token (} or </cffunction>)
-// on the given line, or -1 if not found.
+// on the given line, or -1 if not found. The column is in UTF-16 code units,
+// since the edit column funcContaining compares it against is an LSP one.
 func (pr *ParseResult) closingTokenCol(line int) int {
 	lineStart := 0
 	for range line {
@@ -129,11 +130,11 @@ func (pr *ParseResult) closingTokenCol(line int) int {
 
 	// Check for </cffunction (tag-based)
 	if idx := indexCFTag(lineText, "/cffunction"); idx >= 0 {
-		return idx
+		return utf16Len(lineText[:idx])
 	}
 	// Check for closing brace (script-based)
 	if idx := strings.LastIndex(lineText, "}"); idx >= 0 {
-		return idx
+		return utf16Len(lineText[:idx])
 	}
 
 	return -1
@@ -217,22 +218,7 @@ func (pr *ParseResult) resetGlobalCaches() {
 	pr.mu.Unlock()
 }
 
-// posOffset converts line/char to byte offset.
+// posOffset converts an LSP line/character position to a byte offset.
 func posOffset(content string, line, char int) int {
-	off := 0
-	for range line {
-		idx := strings.IndexByte(content[off:], '\n')
-		if idx < 0 {
-			return len(content)
-		}
-
-		off += idx + 1
-	}
-
-	off += char
-	if off > len(content) {
-		off = len(content)
-	}
-
-	return off
+	return PositionToOffset(content, line, char)
 }
