@@ -15,6 +15,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
@@ -330,15 +331,7 @@ func SplitByTarget(calls []Call, targets []string) (byTarget map[string][]Call, 
 	}
 
 	for _, c := range calls {
-		best, depth := "", -1
-
-		for _, t := range targets {
-			dir := filepath.Dir(t)
-			if rel, ok := relativePath(dir, c.File); ok && !isOutside(rel) && len(dir) > depth {
-				best, depth = t, len(dir)
-			}
-		}
-
+		best := knownissues.DeepestTarget(c.File, targets)
 		if best == "" {
 			rest = append(rest, c)
 

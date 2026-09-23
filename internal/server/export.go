@@ -10,11 +10,9 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
-	"go.lsp.dev/protocol"
 )
 
 // report is one generated known-issues file's content, before it is written.
@@ -146,9 +144,6 @@ func (s *Server) unresolvedReports(files, targets []string) ([]report, int) {
 	return out, len(rest)
 }
 
-// cflintRegenerateHint is the cflint report's how-to-regenerate header line.
-const cflintRegenerateHint = "the editor's cfmleditor.exportCFLint command"
-
 // cflintReports runs CFLint over files and splits its findings across
 // targets. It uses the session's runner, or starts one when linting on save
 // is off: a project report is still wanted where per-save linting is not.
@@ -171,95 +166,12 @@ func (s *Server) cflintReports(ctx context.Context, files, targets []string) ([]
 		return nil, 0, err
 	}
 
-	rows := map[string][]knownissues.Row{}
-	counts := map[string]int{}
-	left := 0
+	reports, left := cflint.Reports(found, targets, s.Version)
 
-	for file, diags := range found {
-		t := deepestTarget(file, targets)
-		if t == "" {
-			left += len(diags)
-
-			continue
-		}
-
-		rel, err := filepath.Rel(filepath.Dir(t), file)
-		if err != nil {
-			left += len(diags)
-
-			continue
-		}
-
-		for _, d := range diags {
-			rows[t] = append(rows[t], knownissues.Row{
-				Path:     filepath.ToSlash(rel),
-				Line:     int(d.Range.Start.Line) + 1,
-				Col:      int(d.Range.Start.Character) + 1,
-				Severity: knownissues.SeverityName(d.Severity),
-				Code:     diagnosticCode(d),
-				Message:  diagnosticMessage(d),
-			})
-		}
-
-		counts[t] += len(diags)
-	}
-
-	out := make([]report, 0, len(targets))
-
-	for _, t := range targets {
-		var b strings.Builder
-
-		knownissues.Write(&b, []string{
-			"CFLint issues across the project, one per line: path:line:col: [severity RULE] message.",
-			"Paths are relative to this file's directory. Listed under knownIssues in .cfmleditor.json",
-			`with "generate": "cflint", the entries show as cflint diagnostics, and a file's give way`,
-			"to CFLint's own results once it is linted on save. Regenerate with:",
-			"  " + cflintRegenerateHint,
-			fmt.Sprintf("%d entries; cfmleditor-lsp %s.", counts[t], s.Version),
-		}, rows[t])
-
-		out = append(out, report{path: t, content: b.String(), entries: counts[t]})
+	out := make([]report, 0, len(reports))
+	for _, r := range reports {
+		out = append(out, report{path: r.Path, content: r.Content, entries: r.Entries})
 	}
 
 	return out, left, nil
-}
-
-// deepestTarget is the target whose directory holds file, the deepest when
-// directories nest; empty when none does.
-func deepestTarget(file string, targets []string) string {
-	best := ""
-
-	for _, t := range targets {
-		dir := filepath.Dir(t)
-
-		rel, err := filepath.Rel(dir, file)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			continue
-		}
-
-		if len(dir) > len(filepath.Dir(best)) || best == "" {
-			best = t
-		}
-	}
-
-	return best
-}
-
-func diagnosticCode(d protocol.Diagnostic) string {
-	switch c := d.Code.(type) {
-	case protocol.String:
-		return string(c)
-	case nil:
-		return ""
-	default:
-		return fmt.Sprint(c)
-	}
-}
-
-func diagnosticMessage(d protocol.Diagnostic) string {
-	if m, ok := d.Message.(protocol.String); ok {
-		return string(m)
-	}
-
-	return ""
 }
