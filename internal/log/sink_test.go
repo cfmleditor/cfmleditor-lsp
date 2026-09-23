@@ -1,6 +1,7 @@
 package log_test
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -82,6 +83,33 @@ func TestSinkCarriesTheStructuredFields(t *testing.T) {
 		if !strings.Contains(records[0], want) {
 			t.Errorf("record %q is missing %q", records[0], want)
 		}
+	}
+}
+
+// TestSinkFormatsZapFields covers what nearly every caller passes: the field
+// constructors, not loose pairs. Read as pairs, each field became the next
+// one's key, and the Output panel showed zap's struct instead of key=value.
+func TestSinkFormatsZapFields(t *testing.T) {
+	logger := cflog.NewLogger(false).(cflog.Teeable)
+	sink := &capture{}
+	logger.Attach(sink)
+
+	logger.Info("known issues published",
+		cflog.String("file", "/repo/.cfmleditor-cflint.txt"),
+		cflog.Int("files", 969),
+		cflog.Bool("open", true),
+		cflog.Strings("roots", []string{"a", "b"}),
+		cflog.Err(errors.New("gone")),
+		"loose", 1)
+
+	_, records := sink.snapshot()
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	want := "known issues published file=/repo/.cfmleditor-cflint.txt files=969 open=true roots=[a b] error=gone loose=1"
+	if records[0] != want {
+		t.Errorf("record\n %q\nwant\n %q", records[0], want)
 	}
 }
 

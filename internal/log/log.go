@@ -4,6 +4,7 @@ package log
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -171,12 +172,50 @@ func (z *zapLogger) forward(level int, msg string, kv []any) {
 	var b strings.Builder
 
 	b.WriteString(msg)
-
-	for i := 0; i+1 < len(kv); i += 2 {
-		fmt.Fprintf(&b, " %v=%v", kv[i], kv[i+1])
-	}
+	writeFields(&b, kv)
 
 	sink.Log(level, b.String())
+}
+
+// writeFields writes kv as " key=value" pairs. It takes what the sugared
+// logger takes: zap.Field values, which is what String, Int and the other
+// constructors here return and what nearly every caller passes, mixed with
+// loose key, value pairs.
+//
+// It read everything as loose pairs, so a field became the key of the next
+// field's value, and the Output panel showed zap's internal struct:
+// "known issues published {file 15 0 /repo/x.txt <nil>}={files 11 969  <nil>}".
+func writeFields(b *strings.Builder, kv []any) {
+	for i := 0; i < len(kv); i++ {
+		if f, ok := kv[i].(zap.Field); ok {
+			enc := zapcore.NewMapObjectEncoder()
+			f.AddTo(enc)
+
+			for _, k := range sortedKeys(enc.Fields) {
+				fmt.Fprintf(b, " %s=%v", k, enc.Fields[k])
+			}
+
+			continue
+		}
+
+		if i+1 < len(kv) {
+			fmt.Fprintf(b, " %v=%v", kv[i], kv[i+1])
+			i++
+		}
+	}
+}
+
+// sortedKeys orders an encoded field's keys: one for most fields, several for
+// an inline object, which would otherwise print in map order.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+
+	slices.Sort(keys)
+
+	return keys
 }
 
 // Fatalf logs a message to stderr and exits the process.
