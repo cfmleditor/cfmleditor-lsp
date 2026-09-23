@@ -687,6 +687,116 @@ rather than on the mapped severity, so it can still tell an `INFO` from a
 | `INFO`, `COSMETIC` | Warning |
 | Anything else | Warning, and never filtered by `minSeverity` |
 
+### Known issues
+
+`knownIssues` lists files of documented findings, such as known issues, TODOs,
+a baseline of unresolved calls or a project-wide CFLint run. The server
+publishes each entry as a diagnostic, so it appears in the editor's Problems
+panel beside everything else:
+
+```json
+{
+  "knownIssues": {
+    "scope": "open",
+    "severity": "information",
+    "files": [
+      "docs/todo.txt",
+      { "file": ".cfmleditor-cflint.txt", "severity": "warning", "scope": "workspace" }
+    ]
+  }
+}
+```
+
+The block's `scope` and `severity` are what its files inherit. Every key is
+optional: with no block at all, or a block that sets neither, they are `open`
+and `information`.
+
+| Key | Meaning |
+|---|---|
+| `scope` | `open` (the default) publishes a file's entries only while it is open, so a long list informs the file being worked on rather than filling the panel. `workspace` publishes every entry at startup, so the panel lists the whole project's |
+| `severity` | `error`, `warning`, `information` (the default) or `hint`. VS Code's Problems panel does not list hints |
+| `files` | The files: each a path relative to the `.cfmleditor.json`, or an object |
+
+A file object:
+
+| Key | Meaning |
+|---|---|
+| `file` | The file, relative to the config |
+| `scope` | As the block's. Left out or `"inherit"`, it is the block's |
+| `severity` | As the block's. Left out or `"inherit"`, it is the block's. An entry's `[severity CODE]` tag overrides it |
+| `source` | The diagnostics' label: `known issue` by default, `cflint` for a `generate: "cflint"` file |
+| `generate` | `unresolved` or `cflint`: the file is a report the server writes. See below |
+
+The generated reports' default files, `.cfmleditor-unresolved.txt` and
+`.cfmleditor-cflint.txt` beside the `.cfmleditor.json`, are included without
+being listed, with `scope` and `severity` of `"inherit"`, and show whenever they
+exist. List one only to set its own, as above; named by its default path, it
+keeps its `generate` kind.
+
+Each file is watched, and editing one republishes its entries.
+
+#### The format
+
+One finding per line; blank lines and `#` comments are ignored:
+
+```
+packages/shop/service.cfc:120: svc.getOrder (method 'getOrder' not found in packages.shop.persist)
+webroot/index.cfm:14:7: [warning CFQUERYPARAM_REQ] <cfquery> should use <cfqueryparam/>
+webroot/index.cfm:30: [TODO] move this to the service
+```
+
+`path:line[:col]: message`. A message may start with a `[CODE]` or
+`[severity CODE]` tag, which becomes the diagnostic's code and overrides the
+file's severity; an untagged entry's code is `known-issue`. An entry in the
+unresolved format is underlined at the method it calls, and found again within
+25 lines when an edit has moved it.
+
+A path is relative to the directory holding the file, and is **never absolute**:
+the file is committed and read on other machines, where an absolute path would
+not name the same file, so one is ignored. A `../` path is kept. It reaches a
+sibling project the way `workspacePaths` do, and holds wherever the projects are
+checked out side by side.
+
+#### Generated reports
+
+Two reports are written by the server rather than by hand:
+
+| `generate` | Written by | Default file |
+|---|---|---|
+| `unresolved` | `cfmleditor.exportUnresolved`, or `cfmleditor-lsp unresolved --write <project>` | `.cfmleditor-unresolved.txt` |
+| `cflint` | `cfmleditor.exportCFLint` | `.cfmleditor-cflint.txt` |
+
+A command writes to every `knownIssues` entry marked with its kind or, when
+none is, to the implicit default file, and then republishes the entries
+straight away. Several files of one kind split the report by
+directory: each receives the findings under its own directory, the deepest when
+they nest, so a config over several projects can keep one report in each. A
+finding under none of them is left out and counted in the command's message.
+The header carries no date, so regenerating an unchanged project changes
+nothing a diff would show.
+
+A `cflint` report's entries are labelled `cflint` and carry the rule ID, as
+CFLint's own diagnostics do. They give way file by file to CFLint on save: once
+a file is linted, its report entries are hidden, even when the run finds
+nothing, so an issue is never listed twice or outlives its fix. Regenerating the
+report shows its entries again for files that are not open. The export works
+with `linting.enabled` off, honours `linting.minSeverity`, and finds what a run
+on save finds for the same file.
+
+To print a report instead of writing it, `cfmleditor-lsp unresolved
+--known-issues <dir>` writes the same format to stdout, relative to the config's
+directory or `--relative-to <dir>`. Findings outside it are left out, and
+counted, unless `--include-workspace` writes them as `../` paths.
+
+#### Diagnostics from several sources
+
+CFLint on save, the workspace parse scan and known issues all publish through
+one store, which keeps each source's diagnostics per file and always publishes a
+file with all of them. A publish replaces everything a server has sent for a
+file, so before the store, saving a file wiped its parse errors and a scan wiped
+its lint results. Closing a file clears its CFLint and parse diagnostics and its
+`open`-scope known issues, and keeps its `workspace`-scope ones.
+
 ### References
 
 `textDocument/references` — the editor's "Find All References" — is off by default and enabled per workspace:

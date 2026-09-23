@@ -2,8 +2,11 @@
 package config
 
 import (
+	"encoding/json"
 	"maps"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
@@ -63,6 +66,12 @@ type JSON struct {
 	// remember to repeat.
 	CodeMap CodeMap `json:"codemap"`
 
+	// KnownIssues lists files of documented findings — known issues, TODOs, a
+	// baseline of unresolved calls — whose entries the server publishes as
+	// diagnostics, so they appear in an editor's problems panel. See
+	// KnownIssuesConfig, and internal/knownissues for the format.
+	KnownIssues *KnownIssuesConfig `json:"knownIssues"`
+
 	ComponentResolvers []Resolver        `json:"componentResolvers"`
 	PropertyResolvers  []PropResolver    `json:"propertyResolvers"`
 	BeanPaths          map[string]string `json:"beanPaths"`
@@ -77,6 +86,195 @@ type JSON struct {
 	References    *References  `json:"references"`
 	Features      *Features    `json:"features"`
 	Debug         bool         `json:"debug"`
+}
+
+// KnownIssuesConfig is the knownIssues block: the scope and severity its
+// files inherit, and the files.
+//
+//	"knownIssues": {
+//	  "scope": "open",
+//	  "severity": "information",
+//	  "files": ["docs/todo.txt", {"file": "x.txt", "scope": "workspace", "severity": "inherit"}]
+//	}
+type KnownIssuesConfig struct {
+	// Scope is "open" (the default): a file's entries are published only
+	// while it is open, so a long list informs the file being worked on
+	// rather than filling the problems panel. "workspace" publishes every
+	// entry at startup, so the panel lists the whole project's.
+	Scope string `json:"scope"`
+	// Severity is error, warning, information (the default) or hint. VS Code's
+	// Problems panel does not list hints.
+	Severity string        `json:"severity"`
+	Files    []KnownIssues `json:"files"`
+}
+
+// KnownIssues is one known-issues file and how its entries are reported.
+type KnownIssues struct {
+	File string `json:"file"`
+	// Severity is as KnownIssuesConfig's; empty or "inherit" takes the
+	// block's. A [severity CODE] tag on an entry overrides it.
+	Severity string `json:"severity"`
+	// Source labels the diagnostics, "known issue" when empty.
+	Source string `json:"source"`
+	// Scope is as KnownIssuesConfig's; empty or "inherit" takes the block's.
+	Scope string `json:"scope"`
+	// Generate marks a file the server writes, so it is regenerated rather
+	// than kept by hand: "unresolved" is the unresolved call report,
+	// rewritten by the cfmleditor.exportUnresolved command and by
+	// `cfmleditor-lsp unresolved --write`; "cflint" is a CFLint run over the
+	// whole project, rewritten by cfmleditor.exportCFLint. Several files of one
+	// kind split the report by directory; see GenerateTargets.
+	//
+	// A cflint file's entries are labelled cflint, and give way per file to a
+	// live CFLint run: once a file is linted on save, its entries from the file
+	// are hidden, so no issue is listed twice.
+	Generate string `json:"generate"`
+}
+
+// The kinds of generated known-issues file.
+const (
+	GenerateUnresolved = "unresolved"
+	GenerateCFLint     = "cflint"
+)
+
+// defaultGenerated is where each kind is written when no knownIssues entry is
+// marked to receive it: beside the .cfmleditor.json.
+var defaultGenerated = map[string]string{
+	GenerateUnresolved: ".cfmleditor-unresolved.txt",
+	GenerateCFLint:     ".cfmleditor-cflint.txt",
+}
+
+// IsGenerated reports whether k is regenerated as kind.
+func (k KnownIssues) IsGenerated(kind string) bool {
+	return strings.EqualFold(strings.TrimSpace(k.Generate), kind)
+}
+
+// GenerateTargets returns the files a kind of report is written to: the
+// resolved knownIssues entries marked generate kind, or, when none is, that
+// kind's default file in configDir. Each file receives the findings under its
+// own directory, so a config over several projects can keep one report in
+// each of them.
+func GenerateTargets(list []KnownIssues, kind, configDir string) []string {
+	var out []string
+
+	for _, k := range list {
+		if k.IsGenerated(kind) && !slices.Contains(out, k.File) {
+			out = append(out, k.File)
+		}
+	}
+
+	if name := defaultGenerated[kind]; len(out) == 0 && name != "" && configDir != "" {
+		out = append(out, filepath.Join(configDir, name))
+	}
+
+	return out
+}
+
+// UnmarshalJSON accepts a bare path for the common case.
+func (k *KnownIssues) UnmarshalJSON(b []byte) error {
+	var path string
+	if json.Unmarshal(b, &path) == nil {
+		*k = KnownIssues{File: path}
+
+		return nil
+	}
+
+	type plain KnownIssues
+
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+
+	*k = KnownIssues(p)
+
+	return nil
+}
+
+// Inherit is the scope or severity value that takes the knownIssues block's.
+// Leaving the key out does the same, and the implicit reports are given it.
+const Inherit = "inherit"
+
+// The knownIssues block's defaults.
+const (
+	defaultKnownIssuesScope    = "open"
+	defaultKnownIssuesSeverity = "information"
+)
+
+// ResolveKnownIssues flattens the knownIssues block into its files, each made
+// absolute against dir, the config file's directory, with its scope and
+// severity settled: a file's own, or the block's when it sets none or
+// "inherit", or the defaults, open and information, when the block sets none
+// either. Entries that name no file are dropped.
+//
+// The generated reports' default files are implicit: an entry naming one
+// without a generate kind takes that file's kind, so a bare path is enough to
+// set its scope or severity, and a kind no entry is marked with gets its
+// default file added, inheriting the block's scope and severity. A config with no knownIssues
+// at all therefore shows .cfmleditor-unresolved.txt and .cfmleditor-cflint.txt
+// when they exist, and an export writes them where they will be picked up. A
+// file that does not exist publishes nothing.
+func ResolveKnownIssues(block *KnownIssuesConfig, dir string) []KnownIssues {
+	var b KnownIssuesConfig
+	if block != nil {
+		b = *block
+	}
+
+	scope := settle(b.Scope, defaultKnownIssuesScope)
+	severity := settle(b.Severity, defaultKnownIssuesSeverity)
+
+	var out []KnownIssues
+
+	for _, k := range b.Files {
+		if strings.TrimSpace(k.File) == "" {
+			continue
+		}
+
+		if !filepath.IsAbs(k.File) {
+			k.File = filepath.Join(dir, filepath.FromSlash(k.File))
+		}
+
+		k.File = filepath.Clean(k.File)
+		k.Scope = settle(k.Scope, scope)
+		k.Severity = settle(k.Severity, severity)
+
+		if strings.TrimSpace(k.Generate) == "" {
+			for kind, name := range defaultGenerated {
+				if k.File == filepath.Join(dir, name) {
+					k.Generate = kind
+				}
+			}
+		}
+
+		out = append(out, k)
+	}
+
+	if dir == "" {
+		return out
+	}
+
+	for _, kind := range []string{GenerateUnresolved, GenerateCFLint} {
+		if !slices.ContainsFunc(out, func(k KnownIssues) bool { return k.IsGenerated(kind) }) {
+			out = append(out, KnownIssues{
+				File:     filepath.Join(dir, defaultGenerated[kind]),
+				Generate: kind,
+				Scope:    settle(Inherit, scope),
+				Severity: settle(Inherit, severity),
+			})
+		}
+	}
+
+	return out
+}
+
+// settle is v, lowercased, or parent when v is empty or "inherit".
+func settle(v, parent string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" || v == Inherit {
+		return parent
+	}
+
+	return v
 }
 
 // Resolver maps a call pattern to a component path.
@@ -375,6 +573,7 @@ type Resolved struct {
 	ServicePropertyResolvers map[string]string
 	Routes                   route.Config
 	CodeMap                  CodeMap
+	KnownIssues              []KnownIssues
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
@@ -434,6 +633,8 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if len(cfg.CodeMap.Entry)+len(cfg.CodeMap.Utility) > 0 || cfg.CodeMap.HideUtility {
 		r.CodeMap = cfg.CodeMap
 	}
+
+	r.KnownIssues = ResolveKnownIssues(cfg.KnownIssues, dir)
 
 	for _, cr := range cfg.ComponentResolvers {
 		if cr.Match != "" && cr.Resolve != "" {
@@ -578,6 +779,10 @@ func Merge(base, over *JSON) *JSON {
 	out.CodeMap = base.CodeMap
 	if len(over.CodeMap.Entry)+len(over.CodeMap.Utility) > 0 || over.CodeMap.HideUtility {
 		out.CodeMap = over.CodeMap
+	}
+
+	if over.KnownIssues != nil {
+		out.KnownIssues = over.KnownIssues
 	}
 
 	out.BeanPaths = mergeStringMap(base.BeanPaths, over.BeanPaths)

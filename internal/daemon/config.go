@@ -155,6 +155,17 @@ func (c *Config) CodeMap() config.CodeMap {
 	return raw.CodeMap
 }
 
+// KnownIssues returns the known-issues files in config, made absolute against
+// the directory the config file is in.
+func (c *Config) KnownIssues() []config.KnownIssues {
+	raw := c.raw()
+	if raw == nil {
+		return nil
+	}
+
+	return config.ResolveKnownIssues(raw.KnownIssues, filepath.Dir(c.Path))
+}
+
 // Debug returns whether debug logging is enabled in config.
 func (c *Config) Debug() bool {
 	raw := c.raw()
@@ -483,6 +494,7 @@ func SettingsFrom(c *Config) server.Settings {
 		ConfigPath:               c.Path,
 		Routes:                   c.Routes(),
 		CodeMap:                  c.CodeMap(),
+		KnownIssues:              c.KnownIssues(),
 		WorkspaceFolders:         c.WorkspaceFolders(),
 		IndexGlobs:               c.IndexGlobs(),
 		Mappings:                 c.Mappings(),

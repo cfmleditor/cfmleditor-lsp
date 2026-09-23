@@ -76,6 +76,12 @@ func (s *Server) scanWorkspace(ctx context.Context) {
 		if !tree.RootNode().HasError() {
 			tree.Close()
 
+			// A file an earlier scan found errors in and that now parses
+			// clean has them withdrawn, rather than left until it is opened.
+			if s.hasDiagnostics(uri.File(f), sourceParse) {
+				s.setDiagnostics(ctx, uri.File(f), sourceParse, nil)
+			}
+
 			continue
 		}
 
@@ -84,10 +90,7 @@ func (s *Server) scanWorkspace(ctx context.Context) {
 
 		if len(diags) > 0 {
 			totalErrors += len(diags)
-			s.notify(ctx, protocol.MethodTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
-				URI:         uri.File(f),
-				Diagnostics: diags,
-			})
+			s.setDiagnostics(ctx, uri.File(f), sourceParse, diags)
 		}
 	}
 

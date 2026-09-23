@@ -26,7 +26,8 @@ const fullConfig = `{
 		"attributes": ["data-view"],
 		"controllers": [{"component": "controllers.${1}", "method": "${2}"}]
 	},
-	"codemap": {"entry": ["../prs"], "utility": ["core"], "hideUtility": true}
+	"codemap": {"entry": ["../prs"], "utility": ["core"], "hideUtility": true},
+	"knownIssues": {"files": [".cfmleditor-unresolved.txt"]}
 }`
 
 // TestSettingsFromFillsEveryField is the recurrence guard for the defect this

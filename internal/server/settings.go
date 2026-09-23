@@ -32,6 +32,7 @@ type Settings struct {
 	ServicePropertyResolvers map[string]string
 	Routes                   route.Config
 	CodeMap                  config.CodeMap
+	KnownIssues              []config.KnownIssues
 	ComponentResolvers       []config.Resolver
 	PropertyResolvers        []config.PropResolver
 	BeanPaths                map[string]string
@@ -55,6 +56,7 @@ func (set Settings) Apply(s *Server) {
 	s.ServicePropertyResolvers = set.ServicePropertyResolvers
 	s.Routes = set.Routes
 	s.CodeMap = set.CodeMap
+	s.KnownIssues = set.KnownIssues
 	s.ComponentResolvers = append(s.ComponentResolvers, set.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, set.PropertyResolvers...)
 	s.BeanPaths = set.BeanPaths

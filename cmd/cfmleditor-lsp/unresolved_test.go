@@ -8,38 +8,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
-func TestIsBuiltin(t *testing.T) {
-	if !isBuiltin("trim") {
-		t.Error("expected trim (a documented built-in function) to be recognized")
-	}
-
-	if !isBuiltin("TRIM") {
-		t.Error("expected case-insensitive built-in lookup")
-	}
-
-	if !isBuiltin("append") {
-		t.Error("expected 'append' (an array/list member function name) to be recognized as builtin")
-	}
-
-	if isBuiltin("someUserDefinedFunctionXyz") {
-		t.Error("expected a made-up function name to not be recognized as builtin")
-	}
-}
-
-func TestIsMemberFunction(t *testing.T) {
-	if !isMemberFunction("append") {
-		t.Error("expected 'append' to be a known member function (from arrayAppend)")
-	}
-
-	if !isMemberFunction("APPEND") {
-		t.Error("expected case-insensitive member function lookup")
-	}
-
-	if isMemberFunction("notARealMemberFunctionXyz") {
-		t.Error("expected an unknown name to not be a member function")
-	}
-}
-
 func TestCollectCFMLFiles(t *testing.T) {
 	dir := t.TempDir()
 

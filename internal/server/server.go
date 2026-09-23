@@ -50,13 +50,19 @@ type Server struct {
 	// cannot participate in a cycle.
 	rootsMu                  sync.RWMutex
 	workspaceRoots           []string
-	WorkspaceFolders         []string                  // project folders from config
-	IndexGlobs               []string                  // optional glob filters (absolute paths)
-	Mappings                 map[string]string         // component path mappings (key -> abs path)
-	ExpressionMappings       map[string]string         // runtime expression → static value substitutions
-	ServicePropertyResolvers map[string]string         // "@serviceproperty" annotation kind → dot-path template
-	Routes                   route.Config              // framework routing convention (see internal/route)
-	CodeMap                  config.CodeMap            // entry and utility globs for cfmleditor.generateCodeMap
+	WorkspaceFolders         []string             // project folders from config
+	IndexGlobs               []string             // optional glob filters (absolute paths)
+	Mappings                 map[string]string    // component path mappings (key -> abs path)
+	ExpressionMappings       map[string]string    // runtime expression → static value substitutions
+	ServicePropertyResolvers map[string]string    // "@serviceproperty" annotation kind → dot-path template
+	Routes                   route.Config         // framework routing convention (see internal/route)
+	CodeMap                  config.CodeMap       // entry and utility globs for cfmleditor.generateCodeMap
+	KnownIssues              []config.KnownIssues // files of documented findings published as diagnostics
+
+	// diag holds every diagnostic this session has published, per file and
+	// source; see diagnostics.go.
+	diag                     diagnosticStore
+	exporting                sync.Map                  // report kinds with an export running (see handleExport)
 	ComponentResolvers       []config.Resolver         // custom method-to-component resolvers
 	PropertyResolvers        []config.PropResolver     // custom property-to-component resolvers
 	resolverMu               sync.Mutex                // guards resolver, cachedResolvers, cachedResolverSet
@@ -184,7 +190,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
 		CodeActionProvider:        protocol.Boolean(true),
 		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats", "cfmleditor.resolveRoute"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats", "cfmleditor.resolveRoute", "cfmleditor.exportUnresolved", "cfmleditor.exportCFLint"},
 		},
 		Workspace: &protocol.WorkspaceOptions{
 			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{

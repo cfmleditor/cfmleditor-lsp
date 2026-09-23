@@ -111,6 +111,7 @@ type optionalBlockState struct {
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
+	KnownIssues              []config.KnownIssues
 }
 
 func (s *Server) optionalBlocks() optionalBlockState {
@@ -123,6 +124,7 @@ func (s *Server) optionalBlocks() optionalBlockState {
 		TagSnippets:              s.TagSnippets,
 		FunctionSnippets:         s.FunctionSnippets,
 		GlobalFunctionResolution: s.GlobalFunctionResolution,
+		KnownIssues:              s.KnownIssues,
 	}
 }
 
@@ -150,6 +152,12 @@ func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev optionalBloc
 
 	if merged.References == nil {
 		s.References = prev.References
+	}
+
+	// A config without the block still resolves to the implicit reports, so
+	// there is only something to put back when the session had its own list.
+	if merged.KnownIssues == nil && len(prev.KnownIssues) > 0 {
+		s.KnownIssues = prev.KnownIssues
 	}
 
 	if merged.Completions == nil {
@@ -272,6 +280,10 @@ func (s *Server) applyConfig(r *config.Resolved) {
 
 	if len(r.CodeMap.Entry)+len(r.CodeMap.Utility) > 0 && len(s.CodeMap.Entry)+len(s.CodeMap.Utility) == 0 {
 		s.CodeMap = r.CodeMap
+	}
+
+	if len(r.KnownIssues) > 0 && len(s.KnownIssues) == 0 {
+		s.KnownIssues = r.KnownIssues
 	}
 
 	s.ComponentResolvers = append(s.ComponentResolvers, r.ComponentResolvers...)
