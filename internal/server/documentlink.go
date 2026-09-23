@@ -57,6 +57,8 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 
 	var links []protocol.DocumentLink
 
+	cols := newColMapper(content)
+
 	for _, dl := range docLinks {
 		tip := dl.Path
 		data, _ := json.Marshal(map[string]string{
@@ -65,8 +67,8 @@ func (s *Server) handleDocumentLink(_ context.Context, rawParams []byte) (any, e
 		})
 		links = append(links, protocol.DocumentLink{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: dl.Line, Character: dl.Start},
-				End:   protocol.Position{Line: dl.Line, Character: dl.End},
+				Start: protocol.Position{Line: dl.Line, Character: cols.col(dl.Line, dl.Start)},
+				End:   protocol.Position{Line: dl.Line, Character: cols.col(dl.Line, dl.End)},
 			},
 			Tooltip: &tip,
 			Data:    protocol.LSPAny(data),

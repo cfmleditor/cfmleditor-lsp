@@ -27,7 +27,7 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 	}
 
 	line := int(params.Position.Line)
-	char := int(params.Position.Character)
+	char := byteCol(content, line, params.Position.Character)
 
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {

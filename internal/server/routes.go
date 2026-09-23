@@ -265,6 +265,8 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 
 	var links []protocol.DocumentLink
 
+	cols := newColMapper(docContent)
+
 	for _, ref := range s.scanDocumentRoutes(docContent, r) {
 		if !routepkg.Plausible(ref.Value) {
 			continue
@@ -281,8 +283,8 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 
 		links = append(links, protocol.DocumentLink{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: ref.Line, Character: ref.Col},
-				End:   protocol.Position{Line: ref.Line, Character: ref.Col + uint32(len(ref.Value))},
+				Start: protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col)},
+				End:   protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col+uint32(len(ref.Value)))}, //nolint:gosec // a route is one attribute value
 			},
 			Target:  targetRef,
 			Tooltip: &tip,

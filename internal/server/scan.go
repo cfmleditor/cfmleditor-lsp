@@ -102,12 +102,13 @@ func (s *Server) scanWorkspace(ctx context.Context) {
 
 func collectErrorDiagnostics(n *sitter.Node, src []byte) []protocol.Diagnostic {
 	var diags []protocol.Diagnostic
-	collectErrors(n, src, &diags)
+	collectErrors(n, src, newColMapper(string(src)), &diags)
 
 	return diags
 }
 
-func collectErrors(n *sitter.Node, src []byte, diags *[]protocol.Diagnostic) {
+// tree-sitter reports columns in bytes; cols turns them into LSP characters.
+func collectErrors(n *sitter.Node, src []byte, cols *colMapper, diags *[]protocol.Diagnostic) {
 	if n.IsError() || n.IsMissing() {
 		start := n.StartPosition()
 		end := n.EndPosition()
@@ -126,8 +127,8 @@ func collectErrors(n *sitter.Node, src []byte, diags *[]protocol.Diagnostic) {
 
 		*diags = append(*diags, protocol.Diagnostic{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(start.Row), Character: uint32(start.Column)},
-				End:   protocol.Position{Line: uint32(end.Row), Character: uint32(end.Column)},
+				Start: protocol.Position{Line: uint32(start.Row), Character: cols.col(uint32(start.Row), uint32(start.Column))},
+				End:   protocol.Position{Line: uint32(end.Row), Character: cols.col(uint32(end.Row), uint32(end.Column))},
 			},
 			Severity: protocol.DiagnosticSeverityError,
 			Source:   protocol.NewOptional("cfmleditor"),
@@ -138,6 +139,6 @@ func collectErrors(n *sitter.Node, src []byte, diags *[]protocol.Diagnostic) {
 	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
-		collectErrors(n.Child(i), src, diags)
+		collectErrors(n.Child(i), src, cols, diags)
 	}
 }

@@ -131,9 +131,17 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 
 	t0 := time.Now()
 
+	// The cursor as a byte column, which is what every helper below reads the
+	// line with; params.Position stays the client's, in UTF-16 units, for the
+	// edits that start at the cursor.
+	char := 0
+	if hasDoc {
+		char = byteCol(content, int(params.Position.Line), params.Position.Character)
+	}
+
 	tagName := ""
 	if hasDoc {
-		tagName = parser.FindEnclosingTag(content, int(params.Position.Line), int(params.Position.Character))
+		tagName = parser.FindEnclosingTag(content, int(params.Position.Line), char)
 	}
 
 	triggerChar := ""
@@ -143,14 +151,14 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 
 	triggeredByTag := (params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		triggerChar == "<") ||
-		(hasDoc && strings.HasSuffix(parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character)), "<"))
+		(hasDoc && strings.HasSuffix(parser.TextBeforeCursor(content, int(params.Position.Line), char), "<"))
 
 	triggeredByClose := params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		triggerChar == ">"
 
 	triggeredByDot := (params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
 		triggerChar == ".") ||
-		(hasDoc && parser.WordBeforeDot(content, int(params.Position.Line), int(params.Position.Character)) != "")
+		(hasDoc && parser.WordBeforeDot(content, int(params.Position.Line), char) != "")
 
 	closing := false
 	typingTag := false
@@ -158,13 +166,13 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 	inAttrValue := false
 
 	if hasDoc {
-		closing = parser.IsClosingTagContext(content, int(params.Position.Line), int(params.Position.Character))
+		closing = parser.IsClosingTagContext(content, int(params.Position.Line), char)
 		if !closing && tagName == "" {
-			typingTag = parser.IsTypingTagName(content, int(params.Position.Line), int(params.Position.Character))
+			typingTag = parser.IsTypingTagName(content, int(params.Position.Line), char)
 		}
 
-		inHashExpr = parser.IsInsideHashExpr(content, int(params.Position.Line), int(params.Position.Character))
-		inAttrValue = parser.IsInsideAttrValue(content, int(params.Position.Line), int(params.Position.Character))
+		inHashExpr = parser.IsInsideHashExpr(content, int(params.Position.Line), char)
+		inAttrValue = parser.IsInsideAttrValue(content, int(params.Position.Line), char)
 	}
 
 	contextDur := time.Since(t0)
@@ -195,7 +203,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		items = s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))
 	case inAttrValue:
 		if CompletionAttributes {
-			attrName := parser.FindCurrentAttr(content, int(params.Position.Line), int(params.Position.Character))
+			attrName := parser.FindCurrentAttr(content, int(params.Position.Line), char)
 			if attrName != "" && tagName != "" {
 				attrs := docs.TagParams(tagName)
 				if attrs == nil {
@@ -223,11 +231,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		}
 	case triggeredByClose && hasDoc:
 		if CompletionCloseTags {
-			if item, ok := duplicateGtCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
+			if item, ok := duplicateGtCompletion(content, int(params.Position.Line), char); ok {
 				items = append(items, item)
 			}
 
-			if item, ok := closeTagCompletion(content, int(params.Position.Line), int(params.Position.Character)); ok {
+			if item, ok := closeTagCompletion(content, int(params.Position.Line), char); ok {
 				items = append(items, item)
 			}
 		}
@@ -235,6 +243,8 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		if CompletionCloseTags {
 			t1 := time.Now()
 			trailingGt := -1
+
+			var trailingGtCol uint32 // trailingGt as an LSP character
 
 			if hasDoc {
 				lineStart := 0
@@ -255,18 +265,19 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				}
 
 				lineText := content[lineStart : lineStart+lineEnd]
-				charPos := int(params.Position.Character)
+				charPos := char
 
 				if charPos < len(lineText) {
 					after := lineText[charPos:]
 					if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
 						trailingGt = charPos + idx + 1
+						trailingGtCol = lineCol(lineText, trailingGt)
 					}
 				}
 			}
 
 			tags := make(map[string]int)
-			for i, tag := range s.findUnclosedTagsScoped(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)) {
+			for i, tag := range s.findUnclosedTagsScoped(content, params.TextDocument.URI, int(params.Position.Line), char) {
 				_, ok := tags[tag]
 				if !ok {
 					item := protocol.CompletionItem{
@@ -280,7 +291,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 						item.TextEdit = &protocol.TextEdit{
 							Range: protocol.Range{
 								Start: params.Position,
-								End:   protocol.Position{Line: params.Position.Line, Character: uint32(trailingGt)},
+								End:   protocol.Position{Line: params.Position.Line, Character: trailingGtCol},
 							},
 							NewText: tag + ">",
 						}
@@ -325,12 +336,12 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		// be computed rather than derived by subtracting a length from the
 		// cursor's column. Doing the latter underflowed uint32 and produced a
 		// range starting at character 4294967288, after its own end.
-		textBefore := parser.TextBeforeCursor(content, int(params.Position.Line), int(params.Position.Character))
+		textBefore := parser.TextBeforeCursor(content, int(params.Position.Line), char)
 		openLine, openChar := params.Position.Line, params.Position.Character
 
 		if open := strings.LastIndex(textBefore, "<"); open >= 0 {
 			l, c := parser.PositionAt(content, open)
-			openLine, openChar = uint32(l), uint32(c)
+			openLine, openChar = uint32(l), lineCol(parser.LineTextAt(content, l), c)
 		}
 
 		items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
@@ -409,7 +420,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		if CompletionDotMethods {
 			t1 := time.Now()
 
-			if methods := s.dotCompletionMethods(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)); len(methods) > 0 {
+			if methods := s.dotCompletionMethods(content, params.TextDocument.URI, int(params.Position.Line), char); len(methods) > 0 {
 				items = append(items, methods...)
 
 				s.log.Debug("completion: dotMethods", cflog.Duration("dur", time.Since(t1)))
@@ -422,7 +433,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 	default:
 		// Check if inside a function call — offer named argument completions first
 		if hasDoc {
-			if argItems := s.argumentCompletion(content, params.TextDocument.URI, int(params.Position.Line), int(params.Position.Character)); len(argItems) > 0 {
+			if argItems := s.argumentCompletion(content, params.TextDocument.URI, int(params.Position.Line), char); len(argItems) > 0 {
 				items = append(items, argItems...)
 			}
 		}
@@ -517,8 +528,8 @@ func duplicateGtCompletion(content string, line, char int) (protocol.CompletionI
 
 		TextEdit: &protocol.TextEdit{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
-				End:   protocol.Position{Line: uint32(line), Character: uint32(char)},
+				Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
+				End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, char)},
 			},
 			NewText: "",
 		},
@@ -581,8 +592,8 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 		InsertTextFormat: protocol.InsertTextFormatSnippet,
 		TextEdit: &protocol.TextEdit{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(line), Character: uint32(char - 1)},
-				End:   protocol.Position{Line: uint32(line), Character: uint32(endChar)},
+				Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
+				End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, endChar)},
 			},
 			NewText: middle + ">",
 		},
