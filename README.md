@@ -766,6 +766,11 @@ Two reports are written by the server rather than by hand:
 | `unresolved` | `cfmleditor.exportUnresolved`, or `cfmleditor-lsp unresolved --write <project>` | `.cfmleditor-unresolved.txt` |
 | `cflint` | `cfmleditor.exportCFLint` | `.cfmleditor-cflint.txt` |
 
+Both are also offered as code actions on any CFML file, "Export unresolved
+calls report for the workspace" and "Export CFLint report for the workspace",
+which is how an editor that cannot run a server command itself reaches them:
+in Zed, `cmd-.` (`ctrl-.` elsewhere).
+
 A command writes to every `knownIssues` entry marked with its kind or, when
 none is, to the implicit default file, and then republishes the entries
 straight away. Several files of one kind split the report by

@@ -22,9 +22,14 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 	line := int(params.Range.Start.Line)
 	char := int(params.Range.Start.Character)
 
+	// The workspace reports come last, and wherever the cursor is: they are
+	// about the project, not the word under it. A client with no way to run a
+	// server command of its own, such as Zed, reaches them only from here.
+	reports := workspaceReportActions()
+
 	word := parser.WordAtPosition(content, line, char)
 	if word == "" {
-		return nil, nil
+		return reports, nil
 	}
 
 	docURI := string(params.TextDocument.URI)
@@ -87,7 +92,28 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 		},
 	})
 
-	return actions, nil
+	return append(actions, reports...), nil
+}
+
+// workspaceReportActions offers the generated known-issues reports, which
+// scan the whole workspace and write their files beside .cfmleditor.json (see
+// handleExport).
+func workspaceReportActions() []protocol.CodeAction {
+	reports := []struct{ title, command string }{
+		{"Export unresolved calls report for the workspace", "cfmleditor.exportUnresolved"},
+		{"Export CFLint report for the workspace", "cfmleditor.exportCFLint"},
+	}
+
+	out := make([]protocol.CodeAction, 0, len(reports))
+
+	for _, r := range reports {
+		out = append(out, protocol.CodeAction{
+			Title:   r.title,
+			Command: protocol.Command{Title: r.title, Command: r.command},
+		})
+	}
+
+	return out
 }
 
 // lspAnyArgs marshals each argument to a protocol.LSPAny for use in a Command's Arguments field.
