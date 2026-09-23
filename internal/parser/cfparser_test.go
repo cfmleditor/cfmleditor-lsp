@@ -3536,6 +3536,9 @@ func TestChainedAssignRHS_FailedFirstHopContinuesChain(t *testing.T) {
 // hop). tryResolveCall must consume through its own hop's closing ')' before
 // returning success — otherwise ".getRGBColor(...)" is left dangling and,
 // same as the failure case, gets rediscovered as an orphaned bare call.
+// The next hop starts from the component the resolver named, not from
+// "document" with the first hop left to re-resolve: see
+// TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments.
 func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
 	content := `component {
 	function work() {
@@ -3568,8 +3571,101 @@ func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
 	}
 
 	getRGBColor, ok := byFunc["getRGBColor"]
-	if !ok || getRGBColor.Variable != "document" || !slices.Equal(getRGBColor.Chain, []string{"getJavaUtils"}) {
-		t.Errorf("expected getRGBColor CallSite Variable=document Chain=[getJavaUtils], got %+v", getRGBColor)
+	if !ok || getRGBColor.Component != "helpers.javautils" || len(getRGBColor.Chain) != 0 {
+		t.Errorf("expected getRGBColor CallSite Component=helpers.javautils Chain=[], got %+v", getRGBColor)
+	}
+}
+
+// TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments covers
+// `x = getService("company").getList()` and the same off a receiver. The
+// resolver needs the string argument to name the service, and a Chain entry
+// is only a method name, so recording the next hop as Chain=[getService] left
+// the resolve step to try "getService()" — which a broad "get$1()" catch-all
+// answered with the wrong component, and a bare root answered not at all.
+func TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments(t *testing.T) {
+	content := `component {
+	function work() {
+		a = getService("company").getList(companyCode=1);
+		b = _parent.getService("address").getAddr(companyCode=1).name;
+		var c = VARIABLES._parent.getService("staff").getStaff(id=1).getName();
+	}
+}`
+
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.AllCalls() {
+		byFunc[c.FuncName] = c
+	}
+
+	for fn, want := range map[string]string{
+		"getList":  "packages.company.service",
+		"getAddr":  "packages.address.service",
+		"getStaff": "packages.staff.service",
+	} {
+		got, ok := byFunc[fn]
+		if !ok || got.Component != want || len(got.Chain) != 0 {
+			t.Errorf("expected %s CallSite Component=%s Chain=[], got %+v", fn, want, got)
+		}
+	}
+
+	if got := byFunc["getName"]; got.Component != "packages.staff.service" || !slices.Equal(got.Chain, []string{"getStaff"}) {
+		t.Errorf("expected getName CallSite Component=packages.staff.service Chain=[getStaff], got %+v", got)
+	}
+}
+
+// TestChainedCall_ResolvedFirstHopOutsideAssignment covers the same
+// getService("x").method() chain where it is not an assignment's plain RHS:
+// a statement on its own, a scoped receiver, a struct-member target, a
+// condition, a nested argument and a named argument. Each reached the first
+// hop's "(" through a path that skipped its arguments unread, so the next hop
+// was recorded without the component they name.
+func TestChainedCall_ResolvedFirstHopOutsideAssignment(t *testing.T) {
+	content := `component {
+	function work() {
+		getService("a").callA();
+		VARIABLES._parent.getService("b").callB();
+		temp.x = VARIABLES._kernel.getService("c").callC();
+		result["x"] = _parent.getService("d").callD();
+		if (NOT getService("e").callE()) {}
+		y = compareNoCase(trim(getService("f").callF()), "x");
+		z = getService(service="g").callG();
+	}
+}`
+
+	resolvers := []Resolver{
+		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
+		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"},
+	}
+
+	pr := ParseWithOptions(testURI, content, ParseOptions{
+		Resolvers:     resolvers,
+		ExtractCalls:  true,
+		ScanAllScopes: true,
+	})
+
+	byFunc := make(map[string]CallSite)
+	for _, c := range pr.AllCalls() {
+		byFunc[c.FuncName] = c
+	}
+
+	for _, l := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		fn := "call" + strings.ToUpper(l)
+		want := "packages." + l + ".service"
+
+		got, ok := byFunc[fn]
+		if !ok || got.Component != want || len(got.Chain) != 0 {
+			t.Errorf("expected %s CallSite Component=%s Chain=[], got %+v", fn, want, got)
+		}
 	}
 }
 

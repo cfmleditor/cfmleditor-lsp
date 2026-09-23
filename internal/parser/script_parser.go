@@ -150,7 +150,15 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	// base receiver for every subsequent chained hop below. Hops beyond the
 	// first accumulate in chainHops so CanResolveCall can walk comp's type
 	// forward through each intermediate call before checking the current one.
-	comp := p.tryResolveCall(callExpr)
+	//
+	// The argument list is already consumed, so this matches callExpr as
+	// built above rather than going through tryResolveCall, which expects to
+	// read the arguments itself from an unconsumed "(".
+	comp := ""
+	if firstArg != "" && len(p.resolvers) > 0 {
+		comp = p.resolveCall(callExpr)
+	}
+
 	funcName := tok.Value
 
 	var chainHops []string
@@ -261,11 +269,41 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 // CallSites with Variable=baseVar and an accumulating Chain, matching
 // checkBareCall's shape so CanResolveCall can walk them.
 func (p *scriptParser) continueChainCalls(baseVar, funcName string, line int) {
-	if !p.skipParens() {
+	callExpr := funcName
+	if baseVar != "" {
+		callExpr = baseVar + "." + funcName
+	}
+
+	comp, ok := p.skipParensResolving(callExpr)
+	if !ok {
 		return
 	}
 
-	p.recordChainContinuation(baseVar, funcName, line)
+	p.recordChainContinuation(baseVar, funcName, comp, line)
+}
+
+// skipParensResolving is skipParens for the first hop of a chain: it also
+// matches componentResolvers against callExpr with the group's first string
+// argument, so a hop that names its component in an argument —
+// getService("company") — hands the next hop that component. A Chain entry
+// is only a method name, and resolving the hop again from it later sees
+// getService() and can only reach a resolver that ignores which service was
+// asked for. Unlike tryResolveCall this reads the argument wherever the scan
+// finds it, so the named form getService(service="company") resolves too.
+// comp is "" when no resolver matches.
+func (p *scriptParser) skipParensResolving(callExpr string) (comp string, ok bool) {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		return "", false
+	}
+
+	p.sc.NextSkipComments() // consume (
+
+	firstArg, ok := p.scanParenBody()
+	if !ok || firstArg == "" || p.sc.PeekSkipComments().Kind != TokDot {
+		return "", ok
+	}
+
+	return p.resolveCall(callExpr + "(\"" + firstArg + "\")"), true
 }
 
 // recordChainContinuation is continueChainCalls' shared core, factored out so
@@ -276,13 +314,22 @@ func (p *scriptParser) continueChainCalls(baseVar, funcName string, line int) {
 // to know where the match ends), so — unlike continueChainCalls — the
 // caller here must already have the scanner positioned right after that
 // closing ')', with no extra skipParens() call needed for the first hop.
-func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line int) {
+//
+// baseComp is the component the first hop was already resolved to, when the
+// caller knows it — tryResolveCall matching "getService(\"company\")" against
+// its string arguments. The hops then start from that component rather than
+// re-deriving the first hop from its bare name: a chain entry carries no
+// arguments, so the resolve step would see "getService()" and could only reach
+// a resolver that ignores which service was asked for.
+func (p *scriptParser) recordChainContinuation(baseVar, funcName, baseComp string, line int) {
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
 	var chainHops []string
+
+	first := true
 
 	for p.sc.PeekSkipComments().Kind == TokDot {
 		p.sc.NextSkipComments() // consume .
@@ -298,7 +345,11 @@ func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line in
 			break
 		}
 
-		chainHops = append(chainHops, funcName)
+		if baseComp == "" || !first {
+			chainHops = append(chainHops, funcName)
+		}
+
+		first = false
 		funcName = methTok.Value
 
 		if !p.skipParens() {
@@ -310,11 +361,13 @@ func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line in
 			copy(hops, chainHops)
 
 			p.addCall(CallSite{
-				FuncName: funcName,
-				Variable: baseVar,
-				Chain:    hops,
-				Line:     uint32(p.baseLine + line),
-				Caller:   caller,
+				FuncName:  funcName,
+				Variable:  baseVar,
+				Component: baseComp,
+				Chain:     hops,
+				Line:      uint32(p.baseLine + line),
+				Caller:    caller,
+				Resolved:  baseComp != "",
 			})
 		}
 	}
@@ -332,7 +385,8 @@ func (p *scriptParser) recordChainContinuation(baseVar, funcName string, line in
 func (p *scriptParser) recordChainFromScope(fullChain string, line int) {
 	p.recordCallFromChain(fullChain, line)
 
-	if !p.skipParens() {
+	comp, ok := p.skipParensResolving(fullChain)
+	if !ok {
 		return
 	}
 
@@ -341,7 +395,7 @@ func (p *scriptParser) recordChainFromScope(fullChain string, line int) {
 		base, name = fullChain[:dot], fullChain[dot+1:]
 	}
 
-	p.recordChainContinuation(base, name, line)
+	p.recordChainContinuation(base, name, comp, line)
 }
 
 func (p *scriptParser) isVarDeclaredLocal(name string) bool {
@@ -514,7 +568,7 @@ chainWalk:
 				ChainBase: prevIdent, ChainMethod: lastIdent,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
-			p.recordChainContinuation(prevIdent, lastIdent, line)
+			p.recordChainContinuation(prevIdent, lastIdent, comp, line)
 		} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
 			p.addRef(ComponentRef{
 				Variable: varName, Component: comp,
@@ -595,7 +649,8 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 
 	p.addCall(call)
 
-	if !p.skipParens() {
+	comp, ok := p.skipParensResolving(nameTok.Value)
+	if !ok {
 		return
 	}
 
@@ -606,7 +661,7 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	// receiver stays dynamic all the way down, as a literal receiver's chain
 	// already does.
 	if call.Component == "" {
-		p.recordChainContinuation("", nameTok.Value, scopeTok.Line)
+		p.recordChainContinuation("", nameTok.Value, comp, scopeTok.Line)
 
 		return
 	}
@@ -866,7 +921,8 @@ func (p *scriptParser) parse() {
 					funcName := lastIdent
 					line := tok.Line
 
-					if !p.skipParens() {
+					comp, ok := p.skipParensResolving(chain)
+					if !ok {
 						return
 					}
 
@@ -880,40 +936,8 @@ func (p *scriptParser) parse() {
 					// call's return value (e.g. "table.getTable().setSkipFirstHeader(...)")
 					// — without this, the scanner resumes right after this hop's
 					// "(" and the next ".method(" is rediscovered as an orphaned,
-					// unqualified bare call. Mirrors checkBareCall's chain loop.
-					var chainHops []string
-
-					for p.sc.PeekSkipComments().Kind == TokDot {
-						p.sc.NextSkipComments() // consume .
-
-						methTok := p.sc.PeekSkipComments()
-						if methTok.Kind != TokIdent {
-							break
-						}
-
-						p.sc.NextSkipComments() // consume method name
-
-						if p.sc.PeekSkipComments().Kind != TokLParen {
-							break
-						}
-
-						chainHops = append(chainHops, funcName)
-						funcName = methTok.Value
-
-						if !p.skipParens() {
-							return
-						}
-
-						hops := make([]string, len(chainHops))
-						copy(hops, chainHops)
-
-						p.addCall(CallSite{
-							FuncName: funcName,
-							Variable: varName,
-							Chain:    hops,
-							Line:     uint32(p.baseLine + line),
-						})
-					}
+					// unqualified bare call.
+					p.recordChainContinuation(varName, funcName, comp, line)
 				}
 			case peek.Kind == TokDoubleColon:
 				p.parseStaticCall(tok)
@@ -2313,7 +2337,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						ChainBase: prevIdent, ChainMethod: lastIdent,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
-					p.recordChainContinuation(prevIdent, lastIdent, varTok.Line)
+					p.recordChainContinuation(prevIdent, lastIdent, comp, varTok.Line)
 				} else if comp := p.tryExtendChain(fullChain.String()); comp != "" {
 					p.addRef(ComponentRef{
 						Variable: nameTok.Value, Component: comp,
@@ -2532,7 +2556,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 							ChainBase: prevIdent, ChainMethod: lastIdent,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
 						})
-						p.recordChainContinuation(prevIdent, lastIdent, scopeTok.Line)
+						p.recordChainContinuation(prevIdent, lastIdent, comp, scopeTok.Line)
 					} else {
 						p.pendingCalls = append(p.pendingCalls, pendingCall{
 							varName:  nameTok.Value,
@@ -2811,7 +2835,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 						ChainBase: prevIdent, ChainMethod: lastIdent,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
 					})
-					p.recordChainContinuation(prevIdent, lastIdent, tok.Line)
+					p.recordChainContinuation(prevIdent, lastIdent, comp, tok.Line)
 				} else {
 					p.pendingCalls = append(p.pendingCalls, pendingCall{
 						varName:  tok.Value,
@@ -2895,7 +2919,8 @@ chainWalk:
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	if !p.skipParens() {
+	comp, ok := p.skipParensResolving(strings.Join(identChain, "."))
+	if !ok {
 		return
 	}
 
@@ -2910,40 +2935,7 @@ chainWalk:
 	// value. Each hop's CallSite keeps Variable pointing at the original
 	// receiver and accumulates the intermediate method names in Chain, so
 	// CanResolveCall can walk the receiver's type through each call.
-	var chainHops []string
-
-	for p.sc.PeekSkipComments().Kind == TokDot {
-		p.sc.NextSkipComments() // consume .
-
-		methTok := p.sc.PeekSkipComments()
-		if methTok.Kind != TokIdent {
-			break
-		}
-
-		p.sc.NextSkipComments() // consume method name
-
-		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
-		}
-
-		chainHops = append(chainHops, funcName)
-		funcName = methTok.Value
-
-		if !p.skipParens() {
-			return
-		}
-
-		hops := make([]string, len(chainHops))
-		copy(hops, chainHops)
-
-		p.addCall(CallSite{
-			FuncName: funcName,
-			Variable: varName,
-			Chain:    hops,
-			Line:     uint32(p.baseLine + tok.Line),
-			Caller:   caller,
-		})
-	}
+	p.recordChainContinuation(varName, funcName, comp, tok.Line)
 }
 
 func (p *scriptParser) parseNewRef(varName string, line int) {
@@ -3428,6 +3420,28 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 	p.sc.NextSkipComments() // consume (
 
 	arg := p.sc.PeekSkipComments()
+
+	// A single named argument, getService(service="company"), is read as the
+	// positional one: falling through to the no-arg match below instead
+	// offers the resolvers getService(), which only a catch-all can answer —
+	// with a component that ignores which service was named.
+	if arg.Kind == TokIdent {
+		named := p.sc.Save()
+		p.sc.NextSkipComments() // name
+
+		if p.sc.PeekSkipComments().Kind == TokEquals {
+			p.sc.NextSkipComments() // =
+
+			if p.sc.PeekSkipComments().Kind == TokString {
+				arg = p.sc.PeekSkipComments()
+			} else {
+				p.sc.Restore(named)
+			}
+		} else {
+			p.sc.Restore(named)
+		}
+	}
+
 	if arg.Kind == TokString {
 		p.sc.NextSkipComments()
 
