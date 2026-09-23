@@ -3527,6 +3527,8 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 		r := &p.resolvers[i]
 		if r.Prefix != "" && prefixEqualFold(callExpr, r.Prefix) {
 			if comp := matchResolverWithCache(callExpr, r); comp != "" {
+				p.resolverSet.noteSoft(r, comp)
+
 				p.skipParenBody()
 
 				return comp

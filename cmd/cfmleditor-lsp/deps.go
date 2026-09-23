@@ -136,7 +136,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		for _, r := range cfg.ComponentResolvers() {
 			cfResolvers = append(cfResolvers, parser.Resolver{
 				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored,
+				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
 			})
 		}
 	} else {

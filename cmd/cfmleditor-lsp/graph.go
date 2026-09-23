@@ -472,7 +472,7 @@ func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string,
 		for _, r := range cfg.ComponentResolvers() {
 			resolvers = append(resolvers, parser.Resolver{
 				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored,
+				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
 			})
 		}
 

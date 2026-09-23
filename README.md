@@ -525,6 +525,20 @@ through a receiver (`VARIABLES._parent.getService("x")`). Reach for it when a re
 at a variable name, or when a broad catch-all is producing wrong answers — `cfmleditor-lsp
 explain` will name the resolver that fired.
 
+#### `dynamicIfMissing`
+
+A catch-all such as `{"prefix": "get", "match": "get([A-Za-z]+)\\(\\)", "resolve": "app.${1:lower}"}` is
+right for the factories it was written for and invents a path for every other getter:
+`getTable()` becomes `app.table`, and every call on the result is then reported as
+`component 'app.table' does not exist`. With `"dynamicIfMissing": true`, a component *that
+resolver* produces and that names no file is taken as a dynamic value instead, so its calls
+are accepted without a method check.
+
+It is per resolver, and only that resolver's output is affected. A missing component named any
+other way — a `getService("$1")` resolver's, a literal `createObject("component", ...)` — is
+still reported, which is the point: those are findings. So is a missing method on a component
+the catch-all got right, since that component exists.
+
 ### Formatting
 
 The `formatting` object controls the built-in formatter invoked via `textDocument/formatting`.

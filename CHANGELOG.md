@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`dynamicIfMissing` on a componentResolver.** A broad catch-all such as `get$1()` invents a component for every getter it was not written for, and every call on the result was reported as a missing component. With the option set, a component that resolver produces and that names no file is taken as a dynamic value. Only that resolver's guesses are affected: a missing component named any other way, and a missing method on a component that exists, are still reported. On tassweb, with it set on the two `get…()` catch-alls: 894 unresolved entries to 811, none added.
+
 ### Fixed
 
 - **An assigned chain lost its receiver and, after a resolver match on two calls, its later hops.** In `VARIABLES.x = REQUEST.kernel.getSandBox("f").getEntityObj().getSelected()` the hops were continued from `kernel`, the last name before the first call, rather than `REQUEST.kernel`; and where a resolver matched `getSandBox(...).getEntityObj()` as one, `getEntityObj` was never recorded and `getSelected` came back "no qualifier, not in file". Both calls are now recorded from the receiver and walked through their return types, and the variable is typed by that walk rather than by the resolver's guess at the text. An indexed receiver keeps its `[]`, so `phrase[1].font()` is no longer read as a call on `phrase`.

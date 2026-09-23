@@ -42,12 +42,12 @@ func loadResolversFromConfig(paths []string) []parser.Resolver {
 
 		for _, r := range cfg.ComponentResolvers {
 			if r.Match != "" && r.Resolve != "" {
-				resolvers = append(resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored})
+				resolvers = append(resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
 			}
 		}
 
 		if jr := config.JavaStubResolver(cfg.JavaStubsPath); jr.Match != "" {
-			resolvers = append(resolvers, parser.Resolver{Match: jr.Match, Resolve: jr.Resolve, Prefix: jr.Prefix, NoFollow: jr.NoFollow, Anchored: jr.Anchored})
+			resolvers = append(resolvers, parser.Resolver{Match: jr.Match, Resolve: jr.Resolve, Prefix: jr.Prefix, NoFollow: jr.NoFollow, Anchored: jr.Anchored, DynamicIfMissing: jr.DynamicIfMissing})
 		}
 
 		return resolvers
