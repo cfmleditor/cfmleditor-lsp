@@ -289,6 +289,17 @@ func malformedShape(out []byte, opts Options) string {
 	lines := strings.Split(string(out), "\n")
 	strs := stringSpansOf(out, scriptRegionsOf(out))
 
+	// A <script> or <style> body is raw text: formatRawTextElement shifts the
+	// block's indent and otherwise writes the author's JavaScript or CSS as it
+	// was, so its brace layout says nothing about the formatter. tassweb had 16
+	// files accused on that alone — `}}` closing a nested object literal, and an
+	// Allman `function f()\n{` at the top of a block. A script-syntax component
+	// has no markup, and a "<script" there is inside a string.
+	var raw scriptSpans
+	if !isScriptSyntaxComponent(out) {
+		raw = tagBodiesOf(out, "script", "style")
+	}
+
 	offset := 0
 
 	for i, line := range lines {
@@ -305,7 +316,8 @@ func malformedShape(out []byte, opts Options) string {
 		// them alone and neither rule below applies. Both rules need this, not
 		// just the second: the corpus happens to contain no multi-line string
 		// holding a "}}" line, which made the first one look safe without it.
-		if strs.contains(start + len(line) - len(strings.TrimLeft(line, " \t"))) {
+		first := start + len(line) - len(strings.TrimLeft(line, " \t"))
+		if strs.contains(first) || raw.contains(first) {
 			continue
 		}
 

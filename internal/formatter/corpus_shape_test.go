@@ -64,6 +64,49 @@ func TestMalformedShapeAcceptsHealthyOutput(t *testing.T) {
 	}
 }
 
+// TestMalformedShapeSkipsRawTextBodies is the pair of shapes that accused 16
+// healthy tassweb files: a <script> body is written as the author laid it out,
+// so a `}}` closing a nested object literal, or an Allman brace in column one,
+// is JavaScript style rather than a formatter defect. The second comes from a
+// <script> inside <cfsavecontent>, whose body is written verbatim — so the
+// skip keys off the <script> tag in the output, not off the element the
+// formatter walked.
+//
+// The skip must stop at the element. A `<cfscript>` body is CFML the formatter
+// lays out, a `}}` after `</script>` is outside it, and a script-syntax
+// component has no markup at all — there a "<script" is inside a string, and
+// taking it as an unclosed element would switch both rules off for the rest of
+// the file.
+func TestMalformedShapeSkipsRawTextBodies(t *testing.T) {
+	t.Parallel()
+
+	healthy := map[string]string{
+		"nested object literal in <script>": mustFormat(t,
+			"<div>\n<script>\nf({\n\t\"a\": {\"b\": function(){\n\t\treturn 1;\n\t}}\n});\n</script>\n</div>\n"),
+		"Allman function in a saved <script>": mustFormat(t,
+			"<cfsavecontent variable=\"js\">\n<script>\nfunction f()\n{\n\treturn 1;\n}\n</script>\n</cfsavecontent>\n"),
+		"brace style in <style>": "<style>\n{\n}}\n</style>\n",
+	}
+
+	for name, src := range healthy {
+		if got := malformedShape([]byte(src), corpusOptions()); got != "" {
+			t.Errorf("%s: raw text reported as malformed: %s\n%s", name, got, src)
+		}
+	}
+
+	defects := map[string]string{
+		"inside <cfscript>":       "<cfscript>\nfunction f() {\n\ta();\n\t}}\n</cfscript>\n",
+		"after </script>":         "<script>\nx = 1;\n</script>\n<cfscript>\nif (a) {\n\tb();\n\t}}\n</cfscript>\n",
+		"script component string": "component {\n\ts = \"<script>\";\n\tfunction f() {\n\t\ta();\n\t}}\n}\n",
+	}
+
+	for name, src := range defects {
+		if got := malformedShape([]byte(src), corpusOptions()); got == "" {
+			t.Errorf("%s: defect not reported:\n%s", name, src)
+		}
+	}
+}
+
 // TestMalformedShapeAllowsNextLineBraces is the boundary the column-one rule
 // needs, and it was not obvious: Allman puts every opening brace on a line of
 // its own, so a top-level `component` has one in column zero by design. The

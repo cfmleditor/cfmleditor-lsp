@@ -721,11 +721,18 @@ func scriptRegionsOf(src []byte) scriptSpans {
 		return scriptSpans{{0, len(src)}}
 	}
 
+	return tagBodiesOf(src, "cfscript", "script")
+}
+
+// tagBodiesOf locates the bodies of every element named in tags, from just past
+// the opening tag's `>` to the start of its closing tag, or to the end of src
+// when the element is never closed.
+func tagBodiesOf(src []byte, tags ...string) scriptSpans {
 	var spans scriptSpans
 
 	lower := lowerASCIIBytes(src)
 
-	for _, tag := range []string{"cfscript", "script"} {
+	for _, tag := range tags {
 		open, closeTag := "<"+tag, "</"+tag
 
 		for pos := 0; ; {
@@ -760,6 +767,7 @@ func scriptRegionsOf(src []byte) scriptSpans {
 
 	return spans
 }
+
 func isTagNameEnd(c byte) bool {
 	return isWS(c) || c == '>' || c == '/'
 }
