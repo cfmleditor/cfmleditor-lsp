@@ -170,3 +170,25 @@ func TestQueryExecuteIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestQueryExecuteConcatenatedSQLKeepsItsAmpersand covers SQL built with `&`.
+// The operator is an unnamed child of query_expression with no field, so it
+// fell through every case in queryParts and each operand became an argument of
+// its own — `"SELECT …", ( … )` — which the guard refused, leaving the file
+// unformatted. The single-quoted spelling is CommandBox's Globber.cfc; it only
+// reaches this renderer from the tree-sitter-cfml release after v0.26.37,
+// which recognises single-quoted SQL, but the double-quoted one always did.
+func TestQueryExecuteConcatenatedSQLKeepsItsAmpersand(t *testing.T) {
+	t.Parallel()
+
+	for _, q := range []string{`"`, `'`} {
+		src := "<cfscript>\nq = queryExecute( " + q + "SELECT * FROM t" + q +
+			" & ( len( s ) ? " + q + " ORDER BY x" + q + " : " + q + q + " ), [], { dbtype=" + q + "query" + q + " } );\n</cfscript>\n"
+
+		out := formatQueryExpr(t, src, nil)
+
+		if !strings.Contains(out, q+"SELECT * FROM t"+q+" & (") {
+			t.Errorf("quote %s: the & between the SQL operands was lost\n%s", q, out)
+		}
+	}
+}

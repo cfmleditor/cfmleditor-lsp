@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`queryExecute` SQL built with `&` was refused by the formatter.** `queryExecute( "SELECT …" & ( sort ? " ORDER BY x" : "" ), … )` came out with the `&` gone and its operands as two arguments, which the guard rejected, so format-on-save did nothing on the file. The `&` is an unnamed child of `query_expression` with no field, and the renderer for one had no case for it. Against a 15,503-file corpus of public CFML this clears three RustCFML tests on tree-sitter-cfml v0.26.37, and CommandBox's `Globber.cfc` on the next release, which recognises its single-quoted SQL.
+
+### Changed
+
+- `tree-sitter-cfml` grammar update (v0.26.36 → v0.26.37). `!` and `NOT` become a `not_expression`, `IS NOT` becomes two tokens, and word operators become visible tokens; v0.3.6 already handles all three. Also new in the grammar: `new`'s type prefix in any casing with Lucee's `class:` and `cfc:` synonyms, and a `<` directly before `</cfscript>`, `</cfquery>` or `</cfxml>` no longer loses the rest of the document. Against a 15,503-file corpus of public CFML, formatter verdicts match v0.26.36 except two files that move from unstable to clean (CommandBox's `CommandService.cfc`, a cfwheels `UserPermissions.cfc`); no new guard rejections.
+
 ## [0.3.6]
 
 ### Fixed

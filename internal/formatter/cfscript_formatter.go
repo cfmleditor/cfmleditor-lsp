@@ -1301,8 +1301,25 @@ func (f *Formatter) exprQuery(n *sitter.Node) string {
 // has nowhere to go in a rendered list and would swallow whatever followed it
 // on the line, and reproducing the call as written is what happened before this
 // renderer existed.
+//
+// The SQL may be concatenated — `"SELECT …" & ( sort ? " ORDER BY x" : "" )` —
+// and the operand after each `&` belongs to the same argument. The `&` has no
+// field and is not named, so it used to fall through every case below, and the
+// operands came out as separate arguments: `"SELECT …", ( … )`, which the
+// guard refuses.
 func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, ok bool) {
 	var open *sitter.Node
+
+	concat := false
+	add := func(p string) {
+		if concat && len(parts) > 0 {
+			parts[len(parts)-1] += " & " + p
+		} else {
+			parts = append(parts, p)
+		}
+
+		concat = false
+	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -1314,6 +1331,8 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 			callee = f.text(c)
 		case c.Kind() == "(" || c.Kind() == ")" || c.Kind() == ",":
 			continue
+		case c.Kind() == "&":
+			concat = true
 		case c.Kind() == `"` || c.Kind() == "'":
 			if open == nil {
 				open = c
@@ -1321,13 +1340,13 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 				continue
 			}
 
-			parts = append(parts, string(f.src[open.StartByte():c.EndByte()]))
+			add(string(f.src[open.StartByte():c.EndByte()]))
 			open = nil
 		case open != nil:
 			// query_text, already covered by the span its quotes delimit.
 			continue
 		case c.IsNamed():
-			parts = append(parts, f.expr(c))
+			add(f.expr(c))
 		}
 	}
 
