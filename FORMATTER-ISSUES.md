@@ -1247,26 +1247,69 @@ string holds an `=` with no name before it. In the tassweb file that is
   quote really does close the value. For a custom tag the attributes are always
   evaluated, which is what makes this a gap.
 
-**Unclosed tags.** An element with no end tag stays on the scanner's tag stack.
-The stack is serialised into tree-sitter's 1,024-byte buffer, and a tag with an
-unrecognised name costs its name's bytes there. `tag_stack_would_overflow`
-(`scanner.h:276`) keeps a 256-byte headroom for tags that nest, but the guard
-runs only for `CFML`-typed tags (`scanner.h:1518`). An HTML-side `CUSTOM` tag is
-pushed unchecked, so enough of them use up the headroom, and the next paired CF
-tag is the one that cannot be pushed. Here the `<cfloop>` is completed as void,
-and its `</cfloop>` has no opener.
+**Unclosed tags.** The limit is not memory. After every token the grammar's
+external scanner produces, tree-sitter asks the scanner to serialise its whole
+state into a fixed buffer of `TREE_SITTER_SERIALIZATION_BUFFER_SIZE`, 1,024
+bytes. It restores from that copy when it re-parses part of a file after an
+edit, and when it forks or backs up during ambiguity and error recovery.
+Anything that does not fit is lost. Part of that state is the stack of open
+tags.
+
+- **Why these tags stay open.** `<control:hiddenfield …>` has no end tag and no
+  `/>`, and its name is not one the scanner knows. So it is not void (as
+  `<input>` is) and does not close itself (as `<p>` and `<li>` do). It is an open
+  container, and each following sibling nests inside the one before. 33 in a row
+  are 33 deep. CF runs each one once as a standalone call, so the grammar's model
+  and the engine's disagree here.
+- **Why the name length matters.** `tag_serialized_size` (`scanner.h:218`)
+  saves a known HTML tag as its type: 1 byte. A tag with an unrecognised name
+  (`CUSTOM`) costs 2 bytes, plus the name, plus a 4-byte `html_depth`. For
+  `control:hiddenfield`, 19 characters, that is 25 bytes.
+- **The budget.** `tag_stack_would_overflow` (`scanner.h:276`) takes the 1,024
+  bytes, less 14 of headers and depth counters, less a 256-byte
+  `TAG_STACK_HEADROOM` kept free for tags that genuinely nest. That leaves
+  about 754 bytes. The headroom exists for issue #55: a run of `<cf_foo>` tags
+  is made void once it reaches the budget (`scanner.h:1518`), so the
+  `<cfscript>` or `<cfoutput>` after it still fits.
+- **Why the `<cfloop>` is what breaks.** That check runs only for `CFML`-typed
+  tags. An HTML-side `CUSTOM` tag is pushed without it, so 30
+  `<control:hiddenfield>` use up the headroom meant for real nesting. The next
+  CF tag, the `<cfloop>`, fails the check and is completed as void, and its
+  `</cfloop>` has no opener. Without the check, serialise would cut the tag list
+  short, and the scanner would restore with tags silently missing.
+
+The arithmetic matches every threshold measured, with the `<cfloop>` itself
+costing about 12 bytes:
+
+| Unclosed tag | Bytes each | Last count that parses | First count that fails |
+|---|---|---|---|
+| `<control:hiddenfield>` | 25 | 29 (725) | 30 (750) |
+| `<x:h>` | 9 | 80 (720) | 90 (810) |
+| `<xh>` | 8 | 90 (720) | 200 (1,600) |
+| `<div>` | 1 | 200 (200) | around 750 |
+
+The tassweb file has 33 open before the `<cfloop>`, which is 825 bytes, over
+the budget on their own.
 
 - **Correction.** The first explanation blamed the colon, or every HTML tag. It is
-  neither. 200 unclosed `<div>`s parse, because a known HTML tag is serialised as
-  its type alone. 200 unclosed `<xh>` fail, and so do 40
-  `<hiddenfieldxxxxxxxx>` without a colon. The failure point follows the name
-  length: `<x:h>` passes at 80 and fails at 90, and `<control:hiddenfield>`
-  fails at 36. The tassweb file has 33 of them open before the `<cfloop>`,
-  alongside the page's other open markup.
+  neither: known HTML tags cost a byte each, and `<hiddenfieldxxxxxxxx>` with no
+  colon fails at 40 just as the prefixed tags do.
 
-Both would close if the grammar treated a `prefix:name` tag as a CF custom tag:
-attributes hash-evaluated like `cf_attribute`, and an unpaired one either void or
-put under the same overflow guard as `<cf_foo>`. That needs the grammar to learn
+There are three ways to fix this in the scanner, in increasing scope:
+
+- Run the same overflow check on HTML `CUSTOM` tags, so a run of them turns
+  void rather than the CF tag that follows.
+- Serialise a `CUSTOM` tag's name as a short hash. For those tags the name is
+  only compared for equality, when an end tag is matched (`tag_eq`,
+  `tag.h:473`), so a hash would do, and the stack would hold hundreds of them.
+  It cannot extend to CF tags, which use their name to build a closing
+  delimiter (`scanner.h:872`).
+- Treat `prefix:name` as a CF custom tag, which also closes the hash-attribute
+  gap above.
+
+The third closes both gaps: attributes hash-evaluated like `cf_attribute`, and
+an unpaired tag either void or put under the same overflow guard as `<cf_foo>`.
+It needs the grammar to learn
 the `<cfimport>` prefixes in the file, or to treat any `name:name` tag this way.
 The second is simpler, but also catches namespaced XML elements such as
 `<svg:rect>` and `<xsl:template>`. Deciding between them is tree-sitter-cfml's call.
