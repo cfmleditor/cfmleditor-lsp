@@ -9,6 +9,15 @@
 ### Changed
 
 - `tree-sitter-cfml` grammar update (v0.26.36 → v0.26.37). `!` and `NOT` become a `not_expression`, `IS NOT` becomes two tokens, and word operators become visible tokens; v0.3.6 already handles all three. Also new in the grammar: `new`'s type prefix in any casing with Lucee's `class:` and `cfc:` synonyms, and a `<` directly before `</cfscript>`, `</cfquery>` or `</cfxml>` no longer loses the rest of the document. Against a 15,503-file corpus of public CFML, formatter verdicts match v0.26.36 except two files that move from unstable to clean (CommandBox's `CommandService.cfc`, a cfwheels `UserPermissions.cfc`); no new guard rejections.
+- `tree-sitter-cfml` grammar update (v0.26.37 → `f3cc198`, the grammar's master ahead of v0.26.38; pinned as a pseudo-version until that release is tagged). What changes for this server:
+  - `queryExecute` with single-quoted or escaped SQL now becomes a `query_expression` (#149 in the grammar).
+  - Dynamic tag names with a static prefix, such as `<h#n#>` and `<dc:#t#>`, now parse.
+  - Recovery from an error in markup stays local instead of taking the rest of the file.
+  - `#` in template text is an expression only where Lucee evaluates it. That is inside `<cfoutput>`, `<cfmail>` and `<cfobjectcache>`, and inside a `<cffunction>` / `<cfcomponent>` whose `output` is a literal true.
+  - A `</cfscript>` inside a string no longer ends the block.
+  - `x = savecontent { … }` (Adobe ColdFusion 2021+) parses as a `savecontent_expression`.
+
+  Against a 15,503-file corpus of public CFML, four files move from refused to formatted: Lucee's `debug/Simple.cfc`, `LDEV0869.cfc` and `_LDEV3623.cfc`, and RustCFML's `test_include_rewrite_freshness.cfm`. One file moves the other way, Slatwall's `admin/views/toolbar/menu.cfm`, from formatted to guard-rejected. Its 67 unpaired `<cf_SlatwallActionCaller>` tags leave most of its `</div>`s as stray end tags in the grammar's tree. `selfCloseTags` therefore rewrote those `<div>`s as `<div … />`, and the grammar's re-parse of that rewrite now fails, so the file is refused rather than reformatted. The cause is the grammar's nesting of unpaired custom tags (tree-sitter-cfml #55), not this server.
 
 ## [0.3.6]
 
