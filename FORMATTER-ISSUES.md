@@ -1213,3 +1213,67 @@ Even with both, a fragment is a starting point rather than a verdict — every
 construct in 6.1 was re-checked standalone before being written down, and that
 check is what caught `static { }` (fails alone, parses inside `component { }`)
 being a subtler gap than it first appeared.
+
+### 6.5 `<cfimport>`-prefixed custom tags: two tassweb refusals
+
+A formatter run over tassweb on 2026-09-25 (6,597 files) refused 9. Seven are
+`</cfsetting>`. The other two come from the same shape, a custom tag imported
+with `<cfimport prefix="control" taglib="../controls">` and written
+`<control:name …>`. The grammar has no notion of a cfimport prefix and reads the
+tag as an ordinary HTML element. Both files are valid CFML, and both gaps
+reproduce on the pinned v0.26.36 and on v0.26.37.
+
+Each construct below was re-parsed standalone with a control that parses, as in
+6.1. Two of the first explanations did not survive that check, and the
+corrections are recorded with them.
+
+| Construct | Minimal repro | Control that parses | Seen in |
+|---|---|---|---|
+| A `#…#` attribute holding a string that contains `=` | `<control:b click="#URLEncodedFormat("=x")#">` | the same attribute on `<cf_b>`, on `<cfmodule>`, or on a `<div>` inside `<cfoutput>` | `webroot/academicreports/resultFormats_list.cfm`, line 98 |
+| An unrecognised tag left unclosed, many times, then a paired CF tag | 36 × `<control:hiddenfield>`, then `<cfloop …></cfloop>` | 40 × the same tag written `/>`, 40 × unclosed `<cf_hiddenfield>`, 200 × unclosed `<div>` | `webroot/attendance/bulk_absentee.cfm`, line 2105 |
+
+**Hash attributes.** The scanner reads `#` as the start of an expression only
+inside `<cfoutput>`, `<cfcomponent>` or `<cffunction>`
+(`scanner_in_hash_eval_context`, `common/scanner.h:1873`). Anywhere else, the
+first `"` of `URLEncodedFormat("…")` closes the HTML attribute value
+(`quoted_attribute_value`, `common/define-grammar.js:445`), and the rest is
+read as further attributes. That misreading goes unnoticed until the inner
+string holds an `=` with no name before it. In the tassweb file that is
+`&unit_flg=`. Without an `=` the tag "parses", but as three attributes.
+
+- **Correction.** This is not specific to prefixed tags: a plain `<div>` outside
+  `<cfoutput>` fails identically. There, though, the grammar is right. Hashes in
+  an HTML attribute outside an output context are not evaluated, so the inner
+  quote really does close the value. For a custom tag the attributes are always
+  evaluated, which is what makes this a gap.
+
+**Unclosed tags.** An element with no end tag stays on the scanner's tag stack.
+The stack is serialised into tree-sitter's 1,024-byte buffer, and a tag with an
+unrecognised name costs its name's bytes there. `tag_stack_would_overflow`
+(`scanner.h:276`) keeps a 256-byte headroom for tags that nest, but the guard
+runs only for `CFML`-typed tags (`scanner.h:1518`). An HTML-side `CUSTOM` tag is
+pushed unchecked, so enough of them use up the headroom, and the next paired CF
+tag is the one that cannot be pushed. Here the `<cfloop>` is completed as void,
+and its `</cfloop>` has no opener.
+
+- **Correction.** The first explanation blamed the colon, or every HTML tag. It is
+  neither. 200 unclosed `<div>`s parse, because a known HTML tag is serialised as
+  its type alone. 200 unclosed `<xh>` fail, and so do 40
+  `<hiddenfieldxxxxxxxx>` without a colon. The failure point follows the name
+  length: `<x:h>` passes at 80 and fails at 90, and `<control:hiddenfield>`
+  fails at 36. The tassweb file has 33 of them open before the `<cfloop>`,
+  alongside the page's other open markup.
+
+Both would close if the grammar treated a `prefix:name` tag as a CF custom tag:
+attributes hash-evaluated like `cf_attribute`, and an unpaired one either void or
+put under the same overflow guard as `<cf_foo>`. That needs the grammar to learn
+the `<cfimport>` prefixes in the file, or to treat any `name:name` tag this way.
+The second is simpler, but also catches namespaced XML elements such as
+`<svg:rect>` and `<xsl:template>`. Deciding between them is tree-sitter-cfml's call.
+Not yet filed.
+
+One formatter-side detail turned up on the first file. The grammar marks the
+error with a zero-width `MISSING` node under an alias, for which `IsMissing()`
+returns false. So `findErrorNode` (`internal/formatter/parse_error.go:39`) finds
+nothing, and the refusal reads "parse error in document, cannot format" with no
+position.
