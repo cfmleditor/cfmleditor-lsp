@@ -2352,7 +2352,7 @@ func (f *Formatter) normalizeCond(raw string) string {
 		return strings.Join(parts, "\n"+baseIndent)
 	}
 
-	single := strings.Join(parts, " ")
+	single := f.foldCondParts(parts)
 
 	// Check if it fits on one line.
 	tagPrefix := f.lineLen
@@ -2383,6 +2383,35 @@ func (f *Formatter) normalizeCond(raw string) string {
 	}
 
 	return result.String()
+}
+
+// foldCondParts joins a condition's lines back onto one.
+//
+// The lines are rendered output, not source, so a break after `(` or before
+// `)` is one the formatter made: a call wider than the line width puts each
+// argument on a line of its own. Joined with a space, that split came back as
+// `f( a, b )` — padding argPad says an argument list does not get — and only
+// once the call was wide enough to split, which it was not while a closure
+// argument still spanned lines in the source. So the first format wrote
+// `f(a, function(s) { … })`, the second measured that at full width, split it,
+// and wrote `f( a, function(s) { … } )`. Folding the break with argPad makes
+// the split invisible once it is folded, whichever pass makes it.
+func (f *Formatter) foldCondParts(parts []string) string {
+	var sb strings.Builder
+
+	for i, p := range parts {
+		if i > 0 {
+			if strings.HasSuffix(parts[i-1], "(") || strings.HasPrefix(p, ")") {
+				sb.WriteString(f.opts.argPad())
+			} else {
+				sb.WriteByte(' ')
+			}
+		}
+
+		sb.WriteString(p)
+	}
+
+	return sb.String()
 }
 
 // anyHasLineComment reports whether any part carries a "//" comment, which
