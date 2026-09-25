@@ -1579,7 +1579,7 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 		// Whitespace between tags — suppress since the formatter handles spacing.
 
 	case "assignment_expression", "binary_expression",
-		"unary_expression", "ternary_expression",
+		"unary_expression", "not_expression", "ternary_expression",
 		"elvis_expression", "update_expression",
 		"call_expression", "member_expression",
 		"subscript_expression", "new_expression",

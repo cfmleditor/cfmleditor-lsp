@@ -669,7 +669,14 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		cmts := f.delimitedComments(n)
 		gapLifted := false
 
-		if op == "" {
+		// A word operator — `AND`, `EQ`, `IS NOT`, `DOES NOT CONTAIN` — is
+		// lifted from the source. Until tree-sitter-cfml v0.26.36 the grammar
+		// hid those tokens, so op was empty and this was the only path they
+		// took; later releases expose them, and following the symbolic
+		// operators' path instead would move a block comment written before
+		// the operator to after it, which the guard rejects, and reproduce a
+		// condition with a line comment in it verbatim rather than formatted.
+		if op == "" || isWordOperator(op) {
 			// gapOperator lifts the raw source between the operands, so
 			// anything sitting in that gap — comments included — is already
 			// carried across. Adding them again would emit them twice.
@@ -696,7 +703,11 @@ func (f *Formatter) expr(n *sitter.Node) string {
 
 		return joined
 
-	case "unary_expression":
+	// not_expression is `!` and `NOT` in tree-sitter-cfml after v0.26.36, which
+	// split them out of unary_expression to give them CFML's precedence, looser
+	// than the comparisons. Its operator is a not_operator node rather than a
+	// token, but its text is the same.
+	case "unary_expression", "not_expression":
 		op := n.ChildByFieldName("operator")
 		arg := n.ChildByFieldName("argument")
 
@@ -1081,20 +1092,46 @@ func (f *Formatter) delimitedComments(n *sitter.Node) string {
 	return sb.String()
 }
 
+// isWordOp reports whether a prefix operator is a word, which needs a space
+// before its operand. CFML is case-insensitive: matched case-sensitively, `Not x`
+// was joined into `Notx`, a different identifier, and a whitespace-only change
+// the guard cannot see.
 func isWordOp(op string) bool {
-	switch op {
-	case "typeof", "void", "delete", "not", "NOT":
+	switch strings.ToLower(op) {
+	case "typeof", "void", "delete", "not":
 		return true
 	}
 
 	return false
 }
 
-// operatorToken finds the operator anonymous token in a binary/unary expression.
+// isWordOperator reports whether a binary operator is spelled as a word (`AND`,
+// `eq`, `IS NOT`, `in`) rather than as symbols.
+func isWordOperator(op string) bool {
+	if op == "" {
+		return false
+	}
+
+	c := op[0] | 0x20 // ASCII lowercase; every CFML operator word is ASCII
+
+	return c >= 'a' && c <= 'z'
+}
+
+// operatorToken finds the operator in a binary/unary expression. The operator
+// field can hold more than one token — CFML's `IS NOT` is two in
+// tree-sitter-cfml after v0.26.36 — and ChildByFieldName returns only the first,
+// so `a IS NOT b` read as `a IS b`. Every token in the field is joined.
 func (f *Formatter) operatorToken(n *sitter.Node) string {
-	op := n.ChildByFieldName("operator")
-	if op != nil {
-		return f.text(op)
+	var parts []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.FieldNameForChild(uint32(i)) == "operator" {
+			parts = append(parts, f.text(n.Child(i)))
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, " ")
 	}
 	// Fallback: first anonymous child
 	for i := uint(0); i < n.ChildCount(); i++ {
