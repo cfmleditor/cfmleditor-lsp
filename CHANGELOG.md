@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`<cfif Not x>` was formatted as `<cfif Notx>`.** The formatter put a space after a word prefix operator only when it was spelled `not` or `NOT`, so `Not` was joined to its operand, which then named a different variable. The two differ only in whitespace, so the guard let it through: against a 15,503-file corpus of public CFML, format-on-save silently rewrote three Slatwall admin views and two Mura components. Matched case-insensitively now.
+
+### Changed
+
+- **Ready for the next tree-sitter-cfml release**, which changes how CFML's operators appear in the tree. Bumped with nothing else, it stops format-on-save on 22 files of the same corpus — every one of them for `IS NOT`. With these changes each file's verdict matches v0.26.36 (15,318 clean) and the formatted output is identical on every file but the five above. Every change also works on v0.26.36, which `go.mod` still pins:
+  - `IS NOT` is two tokens under the `operator` field, and `ChildByFieldName` returns only the first, so `a IS NOT b` read as `a IS b` and the guard refused the file. `operatorToken` joins every token in the field.
+  - Word operators — `AND`, `EQ`, `CONTAINS` — are visible tokens where they were hidden. They are still lifted from the source between the operands, the only path they could take before: the symbolic operators' path moves a block comment written before the operator to after it.
+  - `!` and `NOT` are a `not_expression` rather than a `unary_expression`, to give them CFML's precedence. It was unknown to `expr`, which emitted it verbatim, so its operand went unformatted. It is formatted as a unary now.
+
 ## [0.3.5]
 
 ### Changed
