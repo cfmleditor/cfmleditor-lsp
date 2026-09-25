@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.6]
+
 ### Fixed
 
 - **`<cfif Not x>` was formatted as `<cfif Notx>`.** The formatter put a space after a word prefix operator only when it was spelled `not` or `NOT`, so `Not` was joined to its operand, which then named a different variable. The two differ only in whitespace, so the guard let it through: against a 15,503-file corpus of public CFML, format-on-save silently rewrote three Slatwall admin views and two Mura components. Matched case-insensitively now.
