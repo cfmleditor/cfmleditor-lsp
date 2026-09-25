@@ -18,6 +18,12 @@
   - `x = savecontent { … }` (Adobe ColdFusion 2021+) parses as a `savecontent_expression`.
 
   Against a 15,503-file corpus of public CFML, four files move from refused to formatted: Lucee's `debug/Simple.cfc`, `LDEV0869.cfc` and `_LDEV3623.cfc`, and RustCFML's `test_include_rewrite_freshness.cfm`. One file moves the other way, Slatwall's `admin/views/toolbar/menu.cfm`, from formatted to guard-rejected. Its 67 unpaired `<cf_SlatwallActionCaller>` tags leave most of its `</div>`s as stray end tags in the grammar's tree. `selfCloseTags` therefore rewrote those `<div>`s as `<div … />`, and the grammar's re-parse of that rewrite now fails, so the file is refused rather than reformatted. The cause is the grammar's nesting of unpaired custom tags (tree-sitter-cfml #55), not this server.
+- `tree-sitter-cfml` grammar update (`f3cc198` → `ec5c621`, still ahead of v0.26.38 and pinned as a pseudo-version). What changes for this server:
+  - A dotted key in a struct literal, `{ a.b: 1 }` or `{ a.b = 1 }`, parses; the key is a `path` (#136 in the grammar).
+  - A `{` that starts a statement is a block, so `if (x) { a = 1 }` is no longer read as a struct literal.
+  - An operator after a bare hash on the right of an assignment, as in `x = #a#.b`, `x = #a#[1]` or `x = #a#++`, applies to the hash instead of to the whole assignment: `x = #a#.b` was `(x = #a#).b`.
+
+  Against a 15,503-file corpus of public CFML, three files move from refused to formatted, all for dotted struct keys: Lucee's `LDEV3113.cfc`, RustCFML's `test_dotted_key_struct_literals.cfm` and Preside's `RelationshipGuidanceTest.cfc`. No other verdict changes.
 
 ## [0.3.6]
 
