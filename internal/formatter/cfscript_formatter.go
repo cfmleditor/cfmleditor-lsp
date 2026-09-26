@@ -2640,6 +2640,26 @@ func declKeyword(n *sitter.Node) string {
 	return strings.Join(kws, " ")
 }
 
+// declarator renders one variable_declarator: its name, then its initializer
+// if it has one. A compound initializer (`var hqlOrder &= " ORDER BY"`) puts
+// its operator in the `operator` field, and a plain `=` has none. Both
+// declaration renderers wrote ` = ` whatever the field held, so `&=` and `+=`
+// came out as `=`, and the guard refused the file.
+func (f *Formatter) declarator(d *sitter.Node) string {
+	s := f.expr(d.ChildByFieldName("name"))
+
+	if v := d.ChildByFieldName("value"); v != nil {
+		op := "="
+		if o := d.ChildByFieldName("operator"); o != nil {
+			op = f.text(o)
+		}
+
+		s += " " + op + " " + f.expr(v)
+	}
+
+	return s
+}
+
 // scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];
 func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	keyword := declKeyword(n)
@@ -2664,15 +2684,7 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 		switch d.Kind() {
 		case "variable_declarator":
-			vname := d.ChildByFieldName("name")
-			vval := d.ChildByFieldName("value")
-			s := f.expr(vname)
-
-			if vval != nil {
-				s += " = " + f.expr(vval)
-			}
-
-			decls = append(decls, s)
+			decls = append(decls, f.declarator(d))
 		default:
 			decls = append(decls, f.expr(d))
 		}
@@ -3094,16 +3106,7 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 		var decls []string
 
 		for i := uint(0); i < n.NamedChildCount(); i++ {
-			d := n.NamedChild(i)
-			vname := d.ChildByFieldName("name")
-			vval := d.ChildByFieldName("value")
-			s := f.expr(vname)
-
-			if vval != nil {
-				s += " = " + f.expr(vval)
-			}
-
-			decls = append(decls, s)
+			decls = append(decls, f.declarator(n.NamedChild(i)))
 		}
 
 		return keyword + " " + strings.Join(decls, ", ")
