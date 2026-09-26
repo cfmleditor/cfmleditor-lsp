@@ -59,6 +59,10 @@ func TestDidChangeSharesTheDocumentWithTheParseResult(t *testing.T) {
 			t.Fatal("document not open")
 		}
 
+		// An edit outside a function defers its reparse until the document's
+		// lock is next taken, as every handler does before reading the parse.
+		srv.lockDoc(docURI)()
+
 		srv.mu.RLock()
 		pr := srv.parseResults[docURI]
 		srv.mu.RUnlock()

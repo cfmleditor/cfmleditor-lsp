@@ -82,6 +82,14 @@ func (pr *ParseResult) applyEdit(startLine, startChar, endLine int, newText stri
 	return EditGlobal
 }
 
+// EditInFunction reports whether an edit of the given range falls inside a
+// function body, which ApplyEditResult handles by shifting and invalidating
+// that one function. Anything else costs a reparse of the whole file's
+// signatures, which is what a caller may prefer to defer.
+func (pr *ParseResult) EditInFunction(startLine, endLine, startChar int) bool {
+	return pr.funcContaining(startLine, endLine, startChar) >= 0
+}
+
 // ApplyFullReplace replaces the entire content and re-parses shallowly.
 func (pr *ParseResult) ApplyFullReplace(content string) {
 	pr.Content = content

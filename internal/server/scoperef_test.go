@@ -110,7 +110,11 @@ func TestFuncScopeRefsClearWhenEmptied(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ensureFuncRefsIndexed's callers hold the document's lock, and taking it
+	// runs the reparse the whole-document change deferred.
+	release := srv.lockDoc(docURI)
 	srv.ensureFuncRefsIndexed(docURI, 2)
+	release()
 
 	if got := srv.index.LookupComponentRef("svc"); len(got) != 0 {
 		t.Errorf("stale ref survived after its assignment was removed: %+v", got)
