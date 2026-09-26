@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cfmleditor.exportDeps` drew a thinner graph after an edit outside a function.** It read the document's cached parse result, which an edit outside a function reparses shallowly, dropping every call site inside one. The graph then fell back to the component refs the index holds, so it showed `controller.cfc --> service.cfc` where it had shown each function called and the functions those call, until the next edit inside a function. The file-level graph that the "Export dependency graph for <file>" code action draws was affected the same way. It now parses the text the editor holds, as `cfmleditor.explainCall` does.
+
 ## [0.3.7]
 
 ### Added
