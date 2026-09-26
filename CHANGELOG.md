@@ -46,6 +46,15 @@
 - `tree-sitter-cfml` grammar update (`ec5c621` → v0.26.38). The pin is a tagged release again, not a pseudo-version. The only grammar change since `ec5c621` is that a statement in a closure inside a tag expression now ends at a newline, as it does in CFScript (#148 in the grammar). `<cfset f = function() { var a = 1⏎ var b = 2 }>` used to give `MISSING ";"`. Against the 15,503-file corpus, no file changes verdict: the corpus has no semicolon-less statements in such closures.
 - `tree-sitter-cfml` grammar update (v0.26.38 → v0.26.39). The one grammar change: an unpaired custom tag (`<cf_foo …>` with no `</cf_foo>`, or `<cfmodule>`) no longer swallows the end tag of the element around it (#160 in the grammar). In `<div><cf_foo a="1"></div>` the `</div>` was an `erroneous_end_tag`, and the div got an invented end. The self-close pass then rewrote such containers as `<div … />` and left their `</div>` stranded. Against the 15,503-file corpus, Slatwall's `admin/views/toolbar/menu.cfm` moves from guard-rejected to formatted. It was the last refusal caused by the grammar, and no other verdict changes. The output of 127 other files changes, because their element structure is now right. In 110 of them, spurious self-closed containers go from 637 to 186.
 - `tree-sitter-cfml` grammar update (v0.26.39 → v0.26.40). The one grammar change: in a tag expression, a statement closed by `}` no longer runs on over the whitespace before the `}` (#163 in the grammar). A closure that ended a `<cfset>` struct spanning lines had its body end after the newline. That newline was the cause of the blank line the formatter added on every pass, which `blockText` now works around. The only range change in the 15,503-file corpus is in Lucee's `test/tags/query/inc.cfm`. No verdict changes, and the formatted output of every corpus file is identical to v0.26.39.
+- `tree-sitter-cfml` grammar update (v0.26.40 → `b2eee65`, the grammar's master ahead of v0.26.41; pinned as a pseudo-version until that release is tagged). The grammar changes are all in its scanner, for custom tags imported with `<cfimport prefix="…">` (#166 in the grammar):
+  - `#…#` in the attributes of such a tag is an expression, so `click="#URLEncodedFormat("a=b")#"` no longer ends the value at the inner quote.
+  - A long run of unclosed tags the scanner does not know, such as tassweb's `<control:hiddenfield …>`, stops nesting before it fills the scanner's tag stack, so the next `<cfloop>` still fits.
+
+  These tags keep their HTML element shape, so the formatter needed no change. Formatter verdicts:
+  - **tassweb:** two files move from refused to formatted, `webroot/academicreports/resultFormats_list.cfm` and `webroot/attendance/bulk_absentee.cfm`, taking it to 6,590 of 6,597 clean. These were the two refusals `FORMATTER-ISSUES.md` §6.5 recorded.
+  - **Public CFML corpus:** no verdict changes.
+
+  Formatted output is byte-identical to v0.26.40 for every other file in both corpora, about 21,500 files, even though 3,709 tassweb files change tree shape where their attributes' hashes became expressions.
 
 ## [0.3.6]
 
