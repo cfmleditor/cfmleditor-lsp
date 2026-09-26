@@ -298,6 +298,16 @@ kept producing a fresh diff for an unchanged file:
   `<p>text<br>more</p>` inside a converted parent kept its `<br>` until a later
   run. `preformat` now repeats until the source stops changing.
 
+### 2.14 Compound operator in a `var` declaration — 3 files
+
+`var hqlOrder &= " ORDER BY"` came out as `var hqlOrder = " ORDER BY"`. The
+grammar puts a compound initializer's operator in the declarator's `operator`
+field, and a plain `=` has none. Both declaration renderers, the statement one
+and the `for`-header one, wrote ` = ` whatever the field held. Found on the
+15,503-file corpus: CommandBox's `Print.cfc`, and Slatwall's `Product.cfc` and
+`SmartList.cfc`. One `declarator` helper now renders the declarator for both,
+with its operator.
+
 ## 3. Guard coverage gaps
 
 Cases the `whitespaceOnly` guard got wrong. The first two were latent — nothing

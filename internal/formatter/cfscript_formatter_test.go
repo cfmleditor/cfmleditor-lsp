@@ -35,6 +35,23 @@ func TestVarDeclaration(t *testing.T) {
 	allIn(t, got, "var x = 1;")
 }
 
+// TestVarDeclarationCompoundOperator covers `var hqlOrder &= " ORDER BY"`, a
+// declaration whose initializer is a compound assignment. The grammar puts the
+// operator in the declarator's `operator` field, and both declaration
+// renderers wrote a plain ` = ` whatever it held, so `&=` and `+=` came out as
+// `=`. The guard refused the file: CommandBox's Print.cfc and two in Slatwall.
+func TestVarDeclarationCompoundOperator(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`var methodName &= arrayLen(a) > 1 ? a[2] : '';`, "var methodName &= arrayLen(a) > 1 ? a[2] : '';"},
+		{`var total += getRating();`, "var total += getRating();"},
+		{`var a = 1, b &= "x";`, `var a = 1, b &= "x";`},
+		{`for (var i += 1; i < 3; i++) { x(); }`, "var i += 1; i < 3;"},
+	} {
+		got := formatGuarded(t, wrap(tc.src))
+		allIn(t, got, tc.want)
+	}
+}
+
 func TestLocalDeclaration(t *testing.T) {
 	src := wrap(`local.result = getSomething();`)
 	got := format(t, src)
