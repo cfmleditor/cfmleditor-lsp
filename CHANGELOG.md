@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.7]
+
 ### Added
 
 - **`cfmleditor.explainCall`, the server's form of `cfmleditor-lsp explain`.** Given a document URI, a 0-based line and an optional name filter, it reports how each call on that line resolved: the steps the resolver took and the verdict, in the CLI's own words. It uses the running server's resolver and index, reads the text in the editor rather than the file on disk, and shows the report as a message. A line with no call gets a message saying so.
