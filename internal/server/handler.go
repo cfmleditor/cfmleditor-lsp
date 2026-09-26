@@ -88,6 +88,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleDidSave(ctx, req.Params())
 		case protocol.MethodTextDocumentCompletion:
 			return s.handleCompletion(ctx, req.Params())
+		case protocol.MethodCompletionItemResolve:
+			return s.handleCompletionResolve(ctx, req.Params())
 		case protocol.MethodTextDocumentDefinition:
 			return s.handleDefinition(ctx, req.Params())
 		case protocol.MethodTextDocumentReferences:
@@ -136,6 +138,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 
 	s.initialized = true
 	s.watchedFilesDynamic = clientWatchesFiles(params.Capabilities)
+	s.completionDefer = clientDefers(params.Capabilities)
 
 	folders, _ := params.WorkspaceFolders.Get()
 
