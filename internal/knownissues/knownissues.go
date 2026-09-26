@@ -59,7 +59,7 @@ var entryTag = regexp.MustCompile(`^\[(?:(?i:(error|warning|warn|information|inf
 func Parse(content, baseDir string) []Entry {
 	var out []Entry
 
-	for _, raw := range strings.Split(content, "\n") {
+	for raw := range strings.SplitSeq(content, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -285,8 +285,8 @@ func Diagnostic(e *Entry, lines []string, severity protocol.DiagnosticSeverity, 
 
 	return protocol.Diagnostic{
 		Range: protocol.Range{
-			Start: protocol.Position{Line: uint32(line), Character: uint32(start)}, //nolint:gosec // line and column come from a file's own lines
-			End:   protocol.Position{Line: uint32(line), Character: uint32(end)},   //nolint:gosec // as above
+			Start: protocol.Position{Line: uint32(line), Character: uint32(start)},
+			End:   protocol.Position{Line: uint32(line), Character: uint32(end)},
 		},
 		Severity: severity,
 		Source:   protocol.NewOptional(source),

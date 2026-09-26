@@ -208,10 +208,8 @@ func TestDeferredCompletionIsSmaller(t *testing.T) {
 		s.setDocument(docURI, benchDoc(20))
 
 		req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-				Position:     protocol.Position{Line: 4, Character: 6},
-			},
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     protocol.Position{Line: 4, Character: 6},
 		})
 
 		res, err := s.handleCompletion(context.Background(), req)

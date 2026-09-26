@@ -6,26 +6,62 @@ run:
 linters:
   default: standard
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
     - bodyclose
+    - containedctx
     - copyloopvar
+    - dupword
     - durationcheck
+    - errchkjson
+    - errname
     - errorlint
     - exhaustive
-    - godox
+    - exptostd
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecksumtype
     - gocritic
+    - godox
     - gosec
     - ineffassign
+    - iotamixing
     - makezero
+    - mirror
     - misspell
+    - modernize
+    - musttag
     - nilerr
+    - nilnesserr
     - nlreturn
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
     - prealloc
+    - predeclared
+    - reassign
+    - recvcheck
     - revive
+    - rowserrcheck
+    - sqlclosecheck
     - unconvert
     - unparam
     - usestdlibvars
+    - usetesting
+    - wastedassign
     - wsl_v5
   settings:
+    dupword:
+      # Only the words people type twice by accident. Checking every word
+      # flags deliberate repetition: "every alternative that matches matches
+      # at 0", or a test feeding "getData getData" to an identifier scanner.
+      keywords: ["the", "a", "an", "and", "to", "of", "in", "is", "it", "for", "that", "be", "on", "as"]
+    staticcheck:
+      # Every check, the style and simplification ones included; the default
+      # set leaves several off.
+      checks: ["all"]
     gocritic:
       # On top of gocritic's default checks: every check tagged performance,
       # and two that keep the code honest. The copy thresholds are gocritic's
@@ -60,6 +96,14 @@ linters:
           sizeThreshold: 80
   exclusions:
     rules:
+      # The code-map store's queries have no context to take: none of its
+      # callers holds one. The MCP server's tool handlers take none, and the
+      # CLI and the server's background job would pass context.Background().
+      # Threading a parameter through every query to carry that is noise;
+      # noctx stays on for every other package.
+      - path: internal/codemap/store/
+        linters:
+          - noctx
       - path: _test\.go
         linters:
           - prealloc

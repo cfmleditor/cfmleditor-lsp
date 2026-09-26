@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -202,11 +203,11 @@ func parseGraphFlags(args []string) (graphFlags, error) {
 	}
 
 	if len(f.paths) == 0 {
-		return f, fmt.Errorf("no directory given")
+		return f, errors.New("no directory given")
 	}
 
 	if f.live && f.detached {
-		return f, fmt.Errorf("--live and --detached are opposites; pass at most one")
+		return f, errors.New("--live and --detached are opposites; pass at most one")
 	}
 
 	return f, nil

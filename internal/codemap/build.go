@@ -224,15 +224,11 @@ func Build(opts *Options) *Map {
 	jobs := make(chan string)
 
 	for range opts.Workers {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for f := range jobs {
 				results <- scanFile(opts, root, f, fingerprint)
 			}
-		}()
+		})
 	}
 
 	go func() {

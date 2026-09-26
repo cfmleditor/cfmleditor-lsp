@@ -204,7 +204,7 @@ func TestUnixListenerUnlinksOnClose(t *testing.T) {
 
 	sock := shortSock(t)
 
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

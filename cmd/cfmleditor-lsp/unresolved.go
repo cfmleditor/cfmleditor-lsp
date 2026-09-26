@@ -165,7 +165,11 @@ func cmdUnresolved(args []string) {
 	case jsonOutput:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(results)
+
+		if err := enc.Encode(results); err != nil {
+			fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+			os.Exit(1)
+		}
 	case knownIssuesOutput:
 		baseDir, _ := filepath.Abs(searchDir)
 		if cfg != nil {
@@ -205,7 +209,7 @@ func writeReport(path string, calls []unresolved.Call, regenerate string) (int, 
 
 	skipped := unresolved.WriteKnownIssues(&b, calls, filepath.Dir(path), false, regenerate, version)
 
-	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o644) //nolint:gosec // a report committed to the project, read by everyone
+	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func collectCFMLFiles(fsys vfs.FS, roots []string) []string {

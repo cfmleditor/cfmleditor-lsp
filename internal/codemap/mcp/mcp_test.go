@@ -60,7 +60,7 @@ func exchange(t *testing.T, s *mcp.Server, requests ...string) []map[string]any 
 
 	var replies []map[string]any
 
-	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
 		if line == "" {
 			continue
 		}

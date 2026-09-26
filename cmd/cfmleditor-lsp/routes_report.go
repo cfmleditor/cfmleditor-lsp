@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -15,13 +16,7 @@ import (
 func routeShape(r string) string {
 	segs := strings.Split(r, ".")
 	has := func(want string) bool {
-		for _, s := range segs {
-			if s == want {
-				return true
-			}
-		}
-
-		return false
+		return slices.Contains(segs, want)
 	}
 
 	switch {
@@ -40,10 +35,8 @@ func routeShape(r string) string {
 
 func hasAny(segs []string, want ...string) bool {
 	for _, s := range segs {
-		for _, w := range want {
-			if s == w {
-				return true
-			}
+		if slices.Contains(want, s) {
+			return true
 		}
 	}
 

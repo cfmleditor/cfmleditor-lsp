@@ -66,7 +66,7 @@ func lineCol(text string, col int) uint32 {
 		return utf16Len(text[:col])
 	}
 
-	return utf16Len(text) + uint32(col-len(text)) //nolint:gosec // col > len(text) >= 0
+	return utf16Len(text) + uint32(col-len(text))
 }
 
 // colMapper converts byte columns to LSP characters for many positions in one

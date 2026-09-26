@@ -53,15 +53,7 @@ func assertCalls(t *testing.T, body string, want []string) {
 	}
 
 	for _, w := range want {
-		found := false
-
-		for _, g := range got {
-			if g == w {
-				found = true
-
-				break
-			}
-		}
+		found := slices.Contains(got, w)
 
 		if !found {
 			t.Errorf("%s\n  got  %v\n  want %v (missing %q)", body, got, want, w)

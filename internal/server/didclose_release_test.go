@@ -95,8 +95,7 @@ func TestDidCloseCoversEveryPerDocumentMap(t *testing.T) {
 	src := string(data)
 
 	st := reflect.TypeFor[Server]()
-	for i := range st.NumField() {
-		f := st.Field(i)
+	for f := range st.Fields() {
 		if f.Type.Kind() != reflect.Map || f.Type.Key().String() != "uri.URI" {
 			continue
 		}

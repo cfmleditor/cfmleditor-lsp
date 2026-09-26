@@ -71,7 +71,7 @@ func utf16Of(t *testing.T, line, needle string, delta int) uint32 {
 		t.Fatalf("%q not in %q", needle, line)
 	}
 
-	return utf16Len(line[:i]) + uint32(delta) //nolint:gosec // test positions are small
+	return utf16Len(line[:i]) + uint32(delta)
 }
 
 func TestHoverReadsTheColumnInUTF16Units(t *testing.T) {
@@ -139,10 +139,8 @@ func TestDuplicateGtCompletionAnswersInUTF16Units(t *testing.T) {
 	at := utf16Len(line)
 
 	req := makeCall(t, protocol.MethodTextDocumentCompletion, protocol.CompletionParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-			Position:     protocol.Position{Line: 0, Character: at},
-		},
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Position:     protocol.Position{Line: 0, Character: at},
 		Context: protocol.CompletionContext{
 			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
 			TriggerCharacter: new(">"),

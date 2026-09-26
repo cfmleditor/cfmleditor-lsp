@@ -330,11 +330,11 @@ func TestFetchAssetUnpacks(t *testing.T) {
 			defer server.Close()
 
 			binPath := filepath.Join(t.TempDir(), "cflint-test")
-			if err := fetchAsset(server.URL, binPath, tc.kind); err != nil {
+			if err := fetchAsset(t.Context(), server.URL, binPath, tc.kind); err != nil {
 				t.Fatalf("fetchAsset: %v", err)
 			}
 
-			got, err := os.ReadFile(binPath) //nolint:gosec // test temp dir
+			got, err := os.ReadFile(binPath)
 			if err != nil {
 				t.Fatalf("reading the binary: %v", err)
 			}
@@ -365,7 +365,7 @@ func TestFetchAssetReportsAMissingAssetSeparately(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := fetchAsset(server.URL, filepath.Join(t.TempDir(), "cflint-test"), tarGz)
+	err := fetchAsset(t.Context(), server.URL, filepath.Join(t.TempDir(), "cflint-test"), tarGz)
 	if !errors.Is(err, errAssetMissing) {
 		t.Errorf("fetchAsset on a 404 = %v, want errAssetMissing", err)
 	}
@@ -379,7 +379,7 @@ func TestFetchAssetDoesNotTreatOtherFailuresAsMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := fetchAsset(server.URL, filepath.Join(t.TempDir(), "cflint-test"), rawBinary)
+	err := fetchAsset(t.Context(), server.URL, filepath.Join(t.TempDir(), "cflint-test"), rawBinary)
 	if err == nil || errors.Is(err, errAssetMissing) {
 		t.Errorf("fetchAsset on a 500 = %v, want a plain error", err)
 	}
@@ -396,7 +396,7 @@ func TestFetchAssetRejectsAnArchiveWithNoBinary(t *testing.T) {
 	defer server.Close()
 
 	binPath := filepath.Join(t.TempDir(), "cflint-test")
-	if err := fetchAsset(server.URL, binPath, tarGz); err == nil {
+	if err := fetchAsset(t.Context(), server.URL, binPath, tarGz); err == nil {
 		t.Error("fetchAsset on an empty archive = nil, want an error")
 	}
 
@@ -490,7 +490,7 @@ func TestLatestVersionFrom(t *testing.T) {
 		}))
 		defer server.Close()
 
-		if got := latestVersionFrom(server.URL); got != "1.5.17" {
+		if got := latestVersionFrom(t.Context(), server.URL); got != "1.5.17" {
 			t.Errorf("latestVersionFrom = %q, want 1.5.17", got)
 		}
 	})
@@ -504,7 +504,7 @@ func TestLatestVersionFrom(t *testing.T) {
 				w.WriteHeader(status)
 			}))
 
-			got := latestVersionFrom(server.URL)
+			got := latestVersionFrom(t.Context(), server.URL)
 			server.Close()
 
 			if got != fallbackVersion {
@@ -518,7 +518,7 @@ func TestLatestVersionFrom(t *testing.T) {
 		url := server.URL
 		server.Close()
 
-		if got := latestVersionFrom(url); got != fallbackVersion {
+		if got := latestVersionFrom(t.Context(), url); got != fallbackVersion {
 			t.Errorf("latestVersionFrom against a closed server = %q, want %q", got, fallbackVersion)
 		}
 	})
@@ -554,12 +554,12 @@ func TestBinaryWithFallback(t *testing.T) {
 			_, _ = w.Write(assetBody(t, r.URL.Path, want))
 		})
 
-		binPath, err := binaryWithFallback("9.9.9", name)
+		binPath, err := binaryWithFallback(t.Context(), "9.9.9", name)
 		if err != nil {
 			t.Fatalf("binaryWithFallback: %v", err)
 		}
 
-		got, err := os.ReadFile(binPath) //nolint:gosec // test temp dir
+		got, err := os.ReadFile(binPath)
 		if err != nil {
 			t.Fatalf("reading the binary: %v", err)
 		}
@@ -588,7 +588,7 @@ func TestBinaryWithFallback(t *testing.T) {
 			_, _ = w.Write(assetBody(t, r.URL.Path, want))
 		})
 
-		if _, err := binaryWithFallback("9.9.9", name); err != nil {
+		if _, err := binaryWithFallback(t.Context(), "9.9.9", name); err != nil {
 			t.Fatalf("binaryWithFallback: %v", err)
 		}
 
@@ -608,7 +608,7 @@ func TestBinaryWithFallback(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		})
 
-		_, err := binaryWithFallback("9.9.9", name)
+		_, err := binaryWithFallback(t.Context(), "9.9.9", name)
 		if err == nil || !strings.Contains(err.Error(), "9.9.9") {
 			t.Errorf("binaryWithFallback = %v, want an error naming 9.9.9", err)
 		}

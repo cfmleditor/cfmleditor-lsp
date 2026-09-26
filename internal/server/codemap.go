@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,7 +63,7 @@ func (s *Server) handleGenerateCodeMap(params []protocol.LSPAny) (any, error) {
 
 	roots := s.searchRoots()
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("no workspace root to map; open a folder first")
+		return nil, errors.New("no workspace root to map; open a folder first")
 	}
 
 	out, err := s.codeMapOutputPath(&req, roots[0])
@@ -389,7 +390,7 @@ func (s *Server) notifyError(ctx context.Context, msg string) {
 func (s *Server) handleCodeMapStats(ctx context.Context, params []protocol.LSPAny) (any, error) {
 	roots := s.searchRoots()
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("no workspace root to map; open a folder first")
+		return nil, errors.New("no workspace root to map; open a folder first")
 	}
 
 	m, err := s.buildCodeMap(new(parseCodeMapRequest(params)), roots)

@@ -2,7 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,7 +288,7 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 		links = append(links, protocol.DocumentLink{
 			Range: protocol.Range{
 				Start: protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col)},
-				End:   protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col+uint32(len(ref.Value)))}, //nolint:gosec // a route is one attribute value
+				End:   protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col+uint32(len(ref.Value)))},
 			},
 			Target:  targetRef,
 			Tooltip: &tip,
@@ -394,7 +394,7 @@ func routeTooltip(t *routepkg.Target) string {
 // is wrong still opens a file, just not the right one.
 func (s *Server) handleResolveRoute(params []protocol.LSPAny) (any, error) {
 	if len(params) == 0 {
-		return nil, fmt.Errorf("cfmleditor.resolveRoute requires a route")
+		return nil, errors.New("cfmleditor.resolveRoute requires a route")
 	}
 
 	route, _ := argString(params, 0)

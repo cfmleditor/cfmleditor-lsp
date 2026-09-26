@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +31,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	}
 
 	if len(args) == 0 {
-		return pa, fmt.Errorf("usage: cfparse [-profile cpu.prof] <file-or-dir> [...]")
+		return pa, errors.New("usage: cfparse [-profile cpu.prof] <file-or-dir> [...]")
 	}
 
 	pa.targets = args

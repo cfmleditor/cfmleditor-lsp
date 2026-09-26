@@ -72,12 +72,16 @@ func TestChainBuilderSpillsCorrectly(t *testing.T) {
 
 		want := seg
 
+		var wantSb75 strings.Builder
+
 		for range segments - 1 {
 			c.writeDot()
 			c.writeString(seg)
 
-			want += "." + seg
+			wantSb75.WriteString("." + seg)
 		}
+
+		want += wantSb75.String()
 
 		if got := c.String(); got != want {
 			t.Errorf("%d segments (%d bytes, array holds %d): got %q, want %q",

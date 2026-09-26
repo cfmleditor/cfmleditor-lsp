@@ -3427,7 +3427,7 @@ func (f *Formatter) scriptWhile(n *sitter.Node) {
 	cond := n.ChildByFieldName("condition")
 	body := n.ChildByFieldName("body")
 
-	f.iLine(fmt.Sprintf("while %s", f.parenExpr(cond)))
+	f.iLine("while " + f.parenExpr(cond))
 	f.scriptBlockOf2(body)
 	f.scriptWrite("\n")
 }

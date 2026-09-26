@@ -47,7 +47,7 @@ func TestFatalf_ExitsWithStatus1(t *testing.T) {
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestFatalf_ExitsWithStatus1")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestFatalf_ExitsWithStatus1")
 
 	cmd.Env = append(os.Environ(), "CFMLEDITOR_LSP_TEST_FATALF=1")
 

@@ -106,7 +106,11 @@ func cmdDeps(args []string) {
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(result)
+
+	if err := enc.Encode(result); err != nil {
+		fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // depsResolver builds the resolver and index the traversal needs. Resolution is

@@ -16,7 +16,7 @@ func TestDeeplyNestedVoidElementsConvertInOnePass(t *testing.T) {
 	var b strings.Builder
 	for i := range 25 {
 		b.WriteString("<tr class=\"r\"><td>cell ")
-		b.WriteString(string(rune('a' + i%26)))
+		b.WriteRune(rune('a' + i%26))
 		b.WriteString("<BR>\n")
 	}
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
@@ -139,7 +140,7 @@ func (m *Map) WriteDOT(w io.Writer) error {
 		}
 
 		if e.Count > 1 {
-			attrs = append(attrs, fmt.Sprintf("label=%q", fmt.Sprint(e.Count)))
+			attrs = append(attrs, fmt.Sprintf("label=%q", strconv.Itoa(e.Count)))
 		}
 
 		fmt.Fprintf(&b, "  %q -> %q [%s];\n", e.From, e.To, strings.Join(attrs, " "))

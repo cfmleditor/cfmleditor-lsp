@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -528,7 +529,7 @@ func writeFileInPlace(path string, original, out []byte) error {
 	// Re-read rather than trusting the content from before Format ran: a write
 	// landing on top of an edit made in the meantime would discard it silently.
 	if current, err := os.ReadFile(target); err == nil && !bytes.Equal(current, original) {
-		return fmt.Errorf("file changed on disk while formatting, not overwriting")
+		return errors.New("file changed on disk while formatting, not overwriting")
 	}
 
 	return os.Rename(tmpName, target)

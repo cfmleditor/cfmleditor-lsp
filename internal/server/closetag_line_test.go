@@ -58,12 +58,12 @@ func oldCloseTag(content string, line, char int) bool {
 
 	rest := lineText[char:]
 
-	idx := strings.IndexByte(rest, '>')
-	if idx == -1 {
+	before0, _, ok := strings.Cut(rest, ">")
+	if !ok {
 		return false
 	}
 
-	middle := rest[:idx]
+	middle := before0
 	if strings.TrimSpace(middle) == "" {
 		return false
 	}

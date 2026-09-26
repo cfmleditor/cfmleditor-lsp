@@ -223,7 +223,9 @@ func (s *Server) initLinter() {
 			cflog.String("expected", "one of FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC"))
 	}
 
-	runner, err := cflint.NewRunner(s.LintMinSeverity)
+	// No request context reaches here: initLinter runs once, in the
+	// background, after initialize. The clients' own timeouts bound it.
+	runner, err := cflint.NewRunner(context.Background(), s.LintMinSeverity)
 	if err != nil {
 		s.log.Warn("cflint unavailable", cflog.Err(err))
 

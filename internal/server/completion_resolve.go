@@ -196,7 +196,7 @@ func resolveCompletionItem(item *protocol.CompletionItem) {
 		// of the entry it came from. Its label is not: member len resolved
 		// by label would find the built-in Len.
 		if len(item.Data) > 0 {
-			_ = json.Unmarshal(item.Data, &name) //nolint:errcheck // unreadable data resolves nothing
+			_ = json.Unmarshal(item.Data, &name)
 		}
 	}
 

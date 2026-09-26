@@ -83,7 +83,11 @@ func cmdRefs(args []string) {
 	default:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(result)
+
+		if err := enc.Encode(result); err != nil {
+			fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package codemap_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -304,10 +305,8 @@ func TestBareCallToABuiltinNameStillResolves(t *testing.T) {
 			continue
 		}
 
-		for _, id := range suspicious {
-			if e.To == id {
-				return
-			}
+		if slices.Contains(suspicious, e.To) {
+			return
 		}
 	}
 

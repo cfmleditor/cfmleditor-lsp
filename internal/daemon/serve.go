@@ -25,7 +25,9 @@ func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.In
 
 	_ = os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
+	var lc net.ListenConfig
+
+	ln, err := lc.Listen(ctx, "unix", sockPath)
 	if err != nil {
 		return err
 	}

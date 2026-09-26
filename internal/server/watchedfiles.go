@@ -89,7 +89,7 @@ func (s *Server) registerFileWatchers(ctx context.Context) {
 // the standard library. It matters more here than elsewhere because a checkout
 // or a branch switch arrives as one batch of thousands of events: measured on
 // 5,000, 4.6ms and 5,024 allocations against 1.3ms and 4.
-func (s *Server) handleDidChangeWatchedFiles(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidChangeWatchedFiles(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidChangeWatchedFilesParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

@@ -706,12 +706,16 @@ func (f *Formatter) formatQueryCFIfAlt(n *sitter.Node) {
 		case "cf_elseif_tag":
 			var cond string
 
+			var condSb709 strings.Builder
+
 			for j := uint(0); j < c.ChildCount(); j++ {
 				ch := c.Child(j)
 				if ch.Kind() != ">" {
-					cond += f.text(ch)
+					condSb709.WriteString(f.text(ch))
 				}
 			}
+
+			cond += condSb709.String()
 
 			cond = strings.TrimSpace(cond)
 			if strings.HasPrefix(strings.ToLower(cond), "elseif") {

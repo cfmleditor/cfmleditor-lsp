@@ -2,6 +2,7 @@ package formatter
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -23,11 +24,11 @@ func TestScriptRegionsSurviveLengthChangingUnicode(t *testing.T) {
 	}
 
 	got := string(src[spans[0].start:spans[0].end])
-	if !bytes.Contains([]byte(got), []byte("x = 1;")) {
+	if !strings.Contains(got, "x = 1;") {
 		t.Errorf("span does not cover the script body; got %q", got)
 	}
 
-	if bytes.Contains([]byte(got), []byte("<p>")) {
+	if strings.Contains(got, "<p>") {
 		t.Errorf("span leaked into the markup before it; got %q", got)
 	}
 }

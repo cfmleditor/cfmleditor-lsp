@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -27,12 +28,12 @@ import (
 func (s *Server) handleExplainCall(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	docURI, _ := argString(args, 0)
 	if docURI == "" {
-		return nil, fmt.Errorf("cfmleditor.explainCall requires a document URI argument")
+		return nil, errors.New("cfmleditor.explainCall requires a document URI argument")
 	}
 
 	lineArg, ok := argFloat(args, 1)
 	if !ok || lineArg < 0 {
-		return nil, fmt.Errorf("cfmleditor.explainCall requires a 0-based line number argument")
+		return nil, errors.New("cfmleditor.explainCall requires a 0-based line number argument")
 	}
 
 	line := int(lineArg)

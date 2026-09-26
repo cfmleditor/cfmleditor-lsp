@@ -1411,7 +1411,18 @@ Some handles need both shapes; others only one, depending on how the code uses t
   `&CallSite{…}` to `addCall` does not allocate — the parameter only leaks its
   content — and the parse benchmarks' bytes and allocations were unchanged when
   it went in; check `go build -gcflags=-m` if a new such helper keeps the
-  pointer. `whyNoLint` wants a reason after every `//nolint:x`.
+  pointer. `whyNoLint` wants a reason after every `//nolint:x`, and
+  `nolintlint` fails on one that no longer suppresses anything.
+- **The linter set is chosen for what it catches, not for style.** Beyond
+  `default: standard`, `.golangci.yml` enables linters that flag defects and
+  cost nothing on clean code (`bidichk`, `nilnesserr`, `recvcheck`, `musttag`,
+  `sqlclosecheck`, `rowserrcheck`, `noctx`, `errchkjson` and others), and
+  `staticcheck` runs every check. Each was measured over the whole codebase
+  before it went in; the high-volume style linters (`varnamelen`,
+  `exhaustruct`, `paralleltest`, `lll`, the complexity limits) were measured
+  too and left off. `noctx` is excluded for `internal/codemap/store`, whose
+  callers hold no context to pass; `dupword` checks only the short words typed
+  twice by accident, since checking every word flags deliberate repetition.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
 - `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go
