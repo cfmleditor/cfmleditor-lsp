@@ -1,10 +1,11 @@
 # Performance gaps: costs identified and not acted on
 
 Three costs found while profiling the per-keystroke paths for
-[#101](https://github.com/cfmleditor/cfmleditor-lsp/pull/101), none of them
-acted on. Two change what a client receives and so are not tune-ups; the third
-is not worth what it costs to write. Section 4 is settled; sections 2 and 3 are
-deferred, and section 2 records what a reader should know before picking it up.
+[#101](https://github.com/cfmleditor/cfmleditor-lsp/pull/101). Two change what a
+client receives and so are not tune-ups; the third is not worth what it costs to
+write. Section 3 has since been done, and records what it measured. Section 4 is
+settled; section 2 is deferred, and records what a reader should know before
+picking it up.
 
 This file exists so they are not rediscovered from scratch, and so the reasons
 are on record rather than remembered. Every number below is measured, and the
@@ -157,7 +158,28 @@ it halves a number that needs an order of magnitude, and it wants a client
 advertising `workspace.symbol.resolveSupport` to be worth the handler, which
 is why it is not a fix by itself.
 
-## 3. Completion sends documentation and detail for every item
+## 3. Completion sends documentation and detail for every item — done
+
+Done as option (a) below, gated on the client's `resolveSupport` as described
+there (`internal/server/completion_resolve.go`). A client listing
+`documentation` and `detail` there is sent the built-in and member-function
+items without them, and `completionItem/resolve` fills them in for the item it
+highlights; a client that does not is sent the full items, exactly as before.
+Only those two lists are deferred: they are the only items carrying
+documentation, and the only ones whose text can be found again from what comes
+back on resolve.
+
+Measured with `BenchmarkCompletionWithMarshal`, run alternately, three rounds:
+
+| | JSON | handler + marshal | allocated |
+|---|---:|---:|---:|
+| `full` | 322KB | 840µs | 340KB |
+| `deferred` | 144KB (−55%) | 510µs (−40%) | 157KB |
+
+Option (c), `itemDefaults`, is not done: the 6% it covers is `insertTextFormat`,
+and it needs a client advertising `completionList.itemDefaults` as well.
+
+What follows is the analysis as it stood before, kept for its reasoning.
 
 A completion response is 977 items and 331KB, and the handler is 2µs of the
 633µs it takes. Two fields are two thirds of the payload:
@@ -237,9 +259,7 @@ not to make the scan 18% faster.
   the symbol picker being felt as slow, or a measurement on a real workspace
   showing what a one- or two-character query matches there — the cheap step
   that would say whether the synthetic 26ms is anywhere near the real one.
-- **Section 3** — a client in use that advertises `resolveSupport`, or a
-  workspace where completion latency is being felt. The saving is known and
-  large; only the build cost is holding it.
+- **Section 3** — done; see the section.
 - **Section 4** — a profile showing `nearestTo` mattering on a real workspace
   rather than on a bucket built to be worst-case. Then cache the answer rather
   than speed up the scan.

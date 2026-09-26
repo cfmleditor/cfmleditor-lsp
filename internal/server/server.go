@@ -37,8 +37,13 @@ type Server struct {
 	// by handleInitialized, which the protocol orders strictly after it on the
 	// same read loop — the same happens-before `initialized` above relies on.
 	watchedFilesDynamic bool
-	Version             string
-	FS                  vfs.FS // filesystem abstraction for portability
+	// completionDefer is which completion item fields the client said at
+	// initialize it will resolve lazily. The built-in and member-function
+	// items leave those out, and completionItem/resolve fills them in. See
+	// completion_resolve.go.
+	completionDefer completionDefer
+	Version         string
+	FS              vfs.FS // filesystem abstraction for portability
 
 	mu        sync.RWMutex
 	documents map[uri.URI]string
@@ -159,6 +164,10 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		},
 		CompletionProvider: &protocol.CompletionOptions{
 			TriggerCharacters: []string{"<", "/", ".", ">"},
+			// Only when something was deferred: a client told it may resolve
+			// sends a request for every item it highlights, which is a round
+			// trip for nothing when the list already carries everything.
+			ResolveProvider: trueOrOmitted(s.completionDefer != completionDefer{}),
 		},
 		DocumentFormattingProvider: protocol.Boolean(true),
 		// Answered by formatting the whole document and returning only the

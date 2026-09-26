@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Completion sends less when the editor can fetch the rest.** A client that lists `documentation` and `detail` in its `resolveSupport` (VS Code and Neovim do) is sent the built-in and member-function items without them, and `completionItem/resolve` fills them in for the item it highlights. The response shrinks from 322KB to 144KB and takes 40% less time to build and encode. A client that does not list them is sent the full items, as before.
+
 ### Fixed
 
 - **Typing outside a function no longer reparses the file on every keystroke.** An edit at component level (a property, a comment above a function, the component's attributes) made the server reparse every function signature in the file before it read the next message: 95ms per keystroke in a 65,000-line component. The reparse now waits until something needs the result, and the next request pays for it once. Keystrokes there cost under 3ms.
+- **`cfmleditor.goToMatchingTag` and known-issues underlines counted columns in bytes.** On a line with an `é` or an emoji before the tag, go-to-matching-tag found no tag or jumped to the wrong column. A known-issues entry's underline landed after the method it names, and a whole-line one ran past the end of the line. Both now use UTF-16 units. CFLint's own columns were already right, since CFLint counts UTF-16 units.
 
 ## [0.3.8]
 

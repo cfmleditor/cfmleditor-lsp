@@ -810,6 +810,19 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   in-place edit comes back. Removing the copy took a completion request from
   383KB to 3.4KB, roughly half the bytes of the whole round trip including its
   JSON marshalling.
+- **Documentation and detail are resolved lazily when the client can.** A
+  client listing them in `completionItem.resolveSupport.properties` is sent the
+  built-in and member-function items without them (`s.builtinFuncItems()` and
+  `s.memberFuncItems()`, one shape per combination, built once per process), and
+  `completionItem/resolve` looks the entry up again: a built-in by its label,
+  recognised by its `SortBuiltinFuncs` sort text, and a member by the entry name
+  in its `data`, because member names repeat — `len` is `arrayLen`'s,
+  `stringLen`'s and `structLen`'s. A client that lists neither is sent the full
+  items and is not told `resolveProvider`. The deferred shapes are shared like
+  the full lists and the same rule holds: nothing may write to them. Reach for
+  `s.builtinFuncItems()`, not `getBuiltinFuncItems()`, anywhere a list goes to
+  a client. `TestResolvedItemsMatchTheFullOnes` resolves every deferred item and
+  compares it with the full one.
 - Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
   the binary from `cfmleditor/CFLint` releases on first use.
 

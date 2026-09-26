@@ -51,6 +51,9 @@ var (
 	builtinFuncItemsOnce sync.Once
 	memberFuncItems      []protocol.CompletionItem
 	memberFuncItemsOnce  sync.Once
+	// memberFuncEntries[i] is the docs entry memberFuncItems[i] came from,
+	// which completionItem/resolve needs: see memberKey.
+	memberFuncEntries []string
 )
 
 func getBuiltinFuncItems() []protocol.CompletionItem {
@@ -100,8 +103,10 @@ func getMemberFuncItems() []protocol.CompletionItem {
 	memberFuncItemsOnce.Do(func() {
 		mfs := docs.AllMemberFunctions()
 		memberFuncItems = make([]protocol.CompletionItem, 0, len(mfs))
+		memberFuncEntries = make([]string, 0, len(mfs))
 
 		for _, mf := range mfs {
+			memberFuncEntries = append(memberFuncEntries, mf.Entry.Name)
 			memberFuncItems = append(memberFuncItems, protocol.CompletionItem{
 				Label:         mf.Name,
 				Kind:          protocol.CompletionItemKindMethod,
@@ -227,7 +232,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		}
 
 		if CompletionBuiltinFunctions {
-			items = append(items, getBuiltinFuncItems()...)
+			items = append(items, s.builtinFuncItems()...)
 		}
 	case triggeredByClose && hasDoc:
 		if CompletionCloseTags {
@@ -425,7 +430,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 
 				s.log.Debug("completion: dotMethods", cflog.Duration("dur", time.Since(t1)))
 			} else if CompletionMemberFunctions {
-				items = append(items, getMemberFuncItems()...)
+				items = append(items, s.memberFuncItems()...)
 
 				s.log.Debug("completion: memberFunctions", cflog.Duration("dur", time.Since(t1)))
 			}
@@ -655,7 +660,7 @@ func (s *Server) completionFromCache(docURI uri.URI, line int) []protocol.Comple
 
 	fileItems := s.compCache.GetFile(docURI)
 	if fileItems == nil {
-		fileItems = getBuiltinFuncItems()
+		fileItems = s.builtinFuncItems()
 	}
 
 	idx := sort.Search(len(funcs), func(i int) bool {
@@ -762,7 +767,7 @@ func (s *Server) rebuildFileCompletionCache(docURI uri.URI) {
 func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.ParseResult) {
 	start := time.Now()
 
-	builtins := getBuiltinFuncItems()
+	builtins := s.builtinFuncItems()
 	globals := pr.VariablesVars()
 	thisVarNames := pr.ThisVars()
 	items := make([]protocol.CompletionItem, 0, len(builtins)+len(globals)+len(thisVarNames)+len(pr.Funcs))

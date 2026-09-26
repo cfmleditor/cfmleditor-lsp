@@ -272,40 +272,54 @@ func BenchmarkScopesToFuncRanges(b *testing.B) {
 // JSON-marshalled onto the wire, so the question for any saving inside the
 // handler is how it compares with that.
 func BenchmarkCompletionWithMarshal(b *testing.B) {
-	s := benchLoadedServer(5000, 8)
-	docURI := uri.File("/ws/open/Doc.cfc")
+	// full is what a client that resolves nothing is sent; deferred is what a
+	// client listing documentation and detail in resolveSupport is sent, the
+	// two fields filled in later by completionItem/resolve.
+	for _, c := range []struct {
+		name string
+		d    completionDefer
+	}{
+		{"full", completionDefer{}},
+		{"deferred", completionDefer{documentation: true, detail: true}},
+	} {
+		b.Run(c.name, func(b *testing.B) {
+			s := benchLoadedServer(5000, 8)
+			s.completionDefer = c.d
+			docURI := uri.File("/ws/open/Doc.cfc")
 
-	benchOpen(b, s, docURI, benchDoc(60))
+			benchOpen(b, s, docURI, benchDoc(60))
 
-	req, err := json.Marshal(protocol.CompletionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
-		Position:     protocol.Position{Line: 4, Character: 6},
-	})
-	if err != nil {
-		b.Fatal(err)
-	}
+			req, err := json.Marshal(protocol.CompletionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+				Position:     protocol.Position{Line: 4, Character: 6},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	res, err := s.handleCompletion(context.Background(), req)
-	if err != nil {
-		b.Fatal(err)
-	}
+			res, err := s.handleCompletion(context.Background(), req)
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	out, err := json.Marshal(res)
-	if err != nil {
-		b.Fatal(err)
-	}
+			out, err := json.Marshal(res)
+			if err != nil {
+				b.Fatal(err)
+			}
 
-	b.Logf("response: %d items, %d bytes of JSON", len(res.(*protocol.CompletionList).Items), len(out))
+			b.Logf("response: %d items, %d bytes of JSON", len(res.(*protocol.CompletionList).Items), len(out))
 
-	b.ReportAllocs()
-	b.ResetTimer()
+			b.ReportAllocs()
+			b.ResetTimer()
 
-	for b.Loop() {
-		r, _ := s.handleCompletion(context.Background(), req) //nolint:errcheck
+			for b.Loop() {
+				r, _ := s.handleCompletion(context.Background(), req) //nolint:errcheck
 
-		if _, err := json.Marshal(r); err != nil {
-			b.Fatal(err)
-		}
+				if _, err := json.Marshal(r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
