@@ -845,9 +845,10 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   builds its own from the file's nearest config, so the two can disagree for the reason
   `--root` exists.
 
-  `.exportDeps` has the same cache problem and does not work around it: after an edit outside
-  a function it gets no calls from the cached ParseResult and falls back to the index's
-  component refs.
+  `.exportDeps` had the same cache problem and now parses afresh the same way. Reading the
+  cached ParseResult, a comment added above the component left it no calls, and the graph fell
+  back to the index's component refs: `controller.cfc --> service.cfc (line 2)` in place of
+  the functions called. `TestExportDepsAfterAnEditOutsideAFunction` pins it.
 
   **`resolveRoute` exists so an editor does not keep its own copy of the
   convention.** A command that takes a route by hand and go-to-definition on a
