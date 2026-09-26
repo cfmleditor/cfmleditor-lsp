@@ -2112,9 +2112,25 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 	currentAllComments := true
 	currentHasName := false
 
+	// A `//` comment trailing a parameter, held back from its text. In
+	// comma-first style (`,required any image // why` then `,string type`) the
+	// comma that follows it is only read on the next line, and appending it to
+	// the parameter's text put it inside the comment: `image // why,`. The two
+	// parameters were then no longer separated, and the guard refused the file.
+	// It becomes a comment entry of its own after the parameter, the shape a
+	// comma-last `image, // why` already has, so both spellings come out alike.
+	// Only when a comma follows: with none, nothing is written after the text,
+	// and the comment stays on the parameter's line as it always has.
+	var trailing []string
+
 	flush := func(commaAfter bool) {
 		if len(current) == 0 {
 			return
+		}
+
+		if !commaAfter {
+			current = append(current, trailing...)
+			trailing = nil
 		}
 
 		parts = append(parts, paramPart{
@@ -2122,7 +2138,13 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 			isComment:  currentAllComments,
 			commaAfter: commaAfter,
 		})
+
+		for _, comment := range trailing {
+			parts = append(parts, paramPart{text: comment, isComment: true})
+		}
+
 		current = nil
+		trailing = nil
 		currentAllComments = true
 		currentHasName = false
 	}
@@ -2148,6 +2170,12 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 
 		if kind != "," && !isCommentKind(kind) {
 			currentAllComments = false
+
+			// Something other than the separator came after a held comment, so
+			// it was inside the parameter rather than trailing it. It goes back
+			// where it was, as before.
+			current = append(current, trailing...)
+			trailing = nil
 		}
 
 		switch kind {
@@ -2169,6 +2197,15 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 			currentHasName = true
 		default:
 			if !c.IsNamed() {
+				break
+			}
+
+			// Once one is held, every comment after it is on a later line and
+			// is held with it, in order.
+			if !currentAllComments && isCommentKind(kind) &&
+				(len(trailing) > 0 || f.isLineCommentNode(c)) {
+				trailing = append(trailing, f.text(c))
+
 				break
 			}
 
