@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Typing outside a function no longer reparses the file on every keystroke.** An edit at component level (a property, a comment above a function, the component's attributes) made the server reparse every function signature in the file before it read the next message: 95ms per keystroke in a 65,000-line component. The reparse now waits until something needs the result, and the next request pays for it once. Keystrokes there cost under 3ms.
+
 ## [0.3.8]
 
 ### Fixed

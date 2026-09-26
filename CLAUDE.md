@@ -766,6 +766,20 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   435ms under the document's lock one at a time and takes about 5ms streamed. An edit out of
   order falls back to `ApplyEdit`, and `TestApplyEditsMatchesApplyEdit` holds the two to the
   same result on random input, UTF-16 columns and past-the-end positions included.
+- **An edit outside a function defers its reparse; `lockDoc` pays it.** `ApplyEditResult`
+  reparses every signature in the file for an edit outside a function body, and didChange
+  runs on the read goroutine: 95ms per keystroke at component level in tassweb's
+  `kiosk.cfc`. didChange now applies the text, marks the document with `scheduleReparse`,
+  and returns (0.35 to 3ms there). `lockDoc` runs the owed reparse (`flushReparse`) before
+  handing over the lock, so no handler, timer or background job ever reads a lagging
+  ParseResult; the first one after a run of typing pays once. didChange itself takes
+  `lockDocOnly`, as does didClose. While a reparse is owed, later edits are applied as text
+  only, since their positions no longer match the parse's scopes. A timer (`reparseDelay`,
+  200ms) catches up a document nobody asks about, which bounds how stale the index's view
+  of it can be for requests on *other* files. The rapid-change path uses the same
+  mechanism. Code that reads `s.parseResults` must hold the lock from `lockDoc`, which the
+  entry points already do; `TestDeferredReparseIsCaughtUpByTheNextHandler` and its
+  neighbours pin it.
 - **Formatting answers with the changed runs of lines, not the document.** `lineEdits`
   diffs the source against the formatted text (a patience diff on trimmed lines, so a
   reindented line still anchors, with adjacent changed lines merged into one edit) and
