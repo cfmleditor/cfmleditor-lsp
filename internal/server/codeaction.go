@@ -28,9 +28,10 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 	var actions []protocol.CodeAction
 
-	// Offered only on a line that holds a call, so it is not noise on every
-	// line of the file; the cursor need not be on the call itself.
-	if s.lineHasCall(params.TextDocument.URI, content, params.Range.Start.Line) {
+	// Offered only on a line that looks as if it holds a call, so it is not
+	// noise on every line of the file; the cursor need not be on the call
+	// itself. See lineMayHoldCall for why this is not a parse.
+	if lineMayHoldCall(content, line) {
 		title := fmt.Sprintf("Explain call resolution on line %d", line+1)
 		actions = append(actions, protocol.CodeAction{
 			Title: title,

@@ -759,6 +759,29 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `TestNoHandlerReadsAClientColumnRaw` fails on that cast. `didChange` is
   the exception by design: it hands its ranges to `parser.ApplyEdit`
   unconverted, because the parser converts them against text only it holds.
+- **A large didChange batch is applied in one pass.** More than 50 changes in one
+  notification (the "rapid" path) go through `parser.ApplyEdits`, which streams edits in
+  document order instead of walking and copying the whole document for each. Reverting a
+  reformat in Zed sends exactly that, an edit per line: 6,000 against a 110 KB file took
+  435ms under the document's lock one at a time and takes about 5ms streamed. An edit out of
+  order falls back to `ApplyEdit`, and `TestApplyEditsMatchesApplyEdit` holds the two to the
+  same result on random input, UTF-16 columns and past-the-end positions included.
+- **Formatting answers with the changed runs of lines, not the document.** `lineEdits`
+  diffs the source against the formatted text (a patience diff on trimmed lines, so a
+  reindented line still anchors, with adjacent changed lines merged into one edit) and
+  `TestLineEditsReproduceTheTarget` holds applying them to exactly the formatted text. It
+  replaced a single whole-document TextEdit, which the editor diffed again itself and, on a
+  65,000-line file, was 3.6MB. `internal/textdiff` (range formatting's Myers) is not used
+  here: it keeps a frontier per edit distance, quadratic memory in the changed lines, and a
+  first reformat changes most of them.
+- **Slow handlers release the read loop.** Handlers run inline on the read goroutine, so
+  one slow request held every message behind it. Formatting, range formatting,
+  `explainCall`, `exportDeps` and `findRefs` call `releaseReadLoop` once they have the
+  document text and settings, and do the rest concurrently. Only handlers that work from
+  that captured text may: the cached ParseResult is edited in place by didChange, so a
+  handler that reads it must stay inline. `TestFormattingDoesNotHoldTheReadLoop` holds the
+  formatter on a channel and requires a didChange and a request sent meanwhile to be
+  handled.
 - **Completion hands its cached items over, it does not copy them.** The
   `inHashExpr` branch and the default branch both return
   `completionFromCache`'s slice directly when there is nothing to merge with it,
@@ -835,11 +858,14 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   function reparses it shallowly, which drops every call recorded inside one
   (`resetFuncCaches`), and an edit inside one shifts scopes and refs but not calls. One
   keystroke therefore left it reporting no calls, or calls on the wrong line.
-  `TestExplainCallAfterAnEditOutsideAFunction` fails if either the command or the code
-  action goes back to the cache. The private parse needs no document lock. The code action's
-  "does this line hold a call" is memoised against a hash of the content, one entry, the
-  same arrangement as `scanDocumentRoutes`: 1.5ms to parse a 2,647-line component, 49µs
-  on a hit. The report text and the selection by line and filter are
+  `TestExplainCallAfterAnEditOutsideAFunction` fails if the command goes back to the
+  cache. The private parse needs no document lock. The code action does not parse at all:
+  `lineMayHoldCall` looks for a name before a `(` on the cursor's line. It was a memoised
+  full parse, which missed after every edit, and Zed asks for code actions each time the
+  cursor settles, on the read goroutine: 11ms on a 12,000-line component and 87ms on a
+  65,000-line one. Against the parser on tassweb's `kiosk.cfc` and `timesheet/persist.cfc`
+  the text check misses 5 of about 23,500 call lines, each a call split over lines, and
+  the command's own answer is exact regardless. The report text and the selection by line and filter are
   `resolve.WriteExplanation` and `resolve.CallsOnLine`, shared with the CLI, so the two print
   the same thing. The server's answer uses the session's resolver and index, where the CLI
   builds its own from the file's nearest config, so the two can disagree for the reason

@@ -70,9 +70,6 @@ type Server struct {
 	cachedRoutes             *route.Resolver           // memoised; dropped by invalidateRoutes
 	routeScanKey             string                    // content hash the scan below was taken from
 	routeScanRefs            []route.Ref               // memoised whole-document scan; see routeLinks
-	callLinesMu              sync.Mutex                // guards callLinesKey, callLines
-	callLinesKey             string                    // content hash the lines below were taken from
-	callLines                []uint32                  // memoised lines holding a call site; see lineHasCall
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
@@ -289,9 +286,10 @@ func funcScopeKey(sc parser.FuncScope) string {
 //
 // The lock is per document rather than global so that work on one file never
 // waits on another. LSP requests are nearly always serialised within a
-// connection, since handlers run inline on the read goroutine; the exception is
-// a handler that has made a server->client request, because Server.call
-// releases the read loop via jsonrpc2.Async to avoid deadlocking on the reply.
+// connection, since handlers run inline on the read goroutine; the exceptions
+// are a handler that has made a server->client request, because Server.call
+// releases the read loop via jsonrpc2.Async to avoid deadlocking on the reply,
+// and the slow handlers that release it themselves (see releaseReadLoop).
 // So this contends between a handler and one of the timers, and between a
 // handler and anything that starts while a client round-trip is outstanding.
 //
@@ -449,6 +447,23 @@ func (s *Server) call(ctx context.Context, method string, params, result any) {
 	jsonrpc2.Async(ctx)
 
 	_, _ = s.conn.Call(ctx, method, params, result)
+}
+
+// releaseReadLoop lets the rest of a slow request run alongside the messages
+// that arrive after it.
+//
+// Handlers run inline on the read goroutine, so while one runs nothing else is
+// read: formatting a 65,000-line component takes 1.5s, and every hover,
+// keystroke and cancellation behind it waited that long. A handler may call
+// this once it has taken everything it needs from state that a later message
+// could change (the document text, a config value); the text is a Go string
+// and cannot change under it. It must not be used by a handler that goes on to
+// read the document's cached ParseResult, which didChange edits in place.
+//
+// See call for why releasing is otherwise safe; it is the same mechanism, and
+// calling it twice for one request is harmless.
+func releaseReadLoop(ctx context.Context) {
+	jsonrpc2.Async(ctx)
 }
 
 func (s *Server) getDocument(docURI uri.URI) (string, bool) {

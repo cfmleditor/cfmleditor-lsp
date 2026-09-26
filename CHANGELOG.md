@@ -5,7 +5,16 @@
 ### Fixed
 
 - **`cfmleditor.goToMatchingTag` and known-issues underlines counted columns in bytes.** On a line with an `é` or an emoji before the tag, go-to-matching-tag found no tag or jumped to the wrong column. A known-issues entry's underline landed after the method it names, and a whole-line one ran past the end of the line. Both now use UTF-16 units. CFLint's own columns were already right, since CFLint counts UTF-16 units.
+
+## [0.3.8]
+
+### Fixed
+
+- **A slow request no longer holds up every message behind it.** The server handled one message at a time, each to completion, so formatting a 65,000-line component (1.5s) delayed every hover, highlight and keystroke sent meanwhile. Formatting, range formatting, `cfmleditor.explainCall`, `cfmleditor.exportDeps` and `cfmleditor.findRefs` now take the document's text and do their work alongside later messages.
+- **Formatting answers with the lines it changed, not the whole document.** The response was one edit replacing the file, which the editor then diffed against the buffer itself; on a 65,000-line file that was 3.6MB. It is now the changed runs of lines. A reindented line still counts as that line, so an untouched line between two changed ones stays out of the edits, and on an already formatted file only what changed is sent.
+- **The explain code action no longer parses the file on every cursor move.** Deciding whether to offer "Explain call resolution on line N" parsed the whole document after each edit, which on a 65,000-line component cost 87ms each time the cursor settled. It now reads the cursor's line. The command still parses, so its answer is exact.
 - **`cfmleditor.exportDeps` drew a thinner graph after an edit outside a function.** It read the document's cached parse result, which an edit outside a function reparses shallowly, dropping every call site inside one. The graph then fell back to the component refs the index holds, so it showed `controller.cfc --> service.cfc` where it had shown each function called and the functions those call, until the next edit inside a function. The file-level graph that the "Export dependency graph for <file>" code action draws was affected the same way. It now parses the text the editor holds, as `cfmleditor.explainCall` does.
+- **A large batch of edits held a document for most of a second.** Reverting a reformat in Zed sends one `didChange` holding an edit for every line the formatter changed, and the server applied them one at a time, each walking from the top of the document and copying it. 6,000 edits against a 110 KB file took 435ms, and every request on that file waited behind it. A batch in document order is now applied in one pass, in about 5ms. It is the server's share of the pause after reverting a format; if the editor itself stops responding, that is the editor's work, not the server's.
 
 ## [0.3.7]
 

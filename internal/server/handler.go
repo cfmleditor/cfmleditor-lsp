@@ -363,14 +363,7 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 
 	if rapidChanges {
 		// Too many changes in quick succession — just apply text and defer reindex.
-		for _, change := range params.ContentChanges {
-			r, text, isFull := changeRangeAndText(change)
-			if isFull {
-				content = text
-			} else {
-				content = applyEdit(content, r, text)
-			}
-		}
+		content = applyContentChanges(content, params.ContentChanges)
 
 		s.setDocument(docURI, content)
 
@@ -568,6 +561,35 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 // applyEdit replaces the text in the given range with newText.
 func applyEdit(content string, r protocol.Range, newText string) string {
 	return parser.ApplyEdit(content, int(r.Start.Line), int(r.Start.Character), int(r.End.Line), int(r.End.Character), newText)
+}
+
+// applyContentChanges applies a didChange's changes in one pass where it can
+// (see parser.ApplyEdits). A batch is what an editor sends when it undoes a
+// reformat, an edit per line, and applying those one at a time cost the whole
+// document per edit. A whole-document change replaces everything before it.
+func applyContentChanges(content string, changes []protocol.TextDocumentContentChangeEvent) string {
+	var edits []parser.Edit
+
+	for _, change := range changes {
+		r, text, isFull := changeRangeAndText(change)
+		if isFull {
+			content, edits = text, edits[:0]
+
+			continue
+		}
+
+		edits = append(edits, parser.Edit{
+			StartLine: int(r.Start.Line), StartChar: int(r.Start.Character),
+			EndLine: int(r.End.Line), EndChar: int(r.End.Character),
+			Text: text,
+		})
+	}
+
+	if len(edits) == 0 {
+		return content
+	}
+
+	return parser.ApplyEdits(content, edits)
 }
 
 func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
@@ -1154,6 +1176,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			sourceURI, _ = argString(params.Arguments, 1)
 		}
 
+		// A walk of the workspace on disk: nothing here reads the open
+		// documents, so it can run off the read loop.
+		releaseReadLoop(ctx)
+
 		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.searchRoots()))
 		r := s.getResolver()
 		sourceFile := uri.URI(sourceURI).Path()
@@ -1218,7 +1244,13 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// private, so no document lock is needed.
 		var pr *parser.ParseResult
 
-		if content, ok := s.getDocument(fileURI); ok {
+		content, ok := s.getDocument(fileURI)
+
+		// The graph is built from that text and the index, which has its own
+		// lock, so the parse and the walk can run off the read loop.
+		releaseReadLoop(ctx)
+
+		if ok {
 			pr = s.parseForCalls(fileURI, content)
 		} else if data, err := s.FS.ReadFile(cfpath.FromURI(docURI)); err == nil {
 			pr = s.parseForCalls(fileURI, string(data))
