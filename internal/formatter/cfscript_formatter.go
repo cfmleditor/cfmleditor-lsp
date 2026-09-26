@@ -65,6 +65,8 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 		f.scriptTry(n)
 	case "import_statement":
 		f.scriptPassthru(n)
+	case "tag_statement", "query_tag":
+		f.scriptTagStatement(n)
 
 	// ── block (anonymous body) ─────────────────────────────────────────────
 	case "statement_block", "block":
@@ -1200,6 +1202,37 @@ func hasChildOfKind(n *sitter.Node, kind string) bool {
 	return false
 }
 
+// mixedArgSeparators reports whether some arguments in args are separated by a
+// comma and others only by whitespace. Comments are not arguments, so they
+// neither need nor break a separator.
+func mixedArgSeparators(args *sitter.Node) bool {
+	withComma, without := false, false
+	seenArg, comma := false, false
+
+	for i := uint(0); i < args.ChildCount(); i++ {
+		c := args.Child(i)
+
+		switch {
+		case c.Kind() == ",":
+			comma = true
+		case !c.IsNamed() || isCommentKind(c.Kind()):
+			continue
+		default:
+			if seenArg {
+				if comma {
+					withComma = true
+				} else {
+					without = true
+				}
+			}
+
+			seenArg, comma = true, false
+		}
+	}
+
+	return withComma && without
+}
+
 // tagStyleArgs reports whether args is a script-syntax CF tag's attribute list —
 // `cfdirectory(directory="x" action="create")` — rather than an ordinary argument
 // list. The grammar models both as an `arguments` node holding assignment_expressions;
@@ -1395,6 +1428,14 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 func (f *Formatter) exprArgs(args *sitter.Node) string {
 	if args == nil {
 		return "()"
+	}
+
+	// Lucee accepts a tag call whose attributes are separated partly by commas
+	// and partly by spaces — `cflog(file="#name#" text="load test", type="error")`
+	// in its own LDEV4128 test. Joining with either separator changes the other
+	// gaps, which the guard rejects, so such a list is kept as written.
+	if mixedArgSeparators(args) {
+		return f.text(args)
 	}
 
 	var parts []string
@@ -3594,6 +3635,49 @@ func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 	if body != nil {
 		f.scriptBlock(body)
 	}
+}
+
+// scriptTagStatement renders a script-syntax CF tag that has a body —
+// `lock name="x" { … }`, `transaction { … }`, `query name="q" { … }`,
+// `cfhttp(url = u) { … }` — as its header, written as it stands, and its body
+// laid out as a block.
+//
+// These had no renderer and went to scriptRaw, which trims every line of the
+// node and writes them all at the statement's own level: whatever the body held
+// came out flat, nested `if`s and loops included, and none of it was
+// formatted. 811 corpus components have one; `query`, `transaction`, `loop`,
+// `lock`, `savecontent` and `thread` account for most.
+//
+// The header keeps the tag's own spelling — `name="x"`, not the `name = x`
+// the formatter gives a call's named arguments — as scriptThrow does for the
+// same reason. Two shapes are left to scriptRaw as before: a body written on
+// one line, which the author chose to keep inline, and a header holding a `//`
+// comment, where writing the opening brace after it would put the brace inside
+// the comment.
+func (f *Formatter) scriptTagStatement(n *sitter.Node) {
+	body := n.ChildByFieldName("body")
+	if body == nil || body.Kind() != "statement_block" || !strings.Contains(f.text(body), "\n") {
+		f.scriptRaw(n)
+
+		return
+	}
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		if c := n.NamedChild(i); c.StartByte() < body.StartByte() && f.isLineCommentNode(c) {
+			f.scriptRaw(n)
+
+			return
+		}
+	}
+
+	f.iLine(strings.TrimSpace(string(f.src[n.StartByte():body.StartByte()])))
+	f.scriptBlock(body)
+
+	if tail := strings.TrimSpace(string(f.src[body.EndByte():n.EndByte()])); tail != "" {
+		f.scriptWrite(tail)
+	}
+
+	f.scriptWrite("\n")
 }
 
 // scriptPassthru re-emits a node's text re-indented (last-resort fallback).

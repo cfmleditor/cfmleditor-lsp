@@ -403,6 +403,30 @@ line, as it always has elsewhere. A closure inside a condition too long for the
 line is reflowed by `normalizeCond` with the rest of the condition. That output
 is valid and idempotent, but it is not laid out as a block.
 
+### 2.17 Script-syntax tag bodies flattened — 1,100 files
+
+`tag_statement` and `query_tag` had no case in `formatScriptNode`. So a tag with
+a body — `lock`, `transaction`, `query`, `loop`, `savecontent`, `thread`,
+`cfhttp(…) { … }` — went to `scriptRaw`, which trims every line of the node and
+writes it at the statement's level. The body came out flat and unformatted:
+CommandBox's `FileSystem.cfc` lost the nesting of the `try` inside its
+`lock`. 811 of 8,926 script components have at least one multi-line tag body,
+2,155 in all.
+
+`scriptTagStatement` writes the header as it stands and the body as a block.
+The header keeps the tag spelling (`name="x"`), as `scriptThrow` does, rather
+than the `name = x` a call's named arguments get. `scriptRaw` still takes two
+shapes: a body on one line, which its author chose to keep inline, and a
+header holding a `//` comment, where the brace written after it would be
+commented out.
+
+Formatting the bodies reached one argument-list defect. Lucee accepts a tag
+call whose attributes are separated partly by commas and partly by spaces —
+`cflog(file="#logname#" text="load test", type="error", async=false)` in its
+LDEV4128 test. `exprArgs` joined with commas unless there were none, putting
+one where the source had a space. `mixedArgSeparators` now sends such a list
+through as written.
+
 ## 3. Guard coverage gaps
 
 Cases the `whitespaceOnly` guard got wrong. The first two were latent — nothing
