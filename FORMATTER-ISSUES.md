@@ -355,6 +355,54 @@ thousands of new literals:
   extent itself is a grammar defect: `.cfs` and `<cfscript>` do not have it,
   and neither does a closure followed by `]`, `)` or `>`.
 
+### 2.16 Closure bodies never formatted — 3,686 files
+
+The body of a function expression or an arrow function was copied verbatim:
+`exprFunctionExpr` and `exprArrow` returned the block's source text. Every
+callback kept the indentation it was typed with — 2,929 corpus components hold
+an anonymous function, and 2,250 of them are TestBox specs, which are nothing
+but nested `describe`/`it` closures. It was worse than untouched in one respect:
+counted whole, a closure's body pushed its argument list past `lineWidth`, so
+the call broke onto one argument per line around a body left as written.
+
+- `closureBody` renders a body written across lines through the statement
+  renderer, one level under the closure's line, by writing it into the output
+  buffer and cutting it back out. The surrounding construct's queued block
+  comments are set aside meanwhile, or the closure's block would flush them into
+  itself. A one-line body is kept as written, since its author chose the inline
+  form, and an empty one becomes `{}`.
+- `closuresHug` keeps a call whose multi-line arguments are all closures on the
+  call's own line, measuring only the lines the call owns: the first, up to the
+  opening brace, and the last. A callback passed by name
+  (`body = function() {`) counts.
+- A struct or array holding a multi-line closure goes one entry per line. Kept
+  inline because it was short, it came out as `{ a = function() {` … `}, b = 1 }`.
+- A call's arguments went a level deeper whenever its callee held a newline,
+  which was meant to catch a chain broken before the accessor. A closure earlier
+  in the chain supplies newlines without breaking it, so `.catch`'s callback sat
+  a level deeper than `.then`'s. `endsInChainBreak` now looks for the accessor
+  starting the last line.
+- Bodies are cached by block and indent level. A literal or argument list that
+  goes multi-line renders its entries twice, once to measure and once a level
+  deeper. With a closure inside, which renders its own entries twice in turn,
+  the work doubled at every level: fourteen levels of
+  `it(…, body = function() { var c = { h = function() {` took 666 ms, and
+  twenty did not finish. Cached, fourteen levels take 37 ms. The cached and
+  uncached output were compared on every changed corpus file, and they match.
+
+Formatting these bodies reached one more statement-renderer defect. A word
+operator is lifted from the source together with the gap around it, and the gap
+was trimmed and the right operand joined on after it. So a `//` comment on its
+own line between `OR` and the next clause swallowed the clause. The guard caught
+it in WireBox's `Binder.cfc`, which has the only instance, in a closure body. The
+line-comment check the symbolic operators already had now applies here too.
+
+Two effects are the formatter's existing rules rather than anything new. Inside
+a closure body, a call with more than three arguments breaks one argument per
+line, as it always has elsewhere. A closure inside a condition too long for the
+line is reflowed by `normalizeCond` with the rest of the condition. That output
+is valid and idempotent, but it is not laid out as a block.
+
 ## 3. Guard coverage gaps
 
 Cases the `whitespaceOnly` guard got wrong. The first two were latent — nothing
