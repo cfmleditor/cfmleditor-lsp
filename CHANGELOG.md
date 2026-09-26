@@ -24,6 +24,7 @@
   - An operator after a bare hash on the right of an assignment, as in `x = #a#.b`, `x = #a#[1]` or `x = #a#++`, applies to the hash instead of to the whole assignment: `x = #a#.b` was `(x = #a#).b`.
 
   Against a 15,503-file corpus of public CFML, three files move from refused to formatted, all for dotted struct keys: Lucee's `LDEV3113.cfc`, RustCFML's `test_dotted_key_struct_literals.cfm` and Preside's `RelationshipGuidanceTest.cfc`. No other verdict changes.
+- `tree-sitter-cfml` grammar update (`ec5c621` → v0.26.38). The pin is a tagged release again, not a pseudo-version. The only grammar change since `ec5c621` is that a statement in a closure inside a tag expression now ends at a newline, as it does in CFScript (#148 in the grammar). `<cfset f = function() { var a = 1⏎ var b = 2 }>` used to give `MISSING ";"`. Against the 15,503-file corpus, no file changes verdict: the corpus has no semicolon-less statements in such closures.
 
 ## [0.3.6]
 
