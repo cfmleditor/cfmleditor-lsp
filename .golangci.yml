@@ -53,6 +53,65 @@ linters:
     - wastedassign
     - wsl_v5
   settings:
+    govet:
+      # On top of go vet's default analyzers. Each found nothing when enabled
+      # (LINT-PLAN.md, stage 1). shadow and fieldalignment stay off: see there.
+      enable:
+        - atomicalign
+        - deepequalerrors
+        - httpmux
+        - nilness
+        - reflectvaluecompare
+        - sortslice
+        - unusedwrite
+    revive:
+      # Naming a rule here replaces revive's default set rather than adding to
+      # it, so the defaults are listed first and must stay listed.
+      rules:
+        # revive's defaults.
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+        # Bug-catchers beyond the defaults (LINT-PLAN.md, stage 1).
+        - name: atomic
+        - name: constant-logical-expr
+        - name: forbidden-call-in-wg-go
+        - name: identical-branches
+        - name: identical-ifelseif-branches
+        - name: identical-ifelseif-conditions
+        - name: identical-switch-conditions
+        - name: inefficient-map-lookup
+        - name: modifies-parameter
+        - name: modifies-value-receiver
+        - name: range-val-address
+        - name: range-val-in-closure
+        - name: string-of-int
+        - name: struct-tag
+        - name: time-equal
+        - name: unconditional-recursion
+        - name: unnecessary-if
+        - name: useless-break
+        - name: waitgroup-by-value
     dupword:
       # Only the words people type twice by accident. Checking every word
       # flags deliberate repetition: "every alternative that matches matches
@@ -89,6 +148,29 @@ linters:
         - zeroByteRepeat
         - whyNoLint
         - emptyStringTest
+        # Bug-catchers that are off by default because gocritic tags them
+        # experimental or opinionated. Each found nothing when enabled; they
+        # guard new code (LINT-PLAN.md, stage 1).
+        - badLock
+        - badSyncOnceFunc
+        - syncMapLoadAndDelete
+        - exposedSyncMutex
+        - badSorting
+        - sortSlice
+        - stringsCompare
+        - truncateCmp
+        - returnAfterHttpError
+        - sqlQuery
+        - httpNoBody
+        - externalErrorReassign
+        - uncheckedInlineErr
+        - nilValReturn
+        - evalOrder
+        - dynamicFmtString
+        - badRegexp
+        - regexpPattern
+        - deferUnlambda
+        - sloppyReassign
       settings:
         hugeParam:
           sizeThreshold: 80

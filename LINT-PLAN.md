@@ -32,26 +32,31 @@ One pull request per stage, and the same five steps every time:
   `whyNoLint`, `emptyStringTest`; 27 golangci-lint linters; `staticcheck`
   with `checks: ["all"]`. See its description for what each found.
 
-## Stage 1 — free bug-catchers
+## Stage 1 — free bug-catchers (done)
 
-Zero findings today, so they cost nothing and guard new code.
+46 rules that found nothing, or next to nothing, and guard new code:
 
-- **gocritic:** `badLock`, `badSyncOnceFunc`, `syncMapLoadAndDelete`,
+- **gocritic (20):** `badLock`, `badSyncOnceFunc`, `syncMapLoadAndDelete`,
   `exposedSyncMutex`, `badSorting`, `sortSlice`, `stringsCompare`,
   `truncateCmp`, `returnAfterHttpError`, `sqlQuery`, `httpNoBody`,
   `externalErrorReassign`, `uncheckedInlineErr`, `nilValReturn`, `evalOrder`,
   `dynamicFmtString`, `badRegexp`, `regexpPattern`, `deferUnlambda`,
   `sloppyReassign`.
-- **govet:** `nilness`, `unusedwrite`, `deepequalerrors`,
+- **govet (7):** `nilness`, `unusedwrite`, `deepequalerrors`,
   `reflectvaluecompare`, `sortslice`, `atomicalign`, `httpmux`.
-- **revive:** `atomic`, `constant-logical-expr`, `identical-branches`,
-  `modifies-param`, `modifies-val-rec`, `range-val-address`,
-  `range-val-in-closure`, `string-of-int`, `struct-tag`, `time-equal`,
-  `unconditional-recursion`, `wait-group-by-value`, `useless-break`.
-- **To measure first:** revive's `identical-if-else-if-conditions`,
-  `identical-switch-conditions`, `inefficient-map-lookup`,
-  `forbidden-call-in-wg-go`, `unnecessary-if`. Enabled if clean; moved to
-  stage 2 if not.
+- **revive (19):** `atomic`, `constant-logical-expr`, `forbidden-call-in-wg-go`,
+  `identical-branches`, `identical-ifelseif-branches`,
+  `identical-ifelseif-conditions`, `identical-switch-conditions`,
+  `inefficient-map-lookup`, `modifies-parameter`, `modifies-value-receiver`,
+  `range-val-address`, `range-val-in-closure`, `string-of-int`, `struct-tag`,
+  `time-equal`, `unconditional-recursion`, `unnecessary-if`, `useless-break`,
+  `waitgroup-by-value`.
+
+Only `identical-ifelseif-branches` found anything: two `if … else if` chains
+whose branches did the same thing, now one condition joined with `||`. Naming
+revive rules replaces its default set, so the 23 defaults are listed in the
+config too. A throwaway file breaking one rule from each tool confirmed the
+new checks run, and that the defaults still do.
 
 ## Stage 2 — small fixes, mostly in tests (~60 findings)
 

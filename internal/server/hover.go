@@ -78,9 +78,7 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 		// Only show if in current file or (global resolution enabled + exactly one match)
 		var def *parser.FunctionDef
 
-		if inFile {
-			def = match
-		} else if s.GlobalFunctionResolution && total == 1 {
+		if inFile || (s.GlobalFunctionResolution && total == 1) {
 			def = match
 		}
 
