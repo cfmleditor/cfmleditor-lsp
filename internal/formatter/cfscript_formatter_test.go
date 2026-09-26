@@ -223,6 +223,24 @@ func TestTryCatchFinally(t *testing.T) {
 	allIn(t, got, "try {", "} catch", "} finally {", "cleanup();")
 }
 
+// TestTryCatchScopedVariable covers `catch( any var e )`, which scopes the
+// caught variable and which CommandBox writes throughout. The grammar gives
+// the `var` no field, and the clause was rebuilt from its type and parameter
+// fields alone, so it came out as `catch (any e)`. The guard caught the
+// dropped word and refused the file, which was 47 of the 62 guard rejections
+// in a 15,503-file corpus.
+func TestTryCatchScopedVariable(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`try { a(); } catch( any var e ) { b(e); }`, "catch (any var e)"},
+		{`try { a(); } catch( ForgeboxException var e ) { b(e); }`, "catch (ForgeboxException var e)"},
+		{`try { a(); } catch( "my.Custom" var e ) { b(e); }`, `catch ("my.Custom" var e)`},
+		{`try { a(); } catch( any e ) { b(e); }`, "catch (any e)"},
+	} {
+		got := format(t, wrap(tc.src))
+		allIn(t, got, tc.want, "b(e);")
+	}
+}
+
 // ─── expressions ─────────────────────────────────────────────────────────────
 
 func TestCallExpression(t *testing.T) {

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **`catch( any var e )` was refused by the formatter.** The `var`, which scopes the caught variable, was dropped: the clause came out as `catch (any e)`, the guard rejected the change, and format-on-save did nothing on the file. The grammar gives the `var` no field, and `scriptCatch` rebuilt the clause from its `type` and `parameter` fields alone. CommandBox writes this form throughout. Against a 15,503-file corpus of public CFML, 48 files move from guard-rejected to formatted, which takes guard rejections from 62 to 14; no other verdict changes.
 - **`queryExecute` SQL built with `&` was refused by the formatter.** `queryExecute( "SELECT …" & ( sort ? " ORDER BY x" : "" ), … )` came out with the `&` gone and its operands as two arguments, which the guard rejected, so format-on-save did nothing on the file. The `&` is an unnamed child of `query_expression` with no field, and the renderer for one had no case for it. Against a 15,503-file corpus of public CFML this clears three RustCFML tests on tree-sitter-cfml v0.26.37, and CommandBox's `Globber.cfc` on the next release, which recognises its single-quoted SQL.
 
 ### Changed
