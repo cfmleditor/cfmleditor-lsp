@@ -911,7 +911,11 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return nil, nil
 		}
 
-		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(s.Formatting.IndentWidth)}, s.Formatting)
+		// A snapshot, as the formatting handler takes: the formatter reads it
+		// throughout, and the server's settings can be replaced meanwhile.
+		cfg := s.Formatting
+
+		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(cfg.IndentWidth)}, &cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -1038,8 +1042,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		var lines []string
 
-		lines = append(lines, fmt.Sprintf("File: %s", docURI))
-		lines = append(lines, fmt.Sprintf("Functions (%d):", len(funcs)))
+		lines = append(lines, fmt.Sprintf("File: %s", docURI), fmt.Sprintf("Functions (%d):", len(funcs)))
 
 		for _, f := range funcs {
 			lines = append(lines, fmt.Sprintf("  %s (line %d)", f.Name, f.Line))
@@ -1200,7 +1203,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			},
 			SourceFile: sourceFile,
 		}
-		entries := refs.Trace(s.FS, s.searchRoots(), findOpts)
+		entries := refs.Trace(s.FS, s.searchRoots(), &findOpts)
 		result := refs.FormatResult(entries, funcName, sourceURI, s.searchRoots())
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
@@ -1289,7 +1292,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			}
 		}
 
-		result := deps.Build(deps.Options{
+		result := deps.Build(&deps.Options{
 			DocURI:    docURI,
 			FuncName:  funcName,
 			Calls:     depsCalls,

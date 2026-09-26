@@ -167,7 +167,7 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt Options)
 		return ""
 	}
 
-	pr := parser.ParseWithOptions(fileURI, string(data), parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
 		Resolvers:                opt.Resolvers,
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,

@@ -39,7 +39,7 @@ func TestFunctionDepsFollowScopePrefixedReceivers(t *testing.T) {
 	// exportDeps command fills Refs *instead of* Calls, never alongside, so a
 	// fix that depended on Options.Refs being populated here would pass its
 	// test and do nothing in production.
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + controllerPath,
 		FuncName: "BuildReport",
 		Calls:    calls,

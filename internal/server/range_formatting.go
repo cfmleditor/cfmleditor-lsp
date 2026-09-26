@@ -58,7 +58,7 @@ func (s *Server) handleRangeFormatting(ctx context.Context, rawParams []byte) (a
 	releaseReadLoop(ctx)
 
 	start := time.Now()
-	formatted, err := formatDocument(content, params.Options, cfg)
+	formatted, err := formatDocument(content, params.Options, &cfg)
 	elapsed := time.Since(start)
 
 	if err != nil {

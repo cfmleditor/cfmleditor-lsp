@@ -126,7 +126,7 @@ func TestScanFindsAttributesInRealisticMarkup(t *testing.T) {
 </div>
 </cfoutput>`
 
-	refs := Scan(src, Config{Attributes: []string{"data-view", "data-read"}})
+	refs := Scan(src, &Config{Attributes: []string{"data-view", "data-read"}})
 
 	var values []string
 	for _, r := range refs {
@@ -174,7 +174,7 @@ func TestScanFindsAttributesInRealisticMarkup(t *testing.T) {
 func TestScanCountsLinesAcrossValues(t *testing.T) {
 	src := "a\n<i data-view=\"one.two\">\n\n<i data-view=\"three.four\">"
 
-	refs := Scan(src, Config{Attributes: []string{"data-view"}})
+	refs := Scan(src, &Config{Attributes: []string{"data-view"}})
 	if len(refs) != 2 {
 		t.Fatalf("want 2 refs, got %d", len(refs))
 	}
@@ -205,7 +205,7 @@ func TestScanFindsAllThreeSyntaxes(t *testing.T) {
 	}
 
 	var got []string
-	for _, r := range Scan(src, cfg) {
+	for _, r := range Scan(src, &cfg) {
 		got = append(got, string(r.Source)+":"+r.Name+"="+r.Value)
 	}
 
@@ -243,7 +243,7 @@ func TestQueryParamStopsAtTheDelimiter(t *testing.T) {
 	}
 
 	for src, want := range cases {
-		refs := Scan(src, cfg)
+		refs := Scan(src, &cfg)
 		if len(refs) != 1 {
 			t.Errorf("%s: found %d refs, want 1", src, len(refs))
 
@@ -262,7 +262,7 @@ func TestQueryParamStopsAtTheDelimiter(t *testing.T) {
 func TestNestedMatchWins(t *testing.T) {
 	src := `<a href="index.cfm?do=a.b.c">x</a>`
 
-	refs := Scan(src, Config{
+	refs := Scan(src, &Config{
 		Attributes:  []string{"href"},
 		QueryParams: []string{"do"},
 	})
@@ -282,7 +282,7 @@ func TestNestedMatchWins(t *testing.T) {
 func TestPositionsSurviveMultipleSyntaxes(t *testing.T) {
 	src := "line0\n<a href=\"x.cfm?do=a.b\">\n\n<i data-view=\"c.d\">\n<script>var q={view:\"e.f\"}</script>"
 
-	refs := Scan(src, Config{
+	refs := Scan(src, &Config{
 		Attributes:  []string{"data-view"},
 		QueryParams: []string{"do"},
 		Properties:  []string{"view"},
@@ -329,7 +329,7 @@ func TestScanFunctionArgs(t *testing.T) {
 	cfg := Config{Functions: []string{"setPrint", "redirect"}}
 
 	var got []string
-	for _, r := range Scan(src, cfg) {
+	for _, r := range Scan(src, &cfg) {
 		got = append(got, r.Name+"="+r.Value)
 	}
 
@@ -351,7 +351,7 @@ func TestScanFunctionArgs(t *testing.T) {
 
 	// The trimmed value must still be the text the offsets point at, or an editor
 	// underlines the query string along with the route.
-	for _, r := range Scan(src, cfg) {
+	for _, r := range Scan(src, &cfg) {
 		if src[r.Start:r.End] != r.Value {
 			t.Errorf("%q: Start/End point at %q", r.Value, src[r.Start:r.End])
 		}
@@ -362,13 +362,13 @@ func TestScanFunctionArgs(t *testing.T) {
 // domain must not match do.
 func TestFunctionNameBoundary(t *testing.T) {
 	for _, src := range []string{`myRedirect("a.b.c")`, `x.redirectTo("a.b.c")`} {
-		if refs := Scan(src, Config{Functions: []string{"redirect"}}); len(refs) != 0 {
+		if refs := Scan(src, &Config{Functions: []string{"redirect"}}); len(refs) != 0 {
 			t.Errorf("%s matched: %+v", src, refs)
 		}
 	}
 
 	// A method call on an object is still the function, though.
-	if refs := Scan(`context.redirect("a.b.c")`, Config{Functions: []string{"redirect"}}); len(refs) != 1 {
+	if refs := Scan(`context.redirect("a.b.c")`, &Config{Functions: []string{"redirect"}}); len(refs) != 1 {
 		t.Errorf("a method call did not match: %+v", refs)
 	}
 }
@@ -447,7 +447,7 @@ func TestFunctionArgsAreNameAgnostic(t *testing.T) {
 	for src, want := range cases {
 		var got []string
 
-		for _, r := range Scan(src, cfg) {
+		for _, r := range Scan(src, &cfg) {
 			got = append(got, r.Value)
 		}
 
@@ -476,14 +476,14 @@ func TestUnclosedCallIsNotScanned(t *testing.T) {
 		`redirect('a.b.c)`,       // unclosed quote
 		"redirect(\n\"a.b.c\"\n", // unclosed across lines
 	} {
-		if refs := Scan(src, cfg); len(refs) != 0 {
+		if refs := Scan(src, &cfg); len(refs) != 0 {
 			t.Errorf("%q produced %+v", src, refs)
 		}
 	}
 
 	// A call closing just inside the budget is still read.
 	long := "redirect(" + strings.Repeat("x=1, ", 200) + `route="a.b.c")`
-	if refs := Scan(long, cfg); len(refs) != 1 || refs[0].Value != "a.b.c" {
+	if refs := Scan(long, &cfg); len(refs) != 1 || refs[0].Value != "a.b.c" {
 		t.Errorf("a long but valid argument list was not read: %+v", refs)
 	}
 }
@@ -498,7 +498,7 @@ func TestNonRouteArgumentsAreRejected(t *testing.T) {
 
 	var got []string
 
-	for _, r := range Scan(src, cfg) {
+	for _, r := range Scan(src, &cfg) {
 		if Plausible(r.Value) {
 			got = append(got, r.Value)
 		}

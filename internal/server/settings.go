@@ -47,7 +47,7 @@ type Settings struct {
 }
 
 // Apply copies the settings onto a freshly created Server.
-func (set Settings) Apply(s *Server) {
+func (set *Settings) Apply(s *Server) {
 	s.ConfigPath = set.ConfigPath
 	s.WorkspaceFolders = set.WorkspaceFolders
 	s.IndexGlobs = set.IndexGlobs

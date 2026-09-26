@@ -26,7 +26,7 @@ const eofSrc = "component {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}"
 func formatEOF(t *testing.T, content string, opts protocol.FormattingOptions) string {
 	t.Helper()
 
-	out, err := formatDocument(content, opts, resolvedFormatting())
+	out, err := formatDocument(content, opts, new(resolvedFormatting()))
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

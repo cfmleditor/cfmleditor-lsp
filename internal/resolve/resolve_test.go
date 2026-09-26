@@ -45,7 +45,7 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_resolve_fallback.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:    resolvers,
 		ExtractCalls: true,
 	})
@@ -150,7 +150,7 @@ func TestCanResolveCall_DeepChainWalksEachHopsReturnType(t *testing.T) {
 }`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "chain", "test_chain.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:    resolvers,
 		ExtractCalls: true,
 	})
@@ -254,7 +254,7 @@ func TestCanResolveCall_ExtendsChainRefLookupWithoutPreIndex(t *testing.T) {
 	}
 }`
 	childURI := uri.URI("file://" + filepath.Join(dir, "FakeChild.cfc"))
-	pr := parser.ParseWithOptions(childURI, childContent, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(childURI, childContent, &parser.ParseOptions{ExtractCalls: true})
 
 	// Confirm objFile has no ref in the child itself.
 	if len(pr.ComponentRefs) != 0 {
@@ -346,7 +346,7 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 	}
 }`
 	childURI := uri.URI("file://" + filepath.Join(dir, "ChildSpec.cfc"))
-	pr := parser.ParseWithOptions(childURI, childContent, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(childURI, childContent, &parser.ParseOptions{ExtractCalls: true})
 
 	calls := pr.AllCalls()
 
@@ -415,7 +415,7 @@ func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
 	}
 }`
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_lookup.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls:  true,
 		ScanAllScopes: true,
 	})
@@ -473,7 +473,7 @@ func TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod(t *testing.T) {
 	}
 }`
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_primitive.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls:  true,
 		ScanAllScopes: true,
 	})
@@ -520,7 +520,7 @@ func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_onmissingmethod.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls: true,
 	})
 
@@ -582,7 +582,7 @@ func TestCanResolveCall_NoFollowSkipsMethodVerification(t *testing.T) {
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_nofollow.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls: true,
 	})
 

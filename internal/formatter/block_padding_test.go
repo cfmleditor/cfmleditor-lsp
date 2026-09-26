@@ -13,7 +13,7 @@ func formatWithBlockOpts(t *testing.T, src string, blanks, caseIndent bool) stri
 	opts.BlankLinesInBlocks = blanks
 	opts.SwitchCaseIndent = caseIndent
 
-	out, err := Format([]byte(src), parse(t, src), opts)
+	out, err := Format([]byte(src), parse(t, src), &opts)
 	if err != nil {
 		t.Fatalf("format error (blanks=%v caseIndent=%v): %v", blanks, caseIndent, err)
 	}

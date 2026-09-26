@@ -57,7 +57,7 @@ type Options struct {
 }
 
 // Find scans all CFML files under roots and returns matching references.
-func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
+func Find(fsys vfs.FS, roots []string, opts *Options) []Entry {
 	entries, _ := FindCounted(fsys, roots, opts)
 
 	return entries
@@ -70,7 +70,7 @@ func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
 // is deliberately not the number of files parsed: findInFiles skips parsing any
 // file whose text cannot contain the target at all, and reporting that smaller
 // number would describe an implementation detail instead of the search.
-func FindCounted(fsys vfs.FS, roots []string, opts Options) ([]Entry, int) {
+func FindCounted(fsys vfs.FS, roots []string, opts *Options) ([]Entry, int) {
 	files := collectFiles(fsys, roots)
 
 	return findInFiles(fsys, files, opts), len(files)
@@ -79,14 +79,14 @@ func FindCounted(fsys vfs.FS, roots []string, opts Options) ([]Entry, int) {
 // FindCalls is a convenience wrapper for finding function calls. It returns the
 // entries and the number of files searched, as [FindCounted] defines it.
 func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []parser.Resolver) ([]Entry, int) {
-	return FindCounted(fsys, roots, Options{FuncName: funcName, Resolvers: resolvers})
+	return FindCounted(fsys, roots, &Options{FuncName: funcName, Resolvers: resolvers})
 }
 
 // FindComponentRefs is a convenience wrapper for finding component references.
 // It returns the entries and the number of files searched, as [FindCounted]
 // defines it.
 func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []parser.Resolver) ([]Entry, int) {
-	return FindCounted(fsys, roots, Options{Component: component, Resolvers: resolvers})
+	return FindCounted(fsys, roots, &Options{Component: component, Resolvers: resolvers})
 }
 
 func collectFiles(fsys vfs.FS, roots []string) []string {
@@ -119,7 +119,7 @@ func collectFiles(fsys vfs.FS, roots []string) []string {
 	return files
 }
 
-func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
+func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 	var mu sync.Mutex
 
 	var results []Entry
@@ -194,7 +194,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 				parseOpts.FindCalls = []string{opts.FuncName}
 			}
 
-			pr := parser.ParseWithOptions(fileURI, content, parseOpts)
+			pr := parser.ParseWithOptions(fileURI, content, &parseOpts)
 
 			var entries []Entry
 

@@ -34,7 +34,7 @@ func buildTestMap(t *testing.T) *codemap.Map {
 
 	walk(t, root, &files)
 
-	return codemap.Build(codemap.Options{
+	return codemap.Build(&codemap.Options{
 		Root:     root,
 		Files:    files,
 		FS:       fsys,
@@ -341,7 +341,7 @@ func TestEntryGlobMarksRunnerInvokedCode(t *testing.T) {
 	build := func(globs ...string) *codemap.Map {
 		fsys := vfs.OS{}
 
-		return codemap.Build(codemap.Options{
+		return codemap.Build(&codemap.Options{
 			Root: root, Files: files, FS: fsys, Workers: 2, EntryGlobs: globs,
 			Resolver: &resolve.Resolver{FS: fsys, Index: index.New(), WorkspaceFolders: []string{root}},
 		})
@@ -396,7 +396,7 @@ func TestUtilityIsMarkedNotExcluded(t *testing.T) {
 	build := func(globs ...string) *codemap.Map {
 		fsys := vfs.OS{}
 
-		return codemap.Build(codemap.Options{
+		return codemap.Build(&codemap.Options{
 			Root: root, Files: files, FS: fsys, Workers: 2, UtilityGlobs: globs,
 			Resolver: &resolve.Resolver{FS: fsys, Index: index.New(), WorkspaceFolders: []string{root}},
 		})

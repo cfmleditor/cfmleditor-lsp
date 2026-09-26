@@ -36,7 +36,7 @@ func TestFunctionDepsTraceBeyondTheFirstHop(t *testing.T) {
 		t.Fatal("FuncCalls returned no calls for BuildReport")
 	}
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:    "file://" + controllerPath,
 		FuncName:  "BuildReport",
 		Calls:     calls,
@@ -124,7 +124,7 @@ func TestFunctionDepsTerminateOnACycle(t *testing.T) {
 	done := make(chan []string, 1)
 
 	go func() {
-		result := Build(Options{
+		result := Build(&Options{
 			DocURI:    "file://" + aPath,
 			FuncName:  "Ping",
 			Calls:     calls,
@@ -193,7 +193,7 @@ func TestFunctionDepsGraphIsConnected(t *testing.T) {
 		}
 	}
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:    "file://" + controllerPath,
 		FuncName:  "BuildReport",
 		Calls:     calls,
@@ -213,7 +213,7 @@ func TestFileDepsGraphIsConnected(t *testing.T) {
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
 	pr := parseFile(t, filepath.Join(dir, "controller.cfc"))
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + controllerPath,
 		Refs:     pr.ComponentRefs,
 		Index:    idx,

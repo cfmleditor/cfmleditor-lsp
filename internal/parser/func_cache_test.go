@@ -22,7 +22,7 @@ func TestFullReplaceClearsPerFunctionCaches(t *testing.T) {
 		"\t}\n" +
 		"}\n"
 
-	pr := ParseWithOptions(u, before, ParseOptions{ExtractCalls: true, ExtractLinks: true})
+	pr := ParseWithOptions(u, before, &ParseOptions{ExtractCalls: true, ExtractLinks: true})
 
 	scope := pr.Scopes[0]
 
@@ -61,7 +61,7 @@ func TestFullReplaceClearsRemovedRefs(t *testing.T) {
 	u := uri.File("/tmp/cache/B.cfc")
 
 	before := "component {\n\tpublic void function Go() {\n\t\tvar svc = new pkg.Foo();\n\t}\n}\n"
-	pr := ParseWithOptions(u, before, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(u, before, &ParseOptions{ExtractCalls: true})
 
 	scope := pr.Scopes[0]
 	if refs, _ := pr.FuncRefs(scope.Start, scope.End); len(refs) != 1 {

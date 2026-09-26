@@ -24,7 +24,7 @@ func callsIn(t *testing.T, body string) []string {
 
 	src := "component {\n\tfunction go() {\n\t\t" + body + "\n\t}\n}"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	out := make([]string, 0, 4)
 
@@ -197,7 +197,7 @@ func TestConstructorNamedArgumentsDoNotDeclareVariables(t *testing.T) {
 		"\t\tvar c = new X( datasource = getDS(), table = \"t\" );\n" +
 		"\t}\n}"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	got := pr.FuncVars(pr.Scopes[0].Start, pr.Scopes[0].End)
 	if want := []string{"c"}; !slices.Equal(got, want) {

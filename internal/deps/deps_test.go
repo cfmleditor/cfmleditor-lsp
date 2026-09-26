@@ -41,7 +41,7 @@ func parseFile(t *testing.T, path string) *parser.ParseResult {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), parser.ParseOptions{ExtractCalls: true})
+	return parser.ParseWithOptions(uri.URI("file://"+absPath), string(content), &parser.ParseOptions{ExtractCalls: true})
 }
 
 func buildIndex(t *testing.T, dir string) *index.Index {
@@ -87,7 +87,7 @@ func TestBuild_FunctionDeps(t *testing.T) {
 		t.Fatal("FuncCalls returned no calls for BuildReport")
 	}
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + controllerPath,
 		FuncName: "BuildReport",
 		Calls:    calls,
@@ -140,7 +140,7 @@ func TestBuild_FileDeps(t *testing.T) {
 	refs := make([]parser.ComponentRef, len(pr.ComponentRefs))
 	copy(refs, pr.ComponentRefs)
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + controllerPath,
 		Refs:     refs,
 		Index:    idx,
@@ -187,7 +187,7 @@ func TestBuild_CleanupDeps(t *testing.T) {
 	refs := make([]parser.ComponentRef, len(pr.ComponentRefs))
 	copy(refs, pr.ComponentRefs)
 
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + controllerPath,
 		FuncName: "Cleanup",
 		Refs:     refs,

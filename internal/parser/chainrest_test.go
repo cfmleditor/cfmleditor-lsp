@@ -74,7 +74,7 @@ func TestAssignmentIsTypedByTheLastCallOfAChain(t *testing.T) {
 	</cffunction>
 </cfcomponent>`},
 	} {
-		pr := ParseWithOptions(testURI, tc.content, ParseOptions{
+		pr := ParseWithOptions(testURI, tc.content, &ParseOptions{
 			Resolvers:  chainResolvers,
 			FuncLookup: chainLookup,
 		})
@@ -103,7 +103,7 @@ func TestChainWithoutFuncLookupIsDynamic(t *testing.T) {
 	}
 }`
 
-	got := refsByVar(ParseWithOptions(testURI, content, ParseOptions{Resolvers: chainResolvers}))
+	got := refsByVar(ParseWithOptions(testURI, content, &ParseOptions{Resolvers: chainResolvers}))
 
 	if got["opts"] != "$any" || got["plain"] != "stubs.Options" {
 		t.Errorf("opts -> %q (want $any), plain -> %q (want stubs.Options)", got["opts"], got["plain"])
@@ -121,7 +121,7 @@ func TestCreateObjectChainHopsCarryTheirChain(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: chainResolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: chainResolvers, ExtractCalls: true, ScanAllScopes: true})
 
 	want := map[string]string{"builder": "", "setCredentials": "builder", "build": "builder,setCredentials"}
 
@@ -160,7 +160,7 @@ func TestTagCallDoesNotReadAnUnwalkedChainRef(t *testing.T) {
 	</cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers: chainResolvers, FuncLookup: chainLookup, ExtractCalls: true, ScanAllScopes: true,
 	})
 
@@ -196,7 +196,7 @@ func TestAssignedChainKeepsItsReceiverAndHops(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
 
 	want := map[string]struct {
 		recv  string

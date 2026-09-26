@@ -126,7 +126,7 @@ func callTargets(t *testing.T, body string) []string {
 	t.Helper()
 
 	pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+body+"\n }\n}\n",
-		ParseOptions{ExtractCalls: true})
+		&ParseOptions{ExtractCalls: true})
 	scope := pr.Scopes[0]
 
 	var got []string
@@ -297,7 +297,7 @@ func TestThrowArgumentsAreNotDeclarations(t *testing.T) {
 				t.Errorf("vars: got %v want %v", got, c.want)
 			}
 
-			pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+			pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 			for _, r := range pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End) {
 				if r.Variable == "object" {
 					t.Errorf("recorded a component ref for a named argument: %s -> %s", r.Variable, r.Component)

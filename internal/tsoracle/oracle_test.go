@@ -31,7 +31,7 @@ var expectedDifferences = map[string]string{
 }
 
 func parserCalls(path string, src []byte) []Call {
-	pr := parser.ParseWithOptions(uri.File(path), string(src), parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(uri.File(path), string(src), &parser.ParseOptions{ExtractCalls: true})
 
 	out := make([]Call, 0, 16)
 	for _, c := range pr.AllCalls() {
@@ -339,7 +339,7 @@ func TestNestedNamedFunctionsAreDeclaredByBoth(t *testing.T) {
 		t.Fatal("the grammar does not declare setup, so this case is the oracle's mistake")
 	}
 
-	pr := parser.ParseWithOptions(uri.File("/t.cfc"), string(src), parser.ParseOptions{})
+	pr := parser.ParseWithOptions(uri.File("/t.cfc"), string(src), &parser.ParseOptions{})
 
 	got := make([]string, 0, len(pr.Funcs))
 	for _, f := range pr.Funcs {

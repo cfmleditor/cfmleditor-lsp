@@ -93,7 +93,9 @@ func printMermaidRefs(target string, entries []refs.Entry) {
 	targetNode := strings.ReplaceAll(target, ".", "_")
 	fmt.Printf("    %s[%s]\n", targetNode, target)
 
-	for i, ref := range entries {
+	for i := range entries {
+		ref := &entries[i]
+
 		nodeID := fmt.Sprintf("ref%d", i)
 
 		label := filepath.Base(ref.File)

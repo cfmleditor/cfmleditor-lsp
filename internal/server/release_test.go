@@ -26,7 +26,7 @@ func TestFormattingDoesNotHoldTheReadLoop(t *testing.T) {
 	held, release := make(chan string, 1), make(chan struct{})
 
 	orig := formatDocumentFn
-	formatDocumentFn = func(content string, opts protocol.FormattingOptions, cfg config.ResolvedFormatting) (string, error) {
+	formatDocumentFn = func(content string, opts protocol.FormattingOptions, cfg *config.ResolvedFormatting) (string, error) {
 		held <- content
 
 		<-release

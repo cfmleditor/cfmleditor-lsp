@@ -116,7 +116,7 @@ func TestResolvedItemsMatchTheFullOnes(t *testing.T) {
 		deferred := 0
 
 		for i := range full {
-			item := roundTrip(t, l.lean[i])
+			item := roundTrip(t, &l.lean[i])
 
 			if item.Documentation == nil && full[i].Documentation != nil {
 				deferred++
@@ -141,7 +141,7 @@ func TestResolvedItemsMatchTheFullOnes(t *testing.T) {
 
 // roundTrip sends an item through JSON, as a client does between completion
 // and resolve.
-func roundTrip(t *testing.T, it protocol.CompletionItem) protocol.CompletionItem {
+func roundTrip(t *testing.T, it *protocol.CompletionItem) protocol.CompletionItem {
 	t.Helper()
 
 	b, err := json.Marshal(it)

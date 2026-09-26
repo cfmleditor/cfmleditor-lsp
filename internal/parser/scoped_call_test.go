@@ -14,7 +14,7 @@ func scopedCall(t *testing.T, stmt string) []string {
 	t.Helper()
 
 	render := func(src string) []string {
-		pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+		pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 		out := make([]string, 0, 2)
 
@@ -113,7 +113,7 @@ func TestARequestScopedCallIsNotTakenForAFileLocalFunction(t *testing.T) {
 		"  request.getRemote();\n" +
 		" }\n}\n"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	for _, c := range pr.AllCalls() {
 		if c.FuncName != "getRemote" {
@@ -138,7 +138,7 @@ func chainOf(t *testing.T, stmt string) []string {
 	t.Helper()
 
 	pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+stmt+"\n }\n}\n",
-		ParseOptions{ExtractCalls: true})
+		&ParseOptions{ExtractCalls: true})
 
 	out := make([]string, 0, 4)
 
@@ -209,7 +209,7 @@ func TestAHopChainedOntoAScopedCallKeepsItsReceiver(t *testing.T) {
 func TestAHopChainedOntoAScopeMemberCallKeepsItsReceiver(t *testing.T) {
 	render := func(stmt string) []string {
 		pr := ParseWithOptions(testURI, "component {\n function go() {\n  "+stmt+"\n }\n}\n",
-			ParseOptions{ExtractCalls: true})
+			&ParseOptions{ExtractCalls: true})
 
 		out := make([]string, 0, 4)
 

@@ -16,7 +16,7 @@ func formatGuarded(t *testing.T, src string) string {
 	opts := testOpts()
 	opts.WhitespaceOnly = true
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

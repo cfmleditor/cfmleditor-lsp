@@ -85,7 +85,7 @@ func TestIdempotencyBroad(t *testing.T) {
 			tree1 := language.Parse(language.CFML, []byte(s.src), nil)
 			defer tree1.Close()
 
-			out1, err := Format([]byte(s.src), tree1, opts)
+			out1, err := Format([]byte(s.src), tree1, &opts)
 			if err != nil {
 				t.Fatalf("pass 1: %v", err)
 			}
@@ -93,7 +93,7 @@ func TestIdempotencyBroad(t *testing.T) {
 			tree2 := language.Parse(language.CFML, out1, nil)
 			defer tree2.Close()
 
-			out2, err := Format(out1, tree2, opts)
+			out2, err := Format(out1, tree2, &opts)
 			if err != nil {
 				t.Fatalf("pass 2: %v", err)
 			}

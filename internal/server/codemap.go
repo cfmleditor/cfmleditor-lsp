@@ -132,7 +132,7 @@ func (s *Server) buildCodeMap(req codeMapRequest, roots []string) (*codemap.Map,
 		InterpolateAllText:       !s.Features.OutputContextInterpolation,
 	}
 
-	m := codemap.Build(codemap.Options{
+	m := codemap.Build(&codemap.Options{
 		Root:                     roots[0],
 		Files:                    files,
 		FS:                       s.FS,

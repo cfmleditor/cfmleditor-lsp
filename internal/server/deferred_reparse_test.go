@@ -110,7 +110,7 @@ func TestEditsWhileAReparseIsPendingStayDeferred(t *testing.T) {
 	doc := srv.documents[docURI]
 	srv.mu.RUnlock()
 
-	fresh := parser.ParseWithOptions(docURI, doc, parser.ParseOptions{Shallow: true})
+	fresh := parser.ParseWithOptions(docURI, doc, &parser.ParseOptions{Shallow: true})
 
 	if pr.Content != doc {
 		t.Errorf("parse content lags the document")

@@ -9,7 +9,7 @@ import (
 func tagFileCalls(t *testing.T, src string) []string {
 	t.Helper()
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	out := make([]string, 0, 4)
 

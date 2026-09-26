@@ -15,7 +15,7 @@ func formatQueryExpr(t *testing.T, src string, tweak func(*Options)) string {
 		tweak(&opts)
 	}
 
-	out, err := Format([]byte(src), parse(t, src), opts)
+	out, err := Format([]byte(src), parse(t, src), &opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

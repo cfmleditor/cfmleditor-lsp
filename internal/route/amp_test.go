@@ -27,7 +27,7 @@ func TestAmpEntitySkip(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			refs := Scan(c.content, cfg)
+			refs := Scan(c.content, &cfg)
 			if len(refs) != 1 {
 				t.Fatalf("expected 1 ref, got %d from %q", len(refs), c.content)
 			}
@@ -42,7 +42,7 @@ func TestAmpEntitySkip(t *testing.T) {
 // An '&' at the very end of the input must not read past it.
 func TestAmpEntitySkipAtEndOfInput(t *testing.T) {
 	for _, content := range []string{"&", "&a", "&am", "&amp", "?", "x?"} {
-		if refs := Scan(content, Config{QueryParams: []string{"do"}}); len(refs) != 0 {
+		if refs := Scan(content, &Config{QueryParams: []string{"do"}}); len(refs) != 0 {
 			t.Errorf("Scan(%q) = %v, want none", content, refs)
 		}
 	}

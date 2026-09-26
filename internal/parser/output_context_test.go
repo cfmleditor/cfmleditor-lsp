@@ -19,7 +19,7 @@ func callNames(pr *ParseResult) []string {
 }
 
 func gatedCalls(src string) []string {
-	return callNames(ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true}))
+	return callNames(ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true}))
 }
 
 // TestTextIsScannedOnlyWhereColdFusionEvaluatesIt pins the rules in
@@ -84,7 +84,7 @@ func TestTextIsScannedOnlyWhereColdFusionEvaluatesIt(t *testing.T) {
 func TestInterpolateAllTextRestoresTheOldReading(t *testing.T) {
 	src := `<a href="#" onclick="doIt()">x</a><span style="color:#fff">y</span><cfset x = 1>`
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true, InterpolateAllText: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true, InterpolateAllText: true})
 	if got := callNames(pr); !slices.Equal(got, []string{"doIt"}) {
 		t.Errorf("ungated: got %v want [doIt]", got)
 	}
@@ -97,7 +97,7 @@ func TestTagFreeTemplateIsMarkup(t *testing.T) {
 	cfm := uri.URI("file:///app/template.cfm")
 	html := "<div class=\"x\">\n  <label>Rich Text (with Images)</label>\n  <button onclick=\"save()\">Save</button>\n</div>\n"
 
-	pr := ParseWithOptions(cfm, html, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(cfm, html, &ParseOptions{ExtractCalls: true})
 	if got := callNames(pr); len(got) != 0 {
 		t.Errorf("markup template: calls %v, want none", got)
 	}
@@ -106,18 +106,18 @@ func TestTagFreeTemplateIsMarkup(t *testing.T) {
 		t.Errorf("markup template classified as script: %+v", pr.Regions)
 	}
 
-	if got := callNames(ParseWithOptions(cfm, html, ParseOptions{ExtractCalls: true, InterpolateAllText: true})); len(got) == 0 {
+	if got := callNames(ParseWithOptions(cfm, html, &ParseOptions{ExtractCalls: true, InterpolateAllText: true})); len(got) == 0 {
 		t.Error("with the switch off the template should read as script again")
 	}
 
 	// A script fragment with no markup in it is still script.
-	if got := callNames(ParseWithOptions(cfm, "x = foo();\nif (a<b) { bar(); }\n", ParseOptions{ExtractCalls: true})); !slices.Equal(got, []string{"bar", "foo"}) {
+	if got := callNames(ParseWithOptions(cfm, "x = foo();\nif (a<b) { bar(); }\n", &ParseOptions{ExtractCalls: true})); !slices.Equal(got, []string{"bar", "foo"}) {
 		t.Errorf("script fragment: got %v want [bar foo]", got)
 	}
 
 	// A .cfc is never a template.
 	cfc := uri.URI("file:///app/Thing.cfc")
-	if got := callNames(ParseWithOptions(cfc, "component { function f() { return g(); } }\n</div>", ParseOptions{ExtractCalls: true})); !slices.Contains(got, "g") {
+	if got := callNames(ParseWithOptions(cfc, "component { function f() { return g(); } }\n</div>", &ParseOptions{ExtractCalls: true})); !slices.Contains(got, "g") {
 		t.Errorf(".cfc: got %v, want g", got)
 	}
 }
@@ -145,7 +145,7 @@ func TestCallsAfterARegionSplitKeepTheirFunction(t *testing.T) {
 	src := "<cfcomponent>\n<cffunction name=\"g\" output=\"true\">\n<cfset a = before()>\n<script>\nvar x = \"#inScript()#\";\n</script>\n" +
 		"<cfset b = afterScript()>\n<cfscript>\nisland();\n</cfscript>\n<cfset c = afterIsland()>\n</cffunction>\n<cfset d = outside()>\n</cfcomponent>"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	want := map[string]string{
 		"before": "g", "inScript": "g", "afterScript": "g", "island": "g", "afterIsland": "g", "outside": "",

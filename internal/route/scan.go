@@ -48,7 +48,7 @@ type Ref struct {
 // the matches in offset order. Tracking lines inside the matchers meant every one
 // of them had to remember to count the newlines inside a value it skipped over,
 // which is the sort of bookkeeping that is right until a fourth syntax is added.
-func Scan(content string, cfg Config) []Ref {
+func Scan(content string, cfg *Config) []Ref {
 	if content == "" {
 		return nil
 	}

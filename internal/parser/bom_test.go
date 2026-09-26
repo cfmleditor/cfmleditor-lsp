@@ -43,7 +43,7 @@ func TestALeadingBOMIsNotAToken(t *testing.T) {
 				}
 			}
 
-			pr := ParseWithOptions(testURI, c.src, ParseOptions{ExtractCalls: true})
+			pr := ParseWithOptions(testURI, c.src, &ParseOptions{ExtractCalls: true})
 			if len(pr.Funcs) != 1 || pr.Funcs[0].Name != "beforeAll" {
 				t.Errorf("funcs: got %v, want [beforeAll]", pr.Funcs)
 			}

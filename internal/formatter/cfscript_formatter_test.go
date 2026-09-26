@@ -386,7 +386,7 @@ func TestScriptIdempotency(t *testing.T) {
 	got1 := format(t, src)
 	tree2 := parse(t, got1)
 
-	got2, err := Format([]byte(got1), tree2, testOpts())
+	got2, err := Format([]byte(got1), tree2, new(testOpts()))
 	if err != nil {
 		t.Fatalf("second format error: %v", err)
 	}
@@ -483,7 +483,7 @@ User[] function getUsers() { return []; }`)
 	opts := testOpts()
 	opts.WhitespaceOnly = true
 
-	if _, err := Format([]byte(src), parse(t, src), opts); err != nil {
+	if _, err := Format([]byte(src), parse(t, src), &opts); err != nil {
 		t.Errorf("whitespaceOnly guard rejected the format: %v", err)
 	}
 }

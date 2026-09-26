@@ -24,7 +24,7 @@ func formatOnce(t *testing.T, src []byte) []byte {
 	tree := language.Parse(language.CFML, src, nil)
 	defer tree.Close()
 
-	out, err := Format(src, tree, opts)
+	out, err := Format(src, tree, &opts)
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -45,7 +45,7 @@ func assertRefusesToFormat(t *testing.T, label string, src []byte, reason string
 	tree := language.Parse(language.CFML, src, nil)
 	defer tree.Close()
 
-	out, err := Format(src, tree, opts)
+	out, err := Format(src, tree, &opts)
 	if err == nil {
 		t.Errorf("%s: expected Format to refuse (%s), got %d bytes of output", label, reason, len(out))
 

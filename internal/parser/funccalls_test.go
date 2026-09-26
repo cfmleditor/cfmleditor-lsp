@@ -22,7 +22,7 @@ func TestFuncCallsDoesNotLendOneFunctionAnothersCalls(t *testing.T) {
 }
 `
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	if len(pr.Scopes) != 2 {
 		t.Fatalf("expected two scopes, got %+v", pr.Scopes)
@@ -62,7 +62,7 @@ func TestAllCallsCoversEveryCallSite(t *testing.T) {
 }
 `
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	var got []string
 	for _, c := range pr.AllCalls() {
@@ -123,7 +123,7 @@ func TestAllCallsIsOrderedByLine(t *testing.T) {
 	want := []string{"one.x", "two.y", "three.z"}
 
 	for range 20 {
-		pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+		pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 		var got []string
 		for _, c := range pr.AllCalls() {

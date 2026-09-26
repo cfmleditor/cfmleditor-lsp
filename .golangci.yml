@@ -25,6 +25,25 @@ linters:
     - unparam
     - usestdlibvars
     - wsl_v5
+  settings:
+    gocritic:
+      # On top of gocritic's default checks: a large value copied into a
+      # parameter or a loop variable, and two small spellings that allocate or
+      # grow a slice twice. The thresholds are 128 bytes rather than gocritic's
+      # 80: every copy at or above 128 was removed when these were enabled, and
+      # the checks keep new ones out. When a copy is the point (appending the
+      # value to a result, keeping a private copy of options it then edits),
+      # take it explicitly with *p rather than suppressing the check.
+      enabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - appendCombine
+        - equalFold
+      settings:
+        hugeParam:
+          sizeThreshold: 128
+        rangeValCopy:
+          sizeThreshold: 128
   exclusions:
     rules:
       - path: _test\.go

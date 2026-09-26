@@ -158,7 +158,7 @@ func cmdExplain(args []string) {
 		return ""
 	}
 
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:                cfResolvers,
 		ExpressionMappings:       expressionMappings,
 		ServicePropertyResolvers: servicePropertyResolvers,

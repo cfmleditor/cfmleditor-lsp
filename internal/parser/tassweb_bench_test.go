@@ -45,7 +45,7 @@ func TestBenchTasswebParse(t *testing.T) {
 			continue
 		}
 
-		pr := ParseWithOptions(uri.URI("file://"+f), string(data), ParseOptions{
+		pr := ParseWithOptions(uri.URI("file://"+f), string(data), &ParseOptions{
 			Resolvers:    resolvers,
 			ExtractLinks: true,
 		})
@@ -73,7 +73,7 @@ func TestBenchTasswebParse(t *testing.T) {
 			continue
 		}
 
-		pr := ParseWithOptions(uri.URI("file://"+f), string(data), ParseOptions{
+		pr := ParseWithOptions(uri.URI("file://"+f), string(data), &ParseOptions{
 			Resolvers:    resolvers,
 			ExtractLinks: true,
 			ExtractCalls: true,
@@ -103,7 +103,7 @@ func TestBenchTasswebParse(t *testing.T) {
 			continue
 		}
 
-		pr := ParseWithOptions(uri.URI("file://"+f), string(data), ParseOptions{
+		pr := ParseWithOptions(uri.URI("file://"+f), string(data), &ParseOptions{
 			Shallow: true,
 		})
 

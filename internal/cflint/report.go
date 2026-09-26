@@ -39,7 +39,9 @@ func Reports(found map[string][]protocol.Diagnostic, targets []string, version s
 			continue
 		}
 
-		for _, d := range diags {
+		for i := range diags {
+			d := &diags[i]
+
 			rows[t] = append(rows[t], knownissues.Row{
 				Path:     filepath.ToSlash(rel),
 				Line:     int(d.Range.Start.Line) + 1,
@@ -71,7 +73,7 @@ func Reports(found map[string][]protocol.Diagnostic, targets []string, version s
 	return out, left
 }
 
-func diagnosticCode(d protocol.Diagnostic) string {
+func diagnosticCode(d *protocol.Diagnostic) string {
 	switch c := d.Code.(type) {
 	case protocol.String:
 		return string(c)
@@ -82,7 +84,7 @@ func diagnosticCode(d protocol.Diagnostic) string {
 	}
 }
 
-func diagnosticMessage(d protocol.Diagnostic) string {
+func diagnosticMessage(d *protocol.Diagnostic) string {
 	if m, ok := d.Message.(protocol.String); ok {
 		return string(m)
 	}

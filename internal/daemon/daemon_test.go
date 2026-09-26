@@ -60,7 +60,7 @@ func TestServeMultipleClients(t *testing.T) {
 	// Simulate the stdio client that main.go adds before Serve starts
 	ct.Add()
 
-	go func() { _ = Serve(ctx, sock, log, idx, ct, server.Settings{}) }()
+	go func() { _ = Serve(ctx, sock, log, idx, ct, &server.Settings{}) }()
 
 	waitForSocket(t, sock)
 
@@ -124,7 +124,7 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	idx := index.New()
 
 	// No ConnTracker — we just verify the RPC layer works
-	go func() { _ = Serve(ctx, sock, log, idx, nil, server.Settings{}) }()
+	go func() { _ = Serve(ctx, sock, log, idx, nil, &server.Settings{}) }()
 
 	waitForSocket(t, sock)
 
@@ -163,7 +163,7 @@ func TestDaemonSurvivesAbruptClientDisconnect(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)
@@ -197,7 +197,7 @@ func TestDaemonShutdownClosesSocketClients(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)
@@ -227,7 +227,7 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)

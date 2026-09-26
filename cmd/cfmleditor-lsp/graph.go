@@ -103,9 +103,9 @@ func cmdGraph(args []string) {
 		os.Exit(1)
 	}
 
-	m = applyGraphViews(m, flags)
+	m = applyGraphViews(m, &flags)
 
-	if err := writeGraph(m, flags); err != nil {
+	if err := writeGraph(m, &flags); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -229,7 +229,7 @@ func buildGraph(f *graphFlags) (*codemap.Map, error) {
 		root = filepath.Dir(root)
 	}
 
-	scanRoots, fallback, shared, settings := routeWorkspace(fsys, root, *f)
+	scanRoots, fallback, shared, settings := routeWorkspace(fsys, root, f)
 
 	// Config supplies the entry and utility globs; the command line adds to them
 	// rather than replacing them, so a one-off question needs no config change and
@@ -308,7 +308,7 @@ func buildGraph(f *graphFlags) (*codemap.Map, error) {
 		opts.Progress = graphProgress()
 	}
 
-	m := codemap.Build(opts)
+	m := codemap.Build(&opts)
 
 	if !f.quiet {
 		fmt.Fprintf(os.Stderr, "\n")
@@ -361,7 +361,7 @@ func graphProgress() func(codemap.Phase, int, int) {
 	}
 }
 
-func applyGraphViews(m *codemap.Map, f graphFlags) *codemap.Map {
+func applyGraphViews(m *codemap.Map, f *graphFlags) *codemap.Map {
 	if f.under != "" {
 		if f.underStrict {
 			m = m.Filter(f.under)
@@ -391,7 +391,7 @@ func applyGraphViews(m *codemap.Map, f graphFlags) *codemap.Map {
 	return m
 }
 
-func writeGraph(m *codemap.Map, f graphFlags) error {
+func writeGraph(m *codemap.Map, f *graphFlags) error {
 	out := os.Stdout
 
 	if f.out != "" {
@@ -452,7 +452,7 @@ func writeGraph(m *codemap.Map, f graphFlags) error {
 // Shared by `graph` and `routes` so the two cannot disagree about which config
 // governs a file — a diagnostic that scanned a different workspace from the build
 // it is meant to explain would be worse than none.
-func routeWorkspace(fsys vfs.FS, root string, f graphFlags) (scanRoots []string, fallback codemap.FileConfig, shared *index.Index, settings config.CodeMap) {
+func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string, fallback codemap.FileConfig, shared *index.Index, settings config.CodeMap) {
 	cfg, _ := daemon.FindConfig(root)
 
 	var (

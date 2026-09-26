@@ -35,7 +35,7 @@ func format(t *testing.T, src string) string {
 	t.Helper()
 	tree := parse(t, src)
 
-	out, err := Format([]byte(src), tree, testOpts())
+	out, err := Format([]byte(src), tree, new(testOpts()))
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestIdempotency(t *testing.T) {
 	got1 := format(t, src)
 	tree2 := parse(t, got1)
 
-	got2, err := Format([]byte(got1), tree2, testOpts())
+	got2, err := Format([]byte(got1), tree2, new(testOpts()))
 	if err != nil {
 		t.Fatalf("second format error: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestTabIndentation(t *testing.T) {
 	src := `<cfif x EQ 1><cfset y = 2></cfif>`
 	tree := parse(t, src)
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}

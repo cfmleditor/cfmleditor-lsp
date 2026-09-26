@@ -54,7 +54,7 @@ type Result struct {
 // Build generates a transitive dependency graph.
 // If Calls is provided, traces function-level dependencies.
 // Otherwise falls back to component-level refs.
-func Build(opts Options) Result {
+func Build(opts *Options) Result {
 	filePath := strings.TrimPrefix(opts.DocURI, "file://")
 	baseDir := filepath.Dir(filePath)
 
@@ -83,7 +83,7 @@ func Build(opts Options) Result {
 }
 
 // buildFromCalls traces function-level dependencies using CallSite data.
-func buildFromCalls(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+func buildFromCalls(opts *Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
 	// baseDir travels with each node. It is what ComponentPath resolves a
 	// component against — relative paths and the governing Application.cfc both
 	// depend on it — and carrying the *start* file's directory through the whole
@@ -226,7 +226,7 @@ func derefRefs(ptrs []*parser.ComponentRef) []parser.ComponentRef {
 }
 
 // buildFromRefs traces component-level dependencies using ComponentRef data.
-func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
+func buildFromRefs(opts *Options, startLabel, baseDir string, maxDepth int, seen map[string]bool) []graph.Edge {
 	// baseDir travels with each node, for the reason given in buildFromCalls.
 	type node struct {
 		label   string
@@ -295,7 +295,7 @@ func buildFromRefs(opts Options, startLabel, baseDir string, maxDepth int, seen 
 //
 // File-level tracing through buildFromRefs never had the limitation: refs *are*
 // in the index, so it walks as far as MaxDepth on its own.
-func getFuncCalls(opts Options, fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef) {
+func getFuncCalls(opts *Options, fileURI uri.URI, funcName string) ([]parser.CallSite, []parser.ComponentRef) {
 	if opts.LoadCalls == nil {
 		return nil, nil
 	}

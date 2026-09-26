@@ -161,8 +161,13 @@ func (pr *ParseResult) outputGate() (spans [][2]int, prefixes []string, gated bo
 	return pr.outputSpans, pr.importPrefixes, true
 }
 
-// ParseWithOptions performs a full file parse with extended options.
-func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *ParseResult {
+// ParseWithOptions performs a full file parse with extended options. opts is
+// only read; nil means the zero options.
+func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *ParseResult {
+	if opts == nil {
+		opts = &ParseOptions{}
+	}
+
 	pr := &ParseResult{
 		URI:                      fileURI,
 		Content:                  content,

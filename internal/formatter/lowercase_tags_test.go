@@ -14,7 +14,7 @@ func formatWithCase(t *testing.T, src string, lowercase bool) string {
 	opts.WhitespaceOnly = true
 	opts.LowercaseTags = lowercase
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error (lowercaseTags=%v): %v", lowercase, err)
 	}
@@ -134,9 +134,11 @@ func TestTagNameStaysCanonical(t *testing.T) {
 	preserved := formatWithCase(t, upper, false)
 	lowered := formatWithCase(t, upper, true)
 
-	if strings.ToLower(preserved) != lowered {
+	// An exact comparison, not a case-insensitive one: the output must be
+	// the lowercased input, and EqualFold would pass output that kept capitals.
+	if want := strings.ToLower(preserved); want != lowered {
 		t.Errorf("lowercaseTags changed more than casing:\n--- off (lowercased) ---\n%s\n--- on ---\n%s",
-			strings.ToLower(preserved), lowered)
+			want, lowered)
 	}
 
 	// Guard the fixture: if this stopped parsing as a function with an

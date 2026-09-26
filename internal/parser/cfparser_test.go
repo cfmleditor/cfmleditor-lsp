@@ -141,7 +141,7 @@ func TestIsScriptFile_HTMLWithScriptTag_NotTreatedAsScript(t *testing.T) {
 func TestParse_ScriptTagNoCF_NoBogusCallSites(t *testing.T) {
 	content := "<html>\n<body>\n<script>\nvar $matrix = $form.find('x');\n$matrix.attr('y', 'z');\n</script>\n</body>\n</html>"
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	for _, ref := range pr.ComponentRefs {
 		if ref.Variable == "$matrix" {
@@ -492,7 +492,7 @@ func TestParseComponentRefs_NewJavaPrefixResolvesLikeCreateObject(t *testing.T) 
 	}}
 
 	pr := ParseWithOptions(testURI, `component { f = new java:java.io.File( p ) }`,
-		ParseOptions{Resolvers: javaStubs})
+		&ParseOptions{Resolvers: javaStubs})
 	assertRef(t, pr.ComponentRefs, 0, "f", "stubs.java.io.File")
 }
 
@@ -1128,7 +1128,7 @@ func TestParseBodyVarDecl_BuiltinReturnLookup(t *testing.T) {
 		return ""
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ExtractCalls:        true,
 		ScanAllScopes:       true,
 		BuiltinReturnLookup: builtinReturnLookup,
@@ -1228,7 +1228,7 @@ func TestResolverRefs_MultiLineCall(t *testing.T) {
 		Resolve: "models.User",
 		Prefix:  "getUser",
 	}}
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ScanAllScopes: true,
 	})
@@ -1260,7 +1260,7 @@ func TestExpressionMappings_ReplacesHashExpressions(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ExpressionMappings: map[string]string{
 			"#VARIABLES._core#": "packages.tass.core.",
 		},
@@ -1292,7 +1292,7 @@ func TestExpressionMappings_UnmappedHashExpressionBecomesAny(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{})
 
 	var found bool
 
@@ -2130,7 +2130,7 @@ func TestTagParser_NestedCfscriptChainedCallPendingResolution(t *testing.T) {
 		return ""
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:    resolvers,
 		FuncLookup:   funcLookup,
 		ExtractCalls: true,
@@ -2528,7 +2528,7 @@ func TestResolverMatch_PipeDelimitedPrefix_AssignmentCallSite(t *testing.T) {
 		{Match: `document\.createTemplate|document\.createStamper\(\)`, Resolve: "reporting.directcontent", Prefix: "document.createTemplate|document.createStamper"},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
 
 	scope := pr.Scopes[0]
 	refs := pr.FuncComponentRefs(scope.Start, scope.End)
@@ -2560,7 +2560,7 @@ func TestResolverMatch_PipeDelimitedPrefix_BareNameFallback(t *testing.T) {
 	}
 
 	content := `<cfset style = document.loadStylesheet(cssfile="x",properties="y")>`
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers})
 
 	found := ""
 
@@ -2592,7 +2592,7 @@ func TestResolverMatch_PipeDelimitedPrefix_ScriptBareNameFallback(t *testing.T) 
 		svc = _kernel();
 	}
 }`
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers, ScanAllScopes: true})
 	scope := pr.Scopes[0]
 	refs := pr.FuncComponentRefs(scope.Start, scope.End)
 
@@ -2702,7 +2702,7 @@ func TestResolveFromCall_DiscardedCaptureDottedChain(t *testing.T) {
 		var cell = itextObj.PDFtableCell.init(6);
 	}
 }`
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ScanAllScopes: true,
 	})
@@ -2771,7 +2771,7 @@ func TestExpressionMappings_MultipleReplacements(t *testing.T) {
 	variables.a = createObject("component", "#ROOT#models.A");
 	variables.b = createObject("component", "#CORE#services.B");
 }`
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ExpressionMappings: map[string]string{
 			"#ROOT#": "app.",
 			"#CORE#": "app.core.",
@@ -2797,7 +2797,7 @@ func TestExpressionMappings_PipeDelimitedAlternatives(t *testing.T) {
 	variables.a = createObject("component", "#ROOT#models.A");
 	variables.b = createObject("component", "#LEGACY_ROOT#models.B");
 }`
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ExpressionMappings: map[string]string{
 			"#ROOT#|#LEGACY_ROOT#": "app.",
 		},
@@ -2861,7 +2861,7 @@ func TestPendingCalls_BaseVarNotOverrideResolver(t *testing.T) {
 		Prefix:  "getService",
 	}}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ScanAllScopes: true,
 	})
@@ -3054,7 +3054,7 @@ func TestScriptParser_DollarSignResolverRef(t *testing.T) {
 		var $svc = getService("user");
 	}
 }`
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers})
 	scope := pr.Scopes[0]
 	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
 
@@ -3082,7 +3082,7 @@ func TestScriptParser_ChainedCallResolverRef(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ScanAllScopes: true,
 		ExtractCalls:  true,
@@ -3143,7 +3143,7 @@ func TestTagParser_BareCallAssignment_ExtractCalls(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	found := false
 
@@ -3246,7 +3246,7 @@ func TestTagParser_ArgumentHintRef_WithResolver(t *testing.T) {
 		{Match: `createTable($1)`, Resolve: "reporting.table", Prefix: "createTable"},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ScanAllScopes: true,
 	})
@@ -3285,7 +3285,7 @@ func TestTagParser_DottedCallAssignment_UsesEarlierComponentRef(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
 
 	found := false
 
@@ -3320,7 +3320,7 @@ func TestTagParser_BareCallStatement_UsesEarlierComponentRef(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
 
 	found := false
 
@@ -3355,7 +3355,7 @@ func TestTagParser_ConcatenatedAssignment_NoSpuriousCall(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	for _, call := range pr.AllCalls() {
 		if strings.EqualFold(call.FuncName, "temp") {
@@ -3378,7 +3378,7 @@ func TestTagParser_JavaStubResolver_ResolvesCreateObjectJava(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{Resolvers: resolvers})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers})
 
 	found := ""
 
@@ -3435,7 +3435,7 @@ func TestFuncLookup_ChainedCallOverridesGenericResolver(t *testing.T) {
 		return ""
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:  resolvers,
 		FuncLookup: funcLookup,
 	})
@@ -3476,7 +3476,7 @@ func TestCheckBareCall_DeepChainTracksReceiver(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	calls := pr.AllCalls()
 
@@ -3517,7 +3517,7 @@ func TestChainedAssignRHS_FailedFirstHopContinuesChain(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range pr.AllCalls() {
@@ -3554,7 +3554,7 @@ func TestChainedAssignRHS_SucceededFirstHopContinuesChain(t *testing.T) {
 		},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ExtractCalls:  true,
 		ScanAllScopes: true,
@@ -3596,7 +3596,7 @@ func TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments(t *testing.T) {
 		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ExtractCalls:  true,
 		ScanAllScopes: true,
@@ -3649,7 +3649,7 @@ func TestChainedCall_ResolvedFirstHopOutsideAssignment(t *testing.T) {
 		{Match: `get([A-Za-z]+)\(\)`, Resolve: "packages.tass.${1:lower}", Prefix: "get"},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ExtractCalls:  true,
 		ScanAllScopes: true,
@@ -3686,7 +3686,7 @@ func TestBracketIndexedChain_AssignmentRHS(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range pr.AllCalls() {
@@ -3715,7 +3715,7 @@ func TestBracketIndexedChain_BareCall(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range pr.AllCalls() {
@@ -3743,7 +3743,7 @@ func TestBracketIndexedChain_VarDecl(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range pr.AllCalls() {
@@ -3771,7 +3771,7 @@ func TestBracketIndexedChain_ScopedAssignment(t *testing.T) {
 	}
 }`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{ExtractCalls: true, ScanAllScopes: true})
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true, ScanAllScopes: true})
 
 	byFunc := make(map[string]CallSite)
 	for _, c := range pr.AllCalls() {
@@ -3851,7 +3851,7 @@ func TestServiceProperty_FileLevel(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ServicePropertyResolvers: map[string]string{
 			"package": "tassweb.packages.${name}",
 		},
@@ -3889,7 +3889,7 @@ func TestServiceProperty_UnknownKindIgnored(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ServicePropertyResolvers: map[string]string{
 			"package": "tassweb.packages.${name}",
 		},
@@ -3946,7 +3946,7 @@ func TestServiceProperty_BracketIndexedReceiver(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ServicePropertyResolvers: map[string]string{
 			"package": "tassweb.packages.${name}",
 		},
@@ -4011,7 +4011,7 @@ func TestServiceProperty_BracketWithInternalDot(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		ServicePropertyResolvers: map[string]string{
 			"package": "tassweb.packages.${name}",
 		},
@@ -4147,7 +4147,7 @@ func TestChainedCall_FirstHopOfferedEveryLeadingStringArgument(t *testing.T) {
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
 
-	pr := ParseWithOptions(testURI, content, ParseOptions{
+	pr := ParseWithOptions(testURI, content, &ParseOptions{
 		Resolvers:     resolvers,
 		ExtractCalls:  true,
 		ScanAllScopes: true,

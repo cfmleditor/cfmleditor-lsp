@@ -41,7 +41,7 @@ func TestFormatOneFileLeavesUnparseableFileIntact(t *testing.T) {
 	src := "<cfcomponent>\n\t<cfinvoke component=\"models.Widget\" method=\"render\" returnvariable=\"r\">\n</cfcomponent>\n"
 	path := writeTemp(t, "victim.cfc", src)
 
-	err := formatOneFile(path, cliOpts(true), true)
+	err := formatOneFile(path, new(cliOpts(true)), true)
 	if err == nil {
 		t.Fatal("expected formatOneFile to refuse an unparseable file")
 	}
@@ -72,7 +72,7 @@ func TestFormatOneFileAllowsNormalization(t *testing.T) {
 	src := "component {\n\tfunction getAll() {\n\t\treturn []\n\t}\n}\n"
 	path := writeTemp(t, "semi.cfc", src)
 
-	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("formatOneFile refused a deliberate normalisation: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestFormatOneFileWritesCleanFile(t *testing.T) {
 	src := "component {\n        function a() {\n                return 1;\n        }\n}\n"
 	path := writeTemp(t, "clean.cfc", src)
 
-	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestFormatOneFilePreservesMode(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 
-	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestFormatOneFileSkipsUnchangedFile(t *testing.T) {
 	src := "component {\n        function a() {\n                return 1;\n        }\n}\n"
 	path := writeTemp(t, "idempotent.cfc", src)
 
-	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("first format: %v", err)
 	}
 
@@ -144,7 +144,7 @@ func TestFormatOneFileSkipsUnchangedFile(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if err := formatOneFile(path, cliOpts(true), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("second format: %v", err)
 	}
 
@@ -170,7 +170,7 @@ func TestFormatOneFileFollowsSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	if err := formatOneFile(link, cliOpts(true), true); err != nil {
+	if err := formatOneFile(link, new(cliOpts(true)), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 

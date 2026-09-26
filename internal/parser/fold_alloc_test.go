@@ -61,7 +61,7 @@ func TestFoldingAnIdentifierDoesNotAllocate(t *testing.T) {
 	allocs := func(doc string) float64 {
 		r := testing.Benchmark(func(b *testing.B) {
 			for b.Loop() {
-				ParseWithOptions("file:///fold.cfc", doc, ParseOptions{ExtractCalls: true})
+				ParseWithOptions("file:///fold.cfc", doc, &ParseOptions{ExtractCalls: true})
 			}
 		})
 

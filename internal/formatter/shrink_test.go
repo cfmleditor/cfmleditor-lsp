@@ -256,7 +256,7 @@ func failingRegion(verdict string, src []byte) (region []byte, g language.Gramma
 	// A panic here is the corpus harness's business, not this tool's.
 	defer func() { _ = recover() }()
 
-	_, _ = Format(src, tree, opts)
+	_, _ = Format(src, tree, &opts)
 
 	return region, g, name, ok
 }

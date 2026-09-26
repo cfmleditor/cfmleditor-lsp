@@ -216,7 +216,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				}
 
 				for i := range attrs {
-					if strings.ToLower(attrs[i].Name) == attrName {
+					if strings.EqualFold(attrs[i].Name, attrName) { // attrName is lowercase ASCII already
 						for _, v := range attrs[i].ParamValues() {
 							items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
 								Label:  v,
@@ -383,7 +383,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				})
 			}
 
-			for _, tag := range docs.HTMLTags() {
+			tags := docs.HTMLTags()
+
+			for i := range tags {
+				tag := &tags[i]
+
 				items = append(items, protocol.CompletionItem{
 					Label:    tag.Name,
 					SortText: optStr(SortTags + tag.Name),
@@ -411,7 +415,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				})
 			}
 
-			for _, tag := range docs.HTMLTags() {
+			tags := docs.HTMLTags()
+
+			for i := range tags {
+				tag := &tags[i]
+
 				items = append(items, protocol.CompletionItem{
 					Label:    tag.Name,
 					SortText: optStr(SortTags + tag.Name),
@@ -781,8 +789,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			Label:    scoped,
 			Kind:     protocol.CompletionItemKindVariable,
 			SortText: optStr(SortGlobalVariables + v),
-		})
-		items = append(items, protocol.CompletionItem{
+		}, protocol.CompletionItem{
 			Label:  v,
 			Kind:   protocol.CompletionItemKindVariable,
 			Detail: optStr(scoped),
@@ -799,8 +806,7 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 			Label:    scoped,
 			Kind:     protocol.CompletionItemKindProperty,
 			SortText: optStr(SortGlobalVariables + v),
-		})
-		items = append(items, protocol.CompletionItem{
+		}, protocol.CompletionItem{
 			Label:  v,
 			Kind:   protocol.CompletionItemKindProperty,
 			Detail: optStr(scoped),

@@ -59,8 +59,7 @@ func (g *Graph) DOT() string {
 
 	var lines []string
 
-	lines = append(lines, "digraph {")
-	lines = append(lines, fmt.Sprintf("    rankdir=%s;", dir))
+	lines = append(lines, "digraph {", fmt.Sprintf("    rankdir=%s;", dir))
 	seen := make(map[string]bool)
 
 	for _, e := range g.Edges {

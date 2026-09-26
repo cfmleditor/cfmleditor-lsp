@@ -9,7 +9,7 @@ import "testing"
 // `to="#listLen(temp,"'")#"` became `to="#listLen(temp,”')#"`, which the
 // grammar then rejects. The quote characters inside a value are now left alone.
 func TestNormaliseAttrValueKeepsInnerQuotes(t *testing.T) {
-	f := New(DefaultOptions())
+	f := New(new(DefaultOptions()))
 
 	cases := []struct {
 		name string

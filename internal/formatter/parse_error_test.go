@@ -19,7 +19,7 @@ func stdOpts() Options {
 	return opts
 }
 
-func formatSrc(t *testing.T, src string, opts Options) ([]byte, error) {
+func formatSrc(t *testing.T, src string, opts *Options) ([]byte, error) {
 	t.Helper()
 
 	tree := language.Parse(language.CFML, []byte(src), nil)
@@ -51,7 +51,7 @@ func TestFormatRefusesErrorTree(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := formatSrc(t, tc.src, stdOpts())
+			out, err := formatSrc(t, tc.src, new(stdOpts()))
 			if err == nil {
 				t.Fatalf("expected a parse error, got output:\n%s", out)
 			}
@@ -77,7 +77,7 @@ func TestFormatErrorTreeRefusedRegardlessOfGuard(t *testing.T) {
 	opts := stdOpts()
 	opts.WhitespaceOnly = false
 
-	out, err := formatSrc(t, src, opts)
+	out, err := formatSrc(t, src, &opts)
 	if err == nil {
 		t.Fatalf("expected a parse error with the guard off, got output:\n%s", out)
 	}
@@ -93,7 +93,7 @@ func TestFormatWellFormedTagsStillFormat(t *testing.T) {
 	}
 
 	for _, src := range cases {
-		if _, err := formatSrc(t, src, stdOpts()); err != nil {
+		if _, err := formatSrc(t, src, new(stdOpts())); err != nil {
 			t.Errorf("format %q: unexpected error %v", src, err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestFormatPreservesBOM(t *testing.T) {
 	bom := "\ufeff"
 	src := bom + "component {\n\tfunction a() {\n\t\treturn 1;\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFormatPreservesBOM(t *testing.T) {
 
 // TestFormatNoBOMAdded checks the BOM is not invented for files without one.
 func TestFormatNoBOMAdded(t *testing.T) {
-	out, err := formatSrc(t, "component {\n}\n", stdOpts())
+	out, err := formatSrc(t, "component {\n}\n", new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestFormatKeepsPostParamAttributes(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		out, err := formatSrc(t, tc.src, stdOpts())
+		out, err := formatSrc(t, tc.src, new(stdOpts()))
 		if err != nil {
 			t.Errorf("format %q: %v", tc.src, err)
 
@@ -173,7 +173,7 @@ func TestFormatKeepsAnonymousReturnTypes(t *testing.T) {
 	for _, ty := range types {
 		src := "component {\n\tpublic " + ty + " function f() {}\n}\n"
 
-		out, err := formatSrc(t, src, stdOpts())
+		out, err := formatSrc(t, src, new(stdOpts()))
 		if err != nil {
 			t.Errorf("format %s: %v", ty, err)
 
@@ -201,7 +201,7 @@ func TestFormatKeepsAllCatchClauses(t *testing.T) {
 		"\t\tfinally { w(); }\n" +
 		"\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestFormatKeepsDeclarationKeyword(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		out, err := formatSrc(t, tc.src, stdOpts())
+		out, err := formatSrc(t, tc.src, new(stdOpts()))
 		if err != nil {
 			t.Errorf("format %q: %v", tc.src, err)
 
@@ -248,7 +248,7 @@ func TestFormatKeepsDeclarationKeyword(t *testing.T) {
 	}
 
 	// An interface must not be silently turned into a component.
-	out, err := formatSrc(t, "interface {\n\tpublic function foo();\n}\n", stdOpts())
+	out, err := formatSrc(t, "interface {\n\tpublic function foo();\n}\n", new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestFormatKeepsDeclarationKeyword(t *testing.T) {
 func TestFormatPreservesStaticAccessor(t *testing.T) {
 	src := "component {\n\tfunction a() {\n\t\tvar d = Widget::getData();\n\t\tvar e = Foo::BAR;\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestFormatCommentInsideLiteral(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := formatSrc(t, tc.src, stdOpts())
+			out, err := formatSrc(t, tc.src, new(stdOpts()))
 			if err != nil {
 				t.Fatalf("format: %v", err)
 			}
@@ -330,7 +330,7 @@ func TestFormatCommentInsideLiteral(t *testing.T) {
 func TestFormatCommentInLiteralIsNotDropped(t *testing.T) {
 	src := "component {\n\tfunction a() {\n\t\tvar s = {\n\t\t\t// keep me\n\t\t\ta: 1\n\t\t};\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestFormatKeepsCommentsBeforeContinuation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := formatSrc(t, tc.src, stdOpts())
+			out, err := formatSrc(t, tc.src, new(stdOpts()))
 			if err != nil {
 				t.Fatalf("format: %v", err)
 			}
@@ -396,7 +396,7 @@ func TestFormatKeepsCommentsBeforeContinuation(t *testing.T) {
 func TestFormatElseStillAttachedWithoutComment(t *testing.T) {
 	src := "component {\n\tfunction a() {\n\t\tif (x) {\n\t\t\tone();\n\t\t} else {\n\t\t\ttwo();\n\t\t}\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestFormatDoesNotInventClosingTags(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := formatSrc(t, tc.src, stdOpts())
+			out, err := formatSrc(t, tc.src, new(stdOpts()))
 			if err != nil {
 				t.Fatalf("format: %v", err)
 			}
@@ -449,7 +449,7 @@ func TestFormatKeepsRealClosingTags(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		out, err := formatSrc(t, tc.src, stdOpts())
+		out, err := formatSrc(t, tc.src, new(stdOpts()))
 		if err != nil {
 			t.Errorf("format %q: %v", tc.src, err)
 
@@ -474,7 +474,7 @@ func TestFormatCommentAmongCallArguments(t *testing.T) {
 		"\t\t\t\"*.cfc\" // filter\n" +
 		"\t\t);\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestFormatCommentInCallChain(t *testing.T) {
 		"\t\t\t// skip hidden files\n" +
 		"\t\t\t.filter( fn );\n\t}\n}\n"
 
-	out, err := formatSrc(t, src, stdOpts())
+	out, err := formatSrc(t, src, new(stdOpts()))
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}

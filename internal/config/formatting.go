@@ -41,7 +41,7 @@ func DefaultResolvedFormatting() ResolvedFormatting {
 // zeros, so a config that specifies only some keys keeps the defaults for the
 // rest. Parse hooks are left nil: they belong to the caller, which is what
 // holds the tree-sitter language handles.
-func (r ResolvedFormatting) FormatterOptions() formatter.Options {
+func (r *ResolvedFormatting) FormatterOptions() formatter.Options {
 	o := formatter.DefaultOptions()
 
 	o.SelfCloseTags = r.SelfCloseTags

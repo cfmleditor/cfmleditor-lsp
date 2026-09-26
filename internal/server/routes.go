@@ -149,7 +149,7 @@ func (s *Server) routeAtPosition(content string, line, char int) (routepkg.Ref, 
 
 	want := line - baseLine
 
-	for _, ref := range routepkg.Scan(window, r.Config) {
+	for _, ref := range routepkg.Scan(window, &r.Config) {
 		if int(ref.Line) != want {
 			continue
 		}
@@ -320,7 +320,7 @@ func (s *Server) scanDocumentRoutes(content string, r *routepkg.Resolver) []rout
 	}
 	s.routeMu.Unlock()
 
-	refs := routepkg.Scan(content, r.Config)
+	refs := routepkg.Scan(content, &r.Config)
 
 	s.routeMu.Lock()
 	s.routeScanKey = key

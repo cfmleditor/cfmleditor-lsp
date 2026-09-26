@@ -198,7 +198,7 @@ func scanRoutes(paths []string, quiet bool) (resolved, unresolved []routeFinding
 			rel, _ := filepath.Rel(root, file)
 			rel = filepath.ToSlash(rel)
 
-			for _, ref := range route.Scan(string(data), cfg.Routes.Config) {
+			for _, ref := range route.Scan(string(data), &cfg.Routes.Config) {
 				if !route.Plausible(ref.Value) {
 					continue
 				}
@@ -243,7 +243,7 @@ func scanRoutes(paths []string, quiet bool) (resolved, unresolved []routeFinding
 func routeScanSetup(fsys vfs.FS, root string, paths []string, quiet bool) (*configSet, []string) {
 	f := graphFlags{paths: paths, quiet: quiet}
 
-	scanRoots, fallback, shared, _ := routeWorkspace(fsys, root, f)
+	scanRoots, fallback, shared, _ := routeWorkspace(fsys, root, &f)
 
 	configs := newConfigSet(fsys, shared, fallback)
 	configs.preload(scanRoots)

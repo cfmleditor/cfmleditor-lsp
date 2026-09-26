@@ -37,7 +37,7 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 	releaseReadLoop(ctx)
 
 	start := time.Now()
-	formatted, err := formatDocumentFn(content, params.Options, cfg)
+	formatted, err := formatDocumentFn(content, params.Options, &cfg)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 
 	// Idempotency check: format again and verify the result is stable.
 	if cfg.Debug {
-		formatted2, err2 := formatDocument(formatted, params.Options, cfg)
+		formatted2, err2 := formatDocument(formatted, params.Options, &cfg)
 		if err2 != nil {
 			s.log.Warn("formatting idempotency check failed", cflog.String("uri", string(params.TextDocument.URI)), cflog.Err(err2))
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
@@ -86,7 +86,7 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 // holds it on a channel to show the read loop is released while it runs.
 var formatDocumentFn = formatDocument
 
-func formatDocument(content string, opts protocol.FormattingOptions, cfg config.ResolvedFormatting) (string, error) {
+func formatDocument(content string, opts protocol.FormattingOptions, cfg *config.ResolvedFormatting) (string, error) {
 	src := []byte(content)
 	tree := language.Parse(language.CFML, src, nil)
 
@@ -120,7 +120,7 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg config.
 		return language.Parse(language.CFML, s, nil)
 	}
 
-	out, err := formatter.Format(src, tree, fmtOpts)
+	out, err := formatter.Format(src, tree, &fmtOpts)
 	if err != nil {
 		return content, err
 	}

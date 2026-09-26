@@ -154,7 +154,7 @@ func TestDynamicIfMissingSilencesOnlyItsOwnGuesses(t *testing.T) {
 }`
 
 	file := filepath.Join(dir, "Work.cfc")
-	pr := parser.ParseWithOptions(cfpath.ToURI(file), src, parser.ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), src, &parser.ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
 	r := &Resolver{FS: vfs.OS{}, Index: index.New(), Resolvers: resolvers, Mappings: map[string]string{"packages": filepath.Join(dir, "packages")}}
 
 	want := map[string]string{
@@ -192,7 +192,7 @@ func TestBareCallToAVariablesScopedFunctionIsDynamic(t *testing.T) {
 	src := "<cfcomponent>\n<cffunction name=\"init\">\n<cfargument name=\"render\">\n<cfset VARIABLES._render = ARGUMENTS.render>\n</cffunction>\n" +
 		"<cffunction name=\"show\">\n<cfset out = '<div>#VARIABLES._render(1)#</div>'>\n</cffunction>\n</cfcomponent>"
 
-	pr := parser.ParseWithOptions(cfpath.ToURI("/tmp/Thing.cfc"), src, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(cfpath.ToURI("/tmp/Thing.cfc"), src, &parser.ParseOptions{ExtractCalls: true})
 	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
 
 	target, reason := r.ResolveCallTarget(parser.CallSite{FuncName: "_render", Line: 6}, pr, "/tmp")

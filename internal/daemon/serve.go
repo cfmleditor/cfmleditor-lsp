@@ -18,7 +18,7 @@ import (
 // Serve listens on the given Unix socket path and serves LSP sessions sharing
 // a single Index. It blocks until ctx is cancelled. If a ConnTracker is
 // provided, each socket connection is tracked.
-func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.Index, ct *ConnTracker, settings server.Settings) error {
+func Serve(ctx context.Context, sockPath string, log cflog.Logger, idx *index.Index, ct *ConnTracker, settings *server.Settings) error {
 	if err := os.MkdirAll(filepath.Dir(sockPath), 0o700); err != nil {
 		return err
 	}

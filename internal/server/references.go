@@ -117,7 +117,7 @@ func (s *Server) functionReferences(word, content string, docURI uri.URI, line, 
 	}
 
 	r := s.getResolver()
-	entries := refs.Find(s.refsFS(), s.searchRoots(), refs.Options{
+	entries := refs.Find(s.refsFS(), s.searchRoots(), &refs.Options{
 		FuncName:           word,
 		Resolvers:          s.cfResolvers(),
 		PropertyResolvers:  s.cfPropertyResolvers(),
@@ -148,7 +148,7 @@ func (s *Server) functionReferences(word, content string, docURI uri.URI, line, 
 
 // componentReferences finds the places a component dot-path is referred to.
 func (s *Server) componentReferences(component string) []protocol.Location {
-	entries := refs.Find(s.refsFS(), s.searchRoots(), refs.Options{
+	entries := refs.Find(s.refsFS(), s.searchRoots(), &refs.Options{
 		Component:          component,
 		Resolvers:          s.cfResolvers(),
 		PropertyResolvers:  s.cfPropertyResolvers(),
@@ -267,7 +267,9 @@ func (s *Server) entryLocations(entries []refs.Entry, name string, useVariable b
 	lines := make(map[string][]string, 8)
 	locs := make([]protocol.Location, 0, len(entries))
 
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
+
 		text, ok := lines[e.File]
 		if !ok {
 			text = s.fileLines(e.File)
