@@ -1352,7 +1352,27 @@ construct in 6.1 was re-checked standalone before being written down, and that
 check is what caught `static { }` (fails alone, parses inside `component { }`)
 being a subtler gap than it first appeared.
 
-### 6.5 `<cfimport>`-prefixed custom tags: two tassweb refusals
+### 6.5 `<cfimport>`-prefixed custom tags: two tassweb refusals, fixed
+
+**Fixed in tree-sitter-cfml #166**, which this server pins from `b2eee65`. Both
+files now parse and format. The fix is in the scanner, and it keeps these tags'
+HTML element shape rather than making them CF tag nodes, so the formatter
+needed no change:
+
+- The scanner reads `prefix` from each `<cfimport>` in the template. Inside the
+  start tag of an element with a recorded prefix, `#` opens a `hash_expression`,
+  so the inner quote no longer ends the attribute value.
+- An unclosed tag the scanner does not know now meets an overflow check, with a
+  128-byte margin kept for CF tags. Past it, the tag closes like `<input>`
+  instead of nesting, and the next `<cfloop>` still fits.
+
+The CF-tag-node version described below was measured and deferred. 4,148 of
+tassweb's 6,597 files import a prefix, and `tagName` here renders a `cf_tag` as
+`<cf` plus its name, so that version would need matching formatter work first.
+Only prefixes from the template's own `<cfimport>` count; one from an including
+file, a `#…#` prefix and CFScript's `import … prefix=…;` are still read as HTML.
+
+The analysis that led there follows, as it was written.
 
 A formatter run over tassweb on 2026-09-25 (6,597 files) refused 9. Seven are
 `</cfsetting>`. The other two come from the same shape, a custom tag imported
@@ -1447,11 +1467,12 @@ There are three ways to fix this in the scanner, in increasing scope:
 
 The third closes both gaps: attributes hash-evaluated like `cf_attribute`, and
 an unpaired tag either void or put under the same overflow guard as `<cf_foo>`.
-It needs the grammar to learn
-the `<cfimport>` prefixes in the file, or to treat any `name:name` tag this way.
-The second is simpler, but also catches namespaced XML elements such as
-`<svg:rect>` and `<xsl:template>`. Deciding between them is tree-sitter-cfml's call.
-Not yet filed.
+It needs the grammar to learn the `<cfimport>` prefixes in the file, or to
+treat any `name:name` tag this way. The second is simpler, but also catches
+namespaced XML elements such as `<svg:rect>` and `<xsl:template>`.
+
+#166 took the first option, and the `<cfimport>`-prefix rule from the third
+without its node shape.
 
 One formatter-side detail turned up on the first file. The grammar marks the
 error with a zero-width `MISSING` node under an alias, for which `IsMissing()`
