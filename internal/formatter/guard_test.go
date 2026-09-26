@@ -48,6 +48,11 @@ func TestGuardStillCatchesRealChanges(t *testing.T) {
 		{"dropped brace", "if (x) { return 1; }", "if (x) return 1;"},
 		{"unmatched brace added", "f()", "f() }"},
 		{"identifier changed", "var total = 1", "var totl = 1"},
+		// The grammar skips U+00A0 as whitespace, but Lucee's parser does not:
+		// its SourceCode normalises only \n, \r and \t to a space. Dropping the
+		// no-break space from BoxLang's includeWhitespace.cfm fixture changes
+		// what the engine reads, so that file stays refused (FORMATTER-ISSUES 4.4).
+		{"no-break space dropped", "<cfset test \t= \"t\">", "<cfset test = \"t\">"},
 	}
 
 	for _, tc := range cases {

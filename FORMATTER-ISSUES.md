@@ -1051,6 +1051,21 @@ annotations, the three comment and separator defects, and the two string-scanner
 mistakes in section 4; the string-literal misread that accounted for seven
 files in 3.5; and the two missing-script-region defects in 3.6.
 
+### 4.4 Refused on purpose: a no-break space between tokens
+
+On the 15,503-file corpus, `ortus-boxlang_BoxLang/src/test/java/TestCases/phase1/includeWhitespace.cfm`
+is guard-rejected, and that is the right answer. Its two lines are
+`<cfset test\u00A0\t\t\t\t= "test">`, a BoxLang fixture written to probe exotic
+whitespace. The grammar skips U+00A0 NO-BREAK SPACE as whitespace (its extras
+include `\p{Zs}`), so the formatter renders `<cfset test = "test">` and the
+character is gone. Lucee's parser does not treat it as whitespace:
+`SourceCode` normalises only `\n`, `\r` and `\t` to a space before
+`removeSpace` looks for one. Dropping it changes what the engine reads. The
+guard already counts U+00A0 as content on purpose (see `spaceLen`), and a case
+in `TestGuardStillCatchesRealChanges` now pins that. Keeping the character would
+mean carrying inter-token text through every renderer, which is not worth it
+for one fixture. So the file stays refused.
+
 ## 5. Reproducing
 
 The corpus scanner is checked in as `TestFormatterCorpus`
