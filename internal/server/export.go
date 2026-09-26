@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ type report struct {
 func (s *Server) handleExport(kind string) (any, error) {
 	roots := s.searchRoots()
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("no workspace root to scan; open a folder first")
+		return nil, errors.New("no workspace root to scan; open a folder first")
 	}
 
 	configDir := roots[0]
@@ -81,7 +82,7 @@ func (s *Server) handleExport(kind string) (any, error) {
 		var written, unlisted []string
 
 		for _, r := range reports {
-			if err := os.WriteFile(r.path, []byte(r.content), 0o644); err != nil { //nolint:gosec // a report committed to the project, read by everyone
+			if err := os.WriteFile(r.path, []byte(r.content), 0o644); err != nil {
 				s.notifyError(ctx, "Could not write "+r.path+": "+err.Error())
 
 				return
@@ -129,7 +130,7 @@ func (s *Server) unresolvedReports(files, targets []string) ([]report, int) {
 		opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
 	}
 
-	rep := unresolved.Scan(s.FS, files, nil, opt)
+	rep := unresolved.Scan(s.FS, files, nil, &opt)
 	byTarget, rest := unresolved.SplitByTarget(rep.Calls, targets)
 
 	out := make([]report, 0, len(targets))
@@ -153,7 +154,7 @@ func (s *Server) cflintReports(ctx context.Context, files, targets []string) ([]
 	s.mu.RUnlock()
 
 	if runner == nil {
-		r, err := cflint.NewRunner(s.LintMinSeverity)
+		r, err := cflint.NewRunner(ctx, s.LintMinSeverity)
 		if err != nil {
 			return nil, 0, err
 		}

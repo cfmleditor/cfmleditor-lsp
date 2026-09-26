@@ -63,13 +63,13 @@ func BenchmarkParse_TagCFC(b *testing.B) {
 
 func BenchmarkParse_ScriptCFC_ExtractCalls(b *testing.B) {
 	for b.Loop() {
-		ParseWithOptions("file:///bench.cfc", benchScriptCFC, ParseOptions{ExtractCalls: true})
+		ParseWithOptions("file:///bench.cfc", benchScriptCFC, &ParseOptions{ExtractCalls: true})
 	}
 }
 
 func BenchmarkParse_TagCFC_ExtractCalls(b *testing.B) {
 	for b.Loop() {
-		ParseWithOptions("file:///bench.cfc", benchTagCFC, ParseOptions{ExtractCalls: true})
+		ParseWithOptions("file:///bench.cfc", benchTagCFC, &ParseOptions{ExtractCalls: true})
 	}
 }
 

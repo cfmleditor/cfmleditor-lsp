@@ -66,7 +66,7 @@ func TestTransitiveDepsResolveAgainstTheirOwnDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pr := parser.ParseWithOptions(uri.File(p), string(content), parser.ParseOptions{ExtractCalls: true})
+		pr := parser.ParseWithOptions(uri.File(p), string(content), &parser.ParseOptions{ExtractCalls: true})
 		idx.IndexFileFromResult(pr.URI, pr.Funcs, pr.ComponentRefs)
 	}
 
@@ -76,11 +76,11 @@ func TestTransitiveDepsResolveAgainstTheirOwnDirectory(t *testing.T) {
 	}
 
 	startPR := parser.ParseWithOptions(uri.File(filepath.Join(root, "Start.cfc")),
-		string(startContent), parser.ParseOptions{ExtractCalls: true})
+		string(startContent), &parser.ParseOptions{ExtractCalls: true})
 
 	// The refs path: file-level `new` refs carry a resolvable Component, which
 	// is what the traversal follows between files.
-	result := Build(Options{
+	result := Build(&Options{
 		DocURI:   "file://" + filepath.Join(root, "Start.cfc"),
 		Refs:     startPR.ComponentRefs,
 		Index:    idx,

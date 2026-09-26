@@ -50,7 +50,7 @@ func TestCFMLHasNoBackslashEscape(t *testing.T) {
 		"  expect( b ).toBeTrue();\n" +
 		" }\n}\n"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	var got []string
 
@@ -149,14 +149,14 @@ func TestAMultiLineStringAttributesItsInterpolationToItsOwnLine(t *testing.T) {
 		"  );\n" +
 		" }\n}\n"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
-	at := strings.Index(src, "generateLink")
-	if at < 0 {
+	before, _, ok := strings.Cut(src, "generateLink")
+	if !ok {
 		t.Fatal("fixture does not contain generateLink")
 	}
 
-	want := uint32(strings.Count(src[:at], "\n")) //nolint:gosec // a line count cannot be negative
+	want := uint32(strings.Count(before, "\n"))
 
 	var found bool
 

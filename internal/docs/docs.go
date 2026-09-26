@@ -61,7 +61,9 @@ func (e *Entry) Doc() string {
 			sb.WriteString("\n\n**Parameters:**\n")
 		}
 
-		for _, p := range e.Params {
+		for i := range e.Params {
+			p := &e.Params[i]
+
 			req := ""
 			if p.Required {
 				req = " *(required)*"

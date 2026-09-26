@@ -55,7 +55,7 @@ func TestScanDoesNotAllocateOverContentWithNoRoutes(t *testing.T) {
 	alloc := func(content string) int64 {
 		r := testing.Benchmark(func(b *testing.B) {
 			for b.Loop() {
-				_ = Scan(content, cfg)
+				_ = Scan(content, &cfg)
 			}
 		})
 
@@ -89,7 +89,7 @@ func TestScanScalesLinearly(t *testing.T) {
 	bench := func(content string) int64 {
 		r := testing.Benchmark(func(b *testing.B) {
 			for b.Loop() {
-				_ = Scan(content, cfg)
+				_ = Scan(content, &cfg)
 			}
 		})
 

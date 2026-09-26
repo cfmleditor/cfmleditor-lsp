@@ -145,27 +145,19 @@ func TestLoggingIsSafeFromManyGoroutines(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 20 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range 50 {
 				logger.Info("concurrent")
 			}
-		}()
+		})
 	}
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		for range 50 {
 			logger.Attach(sink)
 			logger.Attach(nil)
 		}
-	}()
+	})
 
 	wg.Wait()
 }

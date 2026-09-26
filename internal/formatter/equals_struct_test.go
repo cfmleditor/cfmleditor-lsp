@@ -110,7 +110,7 @@ func TestEqualsStructKeyCase(t *testing.T) {
 	opts := testOpts()
 	opts.ScopeCase = "upper"
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

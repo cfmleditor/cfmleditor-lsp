@@ -73,7 +73,7 @@ func TestAppendTrailingCommaDoesNotDuplicate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := New(DefaultOptions())
+			f := New(new(DefaultOptions()))
 			f.out.WriteString(tc.in)
 
 			if !f.appendTrailingComma() {

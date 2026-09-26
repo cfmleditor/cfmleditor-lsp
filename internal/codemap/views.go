@@ -2,6 +2,7 @@ package codemap
 
 import (
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -379,13 +380,7 @@ func (m *Map) Cycles() [][]string {
 }
 
 func selfLoop(adj map[string][]string, node string) bool {
-	for _, n := range adj[node] {
-		if n == node {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(adj[node], node)
 }
 
 // FilterUnder scopes the map to a path prefix, keeping the nodes just outside it

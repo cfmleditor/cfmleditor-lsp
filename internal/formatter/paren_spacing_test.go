@@ -10,7 +10,7 @@ func formatWithParens(t *testing.T, src, spacing string) string {
 	opts.WhitespaceOnly = true
 	opts.ParenSpacing = spacing
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error (parenSpacing=%q): %v", spacing, err)
 	}

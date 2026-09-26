@@ -97,7 +97,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 	s.BeanPaths = nil
 
 	s.applyConfig(config.Resolve(merged, dir))
-	s.restoreUnmentionedBlocks(merged, prev)
+	s.restoreUnmentionedBlocks(merged, &prev)
 }
 
 // optionalBlockState is what a config can leave out, and what has to survive a
@@ -136,7 +136,7 @@ func (s *Server) optionalBlocks() optionalBlockState {
 // What it cannot express is a block that was never written at all, which is the
 // difference between "this config turns the feature on" and "this config has
 // nothing to say about the feature".
-func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev optionalBlockState) {
+func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev *optionalBlockState) {
 	if merged.Formatting == nil {
 		s.Formatting = prev.Formatting
 	}

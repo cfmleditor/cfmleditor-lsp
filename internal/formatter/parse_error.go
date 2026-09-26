@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"errors"
 	"fmt"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -23,7 +24,7 @@ func ParseError(tree *sitter.Tree, src []byte) error {
 
 	errNode := findErrorNode(root)
 	if errNode == nil {
-		return fmt.Errorf("parse error in document, cannot format")
+		return errors.New("parse error in document, cannot format")
 	}
 
 	pos := errNode.StartPosition()

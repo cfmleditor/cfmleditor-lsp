@@ -30,7 +30,7 @@ func TestPropertyDefinition_BeanLookupViaInject(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, content, &parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
@@ -110,7 +110,7 @@ func TestPropertyDefinition_TagCFC(t *testing.T) {
 	content := readTestFile(t, abs)
 	srv.setDocument(docURI, content)
 
-	pr := parser.ParseWithOptions(docURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, content, &parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)

@@ -137,7 +137,7 @@ func cmdUnresolved(args []string) {
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
 
-	rep := unresolved.Scan(fsys, files, scanFiles, opt)
+	rep := unresolved.Scan(fsys, files, scanFiles, &opt)
 	results := rep.Calls
 
 	switch {
@@ -165,7 +165,11 @@ func cmdUnresolved(args []string) {
 	case jsonOutput:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(results)
+
+		if err := enc.Encode(results); err != nil {
+			fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+			os.Exit(1)
+		}
 	case knownIssuesOutput:
 		baseDir, _ := filepath.Abs(searchDir)
 		if cfg != nil {
@@ -183,7 +187,9 @@ func cmdUnresolved(args []string) {
 			fmt.Fprintf(os.Stderr, "%d entries outside %s left out; --include-workspace writes them as ../ paths\n", skipped, baseDir)
 		}
 	default:
-		for _, r := range results {
+		for i := range results {
+			r := &results[i]
+
 			fmt.Printf("%s:%d: %s (%s)\n", r.File, r.Line+1, r.CallText(), r.Reason)
 		}
 	}
@@ -203,7 +209,7 @@ func writeReport(path string, calls []unresolved.Call, regenerate string) (int, 
 
 	skipped := unresolved.WriteKnownIssues(&b, calls, filepath.Dir(path), false, regenerate, version)
 
-	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o644) //nolint:gosec // a report committed to the project, read by everyone
+	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func collectCFMLFiles(fsys vfs.FS, roots []string) []string {

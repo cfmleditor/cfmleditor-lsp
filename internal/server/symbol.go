@@ -37,7 +37,9 @@ func (s *Server) handleDocumentSymbol(_ context.Context, rawParams []byte) (any,
 
 	symbols := make([]protocol.DocumentSymbol, 0, len(defs))
 
-	for _, d := range defs {
+	for i := range defs {
+		d := &defs[i]
+
 		r := protocol.Range{
 			Start: protocol.Position{Line: d.Line, Character: 0},
 			End:   protocol.Position{Line: d.Line, Character: 0},

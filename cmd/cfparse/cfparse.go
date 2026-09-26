@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +31,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	}
 
 	if len(args) == 0 {
-		return pa, fmt.Errorf("usage: cfparse [-profile cpu.prof] <file-or-dir> [...]")
+		return pa, errors.New("usage: cfparse [-profile cpu.prof] <file-or-dir> [...]")
 	}
 
 	pa.targets = args
@@ -56,9 +57,9 @@ func collectFiles(targets []string) ([]string, error) {
 			continue
 		}
 
-		filepath.Walk(target, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck
+		filepath.Walk(target, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck // the callback swallows every error, so Walk has none to return
 			if err != nil {
-				return nil //nolint:nilerr
+				return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
 			}
 
 			ext := strings.ToLower(filepath.Ext(path))

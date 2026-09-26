@@ -389,7 +389,7 @@ type expansion struct {
 // the same build. Longest-first means a more specific alias ("ui.web.lab") beats
 // a broader one ("ui.web") that also matches, and the replacements inside one
 // alias stay in the order the config lists them, which is the author's priority.
-func (c Config) expansions(segs []string) []expansion {
+func (c *Config) expansions(segs []string) []expansion {
 	// The route as written comes first, then each suffix-stripped reading, so a
 	// suffix that is also a genuine trailing segment somewhere still resolves the
 	// way it did before the suffix was configured.

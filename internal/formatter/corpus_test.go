@@ -229,7 +229,7 @@ func classifyCorpusFile(src []byte) (verdict corpusVerdict, detail string) {
 		return verdictParseRefused, "grammar produced an ERROR node"
 	}
 
-	out, err := Format(src, tree, opts)
+	out, err := Format(src, tree, &opts)
 
 	if scriptFailed {
 		detail := "embedded cfscript/cfquery produced an ERROR node"
@@ -251,7 +251,7 @@ func classifyCorpusFile(src []byte) (verdict corpusVerdict, detail string) {
 		return verdictUnstable, "formatted output no longer parses"
 	}
 
-	again, err := Format(out, second, opts)
+	again, err := Format(out, second, &opts)
 	if err != nil {
 		return verdictUnstable, "second format refused: " + err.Error()
 	}
@@ -260,7 +260,7 @@ func classifyCorpusFile(src []byte) (verdict corpusVerdict, detail string) {
 		return verdictUnstable, firstDifferingLine(out, again)
 	}
 
-	if shape := malformedShape(out, opts); shape != "" {
+	if shape := malformedShape(out, &opts); shape != "" {
 		return verdictMalformed, shape
 	}
 
@@ -285,7 +285,7 @@ func classifyCorpusFile(src []byte) (verdict corpusVerdict, detail string) {
 //
 // What is left is narrow on purpose. It does not claim to find every malformed
 // output, only to stop this class of defect from being counted clean.
-func malformedShape(out []byte, opts Options) string {
+func malformedShape(out []byte, opts *Options) string {
 	lines := strings.Split(string(out), "\n")
 	strs := stringSpansOf(out, scriptRegionsOf(out))
 

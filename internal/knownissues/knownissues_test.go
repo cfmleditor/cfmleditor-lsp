@@ -49,19 +49,19 @@ func TestDiagnosticAnchorsAtTheCallAndFollowsAnEdit(t *testing.T) {
 	}
 
 	// Recorded on line 3 (index 2): underlined at run.
-	d := Diagnostic(Entry{Line: 2, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
+	d := Diagnostic(&Entry{Line: 2, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
 	if d.Range.Start.Line != 2 || d.Range.Start.Character != 16 || d.Range.End.Character != 19 {
 		t.Errorf("on its line: %+v", d.Range)
 	}
 
 	// Recorded on line 1 after an edit moved the call down: found again.
-	d = Diagnostic(Entry{Line: 0, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
+	d = Diagnostic(&Entry{Line: 0, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
 	if d.Range.Start.Line != 2 {
 		t.Errorf("after an edit: %+v", d.Range)
 	}
 
 	// Free text covers the line's text.
-	d = Diagnostic(Entry{Line: 1, Col: -1, Message: "TODO tidy this"}, lines, protocol.DiagnosticSeverityInformation, "todo")
+	d = Diagnostic(&Entry{Line: 1, Col: -1, Message: "TODO tidy this"}, lines, protocol.DiagnosticSeverityInformation, "todo")
 	if d.Range.Start.Line != 1 || d.Range.Start.Character != 1 || d.Range.End.Character != uint32(len(lines[1])) {
 		t.Errorf("free text: %+v", d.Range)
 	}
@@ -113,14 +113,14 @@ func TestTaggedEntriesCarryTheirCodeAndSeverity(t *testing.T) {
 		t.Errorf("tagged: %+v", lint)
 	}
 
-	d := Diagnostic(lint, nil, protocol.DiagnosticSeverityInformation, "cflint")
+	d := Diagnostic(&lint, nil, protocol.DiagnosticSeverityInformation, "cflint")
 	if d.Code != protocol.String("MISSING_VAR") || d.Severity != protocol.DiagnosticSeverityError {
 		t.Errorf("diagnostic: code %v severity %v", d.Code, d.Severity)
 	}
 
 	// An unresolved entry has no tag and keeps the file's severity and code.
 	plain := Parse("a.cfc:2: svc.run (reason)\n", "/p")[0]
-	if d := Diagnostic(plain, nil, protocol.DiagnosticSeverityWarning, "known issue"); d.Code != protocol.String("known-issue") || d.Severity != protocol.DiagnosticSeverityWarning {
+	if d := Diagnostic(&plain, nil, protocol.DiagnosticSeverityWarning, "known issue"); d.Code != protocol.String("known-issue") || d.Severity != protocol.DiagnosticSeverityWarning {
 		t.Errorf("untagged diagnostic: %+v", d)
 	}
 }
@@ -131,14 +131,14 @@ func TestTaggedEntriesCarryTheirCodeAndSeverity(t *testing.T) {
 func TestDiagnosticColumnsCountUTF16Units(t *testing.T) {
 	lines := []string{"\t<cfset s = \"😀😀\" & svc.run(a)>"}
 
-	d := Diagnostic(Entry{Line: 0, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
+	d := Diagnostic(&Entry{Line: 0, Col: -1, Message: "svc.run (method 'run' not found in x)"}, lines, protocol.DiagnosticSeverityWarning, "known issue")
 
 	// `\t<cfset s = "` is 13 units, the emoji 4, `" & svc.` 8.
 	if d.Range.Start.Character != 25 || d.Range.End.Character != 28 {
 		t.Errorf("method underline %+v, want characters 25-28", d.Range)
 	}
 
-	d = Diagnostic(Entry{Line: 0, Col: -1, Message: "TODO tidy this"}, lines, protocol.DiagnosticSeverityInformation, "todo")
+	d = Diagnostic(&Entry{Line: 0, Col: -1, Message: "TODO tidy this"}, lines, protocol.DiagnosticSeverityInformation, "todo")
 
 	// The whole line after its tab: 1 to 32, where the byte length is 36.
 	if d.Range.Start.Character != 1 || d.Range.End.Character != 32 {
@@ -146,7 +146,7 @@ func TestDiagnosticColumnsCountUTF16Units(t *testing.T) {
 	}
 
 	// An explicit column is CFLint's, already in UTF-16 units, and kept.
-	d = Diagnostic(Entry{Line: 0, Col: 20, Message: "Avoid something"}, lines, protocol.DiagnosticSeverityWarning, "cflint")
+	d = Diagnostic(&Entry{Line: 0, Col: 20, Message: "Avoid something"}, lines, protocol.DiagnosticSeverityWarning, "cflint")
 	if d.Range.Start.Character != 20 || d.Range.End.Character != 32 {
 		t.Errorf("explicit column %+v, want characters 20-32", d.Range)
 	}

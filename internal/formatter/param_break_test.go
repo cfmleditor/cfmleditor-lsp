@@ -12,7 +12,7 @@ func formatWithParamBreak(t *testing.T, src string, threshold int) string {
 	opts.WhitespaceOnly = true
 	opts.ParamBreakThreshold = threshold
 
-	out, err := Format([]byte(src), parse(t, src), opts)
+	out, err := Format([]byte(src), parse(t, src), &opts)
 	if err != nil {
 		t.Fatalf("format error (paramBreakThreshold=%d): %v", threshold, err)
 	}

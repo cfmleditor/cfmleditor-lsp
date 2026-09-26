@@ -221,7 +221,7 @@ func TestDisabledConfigResolvesNothing(t *testing.T) {
 		t.Errorf("an empty config resolved %+v", got)
 	}
 
-	if (Config{Attributes: []string{"data-view"}}).Enabled() {
+	if (&Config{Attributes: []string{"data-view"}}).Enabled() {
 		t.Error("a config with sources but no rules reports itself enabled")
 	}
 }

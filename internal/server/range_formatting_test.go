@@ -67,7 +67,7 @@ z = 3;
 func formatWhole(t *testing.T, content string) string {
 	t.Helper()
 
-	out, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: false, TabSize: 4}, resolvedFormatting())
+	out, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: false, TabSize: 4}, new(resolvedFormatting()))
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

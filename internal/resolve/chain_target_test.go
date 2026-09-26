@@ -48,7 +48,7 @@ func TestChainThroughDynamicHopIsDynamic(t *testing.T) {
 		Chain:     []string{"getSandBox", "getAttendanceObj"},
 	}
 
-	target, reason := r.ResolveCallTarget(call, &parser.ParseResult{}, dir)
+	target, reason := r.ResolveCallTarget(&call, &parser.ParseResult{}, dir)
 	if reason != "" {
 		t.Fatalf("unresolved: %s", reason)
 	}
@@ -91,7 +91,7 @@ func TestMissingComponentIsReportedAsMissing(t *testing.T) {
 			want: "method 'nowhere' not found in packages.gone.service|Kernel",
 		},
 	} {
-		_, reason := r.ResolveCallTarget(tc.call, &parser.ParseResult{}, dir)
+		_, reason := r.ResolveCallTarget(&tc.call, &parser.ParseResult{}, dir)
 		if !strings.HasPrefix(reason, tc.want) {
 			t.Errorf("%s: reason %q, want prefix %q", tc.name, reason, tc.want)
 		}
@@ -107,7 +107,7 @@ func TestChainThroughUntypedInitKeepsTheObject(t *testing.T) {
 
 	call := parser.CallSite{FuncName: "getName", Component: "Kernel", Chain: []string{"init"}}
 
-	target, reason := r.ResolveCallTarget(call, &parser.ParseResult{}, dir)
+	target, reason := r.ResolveCallTarget(&call, &parser.ParseResult{}, dir)
 	if reason != "" {
 		t.Fatalf("unresolved: %s", reason)
 	}
@@ -154,7 +154,7 @@ func TestDynamicIfMissingSilencesOnlyItsOwnGuesses(t *testing.T) {
 }`
 
 	file := filepath.Join(dir, "Work.cfc")
-	pr := parser.ParseWithOptions(cfpath.ToURI(file), src, parser.ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), src, &parser.ParseOptions{Resolvers: resolvers, ExtractCalls: true, ScanAllScopes: true})
 	r := &Resolver{FS: vfs.OS{}, Index: index.New(), Resolvers: resolvers, Mappings: map[string]string{"packages": filepath.Join(dir, "packages")}}
 
 	want := map[string]string{
@@ -173,7 +173,7 @@ func TestDynamicIfMissingSilencesOnlyItsOwnGuesses(t *testing.T) {
 
 		delete(want, c.FuncName)
 
-		if _, reason := r.ResolveCallTarget(c, pr, dir); !strings.HasPrefix(reason, w) || (w == "" && reason != "") {
+		if _, reason := r.ResolveCallTarget(&c, pr, dir); !strings.HasPrefix(reason, w) || (w == "" && reason != "") {
 			t.Errorf("%s: reason %q, want prefix %q", c.FuncName, reason, w)
 		}
 	}
@@ -192,15 +192,15 @@ func TestBareCallToAVariablesScopedFunctionIsDynamic(t *testing.T) {
 	src := "<cfcomponent>\n<cffunction name=\"init\">\n<cfargument name=\"render\">\n<cfset VARIABLES._render = ARGUMENTS.render>\n</cffunction>\n" +
 		"<cffunction name=\"show\">\n<cfset out = '<div>#VARIABLES._render(1)#</div>'>\n</cffunction>\n</cfcomponent>"
 
-	pr := parser.ParseWithOptions(cfpath.ToURI("/tmp/Thing.cfc"), src, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(cfpath.ToURI("/tmp/Thing.cfc"), src, &parser.ParseOptions{ExtractCalls: true})
 	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
 
-	target, reason := r.ResolveCallTarget(parser.CallSite{FuncName: "_render", Line: 6}, pr, "/tmp")
+	target, reason := r.ResolveCallTarget(&parser.CallSite{FuncName: "_render", Line: 6}, pr, "/tmp")
 	if reason != "" || target.Kind != TargetDynamic {
 		t.Errorf("got %q %q, want a dynamic target", target.Kind, reason)
 	}
 
-	if _, reason := r.ResolveCallTarget(parser.CallSite{FuncName: "neverAssigned", Line: 6}, pr, "/tmp"); reason == "" {
+	if _, reason := r.ResolveCallTarget(&parser.CallSite{FuncName: "neverAssigned", Line: 6}, pr, "/tmp"); reason == "" {
 		t.Error("a bare call to a name nothing assigns must stay unresolved")
 	}
 }

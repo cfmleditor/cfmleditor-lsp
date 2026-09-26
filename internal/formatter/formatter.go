@@ -109,7 +109,7 @@ type Options struct {
 // Unset they disagree, because that is what the formatter has always done and
 // changing it silently would reformat every file in every project. "pad" and
 // "tight" are how a project asks for one rule in both places.
-func (o Options) condPad() string {
+func (o *Options) condPad() string {
 	if o.ParenSpacing == "tight" {
 		return ""
 	}
@@ -117,7 +117,7 @@ func (o Options) condPad() string {
 	return " "
 }
 
-func (o Options) argPad() string {
+func (o *Options) argPad() string {
 	if o.ParenSpacing == "pad" {
 		return " "
 	}
@@ -129,7 +129,7 @@ func (o Options) argPad() string {
 // own (Allman) rather than following the construct's header (K&R). Anything
 // other than "next-line", the empty string included, is same-line, so a
 // project that never set this keeps byte-for-byte what it had.
-func (o Options) nextLineBraces() bool {
+func (o *Options) nextLineBraces() bool {
 	return o.BraceStyle == "next-line"
 }
 
@@ -153,7 +153,7 @@ func (f *Formatter) padded(inner string) string {
 // and a real file in the corpus — took the formatter down rather than emitting
 // the tag. Clamping keeps this function total for every caller; the individual
 // level counters are still kept balanced at their own sites.
-func (o Options) indent(level int) string {
+func (o *Options) indent(level int) string {
 	if level <= 0 {
 		return ""
 	}
@@ -170,11 +170,11 @@ func (o Options) indent(level int) string {
 	return strings.Repeat(" ", w*level)
 }
 
-func (o Options) queryCommaLeading() bool {
+func (o *Options) queryCommaLeading() bool {
 	return o.QueryCommaPosition == "before"
 }
 
-func (o Options) queryCommaPreserve() bool {
+func (o *Options) queryCommaPreserve() bool {
 	if o.QueryCommaPosition != "" {
 		return o.QueryCommaPosition == "preserve"
 	}
@@ -235,7 +235,12 @@ type Formatter struct {
 }
 
 // New creates a Formatter with the given options.
-func New(opts Options) *Formatter {
+func New(opts *Options) *Formatter {
+	// The formatter keeps its own copy: the defaults below are written into
+	// it, and must not reach the caller's struct.
+	o := *opts
+	opts = &o
+
 	if opts.IndentWidth == 0 {
 		opts.IndentWidth = 4
 	}
@@ -248,12 +253,13 @@ func New(opts Options) *Formatter {
 		opts.AttrBreakThreshold = 3
 	}
 
-	return &Formatter{opts: opts, atBOL: true, lastNL: true}
+	return &Formatter{opts: o, atBOL: true, lastNL: true}
 }
 
 // Format parses src with the provided tree-sitter parser and returns
 // formatted CFML.
-func Format(src []byte, tree *sitter.Tree, opts Options) (out []byte, err error) {
+// opts is only read.
+func Format(src []byte, tree *sitter.Tree, opts *Options) (out []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = nil
@@ -1287,7 +1293,7 @@ func (f *Formatter) dropWhitespaceOnlyLine() bool {
 // output buffer. Used in trailing-comma mode when a source comma appears at
 // the start of a new line — it gets moved to the end of the previous line.
 // Returns true if the comma was successfully appended.
-func (f *Formatter) appendTrailingComma() bool { //nolint:unparam // return used for future callers
+func (f *Formatter) appendTrailingComma() bool {
 	b := f.out.Bytes()
 	// Walk backwards past trailing whitespace/newlines to find the last content line
 	i := len(b) - 1
@@ -1636,7 +1642,7 @@ func (f *Formatter) saveState() formatterState {
 	}
 }
 
-func (f *Formatter) restoreState(s formatterState) {
+func (f *Formatter) restoreState(s *formatterState) {
 	f.out.Truncate(s.outLen)
 	f.level = s.level
 	f.atBOL = s.atBOL
@@ -1680,7 +1686,7 @@ func (f *Formatter) rendersOnOneLine(emit func()) bool {
 
 	fits := !bytes.ContainsRune(rendered, '\n') && col+len(rendered) <= f.opts.LineWidth
 
-	f.restoreState(saved)
+	f.restoreState(&saved)
 
 	return fits
 }
@@ -2198,7 +2204,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 				f.write("\n")
 			}
 
-			if kind == "comment" { //nolint:gocritic // ifElseChain: intentional for readability
+			if kind == "comment" {
 				f.formatComment(c)
 			} else {
 				f.formatNode(c)

@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"io"
 	"net"
 	"os"
@@ -12,7 +13,11 @@ import (
 // Proxy connects to an existing daemon socket and bridges it to stdio.
 // Returns nil on clean shutdown.
 func Proxy(sockPath string) error {
-	conn, err := net.Dial("unix", sockPath)
+	// Proxy has no context of its own: it runs for the life of the editor's
+	// connection and ends when either side closes.
+	var d net.Dialer
+
+	conn, err := d.DialContext(context.Background(), "unix", sockPath)
 	if err != nil {
 		return err
 	}

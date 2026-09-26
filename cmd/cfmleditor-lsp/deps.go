@@ -106,7 +106,11 @@ func cmdDeps(args []string) {
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(result)
+
+	if err := enc.Encode(result); err != nil {
+		fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // depsResolver builds the resolver and index the traversal needs. Resolution is
@@ -161,7 +165,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		}
 
 		abs, _ := filepath.Abs(f)
-		pr := parser.ParseWithOptions(uri.File(abs), string(content), parser.ParseOptions{
+		pr := parser.ParseWithOptions(uri.File(abs), string(content), &parser.ParseOptions{
 			Resolvers: cfResolvers, ExpressionMappings: expressionMappings,
 			InterpolateAllText: depsInterpolateAll,
 		})
@@ -191,7 +195,7 @@ func depsForFile(path string, resolver *resolve.Resolver, idx *index.Index) []gr
 	abs, _ := filepath.Abs(path)
 	fileURI := uri.File(abs)
 
-	pr := parser.ParseWithOptions(fileURI, string(content), parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, string(content), &parser.ParseOptions{
 		Resolvers: resolver.Resolvers, ExpressionMappings: resolver.ExpressionMappings,
 		ExtractCalls: true, InterpolateAllText: depsInterpolateAll,
 	})
@@ -201,7 +205,7 @@ func depsForFile(path string, resolver *resolve.Resolver, idx *index.Index) []gr
 		calls = append(calls, pr.FuncCalls(sc.Start, sc.End)...)
 	}
 
-	result := deps.Build(deps.Options{
+	result := deps.Build(&deps.Options{
 		DocURI:    string(fileURI),
 		Calls:     calls,
 		Refs:      pr.ComponentRefs,
@@ -229,7 +233,7 @@ func depsCallLoader(resolver *resolve.Resolver) func(uri.URI, string) ([]parser.
 				return nil, nil
 			}
 
-			pr = parser.ParseWithOptions(fileURI, string(data), parser.ParseOptions{
+			pr = parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
 				Resolvers: resolver.Resolvers, ExpressionMappings: resolver.ExpressionMappings,
 				ExtractCalls: true, InterpolateAllText: depsInterpolateAll,
 			})
@@ -241,7 +245,9 @@ func depsCallLoader(resolver *resolve.Resolver) func(uri.URI, string) ([]parser.
 		}
 
 		for _, sc := range pr.Scopes {
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if !strings.EqualFold(f.Name, funcName) || int(f.Line) != sc.Start {
 					continue
 				}

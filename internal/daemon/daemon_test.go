@@ -60,7 +60,7 @@ func TestServeMultipleClients(t *testing.T) {
 	// Simulate the stdio client that main.go adds before Serve starts
 	ct.Add()
 
-	go func() { _ = Serve(ctx, sock, log, idx, ct, server.Settings{}) }()
+	go func() { _ = Serve(ctx, sock, log, idx, ct, &server.Settings{}) }()
 
 	waitForSocket(t, sock)
 
@@ -124,11 +124,11 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 	idx := index.New()
 
 	// No ConnTracker — we just verify the RPC layer works
-	go func() { _ = Serve(ctx, sock, log, idx, nil, server.Settings{}) }()
+	go func() { _ = Serve(ctx, sock, log, idx, nil, &server.Settings{}) }()
 
 	waitForSocket(t, sock)
 
-	conn, err := net.Dial("unix", sock)
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatalf("proxy dial failed: %v", err)
 	}
@@ -163,13 +163,13 @@ func TestDaemonSurvivesAbruptClientDisconnect(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)
 
 	// Connect a client and immediately close the raw connection (simulates crash)
-	c, _ := net.Dial("unix", sock)
+	c, _ := (&net.Dialer{}).DialContext(t.Context(), "unix", sock)
 	_ = c.Close()
 
 	time.Sleep(100 * time.Millisecond)
@@ -197,7 +197,7 @@ func TestDaemonShutdownClosesSocketClients(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)
@@ -227,7 +227,7 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 	ct.Add() // stdio slot
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), idx, ct, &server.Settings{})
 	}()
 
 	waitForSocket(t, sock)
@@ -268,7 +268,9 @@ func TestMultipleConnectionsShareIndex(t *testing.T) {
 func shortSock(t *testing.T) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("/tmp", "cfe")
+	// Not t.TempDir: a Unix socket path is limited to about 104 bytes, and a
+	// directory named after the test overruns it on macOS.
+	dir, err := os.MkdirTemp("/tmp", "cfe") //nolint:usetesting // see above
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func waitForSocket(t *testing.T, sock string) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", sock); err == nil {
+		if c, err := (&net.Dialer{}).DialContext(t.Context(), "unix", sock); err == nil {
 			_ = c.Close()
 
 			return
@@ -301,7 +303,7 @@ func waitForSocket(t *testing.T, sock string) {
 func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2.Conn) {
 	t.Helper()
 
-	c, err := net.Dial("unix", sock)
+	c, err := (&net.Dialer{}).DialContext(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}

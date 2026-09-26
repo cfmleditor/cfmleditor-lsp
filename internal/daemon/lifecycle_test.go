@@ -166,7 +166,7 @@ func TestServeCleansUpItsSocket(t *testing.T) {
 	served := make(chan struct{})
 
 	go func() {
-		_ = Serve(ctx, sock, cflog.NewLogger(false), index.New(), nil, server.Settings{})
+		_ = Serve(ctx, sock, cflog.NewLogger(false), index.New(), nil, &server.Settings{})
 
 		close(served)
 	}()
@@ -204,7 +204,7 @@ func TestUnixListenerUnlinksOnClose(t *testing.T) {
 
 	sock := shortSock(t)
 
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

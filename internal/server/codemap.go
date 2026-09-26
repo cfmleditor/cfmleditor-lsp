@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,10 +63,10 @@ func (s *Server) handleGenerateCodeMap(params []protocol.LSPAny) (any, error) {
 
 	roots := s.searchRoots()
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("no workspace root to map; open a folder first")
+		return nil, errors.New("no workspace root to map; open a folder first")
 	}
 
-	out, err := s.codeMapOutputPath(req, roots[0])
+	out, err := s.codeMapOutputPath(&req, roots[0])
 	if err != nil {
 		return nil, err
 	}
@@ -79,14 +80,14 @@ func (s *Server) handleGenerateCodeMap(params []protocol.LSPAny) (any, error) {
 
 		s.notifyInfo(ctx, "Building code map…")
 
-		m, err := s.buildCodeMap(req, roots)
+		m, err := s.buildCodeMap(&req, roots)
 		if err != nil {
 			s.notifyError(ctx, "Code map failed: "+err.Error())
 
 			return
 		}
 
-		if err := s.writeCodeMap(m, req, out); err != nil {
+		if err := s.writeCodeMap(m, &req, out); err != nil {
 			s.notifyError(ctx, "Could not write "+out+": "+err.Error())
 
 			return
@@ -114,7 +115,7 @@ func (s *Server) handleGenerateCodeMap(params []protocol.LSPAny) (any, error) {
 	return map[string]any{"path": out, "started": true}, nil
 }
 
-func (s *Server) buildCodeMap(req codeMapRequest, roots []string) (*codemap.Map, error) {
+func (s *Server) buildCodeMap(req *codeMapRequest, roots []string) (*codemap.Map, error) {
 	files := collectWorkspaceCFMLFiles(s, roots)
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no CFML files under %s", strings.Join(roots, ", "))
@@ -132,7 +133,7 @@ func (s *Server) buildCodeMap(req codeMapRequest, roots []string) (*codemap.Map,
 		InterpolateAllText:       !s.Features.OutputContextInterpolation,
 	}
 
-	m := codemap.Build(codemap.Options{
+	m := codemap.Build(&codemap.Options{
 		Root:                     roots[0],
 		Files:                    files,
 		FS:                       s.FS,
@@ -148,7 +149,7 @@ func (s *Server) buildCodeMap(req codeMapRequest, roots []string) (*codemap.Map,
 	return applyCodeMapViews(m, req), nil
 }
 
-func applyCodeMapViews(m *codemap.Map, req codeMapRequest) *codemap.Map {
+func applyCodeMapViews(m *codemap.Map, req *codeMapRequest) *codemap.Map {
 	if req.Under != "" {
 		m = m.FilterUnder(req.Under)
 	}
@@ -174,7 +175,7 @@ func applyCodeMapViews(m *codemap.Map, req codeMapRequest) *codemap.Map {
 	return m
 }
 
-func (s *Server) writeCodeMap(m *codemap.Map, req codeMapRequest, out string) error {
+func (s *Server) writeCodeMap(m *codemap.Map, req *codeMapRequest, out string) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(out), err)
 	}
@@ -215,7 +216,7 @@ func (s *Server) writeCodeMap(m *codemap.Map, req codeMapRequest, out string) er
 // A command an editor can invoke with arbitrary arguments is a command that can
 // be asked to write anywhere on the filesystem. Keeping it inside the workspace
 // means the worst a bad argument does is leave a file the user can see and delete.
-func (s *Server) codeMapOutputPath(req codeMapRequest, root string) (string, error) {
+func (s *Server) codeMapOutputPath(req *codeMapRequest, root string) (string, error) {
 	out := req.Out
 	if out == "" {
 		return filepath.Join(root, ".cfmleditor", "codemap"+codeMapExt(req.Format)), nil
@@ -389,10 +390,10 @@ func (s *Server) notifyError(ctx context.Context, msg string) {
 func (s *Server) handleCodeMapStats(ctx context.Context, params []protocol.LSPAny) (any, error) {
 	roots := s.searchRoots()
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("no workspace root to map; open a folder first")
+		return nil, errors.New("no workspace root to map; open a folder first")
 	}
 
-	m, err := s.buildCodeMap(parseCodeMapRequest(params), roots)
+	m, err := s.buildCodeMap(new(parseCodeMapRequest(params)), roots)
 	if err != nil {
 		return nil, err
 	}

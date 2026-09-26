@@ -116,7 +116,7 @@ func TestHunks(t *testing.T) {
 // would think to write by hand: whatever the edit, applying the hunks to a must
 // reproduce b exactly.
 func TestHunksRoundTrip(t *testing.T) {
-	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic fixture generation, not security
+	rng := rand.New(rand.NewPCG(1, 2))
 
 	for range 400 {
 		n := rng.IntN(14)

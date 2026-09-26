@@ -75,7 +75,7 @@ type deferredItems struct {
 
 // key names the docs entry item i of the full list came from, or "" for an
 // item with nothing to defer.
-func (v *deferredItems) get(d completionDefer, full func() []protocol.CompletionItem, key func(i int, it protocol.CompletionItem) string) []protocol.CompletionItem {
+func (v *deferredItems) get(d completionDefer, full func() []protocol.CompletionItem, key func(i int, it *protocol.CompletionItem) string) []protocol.CompletionItem {
 	i := d.variant()
 	if i == 0 {
 		return full()
@@ -85,8 +85,10 @@ func (v *deferredItems) get(d completionDefer, full func() []protocol.Completion
 		src := full()
 		out := make([]protocol.CompletionItem, len(src))
 
-		for j, it := range src {
-			if k := key(j, it); k != "" {
+		for j := range src {
+			it := src[j] // the copy that becomes the deferred item
+
+			if k := key(j, &it); k != "" {
 				if d.documentation {
 					it.Documentation = nil
 				}
@@ -131,7 +133,7 @@ func (s *Server) memberFuncItems() []protocol.CompletionItem {
 // is the entry's name, so a built-in carries no data of its own on the wire:
 // resolve recognises one by its sort text, which only built-ins start with
 // SortBuiltinFuncs, and looks its label up.
-func builtinKey(_ int, it protocol.CompletionItem) string {
+func builtinKey(_ int, it *protocol.CompletionItem) string {
 	if it.Kind != protocol.CompletionItemKindFunction {
 		return ""
 	}
@@ -143,7 +145,7 @@ func builtinKey(_ int, it protocol.CompletionItem) string {
 // when the list was built. A member name is not unique — len is arrayLen's,
 // stringLen's and structLen's — so the entry travels in the item's data and
 // resolve reads it from there.
-func memberKey(i int, _ protocol.CompletionItem) string {
+func memberKey(i int, _ *protocol.CompletionItem) string {
 	getMemberFuncItems()
 
 	return memberFuncEntries[i]
@@ -194,7 +196,7 @@ func resolveCompletionItem(item *protocol.CompletionItem) {
 		// of the entry it came from. Its label is not: member len resolved
 		// by label would find the built-in Len.
 		if len(item.Data) > 0 {
-			_ = json.Unmarshal(item.Data, &name) //nolint:errcheck // unreadable data resolves nothing
+			_ = json.Unmarshal(item.Data, &name)
 		}
 	}
 

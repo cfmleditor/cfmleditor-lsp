@@ -88,7 +88,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 
 	for {
 		line, err := reader.ReadBytes('\n')
-		if len(strings.TrimSpace(string(line))) > 0 {
+		if strings.TrimSpace(string(line)) != "" {
 			if writeErr := s.handleLine(line, enc, writer); writeErr != nil {
 				return writeErr
 			}

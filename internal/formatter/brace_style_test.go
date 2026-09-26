@@ -12,7 +12,7 @@ func formatWithBraces(t *testing.T, src, style string) string {
 	opts.WhitespaceOnly = true
 	opts.BraceStyle = style
 
-	out, err := Format([]byte(src), parse(t, src), opts)
+	out, err := Format([]byte(src), parse(t, src), &opts)
 	if err != nil {
 		t.Fatalf("format error (braceStyle=%q): %v", style, err)
 	}

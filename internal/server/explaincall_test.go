@@ -241,9 +241,11 @@ func codeActions(t *testing.T, srv *Server, docURI uri.URI, pos protocol.Positio
 func codeActionCommands(t *testing.T, srv *Server, docURI uri.URI, pos protocol.Position) []string {
 	t.Helper()
 
+	actions := codeActions(t, srv, docURI, pos)
+
 	var commands []string
-	for _, a := range codeActions(t, srv, docURI, pos) {
-		commands = append(commands, a.Command.Command)
+	for i := range actions {
+		commands = append(commands, actions[i].Command.Command)
 	}
 
 	return commands

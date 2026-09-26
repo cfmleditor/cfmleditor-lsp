@@ -74,8 +74,8 @@ type Runner struct {
 // severe than it are dropped. An empty or unrecognised value reports
 // everything — see MinSeverityRank, which is where a caller should check a
 // configured value if it wants to warn about a typo.
-func NewRunner(minSeverity string) (*Runner, error) {
-	binPath, err := ensureBinary()
+func NewRunner(ctx context.Context, minSeverity string) (*Runner, error) {
+	binPath, err := ensureBinary(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -143,14 +143,16 @@ func eachDiagnostic(result Result, minRank int, fn func(file string, d protocol.
 
 		sev := mapSeverity(issue.Severity)
 
-		for _, loc := range issue.Locations {
+		for i := range issue.Locations {
+			loc := &issue.Locations[i]
+
 			line := max(loc.Line-1, 0)
 			col := max(loc.Column-1, 0)
 
 			fn(loc.File, protocol.Diagnostic{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(line), Character: uint32(col)}, //nolint:gosec // clamped to 0 above
-					End:   protocol.Position{Line: uint32(line), Character: uint32(col)}, //nolint:gosec // as above
+					Start: protocol.Position{Line: uint32(line), Character: uint32(col)},
+					End:   protocol.Position{Line: uint32(line), Character: uint32(col)},
 				},
 				Severity: sev,
 				Source:   protocol.NewOptional("cflint"),
@@ -382,8 +384,8 @@ var releaseClient = &http.Client{
 	},
 }
 
-func latestVersion() string {
-	return latestVersionFrom(latestRelease)
+func latestVersion(ctx context.Context) string {
+	return latestVersionFrom(ctx, latestRelease)
 }
 
 // latestVersionFrom reads the tag `latest` points at, from GitHub's own
@@ -394,8 +396,13 @@ func latestVersion() string {
 // behind one NAT, and an office that hits it spends the rest of the hour
 // pinned to fallbackVersion with nothing saying why. `/releases/latest`
 // redirects to `/releases/tag/<tag>` with no API involved and no limit.
-func latestVersionFrom(url string) string {
-	resp, err := releaseClient.Get(url) //nolint:gosec // trusted URL
+func latestVersionFrom(ctx context.Context, url string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return fallbackVersion
+	}
+
+	resp, err := releaseClient.Do(req)
 	if err != nil {
 		return fallbackVersion
 	}
@@ -421,12 +428,12 @@ func latestVersionFrom(url string) string {
 func tagFromRedirect(location string) string {
 	const marker = "/releases/tag/"
 
-	at := strings.Index(location, marker)
-	if at < 0 {
+	_, after, ok := strings.Cut(location, marker)
+	if !ok {
 		return ""
 	}
 
-	tag := location[at+len(marker):]
+	tag := after
 	if end := strings.IndexAny(tag, "?#"); end >= 0 {
 		tag = tag[:end]
 	}
@@ -490,7 +497,7 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
-func ensureBinary() (string, error) {
+func ensureBinary(ctx context.Context) (string, error) {
 	// Prefer a local binary on PATH
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
@@ -501,7 +508,7 @@ func ensureBinary() (string, error) {
 		return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	return binaryWithFallback(latestVersion(), name)
+	return binaryWithFallback(ctx, latestVersion(ctx), name)
 }
 
 // binaryWithFallback fetches the binary for a version, and settles for the
@@ -532,8 +539,8 @@ func ensureBinary() (string, error) {
 // Only a missing asset falls back. A refused connection or a timeout would
 // fail the same way against any version, and trying a second one only doubles
 // the wait.
-func binaryWithFallback(version, name string) (string, error) {
-	binPath, err := binaryForVersion(version, name)
+func binaryWithFallback(ctx context.Context, version, name string) (string, error) {
+	binPath, err := binaryForVersion(ctx, version, name)
 	if err == nil {
 		return binPath, nil
 	}
@@ -542,7 +549,7 @@ func binaryWithFallback(version, name string) (string, error) {
 		return "", err
 	}
 
-	binPath, fallbackErr := binaryForVersion(fallbackVersion, name)
+	binPath, fallbackErr := binaryForVersion(ctx, fallbackVersion, name)
 	if fallbackErr != nil {
 		// The error from the version actually asked for is the one worth
 		// reporting; the fallback failing too is a detail of the attempt.
@@ -554,7 +561,7 @@ func binaryWithFallback(version, name string) (string, error) {
 
 // binaryForVersion returns the cached binary for one release, downloading it
 // if this is the first time that version has been asked for.
-func binaryForVersion(version, name string) (string, error) {
+func binaryForVersion(ctx context.Context, version, name string) (string, error) {
 	dir, err := cacheDir(version)
 	if err != nil {
 		return "", err
@@ -573,7 +580,7 @@ func binaryForVersion(version, name string) (string, error) {
 	var missing error
 
 	for _, a := range assets {
-		err := fetchAsset(downloadBase+version+"/"+a.name, binPath, a.kind)
+		err := fetchAsset(ctx, downloadBase+version+"/"+a.name, binPath, a.kind)
 		if err == nil {
 			return binPath, nil
 		}
@@ -601,8 +608,13 @@ func binaryForVersion(version, name string) (string, error) {
 // ensureBinary accepts as a cached binary, so linting stayed broken for every
 // later run until someone deleted it by hand. Rename is atomic within a
 // directory, so binPath either does not exist or is a complete download.
-func fetchAsset(url, binPath string, kind assetKind) error {
-	resp, err := downloadClient.Get(url) //nolint:gosec // trusted URL
+func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("downloading cflint: %w", err)
+	}
+
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("downloading cflint: %w", err)
 	}

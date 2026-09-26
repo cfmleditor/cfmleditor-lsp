@@ -23,12 +23,14 @@ type TraceResult struct {
 // (the wrapper function that hop's calls reach through) so callers can tell
 // a direct call to the target apart from a call to some other same-named
 // function that itself, further down the chain, reaches the target.
-func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
+func Trace(fsys vfs.FS, roots []string, opts *Options) []Entry {
 	entries := Find(fsys, roots, opts)
 
 	// Recursively trace callers that are inside a named function
 	// Each recursive level verifies calls resolve to the file containing the wrapper
-	recurseOpts := opts
+	// A copy, not the caller's: each recursion below rewrites FuncName and
+	// SourceFile on it.
+	recurseOpts := *opts
 
 	type funcRef struct {
 		name  string
@@ -42,7 +44,9 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 	for range 10 {
 		var newFuncs []funcRef
 
-		for _, e := range entries {
+		for i := range entries {
+			e := &entries[i]
+
 			key := e.File + "\t" + strings.ToLower(e.Function)
 			if e.Function != "" && !tracedFuncs[key] {
 				tracedFuncs[key] = true
@@ -58,7 +62,7 @@ func Trace(fsys vfs.FS, roots []string, opts Options) []Entry {
 		for _, fr := range newFuncs {
 			recurseOpts.FuncName = fr.name
 			recurseOpts.SourceFile = fr.file
-			extra := Find(fsys, roots, recurseOpts)
+			extra := Find(fsys, roots, &recurseOpts)
 
 			for i := range extra {
 				extra[i].Depth = fr.depth
@@ -83,7 +87,9 @@ func dedupEntries(entries []Entry) []Entry {
 	seen := make(map[string]bool, len(entries))
 	out := make([]Entry, 0, len(entries))
 
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
+
 		key := fmt.Sprintf("%s\t%d\t%s\t%s", e.File, e.Line, e.Function, e.Call)
 		if seen[key] {
 			continue
@@ -91,7 +97,7 @@ func dedupEntries(entries []Entry) []Entry {
 
 		seen[key] = true
 
-		out = append(out, e)
+		out = append(out, *e)
 	}
 
 	return out
@@ -118,13 +124,15 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 
 	groups := make(map[groupKey][]Entry)
 
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
+
 		gk := groupKey{depth: e.Depth, via: e.Via, viaFile: e.ViaFile}
 		if _, ok := groups[gk]; !ok {
 			order = append(order, gk)
 		}
 
-		groups[gk] = append(groups[gk], e)
+		groups[gk] = append(groups[gk], *e)
 	}
 
 	sort.SliceStable(order, func(i, j int) bool { return order[i].depth < order[j].depth })
@@ -140,7 +148,9 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 			))
 		}
 
-		for _, e := range groups[gk] {
+		for i := range groups[gk] {
+			e := &groups[gk][i]
+
 			rel := relativePath(e.File, roots)
 
 			marker := ""
@@ -177,7 +187,9 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 
 	seen := make(map[string]bool)
 
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
+
 		rel := relativePath(e.File, roots)
 
 		label := fmt.Sprintf("%s:%d", rel, e.Line+1)
@@ -196,7 +208,9 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 
 	var edges []graph.Edge
 
-	for i, e := range entries {
+	for i := range entries {
+		e := &entries[i]
+
 		if i >= len(nodes) {
 			break
 		}

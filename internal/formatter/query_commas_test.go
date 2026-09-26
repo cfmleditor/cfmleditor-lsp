@@ -12,7 +12,7 @@ func formatQuery(t *testing.T, src string) string {
 	opts := testOpts()
 	opts.QueryFormat = true
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

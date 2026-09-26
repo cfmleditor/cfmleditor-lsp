@@ -57,7 +57,7 @@ type Options struct {
 }
 
 // Find scans all CFML files under roots and returns matching references.
-func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
+func Find(fsys vfs.FS, roots []string, opts *Options) []Entry {
 	entries, _ := FindCounted(fsys, roots, opts)
 
 	return entries
@@ -70,7 +70,7 @@ func Find(fsys vfs.FS, roots []string, opts Options) []Entry {
 // is deliberately not the number of files parsed: findInFiles skips parsing any
 // file whose text cannot contain the target at all, and reporting that smaller
 // number would describe an implementation detail instead of the search.
-func FindCounted(fsys vfs.FS, roots []string, opts Options) ([]Entry, int) {
+func FindCounted(fsys vfs.FS, roots []string, opts *Options) ([]Entry, int) {
 	files := collectFiles(fsys, roots)
 
 	return findInFiles(fsys, files, opts), len(files)
@@ -79,14 +79,14 @@ func FindCounted(fsys vfs.FS, roots []string, opts Options) ([]Entry, int) {
 // FindCalls is a convenience wrapper for finding function calls. It returns the
 // entries and the number of files searched, as [FindCounted] defines it.
 func FindCalls(fsys vfs.FS, roots []string, funcName string, resolvers []parser.Resolver) ([]Entry, int) {
-	return FindCounted(fsys, roots, Options{FuncName: funcName, Resolvers: resolvers})
+	return FindCounted(fsys, roots, &Options{FuncName: funcName, Resolvers: resolvers})
 }
 
 // FindComponentRefs is a convenience wrapper for finding component references.
 // It returns the entries and the number of files searched, as [FindCounted]
 // defines it.
 func FindComponentRefs(fsys vfs.FS, roots []string, component string, resolvers []parser.Resolver) ([]Entry, int) {
-	return FindCounted(fsys, roots, Options{Component: component, Resolvers: resolvers})
+	return FindCounted(fsys, roots, &Options{Component: component, Resolvers: resolvers})
 }
 
 func collectFiles(fsys vfs.FS, roots []string) []string {
@@ -119,7 +119,7 @@ func collectFiles(fsys vfs.FS, roots []string) []string {
 	return files
 }
 
-func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
+func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 	var mu sync.Mutex
 
 	var results []Entry
@@ -194,13 +194,15 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 				parseOpts.FindCalls = []string{opts.FuncName}
 			}
 
-			pr := parser.ParseWithOptions(fileURI, content, parseOpts)
+			pr := parser.ParseWithOptions(fileURI, content, &parseOpts)
 
 			var entries []Entry
 
 			// Component ref matching (from parsed refs — includes all scopes)
 			if compTarget != "" {
-				for _, ref := range pr.ComponentRefs {
+				for i := range pr.ComponentRefs {
+					ref := &pr.ComponentRefs[i]
+
 					if strings.EqualFold(ref.Component, compTarget) {
 						entries = append(entries, Entry{
 							File: f, Variable: ref.Variable, Line: ref.Line, Resolved: true,
@@ -211,7 +213,9 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 			// Function call matching (from parsed call sites — includes all scopes)
 			if funcTarget != "" {
-				for _, call := range pr.Calls {
+				for j := range pr.Calls {
+					call := &pr.Calls[j]
+
 					if opts.VerifyCall != nil && call.Component != "" {
 						if !opts.VerifyCall(call.Component, call.FuncName, filepath.Dir(absPath)) {
 							continue
@@ -229,7 +233,9 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 						// Check if the function exists in the same file
 						sameFile := false
 
-						for _, fn := range pr.Funcs {
+						for i := range pr.Funcs {
+							fn := &pr.Funcs[i]
+
 							if strings.EqualFold(fn.Name, call.FuncName) {
 								sameFile = true
 
@@ -259,7 +265,7 @@ func findInFiles(fsys vfs.FS, files []string, opts Options) []Entry {
 
 					reason := ""
 					if !resolved && opts.Reason != nil {
-						reason = opts.Reason(call, pr, filepath.Dir(absPath))
+						reason = opts.Reason(*call, pr, filepath.Dir(absPath))
 						if reason != "" {
 							// Restate the call target so the reason reads standalone —
 							// readers scanning one line at a time (without the group

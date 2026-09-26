@@ -38,7 +38,7 @@ func (*Store) NewCache() *Cache { return &Cache{} }
 func (*Store) PruneCache(string) error { return errUnsupported }
 
 // SearchSymbols always fails.
-func (*Store) SearchSymbols(SearchOptions) ([]Symbol, error) { return nil, errUnsupported }
+func (*Store) SearchSymbols(*SearchOptions) ([]Symbol, error) { return nil, errUnsupported }
 
 // Node always fails.
 func (*Store) Node(string) (Symbol, error) { return Symbol{}, errUnsupported }

@@ -6,27 +6,104 @@ run:
 linters:
   default: standard
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
     - bodyclose
+    - containedctx
     - copyloopvar
+    - dupword
     - durationcheck
+    - errchkjson
+    - errname
     - errorlint
     - exhaustive
-    - godox
+    - exptostd
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecksumtype
     - gocritic
+    - godox
     - gosec
     - ineffassign
+    - iotamixing
     - makezero
+    - mirror
     - misspell
+    - modernize
+    - musttag
     - nilerr
+    - nilnesserr
     - nlreturn
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
     - prealloc
+    - predeclared
+    - reassign
+    - recvcheck
     - revive
+    - rowserrcheck
+    - sqlclosecheck
     - unconvert
     - unparam
     - usestdlibvars
+    - usetesting
+    - wastedassign
     - wsl_v5
+  settings:
+    dupword:
+      # Only the words people type twice by accident. Checking every word
+      # flags deliberate repetition: "every alternative that matches matches
+      # at 0", or a test feeding "getData getData" to an identifier scanner.
+      keywords: ["the", "a", "an", "and", "to", "of", "in", "is", "it", "for", "that", "be", "on", "as"]
+    staticcheck:
+      # Every check, the style and simplification ones included; the default
+      # set leaves several off.
+      checks: ["all"]
+    gocritic:
+      # On top of gocritic's default checks: every check tagged performance,
+      # and two that keep the code honest. The copy thresholds are gocritic's
+      # own default of 80 bytes; every copy at or above it was removed when
+      # these were enabled, and the checks keep new ones out. When a copy is the
+      # point (appending the value to a result, keeping a private copy of
+      # options it then edits), take it explicitly with *p rather than
+      # suppressing the check.
+      #
+      # whyNoLint wants a reason on every //nolint. emptyStringTest prefers
+      # s == "" to len(s) == 0.
+      enabled-checks:
+        - appendCombine
+        - equalFold
+        - hugeParam
+        - indexAlloc
+        - preferDecodeRune
+        - preferFprint
+        - preferStringWriter
+        - preferWriteByte
+        - rangeExprCopy
+        - rangeValCopy
+        - sliceClear
+        - stringXbytes
+        - zeroByteRepeat
+        - whyNoLint
+        - emptyStringTest
+      settings:
+        hugeParam:
+          sizeThreshold: 80
+        rangeValCopy:
+          sizeThreshold: 80
   exclusions:
     rules:
+      # The code-map store's queries have no context to take: none of its
+      # callers holds one. The MCP server's tool handlers take none, and the
+      # CLI and the server's background job would pass context.Background().
+      # Threading a parameter through every query to carry that is noise;
+      # noctx stays on for every other package.
+      - path: internal/codemap/store/
+        linters:
+          - noctx
       - path: _test\.go
         linters:
           - prealloc

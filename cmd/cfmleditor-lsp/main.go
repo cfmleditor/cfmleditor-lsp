@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -201,7 +202,7 @@ func runServer() {
 		settings := daemon.SettingsFrom(cfg)
 
 		go func() {
-			_ = daemon.Serve(ctx, sock, log, sharedIndex, ct, settings)
+			_ = daemon.Serve(ctx, sock, log, sharedIndex, ct, &settings)
 		}()
 
 		// Serve this editor session over stdio with the shared index
@@ -270,9 +271,9 @@ func cmdParse(args []string) {
 		}
 
 		if info.IsDir() {
-			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck
+			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck // the callback swallows every error, so Walk has none to return
 				if err != nil {
-					return nil //nolint:nilerr
+					return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
 				}
 
 				ext := strings.ToLower(filepath.Ext(path))
@@ -368,7 +369,7 @@ func cmdFormat(args []string) {
 	failed := false
 
 	for _, f := range files {
-		if err := formatOneFile(f, optionsFor(f), write); err != nil {
+		if err := formatOneFile(f, new(optionsFor(f)), write); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", f, err)
 
 			failed = true
@@ -439,7 +440,7 @@ func formatOptionsFor(configRoot string, allowNonWhitespace bool) func(path stri
 // formatOneFile formats a single file, writing it back in place when write is
 // set. A file is only ever rewritten after Format returned successfully, so a
 // refused format leaves the original untouched.
-func formatOneFile(path string, opts formatter.Options, write bool) error {
+func formatOneFile(path string, opts *formatter.Options, write bool) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -528,7 +529,7 @@ func writeFileInPlace(path string, original, out []byte) error {
 	// Re-read rather than trusting the content from before Format ran: a write
 	// landing on top of an edit made in the meantime would discard it silently.
 	if current, err := os.ReadFile(target); err == nil && !bytes.Equal(current, original) {
-		return fmt.Errorf("file changed on disk while formatting, not overwriting")
+		return errors.New("file changed on disk while formatting, not overwriting")
 	}
 
 	return os.Rename(tmpName, target)

@@ -108,8 +108,7 @@ func TestEveryOptionalConfigBlockIsPreserved(t *testing.T) {
 	var blocks []string
 
 	ct := reflect.TypeFor[config.JSON]()
-	for i := range ct.NumField() {
-		f := ct.Field(i)
+	for f := range ct.Fields() {
 		if f.Type.Kind() == reflect.Pointer && f.Type.Elem().Kind() == reflect.Struct {
 			blocks = append(blocks, f.Name)
 		}

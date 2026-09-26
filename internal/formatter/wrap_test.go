@@ -12,7 +12,7 @@ func formatAtWidth(t *testing.T, src string, width int) string {
 	opts := testOpts()
 	opts.LineWidth = width
 
-	out, err := Format([]byte(src), tree, opts)
+	out, err := Format([]byte(src), tree, &opts)
 	if err != nil {
 		t.Fatalf("format error: %v", err)
 	}

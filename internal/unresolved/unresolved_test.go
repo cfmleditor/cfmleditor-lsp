@@ -22,7 +22,7 @@ func TestWriteKnownIssuesIsProjectRelative(t *testing.T) {
 
 	var entries []string
 
-	for _, l := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
 		if !strings.HasPrefix(l, "#") {
 			entries = append(entries, l)
 		}

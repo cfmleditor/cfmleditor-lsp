@@ -65,8 +65,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 				Command:   "cfmleditor.findRefs",
 				Arguments: lspAnyArgs(word, docURI),
 			},
-		})
-		actions = append(actions, protocol.CodeAction{
+		}, protocol.CodeAction{
 			Title: "Export dependency graph for " + qualifier + "." + word,
 
 			Command: protocol.Command{
@@ -85,8 +84,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 				Command:   "cfmleditor.findRefs",
 				Arguments: lspAnyArgs(word, docURI),
 			},
-		})
-		actions = append(actions, protocol.CodeAction{
+		}, protocol.CodeAction{
 			Title: "Export dependency graph for " + word,
 
 			Command: protocol.Command{

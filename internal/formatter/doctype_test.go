@@ -53,7 +53,7 @@ func TestDoctypePassesWhitespaceOnlyGuard(t *testing.T) {
 	opts := testOpts()
 	opts.WhitespaceOnly = true
 
-	if _, err := Format([]byte(src), parse(t, src), opts); err != nil {
+	if _, err := Format([]byte(src), parse(t, src), &opts); err != nil {
 		t.Fatalf("whitespaceOnly guard rejected a doctype document: %v", err)
 	}
 }

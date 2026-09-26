@@ -57,7 +57,9 @@ func symbolNames(t *testing.T, srv *Server, docURI uri.URI) []string {
 	symbols, _ := res.([]protocol.DocumentSymbol)
 
 	names := make([]string, len(symbols))
-	for i, sym := range symbols {
+	for i := range symbols {
+		sym := &symbols[i]
+
 		names[i] = fmt.Sprintf("%s@%d", sym.Name, sym.Range.Start.Line)
 	}
 
@@ -110,7 +112,7 @@ func TestEditsWhileAReparseIsPendingStayDeferred(t *testing.T) {
 	doc := srv.documents[docURI]
 	srv.mu.RUnlock()
 
-	fresh := parser.ParseWithOptions(docURI, doc, parser.ParseOptions{Shallow: true})
+	fresh := parser.ParseWithOptions(docURI, doc, &parser.ParseOptions{Shallow: true})
 
 	if pr.Content != doc {
 		t.Errorf("parse content lags the document")

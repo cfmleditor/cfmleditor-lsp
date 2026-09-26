@@ -64,7 +64,7 @@ func cmdCFLint(args []string) {
 		os.Exit(1)
 	}
 
-	runner, err := cflint.NewRunner(minSeverity)
+	runner, err := cflint.NewRunner(context.Background(), minSeverity)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cflint unavailable: %v\n", err)
 		os.Exit(1)
@@ -95,7 +95,7 @@ func cmdCFLint(args []string) {
 			continue
 		}
 
-		if err := os.WriteFile(r.Path, []byte(r.Content), 0o644); err != nil { //nolint:gosec // a report committed to the project, read by everyone
+		if err := os.WriteFile(r.Path, []byte(r.Content), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "could not write %s: %v\n", r.Path, err)
 			os.Exit(1)
 		}

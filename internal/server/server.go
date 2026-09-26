@@ -223,7 +223,9 @@ func (s *Server) initLinter() {
 			cflog.String("expected", "one of FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC"))
 	}
 
-	runner, err := cflint.NewRunner(s.LintMinSeverity)
+	// No request context reaches here: initLinter runs once, in the
+	// background, after initialize. The clients' own timeouts bound it.
+	runner, err := cflint.NewRunner(context.Background(), s.LintMinSeverity)
 	if err != nil {
 		s.log.Warn("cflint unavailable", cflog.Err(err))
 
@@ -767,7 +769,7 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 	baseDir := filepath.Dir(cfpath.FromURI(string(fileURI)))
 	resolver := s.getResolver()
 
-	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	return parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Logger:                   s.log,
 		Resolvers:                s.cfResolvers(),
 		PropertyResolvers:        s.cfPropertyResolvers(),
@@ -807,5 +809,5 @@ func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, func
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.ParseResult {
-	return parser.ParseWithOptions(fileURI, content, parser.ParseOptions{Shallow: true})
+	return parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{Shallow: true})
 }

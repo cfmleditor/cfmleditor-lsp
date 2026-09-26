@@ -91,7 +91,7 @@ func TestScriptComponentDetectedThroughAnImport(t *testing.T) {
 			opts.WhitespaceOnly = true
 			opts.CommaPosition = "before"
 
-			if _, err := Format([]byte(tc.src), parse(t, tc.src), opts); err != nil {
+			if _, err := Format([]byte(tc.src), parse(t, tc.src), &opts); err != nil {
 				t.Errorf("guard refused a correct format: %v", err)
 			}
 		})

@@ -45,7 +45,7 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_resolve_fallback.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:    resolvers,
 		ExtractCalls: true,
 	})
@@ -121,7 +121,7 @@ func TestCanResolveCall_ResolverFallbackWhenRefDerivesWrongComponent(t *testing.
 
 	// models.Base does NOT have open(); the fallback to the objFile resolver
 	// (→ models.FileObject) should make this resolvable.
-	if reason := r.CanResolveCall(*openCall, pr, baseDir); reason != "" {
+	if reason := r.CanResolveCall(new(*openCall), pr, baseDir); reason != "" {
 		t.Errorf("expected objFile.open() to resolve, got: %s", reason)
 	}
 }
@@ -150,7 +150,7 @@ func TestCanResolveCall_DeepChainWalksEachHopsReturnType(t *testing.T) {
 }`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "chain", "test_chain.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:    resolvers,
 		ExtractCalls: true,
 	})
@@ -194,7 +194,7 @@ func TestCanResolveCall_DeepChainWalksEachHopsReturnType(t *testing.T) {
 		t.Fatal("expected to find getParams() call site")
 	}
 
-	if reason := r.CanResolveCall(*getParamsCall, pr, baseDir); reason != "" {
+	if reason := r.CanResolveCall(new(*getParamsCall), pr, baseDir); reason != "" {
 		t.Errorf("expected getParams() to resolve via chain walk, got: %s", reason)
 	}
 }
@@ -254,7 +254,7 @@ func TestCanResolveCall_ExtendsChainRefLookupWithoutPreIndex(t *testing.T) {
 	}
 }`
 	childURI := uri.URI("file://" + filepath.Join(dir, "FakeChild.cfc"))
-	pr := parser.ParseWithOptions(childURI, childContent, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(childURI, childContent, &parser.ParseOptions{ExtractCalls: true})
 
 	// Confirm objFile has no ref in the child itself.
 	if len(pr.ComponentRefs) != 0 {
@@ -282,7 +282,7 @@ func TestCanResolveCall_ExtendsChainRefLookupWithoutPreIndex(t *testing.T) {
 	}
 
 	// CanResolveCall must trigger on-demand indexing of FakeParent.cfc and find the ref.
-	if reason := r.CanResolveCall(*openCall, pr, baseDir); reason != "" {
+	if reason := r.CanResolveCall(new(*openCall), pr, baseDir); reason != "" {
 		t.Errorf("expected objFile.open() to resolve via parent ref, got: %s", reason)
 	}
 }
@@ -346,7 +346,7 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 	}
 }`
 	childURI := uri.URI("file://" + filepath.Join(dir, "ChildSpec.cfc"))
-	pr := parser.ParseWithOptions(childURI, childContent, parser.ParseOptions{ExtractCalls: true})
+	pr := parser.ParseWithOptions(childURI, childContent, &parser.ParseOptions{ExtractCalls: true})
 
 	calls := pr.AllCalls()
 
@@ -365,7 +365,7 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 	}
 
 	// Resolution must walk up two extends levels to find $assert in GrandParentSpec.
-	if reason := r.CanResolveCall(*assertCall, pr, dir); reason != "" {
+	if reason := r.CanResolveCall(new(*assertCall), pr, dir); reason != "" {
 		t.Errorf("expected $assert.open() to resolve via two-level extends chain, got: %s", reason)
 	}
 }
@@ -415,7 +415,7 @@ func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
 	}
 }`
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_lookup.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls:  true,
 		ScanAllScopes: true,
 	})
@@ -454,7 +454,7 @@ func TestCanResolveCall_ArgumentsTypedDirectLookup(t *testing.T) {
 		t.Fatal("expected to find ARGUMENTS.doc.open() call site")
 	}
 
-	if reason := r.CanResolveCall(*openCall, pr, dir); reason != "" {
+	if reason := r.CanResolveCall(new(*openCall), pr, dir); reason != "" {
 		t.Errorf("expected ARGUMENTS.doc.open() to resolve via argument type, got: %s", reason)
 	}
 }
@@ -473,7 +473,7 @@ func TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod(t *testing.T) {
 	}
 }`
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_arg_primitive.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls:  true,
 		ScanAllScopes: true,
 	})
@@ -500,7 +500,7 @@ func TestCanResolveCall_ArgumentsPrimitiveTypeMemberMethod(t *testing.T) {
 		t.Fatal("expected to find ARGUMENTS.password.toCharArray() call site")
 	}
 
-	if reason := r.CanResolveCall(*call, pr, dir); reason != "" {
+	if reason := r.CanResolveCall(new(*call), pr, dir); reason != "" {
 		t.Errorf("expected ARGUMENTS.password.toCharArray() to resolve as a member method, got: %s", reason)
 	}
 }
@@ -520,7 +520,7 @@ func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_onmissingmethod.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls: true,
 	})
 
@@ -558,7 +558,7 @@ func TestCanResolveCall_OnMissingMethodSkipsVerification(t *testing.T) {
 		t.Fatal("expected to find pageEvent.setDocument() call site")
 	}
 
-	if reason := r.CanResolveCall(*setDocCall, pr, dir); reason != "" {
+	if reason := r.CanResolveCall(new(*setDocCall), pr, dir); reason != "" {
 		t.Errorf("expected pageEvent.setDocument() to resolve (onMissingMethod), got: %s", reason)
 	}
 }
@@ -582,7 +582,7 @@ func TestCanResolveCall_NoFollowSkipsMethodVerification(t *testing.T) {
 </cfcomponent>`
 
 	fileURI := uri.URI("file://" + filepath.Join(dir, "test_nofollow.cfc"))
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		ExtractCalls: true,
 	})
 
@@ -617,13 +617,13 @@ func TestCanResolveCall_NoFollowSkipsMethodVerification(t *testing.T) {
 
 	// Without noFollow, models.Base's lack of doesNotExist() must be reported.
 	strict := newResolver(false)
-	if reason := strict.CanResolveCall(*call, pr, dir); reason == "" {
+	if reason := strict.CanResolveCall(new(*call), pr, dir); reason == "" {
 		t.Fatal("expected phantomVar.doesNotExist() to fail without noFollow (models.Base has no such method)")
 	}
 
 	// With noFollow, the same call must be accepted purely because the resolver matched.
 	lenient := newResolver(true)
-	if reason := lenient.CanResolveCall(*call, pr, dir); reason != "" {
+	if reason := lenient.CanResolveCall(new(*call), pr, dir); reason != "" {
 		t.Errorf("expected phantomVar.doesNotExist() to resolve with noFollow set, got: %s", reason)
 	}
 }

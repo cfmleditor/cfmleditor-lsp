@@ -18,7 +18,7 @@ func TestGetCloudServiceBuiltin(t *testing.T) {
 </cffunction>
 </cfcomponent>`
 
-	pr := parser.ParseWithOptions("file:///test.cfc", src, parser.ParseOptions{
+	pr := parser.ParseWithOptions("file:///test.cfc", src, &parser.ParseOptions{
 		BuiltinReturnLookup: docs.LookupBuiltinReturnComponent,
 		ExtractCalls:        true,
 	})

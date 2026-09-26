@@ -9,11 +9,15 @@ import (
 func tagFileCalls(t *testing.T, src string) []string {
 	t.Helper()
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	out := make([]string, 0, 4)
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		out = append(out, c.FuncName)
 	}
 

@@ -1396,6 +1396,36 @@ Some handles need both shapes; others only one, depending on how the code uses t
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
   bump. Test files are exempted from `prealloc`, `unparam`,
   `gosec`, and `staticcheck`.
+- **gocritic runs every `performance` check, plus `whyNoLint` and
+  `emptyStringTest`, in test files too.** `hugeParam` and `rangeValCopy` are at
+  gocritic's own 80 bytes: a large struct goes by pointer, and a loop over large
+  elements indexes (`x := &xs[i]`). The trap is a callee that edits what it was
+  given: `formatter.New`, `codemap.Build` and `refs.Trace` all write to their
+  options, so each takes `o := *opts` first — and
+  `TestNewDoesNotWriteToTheCallersOptions`,
+  `TestBuildDoesNotWriteToTheCallersOptions` and the `Trace` test fail if that
+  copy is dropped. Where a copy is the point (appending the value to a result,
+  a loop that edits the element and keeps it, a snapshot of `s.Formatting`
+  taken before the read loop is released), write it as `*p`, `v := xs[i]` or
+  `cfg := s.Formatting` rather than suppressing the check. Passing
+  `&CallSite{…}` to `addCall` does not allocate — the parameter only leaks its
+  content — and the parse benchmarks' bytes and allocations were unchanged when
+  it went in; check `go build -gcflags=-m` if a new such helper keeps the
+  pointer. `whyNoLint` wants a reason after every `//nolint:x`, and
+  `nolintlint` fails on one that no longer suppresses anything.
+- **The linter set is chosen for what it catches, not for style.** Beyond
+  `default: standard`, `.golangci.yml` enables linters that flag defects and
+  cost nothing on clean code (`bidichk`, `nilnesserr`, `recvcheck`, `musttag`,
+  `sqlclosecheck`, `rowserrcheck`, `noctx`, `errchkjson` and others), and
+  `staticcheck` runs every check. Each was measured over the whole codebase
+  before it went in; the high-volume style linters (`varnamelen`,
+  `exhaustruct`, `paralleltest`, `lll`, the complexity limits) were measured
+  too and left off. `noctx` is excluded for `internal/codemap/store`, whose
+  callers hold no context to pass; `dupword` checks only the short words typed
+  twice by accident, since checking every word flags deliberate repetition.
+  `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
+  and the rules left off with the reason for each; update it when a stage
+  lands or the pinned golangci-lint moves.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
 - `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go

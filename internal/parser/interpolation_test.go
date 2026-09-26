@@ -11,11 +11,15 @@ import (
 func interpCalls(t *testing.T, src string) []string {
 	t.Helper()
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	var got []string
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		v := c.Variable
 		if v == "" && c.Component != "" {
 			v = "[" + c.Component + "]"
@@ -120,7 +124,7 @@ func TestTagInterpolationIsFiledAgainstItsFunction(t *testing.T) {
 	src := "<cfcomponent>\n<cffunction name=\"go\">\n<cfoutput>#svc.x()#</cfoutput>\n</cffunction>\n" +
 		"<cffunction name=\"other\">\n<cfset y = 1>\n</cffunction>\n</cfcomponent>"
 
-	pr := ParseWithOptions(testURI, src, ParseOptions{ExtractCalls: true})
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
 
 	for _, sc := range pr.Scopes {
 		n := len(pr.FuncCalls(sc.Start, sc.End))

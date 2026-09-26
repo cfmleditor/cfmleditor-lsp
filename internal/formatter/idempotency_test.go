@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ func formatOnce(t *testing.T, src []byte) []byte {
 	tree := language.Parse(language.CFML, src, nil)
 	defer tree.Close()
 
-	out, err := Format(src, tree, opts)
+	out, err := Format(src, tree, &opts)
 	if err != nil {
 		t.Fatalf("format: %v", err)
 	}
@@ -45,7 +46,7 @@ func assertRefusesToFormat(t *testing.T, label string, src []byte, reason string
 	tree := language.Parse(language.CFML, src, nil)
 	defer tree.Close()
 
-	out, err := Format(src, tree, opts)
+	out, err := Format(src, tree, &opts)
 	if err == nil {
 		t.Errorf("%s: expected Format to refuse (%s), got %d bytes of output", label, reason, len(out))
 
@@ -64,7 +65,7 @@ func assertIdempotent(t *testing.T, label string, src []byte) {
 	first := formatOnce(t, src)
 	second := formatOnce(t, first)
 
-	if string(first) != string(second) {
+	if !bytes.Equal(first, second) {
 		t.Errorf("%s: formatting is not idempotent\n--- first pass ---\n%s\n--- second pass ---\n%s",
 			label, first, second)
 	}

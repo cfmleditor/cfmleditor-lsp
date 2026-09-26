@@ -208,7 +208,7 @@ func TestCompletionTriggeredByTag(t *testing.T) {
 		found := false
 
 		for _, item := range list.Items {
-			if strings.ToLower(item.Label) == "cfoutput" {
+			if strings.EqualFold(item.Label, "cfoutput") {
 				found = true
 
 				break
@@ -246,7 +246,7 @@ func TestCompletionTagWithDocContentInvoked(t *testing.T) {
 	found := false
 
 	for _, item := range list.Items {
-		if strings.ToLower(item.Label) == "cfoutput" {
+		if strings.EqualFold(item.Label, "cfoutput") {
 			found = true
 
 			break
@@ -2083,7 +2083,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 	docContent := `<cfset var svc = getService("tours")>` + "\n" + `<cfset result = svc.getParameters(`
 	srv.setDocument(docURI, docContent)
 
-	pr := parser.ParseWithOptions(docURI, docContent, parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, docContent, &parser.ParseOptions{
 		Resolvers: []parser.Resolver{{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"}},
 	})
 
@@ -2689,7 +2689,7 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 	resolvers := []parser.Resolver{
 		{Match: `getService("$1")`, Resolve: "packages.$1.service", Prefix: "getService"},
 	}
-	pr := parser.ParseWithOptions(uri.URI("file:///test.cfc"), content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(uri.URI("file:///test.cfc"), content, &parser.ParseOptions{
 		Resolvers: resolvers,
 	})
 
@@ -4111,7 +4111,7 @@ func TestDefinitionViaBeanProperty(t *testing.T) {
 	srv.setDocument(docURI, cfcContent)
 
 	// Parse with bean lookup from Application.cfc
-	pr := parser.ParseWithOptions(docURI, cfcContent, parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, cfcContent, &parser.ParseOptions{
 		BeanLookup: func(name string) string {
 			// Simulate bean resolution: UserDAO@dao -> dao/UserDAO.cfc
 			lower := strings.ToLower(name)
@@ -4159,7 +4159,7 @@ func TestCompletionViaBeanProperty(t *testing.T) {
 	docURI := uri.URI("file://" + filepath.Join(dir, "Service.cfc"))
 	srv.setDocument(docURI, cfcContent)
 
-	pr := parser.ParseWithOptions(docURI, cfcContent, parser.ParseOptions{
+	pr := parser.ParseWithOptions(docURI, cfcContent, &parser.ParseOptions{
 		BeanLookup: func(name string) string {
 			if strings.EqualFold(name, "userdao") {
 				return filepath.Join(dir, "dao", "UserDAO.cfc")
@@ -4213,7 +4213,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 	ptPath := filepath.Join(dir, "PropertyTest.cfc")
 	ptContent, _ := os.ReadFile(ptPath)
 	ptURI := uri.URI("file://" + ptPath)
-	pr := parser.ParseWithOptions(ptURI, string(ptContent), parser.ParseOptions{
+	pr := parser.ParseWithOptions(ptURI, string(ptContent), &parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(ptURI, pr.Funcs, pr.ComponentRefs)
@@ -4266,7 +4266,7 @@ func TestBeansTestdata_PositionalTypeResolution(t *testing.T) {
 	ppPath := filepath.Join(dir, "PositionalProps.cfc")
 	ppContent, _ := os.ReadFile(ppPath)
 	ppURI := uri.URI("file://" + ppPath)
-	pr := parser.ParseWithOptions(ppURI, string(ppContent), parser.ParseOptions{
+	pr := parser.ParseWithOptions(ppURI, string(ppContent), &parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(ppURI, pr.Funcs, pr.ComponentRefs)
@@ -4295,7 +4295,7 @@ func TestBeansTestdata_ServiceInjectResolution(t *testing.T) {
 	svcPath := filepath.Join(dir, "services", "BeanUserService.cfc")
 	svcContent, _ := os.ReadFile(svcPath)
 	svcURI := uri.URI("file://" + svcPath)
-	pr := parser.ParseWithOptions(svcURI, string(svcContent), parser.ParseOptions{
+	pr := parser.ParseWithOptions(svcURI, string(svcContent), &parser.ParseOptions{
 		BeanLookup: srv.index.LookupBean,
 	})
 	srv.index.IndexFileFromResult(svcURI, pr.Funcs, pr.ComponentRefs)
@@ -4324,7 +4324,7 @@ func TestFindAllCalls_GetById(t *testing.T) {
 	// Build resolvers (none for this test)
 	var resolvers []parser.Resolver
 
-	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+	entries := refs.Find(vfs.OS{}, []string{dir}, &refs.Options{
 		FuncName:   "getById",
 		Resolvers:  resolvers,
 		BeanLookup: beanLookup,
@@ -4353,7 +4353,7 @@ func TestFindAllCalls_GetById(t *testing.T) {
 func TestFindAllCalls_GetAll(t *testing.T) {
 	dir := filepath.Join(testdataDir(), "beans")
 
-	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+	entries := refs.Find(vfs.OS{}, []string{dir}, &refs.Options{
 		FuncName: "getAll",
 	})
 
@@ -4380,7 +4380,7 @@ func TestFindAllCalls_GetAll(t *testing.T) {
 func TestFindAllCalls_Resolved(t *testing.T) {
 	dir := filepath.Join(testdataDir(), "beans")
 
-	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+	entries := refs.Find(vfs.OS{}, []string{dir}, &refs.Options{
 		FuncName: "getById",
 	})
 
@@ -4403,7 +4403,7 @@ func TestFindAllCalls_Resolved(t *testing.T) {
 func TestFindAllCalls_NoResults(t *testing.T) {
 	dir := filepath.Join(testdataDir(), "beans")
 
-	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+	entries := refs.Find(vfs.OS{}, []string{dir}, &refs.Options{
 		FuncName: "nonExistentFunction",
 	})
 
@@ -4418,7 +4418,7 @@ func TestFindComponentRefs_UserDAO(t *testing.T) {
 	beans := buildBeanMap(beanPaths, vfs.OS{})
 	daoPath := beans["userdao@dao"]
 
-	entries := refs.Find(vfs.OS{}, []string{dir}, refs.Options{
+	entries := refs.Find(vfs.OS{}, []string{dir}, &refs.Options{
 		Component: daoPath,
 		BeanLookup: func(name string) string {
 			return beans[strings.ToLower(name)]

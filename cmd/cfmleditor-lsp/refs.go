@@ -83,7 +83,11 @@ func cmdRefs(args []string) {
 	default:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(result)
+
+		if err := enc.Encode(result); err != nil {
+			fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -93,7 +97,9 @@ func printMermaidRefs(target string, entries []refs.Entry) {
 	targetNode := strings.ReplaceAll(target, ".", "_")
 	fmt.Printf("    %s[%s]\n", targetNode, target)
 
-	for i, ref := range entries {
+	for i := range entries {
+		ref := &entries[i]
+
 		nodeID := fmt.Sprintf("ref%d", i)
 
 		label := filepath.Base(ref.File)

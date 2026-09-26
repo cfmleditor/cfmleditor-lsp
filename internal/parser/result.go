@@ -161,8 +161,13 @@ func (pr *ParseResult) outputGate() (spans [][2]int, prefixes []string, gated bo
 	return pr.outputSpans, pr.importPrefixes, true
 }
 
-// ParseWithOptions performs a full file parse with extended options.
-func ParseWithOptions(fileURI uri.URI, content string, opts ParseOptions) *ParseResult {
+// ParseWithOptions performs a full file parse with extended options. opts is
+// only read; nil means the zero options.
+func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *ParseResult {
+	if opts == nil {
+		opts = &ParseOptions{}
+	}
+
 	pr := &ParseResult{
 		URI:                      fileURI,
 		Content:                  content,
@@ -629,13 +634,17 @@ func (pr *ParseResult) applyChainedReturnLookup() {
 	}
 
 	lookupBase := func(baseVar string, scopedRefs []ComponentRef) string {
-		for _, ref := range scopedRefs {
+		for i := range scopedRefs {
+			ref := &scopedRefs[i]
+
 			if strings.EqualFold(ref.Variable, baseVar) {
 				return ref.Component
 			}
 		}
 
-		for _, ref := range pr.ComponentRefs {
+		for i := range pr.ComponentRefs {
+			ref := &pr.ComponentRefs[i]
+
 			if strings.EqualFold(ref.Variable, baseVar) {
 				return ref.Component
 			}
@@ -858,9 +867,11 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	// Resolve ReturnComponent from return var before processing calls
 	for _, rp := range returnPendings {
 		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
-			for _, ref := range refs {
+			for i := range refs {
+				ref := &refs[i]
+
 				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(&ref)
+					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
 
 					break
 				}
@@ -882,13 +893,17 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		}
 	}
 
-	for _, c := range calls {
+	for j := range calls {
+		c := &calls[j]
+
 		// Skip if this variable already has a ref (e.g. from appendResolverRefs)
 		varLower := strings.ToLower(c.varName)
 		alreadyResolved := false
 
 		if c.funcKey != "" && pr.funcRefsMap != nil {
-			for _, ref := range pr.funcRefsMap[c.funcKey] {
+			for i := range pr.funcRefsMap[c.funcKey] {
+				ref := &pr.funcRefsMap[c.funcKey][i]
+
 				if strings.EqualFold(ref.Variable, varLower) {
 					alreadyResolved = true
 
@@ -898,7 +913,9 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		}
 
 		if !alreadyResolved {
-			for _, ref := range pr.ComponentRefs {
+			for i := range pr.ComponentRefs {
+				ref := &pr.ComponentRefs[i]
+
 				if strings.EqualFold(ref.Variable, varLower) {
 					alreadyResolved = true
 
@@ -916,9 +933,12 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		// Fallback: x = baseVar.method() — assign x same component as baseVar
 		if comp == "" && c.baseVar != "" {
 			baseVarLower := strings.ToLower(c.baseVar)
-			for _, ref := range pr.ComponentRefs {
+
+			for i := range pr.ComponentRefs {
+				ref := &pr.ComponentRefs[i]
+
 				if strings.EqualFold(ref.Variable, baseVarLower) {
-					comp = pr.settledComponent(&ref)
+					comp = pr.settledComponent(ref)
 
 					break
 				}
@@ -926,9 +946,11 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 
 			if comp == "" && c.funcKey != "" && pr.funcRefsMap != nil {
 				refs := pr.funcRefsMap[c.funcKey]
-				for _, ref := range refs {
+				for i := range refs {
+					ref := &refs[i]
+
 					if strings.EqualFold(ref.Variable, baseVarLower) {
-						comp = pr.settledComponent(&ref)
+						comp = pr.settledComponent(ref)
 
 						break
 					}
@@ -974,9 +996,11 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		}
 
 		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
-			for _, ref := range refs {
+			for i := range refs {
+				ref := &refs[i]
+
 				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(&ref)
+					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
 
 					break
 				}
@@ -1047,7 +1071,9 @@ func (pr *ParseResult) generatePropertyAccessors() {
 	}
 	// Build set of existing function names (explicit + previously generated)
 	existing := make(map[string]bool, len(pr.Funcs)+len(pr.Properties)*2)
-	for _, f := range pr.Funcs {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
 		existing[strings.ToLower(f.Name)] = true
 	}
 
@@ -1438,7 +1464,9 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 
 // initFuncScope returns the FuncScope for the init() function, or {-1,-1} if not found.
 func (pr *ParseResult) initFuncScope() FuncScope {
-	for _, f := range pr.Funcs {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
 		if strings.EqualFold(f.Name, "init") {
 			return findFuncScope(int(f.Line), pr.Scopes)
 		}
@@ -1466,7 +1494,7 @@ func (pr *ParseResult) appendResolverRefs() {
 	scopeIdx := 0
 	currentFunc := ""
 
-	for len(content) > 0 {
+	for content != "" {
 		nl := strings.IndexByte(content, '\n')
 
 		var line string
@@ -1517,7 +1545,9 @@ func (pr *ParseResult) filterCallsByName() {
 	// Filter by target names and resolve components
 	pr.Calls = nil
 
-	for _, call := range allCalls {
+	for i := range allCalls {
+		call := allCalls[i] // a copy: edited below, and kept
+
 		if !targets[strings.ToLower(call.FuncName)] {
 			continue
 		}
@@ -1608,7 +1638,7 @@ func ExtractLinks(content string) []DocumentLink {
 
 	lineNum := 0
 
-	for len(content) > 0 {
+	for content != "" {
 		nl := strings.IndexByte(content, '\n')
 
 		var line string
@@ -1803,7 +1833,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		lineNum := funcStart + 1
 
 		scan := pr.Content[start:end]
-		for len(scan) > 0 {
+		for scan != "" {
 			nl := strings.IndexByte(scan, '\n')
 
 			var line string
@@ -1855,7 +1885,7 @@ func (pr *ParseResult) resolveMethodReturnRefs(funcStart, funcEnd int, existingR
 	allRefs = append(allRefs, pr.ComponentRefs...)
 	allRefs = append(allRefs, existingRefs...)
 
-	for len(body) > 0 {
+	for body != "" {
 		nl := strings.IndexByte(body, '\n')
 
 		var line string
@@ -1903,7 +1933,9 @@ func (pr *ParseResult) resolveMethodReturnRefs(funcStart, funcEnd int, existingR
 		// Find component for baseVar
 		var baseComp string
 
-		for _, ref := range allRefs {
+		for i := range allRefs {
+			ref := &allRefs[i]
+
 			if strings.EqualFold(ref.Variable, baseVar) {
 				baseComp = ref.Component
 
@@ -1960,7 +1992,9 @@ func (pr *ParseResult) lookupMethodReturn(component, methodName string) string {
 	}
 
 	// Fallback: check same-file functions
-	for _, f := range pr.Funcs {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
 		if strings.EqualFold(f.Name, methodName) {
 			if f.ReturnComponent != "" {
 				return f.ReturnComponent
@@ -1988,7 +2022,7 @@ func isIdentifier(s string) bool {
 		return false
 	}
 
-	return len(s) > 0
+	return s != ""
 }
 
 // isValidVarChain returns true if s looks like a valid CFML variable chain
@@ -2223,7 +2257,9 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 // resolveVarComponent finds the component a variable resolves to from pr.ComponentRefs.
 func (pr *ParseResult) resolveVarComponent(varName string) string {
 	// Check ComponentRefs — these are component-wide, always valid
-	for _, ref := range pr.ComponentRefs {
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+
 		if strings.EqualFold(ref.Variable, varName) {
 			return ref.Component
 		}

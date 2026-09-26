@@ -584,7 +584,7 @@ func (rs *ResolverSet) Resolve(expr string) string {
 	}
 
 	expr = strings.TrimSpace(expr)
-	if len(expr) == 0 {
+	if expr == "" {
 		return ""
 	}
 
@@ -672,7 +672,7 @@ func indexFold(s, substr string) int {
 // byte comparison. Folding the first byte by hand (rather than EqualFold on one
 // byte) keeps that check inlineable.
 func indexFoldFrom(s, substr string, from int) int {
-	if len(substr) == 0 {
+	if substr == "" {
 		return max(from, 0)
 	}
 

@@ -55,7 +55,7 @@ func TestScanFindsNamesInAnyCase(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			refs := Scan(c.content, cfg)
+			refs := Scan(c.content, &cfg)
 			if len(refs) == 0 {
 				t.Fatalf("no route found in %q", c.content)
 			}

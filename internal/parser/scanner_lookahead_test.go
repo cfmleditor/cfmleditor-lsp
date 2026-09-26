@@ -115,7 +115,7 @@ func TestPeekDoesNotChangeTheTokenStream(t *testing.T) {
 func TestPeekDoesNotChangeTheTokenStreamUnderRandomSequences(t *testing.T) {
 	for _, src := range lookaheadSources {
 		t.Run(src.name, func(t *testing.T) {
-			for seed := int64(0); seed < 50; seed++ {
+			for seed := range int64(50) {
 				rnd := rand.New(rand.NewSource(seed))
 
 				// Decided up front and replayed, so the reference run and the

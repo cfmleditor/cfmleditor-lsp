@@ -249,7 +249,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 		return ""
 	}
 
-	pr := parser.ParseWithOptions(cfpath.ToURI(abs), content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(cfpath.ToURI(abs), content, &parser.ParseOptions{
 		Resolvers:                cfg.resolvers,
 		ExpressionMappings:       cfg.expressionMappings,
 		ServicePropertyResolvers: cfg.servicePropertyResolvers,
@@ -268,7 +268,11 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 
 	found := 0
 
-	for _, call := range pr.AllCalls() {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		if call.Line != target {
 			continue
 		}

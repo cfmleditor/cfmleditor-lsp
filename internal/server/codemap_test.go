@@ -23,7 +23,7 @@ func TestCodeMapOutputStaysInsideTheWorkspace(t *testing.T) {
 	}
 
 	for _, c := range ok {
-		got, err := s.codeMapOutputPath(codeMapRequest{Out: c.in, Format: "html"}, root)
+		got, err := s.codeMapOutputPath(&codeMapRequest{Out: c.in, Format: "html"}, root)
 		if err != nil {
 			t.Errorf("out=%q: %v", c.in, err)
 
@@ -40,7 +40,7 @@ func TestCodeMapOutputStaysInsideTheWorkspace(t *testing.T) {
 	}
 
 	for _, bad := range []string{"../escape.html", "../../etc/passwd", "/tmp/anywhere.html"} {
-		if got, err := s.codeMapOutputPath(codeMapRequest{Out: bad}, root); err == nil {
+		if got, err := s.codeMapOutputPath(&codeMapRequest{Out: bad}, root); err == nil {
 			t.Errorf("out=%q was accepted and resolved to %q", bad, got)
 		}
 	}

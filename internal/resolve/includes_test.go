@@ -58,7 +58,7 @@ func bareCall(t *testing.T, r *Resolver, file, funcName string) (CallTarget, str
 
 	pr := parser.Parse(cfpath.ToURI(file), string(data))
 
-	return r.ResolveCallTarget(parser.CallSite{FuncName: funcName}, pr, filepath.Dir(file))
+	return r.ResolveCallTarget(&parser.CallSite{FuncName: funcName}, pr, filepath.Dir(file))
 }
 
 // TestBareCallResolvesThroughCfinclude covers a template mixed into a

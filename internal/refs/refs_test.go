@@ -43,7 +43,14 @@ func TestTrace_OnlyMatchesTargetComponent(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
+
+	// Trace follows a wrapper by rewriting FuncName and SourceFile on its own
+	// copy of the options. It receives a pointer, so a copy dropped in a refactor
+	// would rewrite the caller's instead.
+	if opts.FuncName != "GetData" || opts.SourceFile != persistPath {
+		t.Errorf("Trace changed the caller's options: FuncName %q, SourceFile %q", opts.FuncName, opts.SourceFile)
+	}
 
 	// Only consider resolved entries
 	controllerPath, _ := filepath.Abs(filepath.Join(dir, "controller.cfc"))
@@ -111,7 +118,7 @@ func TestTrace_RecursesUpstream(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
 
 	// Only consider resolved entries
 	// Negative assertions — unrelated files must not appear
@@ -190,7 +197,7 @@ func TestTrace_DoesNotMatchSameNameInOtherFile(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
 
 	// Only consider resolved entries
 	var resolved []Entry
@@ -261,7 +268,7 @@ func TestTrace_SameFileMatchToleratesPathFormatting(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
 
 	foundProcess := false
 	foundGetReport := false
@@ -317,7 +324,7 @@ func TestTrace_GetReportChainIsolated(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
 
 	// Only consider resolved entries
 	// Negative assertions — unrelated files must not appear
@@ -407,7 +414,7 @@ func TestTrace_DepthAndViaAnnotateChain(t *testing.T) {
 		},
 	}
 
-	entries := Trace(fs, roots, opts)
+	entries := Trace(fs, roots, &opts)
 
 	var runReportEntry, reportViewEntry *Entry
 
@@ -481,7 +488,7 @@ func TestFind_UnresolvedEntryCarriesReason(t *testing.T) {
 		},
 	}
 
-	entries := Find(fs, roots, opts)
+	entries := Find(fs, roots, &opts)
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d: %+v", len(entries), entries)
@@ -568,7 +575,7 @@ func TestFindStillReturnsEntriesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if entries := Find(vfs.OS{}, []string{dir}, Options{FuncName: "GetReport"}); len(entries) != 1 {
+	if entries := Find(vfs.OS{}, []string{dir}, &Options{FuncName: "GetReport"}); len(entries) != 1 {
 		t.Errorf("expected 1 entry from Find, got %d", len(entries))
 	}
 }
@@ -614,7 +621,7 @@ func TestFindPopulatesCallTextLazily(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entries := Find(vfs.OS{}, []string{dir}, Options{FuncName: "GetReport"})
+	entries := Find(vfs.OS{}, []string{dir}, &Options{FuncName: "GetReport"})
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d: %+v", len(entries), entries)
 	}

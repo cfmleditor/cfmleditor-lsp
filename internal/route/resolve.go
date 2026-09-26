@@ -203,7 +203,7 @@ func (r *Resolver) findFile(root, rel string) string {
 }
 
 // Enabled reports whether the config does anything.
-func (c Config) Enabled() bool {
+func (c *Config) Enabled() bool {
 	hasSource := len(c.Attributes) > 0 || len(c.QueryParams) > 0 ||
 		len(c.Properties) > 0 || len(c.Functions) > 0
 

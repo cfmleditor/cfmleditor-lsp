@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -231,7 +232,7 @@ func clientWatchesFiles(caps protocol.ClientCapabilities) bool {
 	return w.DidChangeWatchedFiles.DynamicRegistration != nil && *w.DidChangeWatchedFiles.DynamicRegistration
 }
 
-func (s *Server) handleInitialized(_ context.Context) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleInitialized(_ context.Context) (any, error) {
 	// Known issues are published whether or not files are watched: watching
 	// only decides whether an edit to the file is picked up without a restart.
 	if len(s.KnownIssues) > 0 {
@@ -261,7 +262,7 @@ func (s *Server) handleInitialized(_ context.Context) (any, error) { //nolint:un
 	return nil, nil
 }
 
-func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidOpenTextDocumentParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -285,7 +286,9 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 		cflog.Int("refs", len(pr.ComponentRefs)),
 		cflog.Int("resolvers", len(pr.Resolvers)))
 
-	for _, ref := range pr.ComponentRefs {
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+
 		s.log.Debug("document opened: ref", cflog.String("var", ref.Variable), cflog.String("component", ref.Component))
 	}
 
@@ -306,7 +309,7 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 	return nil, nil
 }
 
-func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidChangeTextDocumentParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -404,7 +407,7 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 			break
 		}
 
-		if isFull { //nolint:gocritic // ifElseChain: intentional for clarity
+		if isFull {
 			// Full document replacement
 			content = text
 			if pr != nil {
@@ -534,7 +537,9 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 		}
 
 		for _, sc := range pr.Scopes {
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if !strings.EqualFold(f.Name, funcName) || int(f.Line) != sc.Start {
 					continue
 				}
@@ -589,7 +594,7 @@ func applyContentChanges(content string, changes []protocol.TextDocumentContentC
 	return parser.ApplyEdits(content, edits)
 }
 
-func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidCloseTextDocumentParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -651,7 +656,7 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	return nil, nil
 }
 
-func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidSaveTextDocumentParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -814,7 +819,7 @@ func scopesToFuncRanges(pr *parser.ParseResult) []cache.FuncRange {
 	return ranges
 }
 
-func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []byte) (any, error) { //nolint:unparam // notifications have no result; kept for uniform dispatch signature
+func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DidChangeWorkspaceFoldersParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -847,7 +852,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 // writeRefsReport writes the reference report for funcName beside the file the
 // request came from, as markdown and as DOT, and tells the client where it
 // went. Only cfmleditor.findRefs' explicit export argument reaches here.
-func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result refs.TraceResult) {
+func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result *refs.TraceResult) {
 	outDir := filepath.Dir(sourceFile)
 	if outDir == "" || outDir == "." {
 		outDir = os.TempDir()
@@ -889,12 +894,12 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return nil, nil
 	case "cfmleditor.format":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.format requires a document URI argument")
+			return nil, errors.New("cfmleditor.format requires a document URI argument")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return nil, fmt.Errorf("cfmleditor.format: invalid URI argument")
+			return nil, errors.New("cfmleditor.format: invalid URI argument")
 		}
 
 		// The same gate textDocument/formatting has. Without it this command
@@ -911,7 +916,11 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return nil, nil
 		}
 
-		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(s.Formatting.IndentWidth)}, s.Formatting)
+		// A snapshot, as the formatting handler takes: the formatter reads it
+		// throughout, and the server's settings can be replaced meanwhile.
+		cfg := s.Formatting
+
+		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(cfg.IndentWidth)}, &cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -940,12 +949,12 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return nil, nil
 	case "cfmleditor.showComponentPath":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.showComponentPath requires a dot-path argument")
+			return nil, errors.New("cfmleditor.showComponentPath requires a dot-path argument")
 		}
 
 		dotPath, _ := argString(params.Arguments, 0)
 		if dotPath == "" {
-			return nil, fmt.Errorf("cfmleditor.showComponentPath: invalid argument")
+			return nil, errors.New("cfmleditor.showComponentPath: invalid argument")
 		}
 
 		var baseDir string
@@ -964,7 +973,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		if resolved == "" {
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 				Type:    protocol.MessageTypeInfo,
-				Message: fmt.Sprintf("Cannot resolve: %s", dotPath),
+				Message: "Cannot resolve: " + dotPath,
 			})
 		} else {
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
@@ -1024,12 +1033,12 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return msg, nil
 	case "cfmleditor.showFileIndex":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.showFileIndex requires a document URI argument")
+			return nil, errors.New("cfmleditor.showFileIndex requires a document URI argument")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
 		if docURI == "" {
-			return nil, fmt.Errorf("cfmleditor.showFileIndex: invalid argument")
+			return nil, errors.New("cfmleditor.showFileIndex: invalid argument")
 		}
 
 		fileURI := uri.URI(docURI)
@@ -1038,8 +1047,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		var lines []string
 
-		lines = append(lines, fmt.Sprintf("File: %s", docURI))
-		lines = append(lines, fmt.Sprintf("Functions (%d):", len(funcs)))
+		lines = append(lines, "File: "+docURI, fmt.Sprintf("Functions (%d):", len(funcs)))
 
 		for _, f := range funcs {
 			lines = append(lines, fmt.Sprintf("  %s (line %d)", f.Name, f.Line))
@@ -1070,7 +1078,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return msg, nil
 	case "cfmleditor.openActiveApplicationFile":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.openActiveApplicationFile requires a document URI argument")
+			return nil, errors.New("cfmleditor.openActiveApplicationFile requires a document URI argument")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
@@ -1105,7 +1113,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return nil, nil
 	case "cfmleditor.goToMatchingTag":
 		if len(params.Arguments) < 2 {
-			return nil, fmt.Errorf("cfmleditor.goToMatchingTag requires [documentURI, line, char]")
+			return nil, errors.New("cfmleditor.goToMatchingTag requires [documentURI, line, char]")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
@@ -1134,7 +1142,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// and the answer is a position the editor moves to; FindMatchingTag
 		// reads and answers in bytes. Converted on both sides, as a handler's
 		// params are (see position.go).
-		pos := parser.FindMatchingTag(content, line, byteCol(content, line, uint32(max(char, 0)))) //nolint:gosec // clamped to 0
+		pos := parser.FindMatchingTag(content, line, byteCol(content, line, uint32(max(char, 0))))
 		if pos == nil {
 			return nil, nil
 		}
@@ -1148,7 +1156,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return pos, nil
 	case "cfmleditor.copyPackage":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.copyPackage requires a document URI argument")
+			return nil, errors.New("cfmleditor.copyPackage requires a document URI argument")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
@@ -1162,7 +1170,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return dotPath, nil
 	case "cfmleditor.findRefs":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.findRefs requires a function name argument")
+			return nil, errors.New("cfmleditor.findRefs requires a function name argument")
 		}
 
 		funcName, _ := argString(params.Arguments, 0)
@@ -1196,11 +1204,11 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 				return cfpath.SamePath(resolved, sourceFile)
 			},
 			Reason: func(call parser.CallSite, pr *parser.ParseResult, fileDir string) string {
-				return r.CanResolveCall(call, pr, fileDir)
+				return r.CanResolveCall(&call, pr, fileDir)
 			},
 			SourceFile: sourceFile,
 		}
-		entries := refs.Trace(s.FS, s.searchRoots(), findOpts)
+		entries := refs.Trace(s.FS, s.searchRoots(), &findOpts)
 		result := refs.FormatResult(entries, funcName, sourceURI, s.searchRoots())
 
 		s.log.Debug("findRefs: complete", cflog.String("funcName", funcName), cflog.Int("results", len(entries)))
@@ -1214,13 +1222,13 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// something the caller already has; only a caller that wants them on
 		// disk asks for them.
 		if argBool(params.Arguments, 2) {
-			s.writeRefsReport(ctx, funcName, sourceFile, result)
+			s.writeRefsReport(ctx, funcName, sourceFile, &result)
 		}
 
 		return result.Summary, nil
 	case "cfmleditor.exportDeps":
 		if len(params.Arguments) == 0 {
-			return nil, fmt.Errorf("cfmleditor.exportDeps requires a document URI")
+			return nil, errors.New("cfmleditor.exportDeps requires a document URI")
 		}
 
 		docURI, _ := argString(params.Arguments, 0)
@@ -1259,7 +1267,9 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			if funcName != "" {
 				// Function-level: FuncCalls for the specific function
 				for _, sc := range pr.Scopes {
-					for _, f := range pr.Funcs {
+					for i := range pr.Funcs {
+						f := &pr.Funcs[i]
+
 						if strings.EqualFold(f.Name, funcName) && int(f.Line) == sc.Start {
 							depsCalls = pr.FuncCalls(sc.Start, sc.End)
 
@@ -1289,7 +1299,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			}
 		}
 
-		result := deps.Build(deps.Options{
+		result := deps.Build(&deps.Options{
 			DocURI:    docURI,
 			FuncName:  funcName,
 			Calls:     depsCalls,

@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -183,7 +185,12 @@ var cfcLifecycle = map[string]bool{
 // before the next one is read, so peak memory is the worker count, not the
 // workspace: holding a few thousand ExtractCalls parse trees at once is gigabytes,
 // and holding eight is nothing.
-func Build(opts Options) *Map {
+func Build(opts *Options) *Map {
+	// A copy: the defaults below are filled into it, and must not reach the
+	// caller's options.
+	o := *opts
+	opts = &o
+
 	start := time.Now()
 
 	if opts.Workers <= 0 {
@@ -217,15 +224,11 @@ func Build(opts Options) *Map {
 	jobs := make(chan string)
 
 	for range opts.Workers {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for f := range jobs {
 				results <- scanFile(opts, root, f, fingerprint)
 			}
-		}()
+		})
 	}
 
 	go func() {
@@ -276,7 +279,7 @@ func Build(opts Options) *Map {
 // It is derived from the paths and content hashes of the indexed components in
 // sorted order, so it is stable across runs and across the parallel scan that
 // follows.
-func indexPass(opts Options) string {
+func indexPass(opts *Options) string {
 	var cfcs []string
 
 	for _, f := range opts.Files {
@@ -327,7 +330,7 @@ type FileGraph struct {
 	Stats       Stats  `json:"stats"`
 }
 
-func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
+func scanFile(opts *Options, root, file, fingerprint string) *FileGraph {
 	res := &FileGraph{}
 
 	data, err := opts.FS.ReadFile(file)
@@ -372,7 +375,7 @@ func scanFile(opts Options, root, file, fingerprint string) *FileGraph {
 		return ""
 	}
 
-	pr := parser.ParseWithOptions(fileURI, content, parser.ParseOptions{
+	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:                cfg.Resolvers,
 		ExpressionMappings:       cfg.ExpressionMappings,
 		ServicePropertyResolvers: cfg.ServicePropertyResolvers,
@@ -513,7 +516,7 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 		return
 	}
 
-	for _, ref := range route.Scan(content, cfg.Routes.Config) {
+	for _, ref := range route.Scan(content, &cfg.Routes.Config) {
 		if !route.Plausible(ref.Value) {
 			continue
 		}
@@ -527,7 +530,9 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 			continue
 		}
 
-		for _, t := range targets {
+		for i := range targets {
+			t := &targets[i]
+
 			toRel := relPath(root, t.Path)
 
 			to := FileID(toRel)
@@ -548,7 +553,7 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 	}
 }
 
-func nodeKindFor(t route.Target) NodeKind {
+func nodeKindFor(t *route.Target) NodeKind {
 	if t.Kind == route.KindController && t.Method != "" {
 		return KindFunction
 	}
@@ -556,7 +561,7 @@ func nodeKindFor(t route.Target) NodeKind {
 	return KindFile
 }
 
-func routeNodeName(t route.Target, rel string) string {
+func routeNodeName(t *route.Target, rel string) string {
 	if t.Kind == route.KindController && t.Method != "" {
 		return t.Method
 	}
@@ -567,7 +572,7 @@ func routeNodeName(t route.Target, rel string) string {
 // addIncludes emits an edge only for a link that resolves to a real CFML file.
 // Links carry hrefs and src attributes too, and turning every one of those into a
 // node would bury the code map under the site's static assets and outbound URLs.
-func (res *FileGraph) addIncludes(opts Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+func (res *FileGraph) addIncludes(opts *Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
 	for i := range pr.Links {
 		link := &pr.Links[i]
 
@@ -587,8 +592,12 @@ func (res *FileGraph) addIncludes(opts Options, cfg FileConfig, pr *parser.Parse
 	}
 }
 
-func (res *FileGraph) addCalls(opts Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
-	for _, call := range pr.AllCalls() {
+func (res *FileGraph) addCalls(opts *Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		res.Stats.CallSites++
 
 		target, reason := cfg.Resolver.ResolveCallTarget(call, pr, baseDir)
@@ -697,7 +706,7 @@ func funcNodeFor(root string, target resolve.CallTarget) string {
 	return FuncID(relPath(root, cfpath.FromURI(string(target.URI))), target.FuncName)
 }
 
-func externalLabel(component string, call parser.CallSite) string {
+func externalLabel(component string, call *parser.CallSite) string {
 	if component != "" && component != "$any" {
 		return component + "." + call.FuncName
 	}
@@ -711,7 +720,7 @@ func externalLabel(component string, call parser.CallSite) string {
 
 // resolveInclude turns a cfinclude-style path into an absolute file, or "" when it
 // does not name a CFML file that exists.
-func resolveInclude(opts Options, cfg FileConfig, raw, baseDir string) string {
+func resolveInclude(opts *Options, cfg FileConfig, raw, baseDir string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "#") || strings.Contains(raw, "://") {
 		return ""
@@ -839,20 +848,24 @@ func newCollector(m *Map) *collector {
 }
 
 func (c *collector) merge(r *FileGraph) {
-	for _, n := range r.Nodes {
-		c.nodes[n.ID] = n
+	for i := range r.Nodes {
+		n := &r.Nodes[i]
+
+		c.nodes[n.ID] = *n
 		delete(c.provisional, n.ID)
 	}
 
 	// A provisional node never displaces a real one: the file that owns a node
 	// knows its line, access and entry status, and a caller's placeholder knows
 	// none of that. Whichever arrives first, the owner's wins.
-	for _, n := range r.Provisional {
+	for i := range r.Provisional {
+		n := &r.Provisional[i]
+
 		if _, ok := c.nodes[n.ID]; ok && !c.provisional[n.ID] {
 			continue
 		}
 
-		c.nodes[n.ID] = n
+		c.nodes[n.ID] = *n
 		c.provisional[n.ID] = true
 	}
 
@@ -890,10 +903,7 @@ func (c *collector) merge(r *FileGraph) {
 // order the workers finished in, which differs between runs — and a map you cannot
 // diff against yesterday's is most of the value gone.
 func (c *collector) finish() {
-	c.m.Nodes = make([]Node, 0, len(c.nodes))
-	for _, n := range c.nodes {
-		c.m.Nodes = append(c.m.Nodes, n)
-	}
+	c.m.Nodes = slices.AppendSeq(make([]Node, 0, len(c.nodes)), maps.Values(c.nodes))
 
 	sort.Slice(c.m.Nodes, func(i, j int) bool { return c.m.Nodes[i].ID < c.m.Nodes[j].ID })
 

@@ -301,9 +301,9 @@ func ComponentPathAtCursor(content string, line, char int) string {
 		return dotPath
 	}
 
-	if hasDot && len(after) > 0 && IsWordChar(after[0]) {
+	if hasDot && after != "" && IsWordChar(after[0]) {
 		beforeTrimmed := strings.TrimRight(lineText[:start], " \t")
-		if len(beforeTrimmed) > 0 {
+		if beforeTrimmed != "" {
 			lastCh := beforeTrimmed[len(beforeTrimmed)-1]
 			if lastCh == '(' || lastCh == ',' {
 				return dotPath

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -221,7 +222,7 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 
 	switch name {
 	case "search_symbols":
-		found, err := s.Store.SearchSymbols(store.SearchOptions{
+		found, err := s.Store.SearchSymbols(&store.SearchOptions{
 			Query: a.Query, Kind: a.Kind, File: a.File, Island: a.Island,
 			OnlyDead: a.OnlyUnreachable, SortByFan: a.SortByFanIn, Limit: a.Limit,
 		})
@@ -288,7 +289,7 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 
 	case "explain_call":
 		if s.Explain == nil {
-			return nil, fmt.Errorf("explain_call is not available: this server was started without a workspace resolver")
+			return nil, errors.New("explain_call is not available: this server was started without a workspace resolver")
 		}
 
 		if a.File == "" || a.Line <= 0 {

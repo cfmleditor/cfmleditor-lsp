@@ -225,7 +225,7 @@ func TestPropertyAccessors_BeanLookup(t *testing.T) {
 	property name="orderDAO" inject="orderDAO";
 	property name="missing" inject="nonexistent";
 }`
-	pr := ParseWithOptions(uri.URI("file:///test.cfc"), content, ParseOptions{
+	pr := ParseWithOptions(uri.URI("file:///test.cfc"), content, &ParseOptions{
 		BeanLookup: lookup,
 	})
 
@@ -253,7 +253,7 @@ func TestPropertyResolvers(t *testing.T) {
 	property name="logger" inject="coldbox:logger";
 	property name="plain" inject="plainBean";
 }`
-	pr := ParseWithOptions(uri.URI("file:///test.cfc"), content, ParseOptions{
+	pr := ParseWithOptions(uri.URI("file:///test.cfc"), content, &ParseOptions{
 		PropertyResolvers: []PropertyResolver{
 			{Match: "model.$1", Resolve: "models.$1", Attribute: "inject"},
 			{Match: "coldbox:$1", Resolve: "coldbox.system.$1", Attribute: "inject"},

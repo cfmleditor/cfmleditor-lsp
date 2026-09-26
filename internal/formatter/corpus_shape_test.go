@@ -17,7 +17,7 @@ func TestMalformedShapeCatchesFoldedBraces(t *testing.T) {
 
 	before := "component {\n\tfunction sw(k) {\n\t\tswitch ( k ) {\n\t\tcase 1:\n {\n\n\t\t\t\ta();\n\n\t\t\t}}\n\n\t}\n}\n"
 
-	got := malformedShape([]byte(before), corpusOptions())
+	got := malformedShape([]byte(before), new(corpusOptions()))
 	if got == "" {
 		t.Fatal("malformedShape passed the output the braced-case defect produced")
 	}
@@ -35,7 +35,7 @@ func TestMalformedShapeCatchesALostIndent(t *testing.T) {
 
 	src := "component {\n\tfunction f() {\n\t\tq = queryExecute(\n\" select 1\nfrom t\",\n{\na: 1\n}\n);\n\t}\n}\n"
 
-	got := malformedShape([]byte(src), corpusOptions())
+	got := malformedShape([]byte(src), new(corpusOptions()))
 	if !strings.Contains(got, "column one") {
 		t.Errorf("a block brace in column one was not reported: %q", got)
 	}
@@ -58,7 +58,7 @@ func TestMalformedShapeAcceptsHealthyOutput(t *testing.T) {
 	}
 
 	for name, src := range cases {
-		if got := malformedShape([]byte(src), corpusOptions()); got != "" {
+		if got := malformedShape([]byte(src), new(corpusOptions())); got != "" {
 			t.Errorf("%s: healthy output reported as malformed: %s\n%s", name, got, src)
 		}
 	}
@@ -89,7 +89,7 @@ func TestMalformedShapeSkipsRawTextBodies(t *testing.T) {
 	}
 
 	for name, src := range healthy {
-		if got := malformedShape([]byte(src), corpusOptions()); got != "" {
+		if got := malformedShape([]byte(src), new(corpusOptions())); got != "" {
 			t.Errorf("%s: raw text reported as malformed: %s\n%s", name, got, src)
 		}
 	}
@@ -101,7 +101,7 @@ func TestMalformedShapeSkipsRawTextBodies(t *testing.T) {
 	}
 
 	for name, src := range defects {
-		if got := malformedShape([]byte(src), corpusOptions()); got == "" {
+		if got := malformedShape([]byte(src), new(corpusOptions())); got == "" {
 			t.Errorf("%s: defect not reported:\n%s", name, src)
 		}
 	}
@@ -121,13 +121,13 @@ func TestMalformedShapeAllowsNextLineBraces(t *testing.T) {
 	opts := corpusOptions()
 	opts.BraceStyle = "next-line"
 
-	src := mustFormatWith(t, "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}\n</cfscript>\n", opts)
+	src := mustFormatWith(t, "<cfscript>\ncomponent {\n\tfunction f() {\n\t\tx = 1;\n\t}\n}\n</cfscript>\n", &opts)
 
-	if got := malformedShape([]byte(src), opts); got != "" {
+	if got := malformedShape([]byte(src), &opts); got != "" {
 		t.Errorf("next-line output reported as malformed: %s\n%s", got, src)
 	}
 
-	if got := malformedShape([]byte("component\n{\n\tf();\n\t}}\n"), opts); got == "" {
+	if got := malformedShape([]byte("component\n{\n\tf();\n\t}}\n"), &opts); got == "" {
 		t.Error("the closing-brace rule stopped applying under next-line braces")
 	}
 }
@@ -135,10 +135,10 @@ func TestMalformedShapeAllowsNextLineBraces(t *testing.T) {
 func mustFormat(t *testing.T, src string) string {
 	t.Helper()
 
-	return mustFormatWith(t, src, corpusOptions())
+	return mustFormatWith(t, src, new(corpusOptions()))
 }
 
-func mustFormatWith(t *testing.T, src string, opts Options) string {
+func mustFormatWith(t *testing.T, src string, opts *Options) string {
 	t.Helper()
 
 	tree := language.Parse(language.CFML, []byte(src), nil)

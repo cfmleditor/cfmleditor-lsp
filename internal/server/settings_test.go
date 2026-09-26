@@ -145,7 +145,7 @@ func TestNearestConfigToTheEditorWins(t *testing.T) {
 
 	s := NewServer(nil, cflog.NewLogger(false))
 	// The daemon found the outer config; the editor opened the inner folder.
-	Settings{ConfigPath: outerPath, Mappings: map[string]string{"models": filepath.Join(outer, "outer-models")}}.Apply(s)
+	(&Settings{ConfigPath: outerPath, Mappings: map[string]string{"models": filepath.Join(outer, "outer-models")}}).Apply(s)
 	initializeIn(t, s, inner)
 
 	if got := s.Mappings["models"]; got != filepath.Join(inner, "inner-models") {
@@ -180,7 +180,7 @@ func TestConfigReloadDoesNotDependOnComponentResolvers(t *testing.T) {
 			}
 
 			s := NewServer(nil, cflog.NewLogger(false))
-			Settings{ConfigPath: cfgPath, ComponentResolvers: tc.resolvers}.Apply(s)
+			(&Settings{ConfigPath: cfgPath, ComponentResolvers: tc.resolvers}).Apply(s)
 			initializeIn(t, s, dir)
 
 			if got := len(s.ComponentResolvers); got != 1 {
@@ -203,7 +203,7 @@ func TestSessionWithNoConfigPathStillLoadsConfig(t *testing.T) {
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{}.Apply(s)
+	(&Settings{}).Apply(s)
 	initializeIn(t, s, dir)
 
 	if !s.Linting {
@@ -220,7 +220,7 @@ func TestEditorSettingsReachASessionWithNoConfigPath(t *testing.T) {
 	dir := t.TempDir()
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{}.Apply(s)
+	(&Settings{}).Apply(s)
 
 	raw, err := json.Marshal(map[string]any{
 		"processId":             nil,
@@ -292,11 +292,11 @@ func TestEditorSettingsMergeWithTheDaemonsConfig(t *testing.T) {
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{
+	(&Settings{
 		ConfigPath: cfgPath,
 		Mappings:   map[string]string{"models": filepath.Join(dir, "models")},
 		Formatting: config.ResolvedFormatting{Enabled: true, LineWidth: 100},
-	}.Apply(s)
+	}).Apply(s)
 
 	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true, "lineWidth": 100, "attrBreakThreshold": 7}}`)
 
@@ -324,7 +324,7 @@ func TestConfigFileStillWinsOverEditorSettings(t *testing.T) {
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{ConfigPath: cfgPath, Formatting: config.ResolvedFormatting{Enabled: true, LineWidth: 100}}.Apply(s)
+	(&Settings{ConfigPath: cfgPath, Formatting: config.ResolvedFormatting{Enabled: true, LineWidth: 100}}).Apply(s)
 
 	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true, "lineWidth": 40}}`)
 
@@ -347,10 +347,10 @@ func TestOverlayDoesNotDuplicateResolvers(t *testing.T) {
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{
+	(&Settings{
 		ConfigPath:         cfgPath,
 		ComponentResolvers: []config.Resolver{{Match: `getService("$1")`, Resolve: "svc.$1", Prefix: "getService"}},
-	}.Apply(s)
+	}).Apply(s)
 
 	initializeServerWith(t, s, dir, `{"formatting": {"enabled": true}}`)
 
@@ -370,7 +370,7 @@ func TestConfigAppliedOnceWithNoEditorSettings(t *testing.T) {
 	}
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{ConfigPath: cfgPath, Linting: true, Mappings: map[string]string{"models": filepath.Join(dir, "models")}}.Apply(s)
+	(&Settings{ConfigPath: cfgPath, Linting: true, Mappings: map[string]string{"models": filepath.Join(dir, "models")}}).Apply(s)
 	initializeIn(t, s, dir)
 
 	if !s.Linting {
@@ -390,7 +390,7 @@ func TestEditorSettingsSurviveAnUnreadableDaemonConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	s := NewServer(nil, cflog.NewLogger(false))
-	Settings{ConfigPath: filepath.Join(dir, "gone", ".cfmleditor.json")}.Apply(s)
+	(&Settings{ConfigPath: filepath.Join(dir, "gone", ".cfmleditor.json")}).Apply(s)
 
 	initializeServerWith(t, s, dir, `{"linting": {"enabled": true}}`)
 
