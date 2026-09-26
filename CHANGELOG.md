@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.8]
+
 ### Fixed
 
 - **A slow request no longer holds up every message behind it.** The server handled one message at a time, each to completion, so formatting a 65,000-line component (1.5s) delayed every hover, highlight and keystroke sent meanwhile. Formatting, range formatting, `cfmleditor.explainCall`, `cfmleditor.exportDeps` and `cfmleditor.findRefs` now take the document's text and do their work alongside later messages.
