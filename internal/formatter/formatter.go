@@ -230,6 +230,8 @@ type Formatter struct {
 	// pendingBlockComments holds comments found between a construct's header
 	// and its body, to be emitted just inside that body once it opens.
 	pendingBlockComments []*sitter.Node
+	// closureBodies caches closureBody by block and level; see there.
+	closureBodies map[closureKey]string
 }
 
 // New creates a Formatter with the given options.

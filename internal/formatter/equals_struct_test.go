@@ -192,7 +192,7 @@ func TestClosureLastInTagStructStable(t *testing.T) {
 			"function (b) {\n\t\t\t//return b;\n\t\t}\n\t}>\n"
 
 		out := formatGuarded(t, src)
-		assertNotContains(t, out, "\n\n")
+		assertNotContains(t, out, "\n\n} />")
 		assertReparses(t, out)
 
 		if again := formatGuarded(t, out); again != out {

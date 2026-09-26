@@ -79,6 +79,26 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 
 // ─── helpers shared by all script formatters ─────────────────────────────────
 
+// endsInChainBreak reports whether a rendered callee ends on a line of its own
+// that starts with the member accessor — `\n\t.catch` — which is what the
+// member_expression renderer writes when it breaks a chain. The arguments of
+// that call then belong one level deeper, under the accessor.
+//
+// Any newline used to count, but a closure earlier in the chain puts newlines
+// in the callee without breaking it: in `p.then(function(r) { … }).catch(…)`
+// the `.catch` sits on the `})` line, and its callback was indented a level
+// deeper than the `then` one beside it.
+func endsInChainBreak(callee string) bool {
+	nl := strings.LastIndexByte(callee, '\n')
+	if nl < 0 {
+		return false
+	}
+
+	last := strings.TrimLeft(callee[nl+1:], " \t")
+
+	return strings.HasPrefix(last, ".") || strings.HasPrefix(last, "?.") || strings.HasPrefix(last, "::")
+}
+
 // memberOperator returns the accessor token joining a member_expression's
 // object and property. It is not always ".": Lucee and BoxLang spell static
 // access `Widget::getData()`, and rendering that as `Widget.getData()` turns a
@@ -667,7 +687,6 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
 		cmts := f.delimitedComments(n)
-		gapLifted := false
 
 		// A word operator — `AND`, `EQ`, `IS NOT`, `DOES NOT CONTAIN` — is
 		// lifted from the source. Until tree-sitter-cfml v0.26.36 the grammar
@@ -682,7 +701,6 @@ func (f *Formatter) expr(n *sitter.Node) string {
 			// carried across. Adding them again would emit them twice.
 			op = f.gapOperator(n, left, right)
 			cmts = ""
-			gapLifted = true
 		}
 
 		joined := fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
@@ -695,9 +713,16 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		// ColdBox's Router.cfc, where `) & // multi-host` lost its comment
 		// outright. Reproduce the expression as written instead, the same
 		// fallback ternary_expression takes for a comment parked before its
-		// `:`. Skipped when gapOperator already lifted the gap verbatim, since
-		// then nothing was dropped and the source text is what was emitted.
-		if !gapLifted && !f.keptLineComments(n, joined) {
+		// `:`.
+		//
+		// A gap lifted by gapOperator needs the check too. Nothing in it was
+		// dropped, but it was trimmed and the right operand joined on after it,
+		// so a `//` comment written on its own line between `OR` and the next
+		// clause — how WireBox's Binder.cfc annotates each clause of a filter —
+		// came out as `OR // why ( clause )`, with the clause inside the
+		// comment. Its only occurrence in the corpus is in a closure body, which
+		// was copied verbatim until closures were formatted.
+		if !f.keptLineComments(n, joined) {
 			return f.text(n)
 		}
 
@@ -768,7 +793,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		args := n.ChildByFieldName("arguments")
 		fnStr := f.expr(fn)
 		// If fn has a chain break, evaluate args at deeper level.
-		chainBroken := strings.Contains(fnStr, "\n")
+		chainBroken := endsInChainBreak(fnStr)
 		if chainBroken {
 			f.level++
 		}
@@ -1416,6 +1441,10 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	// end of line and comments out every argument after it.
 	shouldBreak := hasLineComment || len(parts) > 3 ||
 		(len(parts) > 0 && len(inline) > f.opts.LineWidth)
+	if shouldBreak && !hasLineComment && len(parts) <= 3 && f.closuresHug(args, parts, inline) {
+		return inline
+	}
+
 	if shouldBreak {
 		// Re-evaluate at deeper level so nested splits indent correctly.
 		f.level++
@@ -1751,6 +1780,28 @@ func (f *Formatter) deepenItems(n *sitter.Node, items []collectionItem) {
 	}
 }
 
+// holdsMultilineClosure reports whether a literal has an entry whose value is a
+// closure laid out across lines. Such a literal is always written one entry
+// per line: kept inline because its total length was short, it came out as
+// `{ a = function() {`, the closure's body, then `}, b = 1 }`, with the next
+// entry and the literal's own brace hanging off the closure's.
+//
+// items holds one entry per named child of n, in order, as collectionItems
+// builds it.
+func holdsMultilineClosure(n *sitter.Node, items []collectionItem) bool {
+	for i, it := range items {
+		if it.isComment || !strings.Contains(it.text, "\n") {
+			continue
+		}
+
+		if isClosure(entryValue(n.NamedChild(uint(i)))) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (f *Formatter) exprArray(n *sitter.Node) string {
 	if n.NamedChildCount() == 0 {
 		return "[]"
@@ -1759,7 +1810,7 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 	items, hasLineComment := f.collectionItems(n)
 	trailing := hasTrailingComma(n)
 
-	if !hasLineComment {
+	if !hasLineComment && !holdsMultilineClosure(n, items) {
 		inline := "[" + joinCollectionInline(items, trailing) + "]"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
@@ -1780,7 +1831,7 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 	items, hasLineComment := f.collectionItems(n)
 	trailing := hasTrailingComma(n)
 
-	if !hasLineComment {
+	if !hasLineComment && !holdsMultilineClosure(n, items) {
 		inline := "{ " + joinCollectionInline(items, trailing) + " }"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
@@ -1898,7 +1949,7 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 	if body != nil && (body.Kind() == "statement_block" || body.Kind() == "block") {
 		// Render block inline for arrow functions; full block would need
 		// newlines which aren't valid inside an expression context here.
-		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.blockText(body))
+		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.closureBody(body))
 	}
 
 	return fmt.Sprintf("%s %s %s", paramStr, arrow, f.expr(body))
@@ -1963,7 +2014,150 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		attrStr = " " + strings.Join(attrs, " ")
 	}
 
-	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.blockText(body))
+	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.closureBody(body))
+}
+
+// closureBody renders the block of a function expression or an arrow function.
+//
+// A body written across lines goes through the statement renderer, exactly as
+// a declared function's body does, indented one level under the line the
+// closure's expression sits on. It used to be copied verbatim, so the body of
+// every callback kept whatever indentation it was typed with: a TestBox spec,
+// which is nothing but nested `describe`/`it` closures, was left almost
+// untouched inside its `run()`.
+//
+// The block is rendered into the output buffer and cut back out, because the
+// statement renderer writes rather than returns. The comments a surrounding
+// construct has queued for its own body are set aside for the duration, or the
+// closure's block would flush them into itself.
+//
+// A body written on one line — `function(x) { return x > 1; }` — is kept as
+// written: it is a short lambda whose author chose the inline form, and laying
+// it out as a block would turn every one-line callback into five lines. An
+// empty body written across lines becomes `{}`.
+func (f *Formatter) closureBody(body *sitter.Node) string {
+	src := f.blockText(body)
+	if body.Kind() != "statement_block" || !strings.Contains(src, "\n") {
+		return src
+	}
+
+	if body.NamedChildCount() == 0 {
+		return "{}"
+	}
+
+	key := closureKey{src: &f.src[0], start: body.StartByte(), end: body.EndByte(), level: f.level}
+	if rendered, ok := f.closureBodies[key]; ok {
+		return rendered
+	}
+
+	st := f.saveState()
+	f.pendingBlockComments = nil
+	start := f.out.Len()
+
+	f.scriptWrite("{")
+	f.scriptBlockBody(body)
+
+	rendered := string(f.out.Bytes()[start:])
+	f.restoreState(st)
+
+	if f.closureBodies == nil {
+		f.closureBodies = map[closureKey]string{}
+	}
+
+	f.closureBodies[key] = rendered
+
+	return rendered
+}
+
+// closureKey identifies one rendering of a closure body. The rendering is a
+// function of the block and the indent level alone: the body's statements start
+// on lines of their own, so nothing about the line the closure sits on reaches
+// them. src tells a <cfscript> region's re-parsed source apart from the
+// document's.
+//
+// The cache is what keeps nesting linear. A literal or an argument list that
+// goes multi-line renders its entries twice — once to measure the inline form,
+// once a level deeper to lay them out — and a closure inside renders its own
+// entries twice in turn, so without it the work doubled with every level of
+// callback nested in a struct or a long argument list.
+type closureKey struct {
+	src        *byte
+	start, end uint
+	level      int
+}
+
+// entryValue returns the value of a struct entry or a named argument —
+// `key: value`, `key = value`, `name = value` — and n itself for anything else.
+// A callback is as often passed by name, `it(title = "x", body = function() {`,
+// as by position.
+func entryValue(n *sitter.Node) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+
+	switch n.Kind() {
+	case "pair", "cf_pair":
+		return n.ChildByFieldName("value")
+	case "object_assignment_pattern", "assignment_expression":
+		return n.ChildByFieldName("right")
+	}
+
+	return n
+}
+
+// isClosure reports whether n is a function expression or an arrow function
+// whose body is a block — the expressions closureBody lays out across lines.
+func isClosure(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	switch n.Kind() {
+	case "function_expression":
+		return true
+	case "arrow_function":
+		body := n.ChildByFieldName("body")
+
+		return body != nil && body.Kind() == "statement_block"
+	}
+
+	return false
+}
+
+// closuresHug reports whether an argument list that holds multi-line closures
+// can stay on the call's own line, `describe("x", function() {`, with each
+// closure's body indented under the call and its `}` closing the line the
+// call's `)` is on.
+//
+// Measured whole, a closure's body counts toward the argument list's width, so
+// any callback of more than a few statements broke the list onto one argument
+// per line: `describe(`, then `"x",`, then `function() {` on lines of their
+// own. Only the lines the call itself owns are measured here — the first,
+// up to the opening brace, and the last, from the closing brace — and every
+// other argument must be on one line.
+func (f *Formatter) closuresHug(args *sitter.Node, parts []string, inline string) bool {
+	multi := false
+
+	for i, p := range parts {
+		if !strings.Contains(p, "\n") {
+			continue
+		}
+
+		if !isClosure(entryValue(args.NamedChild(uint(i)))) {
+			return false
+		}
+
+		multi = true
+	}
+
+	if !multi {
+		return false
+	}
+
+	first, _, _ := strings.Cut(inline, "\n")
+	last := inline[strings.LastIndexByte(inline, '\n')+1:]
+
+	return len(first) <= f.opts.LineWidth && len(last) <= f.opts.LineWidth
 }
 
 // blockText is the source of a function body that is kept as written.
