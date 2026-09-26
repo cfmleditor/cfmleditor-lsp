@@ -233,6 +233,17 @@ Literal and argument children are now classified as elements or comments; a
 line comment forces the construct onto several lines and never takes a
 trailing comma. Block comments still inline.
 
+Function parameters had the same defect in comma-first style, found later on the
+15,503-file corpus. In `,required any image //path or object` then `,string
+imageType`, the comma separating the two is only read on the next line, and it
+was appended to the parameter's text after its trailing comment:
+`required any image //path or object,`. The comment swallowed the comma. Six
+spreadsheet-cfml files and Preside's `Bootstrap.cfc` were refused. A `//` comment
+trailing a parameter that a comma follows now becomes a comment entry of its own
+after the parameter. That is the shape a comma-last `image, // why` already had,
+so both spellings format alike. A trailing comment with no comma after it, as on
+the last parameter, stays on its line.
+
 ### 2.10 Comments deleted in "between" positions
 
 A comment belonging to no field was skipped past and lost:
