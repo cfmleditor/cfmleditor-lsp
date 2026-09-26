@@ -70,6 +70,9 @@ type Server struct {
 	cachedRoutes             *route.Resolver           // memoised; dropped by invalidateRoutes
 	routeScanKey             string                    // content hash the scan below was taken from
 	routeScanRefs            []route.Ref               // memoised whole-document scan; see routeLinks
+	callLinesMu              sync.Mutex                // guards callLinesKey, callLines
+	callLinesKey             string                    // content hash the lines below were taken from
+	callLines                []uint32                  // memoised lines holding a call site; see lineHasCall
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
@@ -190,7 +193,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
 		CodeActionProvider:        protocol.Boolean(true),
 		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats", "cfmleditor.resolveRoute", "cfmleditor.exportUnresolved", "cfmleditor.exportCFLint"},
+			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats", "cfmleditor.resolveRoute", "cfmleditor.exportUnresolved", "cfmleditor.exportCFLint", "cfmleditor.explainCall"},
 		},
 		Workspace: &protocol.WorkspaceOptions{
 			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{

@@ -170,53 +170,14 @@ func cmdExplain(args []string) {
 	})
 	pr.FuncLookup = funcLookup
 
-	calls := pr.AllCalls()
-
-	var matches []parser.CallSite
-
-	for _, call := range calls {
-		if int(call.Line)+1 != line {
-			continue
-		}
-
-		if filter != "" && !strings.Contains(strings.ToLower(call.FuncName), strings.ToLower(filter)) &&
-			!strings.Contains(strings.ToLower(call.Variable), strings.ToLower(filter)) {
-			continue
-		}
-
-		matches = append(matches, call)
-	}
+	// The selection and the report are shared with cfmleditor.explainCall, so
+	// the server's answer reads exactly as this one does.
+	matches := resolve.CallsOnLine(pr, line-1, filter)
 
 	if len(matches) == 0 {
 		fmt.Fprintf(os.Stderr, "no call sites found on %s:%d\n", file, line)
 		os.Exit(1)
 	}
 
-	for i, call := range matches {
-		if i > 0 {
-			fmt.Println()
-		}
-
-		callText := call.FuncName
-		if call.Variable != "" {
-			callText = call.Variable + "." + call.FuncName
-		}
-
-		if len(call.Chain) > 0 {
-			callText = call.Variable + "." + strings.Join(call.Chain, "().") + "()." + call.FuncName
-		}
-
-		fmt.Printf("%s:%d: %s\n", file, line, callText)
-
-		reason, steps := resolver.ExplainCall(call, pr, baseDir)
-		for _, s := range steps {
-			fmt.Printf("  - %s\n", s)
-		}
-
-		if reason == "" {
-			fmt.Printf("  => resolved\n")
-		} else {
-			fmt.Printf("  => unresolved: %s\n", reason)
-		}
-	}
+	resolver.WriteExplanation(os.Stdout, file, line-1, matches, pr, baseDir)
 }

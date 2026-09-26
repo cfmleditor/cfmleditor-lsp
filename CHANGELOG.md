@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cfmleditor.explainCall`, the server's form of `cfmleditor-lsp explain`.** Given a document URI, a 0-based line and an optional name filter, it reports how each call on that line resolved: the steps the resolver took and the verdict, in the CLI's own words. It uses the running server's resolver and index, reads the text in the editor rather than the file on disk, and shows the report as a message. A line with no call gets a message saying so.
+- **Code actions for everything the zed-cfml tasks did.** The Zed extension is dropping its tasks, which ran this binary's CLI, and Zed reaches a server through code actions (`cmd-.`) and, from Zed 1.21, a picker of the server's commands. Three actions close the gap:
+  - "Explain call resolution on line N" runs `cfmleditor.explainCall`. It is offered only on a line that holds a call.
+  - "Export dependency graph for <file>" runs `cfmleditor.exportDeps` for the whole file. Until now only the function under the cursor was offered.
+  - "Scan workspace for parse errors" runs `cfmleditor.scanWorkspace`, offered with the two workspace report exports wherever the cursor is.
+
+  Formatting, references and the unresolved and CFLint reports already had a server route: `editor: format`, find references (or "Find all references to X"), and the two "Export ... report for the workspace" actions.
+
 ### Fixed
 
 - **A closure's body was never formatted.** The body of a `function(…) { … }` or `(…) => { … }` inside an expression, such as a call argument, a struct value or an assignment, was copied verbatim. A callback kept whatever indentation it was typed with, so a TestBox spec, which is all `describe`/`it` closures, stayed almost untouched inside its `run()`. It was also worse than untouched: a closure argument long enough to push its call past the line width broke the call onto one argument per line, `describe(`, `"x",`, `function() {`, around a body left as written. A body written across lines now goes through the statement renderer, one level under the line the closure is on. A call whose multi-line arguments are all closures stays on the call's own line, `describe("x", function() {`, when the lines the call owns fit; that covers a callback passed by name, `it(title = "t", body = function() {`, too. A struct or array holding such a closure is written one entry per line. A body written on one line, and an empty one, are kept as written. Against a 15,503-file corpus of public CFML, the formatted output of 3,686 files changes, and no verdict changes.
