@@ -254,6 +254,16 @@ A comment belonging to no field was skipped past and lost:
 Both are now emitted, with the continuation keyword or chain hop moving to its
 own line. With no comment present, `} else {` still sits on one line.
 
+Two more were found later on the 15,503-file corpus, where the comment sits
+inside a statement beside its expression. One is an expression statement with
+no semicolon and a trailing line comment, from lucee-docs' `Application.cfc`:
+`variables.assetBundleVersion = 45 // must match …`. The other is a return with
+a block comment before its semicolon, from Slatwall's `VendorOrder.cfc`:
+`return getSubtotal() /*+ getTaxTotal() …*/;`. `scriptExprStmt` and
+`scriptReturn` rendered only their first named child. They now carry the
+comments across and write each on a line of its own after the statement, the way
+`scriptVarDecl` already did, so the output formats to itself.
+
 ### 2.11 Invented closing tags — ~100 files
 
 `formatCFTag` closed every `cf_tag`, so a tag legal without a body gained a
