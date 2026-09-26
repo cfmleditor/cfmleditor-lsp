@@ -523,7 +523,8 @@ alternative that matches matches at the same position.
 Anchoring is off by default because a resolver aimed at a *call* usually does want to match
 through a receiver (`VARIABLES._parent.getService("x")`). Reach for it when a resolver is aimed
 at a variable name, or when a broad catch-all is producing wrong answers — `cfmleditor-lsp
-explain` will name the resolver that fired.
+explain`, or the "Explain call resolution on line N" code action, will name the resolver
+that fired.
 
 #### `dynamicIfMissing`
 
