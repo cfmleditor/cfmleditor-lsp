@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json/v2"
+	"fmt"
+	"path/filepath"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"go.lsp.dev/protocol"
 )
 
@@ -21,20 +24,35 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 	line := int(params.Range.Start.Line)
 	char := byteCol(content, line, params.Range.Start.Character)
-
-	// The workspace reports come last, and wherever the cursor is: they are
-	// about the project, not the word under it. A client with no way to run a
-	// server command of its own, such as Zed, reaches them only from here.
-	reports := workspaceReportActions()
-
-	word := parser.WordAtPosition(content, line, char)
-	if word == "" {
-		return reports, nil
-	}
-
 	docURI := string(params.TextDocument.URI)
 
 	var actions []protocol.CodeAction
+
+	// Offered only on a line that holds a call, so it is not noise on every
+	// line of the file; the cursor need not be on the call itself.
+	if s.lineHasCall(params.TextDocument.URI, content, params.Range.Start.Line) {
+		title := fmt.Sprintf("Explain call resolution on line %d", line+1)
+		actions = append(actions, protocol.CodeAction{
+			Title: title,
+
+			Command: protocol.Command{
+				Title:     title,
+				Command:   "cfmleditor.explainCall",
+				Arguments: lspAnyArgs(docURI, line),
+			},
+		})
+	}
+
+	// The file and workspace actions come last, and wherever the cursor is:
+	// they are about the file or the project, not the word under the cursor. A
+	// client with no way to run a server command of its own, such as Zed
+	// before its LSP command picker, reaches them only from here.
+	general := append(fileActions(docURI), workspaceActions()...)
+
+	word := parser.WordAtPosition(content, line, char)
+	if word == "" {
+		return append(actions, general...), nil
+	}
 
 	// If on a function name with a qualifier, offer component-level actions
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
@@ -92,21 +110,40 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 		},
 	})
 
-	return append(actions, reports...), nil
+	return append(actions, general...), nil
 }
 
-// workspaceReportActions offers the generated known-issues reports, which
-// scan the whole workspace and write their files beside .cfmleditor.json (see
-// handleExport).
-func workspaceReportActions() []protocol.CodeAction {
-	reports := []struct{ title, command string }{
+// fileActions offers what is about the whole file. The dependency graph here
+// is the file-level form of cfmleditor.exportDeps, which takes the document
+// URI alone; the word actions above pass a function name as well.
+func fileActions(docURI string) []protocol.CodeAction {
+	title := "Export dependency graph for " + filepath.Base(cfpath.FromURI(docURI))
+
+	return []protocol.CodeAction{{
+		Title: title,
+
+		Command: protocol.Command{
+			Title:     title,
+			Command:   "cfmleditor.exportDeps",
+			Arguments: lspAnyArgs(docURI),
+		},
+	}}
+}
+
+// workspaceActions offers the commands that walk the whole workspace: the
+// parse-error scan, which publishes its findings as diagnostics, and the
+// generated known-issues reports, which write their files beside
+// .cfmleditor.json (see handleExport).
+func workspaceActions() []protocol.CodeAction {
+	cmds := []struct{ title, command string }{
+		{"Scan workspace for parse errors", "cfmleditor.scanWorkspace"},
 		{"Export unresolved calls report for the workspace", "cfmleditor.exportUnresolved"},
 		{"Export CFLint report for the workspace", "cfmleditor.exportCFLint"},
 	}
 
-	out := make([]protocol.CodeAction, 0, len(reports))
+	out := make([]protocol.CodeAction, 0, len(cmds))
 
-	for _, r := range reports {
+	for _, r := range cmds {
 		out = append(out, protocol.CodeAction{
 			Title:   r.title,
 			Command: protocol.Command{Title: r.title, Command: r.command},

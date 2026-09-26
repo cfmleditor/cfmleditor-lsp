@@ -65,6 +65,8 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 		f.scriptTry(n)
 	case "import_statement":
 		f.scriptPassthru(n)
+	case "tag_statement", "query_tag":
+		f.scriptTagStatement(n)
 
 	// ── block (anonymous body) ─────────────────────────────────────────────
 	case "statement_block", "block":
@@ -78,6 +80,26 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 }
 
 // ─── helpers shared by all script formatters ─────────────────────────────────
+
+// endsInChainBreak reports whether a rendered callee ends on a line of its own
+// that starts with the member accessor — `\n\t.catch` — which is what the
+// member_expression renderer writes when it breaks a chain. The arguments of
+// that call then belong one level deeper, under the accessor.
+//
+// Any newline used to count, but a closure earlier in the chain puts newlines
+// in the callee without breaking it: in `p.then(function(r) { … }).catch(…)`
+// the `.catch` sits on the `})` line, and its callback was indented a level
+// deeper than the `then` one beside it.
+func endsInChainBreak(callee string) bool {
+	nl := strings.LastIndexByte(callee, '\n')
+	if nl < 0 {
+		return false
+	}
+
+	last := strings.TrimLeft(callee[nl+1:], " \t")
+
+	return strings.HasPrefix(last, ".") || strings.HasPrefix(last, "?.") || strings.HasPrefix(last, "::")
+}
 
 // memberOperator returns the accessor token joining a member_expression's
 // object and property. It is not always ".": Lucee and BoxLang spell static
@@ -667,15 +689,20 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		right := n.ChildByFieldName("right")
 		op := f.operatorToken(n)
 		cmts := f.delimitedComments(n)
-		gapLifted := false
 
-		if op == "" {
+		// A word operator — `AND`, `EQ`, `IS NOT`, `DOES NOT CONTAIN` — is
+		// lifted from the source. Until tree-sitter-cfml v0.26.36 the grammar
+		// hid those tokens, so op was empty and this was the only path they
+		// took; later releases expose them, and following the symbolic
+		// operators' path instead would move a block comment written before
+		// the operator to after it, which the guard rejects, and reproduce a
+		// condition with a line comment in it verbatim rather than formatted.
+		if op == "" || isWordOperator(op) {
 			// gapOperator lifts the raw source between the operands, so
 			// anything sitting in that gap — comments included — is already
 			// carried across. Adding them again would emit them twice.
 			op = f.gapOperator(n, left, right)
 			cmts = ""
-			gapLifted = true
 		}
 
 		joined := fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
@@ -688,15 +715,26 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		// ColdBox's Router.cfc, where `) & // multi-host` lost its comment
 		// outright. Reproduce the expression as written instead, the same
 		// fallback ternary_expression takes for a comment parked before its
-		// `:`. Skipped when gapOperator already lifted the gap verbatim, since
-		// then nothing was dropped and the source text is what was emitted.
-		if !gapLifted && !f.keptLineComments(n, joined) {
+		// `:`.
+		//
+		// A gap lifted by gapOperator needs the check too. Nothing in it was
+		// dropped, but it was trimmed and the right operand joined on after it,
+		// so a `//` comment written on its own line between `OR` and the next
+		// clause — how WireBox's Binder.cfc annotates each clause of a filter —
+		// came out as `OR // why ( clause )`, with the clause inside the
+		// comment. Its only occurrence in the corpus is in a closure body, which
+		// was copied verbatim until closures were formatted.
+		if !f.keptLineComments(n, joined) {
 			return f.text(n)
 		}
 
 		return joined
 
-	case "unary_expression":
+	// not_expression is `!` and `NOT` in tree-sitter-cfml after v0.26.36, which
+	// split them out of unary_expression to give them CFML's precedence, looser
+	// than the comparisons. Its operator is a not_operator node rather than a
+	// token, but its text is the same.
+	case "unary_expression", "not_expression":
 		op := n.ChildByFieldName("operator")
 		arg := n.ChildByFieldName("argument")
 
@@ -757,7 +795,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		args := n.ChildByFieldName("arguments")
 		fnStr := f.expr(fn)
 		// If fn has a chain break, evaluate args at deeper level.
-		chainBroken := strings.Contains(fnStr, "\n")
+		chainBroken := endsInChainBreak(fnStr)
 		if chainBroken {
 			f.level++
 		}
@@ -997,26 +1035,34 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "object":
 		return f.exprObject(n)
 
-	case "pair":
-		key := n.ChildByFieldName("key")
-		val := n.ChildByFieldName("value")
-		keyStr := f.expr(key)
-		valStr := f.expr(val)
-		result := fmt.Sprintf("%s: %s", keyStr, valStr)
-
-		if len(result) > f.opts.LineWidth && !strings.Contains(valStr, "\n") {
-			f.level++
-			valStr = f.expr(val)
-			f.level--
-
-			if strings.Contains(valStr, "\n") {
-				indent := f.opts.indent(f.level + 1)
-
-				return fmt.Sprintf("%s:\n%s%s", keyStr, indent, valStr)
-			}
+	case "object_pattern":
+		// A struct literal written with `=` (`{ a = 1, "b" = 2 }`) parses as an
+		// object_pattern, because the grammar shares the rule with JavaScript
+		// destructuring. It used to fall through to the verbatim default, so
+		// the most common struct spelling in CFML was never formatted at all.
+		// Anything that is not a plain key/value list keeps its source text.
+		if !isStructPattern(n) {
+			return f.text(n)
 		}
 
-		return result
+		return f.exprObject(n)
+
+	case "pair":
+		return f.exprPair(f.expr(n.ChildByFieldName("key")), ":", n.ChildByFieldName("value"))
+
+	case "cf_pair":
+		return f.exprPair(f.structKey(n.ChildByFieldName("key")), " =", n.ChildByFieldName("value"))
+
+	case "object_assignment_pattern":
+		// `{ a = 1 }`: the key is a bare name, so the grammar reads it as a
+		// destructuring default rather than a cf_pair. Only that shape reaches
+		// here; isStructPattern sends every other one to the verbatim default.
+		left := n.ChildByFieldName("left")
+		if left == nil {
+			return f.text(n)
+		}
+
+		return f.exprPair(f.text(left), " =", n.ChildByFieldName("right"))
 
 	// ── functions ─────────────────────────────────────────────────────────
 	case "arrow_function":
@@ -1081,20 +1127,46 @@ func (f *Formatter) delimitedComments(n *sitter.Node) string {
 	return sb.String()
 }
 
+// isWordOp reports whether a prefix operator is a word, which needs a space
+// before its operand. CFML is case-insensitive: matched case-sensitively, `Not x`
+// was joined into `Notx`, a different identifier, and a whitespace-only change
+// the guard cannot see.
 func isWordOp(op string) bool {
-	switch op {
-	case "typeof", "void", "delete", "not", "NOT":
+	switch strings.ToLower(op) {
+	case "typeof", "void", "delete", "not":
 		return true
 	}
 
 	return false
 }
 
-// operatorToken finds the operator anonymous token in a binary/unary expression.
+// isWordOperator reports whether a binary operator is spelled as a word (`AND`,
+// `eq`, `IS NOT`, `in`) rather than as symbols.
+func isWordOperator(op string) bool {
+	if op == "" {
+		return false
+	}
+
+	c := op[0] | 0x20 // ASCII lowercase; every CFML operator word is ASCII
+
+	return c >= 'a' && c <= 'z'
+}
+
+// operatorToken finds the operator in a binary/unary expression. The operator
+// field can hold more than one token — CFML's `IS NOT` is two in
+// tree-sitter-cfml after v0.26.36 — and ChildByFieldName returns only the first,
+// so `a IS NOT b` read as `a IS b`. Every token in the field is joined.
 func (f *Formatter) operatorToken(n *sitter.Node) string {
-	op := n.ChildByFieldName("operator")
-	if op != nil {
-		return f.text(op)
+	var parts []string
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if n.FieldNameForChild(uint32(i)) == "operator" {
+			parts = append(parts, f.text(n.Child(i)))
+		}
+	}
+
+	if len(parts) > 0 {
+		return strings.Join(parts, " ")
 	}
 	// Fallback: first anonymous child
 	for i := uint(0); i < n.ChildCount(); i++ {
@@ -1128,6 +1200,37 @@ func hasChildOfKind(n *sitter.Node, kind string) bool {
 	}
 
 	return false
+}
+
+// mixedArgSeparators reports whether some arguments in args are separated by a
+// comma and others only by whitespace. Comments are not arguments, so they
+// neither need nor break a separator.
+func mixedArgSeparators(args *sitter.Node) bool {
+	withComma, without := false, false
+	seenArg, comma := false, false
+
+	for i := uint(0); i < args.ChildCount(); i++ {
+		c := args.Child(i)
+
+		switch {
+		case c.Kind() == ",":
+			comma = true
+		case !c.IsNamed() || isCommentKind(c.Kind()):
+			continue
+		default:
+			if seenArg {
+				if comma {
+					withComma = true
+				} else {
+					without = true
+				}
+			}
+
+			seenArg, comma = true, false
+		}
+	}
+
+	return withComma && without
 }
 
 // tagStyleArgs reports whether args is a script-syntax CF tag's attribute list —
@@ -1264,8 +1367,25 @@ func (f *Formatter) exprQuery(n *sitter.Node) string {
 // has nowhere to go in a rendered list and would swallow whatever followed it
 // on the line, and reproducing the call as written is what happened before this
 // renderer existed.
+//
+// The SQL may be concatenated — `"SELECT …" & ( sort ? " ORDER BY x" : "" )` —
+// and the operand after each `&` belongs to the same argument. The `&` has no
+// field and is not named, so it used to fall through every case below, and the
+// operands came out as separate arguments: `"SELECT …", ( … )`, which the
+// guard refuses.
 func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, ok bool) {
 	var open *sitter.Node
+
+	concat := false
+	add := func(p string) {
+		if concat && len(parts) > 0 {
+			parts[len(parts)-1] += " & " + p
+		} else {
+			parts = append(parts, p)
+		}
+
+		concat = false
+	}
 
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -1277,6 +1397,8 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 			callee = f.text(c)
 		case c.Kind() == "(" || c.Kind() == ")" || c.Kind() == ",":
 			continue
+		case c.Kind() == "&":
+			concat = true
 		case c.Kind() == `"` || c.Kind() == "'":
 			if open == nil {
 				open = c
@@ -1284,13 +1406,13 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 				continue
 			}
 
-			parts = append(parts, string(f.src[open.StartByte():c.EndByte()]))
+			add(string(f.src[open.StartByte():c.EndByte()]))
 			open = nil
 		case open != nil:
 			// query_text, already covered by the span its quotes delimit.
 			continue
 		case c.IsNamed():
-			parts = append(parts, f.expr(c))
+			add(f.expr(c))
 		}
 	}
 
@@ -1306,6 +1428,14 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 func (f *Formatter) exprArgs(args *sitter.Node) string {
 	if args == nil {
 		return "()"
+	}
+
+	// Lucee accepts a tag call whose attributes are separated partly by commas
+	// and partly by spaces — `cflog(file="#name#" text="load test", type="error")`
+	// in its own LDEV4128 test. Joining with either separator changes the other
+	// gaps, which the guard rejects, so such a list is kept as written.
+	if mixedArgSeparators(args) {
+		return f.text(args)
 	}
 
 	var parts []string
@@ -1352,6 +1482,10 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 	// end of line and comments out every argument after it.
 	shouldBreak := hasLineComment || len(parts) > 3 ||
 		(len(parts) > 0 && len(inline) > f.opts.LineWidth)
+	if shouldBreak && !hasLineComment && len(parts) <= 3 && f.closuresHug(args, parts, inline) {
+		return inline
+	}
+
 	if shouldBreak {
 		// Re-evaluate at deeper level so nested splits indent correctly.
 		f.level++
@@ -1666,6 +1800,49 @@ func joinCollectionLines(items []collectionItem, indent string, trailing bool) s
 	return b.String()
 }
 
+// deepenItems re-renders, one level deeper, the items of a literal that is
+// being laid out one item per line. collectionItems renders them at the
+// literal's own level, which is right for the inline form but one level short
+// once each item sits on its own indented line: a nested literal that itself
+// spanned lines came out with its entries level with its key and its closing
+// bracket level with the outer literal's entries. Only an item that spans
+// lines depends on the level, so only those are rendered again.
+//
+// items holds one entry per named child of n, in order — collectionItems
+// appends exactly one for each.
+func (f *Formatter) deepenItems(n *sitter.Node, items []collectionItem) {
+	f.level++
+	defer func() { f.level-- }()
+
+	for i := range items {
+		if !items[i].isComment && strings.Contains(items[i].text, "\n") {
+			items[i].text = f.expr(n.NamedChild(uint(i)))
+		}
+	}
+}
+
+// holdsMultilineClosure reports whether a literal has an entry whose value is a
+// closure laid out across lines. Such a literal is always written one entry
+// per line: kept inline because its total length was short, it came out as
+// `{ a = function() {`, the closure's body, then `}, b = 1 }`, with the next
+// entry and the literal's own brace hanging off the closure's.
+//
+// items holds one entry per named child of n, in order, as collectionItems
+// builds it.
+func holdsMultilineClosure(n *sitter.Node, items []collectionItem) bool {
+	for i, it := range items {
+		if it.isComment || !strings.Contains(it.text, "\n") {
+			continue
+		}
+
+		if isClosure(entryValue(n.NamedChild(uint(i)))) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (f *Formatter) exprArray(n *sitter.Node) string {
 	if n.NamedChildCount() == 0 {
 		return "[]"
@@ -1674,13 +1851,14 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 	items, hasLineComment := f.collectionItems(n)
 	trailing := hasTrailingComma(n)
 
-	if !hasLineComment {
+	if !hasLineComment && !holdsMultilineClosure(n, items) {
 		inline := "[" + joinCollectionInline(items, trailing) + "]"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
 	}
 
+	f.deepenItems(n, items)
 	indent := f.indented() + f.opts.indent(1)
 
 	return "[\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "]"
@@ -1694,16 +1872,95 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 	items, hasLineComment := f.collectionItems(n)
 	trailing := hasTrailingComma(n)
 
-	if !hasLineComment {
+	if !hasLineComment && !holdsMultilineClosure(n, items) {
 		inline := "{ " + joinCollectionInline(items, trailing) + " }"
 		if f.lineLen+len(inline) <= f.opts.LineWidth {
 			return inline
 		}
 	}
 
+	f.deepenItems(n, items)
 	indent := f.indented() + f.opts.indent(1)
 
 	return "{\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "}"
+}
+
+// exprPair renders one struct entry as key, separator, value. When the entry
+// is too long for the line and its value can break, the value moves onto its
+// own line, indented one level under the key.
+func (f *Formatter) exprPair(keyStr, sep string, val *sitter.Node) string {
+	valStr := f.expr(val)
+	result := keyStr + sep + " " + valStr
+
+	if len(result) > f.opts.LineWidth && !strings.Contains(valStr, "\n") {
+		f.level++
+		valStr = f.expr(val)
+		f.level--
+
+		if strings.Contains(valStr, "\n") {
+			indent := f.opts.indent(f.level + 1)
+
+			return keyStr + sep + "\n" + indent + valStr
+		}
+	}
+
+	return result
+}
+
+// structKey renders the key of an `=` struct entry. A bare name is a key, not
+// a variable reference, so it is written as-is rather than passed through
+// scope casing: `{ url = x }` names a key called url, and changing its case
+// changes the key wherever the struct's key case is preserved (serializeJSON).
+func (f *Formatter) structKey(key *sitter.Node) string {
+	if key != nil && key.Kind() == "property_identifier" {
+		return f.text(key)
+	}
+
+	return f.expr(key)
+}
+
+// isStructPattern reports whether an object_pattern is an ordinary `=` struct
+// literal that exprObject can lay out: every entry a cf_pair or a bare-name
+// object_assignment_pattern, and every comma between two entries or after the
+// last one.
+//
+// The grammar lists entries as commaSep(optional(...)), so `{ a = 1,, b = 2 }`
+// and `{ , a = 1 }` parse with an empty slot. Re-joining the entries with ", "
+// would drop it — a real change, which the guard would refuse for the whole
+// file. Destructuring forms (rest, shorthand, nested patterns) are left alone
+// for the same reason: they are not struct literals, and exprObject does not
+// know how to write them.
+func isStructPattern(n *sitter.Node) bool {
+	afterSeparator := true
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		kind := c.Kind()
+
+		switch {
+		case kind == "{" || kind == "}" || isCommentKind(kind):
+			continue
+		case kind == ",":
+			if afterSeparator {
+				return false
+			}
+
+			afterSeparator = true
+
+			continue
+		case kind == "cf_pair":
+		case kind == "object_assignment_pattern":
+			if left := c.ChildByFieldName("left"); left == nil || left.Kind() != "shorthand_property_identifier_pattern" {
+				return false
+			}
+		default:
+			return false
+		}
+
+		afterSeparator = false
+	}
+
+	return true
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {
@@ -1733,7 +1990,7 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 	if body != nil && (body.Kind() == "statement_block" || body.Kind() == "block") {
 		// Render block inline for arrow functions; full block would need
 		// newlines which aren't valid inside an expression context here.
-		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.text(body))
+		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.closureBody(body))
 	}
 
 	return fmt.Sprintf("%s %s %s", paramStr, arrow, f.expr(body))
@@ -1798,7 +2055,163 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		attrStr = " " + strings.Join(attrs, " ")
 	}
 
-	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.text(body))
+	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.closureBody(body))
+}
+
+// closureBody renders the block of a function expression or an arrow function.
+//
+// A body written across lines goes through the statement renderer, exactly as
+// a declared function's body does, indented one level under the line the
+// closure's expression sits on. It used to be copied verbatim, so the body of
+// every callback kept whatever indentation it was typed with: a TestBox spec,
+// which is nothing but nested `describe`/`it` closures, was left almost
+// untouched inside its `run()`.
+//
+// The block is rendered into the output buffer and cut back out, because the
+// statement renderer writes rather than returns. The comments a surrounding
+// construct has queued for its own body are set aside for the duration, or the
+// closure's block would flush them into itself.
+//
+// A body written on one line — `function(x) { return x > 1; }` — is kept as
+// written: it is a short lambda whose author chose the inline form, and laying
+// it out as a block would turn every one-line callback into five lines. An
+// empty body written across lines becomes `{}`.
+func (f *Formatter) closureBody(body *sitter.Node) string {
+	src := f.blockText(body)
+	if body.Kind() != "statement_block" || !strings.Contains(src, "\n") {
+		return src
+	}
+
+	if body.NamedChildCount() == 0 {
+		return "{}"
+	}
+
+	key := closureKey{src: &f.src[0], start: body.StartByte(), end: body.EndByte(), level: f.level}
+	if rendered, ok := f.closureBodies[key]; ok {
+		return rendered
+	}
+
+	st := f.saveState()
+	f.pendingBlockComments = nil
+	start := f.out.Len()
+
+	f.scriptWrite("{")
+	f.scriptBlockBody(body)
+
+	rendered := string(f.out.Bytes()[start:])
+	f.restoreState(st)
+
+	if f.closureBodies == nil {
+		f.closureBodies = map[closureKey]string{}
+	}
+
+	f.closureBodies[key] = rendered
+
+	return rendered
+}
+
+// closureKey identifies one rendering of a closure body. The rendering is a
+// function of the block and the indent level alone: the body's statements start
+// on lines of their own, so nothing about the line the closure sits on reaches
+// them. src tells a <cfscript> region's re-parsed source apart from the
+// document's.
+//
+// The cache is what keeps nesting linear. A literal or an argument list that
+// goes multi-line renders its entries twice — once to measure the inline form,
+// once a level deeper to lay them out — and a closure inside renders its own
+// entries twice in turn, so without it the work doubled with every level of
+// callback nested in a struct or a long argument list.
+type closureKey struct {
+	src        *byte
+	start, end uint
+	level      int
+}
+
+// entryValue returns the value of a struct entry or a named argument —
+// `key: value`, `key = value`, `name = value` — and n itself for anything else.
+// A callback is as often passed by name, `it(title = "x", body = function() {`,
+// as by position.
+func entryValue(n *sitter.Node) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+
+	switch n.Kind() {
+	case "pair", "cf_pair":
+		return n.ChildByFieldName("value")
+	case "object_assignment_pattern", "assignment_expression":
+		return n.ChildByFieldName("right")
+	}
+
+	return n
+}
+
+// isClosure reports whether n is a function expression or an arrow function
+// whose body is a block — the expressions closureBody lays out across lines.
+func isClosure(n *sitter.Node) bool {
+	if n == nil {
+		return false
+	}
+
+	switch n.Kind() {
+	case "function_expression":
+		return true
+	case "arrow_function":
+		body := n.ChildByFieldName("body")
+
+		return body != nil && body.Kind() == "statement_block"
+	}
+
+	return false
+}
+
+// closuresHug reports whether an argument list that holds multi-line closures
+// can stay on the call's own line, `describe("x", function() {`, with each
+// closure's body indented under the call and its `}` closing the line the
+// call's `)` is on.
+//
+// Measured whole, a closure's body counts toward the argument list's width, so
+// any callback of more than a few statements broke the list onto one argument
+// per line: `describe(`, then `"x",`, then `function() {` on lines of their
+// own. Only the lines the call itself owns are measured here — the first,
+// up to the opening brace, and the last, from the closing brace — and every
+// other argument must be on one line.
+func (f *Formatter) closuresHug(args *sitter.Node, parts []string, inline string) bool {
+	multi := false
+
+	for i, p := range parts {
+		if !strings.Contains(p, "\n") {
+			continue
+		}
+
+		if !isClosure(entryValue(args.NamedChild(uint(i)))) {
+			return false
+		}
+
+		multi = true
+	}
+
+	if !multi {
+		return false
+	}
+
+	first, _, _ := strings.Cut(inline, "\n")
+	last := inline[strings.LastIndexByte(inline, '\n')+1:]
+
+	return len(first) <= f.opts.LineWidth && len(last) <= f.opts.LineWidth
+}
+
+// blockText is the source of a function body that is kept as written.
+//
+// In the cfml grammar the body can end past its own closing brace. When a
+// closure inside a tag expression is followed by a newline and then `}` — the
+// last entry of a struct literal that spans lines — the scanner skips the
+// whitespace before inserting its zero-width automatic semicolon, and the
+// block's extent runs on to that point. Copied verbatim, the newline became a
+// blank line before the struct's `}`, and every further format added another,
+// so the file never settled (Lucee's test/tags/query/inc.cfm).
+func (f *Formatter) blockText(body *sitter.Node) string {
+	return strings.TrimRight(f.text(body), " \t\r\n")
 }
 
 // exprParams renders a formal_parameters / parameter_list node.
@@ -2056,9 +2469,25 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 	currentAllComments := true
 	currentHasName := false
 
+	// A `//` comment trailing a parameter, held back from its text. In
+	// comma-first style (`,required any image // why` then `,string type`) the
+	// comma that follows it is only read on the next line, and appending it to
+	// the parameter's text put it inside the comment: `image // why,`. The two
+	// parameters were then no longer separated, and the guard refused the file.
+	// It becomes a comment entry of its own after the parameter, the shape a
+	// comma-last `image, // why` already has, so both spellings come out alike.
+	// Only when a comma follows: with none, nothing is written after the text,
+	// and the comment stays on the parameter's line as it always has.
+	var trailing []string
+
 	flush := func(commaAfter bool) {
 		if len(current) == 0 {
 			return
+		}
+
+		if !commaAfter {
+			current = append(current, trailing...)
+			trailing = nil
 		}
 
 		parts = append(parts, paramPart{
@@ -2066,7 +2495,13 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 			isComment:  currentAllComments,
 			commaAfter: commaAfter,
 		})
+
+		for _, comment := range trailing {
+			parts = append(parts, paramPart{text: comment, isComment: true})
+		}
+
 		current = nil
+		trailing = nil
 		currentAllComments = true
 		currentHasName = false
 	}
@@ -2092,6 +2527,12 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 
 		if kind != "," && !isCommentKind(kind) {
 			currentAllComments = false
+
+			// Something other than the separator came after a held comment, so
+			// it was inside the parameter rather than trailing it. It goes back
+			// where it was, as before.
+			current = append(current, trailing...)
+			trailing = nil
 		}
 
 		switch kind {
@@ -2113,6 +2554,15 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 			currentHasName = true
 		default:
 			if !c.IsNamed() {
+				break
+			}
+
+			// Once one is held, every comment after it is on a later line and
+			// is held with it, in order.
+			if !currentAllComments && isCommentKind(kind) &&
+				(len(trailing) > 0 || f.isLineCommentNode(c)) {
+				trailing = append(trailing, f.text(c))
+
 				break
 			}
 
@@ -2547,6 +2997,26 @@ func declKeyword(n *sitter.Node) string {
 	return strings.Join(kws, " ")
 }
 
+// declarator renders one variable_declarator: its name, then its initializer
+// if it has one. A compound initializer (`var hqlOrder &= " ORDER BY"`) puts
+// its operator in the `operator` field, and a plain `=` has none. Both
+// declaration renderers wrote ` = ` whatever the field held, so `&=` and `+=`
+// came out as `=`, and the guard refused the file.
+func (f *Formatter) declarator(d *sitter.Node) string {
+	s := f.expr(d.ChildByFieldName("name"))
+
+	if v := d.ChildByFieldName("value"); v != nil {
+		op := "="
+		if o := d.ChildByFieldName("operator"); o != nil {
+			op = f.text(o)
+		}
+
+		s += " " + op + " " + f.expr(v)
+	}
+
+	return s
+}
+
 // scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];
 func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	keyword := declKeyword(n)
@@ -2571,15 +3041,7 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 
 		switch d.Kind() {
 		case "variable_declarator":
-			vname := d.ChildByFieldName("name")
-			vval := d.ChildByFieldName("value")
-			s := f.expr(vname)
-
-			if vval != nil {
-				s += " = " + f.expr(vval)
-			}
-
-			decls = append(decls, s)
+			decls = append(decls, f.declarator(d))
 		default:
 			decls = append(decls, f.expr(d))
 		}
@@ -2599,19 +3061,58 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	}
 }
 
+// statementComments splits a statement's named children into the one that is
+// not a comment and the comments beside it. A comment can sit inside an
+// expression statement or a return, next to the expression rather than in it:
+// `x = 45 // note` with no semicolon, or `return a /* + b */;`. Renderers that
+// took NamedChild(0) and wrote the `;` dropped it, and the guard refused the
+// file.
+func (f *Formatter) statementComments(n *sitter.Node) (*sitter.Node, []string) {
+	var (
+		inner    *sitter.Node
+		comments []string
+	)
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+
+		switch {
+		case isCommentKind(c.Kind()):
+			comments = append(comments, strings.TrimSpace(f.text(c)))
+		case inner == nil:
+			inner = c
+		}
+	}
+
+	return inner, comments
+}
+
+// scriptComments writes each comment on a line of its own after the statement,
+// as scriptVarDecl does and for the same reason: once the semicolon is written
+// the comment is statement-level, and a second pass renders it on its own line.
+func (f *Formatter) scriptComments(comments []string) {
+	for _, c := range comments {
+		f.iLine(c)
+		f.scriptWrite("\n")
+	}
+}
+
 func (f *Formatter) scriptExprStmt(n *sitter.Node) {
 	// The named child is the expression; anonymous child is ";"
-	inner := n.NamedChild(0)
+	inner, comments := f.statementComments(n)
 	if inner == nil {
+		f.scriptComments(comments)
+
 		return
 	}
 
 	f.iLine(f.expr(inner) + ";")
 	f.scriptWrite("\n")
+	f.scriptComments(comments)
 }
 
 func (f *Formatter) scriptReturn(n *sitter.Node) {
-	val := n.NamedChild(0)
+	val, comments := f.statementComments(n)
 	if val == nil {
 		f.iLine("return;")
 	} else {
@@ -2619,6 +3120,7 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 	}
 
 	f.scriptWrite("\n")
+	f.scriptComments(comments)
 }
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
@@ -3001,16 +3503,7 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 		var decls []string
 
 		for i := uint(0); i < n.NamedChildCount(); i++ {
-			d := n.NamedChild(i)
-			vname := d.ChildByFieldName("name")
-			vval := d.ChildByFieldName("value")
-			s := f.expr(vname)
-
-			if vval != nil {
-				s += " = " + f.expr(vval)
-			}
-
-			decls = append(decls, s)
+			decls = append(decls, f.declarator(n.NamedChild(i)))
 		}
 
 		return keyword + " " + strings.Join(decls, ", ")
@@ -3107,7 +3600,9 @@ func (f *Formatter) clauseLead(parent *sitter.Node, from uint, clause *sitter.No
 // scriptCatch renders one catch clause: `catch (<type> <param>) { ... }`.
 // The exception type is a separate `type` field, not part of the parameter —
 // rendering only the parameter turned `catch (java.lang.Exception e)` into
-// `catch (e)`, widening what the handler catches.
+// `catch (e)`, widening what the handler catches. The same goes for the `var`
+// in `catch (any var e)`, which scopes the caught variable: it is an
+// anonymous child with no field, so it has to be looked for.
 func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 	catchType := n.ChildByFieldName("type")
 	param := n.ChildByFieldName("parameter")
@@ -3117,6 +3612,14 @@ func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 
 	if catchType != nil {
 		parts = append(parts, f.text(catchType))
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); !c.IsNamed() && c.Kind() == "var" {
+			parts = append(parts, "var")
+
+			break
+		}
 	}
 
 	if param != nil {
@@ -3132,6 +3635,49 @@ func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 	if body != nil {
 		f.scriptBlock(body)
 	}
+}
+
+// scriptTagStatement renders a script-syntax CF tag that has a body —
+// `lock name="x" { … }`, `transaction { … }`, `query name="q" { … }`,
+// `cfhttp(url = u) { … }` — as its header, written as it stands, and its body
+// laid out as a block.
+//
+// These had no renderer and went to scriptRaw, which trims every line of the
+// node and writes them all at the statement's own level: whatever the body held
+// came out flat, nested `if`s and loops included, and none of it was
+// formatted. 811 corpus components have one; `query`, `transaction`, `loop`,
+// `lock`, `savecontent` and `thread` account for most.
+//
+// The header keeps the tag's own spelling — `name="x"`, not the `name = x`
+// the formatter gives a call's named arguments — as scriptThrow does for the
+// same reason. Two shapes are left to scriptRaw as before: a body written on
+// one line, which the author chose to keep inline, and a header holding a `//`
+// comment, where writing the opening brace after it would put the brace inside
+// the comment.
+func (f *Formatter) scriptTagStatement(n *sitter.Node) {
+	body := n.ChildByFieldName("body")
+	if body == nil || body.Kind() != "statement_block" || !strings.Contains(f.text(body), "\n") {
+		f.scriptRaw(n)
+
+		return
+	}
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		if c := n.NamedChild(i); c.StartByte() < body.StartByte() && f.isLineCommentNode(c) {
+			f.scriptRaw(n)
+
+			return
+		}
+	}
+
+	f.iLine(strings.TrimSpace(string(f.src[n.StartByte():body.StartByte()])))
+	f.scriptBlock(body)
+
+	if tail := strings.TrimSpace(string(f.src[body.EndByte():n.EndByte()])); tail != "" {
+		f.scriptWrite(tail)
+	}
+
+	f.scriptWrite("\n")
 }
 
 // scriptPassthru re-emits a node's text re-indented (last-resort fallback).

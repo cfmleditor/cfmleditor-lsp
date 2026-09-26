@@ -191,6 +191,13 @@ Two defects in `scriptTry`:
 
 Clauses are now walked as children and rendered as `catch (<type> <param>)`.
 
+A third drop, found later on the 15,503-file corpus: `catch( any var e )`, which
+scopes the caught variable, came out as `catch (any e)`. The grammar gives the
+`var` no field, so a renderer built from the `type` and `parameter` fields never
+saw it. CommandBox writes this form throughout, and it was 48 of that corpus's 62
+guard rejections. `scriptCatch` now looks for the anonymous `var` child and
+renders `catch (<type> var <param>)`.
+
 ### 2.7 `interface` rewritten as `component`; `abstract`/`final` dropped
 
 `scriptComponent` hardcoded its header to `"component"`, so `interface {}`
@@ -226,6 +233,17 @@ Literal and argument children are now classified as elements or comments; a
 line comment forces the construct onto several lines and never takes a
 trailing comma. Block comments still inline.
 
+Function parameters had the same defect in comma-first style, found later on the
+15,503-file corpus. In `,required any image //path or object` then `,string
+imageType`, the comma separating the two is only read on the next line, and it
+was appended to the parameter's text after its trailing comment:
+`required any image //path or object,`. The comment swallowed the comma. Six
+spreadsheet-cfml files and Preside's `Bootstrap.cfc` were refused. A `//` comment
+trailing a parameter that a comma follows now becomes a comment entry of its own
+after the parameter. That is the shape a comma-last `image, // why` already had,
+so both spellings format alike. A trailing comment with no comma after it, as on
+the last parameter, stays on its line.
+
 ### 2.10 Comments deleted in "between" positions
 
 A comment belonging to no field was skipped past and lost:
@@ -235,6 +253,16 @@ A comment belonging to no field was skipped past and lost:
 
 Both are now emitted, with the continuation keyword or chain hop moving to its
 own line. With no comment present, `} else {` still sits on one line.
+
+Two more were found later on the 15,503-file corpus, where the comment sits
+inside a statement beside its expression. One is an expression statement with
+no semicolon and a trailing line comment, from lucee-docs' `Application.cfc`:
+`variables.assetBundleVersion = 45 // must match …`. The other is a return with
+a block comment before its semicolon, from Slatwall's `VendorOrder.cfc`:
+`return getSubtotal() /*+ getTaxTotal() …*/;`. `scriptExprStmt` and
+`scriptReturn` rendered only their first named child. They now carry the
+comments across and write each on a line of its own after the statement, the way
+`scriptVarDecl` already did, so the output formats to itself.
 
 ### 2.11 Invented closing tags — ~100 files
 
@@ -279,6 +307,125 @@ kept producing a fresh diff for an unchanged file:
   descend into its body and any void element nested there survived the pass.
   `<p>text<br>more</p>` inside a converted parent kept its `<br>` until a later
   run. `preformat` now repeats until the source stops changing.
+
+### 2.14 Compound operator in a `var` declaration — 3 files
+
+`var hqlOrder &= " ORDER BY"` came out as `var hqlOrder = " ORDER BY"`. The
+grammar puts a compound initializer's operator in the declarator's `operator`
+field, and a plain `=` has none. Both declaration renderers, the statement one
+and the `for`-header one, wrote ` = ` whatever the field held. Found on the
+15,503-file corpus: CommandBox's `Print.cfc`, and Slatwall's `Product.cfc` and
+`SmartList.cfc`. One `declarator` helper now renders the declarator for both,
+with its operator.
+
+### 2.15 `=`-style struct literals never formatted — 1,562 files
+
+`x = {'a'=1, 'b'={'c'=2}}` was written back exactly as it came in, while
+`{'a':1, 'b':{'c':2}}` was laid out. The grammar shares the `=` form's rule with
+JavaScript destructuring, so the literal is an `object_pattern`, a bare-name
+entry an `object_assignment_pattern`, and any other key a `cf_pair`. None of the
+three had a case in `expr`, so all of them reached the verbatim default: 19,178
+literals in 2,788 corpus files, and a `cf_pair` inside a mixed `{a=1, b:2}`
+too. Being whitespace-safe, it never showed up as a guard rejection. It showed
+up as Mura's `apiUtility.cfc` being flagged malformed: closing braces the
+formatter never touched sat on one line.
+
+They now share the `:` renderer, keeping `=`. `isStructPattern` sends two shapes
+back to the verbatim copy. One is an empty slot: the grammar's
+`commaSep(optional(…))` parses `{ a = 1,, b = 2 }`, and re-joining would drop
+it. The other is a destructuring entry (rest, shorthand, a nested pattern),
+which is not a struct literal. A bare key skips `scopeCase`, because
+`{ url = x }` names a key, not the scope.
+
+Two defects the `:` renderer already had came to light once it was reaching
+thousands of new literals:
+
+- **Nested multi-line literals were indented a level short.**
+  `collectionItems` renders at the literal's own level, which is right for the
+  inline form. In the one-per-line form, a nested literal that also spans lines
+  came out with its entries level with its key and its `}` level with the outer
+  entries. `deepenItems` now re-renders, one level deeper, the items that span
+  lines.
+- **A closure body could carry a newline past its `}`.** In a `<cfset>`, when a
+  closure is followed by a newline and the struct's `}`, the cfml scanner skips
+  the whitespace before inserting its zero-width automatic semicolon. The
+  block's extent then runs on to that point. The verbatim copy turned the
+  newline into a blank line before the `}`, one more on each pass, so Lucee's
+  `test/tags/query/inc.cfm` never settled. `blockText` stops at the brace. The
+  extent itself is a grammar defect: `.cfs` and `<cfscript>` do not have it,
+  and neither does a closure followed by `]`, `)` or `>`.
+
+### 2.16 Closure bodies never formatted — 3,686 files
+
+The body of a function expression or an arrow function was copied verbatim:
+`exprFunctionExpr` and `exprArrow` returned the block's source text. Every
+callback kept the indentation it was typed with — 2,929 corpus components hold
+an anonymous function, and 2,250 of them are TestBox specs, which are nothing
+but nested `describe`/`it` closures. It was worse than untouched in one respect:
+counted whole, a closure's body pushed its argument list past `lineWidth`, so
+the call broke onto one argument per line around a body left as written.
+
+- `closureBody` renders a body written across lines through the statement
+  renderer, one level under the closure's line, by writing it into the output
+  buffer and cutting it back out. The surrounding construct's queued block
+  comments are set aside meanwhile, or the closure's block would flush them into
+  itself. A one-line body is kept as written, since its author chose the inline
+  form, and an empty one becomes `{}`.
+- `closuresHug` keeps a call whose multi-line arguments are all closures on the
+  call's own line, measuring only the lines the call owns: the first, up to the
+  opening brace, and the last. A callback passed by name
+  (`body = function() {`) counts.
+- A struct or array holding a multi-line closure goes one entry per line. Kept
+  inline because it was short, it came out as `{ a = function() {` … `}, b = 1 }`.
+- A call's arguments went a level deeper whenever its callee held a newline,
+  which was meant to catch a chain broken before the accessor. A closure earlier
+  in the chain supplies newlines without breaking it, so `.catch`'s callback sat
+  a level deeper than `.then`'s. `endsInChainBreak` now looks for the accessor
+  starting the last line.
+- Bodies are cached by block and indent level. A literal or argument list that
+  goes multi-line renders its entries twice, once to measure and once a level
+  deeper. With a closure inside, which renders its own entries twice in turn,
+  the work doubled at every level: fourteen levels of
+  `it(…, body = function() { var c = { h = function() {` took 666 ms, and
+  twenty did not finish. Cached, fourteen levels take 37 ms. The cached and
+  uncached output were compared on every changed corpus file, and they match.
+
+Formatting these bodies reached one more statement-renderer defect. A word
+operator is lifted from the source together with the gap around it, and the gap
+was trimmed and the right operand joined on after it. So a `//` comment on its
+own line between `OR` and the next clause swallowed the clause. The guard caught
+it in WireBox's `Binder.cfc`, which has the only instance, in a closure body. The
+line-comment check the symbolic operators already had now applies here too.
+
+Two effects are the formatter's existing rules rather than anything new. Inside
+a closure body, a call with more than three arguments breaks one argument per
+line, as it always has elsewhere. A closure inside a condition too long for the
+line is reflowed by `normalizeCond` with the rest of the condition. That output
+is valid and idempotent, but it is not laid out as a block.
+
+### 2.17 Script-syntax tag bodies flattened — 1,100 files
+
+`tag_statement` and `query_tag` had no case in `formatScriptNode`. So a tag with
+a body — `lock`, `transaction`, `query`, `loop`, `savecontent`, `thread`,
+`cfhttp(…) { … }` — went to `scriptRaw`, which trims every line of the node and
+writes it at the statement's level. The body came out flat and unformatted:
+CommandBox's `FileSystem.cfc` lost the nesting of the `try` inside its
+`lock`. 811 of 8,926 script components have at least one multi-line tag body,
+2,155 in all.
+
+`scriptTagStatement` writes the header as it stands and the body as a block.
+The header keeps the tag spelling (`name="x"`), as `scriptThrow` does, rather
+than the `name = x` a call's named arguments get. `scriptRaw` still takes two
+shapes: a body on one line, which its author chose to keep inline, and a
+header holding a `//` comment, where the brace written after it would be
+commented out.
+
+Formatting the bodies reached one argument-list defect. Lucee accepts a tag
+call whose attributes are separated partly by commas and partly by spaces —
+`cflog(file="#logname#" text="load test", type="error", async=false)` in its
+LDEV4128 test. `exprArgs` joined with commas unless there were none, putting
+one where the source had a space. `mixedArgSeparators` now sends such a list
+through as written.
 
 ## 3. Guard coverage gaps
 
@@ -1013,6 +1160,21 @@ annotations, the three comment and separator defects, and the two string-scanner
 mistakes in section 4; the string-literal misread that accounted for seven
 files in 3.5; and the two missing-script-region defects in 3.6.
 
+### 4.4 Refused on purpose: a no-break space between tokens
+
+On the 15,503-file corpus, `ortus-boxlang_BoxLang/src/test/java/TestCases/phase1/includeWhitespace.cfm`
+is guard-rejected, and that is the right answer. Its two lines are
+`<cfset test\u00A0\t\t\t\t= "test">`, a BoxLang fixture written to probe exotic
+whitespace. The grammar skips U+00A0 NO-BREAK SPACE as whitespace (its extras
+include `\p{Zs}`), so the formatter renders `<cfset test = "test">` and the
+character is gone. Lucee's parser does not treat it as whitespace:
+`SourceCode` normalises only `\n`, `\r` and `\t` to a space before
+`removeSpace` looks for one. Dropping it changes what the engine reads. The
+guard already counts U+00A0 as content on purpose (see `spaceLen`), and a case
+in `TestGuardStillCatchesRealChanges` now pins that. Keeping the character would
+mean carrying inter-token text through every renderer, which is not worth it
+for one fixture. So the file stays refused.
+
 ## 5. Reproducing
 
 The corpus scanner is checked in as `TestFormatterCorpus`
@@ -1213,3 +1375,131 @@ Even with both, a fragment is a starting point rather than a verdict — every
 construct in 6.1 was re-checked standalone before being written down, and that
 check is what caught `static { }` (fails alone, parses inside `component { }`)
 being a subtler gap than it first appeared.
+
+### 6.5 `<cfimport>`-prefixed custom tags: two tassweb refusals, fixed
+
+**Fixed in tree-sitter-cfml #166**, which this server pins from `b2eee65`. Both
+files now parse and format. The fix is in the scanner, and it keeps these tags'
+HTML element shape rather than making them CF tag nodes, so the formatter
+needed no change:
+
+- The scanner reads `prefix` from each `<cfimport>` in the template. Inside the
+  start tag of an element with a recorded prefix, `#` opens a `hash_expression`,
+  so the inner quote no longer ends the attribute value.
+- An unclosed tag the scanner does not know now meets an overflow check, with a
+  128-byte margin kept for CF tags. Past it, the tag closes like `<input>`
+  instead of nesting, and the next `<cfloop>` still fits.
+
+The CF-tag-node version described below was measured and deferred. 4,148 of
+tassweb's 6,597 files import a prefix, and `tagName` here renders a `cf_tag` as
+`<cf` plus its name, so that version would need matching formatter work first.
+Only prefixes from the template's own `<cfimport>` count; one from an including
+file, a `#…#` prefix and CFScript's `import … prefix=…;` are still read as HTML.
+
+The analysis that led there follows, as it was written.
+
+A formatter run over tassweb on 2026-09-25 (6,597 files) refused 9. Seven are
+`</cfsetting>`. The other two come from the same shape, a custom tag imported
+with `<cfimport prefix="control" taglib="../controls">` and written
+`<control:name …>`. The grammar has no notion of a cfimport prefix and reads the
+tag as an ordinary HTML element. Both files are valid CFML, and both gaps
+reproduce on the pinned v0.26.36 and on v0.26.37.
+
+Each construct below was re-parsed standalone with a control that parses, as in
+6.1. Two of the first explanations did not survive that check, and the
+corrections are recorded with them.
+
+| Construct | Minimal repro | Control that parses | Seen in |
+|---|---|---|---|
+| A `#…#` attribute holding a string that contains `=` | `<control:b click="#URLEncodedFormat("=x")#">` | the same attribute on `<cf_b>`, on `<cfmodule>`, or on a `<div>` inside `<cfoutput>` | `webroot/academicreports/resultFormats_list.cfm`, line 98 |
+| An unrecognised tag left unclosed, many times, then a paired CF tag | 36 × `<control:hiddenfield>`, then `<cfloop …></cfloop>` | 40 × the same tag written `/>`, 40 × unclosed `<cf_hiddenfield>`, 200 × unclosed `<div>` | `webroot/attendance/bulk_absentee.cfm`, line 2105 |
+
+**Hash attributes.** The scanner reads `#` as the start of an expression only
+inside `<cfoutput>`, `<cfcomponent>` or `<cffunction>`
+(`scanner_in_hash_eval_context`, `common/scanner.h:1873`). Anywhere else, the
+first `"` of `URLEncodedFormat("…")` closes the HTML attribute value
+(`quoted_attribute_value`, `common/define-grammar.js:445`), and the rest is
+read as further attributes. That misreading goes unnoticed until the inner
+string holds an `=` with no name before it. In the tassweb file that is
+`&unit_flg=`. Without an `=` the tag "parses", but as three attributes.
+
+- **Correction.** This is not specific to prefixed tags: a plain `<div>` outside
+  `<cfoutput>` fails identically. There, though, the grammar is right. Hashes in
+  an HTML attribute outside an output context are not evaluated, so the inner
+  quote really does close the value. For a custom tag the attributes are always
+  evaluated, which is what makes this a gap.
+
+**Unclosed tags.** The limit is not memory. After every token the grammar's
+external scanner produces, tree-sitter asks the scanner to serialise its whole
+state into a fixed buffer of `TREE_SITTER_SERIALIZATION_BUFFER_SIZE`, 1,024
+bytes. It restores from that copy when it re-parses part of a file after an
+edit, and when it forks or backs up during ambiguity and error recovery.
+Anything that does not fit is lost. Part of that state is the stack of open
+tags.
+
+- **Why these tags stay open.** `<control:hiddenfield …>` has no end tag and no
+  `/>`, and its name is not one the scanner knows. So it is not void (as
+  `<input>` is) and does not close itself (as `<p>` and `<li>` do). It is an open
+  container, and each following sibling nests inside the one before. 33 in a row
+  are 33 deep. CF runs each one once as a standalone call, so the grammar's model
+  and the engine's disagree here.
+- **Why the name length matters.** `tag_serialized_size` (`scanner.h:218`)
+  saves a known HTML tag as its type: 1 byte. A tag with an unrecognised name
+  (`CUSTOM`) costs 2 bytes, plus the name, plus a 4-byte `html_depth`. For
+  `control:hiddenfield`, 19 characters, that is 25 bytes.
+- **The budget.** `tag_stack_would_overflow` (`scanner.h:276`) takes the 1,024
+  bytes, less 14 of headers and depth counters, less a 256-byte
+  `TAG_STACK_HEADROOM` kept free for tags that genuinely nest. That leaves
+  about 754 bytes. The headroom exists for issue #55: a run of `<cf_foo>` tags
+  is made void once it reaches the budget (`scanner.h:1518`), so the
+  `<cfscript>` or `<cfoutput>` after it still fits.
+- **Why the `<cfloop>` is what breaks.** That check runs only for `CFML`-typed
+  tags. An HTML-side `CUSTOM` tag is pushed without it, so 30
+  `<control:hiddenfield>` use up the headroom meant for real nesting. The next
+  CF tag, the `<cfloop>`, fails the check and is completed as void, and its
+  `</cfloop>` has no opener. Without the check, serialise would cut the tag list
+  short, and the scanner would restore with tags silently missing.
+
+The arithmetic matches every threshold measured, with the `<cfloop>` itself
+costing about 12 bytes:
+
+| Unclosed tag | Bytes each | Last count that parses | First count that fails |
+|---|---|---|---|
+| `<control:hiddenfield>` | 25 | 29 (725) | 30 (750) |
+| `<x:h>` | 9 | 80 (720) | 90 (810) |
+| `<xh>` | 8 | 90 (720) | 200 (1,600) |
+| `<div>` | 1 | 200 (200) | around 750 |
+
+The tassweb file has 33 open before the `<cfloop>`, which is 825 bytes, over
+the budget on their own.
+
+- **Correction.** The first explanation blamed the colon, or every HTML tag. It is
+  neither: known HTML tags cost a byte each, and `<hiddenfieldxxxxxxxx>` with no
+  colon fails at 40 just as the prefixed tags do.
+
+There are three ways to fix this in the scanner, in increasing scope:
+
+- Run the same overflow check on HTML `CUSTOM` tags, so a run of them turns
+  void rather than the CF tag that follows.
+- Serialise a `CUSTOM` tag's name as a short hash. For those tags the name is
+  only compared for equality, when an end tag is matched (`tag_eq`,
+  `tag.h:473`), so a hash would do, and the stack would hold hundreds of them.
+  It cannot extend to CF tags, which use their name to build a closing
+  delimiter (`scanner.h:872`).
+- Treat `prefix:name` as a CF custom tag, which also closes the hash-attribute
+  gap above.
+
+The third closes both gaps: attributes hash-evaluated like `cf_attribute`, and
+an unpaired tag either void or put under the same overflow guard as `<cf_foo>`.
+It needs the grammar to learn the `<cfimport>` prefixes in the file, or to
+treat any `name:name` tag this way. The second is simpler, but also catches
+namespaced XML elements such as `<svg:rect>` and `<xsl:template>`.
+
+#166 took the first option, and the `<cfimport>`-prefix rule from the third
+without its node shape.
+
+One formatter-side detail turned up on the first file. The grammar marks the
+error with a zero-width `MISSING` node under an alias, for which `IsMissing()`
+returns false. So `findErrorNode` (`internal/formatter/parse_error.go:39`) finds
+nothing, and the refusal reads "parse error in document, cannot format" with no
+position.

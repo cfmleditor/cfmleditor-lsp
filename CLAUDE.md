@@ -808,7 +808,47 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
   `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
   `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
-  `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`, `.resolveRoute`.
+  `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`, `.resolveRoute`,
+  `.exportUnresolved`, `.exportCFLint`, `.explainCall`.
+
+  **Everything a CLI subcommand did for an editor task has a server route**, because Zed
+  asked the zed-cfml extension to drop its `tasks.json` tasks and reach the server instead.
+  Zed has two routes: code actions (`cmd-.`, every version) and, from 1.21, an LSP command
+  picker listing `executeCommandProvider`. A command missing from that list is not in the
+  picker, so a new one goes in the list as well as in `handleExecuteCommand`'s switch. **Zed
+  ignores a command's return value**, so anything the user must read goes through
+  `window/showMessage` or a written file; returning it as well costs nothing and serves
+  clients that do read it. The mapping from the removed tasks: `scan` →
+  `.scanWorkspace`, `format` → `textDocument/formatting`, `explain` → `.explainCall`,
+  `unresolved` → `.exportUnresolved`, `cflint` → `.exportCFLint`, `refs` → `.findRefs`
+  (and `textDocument/references`), `deps` → `.exportDeps`.
+
+  Code actions (`internal/server/codeaction.go`), in order: "Explain call resolution on line
+  N" when the cursor's line holds a call; the find/export actions for the word under the
+  cursor; then, wherever the cursor is, "Export dependency graph for <file>" (`.exportDeps`
+  with the URI alone, the whole-file graph) and the workspace actions, "Scan workspace for
+  parse errors", "Export unresolved calls report for the workspace" and "Export CFLint report
+  for the workspace".
+
+  **`explainCall` parses the buffer afresh rather than using the cached ParseResult**
+  (`parseForCalls`). The cache cannot answer "what calls are on this line": an edit outside a
+  function reparses it shallowly, which drops every call recorded inside one
+  (`resetFuncCaches`), and an edit inside one shifts scopes and refs but not calls. One
+  keystroke therefore left it reporting no calls, or calls on the wrong line.
+  `TestExplainCallAfterAnEditOutsideAFunction` fails if either the command or the code
+  action goes back to the cache. The private parse needs no document lock. The code action's
+  "does this line hold a call" is memoised against a hash of the content, one entry, the
+  same arrangement as `scanDocumentRoutes`: 1.5ms to parse a 2,647-line component, 49µs
+  on a hit. The report text and the selection by line and filter are
+  `resolve.WriteExplanation` and `resolve.CallsOnLine`, shared with the CLI, so the two print
+  the same thing. The server's answer uses the session's resolver and index, where the CLI
+  builds its own from the file's nearest config, so the two can disagree for the reason
+  `--root` exists.
+
+  `.exportDeps` had the same cache problem and now parses afresh the same way. Reading the
+  cached ParseResult, a comment added above the component left it no calls, and the graph fell
+  back to the index's component refs: `controller.cfc --> service.cfc (line 2)` in place of
+  the functions called. `TestExportDepsAfterAnEditOutsideAFunction` pins it.
 
   **`resolveRoute` exists so an editor does not keep its own copy of the
   convention.** A command that takes a route by hand and go-to-definition on a
@@ -901,6 +941,11 @@ why the final method-exists check passed or failed. `--root <dir>` picks which
 `.cfmleditor.json` to load and which files to index — same semantics as `unresolved`'s directory
 argument — and defaults to the target file's own directory if omitted, which matters because a
 file's *own* nearest config can differ from the config a batch `unresolved` scan used.
+
+The same trace is available from the editor: `cfmleditor.explainCall` (document URI,
+0-based line, optional filter), offered as the "Explain call resolution on line N" code
+action on any line holding a call. It answers with the running server's resolver and index
+rather than a `--root` config, and shows the report as a message.
 
 **Reach for this before manually tracing through
 script_parser.go/tag_parser.go/result.go/resolve.go.** A component path that shows up in an

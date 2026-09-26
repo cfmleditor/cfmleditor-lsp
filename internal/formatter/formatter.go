@@ -230,6 +230,8 @@ type Formatter struct {
 	// pendingBlockComments holds comments found between a construct's header
 	// and its body, to be emitted just inside that body once it opens.
 	pendingBlockComments []*sitter.Node
+	// closureBodies caches closureBody by block and level; see there.
+	closureBodies map[closureKey]string
 }
 
 // New creates a Formatter with the given options.
@@ -721,11 +723,18 @@ func scriptRegionsOf(src []byte) scriptSpans {
 		return scriptSpans{{0, len(src)}}
 	}
 
+	return tagBodiesOf(src, "cfscript", "script")
+}
+
+// tagBodiesOf locates the bodies of every element named in tags, from just past
+// the opening tag's `>` to the start of its closing tag, or to the end of src
+// when the element is never closed.
+func tagBodiesOf(src []byte, tags ...string) scriptSpans {
 	var spans scriptSpans
 
 	lower := lowerASCIIBytes(src)
 
-	for _, tag := range []string{"cfscript", "script"} {
+	for _, tag := range tags {
 		open, closeTag := "<"+tag, "</"+tag
 
 		for pos := 0; ; {
@@ -760,6 +769,7 @@ func scriptRegionsOf(src []byte) scriptSpans {
 
 	return spans
 }
+
 func isTagNameEnd(c byte) bool {
 	return isWS(c) || c == '>' || c == '/'
 }
@@ -1579,7 +1589,7 @@ func (f *Formatter) formatNode(n *sitter.Node) {
 		// Whitespace between tags — suppress since the formatter handles spacing.
 
 	case "assignment_expression", "binary_expression",
-		"unary_expression", "ternary_expression",
+		"unary_expression", "not_expression", "ternary_expression",
 		"elvis_expression", "update_expression",
 		"call_expression", "member_expression",
 		"subscript_expression", "new_expression",
@@ -2344,7 +2354,7 @@ func (f *Formatter) normalizeCond(raw string) string {
 		return strings.Join(parts, "\n"+baseIndent)
 	}
 
-	single := strings.Join(parts, " ")
+	single := f.foldCondParts(parts)
 
 	// Check if it fits on one line.
 	tagPrefix := f.lineLen
@@ -2375,6 +2385,35 @@ func (f *Formatter) normalizeCond(raw string) string {
 	}
 
 	return result.String()
+}
+
+// foldCondParts joins a condition's lines back onto one.
+//
+// The lines are rendered output, not source, so a break after `(` or before
+// `)` is one the formatter made: a call wider than the line width puts each
+// argument on a line of its own. Joined with a space, that split came back as
+// `f( a, b )` — padding argPad says an argument list does not get — and only
+// once the call was wide enough to split, which it was not while a closure
+// argument still spanned lines in the source. So the first format wrote
+// `f(a, function(s) { … })`, the second measured that at full width, split it,
+// and wrote `f( a, function(s) { … } )`. Folding the break with argPad makes
+// the split invisible once it is folded, whichever pass makes it.
+func (f *Formatter) foldCondParts(parts []string) string {
+	var sb strings.Builder
+
+	for i, p := range parts {
+		if i > 0 {
+			if strings.HasSuffix(parts[i-1], "(") || strings.HasPrefix(p, ")") {
+				sb.WriteString(f.opts.argPad())
+			} else {
+				sb.WriteByte(' ')
+			}
+		}
+
+		sb.WriteString(p)
+	}
+
+	return sb.String()
 }
 
 // anyHasLineComment reports whether any part carries a "//" comment, which

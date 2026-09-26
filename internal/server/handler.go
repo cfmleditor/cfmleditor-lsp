@@ -1210,13 +1210,19 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		fileURI := uri.URI(docURI)
 
-		defer s.lockDoc(fileURI)()
-
 		var depsCalls []parser.CallSite
 
-		s.mu.RLock()
-		pr := s.parseResults[fileURI]
-		s.mu.RUnlock()
+		// A fresh parse, not s.parseResults: the cached result loses every call
+		// inside a function on an edit outside one (see parseForCalls), and the
+		// graph silently fell back to bare component refs. The result is
+		// private, so no document lock is needed.
+		var pr *parser.ParseResult
+
+		if content, ok := s.getDocument(fileURI); ok {
+			pr = s.parseForCalls(fileURI, content)
+		} else if data, err := s.FS.ReadFile(cfpath.FromURI(docURI)); err == nil {
+			pr = s.parseForCalls(fileURI, string(data))
+		}
 
 		if pr != nil {
 			if funcName != "" {
@@ -1298,6 +1304,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		return s.handleExport(config.GenerateCFLint)
 	case "cfmleditor.showCodeMapStats":
 		return s.handleCodeMapStats(ctx, params.Arguments)
+	case "cfmleditor.explainCall":
+		return s.handleExplainCall(ctx, params.Arguments)
 	case "cfmleditor.scanWorkspace":
 		// Same reasoning as runDiagnostics: this goroutine outlives the
 		// handler, so the request ctx (pooled/reset on return) is unsafe here.

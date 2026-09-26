@@ -35,6 +35,23 @@ func TestVarDeclaration(t *testing.T) {
 	allIn(t, got, "var x = 1;")
 }
 
+// TestVarDeclarationCompoundOperator covers `var hqlOrder &= " ORDER BY"`, a
+// declaration whose initializer is a compound assignment. The grammar puts the
+// operator in the declarator's `operator` field, and both declaration
+// renderers wrote a plain ` = ` whatever it held, so `&=` and `+=` came out as
+// `=`. The guard refused the file: CommandBox's Print.cfc and two in Slatwall.
+func TestVarDeclarationCompoundOperator(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`var methodName &= arrayLen(a) > 1 ? a[2] : '';`, "var methodName &= arrayLen(a) > 1 ? a[2] : '';"},
+		{`var total += getRating();`, "var total += getRating();"},
+		{`var a = 1, b &= "x";`, `var a = 1, b &= "x";`},
+		{`for (var i += 1; i < 3; i++) { x(); }`, "var i += 1; i < 3;"},
+	} {
+		got := formatGuarded(t, wrap(tc.src))
+		allIn(t, got, tc.want)
+	}
+}
+
 func TestLocalDeclaration(t *testing.T) {
 	src := wrap(`local.result = getSomething();`)
 	got := format(t, src)
@@ -221,6 +238,24 @@ func TestTryCatchFinally(t *testing.T) {
 	src := wrap(`try { open(); } catch (any e) { close(); } finally { cleanup(); }`)
 	got := format(t, src)
 	allIn(t, got, "try {", "} catch", "} finally {", "cleanup();")
+}
+
+// TestTryCatchScopedVariable covers `catch( any var e )`, which scopes the
+// caught variable and which CommandBox writes throughout. The grammar gives
+// the `var` no field, and the clause was rebuilt from its type and parameter
+// fields alone, so it came out as `catch (any e)`. The guard caught the
+// dropped word and refused the file, which was 47 of the 62 guard rejections
+// in a 15,503-file corpus.
+func TestTryCatchScopedVariable(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`try { a(); } catch( any var e ) { b(e); }`, "catch (any var e)"},
+		{`try { a(); } catch( ForgeboxException var e ) { b(e); }`, "catch (ForgeboxException var e)"},
+		{`try { a(); } catch( "my.Custom" var e ) { b(e); }`, `catch ("my.Custom" var e)`},
+		{`try { a(); } catch( any e ) { b(e); }`, "catch (any e)"},
+	} {
+		got := format(t, wrap(tc.src))
+		allIn(t, got, tc.want, "b(e);")
+	}
 }
 
 // ─── expressions ─────────────────────────────────────────────────────────────
