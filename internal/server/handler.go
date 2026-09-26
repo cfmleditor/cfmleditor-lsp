@@ -1166,6 +1166,10 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			sourceURI, _ = argString(params.Arguments, 1)
 		}
 
+		// A walk of the workspace on disk: nothing here reads the open
+		// documents, so it can run off the read loop.
+		releaseReadLoop(ctx)
+
 		s.log.Debug("findRefs: searching", cflog.String("funcName", funcName), cflog.Strings("roots", s.searchRoots()))
 		r := s.getResolver()
 		sourceFile := uri.URI(sourceURI).Path()
@@ -1230,7 +1234,13 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// private, so no document lock is needed.
 		var pr *parser.ParseResult
 
-		if content, ok := s.getDocument(fileURI); ok {
+		content, ok := s.getDocument(fileURI)
+
+		// The graph is built from that text and the index, which has its own
+		// lock, so the parse and the walk can run off the read loop.
+		releaseReadLoop(ctx)
+
+		if ok {
 			pr = s.parseForCalls(fileURI, content)
 		} else if data, err := s.FS.ReadFile(cfpath.FromURI(docURI)); err == nil {
 			pr = s.parseForCalls(fileURI, string(data))

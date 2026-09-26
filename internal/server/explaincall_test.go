@@ -175,9 +175,9 @@ func TestExplainCallLineWithNoCall(t *testing.T) {
 // that plainly has one. Both the command and the code action must read the
 // text the editor holds.
 //
-// The code action's lines are memoised, so this also asks it about line 6
-// before the edit, when that line is the closing brace, to prove the memo does
-// not outlive the text it came from.
+// The code action reads the line's text, so this also asks it about line 6
+// before the edit, when that line is the closing brace, and after, when the
+// call to missing() has moved onto it.
 func TestExplainCallAfterAnEditOutsideAFunction(t *testing.T) {
 	srv, _, docURI, aPath := explainWorkspace(t)
 
@@ -305,6 +305,36 @@ func TestCodeActionOffersTheFileDependencyGraph(t *testing.T) {
 
 		if !found {
 			t.Errorf("line %d: file dependency graph not offered", pos.Line)
+		}
+	}
+}
+
+// lineMayHoldCall is a look at the line's text, so it is pinned on the shapes
+// it has to tell apart: a call in script, in a tag expression and chained, and
+// the parens that are not calls.
+func TestLineMayHoldCall(t *testing.T) {
+	for text, want := range map[string]bool{
+		"\tvariables.b.run();":              true,
+		"x = foo.bar( id = arguments.id );": true,
+		"<cfif isDefined(\"url.x\")>":       true,
+		"<cfset y = obj.get().value()>":     true,
+		".method( a )":                      true,
+		"return helper(x);":                 true,
+		"\tpublic void function go() {":     false,
+		"function(a, b) {":                  false,
+		"if (x) {":                          false,
+		"} elseif ( y ) {":                  false,
+		"for (i = 1; i <= 10; i++) {":       false,
+		"<cfif (a gt b)>":                   false,
+		"<cfreturn (x)>":                    false,
+		"x = (1 + 2) * 3;":                  false,
+		"x = 1;":                            false,
+		"}":                                 false,
+		"a = 1 and (b or c);":               false,
+		"x = arr[1](2);":                    false,
+	} {
+		if got := lineMayHoldCall("first line\n"+text+"\nlast line", 1); got != want {
+			t.Errorf("%q: got %v, want %v", text, got, want)
 		}
 	}
 }

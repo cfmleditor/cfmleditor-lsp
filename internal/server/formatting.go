@@ -10,7 +10,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
 )
@@ -32,8 +31,13 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 		return nil, nil
 	}
 
+	// The text and the settings are all it needs; format off the read loop.
+	cfg := s.Formatting
+
+	releaseReadLoop(ctx)
+
 	start := time.Now()
-	formatted, err := formatDocument(content, params.Options, s.Formatting)
+	formatted, err := formatDocumentFn(content, params.Options, cfg)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -55,8 +59,8 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 	s.log.Debug("formatting complete", cflog.String("uri", string(params.TextDocument.URI)), cflog.Duration("elapsed", elapsed))
 
 	// Idempotency check: format again and verify the result is stable.
-	if s.Formatting.Debug {
-		formatted2, err2 := formatDocument(formatted, params.Options, s.Formatting)
+	if cfg.Debug {
+		formatted2, err2 := formatDocument(formatted, params.Options, cfg)
 		if err2 != nil {
 			s.log.Warn("formatting idempotency check failed", cflog.String("uri", string(params.TextDocument.URI)), cflog.Err(err2))
 			s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
@@ -72,17 +76,15 @@ func (s *Server) handleFormatting(ctx context.Context, rawParams []byte) (any, e
 		}
 	}
 
-	lines := parser.CountNewlines(content)
-	edits := []protocol.TextEdit{{
-		Range: protocol.Range{
-			Start: protocol.Position{Line: 0, Character: 0},
-			End:   protocol.Position{Line: uint32(lines + 1), Character: 0},
-		},
-		NewText: formatted,
-	}}
+	// The changed runs of lines, not the whole document: see lineEdits.
+	edits := lineEdits(content, formatted)
 
 	return edits, nil
 }
+
+// formatDocumentFn is formatDocument, as handleFormatting calls it; a test
+// holds it on a channel to show the read loop is released while it runs.
+var formatDocumentFn = formatDocument
 
 func formatDocument(content string, opts protocol.FormattingOptions, cfg config.ResolvedFormatting) (string, error) {
 	src := []byte(content)

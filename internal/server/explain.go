@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -53,6 +52,9 @@ func (s *Server) handleExplainCall(ctx context.Context, args []protocol.LSPAny) 
 		content = string(data)
 	}
 
+	// It works on the text alone, in a parse of its own; let later messages in.
+	releaseReadLoop(ctx)
+
 	pr := s.parseForCalls(fileURI, content)
 	calls := resolve.CallsOnLine(pr, line, filter)
 
@@ -94,41 +96,79 @@ func (s *Server) parseForCalls(fileURI uri.URI, content string) *parser.ParseRes
 	return s.parseContent(fileURI, content)
 }
 
-// lineHasCall reports whether a 0-based line of the document holds a call
-// site, which is what decides whether the explain code action is offered.
+// lineMayHoldCall reports whether a line of the document looks as if it holds
+// a call, which is what decides whether the explain code action is offered.
 //
-// The editor asks for code actions each time the cursor settles, and answering
-// needs a full parse, so the lines with calls are memoised against the text
-// they came from. The same arrangement as scanDocumentRoutes: keyed on a hash
-// of the content, one entry, because the editor asks about the document in
-// front of it. The URI and the interpolation switch are in the key as well,
-// since the file's extension and the switch both change which calls it has.
-func (s *Server) lineHasCall(fileURI uri.URI, content string, line uint32) bool {
-	key := string(fileURI) + "\x00" + contentKey(content)
-	if s.Features.OutputContextInterpolation {
-		key += "i"
+// It is a look at the line's text, not a parse. The editor asks for code
+// actions every time the cursor settles, on the read goroutine that every
+// other message waits behind, and deciding this from a parse meant parsing the
+// whole file after every edit: 11ms on a 12,000-line component and 87ms on a
+// 65,000-line one, per cursor move. So this looks for a name directly before a
+// "(", which is how a call is written in script and in a tag's expression, and
+// leaves out the ones that are not calls: control keywords, a function's own
+// declaration, and CFML tags whose attribute text starts with a paren.
+//
+// A line it wrongly accepts, such as a "(" inside a string or comment, costs an
+// action that reports "No call sites" when run; the command itself parses, so
+// its answer is exact either way.
+func lineMayHoldCall(content string, line int) bool {
+	start := parser.PositionToOffset(content, line, 0)
+
+	text := content[start:]
+	if end := strings.IndexByte(text, '\n'); end >= 0 {
+		text = text[:end]
 	}
 
-	s.callLinesMu.Lock()
-	lines, ok := s.callLines, s.callLinesKey == key
-	s.callLinesMu.Unlock()
-
-	if !ok {
-		lines = nil
-
-		for _, call := range s.parseForCalls(fileURI, content).AllCalls() {
-			// AllCalls is sorted by line, so a repeat is always the last one.
-			if n := len(lines); n == 0 || lines[n-1] != call.Line {
-				lines = append(lines, call.Line)
-			}
+	for i := strings.IndexByte(text, '('); i >= 0; {
+		name, before := nameBefore(text[:i])
+		if name != "" && !notACall[strings.ToLower(name)] && !strings.EqualFold(before, "function") {
+			return true
 		}
 
-		s.callLinesMu.Lock()
-		s.callLinesKey, s.callLines = key, lines
-		s.callLinesMu.Unlock()
+		next := strings.IndexByte(text[i+1:], '(')
+		if next < 0 {
+			break
+		}
+
+		i += next + 1
 	}
 
-	_, found := slices.BinarySearch(lines, line)
+	return false
+}
 
-	return found
+// notACall is the words that a "(" can follow without making a call.
+var notACall = map[string]bool{
+	"if": true, "elseif": true, "for": true, "while": true, "switch": true, "catch": true,
+	"function": true, "return": true, "and": true, "or": true, "not": true,
+	"cfif": true, "cfelseif": true, "cfreturn": true, "cfset": true, "cfloop": true,
+}
+
+// nameBefore returns the identifier that s ends with, ignoring spaces before
+// the paren, and the word before that identifier (for "function name(").
+func nameBefore(s string) (name, before string) {
+	s = strings.TrimRight(s, " \t")
+
+	end := len(s)
+	start := end
+
+	for start > 0 && isNameByte(s[start-1]) {
+		start--
+	}
+
+	if start == end || s[start] >= '0' && s[start] <= '9' {
+		return "", ""
+	}
+
+	rest := strings.TrimRight(s[:start], " \t")
+
+	wordStart := len(rest)
+	for wordStart > 0 && isNameByte(rest[wordStart-1]) {
+		wordStart--
+	}
+
+	return s[start:end], rest[wordStart:]
+}
+
+func isNameByte(b byte) bool {
+	return b == '_' || b == '$' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }

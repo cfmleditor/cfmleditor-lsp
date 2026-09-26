@@ -29,7 +29,7 @@ import (
 // selection itself is clean. That is the same refusal whole-document formatting
 // makes, and for the same reason: the formatter has no rendering for an ERROR
 // node.
-func (s *Server) handleRangeFormatting(_ context.Context, rawParams []byte) (any, error) {
+func (s *Server) handleRangeFormatting(ctx context.Context, rawParams []byte) (any, error) {
 	// Two gates, not one: formatting.enabled governs the formatter as a whole,
 	// and features.rangeFormatting only this half of it. Without the second,
 	// stopping a range-formatting defect means giving up format-on-save too.
@@ -52,8 +52,13 @@ func (s *Server) handleRangeFormatting(_ context.Context, rawParams []byte) (any
 	first, last := lineSpan(params.Range)
 	s.log.Info("formatting range", cflog.String("uri", string(docURI)), cflog.Int("firstLine", first), cflog.Int("lastLine", last))
 
+	// As handleFormatting: the text and settings are all it needs.
+	cfg := s.Formatting
+
+	releaseReadLoop(ctx)
+
 	start := time.Now()
-	formatted, err := formatDocument(content, params.Options, s.Formatting)
+	formatted, err := formatDocument(content, params.Options, cfg)
 	elapsed := time.Since(start)
 
 	if err != nil {
