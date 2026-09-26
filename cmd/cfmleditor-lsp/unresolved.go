@@ -137,7 +137,7 @@ func cmdUnresolved(args []string) {
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
 
-	rep := unresolved.Scan(fsys, files, scanFiles, opt)
+	rep := unresolved.Scan(fsys, files, scanFiles, &opt)
 	results := rep.Calls
 
 	switch {
@@ -183,7 +183,9 @@ func cmdUnresolved(args []string) {
 			fmt.Fprintf(os.Stderr, "%d entries outside %s left out; --include-workspace writes them as ../ paths\n", skipped, baseDir)
 		}
 	default:
-		for _, r := range results {
+		for i := range results {
+			r := &results[i]
+
 			fmt.Printf("%s:%d: %s (%s)\n", r.File, r.Line+1, r.CallText(), r.Reason)
 		}
 	}

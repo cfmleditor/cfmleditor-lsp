@@ -9,7 +9,11 @@ import (
 
 func callNames(pr *ParseResult) []string {
 	out := []string{}
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		out = append(out, c.FuncName)
 	}
 

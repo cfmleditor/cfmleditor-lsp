@@ -28,7 +28,11 @@ func callsIn(t *testing.T, body string) []string {
 
 	out := make([]string, 0, 4)
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		recv := c.Variable
 		if recv == "" {
 			recv = "?"

@@ -143,7 +143,9 @@ func eachDiagnostic(result Result, minRank int, fn func(file string, d protocol.
 
 		sev := mapSeverity(issue.Severity)
 
-		for _, loc := range issue.Locations {
+		for i := range issue.Locations {
+			loc := &issue.Locations[i]
+
 			line := max(loc.Line-1, 0)
 			col := max(loc.Column-1, 0)
 

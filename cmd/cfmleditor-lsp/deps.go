@@ -241,7 +241,9 @@ func depsCallLoader(resolver *resolve.Resolver) func(uri.URI, string) ([]parser.
 		}
 
 		for _, sc := range pr.Scopes {
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if !strings.EqualFold(f.Name, funcName) || int(f.Line) != sc.Start {
 					continue
 				}

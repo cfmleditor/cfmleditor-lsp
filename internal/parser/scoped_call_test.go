@@ -18,7 +18,11 @@ func scopedCall(t *testing.T, stmt string) []string {
 
 		out := make([]string, 0, 2)
 
-		for _, c := range pr.AllCalls() {
+		cs := pr.AllCalls()
+
+		for i := range cs {
+			c := &cs[i]
+
 			v := c.Variable
 			if v == "" {
 				v = "?"
@@ -142,7 +146,11 @@ func chainOf(t *testing.T, stmt string) []string {
 
 	out := make([]string, 0, 4)
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		v := c.Variable
 		if v == "" {
 			v = "?"

@@ -93,7 +93,7 @@ func IsTypingTagName(content string, line, char int) bool {
 	}
 
 	rest := after[1:]
-	if len(rest) == 0 || rest[0] == '/' || rest[0] == '!' {
+	if rest == "" || rest[0] == '/' || rest[0] == '!' {
 		return false
 	}
 

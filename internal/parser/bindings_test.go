@@ -131,7 +131,11 @@ func callTargets(t *testing.T, body string) []string {
 
 	var got []string
 
-	for _, c := range pr.FuncCalls(scope.Start, scope.End) {
+	cs := pr.FuncCalls(scope.Start, scope.End)
+
+	for i := range cs {
+		c := &cs[i]
+
 		switch {
 		case c.Variable != "":
 			got = append(got, c.Variable+"."+c.FuncName)

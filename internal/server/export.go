@@ -129,7 +129,7 @@ func (s *Server) unresolvedReports(files, targets []string) ([]report, int) {
 		opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
 	}
 
-	rep := unresolved.Scan(s.FS, files, nil, opt)
+	rep := unresolved.Scan(s.FS, files, nil, &opt)
 	byTarget, rest := unresolved.SplitByTarget(rep.Calls, targets)
 
 	out := make([]report, 0, len(targets))

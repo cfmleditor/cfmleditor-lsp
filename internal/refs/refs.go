@@ -200,7 +200,9 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 
 			// Component ref matching (from parsed refs — includes all scopes)
 			if compTarget != "" {
-				for _, ref := range pr.ComponentRefs {
+				for i := range pr.ComponentRefs {
+					ref := &pr.ComponentRefs[i]
+
 					if strings.EqualFold(ref.Component, compTarget) {
 						entries = append(entries, Entry{
 							File: f, Variable: ref.Variable, Line: ref.Line, Resolved: true,
@@ -211,7 +213,9 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 
 			// Function call matching (from parsed call sites — includes all scopes)
 			if funcTarget != "" {
-				for _, call := range pr.Calls {
+				for j := range pr.Calls {
+					call := &pr.Calls[j]
+
 					if opts.VerifyCall != nil && call.Component != "" {
 						if !opts.VerifyCall(call.Component, call.FuncName, filepath.Dir(absPath)) {
 							continue
@@ -229,7 +233,9 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 						// Check if the function exists in the same file
 						sameFile := false
 
-						for _, fn := range pr.Funcs {
+						for i := range pr.Funcs {
+							fn := &pr.Funcs[i]
+
 							if strings.EqualFold(fn.Name, call.FuncName) {
 								sameFile = true
 
@@ -259,7 +265,7 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 
 					reason := ""
 					if !resolved && opts.Reason != nil {
-						reason = opts.Reason(call, pr, filepath.Dir(absPath))
+						reason = opts.Reason(*call, pr, filepath.Dir(absPath))
 						if reason != "" {
 							// Restate the call target so the reason reads standalone —
 							// readers scanning one line at a time (without the group

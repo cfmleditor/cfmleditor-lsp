@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,7 +65,7 @@ func assertIdempotent(t *testing.T, label string, src []byte) {
 	first := formatOnce(t, src)
 	second := formatOnce(t, first)
 
-	if string(first) != string(second) {
+	if !bytes.Equal(first, second) {
 		t.Errorf("%s: formatting is not idempotent\n--- first pass ---\n%s\n--- second pass ---\n%s",
 			label, first, second)
 	}

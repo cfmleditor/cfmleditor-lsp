@@ -208,7 +208,11 @@ func scanRoutes(paths []string, quiet bool) (resolved, unresolved []routeFinding
 					File: rel, Line: ref.Line + 1,
 				}
 
-				for _, t := range cfg.Routes.Resolve(ref.Value) {
+				ts := cfg.Routes.Resolve(ref.Value)
+
+				for i := range ts {
+					t := &ts[i]
+
 					if t.Kind == route.KindController {
 						finding.Targets = append(finding.Targets, t.Component+"."+t.Method+"()")
 					} else {
@@ -265,12 +269,16 @@ func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned in
 
 	bySource := map[string][2]int{}
 
-	for _, f := range resolved {
+	for i := range resolved {
+		f := &resolved[i]
+
 		c := bySource[f.Source]
 		bySource[f.Source] = [2]int{c[0] + 1, c[1]}
 	}
 
-	for _, f := range unresolved {
+	for i := range unresolved {
+		f := &unresolved[i]
+
 		c := bySource[f.Source]
 		bySource[f.Source] = [2]int{c[0], c[1] + 1}
 	}
@@ -292,7 +300,9 @@ func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned in
 	if !onlyUnresolved && len(resolved) > 0 {
 		fmt.Fprintf(&b, "\nResolved, for example:\n")
 
-		for i, f := range resolved {
+		for i := range resolved {
+			f := &resolved[i]
+
 			if i >= limit {
 				break
 			}
@@ -309,7 +319,9 @@ func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned in
 
 	groups := map[string][]routeFinding{}
 
-	for _, f := range unresolved {
+	for i := range unresolved {
+		f := &unresolved[i]
+
 		segs := strings.Split(f.Route, ".")
 		key := segs[0]
 
@@ -317,7 +329,7 @@ func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned in
 			key += "." + segs[1]
 		}
 
-		groups[key] = append(groups[key], f)
+		groups[key] = append(groups[key], *f)
 	}
 
 	keys := make([]string, 0, len(groups))
@@ -342,7 +354,9 @@ func writeRouteText(w io.Writer, resolved, unresolved []routeFinding, scanned in
 		seen := map[string]bool{}
 		shown := 0
 
-		for _, f := range g {
+		for i := range g {
+			f := &g[i]
+
 			if seen[f.Route] || shown >= limit {
 				continue
 			}

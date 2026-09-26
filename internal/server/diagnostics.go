@@ -277,7 +277,9 @@ func (s *Server) hasKnownIssues(u uri.URI) bool {
 func (s *Server) isKnownIssuesFile(path string) bool {
 	clean := filepath.Clean(path)
 
-	for _, k := range s.KnownIssues {
+	for i := range s.KnownIssues {
+		k := &s.KnownIssues[i]
+
 		if k.File == clean {
 			return true
 		}
@@ -290,7 +292,9 @@ func (s *Server) isKnownIssuesFile(path string) bool {
 // entries, clearing any file an earlier load published to that this one does
 // not. A file that cannot be read publishes nothing and is logged.
 func (s *Server) loadKnownIssues(ctx context.Context) {
-	for _, k := range s.KnownIssues {
+	for i := range s.KnownIssues {
+		k := &s.KnownIssues[i]
+
 		s.loadKnownIssuesFile(ctx, k.File)
 	}
 }
@@ -358,7 +362,11 @@ func (s *Server) loadKnownIssuesFile(ctx context.Context, file string) {
 		severity := knownissues.Severity(cfg.Severity)
 		lines := map[string][]string{}
 
-		for _, e := range knownissues.Parse(string(data), filepath.Dir(file)) {
+		es := knownissues.Parse(string(data), filepath.Dir(file))
+
+		for i := range es {
+			e := &es[i]
+
 			src, ok := lines[e.Path]
 			if !ok {
 				if b, err := s.FS.ReadFile(e.Path); err == nil {

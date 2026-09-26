@@ -73,19 +73,19 @@ func (p *scriptParser) resolveCall(expr string) string {
 	return ResolveFromCall(expr, p.resolvers)
 }
 
-func (p *scriptParser) addRef(ref ComponentRef) {
+func (p *scriptParser) addRef(ref *ComponentRef) {
 	if p.inFunc == "" || p.forceGlobal {
-		p.componentRefs = append(p.componentRefs, ref)
+		p.componentRefs = append(p.componentRefs, *ref)
 	} else {
 		if p.funcRefs == nil {
 			p.funcRefs = make(map[string][]ComponentRef)
 		}
 
-		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], *ref)
 	}
 }
 
-func (p *scriptParser) addCall(call CallSite) {
+func (p *scriptParser) addCall(call *CallSite) {
 	// The single gate on recording a call. Consuming one is not gated: the
 	// dispatch that walks a call and its argument list runs in every mode,
 	// because a (...) group left unconsumed is not skipped — it is scanned as
@@ -97,13 +97,13 @@ func (p *scriptParser) addCall(call CallSite) {
 	}
 
 	if p.inFunc == "" {
-		p.calls = append(p.calls, call)
+		p.calls = append(p.calls, *call)
 	} else {
 		if p.funcCalls == nil {
 			p.funcCalls = make(map[string][]CallSite)
 		}
 
-		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], call)
+		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], *call)
 	}
 }
 
@@ -126,7 +126,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName: tok.Value,
 		Line:     uint32(p.baseLine + tok.Line),
 		Caller:   caller,
@@ -207,7 +207,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 			hops := make([]string, len(chainHops))
 			copy(hops, chainHops)
 
-			p.addCall(CallSite{
+			p.addCall(&CallSite{
 				FuncName:  funcName,
 				Component: comp,
 				Chain:     hops,
@@ -242,7 +242,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 	dotIdx := strings.LastIndexByte(fullChain, '.')
 	if dotIdx < 0 {
 		// Bare function call (no dot)
-		p.addCall(CallSite{
+		p.addCall(&CallSite{
 			FuncName: fullChain,
 			Line:     uint32(p.baseLine + line),
 			Caller:   caller,
@@ -251,7 +251,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		return
 	}
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName: fullChain[dotIdx+1:],
 		Variable: fullChain[:dotIdx],
 		Line:     uint32(p.baseLine + line),
@@ -376,7 +376,7 @@ func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []strin
 			hops := make([]string, len(chainHops))
 			copy(hops, chainHops)
 
-			p.addCall(CallSite{
+			p.addCall(&CallSite{
 				FuncName:  funcName,
 				Variable:  baseVar,
 				Component: baseComp,
@@ -433,7 +433,7 @@ func (p *scriptParser) extractAllLinks() {
 	lineNum := p.baseLine
 	scopeIdx := 0
 
-	for len(src) > 0 {
+	for src != "" {
 		nl := strings.IndexByte(src, '\n')
 
 		var line string
@@ -537,7 +537,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'] or arr[i]) — can't be
 			// resolved statically. Skip the whole [...] group and poison
@@ -582,20 +582,20 @@ chainWalk:
 
 		if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 			rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, line)
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
 				ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
 		} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 			rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, line)
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
 		} else if p.builtinReturnLookup != nil {
 			if comp := p.builtinReturnLookup(lastIdent); comp != "" {
-				p.addRef(ComponentRef{
+				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp,
 					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 				})
@@ -615,7 +615,7 @@ chainWalk:
 		}
 	} else if len(p.resolvers) > 0 {
 		if comp := p.resolveCall(fullChain.String()); comp != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
@@ -665,7 +665,7 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 		call.Resolved = true
 	}
 
-	p.addCall(call)
+	p.addCall(&call)
 
 	comp, ok := p.skipParensResolving(nameTok.Value)
 	if !ok {
@@ -705,7 +705,7 @@ func (p *scriptParser) recordDynamicChain(recv string, line int, caller string) 
 			return
 		}
 
-		p.addCall(CallSite{
+		p.addCall(&CallSite{
 			FuncName:  methTok.Value,
 			Variable:  recv,
 			Component: "$any",
@@ -823,7 +823,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 			// component comes from the continuation, so skip the ref here.
 			if p.sc.PeekSkipComments().Kind != TokDot {
 				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: selfPath,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
 					})
@@ -944,7 +944,7 @@ func (p *scriptParser) parse() {
 						return
 					}
 
-					p.addCall(CallSite{
+					p.addCall(&CallSite{
 						FuncName: funcName,
 						Variable: varName,
 						Line:     uint32(p.baseLine + line),
@@ -1272,7 +1272,7 @@ func (p *scriptParser) skipParensQuiet() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF:
 			return false
 		case TokLParen:
@@ -1346,7 +1346,7 @@ func (p *scriptParser) parseCatchVar() {
 	for {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive
+		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokIdent:
 			last = tok
 		case TokDot:
@@ -1415,7 +1415,7 @@ func (p *scriptParser) recordStaticCall(component string, startTok Token) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName:  methTok.Value,
 		Component: component,
 		Line:      uint32(p.baseLine + startTok.Line),
@@ -1510,7 +1510,7 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 				break
 			}
 
-			switch t.Kind { //nolint:exhaustive
+			switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 			case TokIdent:
 				p.scanNestedCall(t)
 			case TokString, TokRBracket:
@@ -1678,7 +1678,7 @@ func (p *scriptParser) recordLiteralMemberCall(recv Token) {
 			continue // a property read, e.g. `"a,b".listLen` — nothing to record
 		}
 
-		p.addCall(CallSite{
+		p.addCall(&CallSite{
 			FuncName:  methTok.Value,
 			Component: "$any",
 			Line:      uint32(p.baseLine + recv.Line),
@@ -1791,7 +1791,7 @@ func (p *scriptParser) skipDefault() {
 
 		p.sc.NextSkipComments()
 
-		switch peek.Kind { //nolint:exhaustive
+		switch peek.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLParen, TokLBrace, TokLBracket:
 			depth++
 		case TokRParen, TokRBrace, TokRBracket:
@@ -1852,7 +1852,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		afterLT := p.afterLT
 		p.afterLT = t.Kind == TokLT
 
-		switch t.Kind { //nolint:exhaustive
+		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -1903,8 +1903,10 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		if f.ReturnComponent == "" && p.returnVar != "" {
 			// Look up returnVar in this function's refs
 			if refs := p.funcRefs[p.inFunc]; refs != nil {
-				for _, ref := range refs {
-					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(&ref) {
+				for i := range refs {
+					ref := &refs[i]
+
+					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(ref) {
 						f.ReturnComponent = ref.Component
 
 						break
@@ -1913,8 +1915,10 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			}
 			// Also check componentRefs (for variables./this. scoped)
 			if f.ReturnComponent == "" {
-				for _, ref := range p.componentRefs {
-					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(&ref) {
+				for i := range p.componentRefs {
+					ref := &p.componentRefs[i]
+
+					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(ref) {
 						f.ReturnComponent = ref.Component
 
 						break
@@ -2068,7 +2072,7 @@ func (p *scriptParser) checkReturnComponent() {
 					caller = p.funcs[len(p.funcs)-1].Name
 				}
 
-				p.addCall(CallSite{
+				p.addCall(&CallSite{
 					FuncName: peek.Value,
 					Line:     uint32(p.baseLine + peek.Line),
 					Caller:   caller,
@@ -2311,7 +2315,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2351,20 +2355,20 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, varTok.Line)
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
 				} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 					rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, varTok.Line)
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp, ChainRest: rest,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
 				} else if p.builtinReturnLookup != nil {
 					if comp := p.builtinReturnLookup(lastIdent); comp != "" {
-						p.addRef(ComponentRef{
+						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 						})
@@ -2390,7 +2394,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 				}
 			} else if len(p.resolvers) > 0 {
 				if comp := p.resolveCall(fullChain.String()); comp != "" {
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
 					})
@@ -2440,7 +2444,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 				case TokLBracket:
 					// See checkVarRHS's identical case for why.
 					if !p.skipBracketIndex() {
@@ -2514,7 +2518,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 			// component comes from the continuation, so skip the ref here.
 			if p.sc.PeekSkipComments().Kind != TokDot {
 				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: selfPath,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
 					})
@@ -2532,7 +2536,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 			chainWalk2:
 				for {
-					switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+					switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 					case TokLBracket:
 						// See checkVarRHS's identical case for why.
 						if !p.skipBracketIndex() {
@@ -2570,7 +2574,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 
 					if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 						rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, scopeTok.Line)
-						p.addRef(ComponentRef{
+						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
@@ -2587,7 +2591,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 					}
 				} else if len(p.resolvers) > 0 {
 					if comp := p.resolveCall(fullChain.String()); comp != "" {
-						p.addRef(ComponentRef{
+						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
 						})
@@ -2708,7 +2712,7 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 		t := p.sc.NextSkipComments()
 		last = t.Line
 
-		switch t.Kind { //nolint:exhaustive
+		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF:
 			return last
 		case TokLBrace:
@@ -2809,7 +2813,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2849,7 +2853,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
 					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, tok.Line)
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: tok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
@@ -2867,7 +2871,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 			} else if len(p.resolvers) > 0 {
 				// Try generic resolver match on non-call RHS (e.g. "_parent")
 				if comp := p.resolveCall(fullChain.String()); comp != "" {
-					p.addRef(ComponentRef{
+					p.addRef(&ComponentRef{
 						Variable: tok.Value, Component: comp,
 						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
 					})
@@ -2890,7 +2894,7 @@ func (p *scriptParser) checkBareCall(tok Token) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'].method()) — skip it and
 			// poison the receiver so it can't be misattributed to whatever
@@ -2942,7 +2946,7 @@ chainWalk:
 		return
 	}
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName: funcName,
 		Variable: varName,
 		Line:     uint32(p.baseLine + tok.Line),
@@ -2974,7 +2978,7 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 	}
 
 	if component != "" {
-		p.addRef(ComponentRef{
+		p.addRef(&ComponentRef{
 			Variable: varName, Component: component, ChainRest: hops,
 			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
@@ -3014,7 +3018,7 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 
 		if comp != "" {
 			hops := p.scanChainedCalls(comp, line)
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: hops,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
@@ -3041,7 +3045,7 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 
 		if comp != "" {
 			hops := p.scanChainedCalls(comp, line)
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: hops,
 				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 			})
@@ -3080,7 +3084,7 @@ func (p *scriptParser) scanChainedCalls(component string, line int) []string {
 			break
 		}
 
-		p.addCall(CallSite{
+		p.addCall(&CallSite{
 			FuncName:  methTok.Value,
 			Component: component,
 			Chain:     slices.Clone(hops),
@@ -3110,7 +3114,7 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 
 	comp := unquote(arg.Value)
 	if comp != "" {
-		p.addRef(ComponentRef{
+		p.addRef(&ComponentRef{
 			Variable: varName, Component: comp,
 			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
 		})
@@ -3308,7 +3312,7 @@ func (p *globalScriptParser) parsePlain(tok Token, afterLT bool) {
 func (p *globalScriptParser) consumeAssignment() {
 	p.sc.NextSkipComments() // consume =
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 	case TokLBrace, TokLBracket:
 		p.skipGroup()
 	default:
@@ -3321,7 +3325,7 @@ func (p *globalScriptParser) consumeAssignment() {
 func (p *globalScriptParser) skipGroup() bool {
 	var open, closing TokenKind
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 	case TokLParen:
 		open, closing = TokLParen, TokRParen
 	case TokLBrace:
@@ -3337,7 +3341,7 @@ func (p *globalScriptParser) skipGroup() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF:
 			return false
 		case open:
@@ -3367,7 +3371,7 @@ func (p *globalScriptParser) skipTagAttrs() {
 // the same name for why it stops where it does.
 func (p *globalScriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3392,7 +3396,7 @@ func (p *globalScriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
@@ -3641,7 +3645,7 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 
 		argStart = depth == 1 && tok.Kind == TokComma
 
-		switch tok.Kind { //nolint:exhaustive
+		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLParen:
 			depth++
 		case TokRParen:
@@ -3710,7 +3714,7 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		return
 	}
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 	case TokLParen:
 		p.recordBareCallAndChain(tok)
 	case TokDot, TokLBracket:
@@ -3762,7 +3766,7 @@ func (p *scriptParser) skipInstantiation() {
 // the `=` spelling was ever affected, which is why the two look like different
 // constructs in a `.cfc` and are the same one.
 func (p *scriptParser) skipLiteralGroup() {
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 	case TokLBrace, TokLBracket:
 	default:
 		return
@@ -3775,7 +3779,7 @@ func (p *scriptParser) skipLiteralGroup() {
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive
+		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF:
 			return
 		case TokLBrace, TokLBracket:
@@ -3853,7 +3857,7 @@ func (p *scriptParser) parseScriptTagAttrs() {
 // along with the `<cfset var x = 1>` inside it.
 func (p *scriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3882,7 +3886,7 @@ func (p *scriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive
+		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
@@ -3896,7 +3900,7 @@ func (p *scriptParser) skipHashExpr() bool {
 	p.sc.NextSkipComments() // consume the opening #
 
 	for {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive
+		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokEOF, TokSemicolon, TokLBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3934,7 +3938,7 @@ func (p *scriptParser) skipBracketIndex() bool {
 			return false
 		}
 
-		switch tok.Kind { //nolint:exhaustive
+		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
 		case TokLBracket:
 			depth++
 		case TokRBracket:
@@ -4056,7 +4060,7 @@ func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, l
 	method := ext[len(ext)-1]
 
 	if len(ext) > 1 {
-		p.addCall(CallSite{
+		p.addCall(&CallSite{
 			FuncName: method, Variable: recv, Component: "$any", Resolved: true,
 			Line: uint32(p.baseLine + line), Caller: caller,
 		})
@@ -4065,7 +4069,7 @@ func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, l
 		return []string{method, "?"} // the rest is dynamic: see dynamicIfTyped
 	}
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName: method, Variable: recv, Chain: []string{first},
 		Line: uint32(p.baseLine + line), Caller: caller,
 	})
@@ -4135,7 +4139,7 @@ func isKeyword(s string) bool {
 // applyJSDocParams parses @param {type} name annotations from a JSDoc comment
 // and sets the Type on matching arguments (only if their Type is empty or "any").
 func applyJSDocParams(comment string, args []Argument) {
-	for len(comment) > 0 {
+	for comment != "" {
 		idx := strings.Index(comment, "@param")
 		if idx < 0 {
 			break

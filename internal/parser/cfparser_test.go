@@ -635,14 +635,18 @@ func assertDefs(t *testing.T, defs []FunctionDef, want []string) {
 
 	if len(defs) != len(want) {
 		names := make([]string, len(defs))
-		for i, d := range defs {
+		for i := range defs {
+			d := &defs[i]
+
 			names[i] = d.Name
 		}
 
 		t.Fatalf("got %d defs %v, want %d %v", len(defs), names, len(want), want)
 	}
 
-	for i, d := range defs {
+	for i := range defs {
+		d := &defs[i]
+
 		if d.Name != want[i] {
 			t.Errorf("def[%d].Name = %q, want %q", i, d.Name, want[i])
 		}

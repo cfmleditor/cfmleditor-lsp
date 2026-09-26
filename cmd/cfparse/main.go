@@ -37,7 +37,10 @@ func main() {
 			os.Exit(1)
 		}
 
-		pprof.StartCPUProfile(f) //nolint:errcheck
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(os.Stderr, "error starting profile: %v\n", err)
+			os.Exit(1)
+		}
 
 		defer pprof.StopCPUProfile()
 	}

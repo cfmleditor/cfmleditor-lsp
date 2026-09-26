@@ -114,8 +114,12 @@ func buildFromCalls(opts *Options, startLabel, baseDir string, maxDepth int, see
 	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
 		var next []node
 
-		for _, current := range queue {
-			for _, call := range current.calls {
+		for j := range queue {
+			current := &queue[j]
+
+			for i := range current.calls {
+				call := &current.calls[i]
+
 				if call.Component == "" && call.Variable == "" {
 					continue
 				}
@@ -242,7 +246,9 @@ func buildFromRefs(opts *Options, startLabel, baseDir string, maxDepth int, seen
 		var next []node
 
 		for _, current := range queue {
-			for _, ref := range current.refs {
+			for i := range current.refs {
+				ref := &current.refs[i]
+
 				if ref.Component == "" {
 					continue
 				}

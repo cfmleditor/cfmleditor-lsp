@@ -33,12 +33,18 @@ var chainResolvers = []Resolver{{
 func refsByVar(pr *ParseResult) map[string]string {
 	out := make(map[string]string)
 
-	for _, r := range pr.ComponentRefs {
+	for i := range pr.ComponentRefs {
+		r := &pr.ComponentRefs[i]
+
 		out[strings.ToLower(r.Variable)] = r.Component
 	}
 
 	for _, sc := range pr.Scopes {
-		for _, r := range pr.FuncComponentRefs(sc.Start, sc.End) {
+		rs := pr.FuncComponentRefs(sc.Start, sc.End)
+
+		for i := range rs {
+			r := &rs[i]
+
 			out[strings.ToLower(r.Variable)] = r.Component
 		}
 	}

@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
@@ -98,7 +99,7 @@ func TestIdempotencyBroad(t *testing.T) {
 				t.Fatalf("pass 2: %v", err)
 			}
 
-			if string(out1) != string(out2) {
+			if !bytes.Equal(out1, out2) {
 				t.Errorf("not idempotent\nPass 1:\n%s\nPass 2:\n%s", out1, out2)
 			}
 		})

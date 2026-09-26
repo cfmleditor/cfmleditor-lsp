@@ -1396,16 +1396,22 @@ Some handles need both shapes; others only one, depending on how the code uses t
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
   bump. Test files are exempted from `prealloc`, `unparam`,
   `gosec`, and `staticcheck`.
-- **gocritic's `hugeParam` and `rangeValCopy` are on at 128 bytes**, with
-  `appendCombine` and `equalFold`, in test files too. A large struct goes by
-  pointer, and a loop over large elements indexes (`x := &xs[i]`). The trap is
-  a callee that edits what it was given: `formatter.New`, `codemap.Build` and
-  `refs.Trace` all write to their options, so each takes `o := *opts` first —
-  and `TestNewDoesNotWriteToTheCallersOptions`,
+- **gocritic runs every `performance` check, plus `whyNoLint` and
+  `emptyStringTest`, in test files too.** `hugeParam` and `rangeValCopy` are at
+  gocritic's own 80 bytes: a large struct goes by pointer, and a loop over large
+  elements indexes (`x := &xs[i]`). The trap is a callee that edits what it was
+  given: `formatter.New`, `codemap.Build` and `refs.Trace` all write to their
+  options, so each takes `o := *opts` first — and
+  `TestNewDoesNotWriteToTheCallersOptions`,
   `TestBuildDoesNotWriteToTheCallersOptions` and the `Trace` test fail if that
   copy is dropped. Where a copy is the point (appending the value to a result,
-  a snapshot of `s.Formatting` taken before the read loop is released), write
-  it as `*p` or `cfg := s.Formatting` rather than suppressing the check.
+  a loop that edits the element and keeps it, a snapshot of `s.Formatting`
+  taken before the read loop is released), write it as `*p`, `v := xs[i]` or
+  `cfg := s.Formatting` rather than suppressing the check. Passing
+  `&CallSite{…}` to `addCall` does not allocate — the parameter only leaks its
+  content — and the parse benchmarks' bytes and allocations were unchanged when
+  it went in; check `go build -gcflags=-m` if a new such helper keeps the
+  pointer. `whyNoLint` wants a reason after every `//nolint:x`.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
 - `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go

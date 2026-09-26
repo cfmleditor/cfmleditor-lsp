@@ -1642,7 +1642,7 @@ func (f *Formatter) saveState() formatterState {
 	}
 }
 
-func (f *Formatter) restoreState(s formatterState) {
+func (f *Formatter) restoreState(s *formatterState) {
 	f.out.Truncate(s.outLen)
 	f.level = s.level
 	f.atBOL = s.atBOL
@@ -1686,7 +1686,7 @@ func (f *Formatter) rendersOnOneLine(emit func()) bool {
 
 	fits := !bytes.ContainsRune(rendered, '\n') && col+len(rendered) <= f.opts.LineWidth
 
-	f.restoreState(saved)
+	f.restoreState(&saved)
 
 	return fits
 }

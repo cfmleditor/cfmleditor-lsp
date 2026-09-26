@@ -119,7 +119,9 @@ func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {
 	label.WriteString(e.Name)
 	label.WriteByte('(')
 
-	for i, p := range e.Params {
+	for i := range e.Params {
+		p := &e.Params[i]
+
 		if i > 0 {
 			label.WriteString(", ")
 		}

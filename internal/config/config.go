@@ -146,7 +146,7 @@ var defaultGenerated = map[string]string{
 }
 
 // IsGenerated reports whether k is regenerated as kind.
-func (k KnownIssues) IsGenerated(kind string) bool {
+func (k *KnownIssues) IsGenerated(kind string) bool {
 	return strings.EqualFold(strings.TrimSpace(k.Generate), kind)
 }
 
@@ -158,7 +158,9 @@ func (k KnownIssues) IsGenerated(kind string) bool {
 func GenerateTargets(list []KnownIssues, kind, configDir string) []string {
 	var out []string
 
-	for _, k := range list {
+	for i := range list {
+		k := &list[i]
+
 		if k.IsGenerated(kind) && !slices.Contains(out, k.File) {
 			out = append(out, k.File)
 		}
@@ -226,7 +228,9 @@ func ResolveKnownIssues(block *KnownIssuesConfig, dir string) []KnownIssues {
 
 	var out []KnownIssues
 
-	for _, k := range b.Files {
+	for i := range b.Files {
+		k := b.Files[i] // a copy: edited below, and kept
+
 		if strings.TrimSpace(k.File) == "" {
 			continue
 		}

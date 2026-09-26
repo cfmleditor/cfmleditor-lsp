@@ -221,7 +221,7 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 
 	switch name {
 	case "search_symbols":
-		found, err := s.Store.SearchSymbols(store.SearchOptions{
+		found, err := s.Store.SearchSymbols(&store.SearchOptions{
 			Query: a.Query, Kind: a.Kind, File: a.File, Island: a.Island,
 			OnlyDead: a.OnlyUnreachable, SortByFan: a.SortByFanIn, Limit: a.Limit,
 		})

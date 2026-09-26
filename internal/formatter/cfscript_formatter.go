@@ -2099,7 +2099,7 @@ func (f *Formatter) closureBody(body *sitter.Node) string {
 	f.scriptBlockBody(body)
 
 	rendered := string(f.out.Bytes()[start:])
-	f.restoreState(st)
+	f.restoreState(&st)
 
 	if f.closureBodies == nil {
 		f.closureBodies = map[closureKey]string{}

@@ -74,7 +74,9 @@ func fileLoader(t *testing.T) func(uri.URI, string) ([]parser.CallSite, []parser
 
 		pr := parseFile(t, path)
 		for _, sc := range pr.Scopes {
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if strings.EqualFold(f.Name, funcName) && int(f.Line) == sc.Start {
 					refs := append([]parser.ComponentRef{}, pr.ComponentRefs...)
 					refs = append(refs, pr.FuncComponentRefs(sc.Start, sc.End)...)

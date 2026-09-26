@@ -382,7 +382,7 @@ func (r *Resolver) ResolveFromCall(expr string) string {
 
 // CanResolveCall determines whether a function call can be resolved given the
 // parse result context. Returns empty string if resolved, or a reason if not.
-func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) string {
+func (r *Resolver) CanResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) string {
 	return r.canResolveCall(call, pr, baseDir, nil)
 }
 
@@ -391,7 +391,7 @@ func (r *Resolver) CanResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 // the final verdict — which mechanism set the call's component, which componentResolver
 // or FuncLookup hop fired, and why the final method check succeeded or failed. Intended
 // for the `explain` CLI command; not used on the hot lint path.
-func (r *Resolver) ExplainCall(call parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
+func (r *Resolver) ExplainCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
 	tr := &callTrace{}
 	reason := r.canResolveCall(call, pr, baseDir, tr)
 
@@ -441,7 +441,7 @@ func (t *callTrace) hit(kind TargetKind, component string, def *parser.FunctionD
 	}
 }
 
-func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
 	funcName := call.FuncName
 	variable := call.Variable
 
@@ -595,7 +595,9 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 	if strings.EqualFold(variable, "ARGUMENTS") {
 		tr.add("ARGUMENTS.%s called as a function reference — checking caller %q's argument list", funcName, call.Caller)
 
-		for _, f := range pr.Funcs {
+		for i := range pr.Funcs {
+			f := &pr.Funcs[i]
+
 			if strings.EqualFold(f.Name, call.Caller) {
 				for _, arg := range f.Arguments {
 					if strings.EqualFold(arg.Name, funcName) {
@@ -628,7 +630,11 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		// Try function-scoped refs first
 		for _, scope := range pr.Scopes {
 			if int(call.Line) >= scope.Start && int(call.Line) <= scope.End {
-				for _, ref := range pr.FuncComponentRefs(scope.Start, scope.End) {
+				refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+				for i := range refs {
+					ref := &refs[i]
+
 					if strings.EqualFold(ref.Variable, lookupVar) {
 						comp = ref.Component
 
@@ -713,7 +719,9 @@ func (r *Resolver) canResolveCall(call parser.CallSite, pr *parser.ParseResult, 
 		if comp == "" && strings.HasPrefix(strings.ToUpper(variable), "ARGUMENTS.") {
 			argName := variable[10:]
 
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if strings.EqualFold(f.Name, call.Caller) {
 					for _, arg := range f.Arguments {
 						if !strings.EqualFold(arg.Name, argName) {

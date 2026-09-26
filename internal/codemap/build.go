@@ -534,7 +534,9 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 			continue
 		}
 
-		for _, t := range targets {
+		for i := range targets {
+			t := &targets[i]
+
 			toRel := relPath(root, t.Path)
 
 			to := FileID(toRel)
@@ -555,7 +557,7 @@ func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
 	}
 }
 
-func nodeKindFor(t route.Target) NodeKind {
+func nodeKindFor(t *route.Target) NodeKind {
 	if t.Kind == route.KindController && t.Method != "" {
 		return KindFunction
 	}
@@ -563,7 +565,7 @@ func nodeKindFor(t route.Target) NodeKind {
 	return KindFile
 }
 
-func routeNodeName(t route.Target, rel string) string {
+func routeNodeName(t *route.Target, rel string) string {
 	if t.Kind == route.KindController && t.Method != "" {
 		return t.Method
 	}
@@ -595,7 +597,11 @@ func (res *FileGraph) addIncludes(opts *Options, cfg FileConfig, pr *parser.Pars
 }
 
 func (res *FileGraph) addCalls(opts *Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
-	for _, call := range pr.AllCalls() {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		res.Stats.CallSites++
 
 		target, reason := cfg.Resolver.ResolveCallTarget(call, pr, baseDir)
@@ -704,7 +710,7 @@ func funcNodeFor(root string, target resolve.CallTarget) string {
 	return FuncID(relPath(root, cfpath.FromURI(string(target.URI))), target.FuncName)
 }
 
-func externalLabel(component string, call parser.CallSite) string {
+func externalLabel(component string, call *parser.CallSite) string {
 	if component != "" && component != "$any" {
 		return component + "." + call.FuncName
 	}

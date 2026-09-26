@@ -78,7 +78,7 @@ type CallTarget struct {
 // callee that CanResolveCall already found and discarded. It is not on the lint
 // hot path — it allocates a recorder per call — so CanResolveCall still passes nil
 // and pays nothing.
-func (r *Resolver) ResolveCallTarget(call parser.CallSite, pr *parser.ParseResult, baseDir string) (CallTarget, string) {
+func (r *Resolver) ResolveCallTarget(call *parser.CallSite, pr *parser.ParseResult, baseDir string) (CallTarget, string) {
 	tr := &callTrace{}
 	reason := r.canResolveCall(call, pr, baseDir, tr)
 

@@ -59,7 +59,7 @@ type Report struct {
 
 // Scan indexes files, then reports the unresolved calls in targets, or in
 // every one of files when targets is empty.
-func Scan(fsys vfs.FS, files, targets []string, opt Options) Report {
+func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	resolver := &resolve.Resolver{
 		FS:                 fsys,
 		Index:              index.New(),
@@ -141,7 +141,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt Options) Report {
 	return rep
 }
 
-func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt Options) (out []Call, resolved int) {
+func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options) (out []Call, resolved int) {
 	data, err := fsys.ReadFile(file)
 	if err != nil || cfpath.IsBinary(data) {
 		return nil, 0
@@ -180,7 +180,11 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt Options)
 
 	pr.FuncLookup = funcLookup
 
-	for _, call := range pr.AllCalls() {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		reason := resolver.CanResolveCall(call, pr, baseDir)
 		if reason == "" {
 			resolved++
@@ -249,7 +253,7 @@ func IsMemberFunction(name string) bool {
 }
 
 // CallText is how a call is written in the report: variable.function.
-func (c Call) CallText() string {
+func (c *Call) CallText() string {
 	if c.Variable != "" {
 		return c.Variable + "." + c.Function
 	}
@@ -285,7 +289,9 @@ func WriteKnownIssues(w io.Writer, calls []Call, baseDir string, includeWorkspac
 
 	rows := make([]row, 0, len(calls))
 
-	for _, c := range calls {
+	for i := range calls {
+		c := &calls[i]
+
 		rel, ok := relativePath(baseDir, c.File)
 		if !ok || (isOutside(rel) && !includeWorkspace) {
 			skipped++
@@ -330,15 +336,17 @@ func SplitByTarget(calls []Call, targets []string) (byTarget map[string][]Call, 
 		byTarget[t] = nil
 	}
 
-	for _, c := range calls {
+	for i := range calls {
+		c := &calls[i]
+
 		best := knownissues.DeepestTarget(c.File, targets)
 		if best == "" {
-			rest = append(rest, c)
+			rest = append(rest, *c)
 
 			continue
 		}
 
-		byTarget[best] = append(byTarget[best], c)
+		byTarget[best] = append(byTarget[best], *c)
 	}
 
 	return byTarget, rest

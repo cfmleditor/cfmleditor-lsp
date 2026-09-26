@@ -268,7 +268,11 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 
 	found := 0
 
-	for _, call := range pr.AllCalls() {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		if call.Line != target {
 			continue
 		}

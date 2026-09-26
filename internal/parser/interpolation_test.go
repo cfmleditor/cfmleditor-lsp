@@ -15,7 +15,11 @@ func interpCalls(t *testing.T, src string) []string {
 
 	var got []string
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		v := c.Variable
 		if v == "" && c.Component != "" {
 			v = "[" + c.Component + "]"

@@ -27,23 +27,37 @@ linters:
     - wsl_v5
   settings:
     gocritic:
-      # On top of gocritic's default checks: a large value copied into a
-      # parameter or a loop variable, and two small spellings that allocate or
-      # grow a slice twice. The thresholds are 128 bytes rather than gocritic's
-      # 80: every copy at or above 128 was removed when these were enabled, and
-      # the checks keep new ones out. When a copy is the point (appending the
-      # value to a result, keeping a private copy of options it then edits),
-      # take it explicitly with *p rather than suppressing the check.
+      # On top of gocritic's default checks: every check tagged performance,
+      # and two that keep the code honest. The copy thresholds are gocritic's
+      # own default of 80 bytes; every copy at or above it was removed when
+      # these were enabled, and the checks keep new ones out. When a copy is the
+      # point (appending the value to a result, keeping a private copy of
+      # options it then edits), take it explicitly with *p rather than
+      # suppressing the check.
+      #
+      # whyNoLint wants a reason on every //nolint. emptyStringTest prefers
+      # s == "" to len(s) == 0.
       enabled-checks:
-        - hugeParam
-        - rangeValCopy
         - appendCombine
         - equalFold
+        - hugeParam
+        - indexAlloc
+        - preferDecodeRune
+        - preferFprint
+        - preferStringWriter
+        - preferWriteByte
+        - rangeExprCopy
+        - rangeValCopy
+        - sliceClear
+        - stringXbytes
+        - zeroByteRepeat
+        - whyNoLint
+        - emptyStringTest
       settings:
         hugeParam:
-          sizeThreshold: 128
+          sizeThreshold: 80
         rangeValCopy:
-          sizeThreshold: 128
+          sizeThreshold: 80
   exclusions:
     rules:
       - path: _test\.go

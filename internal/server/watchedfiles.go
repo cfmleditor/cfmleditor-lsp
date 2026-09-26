@@ -51,7 +51,9 @@ func (s *Server) registerFileWatchers(ctx context.Context) {
 	// A known-issues file is watched by name: an edit to it, or regenerating
 	// it, republishes its entries. The glob matches the name anywhere, and
 	// applyWatchedFileChanges acts only on the configured path.
-	for _, k := range s.KnownIssues {
+	for i := range s.KnownIssues {
+		k := &s.KnownIssues[i]
+
 		globs = append(globs, "**/"+filepath.Base(k.File))
 	}
 

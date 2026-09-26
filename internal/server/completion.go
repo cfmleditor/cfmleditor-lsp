@@ -67,7 +67,9 @@ func getBuiltinFuncItems() []protocol.CompletionItem {
 			insertText.WriteString(fn.Name)
 			insertText.WriteByte('(')
 
-			for i, p := range fn.Params {
+			for i := range fn.Params {
+				p := &fn.Params[i]
+
 				if i > 0 {
 					insertText.WriteString(", ")
 				}
@@ -320,7 +322,9 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				attrs = docs.HTMLTagParams(tagName)
 			}
 
-			for _, p := range attrs {
+			for i := range attrs {
+				p := &attrs[i]
+
 				items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
 					Label:  p.Name,
 					Kind:   protocol.CompletionItemKindProperty,
@@ -817,7 +821,9 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 		})
 	}
 
-	for _, f := range pr.Funcs {
+	for j := range pr.Funcs {
+		f := &pr.Funcs[j]
+
 		var detail strings.Builder
 		detail.WriteString(f.Name)
 		detail.WriteByte('(')
@@ -871,7 +877,9 @@ func (s *Server) rebuildFileCompletionCacheFromPR(docURI uri.URI, pr *parser.Par
 		thisItems = append(thisItems, protocol.CompletionItem{Label: v, Kind: protocol.CompletionItemKindProperty, SortText: optStr(SortLocalVariables + v)})
 	}
 
-	for _, f := range pr.Funcs {
+	for j := range pr.Funcs {
+		f := &pr.Funcs[j]
+
 		var detail strings.Builder
 		detail.WriteString(f.Name)
 		detail.WriteByte('(')
@@ -1163,7 +1171,10 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 	// Try builtin
 	if e, ok := docs.LookupFunction(funcName); ok {
 		var items []protocol.CompletionItem
-		for _, p := range e.Params {
+
+		for i := range e.Params {
+			p := &e.Params[i]
+
 			items = append(items, protocol.CompletionItem{
 				Label:  p.Name + "=",
 				Kind:   protocol.CompletionItemKindField,
@@ -1272,7 +1283,9 @@ func buildTagSnippet(tag *docs.Entry) string {
 
 	tabIdx := 1
 
-	for _, p := range params {
+	for i := range params {
+		p := &params[i]
+
 		if p.Required {
 			fmt.Fprintf(&b, ` %s="${%d:%s}"`, p.Name, tabIdx, p.Name)
 

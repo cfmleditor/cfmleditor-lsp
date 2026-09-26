@@ -217,7 +217,11 @@ func (s *Server) routeDefinitions(ref routepkg.Ref) []protocol.Location {
 
 	var out []protocol.Location
 
-	for _, t := range r.Resolve(ref.Value) {
+	ts := r.Resolve(ref.Value)
+
+	for i := range ts {
+		t := &ts[i]
+
 		loc := protocol.Location{URI: cfpath.ToURI(t.Path)}
 
 		if t.Kind == routepkg.KindController && t.Method != "" {
@@ -278,7 +282,7 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 		}
 
 		target := cfpath.ToURI(best.Path)
-		tip := routeTooltip(best)
+		tip := routeTooltip(&best)
 		targetRef := &target
 
 		links = append(links, protocol.DocumentLink{
@@ -351,11 +355,13 @@ func linkTarget(targets []routepkg.Target) (routepkg.Target, bool) {
 		views       []routepkg.Target
 	)
 
-	for _, t := range targets {
+	for i := range targets {
+		t := &targets[i]
+
 		if t.Kind == routepkg.KindController {
-			controllers = append(controllers, t)
+			controllers = append(controllers, *t)
 		} else {
-			views = append(views, t)
+			views = append(views, *t)
 		}
 	}
 
@@ -370,7 +376,7 @@ func linkTarget(targets []routepkg.Target) (routepkg.Target, bool) {
 	return routepkg.Target{}, false
 }
 
-func routeTooltip(t routepkg.Target) string {
+func routeTooltip(t *routepkg.Target) string {
 	if t.Kind == routepkg.KindController && t.Method != "" {
 		return t.Component + "." + t.Method + "()"
 	}
@@ -416,7 +422,9 @@ func (s *Server) handleResolveRoute(params []protocol.LSPAny) (any, error) {
 	targets := r.Resolve(route)
 	out := make([]any, 0, len(targets))
 
-	for _, t := range targets {
+	for i := range targets {
+		t := &targets[i]
+
 		entry := map[string]any{
 			"kind": string(t.Kind),
 			"uri":  string(cfpath.ToURI(t.Path)),

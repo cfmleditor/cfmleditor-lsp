@@ -34,7 +34,11 @@ func parserCalls(path string, src []byte) []Call {
 	pr := parser.ParseWithOptions(uri.File(path), string(src), &parser.ParseOptions{ExtractCalls: true})
 
 	out := make([]Call, 0, 16)
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		out = append(out, Call{Line: c.Line, Method: strings.ToLower(c.FuncName)})
 	}
 

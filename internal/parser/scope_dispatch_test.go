@@ -165,7 +165,9 @@ func readParserSource(t *testing.T, name string) string {
 }
 
 func hasComponentRef(refs []ComponentRef, variable, component string) bool {
-	for _, r := range refs {
+	for i := range refs {
+		r := &refs[i]
+
 		if strings.EqualFold(r.Variable, variable) && strings.EqualFold(r.Component, component) {
 			return true
 		}

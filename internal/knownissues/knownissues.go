@@ -186,7 +186,9 @@ func Write(w io.Writer, header []string, rows []Row) {
 		_, _ = fmt.Fprintf(w, "# %s\n", h)
 	}
 
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
+
 		pos := strconv.Itoa(r.Line)
 		if r.Col > 0 {
 			pos += ":" + strconv.Itoa(r.Col)
@@ -242,7 +244,7 @@ const reanchorWindow = 25
 // An entry in the unresolved format, `svc.method (reason)`, is underlined at
 // the method on its line, and found again within reanchorWindow lines when an
 // edit has moved it. Anything else covers the line's text.
-func Diagnostic(e Entry, lines []string, severity protocol.DiagnosticSeverity, source string) protocol.Diagnostic {
+func Diagnostic(e *Entry, lines []string, severity protocol.DiagnosticSeverity, source string) protocol.Diagnostic {
 	// start and end are byte offsets into text until the end, where they
 	// become LSP characters, which count UTF-16 units. Sent as bytes, the
 	// underline stopped short of the end of a line holding an é or an emoji,

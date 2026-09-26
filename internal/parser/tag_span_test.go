@@ -13,7 +13,11 @@ func tagFileCalls(t *testing.T, src string) []string {
 
 	out := make([]string, 0, 4)
 
-	for _, c := range pr.AllCalls() {
+	cs := pr.AllCalls()
+
+	for i := range cs {
+		c := &cs[i]
+
 		out = append(out, c.FuncName)
 	}
 

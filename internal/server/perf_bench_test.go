@@ -313,7 +313,7 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 			b.ResetTimer()
 
 			for b.Loop() {
-				r, _ := s.handleCompletion(context.Background(), req) //nolint:errcheck
+				r, _ := s.handleCompletion(context.Background(), req) //nolint:errcheck // the same request succeeded above; the loop measures it
 
 				if _, err := json.Marshal(r); err != nil {
 					b.Fatal(err)

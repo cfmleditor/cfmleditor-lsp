@@ -57,7 +57,9 @@ func symbolNames(t *testing.T, srv *Server, docURI uri.URI) []string {
 	symbols, _ := res.([]protocol.DocumentSymbol)
 
 	names := make([]string, len(symbols))
-	for i, sym := range symbols {
+	for i := range symbols {
+		sym := &symbols[i]
+
 		names[i] = fmt.Sprintf("%s@%d", sym.Name, sym.Range.Start.Line)
 	}
 

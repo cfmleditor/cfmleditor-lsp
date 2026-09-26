@@ -56,7 +56,7 @@ func open(t *testing.T) *store.Store {
 func TestSearchFindsAMidWordMatch(t *testing.T) {
 	db := open(t)
 
-	found, err := db.SearchSymbols(store.SearchOptions{Query: "perms"})
+	found, err := db.SearchSymbols(&store.SearchOptions{Query: "perms"})
 	if err != nil {
 		t.Fatalf("SearchSymbols: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSearchQueryIsAPhraseNotAnExpression(t *testing.T) {
 	s := open(t)
 
 	for _, q := range []string{`user" OR `, "AND", "a AND b", `"`, "*", "NEAR(a b)"} {
-		if _, err := s.SearchSymbols(store.SearchOptions{Query: q}); err != nil {
+		if _, err := s.SearchSymbols(&store.SearchOptions{Query: q}); err != nil {
 			t.Errorf("searching %q returned an error rather than no results: %v", q, err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestSaveReplacesRatherThanMerges(t *testing.T) {
 		t.Fatalf("second Save: %v", err)
 	}
 
-	all, err := s.SearchSymbols(store.SearchOptions{Limit: 100})
+	all, err := s.SearchSymbols(&store.SearchOptions{Limit: 100})
 	if err != nil {
 		t.Fatalf("SearchSymbols: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestUtilityReachesTheStore(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	found, err := s.SearchSymbols(store.SearchOptions{Query: "getUser"})
+	found, err := s.SearchSymbols(&store.SearchOptions{Query: "getUser"})
 	if err != nil {
 		t.Fatalf("SearchSymbols: %v", err)
 	}

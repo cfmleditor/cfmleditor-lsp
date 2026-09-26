@@ -285,7 +285,9 @@ func (s *Server) handleDidOpen(_ context.Context, rawParams []byte) (any, error)
 		cflog.Int("refs", len(pr.ComponentRefs)),
 		cflog.Int("resolvers", len(pr.Resolvers)))
 
-	for _, ref := range pr.ComponentRefs {
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+
 		s.log.Debug("document opened: ref", cflog.String("var", ref.Variable), cflog.String("component", ref.Component))
 	}
 
@@ -534,7 +536,9 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 		}
 
 		for _, sc := range pr.Scopes {
-			for _, f := range pr.Funcs {
+			for i := range pr.Funcs {
+				f := &pr.Funcs[i]
+
 				if !strings.EqualFold(f.Name, funcName) || int(f.Line) != sc.Start {
 					continue
 				}
@@ -847,7 +851,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 // writeRefsReport writes the reference report for funcName beside the file the
 // request came from, as markdown and as DOT, and tells the client where it
 // went. Only cfmleditor.findRefs' explicit export argument reaches here.
-func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result refs.TraceResult) {
+func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result *refs.TraceResult) {
 	outDir := filepath.Dir(sourceFile)
 	if outDir == "" || outDir == "." {
 		outDir = os.TempDir()
@@ -1199,7 +1203,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 				return cfpath.SamePath(resolved, sourceFile)
 			},
 			Reason: func(call parser.CallSite, pr *parser.ParseResult, fileDir string) string {
-				return r.CanResolveCall(call, pr, fileDir)
+				return r.CanResolveCall(&call, pr, fileDir)
 			},
 			SourceFile: sourceFile,
 		}
@@ -1217,7 +1221,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// something the caller already has; only a caller that wants them on
 		// disk asks for them.
 		if argBool(params.Arguments, 2) {
-			s.writeRefsReport(ctx, funcName, sourceFile, result)
+			s.writeRefsReport(ctx, funcName, sourceFile, &result)
 		}
 
 		return result.Summary, nil
@@ -1262,7 +1266,9 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			if funcName != "" {
 				// Function-level: FuncCalls for the specific function
 				for _, sc := range pr.Scopes {
-					for _, f := range pr.Funcs {
+					for i := range pr.Funcs {
+						f := &pr.Funcs[i]
+
 						if strings.EqualFold(f.Name, funcName) && int(f.Line) == sc.Start {
 							depsCalls = pr.FuncCalls(sc.Start, sc.End)
 

@@ -339,19 +339,25 @@ func (p *tagParser) parse() {
 
 			// Merge calls from cfscript sub-parser
 			if p.extractCalls {
-				for _, c := range sp.calls {
+				for i := range sp.calls {
+					c := &sp.calls[i]
+
 					p.addCall(c)
 				}
 
 				for _, calls := range sp.funcCalls {
-					for _, c := range calls {
+					for i := range calls {
+						c := &calls[i]
+
 						p.addCall(c)
 					}
 				}
 			}
 
 			if p.inFunc != "" {
-				for _, ref := range sp.componentRefs {
+				for i := range sp.componentRefs {
+					ref := &sp.componentRefs[i]
+
 					p.addRef(ref)
 				}
 			} else {
@@ -363,7 +369,9 @@ func (p *tagParser) parse() {
 			// a nested <cfscript> block (e.g. "conn = uri.openConnection();")
 			// never reach resolvePendingCalls, so they can never fall back to
 			// baseVar's own component (or FuncLookup's declared return type).
-			for _, c := range sp.pendingCalls {
+			for i := range sp.pendingCalls {
+				c := sp.pendingCalls[i] // a copy: edited below, and kept
+
 				if c.funcKey == "" {
 					c.funcKey = p.inFunc
 				}
@@ -952,7 +960,7 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 	name := getAttr(tag, "name")
 
 	if component != "" && name != "" {
-		p.addRef(ComponentRef{
+		p.addRef(&ComponentRef{
 			Variable:  name,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
@@ -967,7 +975,7 @@ func (p *tagParser) parseCFInvoke(tag string, line int) {
 	variable := getAttr(tag, "returnvariable")
 
 	if component != "" && variable != "" {
-		p.addRef(ComponentRef{
+		p.addRef(&ComponentRef{
 			Variable:  variable,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
@@ -1042,7 +1050,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	switch {
 	case strings.EqualFold(rhs, "this"):
 		if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: selfPath,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -1050,7 +1058,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "new "):
 		comp := extractComponentPath(rhs[4:])
 		if comp != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -1059,13 +1067,13 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "createobject("):
 		comp := extractCreateObjectArg(rhs[13:])
 		if comp != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
 		} else if len(p.resolvers) > 0 {
 			if comp := p.resolveCall(rhs); comp != "" {
-				p.addRef(ComponentRef{
+				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
 					URI: uriFromString(p.fileURI), Line: uint32(line),
 				})
@@ -1075,7 +1083,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "entitynew("):
 		comp := extractEntityNewArg(rhs[10:])
 		if comp != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -1083,7 +1091,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	case hasPrefixFold(rhs, "entityload("):
 		comp := extractEntityNewArg(rhs[11:])
 		if comp != "" {
-			p.addRef(ComponentRef{
+			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
 				URI: uriFromString(p.fileURI), Line: uint32(line),
 			})
@@ -1092,7 +1100,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		// Try generic resolver match on the RHS expression
 		if len(p.resolvers) > 0 {
 			if comp := p.resolveCall(rhs); comp != "" {
-				p.addRef(ComponentRef{
+				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp,
 					URI: uriFromString(p.fileURI), Line: uint32(line),
 				})
@@ -1107,7 +1115,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 						if comp := matchResolverWithCache(funcName, r); comp != "" {
 							p.resolverSet.noteSoft(r, comp)
 
-							p.addRef(ComponentRef{
+							p.addRef(&ComponentRef{
 								Variable: varName, Component: comp,
 								URI: uriFromString(p.fileURI), Line: uint32(line),
 							})
@@ -1142,7 +1150,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 						comp := p.lookupComponentRef(varChain, line)
 
-						p.addCall(CallSite{
+						p.addCall(&CallSite{
 							FuncName:  methodName,
 							Variable:  varChain,
 							Component: comp,
@@ -1171,7 +1179,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			if funcName != "" && !isKeyword(funcName) && strings.TrimSpace(rhs[len(funcName):paren]) == "" {
 				if p.builtinReturnLookup != nil {
 					if comp := p.builtinReturnLookup(funcName); comp != "" {
-						p.addRef(ComponentRef{
+						p.addRef(&ComponentRef{
 							Variable: varName, Component: comp,
 							URI: uriFromString(p.fileURI), Line: uint32(line),
 						})
@@ -1186,7 +1194,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 						caller = p.funcs[len(p.funcs)-1].Name
 					}
 
-					p.addCall(CallSite{
+					p.addCall(&CallSite{
 						FuncName: funcName,
 						Line:     uint32(line),
 						Caller:   caller,
@@ -1240,7 +1248,7 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 
 	comp := p.lookupComponentRef(varName, line)
 
-	p.addCall(CallSite{
+	p.addCall(&CallSite{
 		FuncName:  methodName,
 		Variable:  varName,
 		Component: comp,
@@ -1425,7 +1433,7 @@ func splitAssign(s string) (name, rhs string) {
 	}
 
 	rest := strings.TrimSpace(s[len(name):])
-	if len(rest) > 0 && rest[0] == '=' {
+	if rest != "" && rest[0] == '=' {
 		return name, strings.TrimSpace(rest[1:])
 	}
 
@@ -1434,7 +1442,7 @@ func splitAssign(s string) (name, rhs string) {
 
 func extractComponentPath(s string) string {
 	s = strings.TrimSpace(s)
-	if len(s) == 0 {
+	if s == "" {
 		return ""
 	}
 
@@ -1460,7 +1468,7 @@ func extractComponentPath(s string) string {
 func extractCreateObjectArg(s string) string {
 	// Expects: "component", "path") — we're past the opening (
 	s = strings.TrimSpace(s)
-	if len(s) == 0 || (s[0] != '"' && s[0] != '\'') {
+	if s == "" || (s[0] != '"' && s[0] != '\'') {
 		return ""
 	}
 
@@ -1484,7 +1492,7 @@ func extractCreateObjectArg(s string) string {
 	}
 
 	rest = strings.TrimSpace(rest[ci+1:])
-	if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
+	if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
 		return ""
 	}
 
@@ -1501,7 +1509,7 @@ func extractCreateObjectArg(s string) string {
 func extractEntityNewArg(s string) string {
 	// Expects: "EntityName") — we're past the opening (
 	s = strings.TrimSpace(s)
-	if len(s) == 0 || (s[0] != '"' && s[0] != '\'') {
+	if s == "" || (s[0] != '"' && s[0] != '\'') {
 		return ""
 	}
 
@@ -1577,15 +1585,15 @@ func (p *tagParser) resolveCall(expr string) string {
 }
 
 // Refs assigned to VARIABLES. or this. scopes are always global.
-func (p *tagParser) addRef(ref ComponentRef) {
+func (p *tagParser) addRef(ref *ComponentRef) {
 	if p.inFunc == "" || p.forceGlobal {
-		p.componentRefs = append(p.componentRefs, ref)
+		p.componentRefs = append(p.componentRefs, *ref)
 	} else {
 		if p.funcRefs == nil {
 			p.funcRefs = make(map[string][]ComponentRef)
 		}
 
-		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], ref)
+		p.funcRefs[p.inFunc] = append(p.funcRefs[p.inFunc], *ref)
 	}
 }
 
@@ -1651,15 +1659,15 @@ func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) stri
 	return ""
 }
 
-func (p *tagParser) addCall(call CallSite) {
+func (p *tagParser) addCall(call *CallSite) {
 	if p.inFunc == "" {
-		p.calls = append(p.calls, call)
+		p.calls = append(p.calls, *call)
 	} else {
 		if p.funcCalls == nil {
 			p.funcCalls = make(map[string][]CallSite)
 		}
 
-		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], call)
+		p.funcCalls[p.inFunc] = append(p.funcCalls[p.inFunc], *call)
 	}
 }
 
@@ -1670,7 +1678,7 @@ func (p *tagParser) extractAllLinks() {
 	lineNum := 0
 	scopeIdx := 0
 
-	for len(src) > 0 {
+	for src != "" {
 		nl := strings.IndexByte(src, '\n')
 
 		var line string
@@ -1843,7 +1851,11 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 	have := map[string]int{}
 
 	if topUp {
-		for _, c := range p.callsOnLine(uint32(line)) {
+		cs := p.callsOnLine(uint32(line))
+
+		for i := range cs {
+			c := &cs[i]
+
 			have[strings.ToLower(c.FuncName)]++
 		}
 	}
@@ -1856,16 +1868,20 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 			return
 		}
 
-		p.addCall(c)
+		p.addCall(&c)
 	}
 
-	for _, c := range sub.calls {
-		emit(c)
+	for i := range sub.calls {
+		c := &sub.calls[i]
+
+		emit(*c)
 	}
 
 	for _, calls := range sub.funcCalls {
-		for _, c := range calls {
-			emit(c)
+		for i := range calls {
+			c := &calls[i]
+
+			emit(*c)
 		}
 	}
 }

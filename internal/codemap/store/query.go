@@ -50,7 +50,7 @@ func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 // function under packages/tass" a single call rather than a fetch-everything-then-
 // filter. The text match goes through the FTS5 trigram index when there is a
 // query, and falls back to the plain table when there is not.
-func (s *Store) SearchSymbols(opts SearchOptions) ([]Symbol, error) {
+func (s *Store) SearchSymbols(opts *SearchOptions) ([]Symbol, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 50
@@ -431,7 +431,7 @@ func (s *Store) islandRoots(island int) ([]string, error) {
 // deletion candidates, not dead code proven: an unresolved call is an edge the map
 // does not have. Read Stats().Unresolved alongside.
 func (s *Store) Orphans(kind string, limit int) ([]Symbol, error) {
-	return s.SearchSymbols(SearchOptions{Kind: kind, OnlyDead: true, Limit: limit})
+	return s.SearchSymbols(&SearchOptions{Kind: kind, OnlyDead: true, Limit: limit})
 }
 
 // Stats returns the build statistics recorded with the map.

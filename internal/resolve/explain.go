@@ -19,7 +19,11 @@ func CallsOnLine(pr *parser.ParseResult, line int, filter string) []parser.CallS
 
 	var out []parser.CallSite
 
-	for _, call := range pr.AllCalls() {
+	calls := pr.AllCalls()
+
+	for i := range calls {
+		call := &calls[i]
+
 		if int(call.Line) != line {
 			continue
 		}
@@ -29,7 +33,7 @@ func CallsOnLine(pr *parser.ParseResult, line int, filter string) []parser.CallS
 			continue
 		}
 
-		out = append(out, call)
+		out = append(out, *call)
 	}
 
 	return out
@@ -37,7 +41,7 @@ func CallsOnLine(pr *parser.ParseResult, line int, filter string) []parser.CallS
 
 // CallText renders a call site as the explain report heads it: the receiver,
 // any chained hops, then the method.
-func CallText(call parser.CallSite) string {
+func CallText(call *parser.CallSite) string {
 	if len(call.Chain) > 0 {
 		return call.Variable + "." + strings.Join(call.Chain, "().") + "()." + call.FuncName
 	}
@@ -56,7 +60,9 @@ func CallText(call parser.CallSite) string {
 // This is the report text itself, shared by the `explain` CLI and
 // cfmleditor.explainCall, so the two cannot drift apart.
 func (r *Resolver) WriteExplanation(w io.Writer, file string, line int, calls []parser.CallSite, pr *parser.ParseResult, baseDir string) {
-	for i, call := range calls {
+	for i := range calls {
+		call := &calls[i]
+
 		if i > 0 {
 			_, _ = fmt.Fprintln(w)
 		}

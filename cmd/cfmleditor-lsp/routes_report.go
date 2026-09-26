@@ -63,13 +63,18 @@ type routeGroup struct {
 // every site of each distinct route, and whether that prefix resolves elsewhere.
 func groupUnresolved(unresolved, resolved []routeFinding) []routeGroup {
 	resolvedPrefixes := map[string]bool{}
-	for _, f := range resolved {
+
+	for i := range resolved {
+		f := &resolved[i]
+
 		resolvedPrefixes[prefixOf(f.Route)] = true
 	}
 
 	byPrefix := map[string]*routeGroup{}
 
-	for _, f := range unresolved {
+	for i := range unresolved {
+		f := &unresolved[i]
+
 		p := prefixOf(f.Route)
 
 		g, ok := byPrefix[p]
@@ -86,7 +91,7 @@ func groupUnresolved(unresolved, resolved []routeFinding) []routeGroup {
 			g.shapes[routeShape(f.Route)]++
 		}
 
-		g.sites[f.Route] = append(g.sites[f.Route], f)
+		g.sites[f.Route] = append(g.sites[f.Route], *f)
 		g.total++
 	}
 
@@ -176,12 +181,16 @@ func writeRouteMarkdown(w io.Writer, resolved, unresolved []routeFinding, scanne
 func writeSourceTable(b *strings.Builder, resolved, unresolved []routeFinding) {
 	counts := map[string][2]int{}
 
-	for _, f := range resolved {
+	for i := range resolved {
+		f := &resolved[i]
+
 		c := counts[f.Source]
 		counts[f.Source] = [2]int{c[0] + 1, c[1]}
 	}
 
-	for _, f := range unresolved {
+	for i := range unresolved {
+		f := &unresolved[i]
+
 		c := counts[f.Source]
 		counts[f.Source] = [2]int{c[0], c[1] + 1}
 	}
@@ -207,7 +216,9 @@ func writeShapeTable(b *strings.Builder, unresolved []routeFinding) {
 	shapes := map[string]int{}
 	seen := map[string]bool{}
 
-	for _, f := range unresolved {
+	for i := range unresolved {
+		f := &unresolved[i]
+
 		if seen[f.Route] {
 			continue
 		}
@@ -262,7 +273,9 @@ func writeGroup(b *strings.Builder, g *routeGroup, limit int) {
 		sites := g.sites[r]
 		fmt.Fprintf(b, "- `%s` — %s\n", r, routeShape(r))
 
-		for i, s := range sites {
+		for i := range sites {
+			s := &sites[i]
+
 			if i >= 3 {
 				fmt.Fprintf(b, "  - _… %d more %s_\n", len(sites)-i, plural(len(sites)-i, "site", "sites"))
 
@@ -286,7 +299,10 @@ func plural(n int, one, many string) string {
 
 func distinctRoutes(f []routeFinding) int {
 	seen := map[string]bool{}
-	for _, x := range f {
+
+	for i := range f {
+		x := &f[i]
+
 		seen[x.Route] = true
 	}
 
