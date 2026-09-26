@@ -1423,6 +1423,11 @@ Some handles need both shapes; others only one, depending on how the code uses t
   too and left off. `noctx` is excluded for `internal/codemap/store`, whose
   callers hold no context to pass; `dupword` checks only the short words typed
   twice by accident, since checking every word flags deliberate repetition.
+  **Naming a revive rule replaces revive's default set**, so
+  `.golangci.yml` lists the 23 defaults before the additions; a rule added
+  without them switches the defaults off with nothing to say so. Prove a new
+  check runs with a throwaway file that breaks it — a check that finds nothing
+  and a check that is not running look the same.
   `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
   and the rules left off with the reason for each; update it when a stage
   lands or the pinned golangci-lint moves.

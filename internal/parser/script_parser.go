@@ -1070,9 +1070,8 @@ func (p *scriptParser) parseComponentAttrs() {
 					p.sc.NextSkipComments()
 
 					val := p.sc.NextSkipComments()
-					if val.Kind == TokString && isTruthy(unquote(val.Value)) {
-						p.persistent = true
-					} else if val.Kind == TokIdent && isTruthy(val.Value) {
+					if (val.Kind == TokString && isTruthy(unquote(val.Value))) ||
+						(val.Kind == TokIdent && isTruthy(val.Value)) {
 						p.persistent = true
 					}
 				}
