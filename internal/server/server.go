@@ -92,7 +92,8 @@ type Server struct {
 	compCache                *cache.Cache
 	funcRanges               map[uri.URI][]cache.FuncRange   // cached function line ranges per file
 	cacheTimers              map[uri.URI]*time.Timer         // debounce timers for completion cache rebuild
-	reindexTimers            map[uri.URI]*time.Timer         // deferred-reindex timers armed by a rapid-change burst
+	reindexTimers            map[uri.URI]*time.Timer         // deferred-reparse timers; see scheduleReparse
+	reparsePending           map[uri.URI]bool                // documents whose ParseResult lags their text; see flushReparse
 	docLocks                 map[uri.URI]*sync.Mutex         // serialises access to each document's ParseResult
 	parseResults             map[uri.URI]*parser.ParseResult // cached parse results per file
 	lastResolveKey           string                          // dedup key for hover/definition (uri:line:char)
@@ -136,6 +137,7 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		funcRanges:               make(map[uri.URI][]cache.FuncRange),
 		cacheTimers:              make(map[uri.URI]*time.Timer),
 		reindexTimers:            make(map[uri.URI]*time.Timer),
+		reparsePending:           make(map[uri.URI]bool),
 		docLocks:                 make(map[uri.URI]*sync.Mutex),
 		parseResults:             make(map[uri.URI]*parser.ParseResult),
 		changeCount:              make(map[uri.URI]int),
@@ -297,7 +299,21 @@ func funcScopeKey(sc parser.FuncScope) string {
 // while holding one. Doc locks are not reentrant, so take one only at the entry
 // points — an LSP handler, a timer body, a background goroutine — never in a
 // helper that those call.
+//
+// Whoever takes the lock also gets a current ParseResult: a reparse that
+// didChange deferred (see scheduleReparse) runs here first. So a handler never
+// reads a parse that lags the document, and only didChange, which takes the
+// lock with lockDocOnly, lets the lag build up.
 func (s *Server) lockDoc(docURI uri.URI) func() {
+	release := s.lockDocOnly(docURI)
+	s.flushReparse(docURI)
+
+	return release
+}
+
+// lockDocOnly takes the document's lock without running a deferred reparse.
+// It is for didChange alone, which is what defers them.
+func (s *Server) lockDocOnly(docURI uri.URI) func() {
 	s.mu.Lock()
 
 	mu, ok := s.docLocks[docURI]
@@ -310,6 +326,79 @@ func (s *Server) lockDoc(docURI uri.URI) func() {
 	mu.Lock()
 
 	return mu.Unlock
+}
+
+// reparseDelay is how long after the last deferred edit a document's
+// ParseResult is brought up to date if nothing asks for it sooner.
+const reparseDelay = 200 * time.Millisecond
+
+// scheduleReparse records that docURI's ParseResult lags its text, and arms a
+// timer to catch it up. The caller holds the document's lock.
+//
+// An edit outside a function body makes ApplyEditResult reparse the whole
+// file's signatures, and didChange runs on the read goroutine: 95ms per
+// keystroke typed at component level in a 65,000-line component, with every
+// other message waiting behind it. Deferring it makes those keystrokes cost
+// the text edit alone. Nothing reads the lagging parse: lockDoc catches it up
+// first, so the first handler after a run of typing pays for one reparse
+// rather than every keystroke paying for its own. The timer covers the case
+// where nothing asks, so the index is current within reparseDelay.
+func (s *Server) scheduleReparse(docURI uri.URI) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.reparsePending[docURI] = true
+
+	if timer, ok := s.reindexTimers[docURI]; ok {
+		timer.Stop()
+	}
+
+	s.reindexTimers[docURI] = time.AfterFunc(reparseDelay, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.Error("goroutine panic", cflog.String("label", "reparseTimer"), cflog.Any("panic", r))
+			}
+		}()
+
+		s.mu.Lock()
+		delete(s.changeCount, docURI)
+		delete(s.changeWindowStart, docURI)
+		s.mu.Unlock()
+
+		s.lockDoc(docURI)() // lockDoc runs the reparse
+	})
+}
+
+// reparseIsPending reports whether docURI's ParseResult lags its text.
+func (s *Server) reparseIsPending(docURI uri.URI) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.reparsePending[docURI]
+}
+
+// flushReparse brings docURI's ParseResult up to the document's text if
+// didChange deferred that. The caller holds the document's lock; lockDoc is
+// the only caller.
+func (s *Server) flushReparse(docURI uri.URI) {
+	s.mu.Lock()
+	pending := s.reparsePending[docURI]
+	delete(s.reparsePending, docURI)
+	pr := s.parseResults[docURI]
+	latest, ok := s.documents[docURI]
+	s.mu.Unlock()
+
+	if !pending || pr == nil || !ok {
+		return
+	}
+
+	pr.ApplyFullReplace(latest)
+
+	s.mu.Lock()
+	s.funcRanges[docURI] = scopesToFuncRanges(pr)
+	s.mu.Unlock()
+
+	s.reindexFromParseResult(docURI, pr)
 }
 
 // getResolver returns the shared resolver, building it on first use.

@@ -319,7 +319,9 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 		return nil, nil
 	}
 
-	defer s.lockDoc(docURI)()
+	// Not lockDoc: that would run the reparse deferred by the last keystroke
+	// before this one, which is the cost deferring exists to avoid.
+	defer s.lockDocOnly(docURI)()
 
 	s.mu.RLock()
 	pr := s.parseResults[docURI]
@@ -367,52 +369,38 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 
 		s.setDocument(docURI, content)
 
-		// Deferred reindex gets its own timer map. Sharing cacheTimers with
+		// Deferred reparse gets its own timer map. Sharing cacheTimers with
 		// debounceCacheRebuild meant the two kinds of pending work occupied one
 		// slot per document: the first non-rapid keystroke after a burst armed a
 		// cache rebuild, which Stop()ped the reindex sitting in the slot and
 		// dropped it. The paste that triggered the burst then never made it into
 		// the index at all.
-		s.mu.Lock()
-		if timer, ok := s.reindexTimers[docURI]; ok {
-			timer.Stop()
-		}
-
-		s.reindexTimers[docURI] = time.AfterFunc(200*time.Millisecond, func() {
-			defer func() {
-				if r := recover(); r != nil {
-					s.log.Error("goroutine panic", cflog.String("label", "rapidChangeTimer"), cflog.Any("panic", r))
-				}
-			}()
-
-			defer s.lockDoc(docURI)()
-
-			s.mu.Lock()
-			delete(s.changeCount, docURI)
-			delete(s.changeWindowStart, docURI)
-			existingPR := s.parseResults[docURI]
-			s.mu.Unlock()
-
-			latest, ok := s.getDocument(docURI)
-			if !ok {
-				return
-			}
-
-			if existingPR != nil {
-				existingPR.ApplyFullReplace(latest)
-				s.mu.Lock()
-				s.funcRanges[docURI] = scopesToFuncRanges(existingPR)
-				s.mu.Unlock()
-				s.reindexFromParseResult(docURI, existingPR)
-			}
-		})
-		s.mu.Unlock()
+		s.scheduleReparse(docURI)
 
 		return nil, nil
 	}
 
-	for _, change := range params.ContentChanges {
+	// A parse already lagging (a deferred reparse not yet run) must not be
+	// edited incrementally: its scopes are out of step with the positions in
+	// these changes. The text is applied and the reparse stays deferred.
+	deferred := pr != nil && s.reparseIsPending(docURI)
+
+	for i, change := range params.ContentChanges {
 		r, text, isFull := changeRangeAndText(change)
+
+		// An edit outside a function body would reparse the whole file's
+		// signatures here, inline; defer it (see scheduleReparse). Changes
+		// before this one were inside functions and are already applied.
+		if !deferred && pr != nil && (isFull || !pr.EditInFunction(int(r.Start.Line), int(r.End.Line), int(r.Start.Character))) {
+			deferred = true
+		}
+
+		if deferred {
+			content = applyContentChanges(content, params.ContentChanges[i:])
+
+			break
+		}
+
 		if isFull { //nolint:gocritic // ifElseChain: intentional for clarity
 			// Full document replacement
 			content = text
@@ -438,6 +426,12 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 	}
 
 	s.setDocument(docURI, content)
+
+	if deferred {
+		s.scheduleReparse(docURI)
+
+		return nil, nil
+	}
 
 	if pr == nil {
 		// No cached parse result — fall back to full parse
@@ -600,7 +594,8 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 
 	docURI := params.TextDocument.URI
 
-	release := s.lockDoc(docURI)
+	// lockDocOnly: a deferred reparse of a document being closed is wasted.
+	release := s.lockDocOnly(docURI)
 
 	s.removeDocument(docURI)
 
@@ -619,6 +614,7 @@ func (s *Server) handleDidClose(ctx context.Context, rawParams []byte) (any, err
 	delete(s.funcRanges, docURI)
 	delete(s.changeCount, docURI)
 	delete(s.changeWindowStart, docURI)
+	delete(s.reparsePending, docURI)
 
 	// Both timers reach for this document's ParseResult, which is about to stop
 	// existing. Stopping them is also the only thing that bounds these maps: a
