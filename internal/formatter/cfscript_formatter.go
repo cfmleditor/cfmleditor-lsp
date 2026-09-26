@@ -2704,19 +2704,58 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	}
 }
 
+// statementComments splits a statement's named children into the one that is
+// not a comment and the comments beside it. A comment can sit inside an
+// expression statement or a return, next to the expression rather than in it:
+// `x = 45 // note` with no semicolon, or `return a /* + b */;`. Renderers that
+// took NamedChild(0) and wrote the `;` dropped it, and the guard refused the
+// file.
+func (f *Formatter) statementComments(n *sitter.Node) (*sitter.Node, []string) {
+	var (
+		inner    *sitter.Node
+		comments []string
+	)
+
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		c := n.NamedChild(i)
+
+		switch {
+		case isCommentKind(c.Kind()):
+			comments = append(comments, strings.TrimSpace(f.text(c)))
+		case inner == nil:
+			inner = c
+		}
+	}
+
+	return inner, comments
+}
+
+// scriptComments writes each comment on a line of its own after the statement,
+// as scriptVarDecl does and for the same reason: once the semicolon is written
+// the comment is statement-level, and a second pass renders it on its own line.
+func (f *Formatter) scriptComments(comments []string) {
+	for _, c := range comments {
+		f.iLine(c)
+		f.scriptWrite("\n")
+	}
+}
+
 func (f *Formatter) scriptExprStmt(n *sitter.Node) {
 	// The named child is the expression; anonymous child is ";"
-	inner := n.NamedChild(0)
+	inner, comments := f.statementComments(n)
 	if inner == nil {
+		f.scriptComments(comments)
+
 		return
 	}
 
 	f.iLine(f.expr(inner) + ";")
 	f.scriptWrite("\n")
+	f.scriptComments(comments)
 }
 
 func (f *Formatter) scriptReturn(n *sitter.Node) {
-	val := n.NamedChild(0)
+	val, comments := f.statementComments(n)
 	if val == nil {
 		f.iLine("return;")
 	} else {
@@ -2724,6 +2763,7 @@ func (f *Formatter) scriptReturn(n *sitter.Node) {
 	}
 
 	f.scriptWrite("\n")
+	f.scriptComments(comments)
 }
 
 func (f *Formatter) scriptThrow(n *sitter.Node) {
