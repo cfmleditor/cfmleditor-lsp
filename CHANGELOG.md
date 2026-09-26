@@ -55,6 +55,7 @@
   - **Public CFML corpus:** no verdict changes.
 
   Formatted output is byte-identical to v0.26.40 for every other file in both corpora, about 21,500 files, even though 3,709 tassweb files change tree shape where their attributes' hashes became expressions.
+- `tree-sitter-cfml` grammar update (`b2eee65` → v0.26.42, the tagged release that contains it; v0.26.41 was tagged before its release commit and published nothing). The one further grammar change: a `var` declaration inside parentheses parses, `while( ( var size = reader.read( cb ) ) != -1 )`, as a `variable_declaration` inside the `parenthesized_expression` (tree-sitter-cfml #167). Against the 15,503-file corpus, four CommandBox files move from refused to formatted: `util/FileSystem.cfc`, `util/MultiSelect.cfc`, `util/ProgressableDownloader.cfc` and `commands/run.cfc`. No other verdict changes, and no other file's formatted output changes.
 
 ## [0.3.6]
 
