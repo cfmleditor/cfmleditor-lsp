@@ -759,6 +759,13 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `TestNoHandlerReadsAClientColumnRaw` fails on that cast. `didChange` is
   the exception by design: it hands its ranges to `parser.ApplyEdit`
   unconverted, because the parser converts them against text only it holds.
+- **A large didChange batch is applied in one pass.** More than 50 changes in one
+  notification (the "rapid" path) go through `parser.ApplyEdits`, which streams edits in
+  document order instead of walking and copying the whole document for each. Reverting a
+  reformat in Zed sends exactly that, an edit per line: 6,000 against a 110 KB file took
+  435ms under the document's lock one at a time and takes about 5ms streamed. An edit out of
+  order falls back to `ApplyEdit`, and `TestApplyEditsMatchesApplyEdit` holds the two to the
+  same result on random input, UTF-16 columns and past-the-end positions included.
 - **Completion hands its cached items over, it does not copy them.** The
   `inHashExpr` branch and the default branch both return
   `completionFromCache`'s slice directly when there is nothing to merge with it,
