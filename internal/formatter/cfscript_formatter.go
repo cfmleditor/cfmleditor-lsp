@@ -1008,26 +1008,34 @@ func (f *Formatter) expr(n *sitter.Node) string {
 	case "object":
 		return f.exprObject(n)
 
-	case "pair":
-		key := n.ChildByFieldName("key")
-		val := n.ChildByFieldName("value")
-		keyStr := f.expr(key)
-		valStr := f.expr(val)
-		result := fmt.Sprintf("%s: %s", keyStr, valStr)
-
-		if len(result) > f.opts.LineWidth && !strings.Contains(valStr, "\n") {
-			f.level++
-			valStr = f.expr(val)
-			f.level--
-
-			if strings.Contains(valStr, "\n") {
-				indent := f.opts.indent(f.level + 1)
-
-				return fmt.Sprintf("%s:\n%s%s", keyStr, indent, valStr)
-			}
+	case "object_pattern":
+		// A struct literal written with `=` (`{ a = 1, "b" = 2 }`) parses as an
+		// object_pattern, because the grammar shares the rule with JavaScript
+		// destructuring. It used to fall through to the verbatim default, so
+		// the most common struct spelling in CFML was never formatted at all.
+		// Anything that is not a plain key/value list keeps its source text.
+		if !isStructPattern(n) {
+			return f.text(n)
 		}
 
-		return result
+		return f.exprObject(n)
+
+	case "pair":
+		return f.exprPair(f.expr(n.ChildByFieldName("key")), ":", n.ChildByFieldName("value"))
+
+	case "cf_pair":
+		return f.exprPair(f.structKey(n.ChildByFieldName("key")), " =", n.ChildByFieldName("value"))
+
+	case "object_assignment_pattern":
+		// `{ a = 1 }`: the key is a bare name, so the grammar reads it as a
+		// destructuring default rather than a cf_pair. Only that shape reaches
+		// here; isStructPattern sends every other one to the verbatim default.
+		left := n.ChildByFieldName("left")
+		if left == nil {
+			return f.text(n)
+		}
+
+		return f.exprPair(f.text(left), " =", n.ChildByFieldName("right"))
 
 	// ── functions ─────────────────────────────────────────────────────────
 	case "arrow_function":
@@ -1722,6 +1730,27 @@ func joinCollectionLines(items []collectionItem, indent string, trailing bool) s
 	return b.String()
 }
 
+// deepenItems re-renders, one level deeper, the items of a literal that is
+// being laid out one item per line. collectionItems renders them at the
+// literal's own level, which is right for the inline form but one level short
+// once each item sits on its own indented line: a nested literal that itself
+// spanned lines came out with its entries level with its key and its closing
+// bracket level with the outer literal's entries. Only an item that spans
+// lines depends on the level, so only those are rendered again.
+//
+// items holds one entry per named child of n, in order — collectionItems
+// appends exactly one for each.
+func (f *Formatter) deepenItems(n *sitter.Node, items []collectionItem) {
+	f.level++
+	defer func() { f.level-- }()
+
+	for i := range items {
+		if !items[i].isComment && strings.Contains(items[i].text, "\n") {
+			items[i].text = f.expr(n.NamedChild(uint(i)))
+		}
+	}
+}
+
 func (f *Formatter) exprArray(n *sitter.Node) string {
 	if n.NamedChildCount() == 0 {
 		return "[]"
@@ -1737,6 +1766,7 @@ func (f *Formatter) exprArray(n *sitter.Node) string {
 		}
 	}
 
+	f.deepenItems(n, items)
 	indent := f.indented() + f.opts.indent(1)
 
 	return "[\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "]"
@@ -1757,9 +1787,88 @@ func (f *Formatter) exprObject(n *sitter.Node) string {
 		}
 	}
 
+	f.deepenItems(n, items)
 	indent := f.indented() + f.opts.indent(1)
 
 	return "{\n" + indent + joinCollectionLines(items, indent, trailing) + "\n" + f.indented() + "}"
+}
+
+// exprPair renders one struct entry as key, separator, value. When the entry
+// is too long for the line and its value can break, the value moves onto its
+// own line, indented one level under the key.
+func (f *Formatter) exprPair(keyStr, sep string, val *sitter.Node) string {
+	valStr := f.expr(val)
+	result := keyStr + sep + " " + valStr
+
+	if len(result) > f.opts.LineWidth && !strings.Contains(valStr, "\n") {
+		f.level++
+		valStr = f.expr(val)
+		f.level--
+
+		if strings.Contains(valStr, "\n") {
+			indent := f.opts.indent(f.level + 1)
+
+			return keyStr + sep + "\n" + indent + valStr
+		}
+	}
+
+	return result
+}
+
+// structKey renders the key of an `=` struct entry. A bare name is a key, not
+// a variable reference, so it is written as-is rather than passed through
+// scope casing: `{ url = x }` names a key called url, and changing its case
+// changes the key wherever the struct's key case is preserved (serializeJSON).
+func (f *Formatter) structKey(key *sitter.Node) string {
+	if key != nil && key.Kind() == "property_identifier" {
+		return f.text(key)
+	}
+
+	return f.expr(key)
+}
+
+// isStructPattern reports whether an object_pattern is an ordinary `=` struct
+// literal that exprObject can lay out: every entry a cf_pair or a bare-name
+// object_assignment_pattern, and every comma between two entries or after the
+// last one.
+//
+// The grammar lists entries as commaSep(optional(...)), so `{ a = 1,, b = 2 }`
+// and `{ , a = 1 }` parse with an empty slot. Re-joining the entries with ", "
+// would drop it — a real change, which the guard would refuse for the whole
+// file. Destructuring forms (rest, shorthand, nested patterns) are left alone
+// for the same reason: they are not struct literals, and exprObject does not
+// know how to write them.
+func isStructPattern(n *sitter.Node) bool {
+	afterSeparator := true
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		kind := c.Kind()
+
+		switch {
+		case kind == "{" || kind == "}" || isCommentKind(kind):
+			continue
+		case kind == ",":
+			if afterSeparator {
+				return false
+			}
+
+			afterSeparator = true
+
+			continue
+		case kind == "cf_pair":
+		case kind == "object_assignment_pattern":
+			if left := c.ChildByFieldName("left"); left == nil || left.Kind() != "shorthand_property_identifier_pattern" {
+				return false
+			}
+		default:
+			return false
+		}
+
+		afterSeparator = false
+	}
+
+	return true
 }
 
 func (f *Formatter) exprString(n *sitter.Node) string {
@@ -1789,7 +1898,7 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 	if body != nil && (body.Kind() == "statement_block" || body.Kind() == "block") {
 		// Render block inline for arrow functions; full block would need
 		// newlines which aren't valid inside an expression context here.
-		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.text(body))
+		return fmt.Sprintf("%s %s %s", paramStr, arrow, f.blockText(body))
 	}
 
 	return fmt.Sprintf("%s %s %s", paramStr, arrow, f.expr(body))
@@ -1854,7 +1963,20 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 		attrStr = " " + strings.Join(attrs, " ")
 	}
 
-	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.text(body))
+	return fmt.Sprintf("function%s%s%s %s", nameStr, f.exprParams(params), attrStr, f.blockText(body))
+}
+
+// blockText is the source of a function body that is kept as written.
+//
+// In the cfml grammar the body can end past its own closing brace. When a
+// closure inside a tag expression is followed by a newline and then `}` — the
+// last entry of a struct literal that spans lines — the scanner skips the
+// whitespace before inserting its zero-width automatic semicolon, and the
+// block's extent runs on to that point. Copied verbatim, the newline became a
+// blank line before the struct's `}`, and every further format added another,
+// so the file never settled (Lucee's test/tags/query/inc.cfm).
+func (f *Formatter) blockText(body *sitter.Node) string {
+	return strings.TrimRight(f.text(body), " \t\r\n")
 }
 
 // exprParams renders a formal_parameters / parameter_list node.
