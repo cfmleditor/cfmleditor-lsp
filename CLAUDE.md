@@ -1423,6 +1423,9 @@ Some handles need both shapes; others only one, depending on how the code uses t
   too and left off. `noctx` is excluded for `internal/codemap/store`, whose
   callers hold no context to pass; `dupword` checks only the short words typed
   twice by accident, since checking every word flags deliberate repetition.
+  `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
+  and the rules left off with the reason for each; update it when a stage
+  lands or the pinned golangci-lint moves.
 - `internal/docs/` content is generated — regenerate rather than hand-editing, but see the
   lossy-regeneration warning under Commands before committing any change to it.
 - `.github/workflows/ci.yml` runs on every pull request: `build-test` (build, vet, gofmt, `go
