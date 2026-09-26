@@ -3163,7 +3163,9 @@ func (f *Formatter) clauseLead(parent *sitter.Node, from uint, clause *sitter.No
 // scriptCatch renders one catch clause: `catch (<type> <param>) { ... }`.
 // The exception type is a separate `type` field, not part of the parameter —
 // rendering only the parameter turned `catch (java.lang.Exception e)` into
-// `catch (e)`, widening what the handler catches.
+// `catch (e)`, widening what the handler catches. The same goes for the `var`
+// in `catch (any var e)`, which scopes the caught variable: it is an
+// anonymous child with no field, so it has to be looked for.
 func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 	catchType := n.ChildByFieldName("type")
 	param := n.ChildByFieldName("parameter")
@@ -3173,6 +3175,14 @@ func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 
 	if catchType != nil {
 		parts = append(parts, f.text(catchType))
+	}
+
+	for i := uint(0); i < n.ChildCount(); i++ {
+		if c := n.Child(i); !c.IsNamed() && c.Kind() == "var" {
+			parts = append(parts, "var")
+
+			break
+		}
 	}
 
 	if param != nil {

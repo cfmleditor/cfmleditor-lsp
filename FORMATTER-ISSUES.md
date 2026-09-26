@@ -191,6 +191,13 @@ Two defects in `scriptTry`:
 
 Clauses are now walked as children and rendered as `catch (<type> <param>)`.
 
+A third drop, found later on the 15,503-file corpus: `catch( any var e )`, which
+scopes the caught variable, came out as `catch (any e)`. The grammar gives the
+`var` no field, so a renderer built from the `type` and `parameter` fields never
+saw it. CommandBox writes this form throughout, and it was 48 of that corpus's 62
+guard rejections. `scriptCatch` now looks for the anonymous `var` child and
+renders `catch (<type> var <param>)`.
+
 ### 2.7 `interface` rewritten as `component`; `abstract`/`final` dropped
 
 `scriptComponent` hardcoded its header to `"component"`, so `interface {}`
