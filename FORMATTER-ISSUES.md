@@ -318,6 +318,43 @@ and the `for`-header one, wrote ` = ` whatever the field held. Found on the
 `SmartList.cfc`. One `declarator` helper now renders the declarator for both,
 with its operator.
 
+### 2.15 `=`-style struct literals never formatted — 1,562 files
+
+`x = {'a'=1, 'b'={'c'=2}}` was written back exactly as it came in, while
+`{'a':1, 'b':{'c':2}}` was laid out. The grammar shares the `=` form's rule with
+JavaScript destructuring, so the literal is an `object_pattern`, a bare-name
+entry an `object_assignment_pattern`, and any other key a `cf_pair`. None of the
+three had a case in `expr`, so all of them reached the verbatim default: 19,178
+literals in 2,788 corpus files, and a `cf_pair` inside a mixed `{a=1, b:2}`
+too. Being whitespace-safe, it never showed up as a guard rejection. It showed
+up as Mura's `apiUtility.cfc` being flagged malformed: closing braces the
+formatter never touched sat on one line.
+
+They now share the `:` renderer, keeping `=`. `isStructPattern` sends two shapes
+back to the verbatim copy. One is an empty slot: the grammar's
+`commaSep(optional(…))` parses `{ a = 1,, b = 2 }`, and re-joining would drop
+it. The other is a destructuring entry (rest, shorthand, a nested pattern),
+which is not a struct literal. A bare key skips `scopeCase`, because
+`{ url = x }` names a key, not the scope.
+
+Two defects the `:` renderer already had came to light once it was reaching
+thousands of new literals:
+
+- **Nested multi-line literals were indented a level short.**
+  `collectionItems` renders at the literal's own level, which is right for the
+  inline form. In the one-per-line form, a nested literal that also spans lines
+  came out with its entries level with its key and its `}` level with the outer
+  entries. `deepenItems` now re-renders, one level deeper, the items that span
+  lines.
+- **A closure body could carry a newline past its `}`.** In a `<cfset>`, when a
+  closure is followed by a newline and the struct's `}`, the cfml scanner skips
+  the whitespace before inserting its zero-width automatic semicolon. The
+  block's extent then runs on to that point. The verbatim copy turned the
+  newline into a blank line before the `}`, one more on each pass, so Lucee's
+  `test/tags/query/inc.cfm` never settled. `blockText` stops at the brace. The
+  extent itself is a grammar defect: `.cfs` and `<cfscript>` do not have it,
+  and neither does a closure followed by `]`, `)` or `>`.
+
 ## 3. Guard coverage gaps
 
 Cases the `whitespaceOnly` guard got wrong. The first two were latent — nothing
