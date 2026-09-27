@@ -198,6 +198,14 @@ the *formatter*, not the parser.
   on the stack. Spell the fold inside the switch expression — binding it to a name invites
   holding it across a nested fold. `TestFoldingAnIdentifierDoesNotAllocate` parses one document
   mixed-case and lowercased and fails if the capitals cost allocations.
+- **Keep a struct's small fields together.** A bool between two 8-byte fields
+  costs eight bytes. `CallSite`, `scriptParser` and `Scanner` each group theirs
+  at the end for that reason; spreading them back out puts `CallSite` from 112
+  to 120 bytes in every call slice and moves the parsers up a size class. It is
+  only worth doing where it crosses an allocator size class or the struct is
+  held by value in a slice — `ParseResult` would shrink 40 bytes and still
+  occupy a 640-byte block. `TestParserStructsKeepTheirSize` pins the three;
+  LINT-PLAN.md stage 3 has the measurements.
 - **A local `var buf [N]byte` stays on the stack; a struct holding a slice of its own array does
   not.** `chainBuilder` accumulates into an array addressed by length for that reason — the
   shorter `c.rest = c.arr[:0]` defeats escape analysis and moved all eleven of its call sites'

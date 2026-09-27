@@ -57,11 +57,7 @@ type Token struct {
 
 // Scanner tokenizes CFML/CFScript source.
 type Scanner struct {
-	src string
-	// interpStrings makes a `#` inside a string open an expression, in which a
-	// string may be opened with the same quote character. Off by default and
-	// turned on only where the text is known to be CFScript — see scanString.
-	interpStrings    bool
+	src              string
 	pos              int
 	line             int
 	LastBlockComment string // most recent /** ... */ or /* ... */ comment value
@@ -81,13 +77,18 @@ type Scanner struct {
 	// the scan actually made one keeps both orderings answering as before: a
 	// scan that crossed a block comment re-sets the field over the clear, and
 	// one that crossed none leaves whatever the clear left.
-	peeked         bool
 	peekTok        Token
 	peekPos        int
 	peekLine       int
 	peekComment    string
+	peeked         bool
 	peekSetComment bool
-	commentSeq     uint32
+
+	// interpStrings makes a `#` inside a string open an expression, in which a
+	// string may be opened with the same quote character. Off by default and
+	// turned on only where the text is known to be CFScript — see scanString.
+	interpStrings bool
+	commentSeq    uint32
 }
 
 // NewScanner creates a scanner for the given source.
