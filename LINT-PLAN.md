@@ -88,26 +88,34 @@ A throwaway file breaking each rule confirmed they all run. Run it with
 `--uniq-by-line=false`: several of these land on the same line as another
 finding, and by default only the first is shown.
 
-## Stage 3 — memory layout, by hand
+## Stage 3 — memory layout, by hand (done)
 
-`govet`'s `fieldalignment` reports 83 structs in production code. 17 would
-shrink; the other 66 only move pointer fields to the front, which shortens
-what the garbage collector scans and saves no memory. The linter is not
-enabled: it cannot be told to report only the first kind, and satisfying the
-second scatters fields that are grouped for readability.
+`govet`'s `fieldalignment` reports 83 structs in production code. Most only
+move pointer fields to the front, which shortens what the garbage collector
+scans and saves no memory. The linter is not enabled: it cannot be told to
+report only the structs that would shrink, and satisfying the rest scatters
+fields that are grouped for readability.
 
-Instead, reorder by hand the structs on the parse path, where the saving is
-multiplied:
+A smaller struct saves nothing unless it lands in a smaller allocator size
+class, or is stored by value in a slice. Of the parser's structs:
 
-| Struct | Now | Reordered | How many |
+| Struct | Before | After | Why it counts |
 |---|---:|---:|---|
-| `parser.CallSite` | 120 B | 112 B | about a million per corpus scan |
-| `scriptParser` | 416 B | 368 B | one per parse |
-| `parser.Scanner` | 144 B | 128 B | one per parse |
-| `parser.ParseResult` | 640 B | 600 B | one per parse, and held per open document |
+| `parser.CallSite` | 120 B | 112 B | held by value in every call slice |
+| `scriptParser` | 392 B | 368 B | size class 416 → 384; one per parse and per sub-parse |
+| `parser.Scanner` | 144 B | 128 B | size class 144 → 128; one per parser |
+| `parser.ParseResult` | 640 B | (600 B) | **not changed**: still size class 640 |
+| `ParseOptions`, `tagParser`, `Resolver` | | | not changed: same size class, or few of them |
 
-Measure against `main`, alternately: the parse benchmarks, and the heap held
-after indexing a corpus.
+Each fix moves the bools (and the `uint32` beside them) together, rather than
+leaving each one padded to eight bytes between wider fields.
+
+Parsing the six-project corpus (7,509 files, 251,313 calls) with call
+extraction allocates 219.3 MB instead of 230.3 MB (−4.8%), and the call sites
+it keeps take 29.8 MB instead of 31.9 MB (−6.6%); identical across three
+runs. Parse time is unchanged: against `main`, alternately, the four parse
+benchmarks moved −4.5% to +3.8% on four rounds, and six more rounds of the one
+that read slower put it at −4% by median.
 
 ## Stage 4 — guardrails that need configuration
 

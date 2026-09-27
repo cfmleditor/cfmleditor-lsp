@@ -28,22 +28,25 @@ type scriptParser struct {
 	scopes              []FuncScope
 	properties          []propertyDef
 	extends             string
-	persistent          bool
 	fileURI             string
 	baseLine            int
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
-	extractLinks        bool              // whether to extract document links
-	extractCalls        bool              // whether to extract all call sites
 	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
-	afterLT             bool              // previous token was '<' — see looksLikeTagAttrs
 	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
-	forceGlobal         bool            // when true, addRef routes to componentRefs
 	returnVar           string          // last "return varName" seen in current function
 	pendingCalls        []pendingCall   // unresolved varName = funcCall(...) assignments
+
+	// The flags sit together: spread between the wider fields above, each
+	// was padded to eight bytes, and the struct fell into a larger size class.
+	persistent   bool
+	extractLinks bool // whether to extract document links
+	extractCalls bool // whether to extract all call sites
+	afterLT      bool // previous token was '<' — see looksLikeTagAttrs
+	forceGlobal  bool // when true, addRef routes to componentRefs
 }
 
 // pendingCall records an unresolved assignment from a function call.

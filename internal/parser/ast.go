@@ -189,8 +189,8 @@ type CallSite struct {
 	Component string // resolved component (from variable ref), empty if unresolved
 	Variable  string // the variable/qualifier before the dot (empty if bare call)
 	Line      uint32
-	Caller    string // enclosing function name (empty if global)
 	Resolved  bool   // true if qualified (obj.func), false if bare call
+	Caller    string // enclosing function name (empty if global)
 	Text      string // the trimmed line text
 
 	// Chain lists the method-name hops between the resolved base (Variable or
