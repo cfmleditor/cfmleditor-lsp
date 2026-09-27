@@ -13,8 +13,8 @@ func TestParseApplicationMappings_ExpandPath(t *testing.T) {
 	appDir := "/project"
 	got := ParseApplicationMappings(content, appDir)
 
-	if got["models"] != filepath.Join(appDir, "src/models") {
-		t.Errorf("models = %q, want %q", got["models"], filepath.Join(appDir, "src/models"))
+	if got["models"] != filepath.Join(appDir, "src", "models") {
+		t.Errorf("models = %q, want %q", got["models"], filepath.Join(appDir, "src", "models"))
 	}
 
 	if got["lib"] != filepath.Join(appDir, "lib") {
@@ -34,9 +34,11 @@ func TestParseApplicationMappings_PlainString(t *testing.T) {
 func TestParseApplicationMappings_SingleQuotes(t *testing.T) {
 	content := `this.mappings['/utils'] = expandPath('./utils');`
 
-	got := ParseApplicationMappings(content, "/app")
-	if got["utils"] != filepath.Join("/app", "utils") {
-		t.Errorf("utils = %q, want %q", got["utils"], filepath.Join("/app", "utils"))
+	app := filepath.FromSlash("/app")
+
+	got := ParseApplicationMappings(content, app)
+	if got["utils"] != filepath.Join(app, "utils") {
+		t.Errorf("utils = %q, want %q", got["utils"], filepath.Join(app, "utils"))
 	}
 }
 
@@ -51,10 +53,11 @@ func TestParseApplicationMappings_NoMappings(t *testing.T) {
 
 func TestParseApplicationMappings_RelativeStringValue(t *testing.T) {
 	content := `this.mappings["/shared"] = "./shared/lib";`
+	project := filepath.FromSlash("/project")
 
-	got := ParseApplicationMappings(content, "/project")
-	if got["shared"] != filepath.Join("/project", "shared/lib") {
-		t.Errorf("shared = %q, want %q", got["shared"], filepath.Join("/project", "shared/lib"))
+	got := ParseApplicationMappings(content, project)
+	if got["shared"] != filepath.Join(project, "shared", "lib") {
+		t.Errorf("shared = %q, want %q", got["shared"], filepath.Join(project, "shared", "lib"))
 	}
 }
 

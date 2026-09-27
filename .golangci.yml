@@ -20,6 +20,7 @@ linters:
     - exhaustive
     - exptostd
     - fatcontext
+    - forcetypeassert
     - gocheckcompilerdirectives
     - gochecksumtype
     - gocritic
@@ -46,8 +47,10 @@ linters:
     - revive
     - rowserrcheck
     - sqlclosecheck
+    - thelper
     - unconvert
     - unparam
+    - unqueryvet
     - usestdlibvars
     - usetesting
     - wastedassign
@@ -112,11 +115,28 @@ linters:
         - name: unnecessary-if
         - name: useless-break
         - name: waitgroup-by-value
+        # Stage 2 (LINT-PLAN.md).
+        - name: bool-literal-in-expr
+        - name: confusing-results
+        - name: import-shadowing
+        - name: redundant-import-alias
+        - name: unchecked-type-assertion
+          # `v, _ := x.(T)` cannot panic: a wrong type leaves the zero value
+          # and the check after it fails. Only the single-value form is flagged.
+          arguments:
+            - acceptIgnoredAssertionResult: true
     dupword:
       # Only the words people type twice by accident. Checking every word
       # flags deliberate repetition: "every alternative that matches matches
       # at 0", or a test feeding "getData getData" to an identifier scanner.
       keywords: ["the", "a", "an", "and", "to", "of", "in", "is", "it", "for", "that", "be", "on", "as"]
+    thelper:
+      # Every *testing.B function here is a body handed to testing.Benchmark
+      # by a scaling test, not a helper; b.Helper() in one means nothing.
+      benchmark:
+        first: false
+        name: false
+        begin: false
     staticcheck:
       # Every check, the style and simplification ones included; the default
       # set leaves several off.
@@ -171,6 +191,10 @@ linters:
         - regexpPattern
         - deferUnlambda
         - sloppyReassign
+        # Stage 2 (LINT-PLAN.md).
+        - deferInLoop
+        - filepathJoin
+        - importShadow
       settings:
         hugeParam:
           sizeThreshold: 80
@@ -192,6 +216,9 @@ linters:
           - unparam
           - gosec
           - staticcheck
+          # SELECT * in a test is a CFML fixture fed to the formatter, not a
+          # query this code runs.
+          - unqueryvet
       - linters:
           - gosec
         text: "G104|G115|G204|G301|G302|G304|G306|G703"

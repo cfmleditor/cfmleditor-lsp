@@ -12,8 +12,8 @@ import (
 
 // varCorpus is a document with declarations spread across every scope, inside
 // functions and outside them, with names that repeat.
-func varCorpus(t testing.TB, n int) (string, []parser.VarDef) {
-	t.Helper()
+func varCorpus(tb testing.TB, n int) (string, []parser.VarDef) {
+	tb.Helper()
 
 	var b strings.Builder
 

@@ -58,17 +58,35 @@ revive rules replaces its default set, so the 23 defaults are listed in the
 config too. A throwaway file breaking one rule from each tool confirmed the
 new checks run, and that the defaults still do.
 
-## Stage 2 — small fixes, mostly in tests (~60 findings)
+## Stage 2 — small fixes, mostly in tests (done)
 
-- `forcetypeassert` (8) and revive's `unchecked-type-assertion` (35): an
-  unchecked type assertion panics rather than failing with a message.
-- `thelper` (16): helpers call `t.Helper()`, so a failure points at the
-  caller.
-- `deferInLoop` (3), `filepathJoin` (6), `unqueryvet` (3): tests.
-- gocritic `importShadow` and revive `import-shadowing` (13): a variable named
-  after an imported package.
-- revive `confusing-results` (5), `bool-literal-in-expr` (4),
-  `redundant-import-alias` (1).
+11 rules; 96 findings measured, 36 fixed once the two settings below were in:
+
+- `forcetypeassert` and revive's `unchecked-type-assertion`: an unchecked
+  type assertion panics rather than failing with a message. 9 fixed, 3 of
+  them in `server_test.go`, where one would have moved the panic to a nil
+  dereference on the next line and got a real check instead. The revive rule
+  runs with `acceptIgnoredAssertionResult`: the 26 `v, _ := x.(T)` it also
+  reported cannot panic, since a wrong type leaves the zero value and the
+  check after it fails, and the `_` is a decision rather than an omission.
+- `thelper`: 1 fixed (`varCorpus`'s `testing.TB` is named `tb`). Its
+  benchmark checks are off: the other 15 findings were `func(b *testing.B)`
+  bodies handed to `testing.Benchmark` by scaling tests, which are not
+  helpers.
+- gocritic `deferInLoop` (3, now `t.Cleanup` or a close in the loop),
+  `filepathJoin` (6), `importShadow` and revive `import-shadowing` (7:
+  `path` and `refs` used as variable names), revive `confusing-results` (5,
+  named), `redundant-import-alias` (1).
+- revive `bool-literal-in-expr` (4): each was `m["k"] != true` on a `map[string]any`,
+  where the literal cannot simply be dropped; rewritten as a checked `bool`
+  assertion, which says what the test means.
+- `unqueryvet` (3): all `SELECT *` in CFML fixtures the formatter tests feed
+  in, so it is excluded in test files and on everywhere else. Production code
+  has no finding.
+
+A throwaway file breaking each rule confirmed they all run. Run it with
+`--uniq-by-line=false`: several of these land on the same line as another
+finding, and by default only the first is shown.
 
 ## Stage 3 — memory layout, by hand
 

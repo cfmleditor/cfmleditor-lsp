@@ -68,7 +68,11 @@ func TestSinkReceivesEveryLevelWithItsLSPType(t *testing.T) {
 // TestSinkCarriesTheStructuredFields, or the Output panel shows a bare message
 // where stderr showed the detail that made it useful.
 func TestSinkCarriesTheStructuredFields(t *testing.T) {
-	logger := cflog.NewLogger(false).(cflog.Teeable)
+	logger, ok := cflog.NewLogger(false).(cflog.Teeable)
+	if !ok {
+		t.Fatal("the logger is not Teeable")
+	}
+
 	sink := &capture{}
 	logger.Attach(sink)
 
@@ -90,7 +94,11 @@ func TestSinkCarriesTheStructuredFields(t *testing.T) {
 // constructors, not loose pairs. Read as pairs, each field became the next
 // one's key, and the Output panel showed zap's struct instead of key=value.
 func TestSinkFormatsZapFields(t *testing.T) {
-	logger := cflog.NewLogger(false).(cflog.Teeable)
+	logger, ok := cflog.NewLogger(false).(cflog.Teeable)
+	if !ok {
+		t.Fatal("the logger is not Teeable")
+	}
+
 	sink := &capture{}
 	logger.Attach(sink)
 
@@ -117,7 +125,11 @@ func TestSinkFormatsZapFields(t *testing.T) {
 // at best ignored and at worst an error logged about logging, so shutdown has to
 // be able to stop this cleanly.
 func TestDetachStops(t *testing.T) {
-	logger := cflog.NewLogger(false).(cflog.Teeable)
+	logger, ok := cflog.NewLogger(false).(cflog.Teeable)
+	if !ok {
+		t.Fatal("the logger is not Teeable")
+	}
+
 	sink := &capture{}
 
 	logger.Attach(sink)

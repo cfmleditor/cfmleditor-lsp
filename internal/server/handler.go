@@ -549,10 +549,10 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 				// name, and the consumer takes the first match — the other
 				// order made the graph follow the shadowed component.
 				// resolve.CanResolveCall resolves in this order too.
-				refs := append([]parser.ComponentRef{}, pr.FuncComponentRefs(sc.Start, sc.End)...)
-				refs = append(refs, pr.ComponentRefs...)
+				compRefs := append([]parser.ComponentRef{}, pr.FuncComponentRefs(sc.Start, sc.End)...)
+				compRefs = append(compRefs, pr.ComponentRefs...)
 
-				return pr.FuncCalls(sc.Start, sc.End), refs
+				return pr.FuncCalls(sc.Start, sc.End), compRefs
 			}
 		}
 
@@ -1043,7 +1043,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		fileURI := uri.URI(docURI)
 		funcs := s.index.FunctionsForFile(fileURI)
-		refs := s.index.RefsForFile(fileURI)
+		compRefs := s.index.RefsForFile(fileURI)
 
 		var lines []string
 
@@ -1053,8 +1053,8 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			lines = append(lines, fmt.Sprintf("  %s (line %d)", f.Name, f.Line))
 		}
 
-		lines = append(lines, fmt.Sprintf("Component refs (%d):", len(refs)))
-		for _, r := range refs {
+		lines = append(lines, fmt.Sprintf("Component refs (%d):", len(compRefs)))
+		for _, r := range compRefs {
 			lines = append(lines, fmt.Sprintf("  %s → %s (line %d)", r.Variable, r.Component, r.Line))
 		}
 
