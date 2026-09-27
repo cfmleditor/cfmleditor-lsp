@@ -72,7 +72,7 @@ func TestServeMultipleClients(t *testing.T) {
 
 	for i := range total {
 		conns[i], rpcs[i] = dialRPC(t, ctx, sock)
-		defer func() { _ = conns[i].Close() }()
+		t.Cleanup(func() { _ = conns[i].Close() })
 	}
 
 	time.Sleep(50 * time.Millisecond)

@@ -287,7 +287,7 @@ func scanQueryParams(content string, names []string) []Ref {
 
 // matchNamedValue reads `name=value` at i. With quotedOnly the value must be
 // quoted; otherwise an unquoted value runs to the next URL delimiter.
-func matchNamedValue(content string, i int, names []string, quotedOnly bool) (string, int, int, int) {
+func matchNamedValue(content string, i int, names []string, quotedOnly bool) (key string, valueStart, valueEnd, next int) {
 	for _, name := range names {
 		if len(content)-i < len(name)+2 || !strings.EqualFold(content[i:i+len(name)], name) {
 			continue
@@ -342,7 +342,7 @@ func matchNamedValue(content string, i int, names []string, quotedOnly bool) (st
 
 // matchPropertyValue reads `name: "value"` at i, where quote is the quote that
 // opened the key name, or 0 when the key is bare.
-func matchPropertyValue(content string, i int, names []string, keyQuote byte) (string, int, int, int) {
+func matchPropertyValue(content string, i int, names []string, keyQuote byte) (key string, valueStart, valueEnd, next int) {
 	for _, name := range names {
 		if len(content)-i < len(name)+3 || !strings.EqualFold(content[i:i+len(name)], name) {
 			continue

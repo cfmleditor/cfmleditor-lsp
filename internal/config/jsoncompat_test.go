@@ -4,7 +4,7 @@ import (
 	stdjson "encoding/json"
 	"testing"
 
-	v2 "encoding/json/v2"
+	"encoding/json/v2"
 )
 
 // Config files are decoded with the standard library on purpose, while the LSP
@@ -37,7 +37,7 @@ func TestConfigDecodingStaysOnTheStandardLibrary(t *testing.T) {
 
 		// And the reason it cannot simply be swapped: v2 drops it in silence.
 		var alt JSON
-		if err := v2.Unmarshal([]byte(src), &alt); err != nil {
+		if err := json.Unmarshal([]byte(src), &alt); err != nil {
 			t.Logf("v2 rejected it outright: %v", err)
 		} else if alt.WorkspaceName == "myproject" {
 			t.Error("v2 now matches field names case-insensitively; the reason for this split may be gone")
@@ -57,7 +57,7 @@ func TestConfigDecodingStaysOnTheStandardLibrary(t *testing.T) {
 		}
 
 		var alt JSON
-		if err := v2.Unmarshal([]byte(src), &alt); err == nil {
+		if err := json.Unmarshal([]byte(src), &alt); err == nil {
 			t.Error("v2 now accepts duplicate members; the reason for this split may be gone")
 		}
 	})

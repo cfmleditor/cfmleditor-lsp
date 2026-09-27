@@ -318,7 +318,7 @@ func calledName(msg string) string {
 }
 
 // findNear finds name as a whole word nearest to line, within reanchorWindow.
-func findNear(lines []string, line int, name string) (int, int, bool) {
+func findNear(lines []string, line int, name string) (foundLine, col int, found bool) {
 	for d := 0; d <= reanchorWindow; d++ {
 		for _, l := range []int{line - d, line + d} {
 			if l < 0 || l >= len(lines) || (d > 0 && l == line) {

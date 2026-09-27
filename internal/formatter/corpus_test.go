@@ -572,11 +572,11 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 
 	compareCorpusBaseline(t, results)
 
-	if path := os.Getenv("CFML_CORPUS_REPORT"); path != "" {
-		if err := writeCorpusReport(path, results); err != nil {
-			t.Errorf("writing report to %s: %v", path, err)
+	if file := os.Getenv("CFML_CORPUS_REPORT"); file != "" {
+		if err := writeCorpusReport(file, results); err != nil {
+			t.Errorf("writing report to %s: %v", file, err)
 		} else {
-			t.Logf("per-file report written to %s", path)
+			t.Logf("per-file report written to %s", file)
 		}
 	}
 
@@ -606,14 +606,14 @@ func reportCorpus(t *testing.T, roots []string, results []corpusResult) {
 func compareCorpusBaseline(t *testing.T, results []corpusResult) {
 	t.Helper()
 
-	path := os.Getenv("CFML_CORPUS_BASELINE")
-	if path == "" {
+	file := os.Getenv("CFML_CORPUS_BASELINE")
+	if file == "" {
 		return
 	}
 
-	base, err := readCorpusReport(path)
+	base, err := readCorpusReport(file)
 	if err != nil {
-		t.Fatalf("reading baseline %q: %v", path, err)
+		t.Fatalf("reading baseline %q: %v", file, err)
 	}
 
 	var moved []string
@@ -639,14 +639,14 @@ func compareCorpusBaseline(t *testing.T, results []corpusResult) {
 	}
 
 	if len(moved) == 0 {
-		t.Logf("baseline %s: no file changed verdict", filepath.Base(path))
+		t.Logf("baseline %s: no file changed verdict", filepath.Base(file))
 
 		return
 	}
 
 	sort.Strings(moved)
 
-	t.Errorf("%d file(s) changed verdict against %s:", len(moved), path)
+	t.Errorf("%d file(s) changed verdict against %s:", len(moved), file)
 
 	for _, m := range moved {
 		t.Errorf("  %s", m)
@@ -654,8 +654,8 @@ func compareCorpusBaseline(t *testing.T, results []corpusResult) {
 }
 
 // readCorpusReport reads a report TSV back into path -> verdict.
-func readCorpusReport(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+func readCorpusReport(file string) (map[string]string, error) {
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -678,7 +678,7 @@ func readCorpusReport(path string) (map[string]string, error) {
 	return out, nil
 }
 
-func writeCorpusReport(path string, results []corpusResult) error {
+func writeCorpusReport(file string, results []corpusResult) error {
 	var rows []string
 
 	for _, r := range results {
@@ -700,5 +700,5 @@ func writeCorpusReport(path string, results []corpusResult) error {
 		buf.WriteByte('\n')
 	}
 
-	return os.WriteFile(path, buf.Bytes(), 0o600)
+	return os.WriteFile(file, buf.Bytes(), 0o600)
 }

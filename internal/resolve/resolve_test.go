@@ -317,7 +317,8 @@ func TestCanResolveCall_ExtendsChainTwoLevels_ThisVarRef(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
 		}
-		defer func(p string) { _ = os.Remove(p) }(path)
+
+		t.Cleanup(func() { _ = os.Remove(path) })
 	}
 
 	// Only pre-index FileObject so its methods are known; parents are intentionally absent.

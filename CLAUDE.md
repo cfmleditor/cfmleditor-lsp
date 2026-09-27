@@ -1427,7 +1427,13 @@ Some handles need both shapes; others only one, depending on how the code uses t
   `.golangci.yml` lists the 23 defaults before the additions; a rule added
   without them switches the defaults off with nothing to say so. Prove a new
   check runs with a throwaway file that breaks it — a check that finds nothing
-  and a check that is not running look the same.
+  and a check that is not running look the same — and run that with
+  `--uniq-by-line=false`, or a second finding on a line is hidden behind the
+  first. **A type assertion in a test is checked or discarded, never bare**:
+  `v, ok := x.(T)` with a `t.Fatalf`, or `v, _ := x.(T)` where the next check
+  fails on the zero value — which is only true if that check does not
+  dereference it. `thelper` does not check benchmark functions, because every
+  one here is a body handed to `testing.Benchmark`.
   `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
   and the rules left off with the reason for each; update it when a stage
   lands or the pinned golangci-lint moves.

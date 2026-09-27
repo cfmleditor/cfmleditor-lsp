@@ -34,7 +34,7 @@ func (c *countingDirFS) ReadDir(path string) ([]fs.DirEntry, error) {
 	return e, err
 }
 
-func (c *countingDirFS) counts() (int, int) {
+func (c *countingDirFS) counts() (readDirs, entries int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

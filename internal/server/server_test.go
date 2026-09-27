@@ -2368,7 +2368,11 @@ func TestSignatureHelpActiveParamMultiple(t *testing.T) {
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (result).(*protocol.SignatureHelp)
+	help, ok := result.(*protocol.SignatureHelp)
+	if !ok || help == nil {
+		t.Fatalf("expected signature help, got %#v", result)
+	}
+
 	if nullVal(help.ActiveParameter) != 3 {
 		t.Errorf("expected activeParam=3, got %d", nullVal(help.ActiveParameter))
 	}
@@ -2386,7 +2390,7 @@ func TestSignatureHelpNestedCall(t *testing.T) {
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (result).(*protocol.SignatureHelp)
+	help, _ := result.(*protocol.SignatureHelp)
 	if help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature")
 	}
@@ -2717,10 +2721,10 @@ func TestFuncRefsLazyExtraction(t *testing.T) {
 	for _, sc := range pr.Scopes {
 		for _, f := range pr.Funcs {
 			if f.Name == "doWork" && int(f.Line) == sc.Start {
-				refs, _ := pr.FuncRefs(sc.Start, sc.End)
+				funcRefs, _ := pr.FuncRefs(sc.Start, sc.End)
 				found = false
 
-				for _, ref := range refs {
+				for _, ref := range funcRefs {
 					if ref.Variable == "helper" && strings.Contains(ref.Component, "helper") {
 						found = true
 					}
@@ -2964,7 +2968,7 @@ func TestSignatureHelpAfterSecondComma(t *testing.T) {
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help := (result).(*protocol.SignatureHelp)
+	help, _ := result.(*protocol.SignatureHelp)
 	if help == nil || nullVal(help.ActiveParameter) != 2 {
 		t.Errorf("expected activeParam=2, got %v", help)
 	}

@@ -131,9 +131,8 @@ func TestUnhandledNodeKinds(t *testing.T) {
 
 	for _, src := range samples {
 		tree := language.Parse(language.CFML, []byte(src), nil)
-		defer tree.Close()
-
 		collectUnhandled(tree.RootNode(), nonLeaf, leaf)
+		tree.Close()
 	}
 
 	for kind := range nonLeaf {

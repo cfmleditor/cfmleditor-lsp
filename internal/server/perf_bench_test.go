@@ -133,7 +133,8 @@ func BenchmarkWorkspaceSymbolWithMarshal(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			b.Logf("response: %d symbols, %d bytes of JSON", len(res.([]protocol.SymbolInformation)), len(out))
+			syms, _ := res.([]protocol.SymbolInformation)
+			b.Logf("response: %d symbols, %d bytes of JSON", len(syms), len(out))
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -307,7 +308,9 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			b.Logf("response: %d items, %d bytes of JSON", len(res.(*protocol.CompletionList).Items), len(out))
+			if list, ok := res.(*protocol.CompletionList); ok {
+				b.Logf("response: %d items, %d bytes of JSON", len(list.Items), len(out))
+			}
 
 			b.ReportAllocs()
 			b.ResetTimer()

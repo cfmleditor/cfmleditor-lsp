@@ -2326,8 +2326,7 @@ func atoi(s string) int {
 }
 
 // lineOffsets converts line numbers to byte offsets.
-func lineOffsets(content string, startLine, endLine int) (int, int) {
-	start := 0
+func lineOffsets(content string, startLine, endLine int) (start, end int) {
 	line := 0
 
 	for line < startLine {
@@ -2340,7 +2339,7 @@ func lineOffsets(content string, startLine, endLine int) (int, int) {
 		line++
 	}
 
-	end := start
+	end = start
 	for line <= endLine {
 		idx := strings.IndexByte(content[end:], '\n')
 		if idx < 0 {

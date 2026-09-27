@@ -110,7 +110,7 @@ func TestUnknownToolIsAToolErrorNotAProtocolError(t *testing.T) {
 	}
 
 	result, _ := replies[0]["result"].(map[string]any)
-	if result["isError"] != true {
+	if isErr, _ := result["isError"].(bool); !isErr {
 		t.Errorf("unknown tool did not set isError: %v", result)
 	}
 }
@@ -185,7 +185,7 @@ func TestEveryToolIsMarkedReadOnly(t *testing.T) {
 		tool, _ := raw.(map[string]any)
 
 		ann, ok := tool["annotations"].(map[string]any)
-		if !ok || ann["readOnlyHint"] != true {
+		if ro, _ := ann["readOnlyHint"].(bool); !ok || !ro {
 			t.Errorf("tool %v is not marked readOnlyHint", tool["name"])
 		}
 	}
@@ -198,7 +198,7 @@ func TestToolResultsCarryStructuredContent(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_callers","arguments":{"id":"svc.cfc::getuser"}}}`)
 
 	result, _ := replies[0]["result"].(map[string]any)
-	if result["isError"] == true {
+	if isErr, _ := result["isError"].(bool); isErr {
 		t.Fatalf("get_callers failed: %v", result)
 	}
 
@@ -218,7 +218,7 @@ func TestMissingRequiredArgumentIsReported(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_symbol","arguments":{}}}`)
 
 	result, _ := replies[0]["result"].(map[string]any)
-	if result["isError"] != true {
+	if isErr, _ := result["isError"].(bool); !isErr {
 		t.Fatalf("get_symbol with no id did not report an error: %v", result)
 	}
 }
