@@ -17,6 +17,7 @@ linters:
     - copyloopvar
     - depguard
     - dupword
+    - dupl
     - durationcheck
     - errchkjson
     - errname
@@ -336,6 +337,8 @@ linters:
         linters:
           - prealloc
           - gosec
+          # Table-driven tests repeat their setup on purpose.
+          - dupl
           # SELECT * in a test is a CFML fixture fed to the formatter, not a
           # query this code runs.
           - unqueryvet

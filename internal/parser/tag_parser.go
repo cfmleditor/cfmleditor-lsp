@@ -261,7 +261,7 @@ func nextTagStart(s string) int {
 }
 
 // parse scans through tag-based CFML extracting definitions.
-func (p *tagParser) parse() { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
+func (p *tagParser) parse() {
 	pos := 0
 
 	for pos < len(p.src) {
@@ -297,95 +297,14 @@ func (p *tagParser) parse() { //nolint:gocognit,funlen // over the limit before 
 
 		// Skip CFML comments (nested)
 		if idx+4 < len(p.src) && p.src[idx:idx+5] == "<!---" {
-			depth := 1
-			j := idx + 5
-
-			for j < len(p.src) && depth > 0 {
-				switch {
-				case j+4 < len(p.src) && p.src[j:j+5] == "<!---":
-					depth++
-					j += 5
-				case j+3 < len(p.src) && p.src[j:j+4] == "--->":
-					depth--
-					j += 4
-				default:
-					j++
-				}
-			}
-
-			pos = j
+			pos = skipCFMLComment(p.src, idx)
 
 			continue
 		}
 
 		// Check for cfscript block
 		if idx+10 <= len(p.src) && strings.EqualFold(p.src[idx:idx+10], "<cfscript>") {
-			bodyStart := idx + 10
-			closeIdx := indexCFTag(p.src[bodyStart:], "/cfscript>")
-
-			var bodyEnd int
-
-			if closeIdx < 0 {
-				bodyEnd = len(p.src)
-			} else {
-				bodyEnd = bodyStart + closeIdx
-			}
-
-			baseLine := p.lineAt(bodyStart)
-			sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, p.resolvers).asCFScript()
-			sp.resolverSet = p.resolverSet
-			sp.extractCalls = p.extractCalls
-			sp.parse()
-			p.funcs = append(p.funcs, sp.funcs...)
-			p.vars = append(p.vars, sp.vars...)
-
-			// Merge calls from cfscript sub-parser
-			if p.extractCalls {
-				for i := range sp.calls {
-					c := &sp.calls[i]
-
-					p.addCall(c)
-				}
-
-				for _, calls := range sp.funcCalls {
-					for i := range calls {
-						c := &calls[i]
-
-						p.addCall(c)
-					}
-				}
-			}
-
-			if p.inFunc != "" {
-				for i := range sp.componentRefs {
-					ref := &sp.componentRefs[i]
-
-					p.addRef(ref)
-				}
-			} else {
-				p.componentRefs = append(p.componentRefs, sp.componentRefs...)
-			}
-
-			// Merge pending calls (unresolved "x = y.method()" assignments) from
-			// the cfscript sub-parser. Without this, chained factory calls inside
-			// a nested <cfscript> block (e.g. "conn = uri.openConnection();")
-			// never reach resolvePendingCalls, so they can never fall back to
-			// baseVar's own component (or FuncLookup's declared return type).
-			for i := range sp.pendingCalls {
-				c := sp.pendingCalls[i] // a copy: edited below, and kept
-
-				if c.funcKey == "" {
-					c.funcKey = p.inFunc
-				}
-
-				p.pendingCalls = append(p.pendingCalls, c)
-			}
-
-			if closeIdx < 0 {
-				pos = len(p.src)
-			} else {
-				pos = bodyEnd + 11 // len("</cfscript>")
-			}
+			pos = p.parseNestedScript(idx)
 
 			continue
 		}
@@ -393,126 +312,7 @@ func (p *tagParser) parse() { //nolint:gocognit,funlen // over the limit before 
 		// Check for CF tags we care about
 		switch {
 		case idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f':
-			// Fast skip on the fourth byte: only tags starting cfc/cff/cfl/cfp/cfs/
-			// cfo/cfi/cfr/cfe reach the switch below (cfcomponent, cffunction,
-			// cfloop, cfparam/cfproperty, cfset, cfobject, cfif/cfinvoke,
-			// cfreturn, cfelseif).
-			//
-			// 'l' and 'e' are the two admitted for a single tag each, and they are
-			// the ones to re-measure if this loop ever shows up in a profile.
-			// <cfloop index="x"> declares x, so go-to-definition on a loop index
-			// has nowhere to land without 'l'; the cost is that every <cflock>,
-			// <cflog>, <cflocation> and <cfldap> now pays an IndexByte for its '>'
-			// and a lineAt, and <cfloop> is among the most common tags in CFML.
-			// 'e' is admitted for <cfelseif>, whose condition holds calls like any
-			// other expression, and charges the same to <cfelse>, <cfexit> and
-			// <cferror>. Both measured within noise on the parser benchmarks,
-			// because that work is a byte scan over a tag that was going to be
-			// scanned past anyway.
-			ch := toLowerByte(p.src[idx+3])
-			if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != 'e' && ch != '/' {
-				pos = p.stepOverEvaluatedTag(idx)
-
-				continue
-			}
-
-			tagEnd := tagEndIndex(p.src[idx:])
-			if tagEnd < 0 {
-				pos = idx + 1
-
-				continue
-			}
-
-			tagEnd += idx + 1 // past the >
-			tag := p.src[idx:tagEnd]
-			line := p.lineAt(idx)
-
-			// A handled tag is stepped over whole, so its own attributes are in
-			// no text gap: `<cfloop array="#svc.list()#">` is scanned here.
-			p.scanInterpolatedText(tag, idx)
-
-			// Detect </cffunction> to exit function scope.
-			//
-			// This was dead code twice over: "</cffunction>" is exactly 13
-			// bytes so `len(tag) > 13` was false, and tag[2:13] is
-			// "cffunction>" — 11 bytes — which never equals the 10-byte
-			// "cffunction". Function scope was therefore never exited.
-			if isCloseTagFor(tag, "cffunction") {
-				p.inFunc = ""
-				p.localVars = p.localVars[:0]
-				p.forceGlobal = false
-				pos = tagEnd
-
-				continue
-			}
-
-			// Dispatch on the fourth byte the fast skip already read, rather than
-			// testing each prefix in turn. The chain this replaces ran up to nine
-			// EqualFold calls for every tag that got this far; the byte narrows it
-			// to one or two, which is what pays for <cfloop> now being admitted to
-			// the scan at all.
-			//
-			// The letters here must stay in step with the fast skip above: a tag
-			// admitted there with no case here is scanned and then dropped, and a
-			// case here whose letter the skip rejects is unreachable.
-			// TestTagDispatchMatchesTheFastSkip fails on either.
-			switch ch {
-			case 'c':
-				if hasCFTagPrefix(tag, "<cfcomponent") {
-					p.extends = getAttr(tag, "extends")
-					if isTruthy(getAttr(tag, "persistent")) {
-						p.persistent = true
-					}
-				}
-			case 'f':
-				if hasCFTagPrefix(tag, "<cffunction") {
-					p.parseCFFunction(tag, idx, tagEnd, line)
-					p.enterFunctionScope(tagEnd, line)
-				}
-			case 'l':
-				if hasCFTagPrefix(tag, "<cfloop") {
-					p.parseScopedAttrVar(tag, "index", line)
-				}
-			case 'p':
-				switch {
-				case hasCFTagPrefix(tag, "<cfproperty"):
-					p.parseCFProperty(tag, line)
-				case hasCFTagPrefix(tag, "<cfparam"):
-					p.parseScopedAttrVar(tag, "name", line)
-				}
-			case 's':
-				if hasCFTagPrefix(tag, "<cfset") {
-					p.parseCFSet(tag, line)
-				}
-			case 'o':
-				if hasCFTagPrefix(tag, "<cfobject") {
-					p.parseCFObject(tag, line)
-				}
-			case 'i':
-				switch {
-				case hasCFTagPrefix(tag, "<cfinvoke"):
-					p.parseCFInvoke(tag, line)
-				case hasCFTagPrefix(tag, "<cfif"):
-					// A condition is an expression, and `<cfif svc.isValid(x)>`
-					// recorded nothing while the same test in script syntax
-					// recorded the call.
-					p.scanExpressionCalls(tagBody(tag), line)
-				}
-			case 'e':
-				// 'e' is admitted for this one tag, the way 'l' is for <cfloop>.
-				// The cost is an IndexByte and a lineAt on every <cfelse>,
-				// <cfexit> and <cferror>; the alternative is that the second
-				// half of every if/else chain in tag syntax has no calls in it.
-				if hasCFTagPrefix(tag, "<cfelseif") {
-					p.scanExpressionCalls(tagBody(tag), line)
-				}
-			case 'r':
-				if hasCFTagPrefix(tag, "<cfreturn") {
-					p.parseCFReturn(tag, line)
-				}
-			}
-
-			pos = tagEnd
+			pos = p.handleCFTag(idx)
 		case p.gated && customPrefixTag(p.src[idx:], p.importPrefixes):
 			pos = p.stepOverEvaluatedTag(idx)
 		default:
@@ -522,6 +322,201 @@ func (p *tagParser) parse() { //nolint:gocognit,funlen // over the limit before 
 
 	if p.extractLinks {
 		p.extractAllLinks()
+	}
+}
+
+// parseNestedScript parses a <cfscript> block opening at idx in a tag file and
+// merges what it found, returning the offset just past its close.
+func (p *tagParser) parseNestedScript(idx int) int {
+	bodyStart := idx + 10
+	closeIdx := indexCFTag(p.src[bodyStart:], "/cfscript>")
+
+	var bodyEnd int
+
+	if closeIdx < 0 {
+		bodyEnd = len(p.src)
+	} else {
+		bodyEnd = bodyStart + closeIdx
+	}
+
+	baseLine := p.lineAt(bodyStart)
+	sp := newScriptParser(p.src[bodyStart:bodyEnd], p.fileURI, baseLine, p.resolvers).asCFScript()
+	sp.resolverSet = p.resolverSet
+	sp.extractCalls = p.extractCalls
+	sp.parse()
+	p.funcs = append(p.funcs, sp.funcs...)
+	p.vars = append(p.vars, sp.vars...)
+
+	// Merge calls from cfscript sub-parser
+	if p.extractCalls {
+		for i := range sp.calls {
+			c := &sp.calls[i]
+
+			p.addCall(c)
+		}
+
+		for _, calls := range sp.funcCalls {
+			for i := range calls {
+				c := &calls[i]
+
+				p.addCall(c)
+			}
+		}
+	}
+
+	if p.inFunc != "" {
+		for i := range sp.componentRefs {
+			ref := &sp.componentRefs[i]
+
+			p.addRef(ref)
+		}
+	} else {
+		p.componentRefs = append(p.componentRefs, sp.componentRefs...)
+	}
+
+	// Merge pending calls (unresolved "x = y.method()" assignments) from
+	// the cfscript sub-parser. Without this, chained factory calls inside
+	// a nested <cfscript> block (e.g. "conn = uri.openConnection();")
+	// never reach resolvePendingCalls, so they can never fall back to
+	// baseVar's own component (or FuncLookup's declared return type).
+	for i := range sp.pendingCalls {
+		c := sp.pendingCalls[i] // a copy: edited below, and kept
+
+		if c.funcKey == "" {
+			c.funcKey = p.inFunc
+		}
+
+		p.pendingCalls = append(p.pendingCalls, c)
+	}
+
+	if closeIdx < 0 {
+		return len(p.src)
+	}
+
+	return bodyEnd + 11 // len("</cfscript>")
+}
+
+// handleCFTag handles the CF tag opening at idx, returning where the walk
+// continues.
+func (p *tagParser) handleCFTag(idx int) int {
+	// Fast skip on the fourth byte: only tags starting cfc/cff/cfl/cfp/cfs/
+	// cfo/cfi/cfr/cfe reach the switch below (cfcomponent, cffunction,
+	// cfloop, cfparam/cfproperty, cfset, cfobject, cfif/cfinvoke,
+	// cfreturn, cfelseif).
+	//
+	// 'l' and 'e' are the two admitted for a single tag each, and they are
+	// the ones to re-measure if this loop ever shows up in a profile.
+	// <cfloop index="x"> declares x, so go-to-definition on a loop index
+	// has nowhere to land without 'l'; the cost is that every <cflock>,
+	// <cflog>, <cflocation> and <cfldap> now pays an IndexByte for its '>'
+	// and a lineAt, and <cfloop> is among the most common tags in CFML.
+	// 'e' is admitted for <cfelseif>, whose condition holds calls like any
+	// other expression, and charges the same to <cfelse>, <cfexit> and
+	// <cferror>. Both measured within noise on the parser benchmarks,
+	// because that work is a byte scan over a tag that was going to be
+	// scanned past anyway.
+	ch := toLowerByte(p.src[idx+3])
+	if ch != 'c' && ch != 'f' && ch != 'l' && ch != 'p' && ch != 's' && ch != 'o' && ch != 'i' && ch != 'r' && ch != 'e' && ch != '/' {
+		return p.stepOverEvaluatedTag(idx)
+	}
+
+	tagEnd := tagEndIndex(p.src[idx:])
+	if tagEnd < 0 {
+		return idx + 1
+	}
+
+	tagEnd += idx + 1 // past the >
+	tag := p.src[idx:tagEnd]
+	line := p.lineAt(idx)
+
+	// A handled tag is stepped over whole, so its own attributes are in
+	// no text gap: `<cfloop array="#svc.list()#">` is scanned here.
+	p.scanInterpolatedText(tag, idx)
+
+	// Detect </cffunction> to exit function scope.
+	//
+	// This was dead code twice over: "</cffunction>" is exactly 13
+	// bytes so `len(tag) > 13` was false, and tag[2:13] is
+	// "cffunction>" — 11 bytes — which never equals the 10-byte
+	// "cffunction". Function scope was therefore never exited.
+	if isCloseTagFor(tag, "cffunction") {
+		p.inFunc = ""
+		p.localVars = p.localVars[:0]
+		p.forceGlobal = false
+
+		return tagEnd
+	}
+
+	p.dispatchCFTag(ch, tag, idx, tagEnd, line)
+
+	return tagEnd
+}
+
+// Dispatch on the fourth byte the fast skip already read, rather than
+// testing each prefix in turn. The chain this replaces ran up to nine
+// EqualFold calls for every tag that got this far; the byte narrows it
+// to one or two, which is what pays for <cfloop> now being admitted to
+// the scan at all.
+//
+// The letters here must stay in step with the fast skip above: a tag
+// admitted there with no case here is scanned and then dropped, and a
+// case here whose letter the skip rejects is unreachable.
+// TestTagDispatchMatchesTheFastSkip fails on either.
+func (p *tagParser) dispatchCFTag(ch byte, tag string, idx, tagEnd, line int) {
+	switch ch {
+	case 'c':
+		if hasCFTagPrefix(tag, "<cfcomponent") {
+			p.extends = getAttr(tag, "extends")
+			if isTruthy(getAttr(tag, "persistent")) {
+				p.persistent = true
+			}
+		}
+	case 'f':
+		if hasCFTagPrefix(tag, "<cffunction") {
+			p.parseCFFunction(tag, idx, tagEnd, line)
+			p.enterFunctionScope(tagEnd, line)
+		}
+	case 'l':
+		if hasCFTagPrefix(tag, "<cfloop") {
+			p.parseScopedAttrVar(tag, "index", line)
+		}
+	case 'p':
+		switch {
+		case hasCFTagPrefix(tag, "<cfproperty"):
+			p.parseCFProperty(tag, line)
+		case hasCFTagPrefix(tag, "<cfparam"):
+			p.parseScopedAttrVar(tag, "name", line)
+		}
+	case 's':
+		if hasCFTagPrefix(tag, "<cfset") {
+			p.parseCFSet(tag, line)
+		}
+	case 'o':
+		if hasCFTagPrefix(tag, "<cfobject") {
+			p.parseCFObject(tag, line)
+		}
+	case 'i':
+		switch {
+		case hasCFTagPrefix(tag, "<cfinvoke"):
+			p.parseCFInvoke(tag, line)
+		case hasCFTagPrefix(tag, "<cfif"):
+			// A condition is an expression, and `<cfif svc.isValid(x)>`
+			// recorded nothing while the same test in script syntax
+			// recorded the call.
+			p.scanExpressionCalls(tagBody(tag), line)
+		}
+	case 'e':
+		// 'e' is admitted for this one tag, the way 'l' is for <cfloop>.
+		// The cost is an IndexByte and a lineAt on every <cfelse>,
+		// <cfexit> and <cferror>; the alternative is that the second
+		// half of every if/else chain in tag syntax has no calls in it.
+		if hasCFTagPrefix(tag, "<cfelseif") {
+			p.scanExpressionCalls(tagBody(tag), line)
+		}
+	case 'r':
+		if hasCFTagPrefix(tag, "<cfreturn") {
+			p.parseCFReturn(tag, line)
+		}
 	}
 }
 
@@ -1046,7 +1041,7 @@ func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 	}
 }
 
-func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	rhs = strings.TrimSpace(rhs)
 
 	switch {
@@ -1099,117 +1094,147 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 			})
 		}
 	default:
-		// Try generic resolver match on the RHS expression
-		if len(p.resolvers) > 0 {
-			if comp := p.resolveCall(rhs); comp != "" {
-				p.addRef(&ComponentRef{
-					Variable: varName, Component: comp,
-					URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
-				})
-
-				return
-			}
-			// Try bare function name for exact-match resolvers
-			if funcName := extractIdent(rhs); funcName != "" {
-				for i := range p.resolvers {
-					r := &p.resolvers[i]
-					if r.Prefix != "" && prefixEqualFold(funcName, r.Prefix) {
-						if comp := matchResolverWithCache(funcName, r); comp != "" {
-							p.resolverSet.noteSoft(r, comp)
-
-							p.addRef(&ComponentRef{
-								Variable: varName, Component: comp,
-								URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
-							})
-
-							return
-						}
-					}
-				}
-			}
+		if p.resolveRHS(rhs, varName, line) {
+			return
 		}
+
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
-		if baseVar := extractMethodCallBase(rhs); baseVar != "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-			// Extract method name for pendingCall
-			var methodForPending string
-
-			before, _, _ := strings.Cut(rhs, "(")
-
-			varChain, methodName, hasDot := strings.CutLast(before, ".")
-			if hasDot {
-				methodForPending = methodName
-			}
-
-			if p.extractCalls {
-				// Record full call: extract method name from rhs
-				if hasDot && isIdentifier(methodName) && isValidVarChain(varChain) {
-					caller := ""
-					if p.inFunc != "" && len(p.funcs) > 0 {
-						caller = p.funcs[len(p.funcs)-1].Name
-					}
-
-					comp := p.lookupComponentRef(varChain, line)
-
-					p.addCall(&CallSite{
-						FuncName:  methodName,
-						Variable:  varChain,
-						Component: comp,
-						Resolved:  comp != "",
-						Line:      conv.Uint32(line),
-						Caller:    caller,
-					})
-				}
-			}
-
-			p.pendingCalls = append(p.pendingCalls, pendingCall{
-				varName:  varName,
-				funcName: methodForPending,
-				baseVar:  baseVar,
-				line:     conv.Uint32(line),
-				funcKey:  p.inFunc,
-				rest:     trailingCalls(rhs),
-			})
+		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
+			p.methodCallRHS(rhs, baseVar, varName, line)
 		} else if paren := strings.IndexByte(rhs, '('); paren > 0 {
-			funcName := extractIdent(rhs)
-			// Confirm the parens actually belong to funcName (only whitespace between
-			// them) — otherwise rhs is a larger expression like `temp & "~" & DateFormat(...)`
-			// where extractIdent grabbed the leading token ("temp"), not the identifier the
-			// paren is attached to, and this isn't a `x = funcName(...)` shape at all.
-			if funcName != "" && !isKeyword(funcName) && strings.TrimSpace(rhs[len(funcName):paren]) == "" {
-				if p.builtinReturnLookup != nil {
-					if comp := p.builtinReturnLookup(funcName); comp != "" {
-						p.addRef(&ComponentRef{
-							Variable: varName, Component: comp,
-							URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
-						})
-
-						return
-					}
-				}
-
-				if p.extractCalls {
-					caller := ""
-					if p.inFunc != "" && len(p.funcs) > 0 {
-						caller = p.funcs[len(p.funcs)-1].Name
-					}
-
-					p.addCall(&CallSite{
-						FuncName: funcName,
-						Line:     conv.Uint32(line),
-						Caller:   caller,
-					})
-				}
-
-				p.pendingCalls = append(p.pendingCalls, pendingCall{
-					varName:  varName,
-					funcName: funcName,
-					line:     conv.Uint32(line),
-					funcKey:  p.inFunc,
-					rest:     trailingCalls(rhs),
-				})
-			}
+			p.funcCallRHS(rhs, paren, varName, line)
 		}
 	}
+}
+
+// currentCaller is the function the walk is inside, or "".
+func (p *tagParser) currentCaller() string {
+	if p.inFunc != "" && len(p.funcs) > 0 {
+		return p.funcs[len(p.funcs)-1].Name
+	}
+
+	return ""
+}
+
+// resolveRHS types varName through a componentResolver matching the whole
+// right-hand side, or its bare function name for exact-match resolvers, and
+// reports whether one did.
+func (p *tagParser) resolveRHS(rhs, varName string, line int) bool {
+	if len(p.resolvers) == 0 {
+		return false
+	}
+
+	if comp := p.resolveCall(rhs); comp != "" {
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+		})
+
+		return true
+	}
+
+	// Try bare function name for exact-match resolvers
+	funcName := extractIdent(rhs)
+	if funcName == "" {
+		return false
+	}
+
+	for i := range p.resolvers {
+		r := &p.resolvers[i]
+		if r.Prefix == "" || !prefixEqualFold(funcName, r.Prefix) {
+			continue
+		}
+
+		if comp := matchResolverWithCache(funcName, r); comp != "" {
+			p.resolverSet.noteSoft(r, comp)
+
+			p.addRef(&ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+			})
+
+			return true
+		}
+	}
+
+	return false
+}
+
+// methodCallRHS handles `x = baseVar.method(...)`: the call, and a pending
+// call that types x once method's return type is known.
+func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
+	// Extract method name for pendingCall
+	var methodForPending string
+
+	before, _, _ := strings.Cut(rhs, "(")
+
+	varChain, methodName, hasDot := strings.CutLast(before, ".")
+	if hasDot {
+		methodForPending = methodName
+	}
+
+	// Record full call: extract method name from rhs
+	if p.extractCalls && hasDot && isIdentifier(methodName) && isValidVarChain(varChain) {
+		comp := p.lookupComponentRef(varChain, line)
+
+		p.addCall(&CallSite{
+			FuncName:  methodName,
+			Variable:  varChain,
+			Component: comp,
+			Resolved:  comp != "",
+			Line:      conv.Uint32(line),
+			Caller:    p.currentCaller(),
+		})
+	}
+
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName:  varName,
+		funcName: methodForPending,
+		baseVar:  baseVar,
+		line:     conv.Uint32(line),
+		funcKey:  p.inFunc,
+		rest:     trailingCalls(rhs),
+	})
+}
+
+// funcCallRHS handles `x = funcName(...)`, whose paren is at paren: a builtin's
+// return type, else the call and a pending call that types x later.
+func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int) {
+	funcName := extractIdent(rhs)
+	// Confirm the parens actually belong to funcName (only whitespace between
+	// them) — otherwise rhs is a larger expression like `temp & "~" & DateFormat(...)`
+	// where extractIdent grabbed the leading token ("temp"), not the identifier the
+	// paren is attached to, and this isn't a `x = funcName(...)` shape at all.
+	if funcName == "" || isKeyword(funcName) || strings.TrimSpace(rhs[len(funcName):paren]) != "" {
+		return
+	}
+
+	if p.builtinReturnLookup != nil {
+		if comp := p.builtinReturnLookup(funcName); comp != "" {
+			p.addRef(&ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+			})
+
+			return
+		}
+	}
+
+	if p.extractCalls {
+		p.addCall(&CallSite{
+			FuncName: funcName,
+			Line:     conv.Uint32(line),
+			Caller:   p.currentCaller(),
+		})
+	}
+
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName:  varName,
+		funcName: funcName,
+		line:     conv.Uint32(line),
+		funcKey:  p.inFunc,
+		rest:     trailingCalls(rhs),
+	})
 }
 
 // checkBareCallStr detects bare obj.method(...) patterns in a <cfset> without assignment.
@@ -1670,42 +1695,7 @@ func (p *tagParser) addCall(call *CallSite) {
 // extractAllLinks scans source lines for document links, routing them to
 // global links or funcLinks based on which scope the line falls in.
 func (p *tagParser) extractAllLinks() {
-	src := p.src
-	lineNum := 0
-	scopeIdx := 0
-
-	for src != "" {
-		nl := strings.IndexByte(src, '\n')
-
-		var line string
-		if nl < 0 {
-			line = src
-			src = ""
-		} else {
-			line = src[:nl]
-			src = src[nl+1:]
-		}
-
-		// Advance past finished scopes
-		for scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].End {
-			scopeIdx++
-		}
-
-		if scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].Start && lineNum < p.scopes[scopeIdx].End {
-			key := funcKey(p.scopes[scopeIdx].Start, p.scopes[scopeIdx].End)
-			if p.funcLinks == nil {
-				p.funcLinks = make(map[string][]DocumentLink)
-			}
-
-			links := p.funcLinks[key]
-			extractLinksFromLine(line, lineNum, &links)
-			p.funcLinks[key] = links
-		} else {
-			extractLinksFromLine(line, lineNum, &p.links)
-		}
-
-		lineNum++
-	}
+	p.funcLinks = extractLinksByScope(p.src, 0, p.scopes, p.funcLinks, &p.links)
 }
 
 // isWhitespace returns true if the byte is any whitespace character.
@@ -1996,4 +1986,48 @@ func skipSpace(s string, i int) int {
 
 func isIdentByte(c byte) bool {
 	return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// extractLinksByScope extracts the links on every line of src, which starts at
+// line lineNum, filing each under the function whose scope holds its line,
+// else in links. The two parsers share it: scopes are in line order, so one
+// pass keeps a cursor into them.
+func extractLinksByScope(src string, lineNum int, scopes []FuncScope, funcLinks map[string][]DocumentLink, links *[]DocumentLink) map[string][]DocumentLink {
+	scopeIdx := 0
+
+	for src != "" {
+		nl := strings.IndexByte(src, '\n')
+
+		var line string
+		if nl < 0 {
+			line = src
+			src = ""
+		} else {
+			line = src[:nl]
+			src = src[nl+1:]
+		}
+
+		// Advance past finished scopes
+		for scopeIdx < len(scopes) && lineNum > scopes[scopeIdx].End {
+			scopeIdx++
+		}
+
+		if scopeIdx < len(scopes) && lineNum > scopes[scopeIdx].Start && lineNum < scopes[scopeIdx].End {
+			if funcLinks == nil {
+				funcLinks = make(map[string][]DocumentLink)
+			}
+
+			key := funcKey(scopes[scopeIdx].Start, scopes[scopeIdx].End)
+			fl := funcLinks[key]
+			extractLinksFromLine(line, lineNum, &fl)
+
+			funcLinks[key] = fl
+		} else {
+			extractLinksFromLine(line, lineNum, links)
+		}
+
+		lineNum++
+	}
+
+	return funcLinks
 }

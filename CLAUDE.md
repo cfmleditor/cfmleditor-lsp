@@ -352,11 +352,18 @@ the *formatter*, not the parser.
   stays `$any`). **`make gapcheck` cannot see this**: it compares line and method
   name and deliberately not the receiver, so a call against the wrong receiver
   still counts as found.
-- **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
-  `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
-  the case in all of them. Three of the five were still reporting a bare `bar` when the first
-  two handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
-  reason; add to it rather than fixing one walk.
+- **The parser walks a chain in three places, and a construct met mid-chain needs the case in
+  all of them.** `walkChain` is the one behind every assignment's right-hand side
+  (`checkVarRHS`, which `parseBodyVarDecl` now calls, `parseBodyScopedVar` and
+  `checkAssignRef`); `scopedChainCall` walks `scope.name.a.b()` as a statement, and
+  `checkBareCall` walks a bare receiver into a list rather than a string. It was five
+  hand-copied loops, and three of the five were still reporting a bare `bar` when the first two
+  handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
+  reason; add to it rather than fixing one walk. **`checkVarRHS` and `assignFromChain` are not
+  the same answer**: after the walk, `checkVarRHS` also tries `tryExtendChain` and the builtin
+  return lookup, and `assignFromChain` (behind the scoped and unscoped assignments) never has.
+  That is how the code was found, kept as it was; unifying them is a behaviour change to measure
+  on the corpus, not a refactor.
 - **"This function calls nothing" is not "this is not a function".** `FuncCalls`
   answered both by falling back to every call in the file, so a leaf method was
   handed its siblings' calls — `deps` drew an edge out of an empty function,
@@ -1490,12 +1497,12 @@ Some handles need both shapes; others only one, depending on how the code uses t
   fails on the zero value — which is only true if that check does not
   dereference it. `thelper` does not check benchmark functions, because every
   one here is a body handed to `testing.Benchmark`.
-  **Complexity has limits, and the functions already over them are marked.**
-  `gocognit` 50, `nestif` 10, `funlen` 80 statements; a function that was
-  over one when the limit went in carries a `//nolint` saying so. Do not add
-  one to new code to get past a limit — split the function. Refactoring a
-  marked function under the limit makes `nolintlint` fail until the marker
-  goes, which is the point. `depguard` holds three package boundaries
+  **Complexity has limits, and nothing is excused from them.**
+  `gocognit` 50, `nestif` 10, `funlen` 80 statements. The 42 functions that
+  were over one when the limits went in have all been split; do not add a
+  `//nolint` to get past a limit — split the function. `dupl` runs outside
+  tests for the same reason: the two parsers' `extractAllLinks` and three
+  copies of the chain walk were what it found. `depguard` holds three package boundaries
   (`internal/parser` imports only `internal/log` and the dependency-free `internal/conv`; only `daemon` and `cmd`
   import `internal/server`; only `cmd` imports the code-map store and MCP
   server), and `forbidigo` bans printing to stdout under `internal/`.

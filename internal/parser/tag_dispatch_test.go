@@ -65,7 +65,7 @@ func readTagParserSource(t *testing.T) string {
 var (
 	skipLineRe = regexp.MustCompile(`if ch != '.'(?: && ch != '.')* \{`)
 	letterRe   = regexp.MustCompile(`'(.)'`)
-	caseRe     = regexp.MustCompile(`(?m)^\t{3}case '(.)':$`)
+	caseRe     = regexp.MustCompile(`(?m)^\t+case '(.)':$`)
 )
 
 func fastSkipLetters(t *testing.T, src string) []string {
@@ -95,9 +95,16 @@ func dispatchCaseLetters(t *testing.T, src string) []string {
 		t.Fatal("could not find the dispatch switch; update this test if the scan changed shape")
 	}
 
+	// The switch's own function, and no further: another byte switch later
+	// in the file is not this dispatch.
+	body := src[idx:]
+	if end := strings.Index(body, "\n}\n"); end >= 0 {
+		body = body[:end]
+	}
+
 	var out []string
 
-	for _, m := range caseRe.FindAllStringSubmatch(src[idx:], -1) {
+	for _, m := range caseRe.FindAllStringSubmatch(body, -1) {
 		out = append(out, m[1])
 	}
 

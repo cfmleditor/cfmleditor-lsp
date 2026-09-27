@@ -276,9 +276,9 @@ A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 
 ## Suppressions that were fixable (done)
 
-60 `//nolint` markers went, leaving 56 that are needed: the 42 complexity
-markers, 9 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client may
-still send, and the Unix-socket `usetesting`.
+60 `//nolint` markers went here and the 42 complexity markers after (below),
+leaving 14: 9 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client
+may still send, and the Unix-socket `usetesting`.
 
 - **`gosec` (10 of 19).**
   - **Shared-scope go-to-definition (1).** It read `Application.cfc` with a
@@ -378,6 +378,44 @@ would change and `make fmt` applies it. The first run changed 23 files:
 It is mechanical and behaviour-neutral: the build, lint and the race tests
 are unchanged.
 
+## The complexity markers (done)
+
+The 42 functions marked as over `gocognit`, `nestif` or `funlen` when the
+limits went in are all split, and `dupl` is on outside tests. The split was
+done in three groups, each checked against the branch point:
+
+- **CLI, server, refs and resolve (11 markers).** `unresolved` output and
+  `--known-issues` output are identical over the corpus (89,615 entries), and
+  the full `explain` trace is identical on 375 call lines. The code map is
+  identical apart from which of three identical `RailoDBInfo.cfc` copies a
+  call lands on, which differs the same way between two runs of the unchanged
+  binary. `TestEveryAcceptPathRecordsATarget` now checks every function in
+  `resolve.go` taking the trace and returning a verdict, not `canResolveCall`
+  alone, since an accept path moved into a helper would otherwise leave its
+  sight. It still finds all 24.
+- **Formatter (7).** Output is byte-identical for all 7,509 corpus files under
+  five configurations: the defaults, `queryFormat` on, and each comma position
+  with and without it. Formatting time is unchanged.
+- **Parser (24), plus `dupl`'s two pairs.**
+  - **What was merged.**
+    - Three copies of the chain walk are `walkChain`.
+    - `parseBodyVarDecl`'s right-hand side, a copy of `checkVarRHS`, calls it.
+    - The pending-call record is `addPendingCall`.
+    - `extractAllLinks` is one function behind both parsers.
+  - **How it was checked.**
+    - A dump of everything `ParseWithOptions` returns for every corpus file
+      is identical: three modes, including resolvers, `FuncLookup`, the
+      builtin lookup and `FindCalls`, and the lazily parsed per-function
+      results.
+    - The editor helpers (`FindCallContext`, `QualifierBeforeWord`,
+      `FindMatchingTag`) answer identically at 221,172 cursor positions.
+    - Allocations are unchanged on every parser benchmark, and timings are
+      unchanged in alternating runs. `ApplyEdit_Global` was re-run six more
+      times, with medians 127.9µs and 127.8µs.
+    - No chain builder moved to the heap.
+  - **Fixed along the way.** `findScriptFuncScopes` used `strings.ToLower`,
+    which the parser rules forbid on a parse path; it uses `identEq` now.
+
 ## Left off, and why
 
 | Rule | Findings | Why it stays off |
@@ -399,7 +437,6 @@ are unchanged.
 | `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
 | `noinlineerr` | 374 | Forbids `if err := f(); err != nil`, which is this codebase's idiom |
 | `wsl` | 78 | The old implementation; `wsl_v5` is enabled |
-| `dupl` | 12 | Four of its six pairs are tests. The two in the parser (`extractAllLinks` in both parsers, and a chain walk twice in `script_parser.go`) are refactors on the keystroke path, to be benchmarked like the complexity markers |
 | `tagliatelle` | 4 | Wants the MCP tools' snake_case argument names renamed, which would break clients |
 | `gochecknoinits`, `ireturn`, `dogsled`, `embeddedstructfieldcheck`, `gosmopolitan` | 3, 7, 14, 4, 1 | Generated code, style, tests only, style, and a deliberate Han-script test string |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |

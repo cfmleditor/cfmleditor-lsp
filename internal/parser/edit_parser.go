@@ -4,7 +4,7 @@ import "strings"
 
 // FindCallContext finds the function name being called at the cursor position
 // and which parameter the cursor is on (0-based). Also returns the full qualifier.
-func FindCallContext(content string, line, char int) (funcName string, qualifier string, activeParam int) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func FindCallContext(content string, line, char int) (funcName string, qualifier string, activeParam int) {
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return "", "", 0
@@ -16,57 +16,16 @@ func FindCallContext(content string, line, char int) (funcName string, qualifier
 	depth := 0
 	commas := 0
 
-	i := pos - 1
-	for i >= 0 {
-		ch := lineText[i]
-		switch ch {
+	for i := pos - 1; i >= 0; i-- {
+		switch lineText[i] {
 		case ')':
 			depth++
 		case '(':
 			if depth == 0 {
 				// Found the opening paren — extract function name before it
-				end := i
+				funcName, qualifier := calleeBefore(lineText, i)
 
-				start := end - 1
-				for start >= 0 && (isIdentPart(lineText[start]) || lineText[start] == '.') {
-					start--
-				}
-
-				start++
-
-				name := lineText[start:end]
-				if qual, funcN, ok := strings.CutLast(name, "."); ok {
-					// If qualifier is empty, check for call expression before the dot
-					if qual == "" && start > 0 && lineText[start-1] == ')' {
-						j := start - 1
-						parenDepth := 0
-
-						for j >= 0 {
-							switch lineText[j] {
-							case ')':
-								parenDepth++
-							case '(':
-								parenDepth--
-								if parenDepth == 0 {
-									fnStart := j - 1
-									for fnStart >= 0 && isIdentPart(lineText[fnStart]) {
-										fnStart--
-									}
-
-									fnStart++
-
-									return funcN, lineText[fnStart:start], commas
-								}
-							}
-
-							j--
-						}
-					}
-
-					return funcN, qual, commas
-				}
-
-				return name, "", commas
+				return funcName, qualifier, commas
 			}
 
 			depth--
@@ -75,11 +34,52 @@ func FindCallContext(content string, line, char int) (funcName string, qualifier
 				commas++
 			}
 		}
-
-		i--
 	}
 
 	return "", "", 0
+}
+
+// calleeBefore splits the callee ending at the paren at end into its name and
+// qualifier. A qualifier that is itself a call's result — `getService("x").`
+// — is that call's text.
+func calleeBefore(lineText string, end int) (funcName, qualifier string) {
+	start := end - 1
+	for start >= 0 && (isIdentPart(lineText[start]) || lineText[start] == '.') {
+		start--
+	}
+
+	start++
+
+	name := lineText[start:end]
+
+	qual, funcN, ok := strings.CutLast(name, ".")
+	if !ok {
+		return name, ""
+	}
+
+	// If qualifier is empty, check for call expression before the dot
+	if qual == "" && start > 0 && lineText[start-1] == ')' {
+		parenDepth := 0
+
+		for j := start - 1; j >= 0; j-- {
+			switch lineText[j] {
+			case ')':
+				parenDepth++
+			case '(':
+				parenDepth--
+				if parenDepth == 0 {
+					fnStart := j - 1
+					for fnStart >= 0 && isIdentPart(lineText[fnStart]) {
+						fnStart--
+					}
+
+					return funcN, lineText[fnStart+1 : start]
+				}
+			}
+		}
+	}
+
+	return funcN, qual
 }
 
 // LineTextAt returns the text of the given 0-based line.
@@ -135,7 +135,7 @@ func WordAtPosition(content string, line, char int) string {
 
 // QualifierBeforeWord returns the identifier before the dot preceding the word at cursor.
 // Returns "~" prefix for createObject/new patterns, "~?" for call expressions.
-func QualifierBeforeWord(content string, line, char int) string { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func QualifierBeforeWord(content string, line, char int) string {
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return ""
@@ -151,69 +151,11 @@ func QualifierBeforeWord(content string, line, char int) string { //nolint:gocog
 	}
 
 	dotPos := start - 1
-	if dotPos > 0 && (lineText[dotPos-1] == ')' || lineText[dotPos-1] == ']') { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		if lineText[dotPos-1] == ')' {
-			prefix := lineText[:dotPos]
-			lowerPrefix := strings.ToLower(prefix)
+	if dotPos > 0 && lineText[dotPos-1] == ')' {
+		return callResultQualifier(lineText, dotPos)
+	}
 
-			if idx := strings.LastIndex(lowerPrefix, "createobject("); idx >= 0 {
-				args := prefix[idx+13:]
-				args = strings.TrimSuffix(args, ")")
-
-				parts := strings.SplitN(args, ",", 2)
-				if len(parts) == 2 {
-					comp := strings.TrimSpace(parts[1])
-					comp = strings.Trim(comp, "\"'")
-
-					if comp != "" {
-						return "~" + comp
-					}
-				}
-			}
-
-			if idx := strings.LastIndex(lowerPrefix, "new "); idx >= 0 {
-				rest := strings.TrimSpace(prefix[idx+4:])
-				if parenIdx := strings.IndexByte(rest, '('); parenIdx >= 0 {
-					rest = rest[:parenIdx]
-				}
-
-				rest = strings.Trim(rest, "\"'")
-				if rest != "" {
-					return "~" + rest
-				}
-			}
-
-			depth := 0
-
-			i := dotPos - 1
-			for i >= 0 {
-				if lineText[i] == ')' {
-					depth++
-				} else if lineText[i] == '(' {
-					depth--
-					if depth == 0 {
-						break
-					}
-				}
-
-				i--
-			}
-
-			if i > 0 {
-				fnEnd := i
-
-				fnStart := fnEnd - 1
-				for fnStart >= 0 && IsWordChar(lineText[fnStart]) {
-					fnStart--
-				}
-
-				fnStart++
-				if fnStart < fnEnd {
-					return "~?" + lineText[fnStart:dotPos]
-				}
-			}
-		}
-
+	if dotPos > 0 && lineText[dotPos-1] == ']' {
 		return "~"
 	}
 
@@ -230,6 +172,74 @@ func QualifierBeforeWord(content string, line, char int) string { //nolint:gocog
 	}
 
 	return lineText[s:end]
+}
+
+// callResultQualifier is QualifierBeforeWord's answer when the dot at dotPos
+// follows a closing paren: "~" and the component for a createObject(…) or a
+// new X(), "~?" and the call's text for any other call, and a bare "~" when
+// neither can be read.
+func callResultQualifier(lineText string, dotPos int) string {
+	prefix := lineText[:dotPos]
+	lowerPrefix := strings.ToLower(prefix)
+
+	if idx := strings.LastIndex(lowerPrefix, "createobject("); idx >= 0 {
+		args := prefix[idx+13:]
+		args = strings.TrimSuffix(args, ")")
+
+		parts := strings.SplitN(args, ",", 2)
+		if len(parts) == 2 {
+			comp := strings.TrimSpace(parts[1])
+			comp = strings.Trim(comp, "\"'")
+
+			if comp != "" {
+				return "~" + comp
+			}
+		}
+	}
+
+	if idx := strings.LastIndex(lowerPrefix, "new "); idx >= 0 {
+		rest := strings.TrimSpace(prefix[idx+4:])
+		if parenIdx := strings.IndexByte(rest, '('); parenIdx >= 0 {
+			rest = rest[:parenIdx]
+		}
+
+		rest = strings.Trim(rest, "\"'")
+		if rest != "" {
+			return "~" + rest
+		}
+	}
+
+	depth := 0
+
+	i := dotPos - 1
+	for i >= 0 {
+		if lineText[i] == ')' {
+			depth++
+		} else if lineText[i] == '(' {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+
+		i--
+	}
+
+	if i > 0 {
+		fnEnd := i
+
+		fnStart := fnEnd - 1
+		for fnStart >= 0 && IsWordChar(lineText[fnStart]) {
+			fnStart--
+		}
+
+		fnStart++
+		if fnStart < fnEnd {
+			return "~?" + lineText[fnStart:dotPos]
+		}
+	}
+
+	return "~"
 }
 
 // ComponentPathAtCursor checks if the cursor is on a component dot-path in a

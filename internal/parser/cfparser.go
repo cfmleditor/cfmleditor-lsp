@@ -199,7 +199,7 @@ func findFuncScopesIn(regions []Region) []FuncScope {
 }
 
 // findScriptFuncScopes finds function boundaries in script source.
-func findScriptFuncScopes(src string, baseLine int) []FuncScope { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 	var scopes []FuncScope
 
 	sc := NewScanner(src)
@@ -210,34 +210,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope { //nolint:gocog
 			break
 		}
 
-		if tok.Kind != TokIdent {
-			continue
-		}
-
-		isFuncKeyword := identEq(tok.Value, "function")
-		if !isFuncKeyword {
-			lower := strings.ToLower(tok.Value)
-			if lower == "public" || lower == "private" || lower == "remote" || lower == "package" {
-				// Look ahead for [type] function
-				next := sc.PeekSkipComments()
-				if next.Kind == TokIdent && identEq(next.Value, "function") {
-					sc.NextSkipComments()
-
-					isFuncKeyword = true
-				} else if next.Kind == TokIdent {
-					sc.NextSkipComments() // type
-
-					next2 := sc.PeekSkipComments()
-					if next2.Kind == TokIdent && identEq(next2.Value, "function") {
-						sc.NextSkipComments()
-
-						isFuncKeyword = true
-					}
-				}
-			}
-		}
-
-		if !isFuncKeyword {
+		if tok.Kind != TokIdent || !startsFunction(sc, tok) {
 			continue
 		}
 
@@ -254,21 +227,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope { //nolint:gocog
 			continue
 		}
 
-		depth := 1
-		for depth > 0 {
-			t := sc.NextSkipComments()
-			if t.Kind == TokEOF {
-				break
-			}
-
-			if t.Kind == TokLParen {
-				depth++
-			}
-
-			if t.Kind == TokRParen {
-				depth--
-			}
-		}
+		skipToClose(sc, TokLParen, TokRParen)
 
 		// Find body end
 		brace := sc.PeekSkipComments()
@@ -286,30 +245,74 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope { //nolint:gocog
 
 		sc.NextSkipComments()
 
-		braceDepth := 1
-
-		var lastTok Token
-
-		for braceDepth > 0 {
-			lastTok = sc.NextSkipComments()
-			if lastTok.Kind == TokEOF {
-				break
-			}
-
-			if lastTok.Kind == TokLBrace {
-				braceDepth++
-			}
-
-			if lastTok.Kind == TokRBrace {
-				braceDepth--
-			}
-		}
+		lastTok := skipToClose(sc, TokLBrace, TokRBrace)
 
 		endLine := baseLine + lastTok.Line
 		scopes = append(scopes, FuncScope{Name: nameTok.Value, Start: startLine, End: endLine})
 	}
 
 	return scopes
+}
+
+// startsFunction reports whether tok begins a function declaration: the
+// `function` keyword, or an access modifier followed by it, with or without
+// a return type between. It consumes the tokens it reads past tok.
+func startsFunction(sc *Scanner, tok Token) bool {
+	if identEq(tok.Value, "function") {
+		return true
+	}
+
+	if !identEq(tok.Value, "public") && !identEq(tok.Value, "private") &&
+		!identEq(tok.Value, "remote") && !identEq(tok.Value, "package") {
+		return false
+	}
+
+	// Look ahead for [type] function
+	next := sc.PeekSkipComments()
+	if next.Kind != TokIdent {
+		return false
+	}
+
+	sc.NextSkipComments()
+
+	if identEq(next.Value, "function") {
+		return true
+	}
+
+	// next was the return type
+	next2 := sc.PeekSkipComments()
+	if next2.Kind == TokIdent && identEq(next2.Value, "function") {
+		sc.NextSkipComments()
+
+		return true
+	}
+
+	return false
+}
+
+// skipToClose consumes tokens up to the close that balances an open already
+// consumed, and returns the last token it read: that close, or EOF.
+func skipToClose(sc *Scanner, open, closing TokenKind) Token {
+	depth := 1
+
+	var last Token
+
+	for depth > 0 {
+		last = sc.NextSkipComments()
+		if last.Kind == TokEOF {
+			break
+		}
+
+		switch last.Kind {
+		case open:
+			depth++
+		case closing:
+			depth--
+		default:
+		}
+	}
+
+	return last
 }
 
 // findTagFuncScopes finds <cffunction>...</cffunction> boundaries.
@@ -647,78 +650,36 @@ func findScriptSkipSpans(content string) []scriptSkipSpan {
 // blocks inside comments do not produce spurious script regions. Literal
 // <script>...</script> blocks with no CFML inside (see findScriptSkipSpans)
 // are emitted as RegionSkip so their JavaScript is never scanned as CFML.
-func splitCFScriptBlocks(content string) ([]Region, []int32) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func splitCFScriptBlocks(content string) ([]Region, []int32) {
 	idx := buildLineIdx(content)
 	skipSpans := findScriptSkipSpans(content)
 	skipIdx := 0
 
 	var regions []Region
 
+	// add appends a region of kind for content[from:to], unless it is blank.
+	add := func(kind RegionKind, from, to int) {
+		if text := content[from:to]; strings.TrimSpace(text) != "" {
+			regions = append(regions, Region{Kind: kind, StartLine: lineAtOffset(idx, from), Text: text, Offset: from})
+		}
+	}
+
 	pos := 0
 
 	for {
-		// Find the next <cfscript> while skipping CFML comments.
-		openIdx := -1
-		scanPos := pos
-
-		for scanPos < len(content) {
-			i := strings.IndexByte(content[scanPos:], '<')
-			if i < 0 {
-				break
-			}
-
-			i += scanPos
-
-			// Skip CFML comment (<!--- ... --->) with nesting support.
-			if i+4 < len(content) && content[i:i+5] == "<!---" {
-				depth := 1
-				j := i + 5
-
-				for j < len(content) && depth > 0 {
-					switch {
-					case j+4 < len(content) && content[j:j+5] == "<!---":
-						depth++
-						j += 5
-					case j+3 < len(content) && content[j:j+4] == "--->":
-						depth--
-						j += 4
-					default:
-						j++
-					}
-				}
-
-				scanPos = j
-
-				continue
-			}
-
-			if i+10 <= len(content) && strings.EqualFold(content[i:i+10], "<cfscript>") {
-				openIdx = i
-
-				break
-			}
-
-			scanPos = i + 1
-		}
+		openIdx := nextCFScriptOpen(content, pos)
 
 		// Find the next script-skip span at or after pos.
 		for skipIdx < len(skipSpans) && skipSpans[skipIdx].end <= pos {
 			skipIdx++
 		}
 
-		var nextSkip *scriptSkipSpan
-		if skipIdx < len(skipSpans) {
-			nextSkip = &skipSpans[skipIdx]
-		}
-
 		// A skip span starting before the next <cfscript> (or with no more
 		// <cfscript> left at all) is handled first.
-		if nextSkip != nil && (openIdx < 0 || nextSkip.start < openIdx) {
+		if skipIdx < len(skipSpans) && (openIdx < 0 || skipSpans[skipIdx].start < openIdx) {
+			nextSkip := &skipSpans[skipIdx]
 			if nextSkip.start > pos {
-				text := content[pos:nextSkip.start]
-				if strings.TrimSpace(text) != "" {
-					regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
-				}
+				add(RegionTag, pos, nextSkip.start)
 			}
 
 			regions = append(regions, Region{Kind: RegionSkip, StartLine: lineAtOffset(idx, nextSkip.start), Text: content[nextSkip.start:nextSkip.end], Offset: nextSkip.start})
@@ -734,20 +695,14 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) { //nolint:gocognit
 		}
 
 		if openIdx > pos {
-			text := content[pos:openIdx]
-			if strings.TrimSpace(text) != "" {
-				regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
-			}
+			add(RegionTag, pos, openIdx)
 		}
 
 		bodyStart := openIdx + 10 // len("<cfscript>")
 		closeIdx := indexCFTag(content[bodyStart:], "/cfscript>")
 
 		if closeIdx < 0 {
-			text := content[bodyStart:]
-			if strings.TrimSpace(text) != "" {
-				regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text, Offset: bodyStart})
-			}
+			add(RegionScript, bodyStart, len(content))
 
 			pos = len(content)
 
@@ -756,22 +711,65 @@ func splitCFScriptBlocks(content string) ([]Region, []int32) { //nolint:gocognit
 
 		closeIdx += bodyStart
 
-		text := content[bodyStart:closeIdx]
-		if strings.TrimSpace(text) != "" {
-			regions = append(regions, Region{Kind: RegionScript, StartLine: lineAtOffset(idx, bodyStart), Text: text, Offset: bodyStart})
-		}
+		add(RegionScript, bodyStart, closeIdx)
 
 		pos = closeIdx + 11 // len("</cfscript>")
 	}
 
 	if pos < len(content) {
-		text := content[pos:]
-		if strings.TrimSpace(text) != "" {
-			regions = append(regions, Region{Kind: RegionTag, StartLine: lineAtOffset(idx, pos), Text: text, Offset: pos})
-		}
+		add(RegionTag, pos, len(content))
 	}
 
 	return regions, idx
+}
+
+// nextCFScriptOpen is the offset of the next <cfscript> at or after pos that
+// is not inside a CFML comment, or -1.
+func nextCFScriptOpen(content string, pos int) int {
+	for pos < len(content) {
+		i := strings.IndexByte(content[pos:], '<')
+		if i < 0 {
+			return -1
+		}
+
+		i += pos
+
+		if i+4 < len(content) && content[i:i+5] == "<!---" {
+			pos = skipCFMLComment(content, i)
+
+			continue
+		}
+
+		if i+10 <= len(content) && strings.EqualFold(content[i:i+10], "<cfscript>") {
+			return i
+		}
+
+		pos = i + 1
+	}
+
+	return -1
+}
+
+// skipCFMLComment returns the offset just past the <!--- ... ---> that opens
+// at i, honouring nested comments, or len(content) if it never closes.
+func skipCFMLComment(content string, i int) int {
+	depth := 1
+	j := i + 5
+
+	for j < len(content) && depth > 0 {
+		switch {
+		case j+4 < len(content) && content[j:j+5] == "<!---":
+			depth++
+			j += 5
+		case j+3 < len(content) && content[j:j+4] == "--->":
+			depth--
+			j += 4
+		default:
+			j++
+		}
+	}
+
+	return j
 }
 
 // indexCFTag finds "<" followed by suffix (case-insensitive) in s.
