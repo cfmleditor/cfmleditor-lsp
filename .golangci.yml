@@ -175,6 +175,9 @@ linters:
         # v2.14.0). Found nothing; a marshal method on the wrong receiver is
         # silently never called.
         - name: marshal-receiver
+        # An if-init that wraps defeats the idiom, which exists for one-liners;
+        # hoist the statement above the if instead.
+        - name: multiline-if-init
         - name: enforce-slice-style
           arguments: ["literal"]
         # Stage 2 (LINT-PLAN.md).

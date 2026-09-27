@@ -210,9 +210,13 @@ The procedure, each time the pin in the Makefile moves:
   over six alternating rounds.
 - **Deprecated:** unchanged — `wsl`, `gomodguard`, `exhaustruct`, none of
   them enabled. No linter was added.
-- **New revive rules:** `marshal-receiver` (0 findings) is enabled.
-  `use-slices-concat` (7) and `multiline-if-init` (15) are left off; see the
-  table.
+- **New revive rules:** `marshal-receiver` (0 findings) and
+  `multiline-if-init` (15 findings, chosen afterwards) are enabled;
+  `use-slices-concat` (7) is left off, see the table. Each `multiline-if-init`
+  finding was an `if err := f(…wrapped…); err != nil`; the statement now
+  sits above the `if`, which then tests `err` alone. 12 of the 15 were in
+  tests; the other three are the code map's JSONL writer and its SQLite row
+  scans.
 
 ## Left off, and why
 
@@ -233,6 +237,5 @@ The procedure, each time the pin in the Makefile moves:
 | revive `data-race`, `defer` | 3, 16 | False positives: the values are written under a mutex and read after `wg.Wait()`; `CapturePanic` is correct as written |
 | revive `identical-switch-branches`, `deep-exit` | 20, 40 | One case per concept on purpose; the CLI exits by design |
 | revive `use-slices-concat` | 7 | `slices.Concat` of empty inputs returns nil where `append` to `[]T{}` returns an empty slice — the `null`-versus-`[]` distinction stage 5 guards |
-| revive `multiline-if-init` | 15 | Style, not yet chosen (v2.14.0) |
 | `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |

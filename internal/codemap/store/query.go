@@ -27,8 +27,9 @@ func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 			access, component     sql.NullString
 		)
 
-		if err := rows.Scan(&s.ID, &s.Kind, &s.Name, &s.File, &ln, &access, &component,
-			&entry, &reach, &uti, &s.Island, &s.InDegree, &s.OutDegree); err != nil {
+		err := rows.Scan(&s.ID, &s.Kind, &s.Name, &s.File, &ln, &access, &component,
+			&entry, &reach, &uti, &s.Island, &s.InDegree, &s.OutDegree)
+		if err != nil {
 			return nil, fmt.Errorf("scanning symbol: %w", err)
 		}
 
@@ -187,9 +188,10 @@ func (s *Store) neighbours(id, match, join string, limit int) ([]Neighbour, erro
 			access, component      sql.NullString
 		)
 
-		if err := rows.Scan(&n.ID, &n.Kind, &n.Name, &n.File, &ln, &access, &component,
+		err := rows.Scan(&n.ID, &n.Kind, &n.Name, &n.File, &ln, &access, &component,
 			&entry, &reach, &uti, &n.Island, &n.InDegree, &n.OutDegree,
-			&n.EdgeKind, &n.Count, &dyn); err != nil {
+			&n.EdgeKind, &n.Count, &dyn)
+		if err != nil {
 			return nil, fmt.Errorf("scanning neighbour: %w", err)
 		}
 

@@ -29,19 +29,21 @@ func (m *Map) WriteJSONL(w io.Writer) error {
 	enc := json.NewEncoder(w)
 
 	for i := range m.Nodes {
-		if err := enc.Encode(struct {
+		err := enc.Encode(struct {
 			Type string `json:"type"`
 			Node
-		}{"node", m.Nodes[i]}); err != nil {
+		}{"node", m.Nodes[i]})
+		if err != nil {
 			return err
 		}
 	}
 
 	for i := range m.Edges {
-		if err := enc.Encode(struct {
+		err := enc.Encode(struct {
 			Type string `json:"type"`
 			Edge
-		}{"edge", m.Edges[i]}); err != nil {
+		}{"edge", m.Edges[i]})
+		if err != nil {
 			return err
 		}
 	}

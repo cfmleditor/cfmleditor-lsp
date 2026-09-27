@@ -284,10 +284,11 @@ func TestEditorSettingsMergeWithTheDaemonsConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".cfmleditor.json")
 
-	if err := os.WriteFile(cfgPath, []byte(`{
+	err := os.WriteFile(cfgPath, []byte(`{
 		"mappings": {"models": "./models"},
 		"formatting": {"enabled": true, "lineWidth": 100}
-	}`), 0o644); err != nil {
+	}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -340,9 +341,10 @@ func TestOverlayDoesNotDuplicateResolvers(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".cfmleditor.json")
 
-	if err := os.WriteFile(cfgPath, []byte(`{
+	err := os.WriteFile(cfgPath, []byte(`{
 		"componentResolvers": [{"match": "getService(\"$1\")", "resolve": "svc.$1", "prefix": "getService"}]
-	}`), 0o644); err != nil {
+	}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
