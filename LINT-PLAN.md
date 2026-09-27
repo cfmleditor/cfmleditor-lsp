@@ -276,11 +276,16 @@ A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 
 ## Suppressions that were fixable (done)
 
-59 `//nolint` markers went, leaving 57 that are needed: the 42 complexity
-markers, 10 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client may
+60 `//nolint` markers went, leaving 56 that are needed: the 42 complexity
+markers, 9 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client may
 still send, and the Unix-socket `usetesting`.
 
-- **`gosec` (9 of 19).**
+- **`gosec` (10 of 19).**
+  - **Shared-scope go-to-definition (1).** It read `Application.cfc` with a
+    bare `os.ReadFile`, bypassing the server's file system and its open
+    buffers. With unsaved edits the jump landed on whatever line the
+    declaration used to be on. It reads through `refsFS` now.
+    `TestSharedScopeDefinitionReadsTheOpenBuffer` fails without it.
   - **Report writes (7).** The findRefs, exportDeps and code-map reports, and
     the unresolved and CFLint exports, were written `0644` into a `0755`
     directory. They are now `0600` in `0750`.
@@ -296,17 +301,16 @@ still send, and the Unix-socket `usetesting`.
     search's run of `?` placeholders is now one JSON array read through
     `json_each`. That search was about 10% faster than on `main` over 4
     alternating rounds.
-  - **The 10 kept.** Each is the program doing its job:
+  - **The 9 kept.** Each is the program doing its job:
     - the debug log at the path in `CFMLEDITOR_LSP_LOG` (2);
-    - the `vfs` read layer, reading `Application.cfc` from a search directory,
-      reading `.cfmleditor.json` while walking up, and CFLint reading the file
-      it lints (4);
+    - the `vfs` read layer, reading `.cfmleditor.json` while walking up, and
+      CFLint reading the file it lints (3);
     - launching CFLint (2);
     - making the downloaded CFLint executable (1);
     - `SearchSymbols` joining fixed WHERE conditions (1).
 
-    Those reads cannot go through an `os.Root`, because a symlinked
-    `Application.cfc` or config file is legitimate. Wrapping them in
+    Those reads cannot go through an `os.Root`, because a symlinked config
+    file is legitimate. Wrapping them in
     `filepath.Clean` would satisfy gosec without making anything safer.
 
 - **`nilerr` (8) and `errcheck,gosec` on `filepath.Walk` (3).** `nilerr` flags a

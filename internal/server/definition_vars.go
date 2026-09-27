@@ -1,7 +1,6 @@
 package server
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -294,11 +293,16 @@ func (s *Server) crossFileVarDef(scope parser.Scope, word string, docURI uri.URI
 		return nil
 	}
 
+	// Through the open buffers: Application.cfc is often the file being
+	// edited, and a line read from the saved copy lands the cursor wherever
+	// the declaration used to be.
+	fsys := s.refsFS()
+
 	for _, dir := range s.varSearchDirs(docURI, scope) {
 		for _, name := range names {
 			path := filepath.Join(dir, name)
 
-			data, err := os.ReadFile(path) //nolint:gosec // a fixed file name (Application.cfc and the like) in a search directory
+			data, err := fsys.ReadFile(path)
 			if err != nil {
 				continue
 			}
