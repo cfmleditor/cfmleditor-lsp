@@ -1442,6 +1442,15 @@ Some handles need both shapes; others only one, depending on how the code uses t
   fails on the zero value — which is only true if that check does not
   dereference it. `thelper` does not check benchmark functions, because every
   one here is a body handed to `testing.Benchmark`.
+  **Complexity has limits, and the functions already over them are marked.**
+  `gocognit` 50, `nestif` 10, `funlen` 80 statements; a function that was
+  over one when the limit went in carries a `//nolint` saying so. Do not add
+  one to new code to get past a limit — split the function. Refactoring a
+  marked function under the limit makes `nolintlint` fail until the marker
+  goes, which is the point. `depguard` holds three package boundaries
+  (`internal/parser` imports only `internal/log`; only `daemon` and `cmd`
+  import `internal/server`; only `cmd` imports the code-map store and MCP
+  server), and `forbidigo` bans printing to stdout under `internal/`.
   `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
   and the rules left off with the reason for each; update it when a stage
   lands or the pinned golangci-lint moves.

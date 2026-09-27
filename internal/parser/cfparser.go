@@ -193,7 +193,7 @@ func findFuncScopesIn(regions []Region) []FuncScope {
 }
 
 // findScriptFuncScopes finds function boundaries in script source.
-func findScriptFuncScopes(src string, baseLine int) []FuncScope {
+func findScriptFuncScopes(src string, baseLine int) []FuncScope { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	var scopes []FuncScope
 
 	sc := NewScanner(src)
@@ -641,7 +641,7 @@ func findScriptSkipSpans(content string) []scriptSkipSpan {
 // blocks inside comments do not produce spurious script regions. Literal
 // <script>...</script> blocks with no CFML inside (see findScriptSkipSpans)
 // are emitted as RegionSkip so their JavaScript is never scanned as CFML.
-func splitCFScriptBlocks(content string) ([]Region, []int32) {
+func splitCFScriptBlocks(content string) ([]Region, []int32) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	idx := buildLineIdx(content)
 	skipSpans := findScriptSkipSpans(content)
 	skipIdx := 0

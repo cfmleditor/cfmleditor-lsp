@@ -97,7 +97,7 @@ func (f *Formatter) formatQueryChildren(root *sitter.Node) {
 
 // formatQueryNode emits a single query grammar node, inserting newlines
 // before SQL clause keywords.
-func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
+func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	kind := n.Kind()
 
 	switch kind {
@@ -794,7 +794,7 @@ func (f *Formatter) formatQueryCFTag(n *sitter.Node) {
 }
 
 // formatQueryParenthesized handles parenthesized expressions like VALUES (...).
-func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) {
+func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	// Check if content has embedded CF tags (recursively)
 	hasTag := f.queryNodeHasTag(n)
 
@@ -808,7 +808,7 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) {
 		}
 	}
 
-	if !hasTag {
+	if !hasTag { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		// Simple parenthesized node - check if it fits on one line
 		if *first {
 			f.writeIndent()

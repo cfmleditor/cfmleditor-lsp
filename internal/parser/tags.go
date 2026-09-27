@@ -4,7 +4,7 @@ import "strings"
 
 // FindMatchingTag finds the matching open/close tag at the given position.
 // Returns a map with "line" and "character" keys, or nil if no match.
-func FindMatchingTag(content string, line, char int) map[string]any {
+func FindMatchingTag(content string, line, char int) map[string]any { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return nil
@@ -56,7 +56,7 @@ func FindMatchingTag(content string, line, char int) map[string]any {
 
 	cursorOffset := offset + pos
 
-	if isClose {
+	if isClose { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		depth := 0
 
 		i := cursorOffset - 1

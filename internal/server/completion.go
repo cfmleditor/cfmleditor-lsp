@@ -122,7 +122,7 @@ func getMemberFuncItems() []protocol.CompletionItem {
 	return memberFuncItems
 }
 
-func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, error) {
+func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, error) { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	totalStart := time.Now()
 
 	var params protocol.CompletionParams
@@ -247,7 +247,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			}
 		}
 	case closing:
-		if CompletionCloseTags {
+		if CompletionCloseTags { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			t1 := time.Now()
 			trailingGt := -1
 
@@ -1013,12 +1013,12 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 // dotCompletionMethods returns completion items for methods on a component
 // instance variable. It extracts the word before the dot, looks up the
 // component ref, resolves the CFC path, and returns its function defs.
-func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem {
+func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	// Extract variable name before the dot
 	varName := parser.WordBeforeDot(content, line, char)
 
 	// If no simple word, check for call expression before dot: e.g. getService("tours").
-	if varName == "" {
+	if varName == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		lineText := parser.LineTextAt(content, line)
 		dotPos := char - 1
 

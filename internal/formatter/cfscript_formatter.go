@@ -615,7 +615,7 @@ func (f *Formatter) blockPadClose() {
 
 // expr renders an expression node inline and returns the string.
 // Expressions are never written directly; they are embedded in statements.
-func (f *Formatter) expr(n *sitter.Node) string {
+func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	if n == nil {
 		return ""
 	}
@@ -803,7 +803,7 @@ func (f *Formatter) expr(n *sitter.Node) string {
 		argsStr := f.exprArgs(args)
 		result := fnStr + argsStr
 		// If the full call exceeds line width and args are inline, split args.
-		if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 {
+		if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			f.level++
 
 			var parts []string
@@ -1425,7 +1425,7 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 	return callee, parts, true
 }
 
-func (f *Formatter) exprArgs(args *sitter.Node) string {
+func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	if args == nil {
 		return "()"
 	}
@@ -1486,7 +1486,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string {
 		return inline
 	}
 
-	if shouldBreak {
+	if shouldBreak { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		// Re-evaluate at deeper level so nested splits indent correctly.
 		f.level++
 

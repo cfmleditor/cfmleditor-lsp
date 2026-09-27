@@ -1056,7 +1056,7 @@ func (p *scriptParser) parseComponentAttrs() {
 
 		p.sc.NextSkipComments()
 
-		if tok.Kind == TokIdent {
+		if tok.Kind == TokIdent { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			if strings.EqualFold(tok.Value, "extends") {
 				eq := p.sc.PeekSkipComments()
 				if eq.Kind == TokEquals {
@@ -1808,7 +1808,7 @@ func (p *scriptParser) skipDefault() {
 
 // parseBody processes { ... } or ; for a function body, extracting refs.
 // Sets inFunc/localVarSet on entry, clears on exit. Returns the line of the closing token.
-func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
+func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		t := p.sc.NextSkipComments()
@@ -1900,7 +1900,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.inFunc = realKey
 
 	// Resolve ReturnComponent on the current function
-	if len(p.funcs) > 0 {
+	if len(p.funcs) > 0 { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		f := &p.funcs[len(p.funcs)-1]
 		if f.ReturnComponent == "" && p.returnVar != "" {
 			// Look up returnVar in this function's refs
@@ -2306,7 +2306,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, varTok.Line)
 	default:
-		if !isKeyword(rhs.Value) {
+		if !isKeyword(rhs.Value) { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			p.sc.NextSkipComments()
 
 			prevIdent := ""
@@ -2407,7 +2407,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 }
 
 // parseBodyScopedVar handles: scope.name = expr inside a function body.
-func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
+func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
 		// Not "scope.name" at all — e.g. REQUEST[key].method(), indexing the
@@ -2497,7 +2497,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	p.skipLiteralGroup()
 
 	rhs := p.sc.PeekSkipComments()
-	if rhs.Kind == TokIdent {
+	if rhs.Kind == TokIdent { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		var buf foldScratch
 		switch string(buf.lowerFold(rhs.Value)) {
 		case "new":
@@ -2803,7 +2803,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		p.parseEntityNewRef(tok.Value, tok.Line)
 	default:
 		// Check if RHS is a function call: funcName( or someVar.method(
-		if !isKeyword(rhs.Value) {
+		if !isKeyword(rhs.Value) { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			p.sc.NextSkipComments() // consume first ident
 
 			// Walk dot chain: [scope.]varName.method(

@@ -104,7 +104,7 @@ func dedupEntries(entries []Entry) []Entry {
 }
 
 // FormatResult builds a summary and graph from trace entries.
-func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult {
+func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	// Summary
 	lines := make([]string, 0, 1+len(entries))
 	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)

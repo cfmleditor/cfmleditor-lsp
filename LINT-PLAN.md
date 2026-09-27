@@ -117,21 +117,41 @@ runs. Parse time is unchanged: against `main`, alternately, the four parse
 benchmarks moved −4.5% to +3.8% on four rounds, and six more rounds of the one
 that read slower put it at −4% by median.
 
-## Stage 4 — guardrails that need configuration
+## Stage 4 — guardrails that need configuration (done)
 
-- **Complexity ratchet:** `gocognit`, `cyclop`, `nestif` and `funlen` with
-  their thresholds set just above today's maximum. Nothing fires, but no
-  function can grow past the worst one now, and the thresholds can come down
-  later. The parser's dispatch functions are large on purpose; the ratchet
-  does not ask them to shrink.
-- **`depguard`:** package boundaries CLAUDE.md states in prose, made checked —
-  for example `internal/parser` does not import `internal/docs`.
-- **`forbidigo`:** banned calls — for example no `fmt.Print*` in
-  `internal/server`, where stdout is the LSP channel and a stray print
-  corrupts the protocol.
+**Complexity: limits, with today's offenders marked.** A ratchet set just
+above the worst function (cognitive complexity 279, `canResolveCall`) would
+have let every other function grow that far first. So the limits are set
+where code gets hard to read, and each function over one today carries
+`//nolint:<check> // over the limit before it existed; LINT-PLAN.md stage 4`.
+`nolintlint` fails on a marker a function no longer needs, so the list only
+shrinks. No test function was over any limit.
 
-The thresholds and boundaries are proposed from the current code and agreed
-before they go in.
+| Check | Limit | Worst | Over the limit |
+|---|---:|---:|---:|
+| `gocognit` | 50 | 279 | 22 |
+| `nestif` | 10 | 49 | 18 (marked on the `if`) |
+| `funlen` (statements; lines off, the code is commented at length) | 80 | 247 | 8 |
+
+`cyclop` and `gocyclo` are left off: they flag the same functions as
+`gocognit` without weighting nesting, which is what makes code hard to read.
+
+**Package boundaries (`depguard`)**, each matching the import graph when it
+went in:
+
+- `internal/parser` imports no project package but `internal/log` (tests
+  excepted).
+- Only `internal/daemon` and `cmd` import `internal/server`.
+- Only `cmd` imports `internal/codemap/store` and `internal/codemap/mcp`,
+  which keeps SQLite out of the server and the wasm build.
+
+**Banned calls (`forbidigo`):** `fmt.Print*`, `print` and `println` in
+production code under `internal/`, where stdout is the LSP channel. `cmd/`
+prints by design, and tests are excluded (`make visualtest` prints on
+purpose). Nothing matched.
+
+A canary per rule confirmed each fires, and raising the `gocognit` limit made
+`nolintlint` report the markers it had made unnecessary.
 
 ## Stage 5 — style rules that cost nothing today
 
@@ -175,6 +195,5 @@ A choice per rule, since each fixes a style for all future code.
 | gocritic `weakCond`, `rangeAppendAll`, `commentedOutCode` | 1, 1, 5 | False positives: a regexp index is nil or exactly two long; the snippet policy's copy is deliberate; the "code" is an explanatory comment |
 | revive `data-race`, `defer` | 3, 16 | False positives: the values are written under a mutex and read after `wg.Wait()`; `CapturePanic` is correct as written |
 | revive `identical-switch-branches`, `deep-exit` | 20, 40 | One case per concept on purpose; the CLI exits by design |
-| `depguard`, `forbidigo` | — | Stage 4, once configured |
-| Complexity limits | — | Stage 4, as a ratchet |
+| `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |
