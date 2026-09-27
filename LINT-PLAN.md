@@ -273,10 +273,10 @@ A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 
 ## Suppressions that were fixable (done)
 
-36 `//nolint` markers went, leaving the 80 that are needed: the complexity
-markers, `gosec` on reads and writes the server makes by design, `staticcheck`
-on the deprecated `rootUri` a client may still send, the Unix-socket
-`usetesting`, and 14 `exhaustive` token switches with no default arm.
+50 `//nolint` markers went, leaving the 66 that are needed: the 42 complexity
+markers, 19 `gosec` on reads and writes the server makes by design, 4
+`staticcheck` on the deprecated `rootUri` a client may still send, and the
+Unix-socket `usetesting`.
 
 - **`nilerr` (8) and `errcheck,gosec` on `filepath.Walk` (3).** `nilerr` flags a
   `return nil` in a branch reached with a non-nil error, but not a callback that
@@ -284,9 +284,15 @@ on the deprecated `rootUri` a client may still send, the Unix-socket
   unreadable entry exactly as before. `parse` and `scan` shared a copy-pasted
   walk, now `cfmlFilesUnder`; the tree-sitter oracle test collects paths first
   and reads them after.
-- **`exhaustive` (16)**, by `default-signifies-exhaustive: true`. Each was on a
-  switch that already had a `default:` arm. A switch with no default and a
-  missing case is still flagged.
+- **`exhaustive` (30)**, by `default-signifies-exhaustive: true`.
+  - 16 markers were on switches that already had a `default:` arm.
+  - The other 14 were on switches that handle a few of many values: 11 token
+    loops in the parser, two scope filters and completion resolve. Each now
+    ends in an empty `default:` with the marker's reason as a comment. Listing
+    the other values would have meant 32 token kinds in eleven places.
+  - The parser's machine code is unchanged; only debug line numbers moved.
+  - Unlike a `//nolint`, the switch is still checked: deleting its `default:`
+    is flagged.
 - **`revive` (7).**
   - An unused `t` or `req` is now `_`.
   - `context-as-argument` allows `*testing.T` before the context.

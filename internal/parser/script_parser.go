@@ -1276,13 +1276,15 @@ func (p *scriptParser) skipParensQuiet() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF:
 			return false
 		case TokLParen:
 			depth++
 		case TokRParen:
 			depth--
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -1514,11 +1516,13 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 				break
 			}
 
-			switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+			switch t.Kind {
 			case TokIdent:
 				p.scanNestedCall(t)
 			case TokString, TokRBracket:
 				p.handleLiteralToken(t)
+			default:
+				// Any other token is passed over.
 			}
 		}
 	}
@@ -1795,7 +1799,7 @@ func (p *scriptParser) skipDefault() {
 
 		p.sc.NextSkipComments()
 
-		switch peek.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch peek.Kind {
 		case TokLParen, TokLBrace, TokLBracket:
 			depth++
 		case TokRParen, TokRBrace, TokRBracket:
@@ -1804,6 +1808,8 @@ func (p *scriptParser) skipDefault() {
 			p.scanNestedCall(peek)
 		case TokString:
 			p.handleLiteralToken(peek)
+		default:
+			// Any other token is passed over.
 		}
 	}
 }
@@ -1856,7 +1862,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 		afterLT := p.afterLT
 		p.afterLT = t.Kind == TokLT
 
-		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch t.Kind {
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -1872,6 +1878,8 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 			if depth > 0 {
 				p.handleLiteralToken(t)
 			}
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -2715,7 +2723,7 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 		t := p.sc.NextSkipComments()
 		last = t.Line
 
-		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch t.Kind {
 		case TokEOF:
 			return last
 		case TokLBrace:
@@ -2726,6 +2734,8 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 			p.scanNestedCall(t)
 		case TokString, TokRBracket:
 			p.handleLiteralToken(t)
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -3344,13 +3354,15 @@ func (p *globalScriptParser) skipGroup() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF:
 			return false
 		case open:
 			depth++
 		case closing:
 			depth--
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -3648,7 +3660,7 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 
 		argStart = depth == 1 && tok.Kind == TokComma
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokLParen:
 			depth++
 		case TokRParen:
@@ -3657,6 +3669,8 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 			p.scanNestedCall(tok)
 		case TokString, TokRBracket:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -3717,7 +3731,7 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		return
 	}
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLParen:
 		p.recordBareCallAndChain(tok)
 	case TokDot, TokLBracket:
@@ -3726,6 +3740,8 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		// is consumed and dropped, which is the same thing the old scan did to
 		// it.
 		p.checkBareCall(tok)
+	default:
+		// Anything else after the name: it is not a call.
 	}
 }
 
@@ -3782,7 +3798,7 @@ func (p *scriptParser) skipLiteralGroup() {
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokEOF:
 			return
 		case TokLBrace, TokLBracket:
@@ -3799,6 +3815,8 @@ func (p *scriptParser) skipLiteralGroup() {
 			p.scanNestedCall(tok)
 		case TokString:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 }
@@ -3903,11 +3921,13 @@ func (p *scriptParser) skipHashExpr() bool {
 	p.sc.NextSkipComments() // consume the opening #
 
 	for {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokLT, TokGT:
 			return false
 		case TokHash:
 			return true
+		default:
+			// Any other token is part of the span.
 		}
 	}
 }
@@ -3941,7 +3961,7 @@ func (p *scriptParser) skipBracketIndex() bool {
 			return false
 		}
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokLBracket:
 			depth++
 		case TokRBracket:
@@ -3950,6 +3970,8 @@ func (p *scriptParser) skipBracketIndex() bool {
 			p.scanNestedCall(tok)
 		case TokString:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 

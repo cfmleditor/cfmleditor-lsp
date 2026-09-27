@@ -133,13 +133,15 @@ func GlobalVars(content string) []string {
 
 		_ = scopes
 
-		switch v.Scope { //nolint:exhaustive // a file-level name lives in variables or this; every other scope is not one
+		switch v.Scope {
 		case ScopeVariables, ScopeThis:
 			if !seen[v.Name] {
 				seen[v.Name] = true
 
 				names = append(names, v.Name)
 			}
+		default:
+			// Every other scope is not a file-level name.
 		}
 	}
 
@@ -158,13 +160,15 @@ func VarsInFunc(content string, funcStart, funcEnd int) []string {
 			continue
 		}
 
-		switch v.Scope { //nolint:exhaustive // a function's own names are its locals and arguments; every other scope is not one
+		switch v.Scope {
 		case ScopeLocal, ScopeArguments:
 			if !seen[v.Name] {
 				seen[v.Name] = true
 
 				names = append(names, v.Name)
 			}
+		default:
+			// Every other scope is not one of the function's own names.
 		}
 	}
 
