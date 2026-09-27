@@ -68,3 +68,76 @@ func TestSharedScopeDefinitionReadsTheOpenBuffer(t *testing.T) {
 		t.Errorf("with unsaved edits open: line %d, want 5 — the answer came from disk", got)
 	}
 }
+
+// TestSharedScopeDefinitionInScriptSyntax. The script parser recorded
+// application., session. and request. assignments as variables scope and
+// server. ones not at all, so go-to-definition from a page found nothing in a
+// script-syntax Application.cfc or Server.cfc, only in tag syntax.
+func TestSharedScopeDefinitionInScriptSyntax(t *testing.T) {
+	dir := t.TempDir()
+
+	files := map[string]string{
+		"Application.cfc": "component {\n" +
+			"\tfunction onApplicationStart() {\n" +
+			"\t\tapplication.cache = {};\n" +
+			"\t}\n" +
+			"\tfunction onSessionStart() {\n" +
+			"\t\tsession.cart = [];\n" +
+			"\t}\n" +
+			"}\n",
+		"Server.cfc": "component {\n" +
+			"\tfunction onServerStart() {\n" +
+			"\t\tserver.started = now();\n" +
+			"\t}\n" +
+			"}\n",
+	}
+
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page := "<cfset a = application.cache>\n<cfset b = session.cart>\n<cfset c = server.started>\n"
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+	srv.Features = config.ResolveFeatures(nil)
+
+	pageURI := uri.File(filepath.Join(dir, "page.cfm"))
+	srv.setDocument(pageURI, page)
+
+	cases := []struct {
+		cursor, file string
+		line         uint32
+	}{
+		{"application.|cache", "Application.cfc", 2},
+		{"session.|cart", "Application.cfc", 5},
+		{"server.|started", "Server.cfc", 2},
+	}
+
+	for _, c := range cases {
+		line, char := cursorPosition(t, page, c.cursor)
+
+		var loc *protocol.Location
+
+		switch got := definitionAt(t, srv, pageURI, line, char).(type) {
+		case protocol.Location:
+			loc = &got
+		case []protocol.Location:
+			if len(got) > 0 {
+				loc = &got[0]
+			}
+		}
+
+		if loc == nil {
+			t.Errorf("%s: no definition", c.cursor)
+
+			continue
+		}
+
+		if base := filepath.Base(loc.URI.Path()); base != c.file || loc.Range.Start.Line != c.line {
+			t.Errorf("%s: %s line %d, want %s line %d", c.cursor, base, loc.Range.Start.Line, c.file, c.line)
+		}
+	}
+}

@@ -329,10 +329,11 @@ the *formatter*, not the parser.
   against the file's own functions; every other scope holds a runtime value, so
   the receiver is **`$any`** — recorded unqualified, `request.getRemote()` in a
   file that declares a `getRemote` is an edge to a function the call never
-  reaches. **Read the scope from the token, not the `Scope` value**: `request`,
-  `session` and `application` are all dispatched as `ScopeVariables` so an
-  assignment through one keeps its right-hand side's component, and testing the
-  enum put every one of them in the first group.
+  reaches. **Read the scope from the token, not the `Scope` value**: the two
+  groups are "this component" and "anything else", which is not a question the
+  enum answers — `request`, `session` and `application` used to be dispatched
+  as `ScopeVariables`, and testing the enum put every one of them in the first
+  group.
 - **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
   `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
   and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the
@@ -627,7 +628,7 @@ list.
 - `internal/docs/` — generated; regenerate via `make generate`, never hand-edit
 
 **Scope-prefixed assignments:** each handled scope (`local.`, `variables.`, `this.`,
-`arguments.`, `request.`, `session.`, `application.`) needs its own `case` in *both* dispatch
+`arguments.`, `request.`, `session.`, `application.`, `server.`) needs its own `case` in *both* dispatch
 switches (`scriptParser.parse()` and `handleBodyToken`) routing to
 `parseScopedVar`/`parseBodyScopedVar` — that handler is the only one that correctly
 distinguishes `scope.name = rhs` (assignment) from `scope.name.method()` (bare call) for a
@@ -635,9 +636,19 @@ two-token-prefixed LHS. Any scope keyword *not* listed falls through to `checkAs
 default path, which only recognizes a bare `x = ...` (single identifier directly followed by
 `=`); for a scope-prefixed LHS the next token is `.` not `=`, so the statement is silently
 misread as a bare-call check and any component type the RHS establishes is dropped.
-`url.`/`form.`/`cookie.`/`cgi.`/`client.`/`server.` deliberately aren't listed (those scopes
-hold primitive request/config data, not component instances) — add them the same way if a
-project assigns components through one.
+`server.` is listed too, since `Server.cfc` declares into it and go-to-definition looks there.
+`url.`/`form.`/`cookie.`/`cgi.`/`client.` deliberately aren't listed (those scopes hold primitive
+request/config data, not component instances) — add them the same way if a project assigns
+components through one.
+
+**The shared scopes keep their own scope in the declaration.** `request.`, `session.`,
+`application.` and `server.` share the variables-scope handling for everything *except* the
+`VarDef` they record: the component ref is filed globally and the calls are extracted alike.
+They used to be dispatched as `ScopeVariables` outright, which put `application.cache` among
+the component's variables and left go-to-definition on it nothing to find in a script-syntax
+`Application.cfc` (tag syntax always had it right), and made `application.helper =
+function(){}` at component level a method of the component. `sharedScopeOf` maps the keyword;
+`TestSharedScopeAssignmentsKeepTheirScope` pins all three.
 
 ## LSP surface
 

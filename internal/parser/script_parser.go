@@ -659,11 +659,11 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	}
 
 	// The scope is read from the token rather than from the Scope value the
-	// dispatch passed: `request`, `session` and `application` are all dispatched
-	// as ScopeVariables, deliberately, so that an assignment through one keeps
-	// the component its right-hand side establishes. They are not this
-	// component's members, and testing the enum would record every one of them
-	// as a call to a function of that name in this file.
+	// dispatch passed: what matters is whether the scope is this component's
+	// own (this., variables.) or not, which the token says directly. Testing
+	// the enum once recorded request., session. and application. calls as calls
+	// to functions of that name in this file, when they were dispatched as
+	// ScopeVariables.
 	if !identEq(scopeTok.Value, "this") && !identEq(scopeTok.Value, "variables") {
 		call.Variable = scopeTok.Value
 		call.Component = "$any"
@@ -881,12 +881,12 @@ func (p *scriptParser) parse() {
 			p.parseScopedVar(tok, ScopeThis)
 		case "variables":
 			p.parseScopedVar(tok, ScopeVariables)
-		case "request", "session", "application":
+		case "request", "session", "application", "server":
 			// See the matching case in handleBodyToken for why this is needed:
 			// without it, a top-level (outside any function) "REQUEST.x = ..."
 			// assignment falls through to the bare-call path and its RHS
 			// component type is silently dropped.
-			p.parseScopedVar(tok, ScopeVariables)
+			p.parseScopedVar(tok, sharedScopeOf(tok))
 		case "import":
 			p.parseImport()
 		case "new":
@@ -1952,6 +1952,14 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 	return endLine
 }
 
+// sharedScopeOf is the scope a request., session., application. or server.
+// keyword names. Only called from the dispatch arms for those four.
+func sharedScopeOf(tok Token) Scope {
+	scope, _ := ScopeForPrefix(tok.Value)
+
+	return scope
+}
+
 // handleBodyToken processes an identifier inside a function body.
 func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 	var buf foldScratch
@@ -1966,8 +1974,8 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		p.parseBodyScopedVar(tok, ScopeVariables)
 	case "this":
 		p.parseBodyScopedVar(tok, ScopeThis)
-	case "request", "session", "application":
-		// Request/session/application-scoped assignments (e.g. "REQUEST.generator =
+	case "request", "session", "application", "server":
+		// Request/session/application/server-scoped assignments (e.g. "REQUEST.generator =
 		// document.createTable(1);") — checkAssignRef's default path only recognizes
 		// a bare "x = ..." (identifier directly followed by "="); for a scope-prefixed
 		// LHS the next token is "." not "=", so without this case it falls through to
@@ -1976,7 +1984,14 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		// vs "scope.name.method()" split correctly for variables./this./arguments.; the
 		// same handling applies verbatim here. Treated as global (forceGlobal), same as
 		// this./variables., since these scopes outlive the current function.
-		p.parseBodyScopedVar(tok, ScopeVariables)
+		//
+		// The declaration keeps its own scope. It used to be recorded as
+		// ScopeVariables, which put `application.cache` among the component's
+		// variables and left go-to-definition on `application.cache` nothing to
+		// find in a script-syntax Application.cfc. Only the scope is recorded
+		// differently: the component ref, the forced-global filing and the call
+		// extraction are the same for either value.
+		p.parseBodyScopedVar(tok, sharedScopeOf(tok))
 	case "return":
 		p.checkReturnComponent()
 	case "new":
