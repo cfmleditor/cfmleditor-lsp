@@ -496,7 +496,7 @@ what `CanResolveCall` runs and also reports where the call landed. `canResolveCa
 already computed the callee and threw it away. Rather than widen its return across
 twenty-odd `return ""` sites — the hand-maintained parallel list this file warns
 about elsewhere — each accept path calls `tr.hit(...)` beside its existing
-`tr.add(...)`, and **`TestEveryAcceptPathRecordsATarget` parses the source** and
+`tr.addf(...)`, and **`TestEveryAcceptPathRecordsATarget` parses the source** and
 fails on a `return ""` with no preceding hit. A forgotten hit costs a graph edge,
 not a wrong one.
 

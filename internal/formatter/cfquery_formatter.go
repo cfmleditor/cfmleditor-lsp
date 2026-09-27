@@ -50,7 +50,7 @@ func (f *Formatter) formatCFQuery(n *sitter.Node) {
 
 	f.level++
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.Kind() == "cf_query_content" {
 			querySrc := f.src[c.StartByte():c.EndByte()]
@@ -88,7 +88,7 @@ func (f *Formatter) formatCFQuery(n *sitter.Node) {
 func (f *Formatter) formatQueryChildren(root *sitter.Node) {
 	first := true
 
-	for i := uint(0); i < root.ChildCount(); i++ {
+	for i := range root.ChildCount() {
 		c := root.Child(i)
 		f.formatQueryNode(c, &first)
 	}
@@ -605,7 +605,7 @@ func (f *Formatter) formatQueryCFIf(n *sitter.Node) {
 	phase := 0 // 0=before condition, 1=in condition, 2=body
 	bodyFirst := true
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		kind := c.Kind()
 
@@ -698,7 +698,7 @@ func (f *Formatter) formatQueryCFIfAlt(n *sitter.Node) {
 	tagEmitted := false
 	bodyFirst := true
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "<cf":
@@ -714,7 +714,7 @@ func (f *Formatter) formatQueryCFIfAlt(n *sitter.Node) {
 
 			var condSb709 strings.Builder
 
-			for j := uint(0); j < c.ChildCount(); j++ {
+			for j := range c.ChildCount() {
 				ch := c.Child(j)
 				if ch.Kind() != ">" {
 					condSb709.WriteString(f.text(ch))
@@ -780,7 +780,7 @@ func (f *Formatter) formatQueryCFTag(n *sitter.Node) {
 	// Emit body children (skip start/end tags)
 	first := true
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_end_tag":
@@ -827,7 +827,7 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //no
 		// Calculate inline length
 		inlineLen := 1 // "("
 
-		for i := uint(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			c := n.Child(i)
 			switch c.Kind() {
 			case "(", ")":
@@ -854,7 +854,7 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //no
 
 			firstInner := true
 
-			for i := uint(0); i < n.ChildCount(); i++ {
+			for i := range n.ChildCount() {
 				c := n.Child(i)
 				switch c.Kind() {
 				case "(", ")":
@@ -884,7 +884,7 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //no
 			f.level++
 			firstInner := true
 
-			for i := uint(0); i < n.ChildCount(); i++ {
+			for i := range n.ChildCount() {
 				c := n.Child(i)
 				switch c.Kind() {
 				case "(", ")":
@@ -939,7 +939,7 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //no
 	f.level++
 	innerFirst := true
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "(", ")":
@@ -1008,7 +1008,7 @@ func (f *Formatter) formatQueryNodeInline(n *sitter.Node) {
 
 			firstInner := true
 
-			for i := uint(0); i < argsNode.ChildCount(); i++ {
+			for i := range argsNode.ChildCount() {
 				c := argsNode.Child(i)
 				switch c.Kind() {
 				case "(", ")":
@@ -1094,7 +1094,7 @@ func (f *Formatter) writeQuerySelfCloseTag(n *sitter.Node) {
 func (f *Formatter) emitQueryExtrasAndRight(n *sitter.Node, right *sitter.Node, first *bool) {
 	hasComment := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.Kind() == "cf_comment" {
 			if !f.lastNL {
@@ -1127,7 +1127,7 @@ func (f *Formatter) emitQueryExtrasAndRight(n *sitter.Node, right *sitter.Node, 
 
 // queryNodeHasTag checks recursively if a node contains any CF tags.
 func (f *Formatter) queryNodeHasTag(n *sitter.Node) bool {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_selfclose_tag", "cf_if_tag", "cf_tag":

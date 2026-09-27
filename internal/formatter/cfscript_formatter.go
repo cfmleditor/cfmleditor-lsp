@@ -119,7 +119,7 @@ func memberOperator(n *sitter.Node) string {
 		return "?."
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.IsNamed() {
 			continue
@@ -143,7 +143,7 @@ func memberOperator(n *sitter.Node) string {
 func (f *Formatter) writeInterveningComments(n *sitter.Node, from, to uint) bool {
 	wrote := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		switch c.Kind() {
@@ -177,7 +177,7 @@ func (f *Formatter) deferBlockComments(n, from, to *sitter.Node) {
 		return
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		switch c.Kind() {
@@ -205,7 +205,7 @@ func (f *Formatter) deferBlockComments(n, from, to *sitter.Node) {
 func (f *Formatter) elseBody(alt *sitter.Node) *sitter.Node {
 	var lead []*sitter.Node
 
-	for i := uint(0); i < alt.NamedChildCount(); i++ {
+	for i := range alt.NamedChildCount() {
 		c := alt.NamedChild(i)
 
 		switch c.Kind() {
@@ -293,7 +293,7 @@ func (f *Formatter) lineComments(n *sitter.Node) []string {
 		return append(out, strings.TrimSpace(f.text(n)))
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		out = append(out, f.lineComments(n.Child(i))...)
 	}
 
@@ -312,7 +312,7 @@ func (f *Formatter) containsLineComment(n *sitter.Node) bool {
 		return true
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if f.containsLineComment(n.Child(i)) {
 			return true
 		}
@@ -414,7 +414,7 @@ func (f *Formatter) scriptChildren(n *sitter.Node, leadEmitted bool) {
 	prevWasNamed := leadEmitted
 	prevEndRow := int(n.StartPosition().Row)
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if !c.IsNamed() {
 			continue
@@ -640,7 +640,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		right := n.ChildByFieldName("right")
 		op := f.assignmentOperator(n)
 
-		for i := uint(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			c := n.Child(i)
 			if !c.IsNamed() && c.Kind() != "=" {
 				t := c.Kind()
@@ -810,7 +810,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 
 			var isComment []bool
 
-			for i := uint(0); i < args.NamedChildCount(); i++ {
+			for i := range args.NamedChildCount() {
 				c := args.NamedChild(i)
 				parts = append(parts, f.expr(c))
 				isComment = append(isComment, c.Kind() == "cf_comment")
@@ -989,7 +989,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 
 		sb.WriteString("(" + f.opts.condPad())
 
-		for i := uint(0); i < n.NamedChildCount(); i++ {
+		for i := range n.NamedChildCount() {
 			c := n.NamedChild(i)
 
 			if i > 0 {
@@ -1018,7 +1018,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 	case "sequence_expression":
 		// comma-separated list
 		var parts []string
-		for i := uint(0); i < n.NamedChildCount(); i++ {
+		for i := range n.NamedChildCount() {
 			parts = append(parts, f.expr(n.NamedChild(i)))
 		}
 
@@ -1102,7 +1102,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 func (f *Formatter) delimitedComments(n *sitter.Node) string {
 	var sb strings.Builder
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		switch c.Kind() {
@@ -1159,7 +1159,7 @@ func isWordOperator(op string) bool {
 func (f *Formatter) operatorToken(n *sitter.Node) string {
 	var parts []string
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if n.FieldNameForChild(uint32(i)) == "operator" {
 			parts = append(parts, f.text(n.Child(i)))
 		}
@@ -1169,7 +1169,7 @@ func (f *Formatter) operatorToken(n *sitter.Node) string {
 		return strings.Join(parts, " ")
 	}
 	// Fallback: first anonymous child
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if !c.IsNamed() {
 			return c.Kind()
@@ -1193,7 +1193,7 @@ func (f *Formatter) gapOperator(_ *sitter.Node, left, right *sitter.Node) string
 
 // hasChildOfKind reports whether n has a direct child of the given kind.
 func hasChildOfKind(n *sitter.Node, kind string) bool {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if n.Child(i).Kind() == kind {
 			return true
 		}
@@ -1209,7 +1209,7 @@ func mixedArgSeparators(args *sitter.Node) bool {
 	withComma, without := false, false
 	seenArg, comma := false, false
 
-	for i := uint(0); i < args.ChildCount(); i++ {
+	for i := range args.ChildCount() {
 		c := args.Child(i)
 
 		switch {
@@ -1243,7 +1243,7 @@ func tagStyleArgs(args *sitter.Node) bool {
 		return false
 	}
 
-	for i := uint(0); i < args.ChildCount(); i++ {
+	for i := range args.ChildCount() {
 		if args.Child(i).Kind() == "," {
 			return false
 		}
@@ -1261,7 +1261,7 @@ func tagStyleArgs(args *sitter.Node) bool {
 // asked for and returned it whether or not the node had one, so every colon
 // came back as "=" and the file was refused.
 func (f *Formatter) assignmentOperator(n *sitter.Node) string {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.IsNamed() {
 			continue
@@ -1387,7 +1387,7 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 		concat = false
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		switch {
@@ -1444,7 +1444,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // ov
 
 	hasLineComment := false
 
-	for i := uint(0); i < args.NamedChildCount(); i++ {
+	for i := range args.NamedChildCount() {
 		c := args.NamedChild(i)
 		parts = append(parts, f.expr(c))
 		isComment = append(isComment, isCommentKind(c.Kind()))
@@ -1491,7 +1491,7 @@ func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // ov
 		f.level++
 
 		parts = parts[:0]
-		for i := uint(0); i < args.NamedChildCount(); i++ {
+		for i := range args.NamedChildCount() {
 			parts = append(parts, f.expr(args.NamedChild(i)))
 		}
 
@@ -1634,7 +1634,7 @@ func lastArgument(isComment []bool) int {
 func (f *Formatter) commentsBetween(n *sitter.Node, from, to uint) []string {
 	var out []string
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if !isCommentKind(c.Kind()) {
 			continue
@@ -1678,7 +1678,7 @@ type collectionItem struct {
 func (f *Formatter) collectionItems(n *sitter.Node) (items []collectionItem, hasLineComment bool) {
 	items = make([]collectionItem, 0, n.NamedChildCount())
 
-	for i := uint(0); i < n.NamedChildCount(); i++ {
+	for i := range n.NamedChildCount() {
 		c := n.NamedChild(i)
 
 		switch c.Kind() {
@@ -1933,7 +1933,7 @@ func (f *Formatter) structKey(key *sitter.Node) string {
 func isStructPattern(n *sitter.Node) bool {
 	afterSeparator := true
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		kind := c.Kind()
 
@@ -1999,7 +1999,7 @@ func (f *Formatter) exprArrow(n *sitter.Node) string {
 // arrowToken returns the arrow an arrow_function was written with, defaulting
 // to `=>` if the grammar ever produces one without an anonymous arrow child.
 func arrowToken(n *sitter.Node) string {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if kind := n.Child(i).Kind(); kind == "=>" || kind == "->" {
 			return kind
 		}
@@ -2027,7 +2027,7 @@ func (f *Formatter) exprFunctionExpr(n *sitter.Node) string {
 	// an argument list.
 	var attrs []string
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		switch n.FieldNameForChild(uint32(i)) {
 		case "name", "parameters", "body", "return_type":
 			continue
@@ -2237,7 +2237,7 @@ func (f *Formatter) exprParams(params *sitter.Node) string {
 
 	var isComment []bool
 
-	for i := uint(0); i < params.NamedChildCount(); i++ {
+	for i := range params.NamedChildCount() {
 		c := params.NamedChild(i)
 		parts = append(parts, f.exprParam(c))
 		isComment = append(isComment, isCommentKind(c.Kind()))
@@ -2277,7 +2277,7 @@ func (f *Formatter) exprFuncDefParams(params *sitter.Node, col int) string {
 	} else {
 		trailing := hasTrailingComma(params)
 
-		for i := uint(0); i < params.NamedChildCount(); i++ {
+		for i := range params.NamedChildCount() {
 			c := params.NamedChild(i)
 			parts = append(parts, paramPart{
 				text:      f.exprParam(c),
@@ -2419,7 +2419,7 @@ func lastParameter(parts []paramPart) int {
 // entirely of untyped parameters took the non-flat path, which iterates named
 // children only and silently dropped every "required" it found.
 func (f *Formatter) hasFlatParams(params *sitter.Node) bool {
-	for i := uint(0); i < params.ChildCount(); i++ {
+	for i := range params.ChildCount() {
 		switch params.Child(i).Kind() {
 		case "parameter_type", "required":
 			return true
@@ -2506,7 +2506,7 @@ func (f *Formatter) flatParamParts(params *sitter.Node) []paramPart {
 		currentHasName = false
 	}
 
-	for i := uint(0); i < params.ChildCount(); i++ {
+	for i := range params.ChildCount() {
 		c := params.Child(i)
 		kind := c.Kind()
 
@@ -2783,7 +2783,7 @@ func (f *Formatter) scriptComponent(n *sitter.Node) {
 	// than inferred from the form, so neither is imposed on the other.
 	var commaAfter []bool
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "statement_block", "block", "class_body", "component_body":
@@ -2873,7 +2873,7 @@ func (f *Formatter) scriptFunction(n *sitter.Node) {
 	sawFuncKeyword := false
 
 	// Walk children to pick up access modifiers that have no field name.
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		fieldName := n.FieldNameForChild(uint32(i))
@@ -2978,7 +2978,7 @@ func (f *Formatter) scriptProperty(n *sitter.Node) {
 func declKeyword(n *sitter.Node) string {
 	var kws []string
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.IsNamed() {
 			continue
@@ -3017,7 +3017,7 @@ func (f *Formatter) declarator(d *sitter.Node) string {
 	return s
 }
 
-// scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];
+// scriptVarDecl renders: var/local/final name [= expr][, name [= expr]];.
 func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	keyword := declKeyword(n)
 
@@ -3030,7 +3030,7 @@ func (f *Formatter) scriptVarDecl(n *sitter.Node) {
 	// which is where a trailing one was written in the first place.
 	var comments []string
 
-	for i := uint(0); i < n.NamedChildCount(); i++ {
+	for i := range n.NamedChildCount() {
 		d := n.NamedChild(i)
 
 		if isCommentKind(d.Kind()) {
@@ -3073,7 +3073,7 @@ func (f *Formatter) statementComments(n *sitter.Node) (*sitter.Node, []string) {
 		comments []string
 	)
 
-	for i := uint(0); i < n.NamedChildCount(); i++ {
+	for i := range n.NamedChildCount() {
 		c := n.NamedChild(i)
 
 		switch {
@@ -3139,7 +3139,7 @@ func (f *Formatter) scriptThrow(n *sitter.Node) {
 	if val != nil && val.Kind() == "parameter_attribute" {
 		var attrs []string
 
-		for i := uint(0); i < n.NamedChildCount(); i++ {
+		for i := range n.NamedChildCount() {
 			c := n.NamedChild(i)
 			if c.Kind() == "parameter_attribute" {
 				attrs = append(attrs, strings.TrimSpace(f.text(c)))
@@ -3173,7 +3173,7 @@ func (f *Formatter) scriptThrow(n *sitter.Node) {
 		inner := val.NamedChild(0)
 		if inner != nil && inner.Kind() == "sequence_expression" {
 			var parts []string
-			for i := uint(0); i < inner.NamedChildCount(); i++ {
+			for i := range inner.NamedChildCount() {
 				parts = append(parts, f.expr(inner.NamedChild(i)))
 			}
 
@@ -3380,7 +3380,7 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 	}
 
 	if body != nil {
-		for i := uint(0); i < body.NamedChildCount(); i++ {
+		for i := range body.NamedChildCount() {
 			clause := body.NamedChild(i)
 			switch clause.Kind() {
 			case "switch_case":
@@ -3391,7 +3391,7 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 
 				f.level++
 
-				for j := uint(0); j < clause.NamedChildCount(); j++ {
+				for j := range clause.NamedChildCount() {
 					child := clause.NamedChild(j)
 					if val2 != nil && child.StartByte() == val2.StartByte() && child.EndByte() == val2.EndByte() {
 						continue
@@ -3405,7 +3405,7 @@ func (f *Formatter) scriptSwitch(n *sitter.Node) {
 				f.scriptWrite("\n")
 
 				f.level++
-				for j := uint(0); j < clause.NamedChildCount(); j++ {
+				for j := range clause.NamedChildCount() {
 					f.formatScriptNode(clause.NamedChild(j))
 				}
 			default:
@@ -3441,7 +3441,7 @@ func (f *Formatter) scriptDo(n *sitter.Node) {
 	f.scriptWrite(fmt.Sprintf(" while %s;\n", f.parenExpr(cond)))
 }
 
-// scriptFor renders: for (init; cond; update) { body }
+// scriptFor renders: for (init; cond; update) { body }.
 func (f *Formatter) scriptFor(n *sitter.Node) {
 	init := n.ChildByFieldName("initializer")
 	cond := n.ChildByFieldName("condition")
@@ -3472,7 +3472,7 @@ func (f *Formatter) scriptForIn(n *sitter.Node) {
 
 	varKind := ""
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if n.FieldNameForChild(uint32(i)) == "kind" {
 			varKind = f.text(c) + " "
@@ -3502,7 +3502,7 @@ func (f *Formatter) forClause(n *sitter.Node) string {
 
 		var decls []string
 
-		for i := uint(0); i < n.NamedChildCount(); i++ {
+		for i := range n.NamedChildCount() {
 			decls = append(decls, f.declarator(n.NamedChild(i)))
 		}
 
@@ -3532,7 +3532,7 @@ func (f *Formatter) scriptTry(n *sitter.Node) {
 		prevEnd = body.EndByte()
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.Kind() != "catch_clause" {
 			continue
@@ -3614,7 +3614,7 @@ func (f *Formatter) scriptCatch(n *sitter.Node, lead string) {
 		parts = append(parts, f.text(catchType))
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if c := n.Child(i); !c.IsNamed() && c.Kind() == "var" {
 			parts = append(parts, "var")
 
@@ -3662,7 +3662,7 @@ func (f *Formatter) scriptTagStatement(n *sitter.Node) {
 		return
 	}
 
-	for i := uint(0); i < n.NamedChildCount(); i++ {
+	for i := range n.NamedChildCount() {
 		if c := n.NamedChild(i); c.StartByte() < body.StartByte() && f.isLineCommentNode(c) {
 			f.scriptRaw(n)
 

@@ -6,19 +6,19 @@ import (
 	"strings"
 )
 
-// mappingRe matches: this.mappings["/key"] = expandPath("./path") or this.mappings["/key"] = "path"
+// mappingRe matches: this.mappings["/key"] = expandPath("./path") or this.mappings["/key"] = "path".
 var mappingRe = regexp.MustCompile(`(?i)this\.mappings\[\s*["']([^"']+)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["'])`)
 
-// beanPathRe matches: this.beanPaths["namespace"] = expandPath("./path") or this.beanPaths["namespace"] = "path"
+// beanPathRe matches: this.beanPaths["namespace"] = expandPath("./path") or this.beanPaths["namespace"] = "path".
 var beanPathRe = regexp.MustCompile(`(?i)this\.beanPaths\[\s*["']([^"']*)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["'])`)
 
-// diLocationsRe matches: variables.framework.diLocations = "path1,path2"
+// diLocationsRe matches: variables.framework.diLocations = "path1,path2".
 var diLocationsRe = regexp.MustCompile(`(?i)(?:variables\.)?framework\.diLocations\s*=\s*["']([^"']+)["']`)
 
-// ormCfcLocationRe matches: cfcLocation = "path" or cfcLocation: "path" (inside ormSettings struct)
+// ormCfcLocationRe matches: cfcLocation = "path" or cfcLocation: "path" (inside ormSettings struct).
 var ormCfcLocationRe = regexp.MustCompile(`(?i)cfcLocation\s*[:=]\s*["']([^"']+)["']`)
 
-// ormCfcLocationArrayRe matches: cfcLocation = ["path1","path2"] or cfcLocation: ["path1","path2"]
+// ormCfcLocationArrayRe matches: cfcLocation = ["path1","path2"] or cfcLocation: ["path1","path2"].
 var ormCfcLocationArrayRe = regexp.MustCompile(`(?i)cfcLocation\s*[:=]\s*\[([^\]]+)\]`)
 
 // ParseApplicationMappings extracts this.mappings from Application.cfc content.

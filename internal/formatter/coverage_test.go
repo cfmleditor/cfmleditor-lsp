@@ -153,7 +153,7 @@ func collectUnhandled(n *sitter.Node, nonLeaf, leaf map[string]bool) {
 		}
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		collectUnhandled(n.Child(i), nonLeaf, leaf)
 	}
 }

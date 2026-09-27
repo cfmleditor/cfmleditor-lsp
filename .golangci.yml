@@ -31,9 +31,13 @@ linters:
     - gochecksumtype
     - gocognit
     - gocritic
+    - godoclint
+    - godot
     - godox
+    - goprintffuncname
     - gosec
     - ineffassign
+    - intrange
     - iotamixing
     - makezero
     - mirror

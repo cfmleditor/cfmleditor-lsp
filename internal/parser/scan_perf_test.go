@@ -15,7 +15,7 @@ import (
 // rather than a handful of cases chosen by whoever did the rewrite.
 
 func indexCFTagSlow(s, suffix string) int {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == '<' && i+1+len(suffix) <= len(s) && strings.EqualFold(s[i+1:i+1+len(suffix)], suffix) {
 			return i
 		}
@@ -27,7 +27,7 @@ func indexCFTagSlow(s, suffix string) int {
 func buildLineIdxSlow(src string) []int {
 	n := 1
 
-	for i := 0; i < len(src); i++ {
+	for i := range len(src) {
 		if src[i] == '\n' {
 			n++
 		}
@@ -35,7 +35,7 @@ func buildLineIdxSlow(src string) []int {
 
 	idx := make([]int, 1, n)
 
-	for i := 0; i < len(src); i++ {
+	for i := range len(src) {
 		if src[i] == '\n' {
 			idx = append(idx, i+1)
 		}
@@ -148,7 +148,7 @@ func hasScriptTagSlow(content string) bool {
 }
 
 func containsCFTagSlow(s string) bool {
-	for i := 0; i < len(s)-2; i++ {
+	for i := range len(s) - 2 {
 		if s[i] == '<' && toLowerByte(s[i+1]) == 'c' && toLowerByte(s[i+2]) == 'f' {
 			return true
 		}

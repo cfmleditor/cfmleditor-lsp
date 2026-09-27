@@ -6,7 +6,7 @@ import (
 )
 
 // TestFormatOutput prints formatted output for visual inspection.
-// Run with: go test -v -run TestFormatOutput ./internal/formatter/
+// Run with: go test -v -run TestFormatOutput ./internal/formatter/.
 func TestFormatOutput(t *testing.T) {
 	samples := []struct {
 		name string

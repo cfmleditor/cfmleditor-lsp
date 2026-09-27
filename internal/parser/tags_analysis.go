@@ -236,7 +236,7 @@ func FindUnclosedTags(content string, startLine, line, char int) []string {
 func toLowerASCII(s string) string {
 	var b strings.Builder
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'

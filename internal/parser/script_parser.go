@@ -472,7 +472,7 @@ func (p *scriptParser) extractAllLinks() {
 	}
 }
 
-// parseVarDecl handles: var name = expr
+// parseVarDecl handles: var name = expr.
 func (p *scriptParser) parseVarDecl(tok Token) {
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind != TokIdent {
