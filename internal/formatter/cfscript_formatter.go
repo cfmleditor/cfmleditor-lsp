@@ -615,7 +615,7 @@ func (f *Formatter) blockPadClose() {
 
 // expr renders an expression node inline and returns the string.
 // Expressions are never written directly; they are embedded in statements.
-func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
+func (f *Formatter) expr(n *sitter.Node) string {
 	if n == nil {
 		return ""
 	}
@@ -636,46 +636,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 
 	// ── operators / compound expressions ──────────────────────────────────
 	case "assignment_expression":
-		left := n.ChildByFieldName("left")
-		right := n.ChildByFieldName("right")
-		op := f.assignmentOperator(n)
-
-		for i := range n.ChildCount() {
-			c := n.Child(i)
-			if !c.IsNamed() && c.Kind() != "=" {
-				t := c.Kind()
-				if strings.HasSuffix(t, "=") {
-					op = t
-				}
-			}
-		}
-
-		leftStr := f.expr(left)
-		rightStr := f.expr(right)
-		cmts := f.delimitedComments(n)
-
-		// A colon binds to the name it follows, the way a struct literal's
-		// `key: value` does; only "=" takes a space on both sides.
-		sep := " " + op
-		if op == ":" {
-			sep = op
-		}
-
-		result := fmt.Sprintf("%s%s%s %s", leftStr, sep, cmts, rightStr)
-
-		if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
-			f.level++
-			rightStr = f.expr(right)
-			f.level--
-
-			if strings.Contains(rightStr, "\n") {
-				indent := f.opts.indent(f.level + 1)
-
-				return fmt.Sprintf("%s%s%s\n%s%s", leftStr, sep, cmts, indent, rightStr)
-			}
-		}
-
-		return result
+		return f.exprAssignment(n)
 
 	case "augmented_assignment_expression":
 		left := n.ChildByFieldName("left")
@@ -685,70 +646,9 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		return fmt.Sprintf("%s %s%s %s", f.expr(left), op, f.delimitedComments(n), f.expr(right))
 
 	case "binary_expression":
-		left := n.ChildByFieldName("left")
-		right := n.ChildByFieldName("right")
-		op := f.operatorToken(n)
-		cmts := f.delimitedComments(n)
-
-		// A word operator — `AND`, `EQ`, `IS NOT`, `DOES NOT CONTAIN` — is
-		// lifted from the source. Until tree-sitter-cfml v0.26.36 the grammar
-		// hid those tokens, so op was empty and this was the only path they
-		// took; later releases expose them, and following the symbolic
-		// operators' path instead would move a block comment written before
-		// the operator to after it, which the guard rejects, and reproduce a
-		// condition with a line comment in it verbatim rather than formatted.
-		if op == "" || isWordOperator(op) {
-			// gapOperator lifts the raw source between the operands, so
-			// anything sitting in that gap — comments included — is already
-			// carried across. Adding them again would emit them twice.
-			op = f.gapOperator(n, left, right)
-			cmts = ""
-		}
-
-		joined := fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
-
-		// A `//` comment between the operands is neither the left nor the
-		// right field, and delimitedComments deliberately refuses to re-emit
-		// one inline: it runs to end of line, so putting it back between the
-		// operator and the right operand comments the rest of the expression
-		// out. Dropping it was left to the guard — which is what rejected
-		// ColdBox's Router.cfc, where `) & // multi-host` lost its comment
-		// outright. Reproduce the expression as written instead, the same
-		// fallback ternary_expression takes for a comment parked before its
-		// `:`.
-		//
-		// A gap lifted by gapOperator needs the check too. Nothing in it was
-		// dropped, but it was trimmed and the right operand joined on after it,
-		// so a `//` comment written on its own line between `OR` and the next
-		// clause — how WireBox's Binder.cfc annotates each clause of a filter —
-		// came out as `OR // why ( clause )`, with the clause inside the
-		// comment. Its only occurrence in the corpus is in a closure body, which
-		// was copied verbatim until closures were formatted.
-		if !f.keptLineComments(n, joined) {
-			return f.text(n)
-		}
-
-		return joined
-
-	// not_expression is `!` and `NOT` in tree-sitter-cfml after v0.26.36, which
-	// split them out of unary_expression to give them CFML's precedence, looser
-	// than the comparisons. Its operator is a not_operator node rather than a
-	// token, but its text is the same.
+		return f.exprBinary(n)
 	case "unary_expression", "not_expression":
-		op := n.ChildByFieldName("operator")
-		arg := n.ChildByFieldName("argument")
-
-		if op == nil {
-			op = n.Child(0)
-		}
-
-		opStr := f.text(op)
-		// word operators need a space: typeof, void, delete, not
-		if isWordOp(opStr) {
-			return fmt.Sprintf("%s %s", opStr, f.expr(arg))
-		}
-
-		return fmt.Sprintf("%s%s", opStr, f.expr(arg))
+		return f.exprUnary(n)
 
 	case "update_expression":
 		arg := n.ChildByFieldName("argument")
@@ -761,259 +661,25 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		return fmt.Sprintf("%s%s", f.expr(arg), op)
 
 	case "ternary_expression":
-		cond := n.ChildByFieldName("condition")
-		cons := n.ChildByFieldName("consequence")
-		alt := n.ChildByFieldName("alternative")
-		condStr := f.expr(cond)
-		consStr := f.expr(cons)
-		altStr := f.expr(alt)
-
-		inline := fmt.Sprintf("%s ? %s : %s", condStr, consStr, altStr)
-
-		// A `//` comment parked before the `:` — a common way to say why the
-		// alternative is what it is — belongs to none of the three fields above
-		// and was dropped outright. Reproduce the expression as written rather
-		// than lose it; a line comment could not be re-inlined into either
-		// branch anyway, since it runs to end of line.
-		if !f.keptLineComments(n, inline) {
-			return f.text(n)
-		}
-
-		if len(inline) > f.opts.LineWidth {
-			indent := f.opts.indent(f.level + 1)
-
-			return condStr + "\n" + indent + "? " + consStr + "\n" + indent + ": " + altStr
-		}
-
-		return inline
+		return f.exprTernary(n)
 
 	case "query_expression":
 		return f.exprQuery(n)
 
 	case "call_expression":
-		fn := n.ChildByFieldName("function")
-		args := n.ChildByFieldName("arguments")
-		fnStr := f.expr(fn)
-		// If fn has a chain break, evaluate args at deeper level.
-		chainBroken := endsInChainBreak(fnStr)
-		if chainBroken {
-			f.level++
-		}
-
-		argsStr := f.exprArgs(args)
-		result := fnStr + argsStr
-		// If the full call exceeds line width and args are inline, split args.
-		if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-			f.level++
-
-			var parts []string
-
-			var isComment []bool
-
-			for i := range args.NamedChildCount() {
-				c := args.NamedChild(i)
-				parts = append(parts, f.expr(c))
-				isComment = append(isComment, c.Kind() == "cf_comment")
-			}
-
-			indent := f.opts.indent(f.level)
-			f.level--
-			outerIndent := f.opts.indent(f.level)
-
-			var sb strings.Builder
-
-			sb.WriteString("(\n")
-
-			leading := f.opts.CommaPosition == "before"
-			for i, p := range parts {
-				if leading {
-					if !isComment[i] && i > 0 {
-						hasPrev := false
-
-						for j := i - 1; j >= 0; j-- {
-							if !isComment[j] {
-								hasPrev = true
-
-								break
-							}
-						}
-
-						if hasPrev {
-							sb.WriteString(indent)
-							sb.WriteString(", ")
-							sb.WriteString(p)
-						} else {
-							sb.WriteString(indent)
-							sb.WriteString(p)
-						}
-					} else {
-						sb.WriteString(indent)
-						sb.WriteString(p)
-					}
-				} else {
-					sb.WriteString(indent)
-					sb.WriteString(p)
-
-					if !isComment[i] {
-						hasMore := false
-
-						for j := i + 1; j < len(parts); j++ {
-							if !isComment[j] {
-								hasMore = true
-
-								break
-							}
-						}
-
-						if hasMore {
-							sb.WriteString(",")
-						}
-					}
-				}
-
-				sb.WriteString("\n")
-			}
-
-			sb.WriteString(outerIndent)
-			sb.WriteByte(')')
-			argsStr = sb.String()
-		}
-
-		if chainBroken {
-			f.level--
-		}
-
-		return fnStr + argsStr
+		return f.exprCall(n)
 
 	case "new_expression":
-		ctor := n.ChildByFieldName("constructor")
-		args := n.ChildByFieldName("arguments")
-
-		// An inline component literal — `new component { property name="x"; function
-		// f() {} }` — has neither a constructor nor an argument list: the class is
-		// its body. The field-based rendering below found nothing in either field
-		// and emitted `new ()`, deleting the keyword and the whole body with it
-		// (16 files in the corpus, all rejected by the whitespaceOnly guard, so in
-		// the editor this reads as format-on-save doing nothing).
-		//
-		// Emitted verbatim, in the same spirit as a function_expression's body:
-		// it's a declaration rather than an expression to re-space, and rendering
-		// it properly needs the statement machinery, which does not return a string.
-		if ctor == nil && hasChildOfKind(n, "component_body") {
-			return f.text(n)
-		}
-
-		// `new java:java.io.File(p)` — the type prefix is a single token that
-		// already carries its colon, and dropping it changes which object gets
-		// constructed, so it has to be reproduced verbatim.
-		prefix := ""
-
-		if p := n.ChildByFieldName("prefix"); p != nil {
-			prefix = f.text(p)
-		}
-
-		return fmt.Sprintf("new %s%s%s", prefix, f.expr(ctor), f.exprArgs(args))
+		return f.exprNew(n)
 
 	case "member_expression":
-		obj := n.ChildByFieldName("object")
-		prop := n.ChildByFieldName("property")
-		objStr := f.expr(obj)
-		propStr := f.expr(prop)
-		op := memberOperator(n)
-
-		// A comment between a chained call and its next hop belongs to no
-		// field, so joining object and property dropped it.
-		if obj != nil && prop != nil {
-			if comments := f.commentsBetween(n, obj.EndByte(), prop.StartByte()); len(comments) > 0 {
-				indent := f.opts.indent(f.level + 1)
-
-				var b strings.Builder
-
-				b.WriteString(objStr)
-
-				for _, c := range comments {
-					b.WriteString("\n")
-					b.WriteString(indent)
-					b.WriteString(c)
-				}
-
-				b.WriteString("\n")
-				b.WriteString(indent)
-				b.WriteString(op)
-				b.WriteString(propStr)
-
-				return b.String()
-			}
-		}
-
-		inline := objStr + op + propStr
-		// Break if the object part is multi-line or the last line exceeds width.
-		lastLine := inline
-		if _, after, ok := strings.CutLast(inline, "\n"); ok {
-			lastLine = after
-		}
-
-		if len(lastLine) > f.opts.LineWidth &&
-			obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
-			indent := f.opts.indent(f.level + 1)
-
-			return objStr + "\n" + indent + op + propStr
-		}
-
-		return inline
+		return f.exprMember(n)
 
 	case "subscript_expression":
-		obj := n.ChildByFieldName("object")
-		idx := n.ChildByFieldName("index")
-
-		// A subscript can be reached statically — `Test::["f"]()`, the
-		// subscripted form of `Test::f()` — and the grammar reports the `::` as
-		// a named static_chain field, exactly as it does on a member_expression
-		// (see memberOperator). Rendering the node from object and index alone
-		// dropped it and turned a static call into an instance call. The
-		// grammar has only parsed this form since v0.26.35 (#79), so until then
-		// the file was refused rather than mis-rendered.
-		accessor := ""
-		if sc := n.ChildByFieldName("static_chain"); sc != nil {
-			accessor = "::"
-		}
-
-		return fmt.Sprintf("%s%s[%s]", f.expr(obj), accessor, f.expr(idx))
+		return f.exprSubscript(n)
 
 	case "parenthesized_expression":
-		// Every named child is rendered, not just the first. A comment inside
-		// the parens — commonly a commented-out clause parked at the end of a
-		// long condition — is a named child like any other, so taking child 0
-		// dropped it, or worse rendered it as the expression itself.
-		var sb strings.Builder
-
-		sb.WriteString("(" + f.opts.condPad())
-
-		for i := range n.NamedChildCount() {
-			c := n.NamedChild(i)
-
-			if i > 0 {
-				sb.WriteString(" ")
-			}
-
-			switch c.Kind() {
-			case "comment", "block_comment", "cf_comment":
-				text := strings.TrimSpace(f.text(c))
-				sb.WriteString(text)
-
-				// A "//" comment runs to end of line, so without a break it
-				// would swallow the rest of the condition and the ")".
-				if strings.HasPrefix(text, "//") {
-					sb.WriteString("\n")
-				}
-			default:
-				sb.WriteString(f.expr(c))
-			}
-		}
-
-		sb.WriteString(f.opts.condPad() + ")")
-
-		return sb.String()
+		return f.exprParenthesized(n)
 
 	case "sequence_expression":
 		// comma-separated list
@@ -1036,16 +702,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		return f.exprObject(n)
 
 	case "object_pattern":
-		// A struct literal written with `=` (`{ a = 1, "b" = 2 }`) parses as an
-		// object_pattern, because the grammar shares the rule with JavaScript
-		// destructuring. It used to fall through to the verbatim default, so
-		// the most common struct spelling in CFML was never formatted at all.
-		// Anything that is not a plain key/value list keeps its source text.
-		if !isStructPattern(n) {
-			return f.text(n)
-		}
-
-		return f.exprObject(n)
+		return f.exprObjectPattern(n)
 
 	case "pair":
 		return f.exprPair(f.expr(n.ChildByFieldName("key")), ":", n.ChildByFieldName("value"))
@@ -1054,15 +711,7 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		return f.exprPair(f.structKey(n.ChildByFieldName("key")), " =", n.ChildByFieldName("value"))
 
 	case "object_assignment_pattern":
-		// `{ a = 1 }`: the key is a bare name, so the grammar reads it as a
-		// destructuring default rather than a cf_pair. Only that shape reaches
-		// here; isStructPattern sends every other one to the verbatim default.
-		left := n.ChildByFieldName("left")
-		if left == nil {
-			return f.text(n)
-		}
-
-		return f.exprPair(f.text(left), " =", n.ChildByFieldName("right"))
+		return f.exprObjectAssignmentPattern(n)
 
 	// ── functions ─────────────────────────────────────────────────────────
 	case "arrow_function":
@@ -1082,6 +731,399 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 	default:
 		return f.text(n)
 	}
+}
+
+// exprAssignment formats a assignment_expression.
+func (f *Formatter) exprAssignment(n *sitter.Node) string {
+	left := n.ChildByFieldName("left")
+	right := n.ChildByFieldName("right")
+	op := f.assignmentOperator(n)
+
+	for i := range n.ChildCount() {
+		c := n.Child(i)
+		if !c.IsNamed() && c.Kind() != "=" {
+			t := c.Kind()
+			if strings.HasSuffix(t, "=") {
+				op = t
+			}
+		}
+	}
+
+	leftStr := f.expr(left)
+	rightStr := f.expr(right)
+	cmts := f.delimitedComments(n)
+
+	// A colon binds to the name it follows, the way a struct literal's
+	// `key: value` does; only "=" takes a space on both sides.
+	sep := " " + op
+	if op == ":" {
+		sep = op
+	}
+
+	result := fmt.Sprintf("%s%s%s %s", leftStr, sep, cmts, rightStr)
+
+	if len(result) > f.opts.LineWidth && !strings.Contains(rightStr, "\n") {
+		f.level++
+		rightStr = f.expr(right)
+		f.level--
+
+		if strings.Contains(rightStr, "\n") {
+			indent := f.opts.indent(f.level + 1)
+
+			return fmt.Sprintf("%s%s%s\n%s%s", leftStr, sep, cmts, indent, rightStr)
+		}
+	}
+
+	return result
+}
+
+// exprBinary formats a binary_expression.
+func (f *Formatter) exprBinary(n *sitter.Node) string {
+	left := n.ChildByFieldName("left")
+	right := n.ChildByFieldName("right")
+	op := f.operatorToken(n)
+	cmts := f.delimitedComments(n)
+
+	// A word operator — `AND`, `EQ`, `IS NOT`, `DOES NOT CONTAIN` — is
+	// lifted from the source. Until tree-sitter-cfml v0.26.36 the grammar
+	// hid those tokens, so op was empty and this was the only path they
+	// took; later releases expose them, and following the symbolic
+	// operators' path instead would move a block comment written before
+	// the operator to after it, which the guard rejects, and reproduce a
+	// condition with a line comment in it verbatim rather than formatted.
+	if op == "" || isWordOperator(op) {
+		// gapOperator lifts the raw source between the operands, so
+		// anything sitting in that gap — comments included — is already
+		// carried across. Adding them again would emit them twice.
+		op = f.gapOperator(n, left, right)
+		cmts = ""
+	}
+
+	joined := fmt.Sprintf("%s %s%s %s", f.expr(left), op, cmts, f.expr(right))
+
+	// A `//` comment between the operands is neither the left nor the
+	// right field, and delimitedComments deliberately refuses to re-emit
+	// one inline: it runs to end of line, so putting it back between the
+	// operator and the right operand comments the rest of the expression
+	// out. Dropping it was left to the guard — which is what rejected
+	// ColdBox's Router.cfc, where `) & // multi-host` lost its comment
+	// outright. Reproduce the expression as written instead, the same
+	// fallback ternary_expression takes for a comment parked before its
+	// `:`.
+	//
+	// A gap lifted by gapOperator needs the check too. Nothing in it was
+	// dropped, but it was trimmed and the right operand joined on after it,
+	// so a `//` comment written on its own line between `OR` and the next
+	// clause — how WireBox's Binder.cfc annotates each clause of a filter —
+	// came out as `OR // why ( clause )`, with the clause inside the
+	// comment. Its only occurrence in the corpus is in a closure body, which
+	// was copied verbatim until closures were formatted.
+	if !f.keptLineComments(n, joined) {
+		return f.text(n)
+	}
+
+	return joined
+
+	// not_expression is `!` and `NOT` in tree-sitter-cfml after v0.26.36, which
+	// split them out of unary_expression to give them CFML's precedence, looser
+	// than the comparisons. Its operator is a not_operator node rather than a
+	// token, but its text is the same.
+}
+
+// exprUnary formats a unary_expression.
+func (f *Formatter) exprUnary(n *sitter.Node) string {
+	op := n.ChildByFieldName("operator")
+	arg := n.ChildByFieldName("argument")
+
+	if op == nil {
+		op = n.Child(0)
+	}
+
+	opStr := f.text(op)
+	// word operators need a space: typeof, void, delete, not
+	if isWordOp(opStr) {
+		return fmt.Sprintf("%s %s", opStr, f.expr(arg))
+	}
+
+	return fmt.Sprintf("%s%s", opStr, f.expr(arg))
+}
+
+// exprTernary formats a ternary_expression.
+func (f *Formatter) exprTernary(n *sitter.Node) string {
+	cond := n.ChildByFieldName("condition")
+	cons := n.ChildByFieldName("consequence")
+	alt := n.ChildByFieldName("alternative")
+	condStr := f.expr(cond)
+	consStr := f.expr(cons)
+	altStr := f.expr(alt)
+
+	inline := fmt.Sprintf("%s ? %s : %s", condStr, consStr, altStr)
+
+	// A `//` comment parked before the `:` — a common way to say why the
+	// alternative is what it is — belongs to none of the three fields above
+	// and was dropped outright. Reproduce the expression as written rather
+	// than lose it; a line comment could not be re-inlined into either
+	// branch anyway, since it runs to end of line.
+	if !f.keptLineComments(n, inline) {
+		return f.text(n)
+	}
+
+	if len(inline) > f.opts.LineWidth {
+		indent := f.opts.indent(f.level + 1)
+
+		return condStr + "\n" + indent + "? " + consStr + "\n" + indent + ": " + altStr
+	}
+
+	return inline
+}
+
+// exprCall formats a call_expression.
+func (f *Formatter) exprCall(n *sitter.Node) string {
+	fn := n.ChildByFieldName("function")
+	args := n.ChildByFieldName("arguments")
+	fnStr := f.expr(fn)
+	// If fn has a chain break, evaluate args at deeper level.
+	chainBroken := endsInChainBreak(fnStr)
+	if chainBroken {
+		f.level++
+	}
+
+	argsStr := f.exprArgs(args)
+	result := fnStr + argsStr
+	// If the full call exceeds line width and args are inline, split args.
+	if !strings.Contains(argsStr, "\n") && len(result) > f.opts.LineWidth && args != nil && args.NamedChildCount() > 0 {
+		argsStr = f.brokenCallArgs(args)
+	}
+
+	if chainBroken {
+		f.level--
+	}
+
+	return fnStr + argsStr
+}
+
+// brokenCallArgs writes a call's arguments one per line, for a call too long
+// to fit, with commas where CommaPosition puts them and none after a comment.
+func (f *Formatter) brokenCallArgs(args *sitter.Node) string {
+	f.level++
+
+	count := args.NamedChildCount()
+	parts := make([]string, 0, count)
+	isComment := make([]bool, 0, count)
+
+	for i := range count {
+		c := args.NamedChild(i)
+		parts = append(parts, f.expr(c))
+		isComment = append(isComment, c.Kind() == "cf_comment")
+	}
+
+	indent := f.opts.indent(f.level)
+	f.level--
+	outerIndent := f.opts.indent(f.level)
+
+	var sb strings.Builder
+
+	sb.WriteString("(\n")
+
+	leading := f.opts.CommaPosition == "before"
+
+	for i, p := range parts {
+		sb.WriteString(indent)
+
+		switch {
+		case isComment[i]:
+			sb.WriteString(p)
+		case leading:
+			if anyArgument(isComment[:i]) {
+				sb.WriteString(", ")
+			}
+
+			sb.WriteString(p)
+		default:
+			sb.WriteString(p)
+
+			if anyArgument(isComment[i+1:]) {
+				sb.WriteString(",")
+			}
+		}
+
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(outerIndent)
+	sb.WriteByte(')')
+
+	return sb.String()
+}
+
+// anyArgument reports whether any entry is an argument rather than a comment.
+func anyArgument(isComment []bool) bool {
+	return slices.Contains(isComment, false)
+}
+
+// exprNew formats a new_expression.
+func (f *Formatter) exprNew(n *sitter.Node) string {
+	ctor := n.ChildByFieldName("constructor")
+	args := n.ChildByFieldName("arguments")
+
+	// An inline component literal — `new component { property name="x"; function
+	// f() {} }` — has neither a constructor nor an argument list: the class is
+	// its body. The field-based rendering below found nothing in either field
+	// and emitted `new ()`, deleting the keyword and the whole body with it
+	// (16 files in the corpus, all rejected by the whitespaceOnly guard, so in
+	// the editor this reads as format-on-save doing nothing).
+	//
+	// Emitted verbatim, in the same spirit as a function_expression's body:
+	// it's a declaration rather than an expression to re-space, and rendering
+	// it properly needs the statement machinery, which does not return a string.
+	if ctor == nil && hasChildOfKind(n, "component_body") {
+		return f.text(n)
+	}
+
+	// `new java:java.io.File(p)` — the type prefix is a single token that
+	// already carries its colon, and dropping it changes which object gets
+	// constructed, so it has to be reproduced verbatim.
+	prefix := ""
+
+	if p := n.ChildByFieldName("prefix"); p != nil {
+		prefix = f.text(p)
+	}
+
+	return fmt.Sprintf("new %s%s%s", prefix, f.expr(ctor), f.exprArgs(args))
+}
+
+// exprMember formats a member_expression.
+func (f *Formatter) exprMember(n *sitter.Node) string {
+	obj := n.ChildByFieldName("object")
+	prop := n.ChildByFieldName("property")
+	objStr := f.expr(obj)
+	propStr := f.expr(prop)
+	op := memberOperator(n)
+
+	// A comment between a chained call and its next hop belongs to no
+	// field, so joining object and property dropped it.
+	if obj != nil && prop != nil {
+		if comments := f.commentsBetween(n, obj.EndByte(), prop.StartByte()); len(comments) > 0 {
+			indent := f.opts.indent(f.level + 1)
+
+			var b strings.Builder
+
+			b.WriteString(objStr)
+
+			for _, c := range comments {
+				b.WriteString("\n")
+				b.WriteString(indent)
+				b.WriteString(c)
+			}
+
+			b.WriteString("\n")
+			b.WriteString(indent)
+			b.WriteString(op)
+			b.WriteString(propStr)
+
+			return b.String()
+		}
+	}
+
+	inline := objStr + op + propStr
+	// Break if the object part is multi-line or the last line exceeds width.
+	lastLine := inline
+	if _, after, ok := strings.CutLast(inline, "\n"); ok {
+		lastLine = after
+	}
+
+	if len(lastLine) > f.opts.LineWidth &&
+		obj != nil && (obj.Kind() == "call_expression" || obj.Kind() == "member_expression") {
+		indent := f.opts.indent(f.level + 1)
+
+		return objStr + "\n" + indent + op + propStr
+	}
+
+	return inline
+}
+
+// exprSubscript formats a subscript_expression.
+func (f *Formatter) exprSubscript(n *sitter.Node) string {
+	obj := n.ChildByFieldName("object")
+	idx := n.ChildByFieldName("index")
+
+	// A subscript can be reached statically — `Test::["f"]()`, the
+	// subscripted form of `Test::f()` — and the grammar reports the `::` as
+	// a named static_chain field, exactly as it does on a member_expression
+	// (see memberOperator). Rendering the node from object and index alone
+	// dropped it and turned a static call into an instance call. The
+	// grammar has only parsed this form since v0.26.35 (#79), so until then
+	// the file was refused rather than mis-rendered.
+	accessor := ""
+	if sc := n.ChildByFieldName("static_chain"); sc != nil {
+		accessor = "::"
+	}
+
+	return fmt.Sprintf("%s%s[%s]", f.expr(obj), accessor, f.expr(idx))
+}
+
+// exprParenthesized formats a parenthesized_expression.
+func (f *Formatter) exprParenthesized(n *sitter.Node) string {
+	// Every named child is rendered, not just the first. A comment inside
+	// the parens — commonly a commented-out clause parked at the end of a
+	// long condition — is a named child like any other, so taking child 0
+	// dropped it, or worse rendered it as the expression itself.
+	var sb strings.Builder
+
+	sb.WriteString("(" + f.opts.condPad())
+
+	for i := range n.NamedChildCount() {
+		c := n.NamedChild(i)
+
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+
+		switch c.Kind() {
+		case "comment", "block_comment", "cf_comment":
+			text := strings.TrimSpace(f.text(c))
+			sb.WriteString(text)
+
+			// A "//" comment runs to end of line, so without a break it
+			// would swallow the rest of the condition and the ")".
+			if strings.HasPrefix(text, "//") {
+				sb.WriteString("\n")
+			}
+		default:
+			sb.WriteString(f.expr(c))
+		}
+	}
+
+	sb.WriteString(f.opts.condPad() + ")")
+
+	return sb.String()
+}
+
+// exprObjectPattern formats a object_pattern.
+func (f *Formatter) exprObjectPattern(n *sitter.Node) string {
+	// A struct literal written with `=` (`{ a = 1, "b" = 2 }`) parses as an
+	// object_pattern, because the grammar shares the rule with JavaScript
+	// destructuring. It used to fall through to the verbatim default, so
+	// the most common struct spelling in CFML was never formatted at all.
+	// Anything that is not a plain key/value list keeps its source text.
+	if !isStructPattern(n) {
+		return f.text(n)
+	}
+
+	return f.exprObject(n)
+}
+
+// exprObjectAssignmentPattern formats a object_assignment_pattern.
+func (f *Formatter) exprObjectAssignmentPattern(n *sitter.Node) string {
+	// `{ a = 1 }`: the key is a bare name, so the grammar reads it as a
+	// destructuring default rather than a cf_pair. Only that shape reaches
+	// here; isStructPattern sends every other one to the verbatim default.
+	left := n.ChildByFieldName("left")
+	if left == nil {
+		return f.text(n)
+	}
+
+	return f.exprPair(f.text(left), " =", n.ChildByFieldName("right"))
 }
 
 // ─── helpers for expr ────────────────────────────────────────────────────────
@@ -1425,7 +1467,7 @@ func (f *Formatter) queryParts(n *sitter.Node) (callee string, parts []string, o
 	return callee, parts, true
 }
 
-func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (f *Formatter) exprArgs(args *sitter.Node) string {
 	if args == nil {
 		return "()"
 	}
@@ -1486,89 +1528,37 @@ func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // ov
 		return inline
 	}
 
-	if shouldBreak { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		// Re-evaluate at deeper level so nested splits indent correctly.
-		f.level++
+	if shouldBreak {
+		return f.brokenArgs(args, isComment, useCommas, trailing)
+	}
 
-		parts = parts[:0]
-		for i := range args.NamedChildCount() {
-			parts = append(parts, f.expr(args.NamedChild(i)))
-		}
+	return inline
+}
 
-		indent := f.opts.indent(f.level)
-		f.level--
-		outerIndent := f.opts.indent(f.level)
+// brokenArgs writes an argument list one argument per line, re-formatting
+// each at the deeper level so nested splits indent correctly.
+func (f *Formatter) brokenArgs(args *sitter.Node, isComment []bool, useCommas, trailing bool) string {
+	f.level++
 
-		var sb strings.Builder
+	parts := make([]string, 0, args.NamedChildCount())
+	for i := range args.NamedChildCount() {
+		parts = append(parts, f.expr(args.NamedChild(i)))
+	}
 
-		sb.WriteString("(\n")
+	indent := f.opts.indent(f.level)
+	f.level--
+	outerIndent := f.opts.indent(f.level)
 
-		// Space-separated attributes carry no separator to place, so neither comma
-		// position applies to them.
-		if !useCommas {
-			for _, p := range parts {
-				sb.WriteString(indent)
-				sb.WriteString(p)
-				sb.WriteString("\n")
-			}
+	var sb strings.Builder
 
-			sb.WriteString(outerIndent)
-			sb.WriteByte(')')
+	sb.WriteString("(\n")
 
-			return sb.String()
-		}
-
-		leading := f.opts.CommaPosition == "before"
-		for i, p := range parts {
-			if leading {
-				if !isComment[i] && i > 0 {
-					hasPrev := false
-
-					for j := i - 1; j >= 0; j-- {
-						if !isComment[j] {
-							hasPrev = true
-
-							break
-						}
-					}
-
-					if hasPrev {
-						sb.WriteString(indent)
-						sb.WriteString(", ")
-						sb.WriteString(p)
-					} else {
-						sb.WriteString(indent)
-						sb.WriteString(p)
-					}
-				} else {
-					sb.WriteString(indent)
-					sb.WriteString(p)
-				}
-
-				if trailing && !isComment[i] && i == lastArgument(isComment) {
-					sb.WriteString(",")
-				}
-			} else {
-				sb.WriteString(indent)
-				sb.WriteString(p)
-
-				if !isComment[i] {
-					hasMore := false
-
-					for j := i + 1; j < len(parts); j++ {
-						if !isComment[j] {
-							hasMore = true
-
-							break
-						}
-					}
-
-					if hasMore || trailing {
-						sb.WriteString(",")
-					}
-				}
-			}
-
+	// Space-separated attributes carry no separator to place, so neither comma
+	// position applies to them.
+	if !useCommas {
+		for _, p := range parts {
+			sb.WriteString(indent)
+			sb.WriteString(p)
 			sb.WriteString("\n")
 		}
 
@@ -1578,7 +1568,37 @@ func (f *Formatter) exprArgs(args *sitter.Node) string { //nolint:gocognit // ov
 		return sb.String()
 	}
 
-	return inline
+	leading := f.opts.CommaPosition == "before"
+	last := lastArgument(isComment)
+
+	for i, p := range parts {
+		sb.WriteString(indent)
+
+		if leading {
+			if !isComment[i] && anyArgument(isComment[:i]) {
+				sb.WriteString(", ")
+			}
+
+			sb.WriteString(p)
+
+			if trailing && !isComment[i] && i == last {
+				sb.WriteString(",")
+			}
+		} else {
+			sb.WriteString(p)
+
+			if !isComment[i] && (anyArgument(isComment[i+1:]) || trailing) {
+				sb.WriteString(",")
+			}
+		}
+
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(outerIndent)
+	sb.WriteByte(')')
+
+	return sb.String()
 }
 
 // joinSignatureAttrs lays out a function declaration's annotations — the

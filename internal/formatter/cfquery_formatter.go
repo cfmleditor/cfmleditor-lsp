@@ -105,301 +105,24 @@ func (f *Formatter) formatQueryChildren(root *sitter.Node) {
 
 // formatQueryNode emits a single query grammar node, inserting newlines
 // before SQL clause keywords.
-func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
+func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) {
 	kind := n.Kind()
 
 	switch kind {
 	case "query_keyword":
-		text := f.text(n)
-		upper := strings.ToUpper(text)
-
-		out := upper
-		if !f.opts.QueryUppercaseKeywords {
-			out = text
-		}
-
-		switch {
-		case sqlClauseKeywords[upper]:
-			// JOIN stays on the same line if preceded by a join modifier
-			prevIsJoinMod := false
-
-			if upper == "JOIN" {
-				if prev := n.PrevSibling(); prev != nil {
-					prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
-					prevIsJoinMod = sqlJoinModifiers[prevText]
-				}
-			}
-
-			if prevIsJoinMod {
-				f.write(" " + out)
-			} else {
-				if !*first {
-					if f.pendingComma {
-						f.pendingComma = false
-						f.appendTrailingComma()
-					}
-
-					f.write("\n")
-				}
-
-				f.writeIndent()
-				f.write(out)
-			}
-
-			*first = false
-		case sqlJoinModifiers[upper]:
-			// Stay on same line if preceded by another join modifier (e.g. LEFT OUTER)
-			prevIsJoinMod := false
-
-			if prev := n.PrevSibling(); prev != nil {
-				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
-				prevIsJoinMod = sqlJoinModifiers[prevText]
-			}
-
-			if prevIsJoinMod {
-				f.write(" " + out)
-			} else {
-				if !*first {
-					f.write("\n")
-				}
-
-				f.writeIndent()
-				f.write(out)
-			}
-
-			*first = false
-		case upper == "ON":
-			// ON indents one level deeper than the JOIN
-			if !*first {
-				f.write("\n")
-			}
-
-			f.level++
-			f.writeIndent()
-			f.write(out)
-
-			f.level--
-			*first = false
-		default:
-			if *first {
-				f.writeIndent()
-
-				*first = false
-			} else {
-				f.write(" ")
-			}
-
-			f.write(out)
-		}
+		f.formatQueryKeyword(n, first)
 
 	case "query_identifier":
-		text := f.text(n)
-		upper := strings.ToUpper(text)
-
-		switch {
-		case sqlClauseKeywords[upper]:
-			prevIsJoinMod := false
-
-			if upper == "JOIN" {
-				if prev := n.PrevSibling(); prev != nil {
-					prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
-					prevIsJoinMod = sqlJoinModifiers[prevText]
-				}
-			}
-
-			if prevIsJoinMod {
-				if f.opts.QueryUppercaseKeywords {
-					f.write(" " + upper)
-				} else {
-					f.write(" " + text)
-				}
-			} else {
-				if !*first {
-					if f.pendingComma {
-						f.pendingComma = false
-						f.appendTrailingComma()
-					}
-
-					f.write("\n")
-				}
-
-				f.writeIndent()
-
-				if f.opts.QueryUppercaseKeywords {
-					f.write(upper)
-				} else {
-					f.write(text)
-				}
-			}
-
-			*first = false
-		case sqlJoinModifiers[upper]:
-			prevIsJoinMod := false
-
-			if prev := n.PrevSibling(); prev != nil {
-				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
-				prevIsJoinMod = sqlJoinModifiers[prevText]
-			}
-
-			if prevIsJoinMod {
-				if f.opts.QueryUppercaseKeywords {
-					f.write(" " + upper)
-				} else {
-					f.write(" " + text)
-				}
-			} else {
-				if !*first {
-					f.write("\n")
-				}
-
-				f.writeIndent()
-
-				if f.opts.QueryUppercaseKeywords {
-					f.write(upper)
-				} else {
-					f.write(text)
-				}
-			}
-
-			*first = false
-		case upper == "ON":
-			if !*first {
-				f.write("\n")
-			}
-
-			f.level++
-			f.writeIndent()
-
-			if f.opts.QueryUppercaseKeywords {
-				f.write(upper)
-			} else {
-				f.write(text)
-			}
-
-			f.level--
-			*first = false
-		case sqlKeywords[upper]:
-			if *first {
-				f.writeIndent()
-
-				*first = false
-			} else {
-				f.write(" ")
-			}
-
-			if f.opts.QueryUppercaseKeywords {
-				f.write(upper)
-			} else {
-				f.write(text)
-			}
-		default:
-			if *first {
-				f.writeIndent()
-
-				*first = false
-			} else if !touchesPrevSibling(n) {
-				f.write(" ")
-			}
-
-			f.write(strings.ToLower(text))
-		}
+		f.formatQueryIdentifier(n, first)
 
 	case "query_function_name":
-		if *first {
-			f.writeIndent()
-
-			*first = false
-		} else {
-			f.write(" ")
-		}
-
+		f.querySeparator(first)
 		f.write(strings.ToLower(f.text(n)))
 
 	case "query_function":
-		// Handles both SQL functions (COUNT, UPPER) and table(columns), VALUES(...)
-		nameNode := n.ChildByFieldName("name")
-		argsNode := n.ChildByFieldName("arguments")
+		f.formatQueryFunction(n, first)
 
-		// Determine name text and whether it's a keyword
-		var nameText string
-
-		isClauseKW := false
-
-		if nameNode != nil {
-			switch nameNode.Kind() {
-			case "query_keyword":
-				if f.opts.QueryUppercaseKeywords {
-					nameText = strings.ToUpper(f.text(nameNode))
-				} else {
-					nameText = f.text(nameNode)
-				}
-
-				isClauseKW = sqlClauseKeywords[strings.ToUpper(f.text(nameNode))]
-			case "query_function_name":
-				nameText = strings.ToLower(f.text(nameNode))
-			default:
-				// Adjacent name( = function call (preserve case), name ( = table (lowercase)
-				if argsNode != nil && nameNode.EndByte() == argsNode.StartByte() {
-					nameText = f.text(nameNode)
-				} else {
-					nameText = strings.ToLower(f.text(nameNode))
-				}
-			}
-		}
-
-		// Clause keywords (VALUES, SET) start a new line
-		if isClauseKW {
-			if !*first {
-				f.write("\n")
-			}
-
-			f.writeIndent()
-			f.write(nameText)
-
-			*first = false
-		} else {
-			if *first {
-				f.writeIndent()
-
-				*first = false
-			} else {
-				f.write(" ")
-			}
-
-			f.write(nameText)
-		}
-
-		// Emit arguments - use parenthesized handler for proper wrapping
-		if argsNode != nil {
-			// After INTO/UPDATE, name(cols) is a table — force space before (
-			if !isClauseKW && nameNode != nil &&
-				nameNode.Kind() != "query_keyword" && nameNode.Kind() != "query_function_name" &&
-				nameNode.EndByte() == argsNode.StartByte() {
-				if prev := n.PrevSibling(); prev != nil && prev.Kind() == "query_keyword" {
-					prevText := strings.ToUpper(f.text(prev))
-					if prevText == "INTO" || prevText == "UPDATE" {
-						f.write(" ")
-					}
-				}
-			}
-
-			f.formatQueryParenthesized(argsNode, first)
-		}
-
-	case "query_math_expression":
-		left := n.ChildByFieldName("left")
-		op := n.ChildByFieldName("operator")
-		right := n.ChildByFieldName("right")
-
-		f.formatQueryNode(left, first)
-
-		if op != nil {
-			f.write(" " + f.text(op) + " ")
-		}
-
-		f.emitQueryExtrasAndRight(n, right, first)
-
-	case "query_comparison_expression":
+	case "query_math_expression", "query_comparison_expression":
 		left := n.ChildByFieldName("left")
 		op := n.ChildByFieldName("operator")
 		right := n.ChildByFieldName("right")
@@ -413,86 +136,10 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 		f.emitQueryExtrasAndRight(n, right, first)
 
 	case "query_comma":
-		switch {
-		case f.opts.queryCommaPreserve():
-			// Preserve: keep comma in its original position (leading or trailing)
-			if *first {
-				f.writeIndent()
-				f.write(",")
-
-				*first = false
-			} else {
-				f.write(",")
-
-				nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
-				if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
-					f.write("\n")
-
-					*first = true
-				}
-			}
-		case f.opts.queryCommaLeading():
-			if *first {
-				f.writeIndent()
-				f.write(",")
-
-				*first = false
-			} else {
-				nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
-				if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
-					f.write("\n")
-					f.writeIndent()
-					f.write(",")
-				} else {
-					f.write(",")
-				}
-
-				*first = false
-			}
-		default:
-			// Trailing comma mode ("after")
-			if *first {
-				f.pendingComma = true
-			} else {
-				nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
-				if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
-					f.write(",\n")
-
-					*first = true
-				} else {
-					f.write(",")
-
-					*first = false
-				}
-			}
-		}
+		f.formatQueryComma(n, first)
 
 	case "cf_selfclose_tag":
-		// Embedded CF tag (e.g. <cfqueryparam ...>)
-		if *first {
-			f.writeIndent()
-
-			*first = false
-		} else {
-			f.write(" ")
-		}
-
-		f.writeQuerySelfCloseTag(n)
-		// Stay inline if followed by a non-clause keyword like AS
-		if next := n.NextSibling(); next != nil &&
-			(next.Kind() == "query_keyword" && !sqlClauseKeywords[strings.ToUpper(f.text(next))]) ||
-			(next != nil && next.Kind() == "query_identifier" && sqlKeywords[strings.ToUpper(f.text(next))]) {
-			*first = false
-		} else {
-			if f.pendingComma {
-				f.write(",")
-				f.pendingComma = false
-			}
-
-			f.write("\n")
-
-			*first = true
-		}
+		f.formatQuerySelfCloseTag(n, first)
 
 	case "query_assignment_expression":
 		// e.g. active = 1 or id = <cfqueryparam ...>
@@ -503,26 +150,8 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 		f.write(" = ")
 		f.emitQueryExtrasAndRight(n, right, first)
 
-	case "query_operator":
-		if *first {
-			f.writeIndent()
-
-			*first = false
-		} else {
-			f.write(" ")
-		}
-
-		f.write(f.text(n))
-
-	case "query_open_paren", "query_close_paren":
-		if *first {
-			f.writeIndent()
-
-			*first = false
-		} else {
-			f.write(" ")
-		}
-
+	case "query_operator", "query_open_paren", "query_close_paren":
+		f.querySeparator(first)
 		f.write(f.text(n))
 
 	case "query_alias":
@@ -535,23 +164,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 		f.formatQueryNodeInline(right)
 
 	case "cf_if_tag":
-		// Flush pending comma — if previous content is a regular item, trail it
-		if f.pendingComma {
-			f.pendingComma = false
-			if prev := n.PrevSibling(); prev != nil && prev.Kind() != "cf_if_tag" && prev.Kind() != "cf_tag" {
-				f.appendTrailingComma()
-			}
-		}
-		// If cfif is on the same source line as its prev sibling (no newline
-		// in between), emit inline to preserve constructs like:
-		// FROM <cfif cond>table_a<cfelse>table_b</cfif> alias
-		if prev := n.PrevSibling(); prev != nil && !f.hasNewlineBetween(prev.EndByte(), n.StartByte()) {
-			f.formatQueryCFIfInline(n)
-		} else {
-			f.formatQueryCFIf(n)
-
-			*first = true
-		}
+		f.formatQueryIfTag(n, first)
 
 	case "cf_if_alt":
 		f.formatQueryCFIfAlt(n)
@@ -591,6 +204,397 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 
 			f.write(text)
 		}
+	}
+}
+
+// querySeparator starts a query item: the indent for the first on a line,
+// otherwise a space.
+func (f *Formatter) querySeparator(first *bool) {
+	if *first {
+		f.writeIndent()
+
+		*first = false
+	} else {
+		f.write(" ")
+	}
+}
+
+// formatQueryIfTag formats a <cfif> inside a query.
+func (f *Formatter) formatQueryIfTag(n *sitter.Node, first *bool) {
+	// Flush pending comma — if previous content is a regular item, trail it
+	if f.pendingComma {
+		f.pendingComma = false
+		if prev := n.PrevSibling(); prev != nil && prev.Kind() != "cf_if_tag" && prev.Kind() != "cf_tag" {
+			f.appendTrailingComma()
+		}
+	}
+	// If cfif is on the same source line as its prev sibling (no newline
+	// in between), emit inline to preserve constructs like:
+	// FROM <cfif cond>table_a<cfelse>table_b</cfif> alias
+	if prev := n.PrevSibling(); prev != nil && !f.hasNewlineBetween(prev.EndByte(), n.StartByte()) {
+		f.formatQueryCFIfInline(n)
+	} else {
+		f.formatQueryCFIf(n)
+
+		*first = true
+	}
+}
+
+// formatQueryKeyword formats a query_keyword inside a query.
+func (f *Formatter) formatQueryKeyword(n *sitter.Node, first *bool) {
+	text := f.text(n)
+	upper := strings.ToUpper(text)
+
+	out := upper
+	if !f.opts.QueryUppercaseKeywords {
+		out = text
+	}
+
+	switch {
+	case sqlClauseKeywords[upper]:
+		// JOIN stays on the same line if preceded by a join modifier
+		prevIsJoinMod := false
+
+		if upper == "JOIN" {
+			if prev := n.PrevSibling(); prev != nil {
+				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+				prevIsJoinMod = sqlJoinModifiers[prevText]
+			}
+		}
+
+		if prevIsJoinMod {
+			f.write(" " + out)
+		} else {
+			if !*first {
+				if f.pendingComma {
+					f.pendingComma = false
+					f.appendTrailingComma()
+				}
+
+				f.write("\n")
+			}
+
+			f.writeIndent()
+			f.write(out)
+		}
+
+		*first = false
+	case sqlJoinModifiers[upper]:
+		// Stay on same line if preceded by another join modifier (e.g. LEFT OUTER)
+		prevIsJoinMod := false
+
+		if prev := n.PrevSibling(); prev != nil {
+			prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+			prevIsJoinMod = sqlJoinModifiers[prevText]
+		}
+
+		if prevIsJoinMod {
+			f.write(" " + out)
+		} else {
+			if !*first {
+				f.write("\n")
+			}
+
+			f.writeIndent()
+			f.write(out)
+		}
+
+		*first = false
+	case upper == "ON":
+		// ON indents one level deeper than the JOIN
+		if !*first {
+			f.write("\n")
+		}
+
+		f.level++
+		f.writeIndent()
+		f.write(out)
+
+		f.level--
+		*first = false
+	default:
+		if *first {
+			f.writeIndent()
+
+			*first = false
+		} else {
+			f.write(" ")
+		}
+
+		f.write(out)
+	}
+}
+
+// formatQueryIdentifier formats a query_identifier inside a query.
+func (f *Formatter) formatQueryIdentifier(n *sitter.Node, first *bool) {
+	text := f.text(n)
+	upper := strings.ToUpper(text)
+
+	switch {
+	case sqlClauseKeywords[upper]:
+		prevIsJoinMod := false
+
+		if upper == "JOIN" {
+			if prev := n.PrevSibling(); prev != nil {
+				prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+				prevIsJoinMod = sqlJoinModifiers[prevText]
+			}
+		}
+
+		if prevIsJoinMod {
+			if f.opts.QueryUppercaseKeywords {
+				f.write(" " + upper)
+			} else {
+				f.write(" " + text)
+			}
+		} else {
+			if !*first {
+				if f.pendingComma {
+					f.pendingComma = false
+					f.appendTrailingComma()
+				}
+
+				f.write("\n")
+			}
+
+			f.writeIndent()
+
+			if f.opts.QueryUppercaseKeywords {
+				f.write(upper)
+			} else {
+				f.write(text)
+			}
+		}
+
+		*first = false
+	case sqlJoinModifiers[upper]:
+		prevIsJoinMod := false
+
+		if prev := n.PrevSibling(); prev != nil {
+			prevText := strings.ToUpper(strings.TrimSpace(f.text(prev)))
+			prevIsJoinMod = sqlJoinModifiers[prevText]
+		}
+
+		if prevIsJoinMod {
+			if f.opts.QueryUppercaseKeywords {
+				f.write(" " + upper)
+			} else {
+				f.write(" " + text)
+			}
+		} else {
+			if !*first {
+				f.write("\n")
+			}
+
+			f.writeIndent()
+
+			if f.opts.QueryUppercaseKeywords {
+				f.write(upper)
+			} else {
+				f.write(text)
+			}
+		}
+
+		*first = false
+	case upper == "ON":
+		if !*first {
+			f.write("\n")
+		}
+
+		f.level++
+		f.writeIndent()
+
+		if f.opts.QueryUppercaseKeywords {
+			f.write(upper)
+		} else {
+			f.write(text)
+		}
+
+		f.level--
+		*first = false
+	case sqlKeywords[upper]:
+		if *first {
+			f.writeIndent()
+
+			*first = false
+		} else {
+			f.write(" ")
+		}
+
+		if f.opts.QueryUppercaseKeywords {
+			f.write(upper)
+		} else {
+			f.write(text)
+		}
+	default:
+		if *first {
+			f.writeIndent()
+
+			*first = false
+		} else if !touchesPrevSibling(n) {
+			f.write(" ")
+		}
+
+		f.write(strings.ToLower(text))
+	}
+}
+
+// formatQueryFunction formats a query_function inside a query.
+func (f *Formatter) formatQueryFunction(n *sitter.Node, first *bool) {
+	// Handles both SQL functions (COUNT, UPPER) and table(columns), VALUES(...)
+	nameNode := n.ChildByFieldName("name")
+	argsNode := n.ChildByFieldName("arguments")
+
+	// Determine name text and whether it's a keyword
+	var nameText string
+
+	isClauseKW := false
+
+	if nameNode != nil {
+		switch nameNode.Kind() {
+		case "query_keyword":
+			if f.opts.QueryUppercaseKeywords {
+				nameText = strings.ToUpper(f.text(nameNode))
+			} else {
+				nameText = f.text(nameNode)
+			}
+
+			isClauseKW = sqlClauseKeywords[strings.ToUpper(f.text(nameNode))]
+		case "query_function_name":
+			nameText = strings.ToLower(f.text(nameNode))
+		default:
+			// Adjacent name( = function call (preserve case), name ( = table (lowercase)
+			if argsNode != nil && nameNode.EndByte() == argsNode.StartByte() {
+				nameText = f.text(nameNode)
+			} else {
+				nameText = strings.ToLower(f.text(nameNode))
+			}
+		}
+	}
+
+	// Clause keywords (VALUES, SET) start a new line
+	if isClauseKW {
+		if !*first {
+			f.write("\n")
+		}
+
+		f.writeIndent()
+		f.write(nameText)
+
+		*first = false
+	} else {
+		if *first {
+			f.writeIndent()
+
+			*first = false
+		} else {
+			f.write(" ")
+		}
+
+		f.write(nameText)
+	}
+
+	// Emit arguments - use parenthesized handler for proper wrapping
+	if argsNode != nil {
+		// After INTO/UPDATE, name(cols) is a table — force space before (
+		if !isClauseKW && nameNode != nil &&
+			nameNode.Kind() != "query_keyword" && nameNode.Kind() != "query_function_name" &&
+			nameNode.EndByte() == argsNode.StartByte() {
+			if prev := n.PrevSibling(); prev != nil && prev.Kind() == "query_keyword" {
+				prevText := strings.ToUpper(f.text(prev))
+				if prevText == "INTO" || prevText == "UPDATE" {
+					f.write(" ")
+				}
+			}
+		}
+
+		f.formatQueryParenthesized(argsNode, first)
+	}
+}
+
+// formatQueryComma formats a query_comma inside a query.
+func (f *Formatter) formatQueryComma(n *sitter.Node, first *bool) {
+	switch {
+	case f.opts.queryCommaPreserve():
+		// Preserve: keep comma in its original position (leading or trailing)
+		if *first {
+			f.writeIndent()
+			f.write(",")
+
+			*first = false
+		} else {
+			f.write(",")
+
+			nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
+			if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
+				f.write("\n")
+
+				*first = true
+			}
+		}
+	case f.opts.queryCommaLeading():
+		if *first {
+			f.writeIndent()
+			f.write(",")
+
+			*first = false
+		} else {
+			nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
+			if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
+				f.write("\n")
+				f.writeIndent()
+				f.write(",")
+			} else {
+				f.write(",")
+			}
+
+			*first = false
+		}
+	default:
+		// Trailing comma mode ("after")
+		if *first {
+			f.pendingComma = true
+		} else {
+			nextIsTag := n.NextSibling() != nil && n.NextSibling().Kind() == "cf_selfclose_tag"
+			if f.lineLen > f.opts.QueryLineWidth || nextIsTag {
+				f.write(",\n")
+
+				*first = true
+			} else {
+				f.write(",")
+
+				*first = false
+			}
+		}
+	}
+}
+
+// formatQuerySelfCloseTag formats a cf_selfclose_tag inside a query.
+func (f *Formatter) formatQuerySelfCloseTag(n *sitter.Node, first *bool) {
+	// Embedded CF tag (e.g. <cfqueryparam ...>)
+	if *first {
+		f.writeIndent()
+
+		*first = false
+	} else {
+		f.write(" ")
+	}
+
+	f.writeQuerySelfCloseTag(n)
+	// Stay inline if followed by a non-clause keyword like AS
+	if next := n.NextSibling(); next != nil &&
+		(next.Kind() == "query_keyword" && !sqlClauseKeywords[strings.ToUpper(f.text(next))]) ||
+		(next != nil && next.Kind() == "query_identifier" && sqlKeywords[strings.ToUpper(f.text(next))]) {
+		*first = false
+	} else {
+		if f.pendingComma {
+			f.write(",")
+			f.pendingComma = false
+		}
+
+		f.write("\n")
+
+		*first = true
 	}
 }
 
@@ -800,132 +804,18 @@ func (f *Formatter) formatQueryCFTag(n *sitter.Node) {
 }
 
 // formatQueryParenthesized handles parenthesized expressions like VALUES (...).
-func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) {
 	// Check if content has embedded CF tags (recursively)
 	hasTag := f.queryNodeHasTag(n)
 
-	// No space before paren if immediately adjacent to previous token in source
+	// No space before paren if immediately adjacent to previous token in source.
+	// Only actual function names suppress inner spaces.
 	adjacentToPrev := false
 
-	if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() {
-		// Only actual function names suppress inner spaces
-		if prev.Kind() == "query_function_name" {
-			adjacentToPrev = true
-		}
+	if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() && prev.Kind() == "query_function_name" {
+		adjacentToPrev = true
 	}
 
-	if !hasTag { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		// Simple parenthesized node - check if it fits on one line
-		if *first {
-			f.writeIndent()
-
-			*first = false
-		} else if !adjacentToPrev {
-			f.write(" ")
-		}
-
-		// Calculate inline length
-		inlineLen := 1 // "("
-
-		for i := range n.ChildCount() {
-			c := n.Child(i)
-			switch c.Kind() {
-			case "(", ")":
-			case "query_comma":
-				inlineLen += 2 // ", "
-			default:
-				if inlineLen > 1 {
-					inlineLen++ // space
-				}
-
-				inlineLen += len(strings.TrimSpace(f.text(c)))
-			}
-		}
-
-		inlineLen++ // ")"
-
-		if f.lineLen+inlineLen <= f.opts.QueryLineWidth {
-			// Fits inline
-			f.write("(")
-
-			if !adjacentToPrev {
-				f.write(" ")
-			}
-
-			firstInner := true
-
-			for i := range n.ChildCount() {
-				c := n.Child(i)
-				switch c.Kind() {
-				case "(", ")":
-					continue
-				case "query_comma":
-					f.write(",")
-				default:
-					if !firstInner {
-						f.write(" ")
-					}
-
-					firstInner = false
-
-					f.formatQueryNodeInline(c)
-				}
-			}
-
-			if !adjacentToPrev {
-				f.write(" ")
-			}
-
-			f.write(")")
-		} else {
-			// Expand multi-line
-			f.write("(\n")
-
-			f.level++
-			firstInner := true
-
-			for i := range n.ChildCount() {
-				c := n.Child(i)
-				switch c.Kind() {
-				case "(", ")":
-					continue
-				case "query_comma":
-					if f.lineLen > f.opts.QueryLineWidth {
-						if f.opts.queryCommaLeading() {
-							f.write("\n")
-							f.writeIndent()
-							f.write(",")
-						} else {
-							f.write(",\n")
-							f.writeIndent()
-						}
-					} else {
-						f.write(",")
-					}
-				default:
-					if !firstInner {
-						f.write(" ")
-					} else {
-						f.writeIndent()
-					}
-
-					firstInner = false
-
-					f.formatQueryNodeInline(c)
-				}
-			}
-
-			f.write("\n")
-
-			f.level--
-			f.writeIndent()
-			f.write(")")
-		}
-
-		return
-	}
-
-	// Complex parenthesized node with tags - emit with indentation
 	if *first {
 		f.writeIndent()
 
@@ -934,6 +824,128 @@ func (f *Formatter) formatQueryParenthesized(n *sitter.Node, first *bool) { //no
 		f.write(" ")
 	}
 
+	switch {
+	case hasTag:
+		// Complex parenthesized node with tags - emit with indentation
+		f.writeParenWithTags(n)
+	case f.lineLen+f.parenInlineLen(n) <= f.opts.QueryLineWidth:
+		f.writeParenInline(n, adjacentToPrev)
+	default:
+		f.writeParenExpanded(n)
+	}
+}
+
+// parenInlineLen is how wide a parenthesized node is written on one line.
+func (f *Formatter) parenInlineLen(n *sitter.Node) int {
+	inlineLen := 1 // "("
+
+	for i := range n.ChildCount() {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "(", ")":
+		case "query_comma":
+			inlineLen += 2 // ", "
+		default:
+			if inlineLen > 1 {
+				inlineLen++ // space
+			}
+
+			inlineLen += len(strings.TrimSpace(f.text(c)))
+		}
+	}
+
+	return inlineLen + 1 // ")"
+}
+
+// writeParenInline writes a parenthesized node that fits on the line.
+func (f *Formatter) writeParenInline(n *sitter.Node, adjacentToPrev bool) {
+	f.write("(")
+
+	if !adjacentToPrev {
+		f.write(" ")
+	}
+
+	firstInner := true
+
+	for i := range n.ChildCount() {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "(", ")":
+			continue
+		case "query_comma":
+			f.write(",")
+		default:
+			if !firstInner {
+				f.write(" ")
+			}
+
+			firstInner = false
+
+			f.formatQueryNodeInline(c)
+		}
+	}
+
+	if !adjacentToPrev {
+		f.write(" ")
+	}
+
+	f.write(")")
+}
+
+// writeParenExpanded writes a parenthesized node too wide for the line,
+// breaking after a comma once the line runs past the width.
+func (f *Formatter) writeParenExpanded(n *sitter.Node) {
+	f.write("(\n")
+
+	f.level++
+	firstInner := true
+
+	for i := range n.ChildCount() {
+		c := n.Child(i)
+		switch c.Kind() {
+		case "(", ")":
+			continue
+		case "query_comma":
+			f.writeParenComma()
+		default:
+			if !firstInner {
+				f.write(" ")
+			} else {
+				f.writeIndent()
+			}
+
+			firstInner = false
+
+			f.formatQueryNodeInline(c)
+		}
+	}
+
+	f.write("\n")
+
+	f.level--
+	f.writeIndent()
+	f.write(")")
+}
+
+// writeParenComma writes a comma in an expanded parenthesized node, and a line
+// break beside it once the line is past the width.
+func (f *Formatter) writeParenComma() {
+	switch {
+	case f.lineLen <= f.opts.QueryLineWidth:
+		f.write(",")
+	case f.opts.queryCommaLeading():
+		f.write("\n")
+		f.writeIndent()
+		f.write(",")
+	default:
+		f.write(",\n")
+		f.writeIndent()
+	}
+}
+
+// writeParenWithTags writes a parenthesized node holding CF tags, one item
+// per line.
+func (f *Formatter) writeParenWithTags(n *sitter.Node) {
 	f.write("(\n")
 
 	f.level++
