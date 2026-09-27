@@ -240,11 +240,31 @@ Measured with each exclusion lifted:
   saves nothing anyone measures, and its file paths and permissions are
   fixtures.
 
-The global `gosec` exclusions were measured at the same time and stay: 239
-findings, 173 of them `G115` integer conversions such as `uint32(line)`, 47
-file paths from a variable (`G304`, `G703`) in a tool whose job is reading
-the files it is given, and 5 `G104` unhandled errors that `errcheck` already
-reviews.
+## gosec in production code (done)
+
+A global exclusion hid eight `gosec` rules everywhere: 239 findings. It is now
+`G115` alone, plus one exclusion for `cmd/`:
+
+- **`G115`, 173, stays excluded.** Every `int`-to-`uint32` conversion of a
+  line or column for the protocol, 111 of them in the parser. A line number
+  does not overflow, and a checked conversion at each site is cost with no
+  protection.
+- **`cmd/` is excluded from `G304`, `G306` and `G703`** (38): the CLI opens,
+  stats, walks and writes the files it is given on the command line.
+- **The rest are fixed or carry their reason.** One was a real defect:
+  `cfmleditor.findRefs` and `cfmleditor.exportDeps` built their report paths
+  from the command's arguments, so a function name such as `x/../../escaped`
+  (which `filepath.Join` cleans) or a document outside the workspace wrote a
+  file wherever it pointed. `reportPath` now requires a plain file name inside
+  a workspace root, the same confinement `codeMapOutputPath` always had, and
+  `TestFindRefsReportNameCannotEscape` fails without it. The debug log is now
+  `0600` in a `0700` directory, since it can hold source text; CFLint's cache
+  directory is `0750`. The CFLint launch, its executable binary, reports meant
+  to be shared (`0644`), and the reads the server makes by design are
+  suppressed with their reasons.
+
+A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
+`internal/` and not under `cmd/`.
 
 ## Left off, and why
 

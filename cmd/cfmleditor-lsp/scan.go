@@ -27,7 +27,7 @@ func cmdScan(args []string) {
 		}
 
 		if info.IsDir() {
-			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck // the callback swallows every error, so Walk has none to return
+			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck,gosec // the callback swallows every error, so Walk has none to return
 				if err != nil {
 					return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
 				}

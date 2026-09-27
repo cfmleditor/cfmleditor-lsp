@@ -49,10 +49,11 @@ func openLogFile() *os.File {
 	}
 
 	if dir := filepath.Dir(path); dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+		_ = os.MkdirAll(dir, 0o700) //nolint:gosec // the path is the user's own CFMLEDITOR_LSP_LOG
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// Private: a debug log can hold source text.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is the user's own CFMLEDITOR_LSP_LOG
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot open %s=%s: %v\n", FileEnv, path, err)
 

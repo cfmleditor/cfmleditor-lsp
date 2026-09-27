@@ -322,9 +322,18 @@ linters:
           # SELECT * in a test is a CFML fixture fed to the formatter, not a
           # query this code runs.
           - unqueryvet
+      # G115 is every int-to-uint32 conversion of a line or column for the
+      # protocol (173 sites, most in the parser), and a line number does not
+      # overflow. LINT-PLAN.md has the measurement.
       - linters:
           - gosec
-        text: "G104|G115|G204|G301|G302|G304|G306|G703"
+        text: "G115"
+      # The CLI opens, stats, walks and writes the files and directories it is
+      # given on the command line; that is its job, not a path to guard.
+      - path: ^cmd/
+        linters:
+          - gosec
+        text: "G304|G306|G703"
       - linters:
           - godox
         text: "TODO"

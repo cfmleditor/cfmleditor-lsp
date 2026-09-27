@@ -860,7 +860,10 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   mentioned", and `mergeLinting` unions key by key — otherwise a child config
   naming only `minSeverity` would switch linting off while appearing to tune it.
 - `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
-  `true`. It used to write unconditionally, which meant the code action on an ordinary "find all
+  `true`, and — like `.exportDeps`' `deps-<name>.md` — only through `reportPath`, which refuses a
+  name that is not a plain file name and a directory outside the workspace roots. Both come from
+  the command's arguments: `x/../../escaped` as a function name, which `filepath.Join` cleans, wrote
+  a file one directory above the source. `TestFindRefsReportNameCannotEscape` pins it. It used to write unconditionally, which meant the code action on an ordinary "find all
   references" gesture dropped two files beside the source file being read. The plain code actions
   pass two arguments; a separate "Export references to X to a file" action passes the third.
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
@@ -1402,7 +1405,9 @@ Some handles need both shapes; others only one, depending on how the code uses t
   Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
   used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
-  bump. Test files are exempted from `prealloc` and `gosec` only: a test's
+  bump. `gosec` runs everywhere except `G115` (int-to-uint32 line numbers, 173 sites) and, in
+  `cmd/`, the rules about opening and writing the paths the CLI is given; anything else it
+  flags is fixed or carries its reason. Test files are exempted from `prealloc` and `gosec` only: a test's
   slices are not worth pre-sizing, and its paths and permissions are fixtures.
   `staticcheck` and `unparam` run on tests too, since a deprecated API or a
   helper parameter nobody varies is as real there as anywhere.

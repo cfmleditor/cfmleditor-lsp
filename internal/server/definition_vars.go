@@ -298,7 +298,7 @@ func (s *Server) crossFileVarDef(scope parser.Scope, word string, docURI uri.URI
 		for _, name := range names {
 			path := filepath.Join(dir, name)
 
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //nolint:gosec // a fixed file name (Application.cfc and the like) in a search directory
 			if err != nil {
 				continue
 			}
