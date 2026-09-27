@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
@@ -254,8 +255,7 @@ func depsCallLoader(resolver *resolve.Resolver) func(uri.URI, string) ([]parser.
 
 				// Function locals first, then file-level: a `var x = new Foo()`
 				// shadows a `variables.x`, and the consumer takes the first match.
-				refs := append([]parser.ComponentRef{}, pr.FuncComponentRefs(sc.Start, sc.End)...)
-				refs = append(refs, pr.ComponentRefs...)
+				refs := slices.Concat(pr.FuncComponentRefs(sc.Start, sc.End), pr.ComponentRefs)
 
 				return pr.FuncCalls(sc.Start, sc.End), refs
 			}

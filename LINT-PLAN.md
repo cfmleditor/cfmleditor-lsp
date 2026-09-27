@@ -181,12 +181,46 @@ A canary confirmed a sample of the new checks fire (`builtinShadow`,
 
 ## Stage 6 — upkeep, on every golangci-lint bump
 
-- Run `golangci-lint linters` and migrate anything marked `[deprecated]`.
-  At v2.13.2 those are `wsl` (→ `wsl_v5`, already used), `gomodguard`
-  (→ `gomodguard_v2`) and `exhaustruct` (→ `exhaustruct_v5`), neither of the
-  last two enabled.
-- Run the linters, gocritic checks and revive rules the new version adds, as
-  above, and sort them into the stages.
+The procedure, each time the pin in the Makefile moves:
+
+1. **Diff the vendored analyzers** between the two versions' `go.mod`
+   (gocritic, revive, staticcheck, gosec, `golang.org/x/tools`); an analyzer
+   that did not move adds nothing.
+2. **Run the existing config** on the new version. A moved analyzer can find
+   new things under an old name — `modernize` is one linter that grows checks.
+3. **Migrate anything `[deprecated]`** in `golangci-lint linters`.
+4. **Measure the checks and rules the new version adds** and sort each into a
+   stage: a bug-catcher that finds nothing goes in, a style rule is a choice,
+   and the rest go in the table below with their counts.
+5. **Benchmark against `main`, alternately,** if any fix touched the parse or
+   request path.
+
+### v2.13.2 → v2.14.0 (done)
+
+- **Moved:** gocritic v0.14.4 → v0.15.0 (no new checks), revive v1.15.0 →
+  v1.17.0 (three new rules), gosec v2.28 → v2.29, exhaustive v0.12 → v0.13,
+  `golang.org/x/tools` v0.49 → v0.50. staticcheck did not move.
+- **New findings under the existing config:** 15, all `modernize`'s new
+  `stringscut`, which replaces `strings.LastIndex`/`LastIndexByte` and the
+  slicing around it with Go 1.27's `strings.CutLast`. 13 were on the parse
+  path. Applied, then tidied by hand where the autofix invented names
+  (`ok0`, `before0`) or nested one `if` inside another. The corpus extracts
+  the same 251,313 calls with the same bytes per parse; the plain tag parse,
+  where most of the edits are, measured 122.9µs against 122.9µs by median
+  over six alternating rounds.
+- **Deprecated:** unchanged — `wsl`, `gomodguard`, `exhaustruct`, none of
+  them enabled. No linter was added.
+- **New revive rules:** all three are enabled. `marshal-receiver` found
+  nothing. `multiline-if-init` (15) and `use-slices-concat` (7) were chosen
+  afterwards. `slices.Concat` returns nil where the `append` to `[]T{}` it
+  replaces returned an empty slice, so each of the 7 was checked for a nil
+  that could reach JSON or a nil test: the merged resolver lists, two
+  component-ref lists that are only ranged over, a BOM prefix that is never
+  empty, and two test helpers. None could. Each `multiline-if-init`
+  finding was an `if err := f(…wrapped…); err != nil`; the statement now
+  sits above the `if`, which then tests `err` alone. 12 of the 15 were in
+  tests; the other three are the code map's JSONL writer and its SQLite row
+  scans.
 
 ## Left off, and why
 

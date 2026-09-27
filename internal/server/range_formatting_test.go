@@ -33,7 +33,7 @@ func applyEdits(t *testing.T, content string, edits []protocol.TextEdit) string 
 			repl = strings.Split(strings.TrimSuffix(e.NewText, "\n"), "\n")
 		}
 
-		lines = append(lines[:start], append(append([]string{}, repl...), lines[end:]...)...)
+		lines = slices.Concat(lines[:start], repl, lines[end:])
 	}
 
 	return strings.Join(lines, "\n")

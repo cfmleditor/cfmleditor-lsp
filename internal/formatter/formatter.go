@@ -304,7 +304,7 @@ func Format(src []byte, tree *sitter.Tree, opts *Options) (out []byte, err error
 	// emits it. Carry it across verbatim — dropping it rewrites the file's
 	// encoding preamble, which some CFML engines are sensitive to.
 	if bytes.HasPrefix(src, utf8BOM) && !bytes.HasPrefix(out, utf8BOM) {
-		out = append(append([]byte{}, utf8BOM...), out...)
+		out = slices.Concat(utf8BOM, out)
 	}
 
 	if opts.WhitespaceOnly {

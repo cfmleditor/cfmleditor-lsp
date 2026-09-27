@@ -112,8 +112,10 @@ func initializeWithRoot(t *testing.T, root string) *Server {
 // was invisible even though daemon mode loads it.
 func TestConfigFoundAboveWorkspaceRoot(t *testing.T) {
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, ".cfmleditor.json"),
-		[]byte(`{"linting":{"enabled":true},"mappings":{"models":"./src/models"}}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(project, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":true},"mappings":{"models":"./src/models"}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,8 +139,10 @@ func TestConfigFoundAboveWorkspaceRoot(t *testing.T) {
 // rather than continuing to an ancestor.
 func TestNearestConfigWins(t *testing.T) {
 	outer := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outer, ".cfmleditor.json"),
-		[]byte(`{"mappings":{"outer":"./outer"}}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(outer, ".cfmleditor.json"),
+		[]byte(`{"mappings":{"outer":"./outer"}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,8 +151,9 @@ func TestNearestConfigWins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(inner, ".cfmleditor.json"),
-		[]byte(`{"mappings":{"inner":"./inner"}}`), 0o644); err != nil {
+	err = os.WriteFile(filepath.Join(inner, ".cfmleditor.json"),
+		[]byte(`{"mappings":{"inner":"./inner"}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,8 +168,10 @@ func TestNearestConfigWins(t *testing.T) {
 // does not abort the walk and hide a valid one further up.
 func TestUnparseableConfigDoesNotMaskAncestor(t *testing.T) {
 	outer := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outer, ".cfmleditor.json"),
-		[]byte(`{"linting":{"enabled":true}}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(outer, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":true}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -173,8 +180,9 @@ func TestUnparseableConfigDoesNotMaskAncestor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(inner, ".cfmleditor.json"),
-		[]byte(`{ this is not json`), 0o644); err != nil {
+	err = os.WriteFile(filepath.Join(inner, ".cfmleditor.json"),
+		[]byte(`{ this is not json`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,8 +242,10 @@ func TestEditorSettingsUsedWithoutConfigFile(t *testing.T) {
 // .cfmleditor.json stays the source of truth for every key it states.
 func TestConfigFileWinsOverEditorSettings(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
-		[]byte(`{"linting":{"enabled":false},"javaStubsPath":"from.file"}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":false},"javaStubsPath":"from.file"}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,8 +267,10 @@ func TestConfigFileWinsOverEditorSettings(t *testing.T) {
 // rule: keys the file does not mention still come from the editor.
 func TestEditorSettingsFillGapsInConfigFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
-		[]byte(`{"mappings":{"models":"./src/models"}}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"mappings":{"models":"./src/models"}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -277,8 +289,10 @@ func TestEditorSettingsFillGapsInConfigFile(t *testing.T) {
 // degrade to "no editor config" rather than breaking initialize outright.
 func TestMalformedEditorSettingsAreIgnored(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
-		[]byte(`{"linting":{"enabled":true}}`), 0o644); err != nil {
+
+	err := os.WriteFile(filepath.Join(dir, ".cfmleditor.json"),
+		[]byte(`{"linting":{"enabled":true}}`), 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
 

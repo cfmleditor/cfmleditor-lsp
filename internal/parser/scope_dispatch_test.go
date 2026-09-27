@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -74,8 +75,7 @@ func TestScopedAssignmentInAFunctionBodyEstablishesAComponentRef(t *testing.T) {
 
 		s := pr.Scopes[0]
 
-		refs := append([]ComponentRef{}, pr.FuncComponentRefs(s.Start, s.End)...)
-		refs = append(refs, pr.ComponentRefs...)
+		refs := slices.Concat(pr.FuncComponentRefs(s.Start, s.End), pr.ComponentRefs)
 
 		if !hasComponentRef(refs, "svc", "pkg.Thing") {
 			t.Errorf("%s.svc = new pkg.Thing() established no component ref inside a function — "+

@@ -35,9 +35,7 @@ func FindCallContext(content string, line, char int) (funcName string, qualifier
 				start++
 
 				name := lineText[start:end]
-				if dotIdx := strings.LastIndexByte(name, '.'); dotIdx >= 0 {
-					qual := name[:dotIdx]
-					funcN := name[dotIdx+1:]
+				if qual, funcN, ok := strings.CutLast(name, "."); ok {
 					// If qualifier is empty, check for call expression before the dot
 					if qual == "" && start > 0 && lineText[start-1] == ')' {
 						j := start - 1

@@ -164,11 +164,13 @@ func (s *Store) Save(m *codemap.Map) error {
 
 	for i := range m.Nodes {
 		n := &m.Nodes[i]
-		if _, err := nodeStmt.Exec(n.ID, string(n.Kind), n.Name, strings.ToLower(n.Name),
+
+		_, err := nodeStmt.Exec(n.ID, string(n.Kind), n.Name, strings.ToLower(n.Name),
 			n.File, n.Line, n.Access, n.Component,
 			b2i(n.Entry), n.Island, b2i(n.Reachable), b2i(n.Root),
 			b2i(n.Utility), b2i(n.Boundary),
-			in[n.ID], out[n.ID]); err != nil {
+			in[n.ID], out[n.ID])
+		if err != nil {
 			return fmt.Errorf("inserting node %s: %w", n.ID, err)
 		}
 

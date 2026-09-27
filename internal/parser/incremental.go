@@ -141,8 +141,8 @@ func (pr *ParseResult) closingTokenCol(line int) int {
 		return utf16Len(lineText[:idx])
 	}
 	// Check for closing brace (script-based)
-	if idx := strings.LastIndex(lineText, "}"); idx >= 0 {
-		return utf16Len(lineText[:idx])
+	if before, _, ok := strings.CutLast(lineText, "}"); ok {
+		return utf16Len(before)
 	}
 
 	return -1

@@ -1454,7 +1454,11 @@ Some handles need both shapes; others only one, depending on how the code uses t
   **Write an empty slice as `[]T{}`, and keep it one where it is marshalled.**
   `enforce-slice-style` is `literal`, not `nil`, because a nil slice encodes
   as JSON `null` and an LSP response or the code map expecting `[]` then
-  breaks a client.
+  breaks a client. `use-slices-concat` pulls the other way — `slices.Concat`
+  of empty inputs returns nil — so where a concatenation is marshalled,
+  build it on an explicit `[]T{}` instead. An `if` init statement stays on one line
+  (`multiline-if-init`): when the call wraps, assign above the `if` and test
+  `err` alone.
   `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
   and the rules left off with the reason for each; update it when a stage
   lands or the pinned golangci-lint moves.

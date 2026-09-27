@@ -1132,33 +1132,30 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 			var methodForPending string
 
 			before, _, _ := strings.Cut(rhs, "(")
-			if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
-				methodForPending = before[dot+1:]
+
+			varChain, methodName, hasDot := strings.CutLast(before, ".")
+			if hasDot {
+				methodForPending = methodName
 			}
 
 			if p.extractCalls {
 				// Record full call: extract method name from rhs
-				if dot := strings.LastIndexByte(before, '.'); dot >= 0 {
-					methodName := before[dot+1:]
-
-					varChain := before[:dot]
-					if isIdentifier(methodName) && isValidVarChain(varChain) {
-						caller := ""
-						if p.inFunc != "" && len(p.funcs) > 0 {
-							caller = p.funcs[len(p.funcs)-1].Name
-						}
-
-						comp := p.lookupComponentRef(varChain, line)
-
-						p.addCall(&CallSite{
-							FuncName:  methodName,
-							Variable:  varChain,
-							Component: comp,
-							Resolved:  comp != "",
-							Line:      uint32(line),
-							Caller:    caller,
-						})
+				if hasDot && isIdentifier(methodName) && isValidVarChain(varChain) {
+					caller := ""
+					if p.inFunc != "" && len(p.funcs) > 0 {
+						caller = p.funcs[len(p.funcs)-1].Name
 					}
+
+					comp := p.lookupComponentRef(varChain, line)
+
+					p.addCall(&CallSite{
+						FuncName:  methodName,
+						Variable:  varChain,
+						Component: comp,
+						Resolved:  comp != "",
+						Line:      uint32(line),
+						Caller:    caller,
+					})
 				}
 			}
 
@@ -1225,13 +1222,13 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 		return
 	}
 
-	dot := strings.LastIndexByte(before, '.')
-	if dot < 0 {
+	recv, method, ok := strings.CutLast(before, ".")
+	if !ok {
 		return
 	}
 
-	varName := strings.TrimSpace(before[:dot])
-	methodName := strings.TrimSpace(before[dot+1:])
+	varName := strings.TrimSpace(recv)
+	methodName := strings.TrimSpace(method)
 
 	if methodName == "" || varName == "" || !isIdentifier(methodName) {
 		return
@@ -1526,21 +1523,18 @@ func extractEntityNewArg(s string) string {
 // extractMethodCallBase returns the base variable name from a "baseVar.method(" pattern.
 // For "variables.jss.getInstance(..." returns "jss". Returns "" if not a method call.
 func extractMethodCallBase(rhs string) string {
-	before, _, ok := strings.Cut(rhs, "(")
+	prefix, _, ok := strings.Cut(rhs, "(")
 	if !ok {
 		return ""
 	}
 
-	prefix := before
-
-	dot := strings.LastIndexByte(prefix, '.')
-	if dot < 0 {
+	base, _, ok := strings.CutLast(prefix, ".")
+	if !ok {
 		return ""
 	}
 
-	base := prefix[:dot]
-	if lastDot := strings.LastIndexByte(base, '.'); lastDot >= 0 {
-		return base[lastDot+1:]
+	if _, after, ok := strings.CutLast(base, "."); ok {
+		return after
 	}
 
 	return base

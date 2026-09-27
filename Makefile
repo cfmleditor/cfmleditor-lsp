@@ -45,8 +45,9 @@ GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
 # its input. v2.13.2 vendors staticcheck v0.8.1 (2026.2.1), which added Go 1.27
 # support. The panic was Linux-only -- internal/poll is platform-split and the
 # darwin build does not use the new form -- so a local `make lint` on macOS
-# passed while CI did not. Bump this in step with the go directive.
-GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+# passed while CI did not. Bump this in step with the go directive, and
+# follow LINT-PLAN.md stage 6 when you do.
+GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 
 # The version is read out of go.mod directly rather than with `go list -m`.
 # Inside a workspace that lists every module in go.work, one per line, and
