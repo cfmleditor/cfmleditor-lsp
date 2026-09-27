@@ -178,6 +178,9 @@ linters:
         # An if-init that wraps defeats the idiom, which exists for one-liners;
         # hoist the statement above the if instead.
         - name: multiline-if-init
+        # slices.Concat allocates the result once. It returns nil, not [], when
+        # every input is empty: where that reaches JSON, keep an explicit [].
+        - name: use-slices-concat
         - name: enforce-slice-style
           arguments: ["literal"]
         # Stage 2 (LINT-PLAN.md).

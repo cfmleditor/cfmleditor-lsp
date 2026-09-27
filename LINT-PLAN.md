@@ -210,9 +210,13 @@ The procedure, each time the pin in the Makefile moves:
   over six alternating rounds.
 - **Deprecated:** unchanged — `wsl`, `gomodguard`, `exhaustruct`, none of
   them enabled. No linter was added.
-- **New revive rules:** `marshal-receiver` (0 findings) and
-  `multiline-if-init` (15 findings, chosen afterwards) are enabled;
-  `use-slices-concat` (7) is left off, see the table. Each `multiline-if-init`
+- **New revive rules:** all three are enabled. `marshal-receiver` found
+  nothing. `multiline-if-init` (15) and `use-slices-concat` (7) were chosen
+  afterwards. `slices.Concat` returns nil where the `append` to `[]T{}` it
+  replaces returned an empty slice, so each of the 7 was checked for a nil
+  that could reach JSON or a nil test: the merged resolver lists, two
+  component-ref lists that are only ranged over, a BOM prefix that is never
+  empty, and three test helpers. None could. Each `multiline-if-init`
   finding was an `if err := f(…wrapped…); err != nil`; the statement now
   sits above the `if`, which then tests `err` alone. 12 of the 15 were in
   tests; the other three are the code map's JSONL writer and its SQLite row
@@ -236,6 +240,5 @@ The procedure, each time the pin in the Makefile moves:
 | gocritic `weakCond`, `rangeAppendAll`, `commentedOutCode` | 1, 1, 5 | False positives: a regexp index is nil or exactly two long; the snippet policy's copy is deliberate; the "code" is an explanatory comment |
 | revive `data-race`, `defer` | 3, 16 | False positives: the values are written under a mutex and read after `wg.Wait()`; `CapturePanic` is correct as written |
 | revive `identical-switch-branches`, `deep-exit` | 20, 40 | One case per concept on purpose; the CLI exits by design |
-| revive `use-slices-concat` | 7 | `slices.Concat` of empty inputs returns nil where `append` to `[]T{}` returns an empty slice — the `null`-versus-`[]` distinction stage 5 guards |
 | `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |

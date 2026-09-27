@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -549,8 +550,7 @@ func (s *Server) depsCallLoader() func(uri.URI, string) ([]parser.CallSite, []pa
 				// name, and the consumer takes the first match — the other
 				// order made the graph follow the shadowed component.
 				// resolve.CanResolveCall resolves in this order too.
-				compRefs := append([]parser.ComponentRef{}, pr.FuncComponentRefs(sc.Start, sc.End)...)
-				compRefs = append(compRefs, pr.ComponentRefs...)
+				compRefs := slices.Concat(pr.FuncComponentRefs(sc.Start, sc.End), pr.ComponentRefs)
 
 				return pr.FuncCalls(sc.Start, sc.End), compRefs
 			}

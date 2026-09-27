@@ -794,8 +794,8 @@ func Merge(base, over *JSON) *JSON {
 
 	// Resolvers from both sides stay active. Order is priority — the first
 	// match wins at lookup time — so over's entries lead.
-	out.ComponentResolvers = append(append([]Resolver{}, over.ComponentResolvers...), base.ComponentResolvers...)
-	out.PropertyResolvers = append(append([]PropResolver{}, over.PropertyResolvers...), base.PropertyResolvers...)
+	out.ComponentResolvers = slices.Concat(over.ComponentResolvers, base.ComponentResolvers)
+	out.PropertyResolvers = slices.Concat(over.PropertyResolvers, base.PropertyResolvers)
 
 	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
 
