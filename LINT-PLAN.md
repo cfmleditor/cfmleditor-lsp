@@ -216,7 +216,7 @@ The procedure, each time the pin in the Makefile moves:
   replaces returned an empty slice, so each of the 7 was checked for a nil
   that could reach JSON or a nil test: the merged resolver lists, two
   component-ref lists that are only ranged over, a BOM prefix that is never
-  empty, and three test helpers. None could. Each `multiline-if-init`
+  empty, and two test helpers. None could. Each `multiline-if-init`
   finding was an `if err := f(…wrapped…); err != nil`; the statement now
   sits above the `if`, which then tests `err` alone. 12 of the 15 were in
   tests; the other three are the code map's JSONL writer and its SQLite row
