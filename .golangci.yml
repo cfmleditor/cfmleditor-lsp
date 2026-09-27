@@ -1,7 +1,10 @@
 version: "2"
 
 run:
-  timeout: 3m
+  # CI lints with a cold cache every time. A passing run took 2m39s against a
+  # 3m limit, and one over it failed with "0 issues" and a timeout. The limit
+  # is a guard against a hang, not a budget.
+  timeout: 10m
 
 linters:
   default: standard
