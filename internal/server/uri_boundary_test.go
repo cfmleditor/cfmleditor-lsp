@@ -2,14 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-
-	"encoding/json/v2"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"

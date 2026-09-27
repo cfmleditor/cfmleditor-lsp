@@ -229,8 +229,10 @@ func TestCallsInsideABracketIndexAreFound(t *testing.T) {
 		// literal "[]" marker, so a dynamic key still falls through to an
 		// honest "no component ref" rather than resolving as `REQUEST.method()`.
 		{"poison marker survives", `REQUEST[ key ].method();`, []string{"REQUEST[].method"}},
-		{"poison marker with a call in the key", `REQUEST[ svc.k() ].method();`,
-			[]string{"REQUEST[].method", "svc.k"}},
+		{
+			"poison marker with a call in the key", `REQUEST[ svc.k() ].method();`,
+			[]string{"REQUEST[].method", "svc.k"},
+		},
 	}
 
 	for _, c := range cases {

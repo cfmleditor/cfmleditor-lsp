@@ -273,7 +273,7 @@ func readFile(path string) string {
 }
 
 func writeFile(path, content string) {
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		fatal("failed to write %s: %v", path, err)
 	}
 }

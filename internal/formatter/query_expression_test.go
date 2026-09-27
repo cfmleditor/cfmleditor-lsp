@@ -160,7 +160,8 @@ func TestQueryExecuteNestedSplitIndentsCorrectly(t *testing.T) {
 func TestQueryExecuteIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	for _, src := range []string{querySrc,
+	for _, src := range []string{
+		querySrc,
 		"<cfscript>\nq = queryExecute(\"select 1\");\n</cfscript>\n",
 		"<cfscript>\nq = queryExecute(\"s\",\n// why\n{a:1});\n</cfscript>\n",
 	} {

@@ -149,9 +149,11 @@ func TestPropertyDefinition_AccessorsGenerated(t *testing.T) {
 	srv.index.IndexFileFromResult(docURI, pr.Funcs, pr.ComponentRefs)
 
 	// Check that accessor functions are indexed
-	expected := []string{"getUserDAO", "setUserDAO", "getOrderDAO", "setOrderDAO",
+	expected := []string{
+		"getUserDAO", "setUserDAO", "getOrderDAO", "setOrderDAO",
 		"getLogger", "setLogger", "getConfig", "setConfig",
-		"getBeanUserService", "setBeanUserService"}
+		"getBeanUserService", "setBeanUserService",
+	}
 	for _, name := range expected {
 		defs := srv.index.Lookup(name)
 		found := false

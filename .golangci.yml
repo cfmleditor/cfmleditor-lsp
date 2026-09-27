@@ -350,3 +350,10 @@ linters:
       - linters:
           - godox
         text: "TODO"
+
+formatters:
+  enable:
+    # gofmt, stricter: no blank line at the start or end of a block, adjacent
+    # var declarations grouped, octal written 0o. `make fmt` and `make lint-fix`
+    # apply it; `make lint` fails on a file it would change.
+    - gofumpt

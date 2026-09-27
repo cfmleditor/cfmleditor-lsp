@@ -10,7 +10,7 @@ make test           # go test ./...
 make lint           # golangci-lint run ./... (pinned scanner, built from source)
 make lint-fix       # golangci-lint run --fix ./...
 make vuln           # govulncheck ./... (pinned scanner, GOWORK=off)
-make fmt            # gofmt -w . && golangci-lint run --fix ./...
+make fmt            # gofmt -w . && golangci-lint run --fix ./... (gofumpt included)
 make install        # build and copy to `go env GOPATH`/bin
 make link           # build + symlink onto PATH for local editor use (LINK_DIR=<dir> to override)
 make unlink         # remove that symlink
@@ -1464,6 +1464,11 @@ Some handles need both shapes; others only one, depending on how the code uses t
   it went in; check `go build -gcflags=-m` if a new such helper keeps the
   pointer. `whyNoLint` wants a reason after every `//nolint:x`, and
   `nolintlint` fails on one that no longer suppresses anything.
+- **Formatting is gofumpt, enforced by `make lint`.** It is `gofmt` plus a few
+  rules: no blank line at the start or end of a block, one element per line
+  once a composite literal spans lines, no redundant parentheses, and
+  standard-library imports in one group — `encoding/json/v2` included. Run
+  `make fmt` rather than fixing a finding by hand.
 - **The linter set is chosen for what it catches, not for style.** Beyond
   `default: standard`, `.golangci.yml` enables linters that flag defects and
   cost nothing on clean code (`bidichk`, `nilnesserr`, `recvcheck`, `musttag`,

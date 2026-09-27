@@ -2,9 +2,8 @@ package config
 
 import (
 	stdjson "encoding/json"
-	"testing"
-
 	"encoding/json/v2"
+	"testing"
 )
 
 // Config files are decoded with the standard library on purpose, while the LSP
