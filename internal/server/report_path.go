@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -44,4 +45,40 @@ func insideDir(root, path string) bool {
 	rel, err := filepath.Rel(rootAbs, abs)
 
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// reportPerm is owner-only: a report can quote the source it was made from, and
+// nothing but the user who asked for it needs to read it.
+const reportPerm = 0o600
+
+// writeReport writes a report the server generated to path.
+//
+// It goes through an os.Root on the report's directory. reportPath and
+// codeMapOutputPath check the path as text, which a symlink planted where the
+// report goes defeats: the write would follow it to wherever it points. The
+// root refuses that. Only the file name is confined, not the directories above
+// it, so a workspace reached through a symlinked directory still gets its
+// reports.
+func writeReport(path string, data []byte) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = root.Close() }()
+
+	return root.WriteFile(filepath.Base(path), data, reportPerm)
+}
+
+// createReport is writeReport for a report written as a stream. The file stays
+// usable after the root is closed.
+func createReport(path string) (*os.File, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = root.Close() }()
+
+	return root.OpenFile(filepath.Base(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, reportPerm)
 }

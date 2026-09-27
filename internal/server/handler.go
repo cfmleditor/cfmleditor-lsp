@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -875,14 +874,14 @@ func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile strin
 
 	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 
-	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
+	if err := writeReport(outFile, []byte(output)); err != nil {
 		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 
 		return
 	}
 
 	dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
-	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
+	if err := writeReport(dotFile, []byte(result.Graph.DOT())); err != nil {
 		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 	}
 
@@ -1340,12 +1339,12 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return mermaid, nil
 		}
 
-		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
+		if err := writeReport(outFile, []byte("```mermaid\n"+mermaid+"\n```\n")); err != nil {
 			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 		}
 
 		dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
+		if err := writeReport(dotFile, []byte(result.Graph.DOT())); err != nil {
 			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 		}
 

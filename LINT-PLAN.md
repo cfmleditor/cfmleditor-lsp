@@ -273,10 +273,38 @@ A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 
 ## Suppressions that were fixable (done)
 
-50 `//nolint` markers went, leaving the 66 that are needed: the 42 complexity
-markers, 19 `gosec` on reads and writes the server makes by design, 4
-`staticcheck` on the deprecated `rootUri` a client may still send, and the
-Unix-socket `usetesting`.
+59 `//nolint` markers went, leaving 57 that are needed: the 42 complexity
+markers, 10 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client may
+still send, and the Unix-socket `usetesting`.
+
+- **`gosec` (9 of 19).**
+  - **Report writes (7).** The findRefs, exportDeps and code-map reports, and
+    the unresolved and CFLint exports, were written `0644` into a `0755`
+    directory. They are now `0600` in `0750`.
+  - **Symlinks.** The findRefs, exportDeps and code-map reports now go through
+    an `os.Root` on the report's directory. `reportPath` checks the path as
+    text, so a symlink planted at the report's name carried the write outside
+    the workspace. The old write followed one and emptied its target.
+    `TestWriteReportRefusesAPlantedSymlink` fails without the root.
+  - **Exports are not confined.** They keep a plain write, because the
+    known-issues file is named in the config and a project may keep it behind
+    a symlink on purpose.
+  - **SQL (2).** Callers and callees are two constant queries. The path
+    search's run of `?` placeholders is now one JSON array read through
+    `json_each`. That search was about 10% faster than on `main` over 4
+    alternating rounds.
+  - **The 10 kept.** Each is the program doing its job:
+    - the debug log at the path in `CFMLEDITOR_LSP_LOG` (2);
+    - the `vfs` read layer, reading `Application.cfc` from a search directory,
+      reading `.cfmleditor.json` while walking up, and CFLint reading the file
+      it lints (4);
+    - launching CFLint (2);
+    - making the downloaded CFLint executable (1);
+    - `SearchSymbols` joining fixed WHERE conditions (1).
+
+    Those reads cannot go through an `os.Root`, because a symlinked
+    `Application.cfc` or config file is legitimate. Wrapping them in
+    `filepath.Clean` would satisfy gosec without making anything safer.
 
 - **`nilerr` (8) and `errcheck,gosec` on `filepath.Walk` (3).** `nilerr` flags a
   `return nil` in a branch reached with a non-nil error, but not a callback that

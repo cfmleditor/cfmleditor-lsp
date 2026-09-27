@@ -176,11 +176,11 @@ func applyCodeMapViews(m *codemap.Map, req *codeMapRequest) *codemap.Map {
 }
 
 func (s *Server) writeCodeMap(m *codemap.Map, req *codeMapRequest, out string) error {
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil { //nolint:gosec // inside the workspace (codeMapOutputPath), for the user to open and share
+	if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(out), err)
 	}
 
-	file, err := os.Create(out) //nolint:gosec // confined to the workspace by codeMapOutputPath
+	file, err := createReport(out)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", out, err)
 	}

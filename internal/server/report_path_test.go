@@ -109,3 +109,64 @@ func TestReportPath(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteReportRefusesAPlantedSymlink. reportPath checks the path as text, so
+// a symlink already sitting where the report goes would carry the write to
+// wherever it points. The os.Root in writeReport and createReport refuses it.
+func TestWriteReportRefusesAPlantedSymlink(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+
+	target := filepath.Join(outside, "victim")
+	if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "refs-x.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	if err := writeReport(link, []byte("overwritten")); err == nil {
+		t.Error("writeReport followed a symlink out of the report's directory")
+	}
+
+	if f, err := createReport(link); err == nil {
+		_ = f.Close()
+
+		t.Error("createReport followed a symlink out of the report's directory")
+	}
+
+	if got, _ := os.ReadFile(target); string(got) != "keep" {
+		t.Errorf("the symlink's target was written: %q", got)
+	}
+}
+
+// TestReportsAreOwnerOnly: a report can quote the source it was made from.
+func TestReportsAreOwnerOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	written := filepath.Join(dir, "deps-x.md")
+	if err := writeReport(written, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	streamed := filepath.Join(dir, "codemap.html")
+
+	f, err := createReport(streamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = f.Close()
+
+	for _, p := range []string{written, streamed} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s is %v, readable beyond its owner", filepath.Base(p), perm)
+		}
+	}
+}
