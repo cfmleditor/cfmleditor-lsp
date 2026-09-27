@@ -39,9 +39,18 @@ func benchDoc(funcs int) string {
 	return b.String()
 }
 
+// The size of benchLoadedServer's index: a real workspace's order of magnitude,
+// every file declaring the same few names.
+const (
+	benchFiles        = 5000
+	benchFuncsPerFile = 8
+)
+
 // benchLoadedServer fills an index with files declaring the same handful of
 // method names, which is the shape that stresses the name buckets.
-func benchLoadedServer(files, perFile int) *Server {
+func benchLoadedServer() *Server {
+	files, perFile := benchFiles, benchFuncsPerFile
+
 	s := newTestServer()
 
 	for f := range files {
@@ -88,7 +97,7 @@ func benchOpen(b *testing.B, s *Server, docURI uri.URI, content string) {
 func BenchmarkWorkspaceSymbol(b *testing.B) {
 	for _, q := range []string{"method3", "zzz"} {
 		b.Run("query_"+q, func(b *testing.B) {
-			s := benchLoadedServer(5000, 8)
+			s := benchLoadedServer()
 
 			req, err := json.Marshal(protocol.WorkspaceSymbolParams{Query: q})
 			if err != nil {
@@ -114,7 +123,7 @@ func BenchmarkWorkspaceSymbol(b *testing.B) {
 // anything, and a one-character query matches every definition in the
 // workspace. See PERFORMANCE-GAPS.md.
 func BenchmarkWorkspaceSymbolWithMarshal(b *testing.B) {
-	s := benchLoadedServer(5000, 8)
+	s := benchLoadedServer()
 
 	for _, q := range []string{"m", "method3", "zzz"} {
 		b.Run("query_"+q, func(b *testing.B) {
@@ -154,7 +163,7 @@ func BenchmarkWorkspaceSymbolWithMarshal(b *testing.B) {
 }
 
 func BenchmarkCompletion(b *testing.B) {
-	s := benchLoadedServer(5000, 8)
+	s := benchLoadedServer()
 	docURI := uri.File("/ws/open/Doc.cfc")
 
 	benchOpen(b, s, docURI, benchDoc(60))
@@ -182,7 +191,7 @@ func BenchmarkCompletion(b *testing.B) {
 func BenchmarkKeystroke(b *testing.B) {
 	for _, funcs := range []int{20, 200} {
 		b.Run(fmt.Sprintf("funcs%d", funcs), func(b *testing.B) {
-			s := benchLoadedServer(5000, 8)
+			s := benchLoadedServer()
 			docURI := uri.File("/ws/open/Doc.cfc")
 
 			benchOpen(b, s, docURI, benchDoc(funcs))
@@ -284,7 +293,7 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 		{"deferred", completionDefer{documentation: true, detail: true}},
 	} {
 		b.Run(c.name, func(b *testing.B) {
-			s := benchLoadedServer(5000, 8)
+			s := benchLoadedServer()
 			s.completionDefer = c.d
 			docURI := uri.File("/ws/open/Doc.cfc")
 
@@ -389,7 +398,7 @@ func BenchmarkIndexBackedHandlers(b *testing.B) {
 
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
-			s := benchLoadedServer(5000, 8)
+			s := benchLoadedServer()
 			docURI := uri.File("/ws/open/Doc.cfc")
 
 			benchOpen(b, s, docURI, benchDoc(60))
