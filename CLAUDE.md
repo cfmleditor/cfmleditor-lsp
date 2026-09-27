@@ -1427,7 +1427,9 @@ Some handles need both shapes; others only one, depending on how the code uses t
   Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
   used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
-  bump. `gosec` runs everywhere except, in `cmd/`, the rules about opening and writing the paths
+  bump. It builds once, into `target/tools/golangci-lint-<version>-go<version>`, and CI caches
+  that file and golangci-lint's analysis cache between runs; a cold lint job was about 50s
+  building the linter and 90s analysing. `gosec` runs everywhere except, in `cmd/`, the rules about opening and writing the paths
   the CLI is given; anything else it flags is fixed or carries its reason. **Convert a line or
   column with `conv.Uint32`, not `uint32(n)`**: `internal/conv` clamps where a bare conversion
   wraps a negative to about four billion, and `G115` flags the bare form. Test files are exempted from `prealloc` and `gosec` only: a test's

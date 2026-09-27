@@ -1,9 +1,9 @@
 version: "2"
 
 run:
-  # CI lints with a cold cache every time. A passing run took 2m39s against a
-  # 3m limit, and one over it failed with "0 issues" and a timeout. The limit
-  # is a guard against a hang, not a budget.
+  # A cold run (a new linter or Go version, or an evicted CI cache) took 2m39s
+  # in CI against the old 3m limit, and one over it failed with "0 issues" and
+  # a timeout. The limit is a guard against a hang, not a budget.
   timeout: 10m
 
 linters:

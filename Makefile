@@ -56,7 +56,17 @@ GOLANGCI ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 # "1.23" as a command. A developer with a go.work alongside the grammar repo
 # is the normal case here, so `go list -m` cannot be used for this.
 GO_VERSION = $(shell awk '/^go /{print $$2; exit}' go.mod)
-GOLANGCI_RUN = GOTOOLCHAIN=go$(GO_VERSION) go run $(GOLANGCI)
+
+# The pinned linter, built once. The name carries the linter's version and the
+# Go version it was built with, so bumping either builds a new binary rather
+# than running a stale one. CI caches this file between runs: building the
+# linter is about 50s of a cold lint job. `make clean` removes it.
+GOLANGCI_BIN = target/tools/$(subst @,-,$(notdir $(GOLANGCI)))-go$(GO_VERSION)
+
+$(GOLANGCI_BIN):
+	@mkdir -p $(@D)/.build
+	GOTOOLCHAIN=go$(GO_VERSION) GOBIN=$(CURDIR)/$(@D)/.build go install $(GOLANGCI)
+	mv $(@D)/.build/golangci-lint $@
 
 # Fetch every source, then assemble docs/data from all of them. Written as one
 # sequential recipe rather than as prerequisites so `make -j` cannot start the
@@ -210,12 +220,12 @@ shrink:
 	rm -f $$log; \
 	exit $$status
 
-fmt:
+fmt: $(GOLANGCI_BIN)
 	gofmt -w .
-	$(GOLANGCI_RUN) run --fix ./...
+	$(GOLANGCI_BIN) run --fix ./...
 
-lint:
-	$(GOLANGCI_RUN) run ./...
+lint: $(GOLANGCI_BIN)
+	$(GOLANGCI_BIN) run ./...
 
 # GOWORK=off so the scan resolves dependencies from go.mod rather than from a
 # developer's go.work. A workspace can substitute a local checkout (e.g.
@@ -224,8 +234,8 @@ lint:
 vuln:
 	GOWORK=off GOTOOLCHAIN=go$(GO_VERSION) go run $(GOVULNCHECK) ./...
 
-lint-fix:
-	$(GOLANGCI_RUN) run --fix ./...
+lint-fix: $(GOLANGCI_BIN)
+	$(GOLANGCI_BIN) run --fix ./...
 
 install: build
 	@mkdir -p $(GOBIN_DIR)
