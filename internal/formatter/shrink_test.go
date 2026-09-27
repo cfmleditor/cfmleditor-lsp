@@ -116,7 +116,7 @@ func firstFailingNode(n *sitter.Node) *sitter.Node {
 		return n
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if e := firstFailingNode(n.Child(i)); e != nil {
 			return e
 		}

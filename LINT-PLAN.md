@@ -339,6 +339,32 @@ still send, and the Unix-socket `usetesting`.
 A canary confirmed that the two configuration changes still flag what they
 should.
 
+## Four linters from a sweep of every one (done)
+
+Running golangci-lint v2.14.0 with `default: all` found four linters that were
+off and are cheap to satisfy. The rest of that sweep is in the table below.
+
+- **`intrange` (97).**
+  - **The payoff:** 89 of the loops were
+    `for i := uint(0); i < n.ChildCount(); i++`. That makes a cgo call on
+    every pass through the loop, and they are almost all in the formatter.
+    `for i := range n.ChildCount()` makes the call once. A parsed tree does
+    not change during a walk, so the loop is the same.
+  - **Fixing them:** `--fix` leaves loops like these alone, because it cannot
+    know a method call is free of side effects. They were converted by one
+    exact pattern. An AST check confirmed that no converted loop body writes
+    its counter, and `intrange` skips a loop that does.
+  - **Output:** identical for all 7,509 corpus files, byte for byte, and
+    `make corpus BASELINE=` reports no file changing verdict.
+  - **Speed:** formatting the whole corpus was faster in all 4 alternating
+    rounds, a median 13.8s against 14.4s (about 4%).
+- **`godot` (14):** doc comments end in a full stop. Applied by `--fix`.
+- **`goprintffuncname` (1):** the call trace's `add(format, args...)` is
+  `addf`.
+- **`godoclint` (1):** a comment introducing a group of scope constants sat
+  directly above `ScopeURL`, so Go read it as that constant's doc. A blank
+  line now separates them.
+
 ## Left off, and why
 
 | Rule | Findings | Why it stays off |
@@ -358,4 +384,9 @@ should.
 | revive `data-race`, `defer` | 3, 16 | False positives: the values are written under a mutex and read after `wg.Wait()`; `CapturePanic` is correct as written |
 | revive `identical-switch-branches`, `deep-exit` | 20, 40 | One case per concept on purpose; the CLI exits by design |
 | `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
+| `noinlineerr` | 374 | Forbids `if err := f(); err != nil`, which is this codebase's idiom |
+| `wsl` | 78 | The old implementation; `wsl_v5` is enabled |
+| `dupl` | 12 | Four of its six pairs are tests. The two in the parser (`extractAllLinks` in both parsers, and a chain walk twice in `script_parser.go`) are refactors on the keystroke path, to be benchmarked like the complexity markers |
+| `tagliatelle` | 4 | Wants the MCP tools' snake_case argument names renamed, which would break clients |
+| `gochecknoinits`, `ireturn`, `dogsled`, `embeddedstructfieldcheck`, `gosmopolitan` | 3, 7, 14, 4, 1 | Generated code, style, tests only, style, and a deliberate Han-script test string |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |

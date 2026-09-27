@@ -1183,7 +1183,7 @@ func findFirstError(n *sitter.Node) *sitter.Node {
 		return n
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if found := findFirstError(n.Child(i)); found != nil {
 			return found
 		}
@@ -1216,7 +1216,7 @@ func (f *Formatter) text(n *sitter.Node) string {
 }
 
 // func (f *Formatter) childByField(n *sitter.Node, field string) *sitter.Node {
-// 	for i := uint(0); i < n.ChildCount(); i++ {
+// 	for i := range n.ChildCount() {
 // 		c := n.Child(i)
 // 		if n.FieldNameForChild(uint32(i)) == field {
 // 			return c
@@ -1385,7 +1385,7 @@ func (f *Formatter) collectAttrs(tag *sitter.Node) []cfAttr {
 }
 
 func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr, hdrEnd int) {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_start_tag_with_selfclose", "cf_tag_attributes":
@@ -1400,7 +1400,7 @@ func (f *Formatter) walkAttrs(n *sitter.Node, attrs *[]cfAttr, hdrEnd int) {
 		case "cf_attribute":
 			attr := cfAttr{}
 
-			for j := uint(0); j < c.ChildCount(); j++ {
+			for j := range c.ChildCount() {
 				gc := c.Child(j)
 				switch gc.Kind() {
 				case "cf_attribute_name":
@@ -1708,7 +1708,7 @@ func (f *Formatter) formatChildren(n *sitter.Node) {
 	prevTagKind := ""
 	prevWasComment := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		kind := f.nodeTagKind(c)
 
@@ -1779,7 +1779,7 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 		return true
 	case "cf_tag":
 		// A cf_tag with an end tag is a block tag.
-		for i := uint(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			if n.Child(i).Kind() == "cf_end_tag" {
 				return true
 			}
@@ -1800,7 +1800,7 @@ func (f *Formatter) isBlockTagKind(n *sitter.Node) bool {
 // leaving the file to answer true and lose the blank line on the next pass.
 // Formatting oscillated between the two forever.
 func (f *Formatter) firstBodyChildIsArg(n *sitter.Node) bool {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		kind := c.Kind()
@@ -1839,7 +1839,7 @@ func (f *Formatter) tagName(n *sitter.Node) string {
 
 	// Generic cf_tag: look for cf_tag_name in cf_start_tag child.
 	if kind == "cf_tag" || kind == "cf_start_tag" || kind == "cf_end_tag" || kind == "cf_start_tag_with_selfclose" {
-		for i := uint(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			c := n.Child(i)
 			if c.Kind() == "cf_tag_name" {
 				return "cf" + strings.ToLower(f.text(c))
@@ -1962,7 +1962,7 @@ func isTagNameByte(b byte) bool {
 // hasCFBodyContent reports whether a cf_tag has any body child with actual
 // content, ignoring the start/end tags emitted around the body loop.
 func (f *Formatter) hasCFBodyContent(n *sitter.Node) bool {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_end_tag", "implicit_cf_end_tag":
@@ -1983,7 +1983,7 @@ func (f *Formatter) hasCFBodyContent(n *sitter.Node) bool {
 // implicit_cf_end_tag marker — inventing a `</name>` for it re-parents every
 // following sibling into the tag's body.
 func (f *Formatter) hasRealCFEndTag(n *sitter.Node) bool {
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if n.Child(i).Kind() == "cf_end_tag" {
 			return true
 		}
@@ -2009,7 +2009,7 @@ func (f *Formatter) isCFTryBranch(n *sitter.Node) bool {
 
 func (f *Formatter) formatCFTag(n *sitter.Node) {
 	// Check if this is a self-closing cf_tag (e.g. <cftransaction action="commit" />)
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if n.Child(i).Kind() == "cf_start_tag_with_selfclose" {
 			f.formatCFSelfCloseAttrTag(n)
 
@@ -2043,7 +2043,7 @@ func (f *Formatter) formatCFTag(n *sitter.Node) {
 	prevCFTagKind := ""
 	prevCFTagWasComment := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "cf_start_tag", "cf_end_tag", "implicit_cf_end_tag":
@@ -2160,7 +2160,7 @@ func (f *Formatter) formatCFBlockTag(n *sitter.Node) {
 	// Collect body nodes (skip syntax tokens).
 	var bodyNodes []*sitter.Node
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		kind := c.Kind()
@@ -2491,7 +2491,7 @@ func (f *Formatter) formatCFIfTag(n *sitter.Node) {
 
 	var trailingNodes []*sitter.Node
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		kind := c.Kind()
@@ -2595,7 +2595,7 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 	isElse := false
 	inBody := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		kind := c.Kind()
@@ -2604,7 +2604,7 @@ func (f *Formatter) formatCFIfAlt(n *sitter.Node) {
 			continue
 		case "cf_elseif_tag":
 			// Extract condition from inside cf_elseif_tag
-			for j := uint(0); j < c.ChildCount(); j++ {
+			for j := range c.ChildCount() {
 				gc := c.Child(j)
 				if gc.Kind() == ">" {
 					break
@@ -2709,7 +2709,7 @@ func (f *Formatter) formatCFSelfClosingTag(n *sitter.Node) {
 	// reconstruct from expression children with normalized spacing.
 	var exprParts []string
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		kind := c.Kind()
@@ -2807,7 +2807,7 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 
 	f.level++
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.Kind() == "cf_script_content" && f.opts.ParseScript != nil {
 			f.formatScriptRegion(c)
@@ -2823,7 +2823,7 @@ func (f *Formatter) formatCFScript(n *sitter.Node) {
 func (f *Formatter) formatScriptChildren(n *sitter.Node) {
 	prevEndRow := int(n.StartPosition().Row)
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 
 		startRow := int(c.StartPosition().Row)
@@ -2843,7 +2843,7 @@ func (f *Formatter) formatScriptChildren(n *sitter.Node) {
 func (f *Formatter) formatHashExpression(n *sitter.Node) {
 	f.write("#")
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		if c.Kind() == "#" {
 			f.write("#")

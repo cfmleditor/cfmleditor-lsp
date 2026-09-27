@@ -256,7 +256,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 
 			if hasDoc {
 				lineStart := 0
-				for i := 0; i < int(params.Position.Line); i++ {
+				for range params.Position.Line {
 					idx := strings.IndexByte(content[lineStart:], '\n')
 					if idx < 0 {
 						lineStart = len(content)

@@ -465,7 +465,7 @@ func FilePathAtCursor(content string, line, char int) string {
 func CountNewlines(s string) int {
 	n := 0
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == '\n' {
 			n++
 		}

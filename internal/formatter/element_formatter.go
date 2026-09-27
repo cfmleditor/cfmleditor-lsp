@@ -34,7 +34,7 @@ func (f *Formatter) formatElement(n *sitter.Node) {
 
 	var bodyNodes []*sitter.Node
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "start_tag", "self_closing_tag":
@@ -164,7 +164,7 @@ func (f *Formatter) isPreformattedElement(startTag *sitter.Node) bool {
 		return false
 	}
 
-	for i := uint(0); i < startTag.ChildCount(); i++ {
+	for i := range startTag.ChildCount() {
 		c := startTag.Child(i)
 		if c.Kind() == "tag_name" {
 			return htmlPreformattedElements[strings.ToLower(f.text(c))]
@@ -179,7 +179,7 @@ func (f *Formatter) isVoidElement(startTag *sitter.Node) bool {
 		return false
 	}
 
-	for i := uint(0); i < startTag.ChildCount(); i++ {
+	for i := range startTag.ChildCount() {
 		c := startTag.Child(i)
 		if c.Kind() == "tag_name" {
 			return htmlVoidElements[strings.ToLower(f.text(c))]
@@ -506,7 +506,7 @@ func (f *Formatter) formatRawTextElement(n *sitter.Node) {
 
 	var bodyNodes []*sitter.Node
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "start_tag", "self_closing_tag":

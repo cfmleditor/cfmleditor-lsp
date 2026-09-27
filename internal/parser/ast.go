@@ -43,6 +43,7 @@ const (
 	// why the script parser's component-ref dispatch deliberately leaves most of
 	// them out — but an assignment into one is still a declaration, and
 	// go-to-definition on `application.x` has to have somewhere to land.
+
 	ScopeURL
 	ScopeForm
 	ScopeCGI
@@ -594,7 +595,7 @@ func (rs *ResolverSet) Resolve(expr string) string {
 		candidates []int
 	)
 
-	for i := 0; i < len(expr); i++ {
+	for i := range len(expr) {
 		b := expr[i]
 		if b >= 'A' && b <= 'Z' {
 			b += 32

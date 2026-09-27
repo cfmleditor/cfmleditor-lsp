@@ -139,7 +139,7 @@ func collectErrors(n *sitter.Node, src []byte, cols *colMapper, diags *[]protoco
 		return
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		collectErrors(n.Child(i), src, cols, diags)
 	}
 }

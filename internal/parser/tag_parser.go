@@ -956,7 +956,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	}
 }
 
-// parseCFObject handles <cfobject component="path" name="var">
+// parseCFObject handles <cfobject component="path" name="var">.
 func (p *tagParser) parseCFObject(tag string, line int) {
 	component := getAttr(tag, "component")
 	name := getAttr(tag, "name")
@@ -971,7 +971,7 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 	}
 }
 
-// parseCFInvoke handles <cfinvoke component="path" returnvariable="var">
+// parseCFInvoke handles <cfinvoke component="path" returnvariable="var">.
 func (p *tagParser) parseCFInvoke(tag string, line int) {
 	component := getAttr(tag, "component")
 	variable := getAttr(tag, "returnvariable")
@@ -1027,7 +1027,7 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	}
 }
 
-// parseCFProperty handles <cfproperty name="x" type="y" />
+// parseCFProperty handles <cfproperty name="x" type="y" />.
 func (p *tagParser) parseCFProperty(tag string, line int) {
 	name := getAttr(tag, "name")
 	if name == "" {

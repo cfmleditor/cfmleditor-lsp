@@ -66,7 +66,7 @@ func collectEdits(n *sitter.Node, src []byte, edits *[]preformatEdit) {
 	// converted one level per pass. Deeper nesting than maxPasses was left half
 	// converted, finished by the *next* run of the formatter, so an unchanged
 	// file kept producing a fresh diff.
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		collectEdits(n.Child(i), src, edits)
 	}
 }
@@ -77,7 +77,7 @@ func tryConvertToSelfClosing(n *sitter.Node, src []byte, edits *[]preformatEdit)
 	hasEndTag := false
 	hasImplicitEnd := false
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		c := n.Child(i)
 		switch c.Kind() {
 		case "start_tag":

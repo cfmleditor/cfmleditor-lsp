@@ -43,7 +43,7 @@ func findErrorNode(n *sitter.Node) *sitter.Node {
 		return n
 	}
 
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		if found := findErrorNode(n.Child(i)); found != nil {
 			return found
 		}

@@ -133,7 +133,7 @@ func WritePanic(where string, v any) {
 // in a state nothing has reasoned about. The value here is the record, not the
 // rescue.
 //
-// Usage: defer CapturePanic("runServer")()
+// Usage: defer CapturePanic("runServer")().
 func CapturePanic(where string) func() {
 	return func() {
 		r := recover()

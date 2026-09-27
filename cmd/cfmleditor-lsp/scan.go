@@ -89,7 +89,7 @@ func cmdScan(args []string) {
 // printErrors reports every error node under n and returns how many it found,
 // so the caller can tell "clean" from "reported problems" — the count it kept
 // was never incremented, so `scan` printed each error and then finished with
-// "No parse errors found in N files."
+// "No parse errors found in N files.".
 func printErrors(file string, lang string, n *sitter.Node, src []byte) int {
 	return printErrorNodes(file, lang, n, src)
 }
@@ -115,7 +115,7 @@ func printErrorNodes(file string, lang string, n *sitter.Node, src []byte) int {
 	}
 
 	count := 0
-	for i := uint(0); i < n.ChildCount(); i++ {
+	for i := range n.ChildCount() {
 		count += printErrorNodes(file, lang, n.Child(i), src)
 	}
 
@@ -173,7 +173,7 @@ func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lin
 			return
 		}
 
-		for i := uint(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			walk(n.Child(i))
 		}
 	}
