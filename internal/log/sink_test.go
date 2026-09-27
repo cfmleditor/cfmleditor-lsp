@@ -173,3 +173,33 @@ func TestLoggingIsSafeFromManyGoroutines(t *testing.T) {
 
 	wg.Wait()
 }
+
+// Debug records reach nobody unless the debug flag is on. zap's level kept them
+// off stderr, but the forward to the client had no level check, so without the
+// flag every Debug call — one per keystroke from didChange — was still
+// formatted and sent to the editor as window/logMessage.
+func TestDebugRecordsNeedTheDebugFlag(t *testing.T) {
+	for _, debug := range []bool{false, true} {
+		logger, ok := cflog.NewLogger(debug).(cflog.Teeable)
+		if !ok {
+			t.Fatal("the logger is not Teeable")
+		}
+
+		sink := &capture{}
+		logger.Attach(sink)
+
+		logger.Debug("details", "k", "v")
+		logger.Info("hello")
+
+		_, records := sink.snapshot()
+
+		want := []string{"hello"}
+		if debug {
+			want = []string{"details k=v", "hello"}
+		}
+
+		if strings.Join(records, "|") != strings.Join(want, "|") {
+			t.Errorf("debug=%v: the client was sent %q, want %q", debug, records, want)
+		}
+	}
+}

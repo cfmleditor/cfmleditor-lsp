@@ -77,11 +77,17 @@ func NewLogger(debug bool) Logger {
 		}))
 	}
 
-	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar()}
+	return &zapLogger{l: l.WithOptions(zap.AddCallerSkip(1)).Sugar(), debug: debug}
 }
 
 type zapLogger struct {
 	l *zap.SugaredLogger
+
+	// debug is the config's debug flag. Debug records are dropped outright
+	// without it: zap's level already kept them off stderr, but forward has no
+	// level of its own, so every one was still formatted and sent to the client
+	// as window/logMessage — one per keystroke from didChange alone.
+	debug bool
 
 	// Guards sink alone. A log call must never block on anything else, and the
 	// sink is swapped once at startup and once at shutdown against readers on
@@ -91,6 +97,10 @@ type zapLogger struct {
 }
 
 func (z *zapLogger) Debug(msg string, kv ...any) {
+	if !z.debug {
+		return
+	}
+
 	z.l.Debugw(msg, kv...)
 	z.forward(lspLog, msg, kv)
 }
