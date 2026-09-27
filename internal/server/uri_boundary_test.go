@@ -248,11 +248,11 @@ func TestUncanonicalWindowsRootIsMangledUpstream(t *testing.T) {
 		t.Fatalf("unmarshalling initialize params: %v", err)
 	}
 
-	if params.RootURI == nil {
+	if params.RootURI == nil { //nolint:staticcheck // rootUri is deprecated, but clients still send it and this pins how it decodes
 		t.Fatal("rootUri did not survive unmarshalling at all")
 	}
 
-	decoded := string(*params.RootURI)
+	decoded := string(*params.RootURI) //nolint:staticcheck // as above
 	if !strings.Contains(decoded, "users") {
 		t.Skipf("go.lsp.dev/protocol no longer lowercases the authority (%q); recheck this boundary", decoded)
 	}

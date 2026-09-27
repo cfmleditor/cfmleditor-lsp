@@ -318,9 +318,7 @@ linters:
       - path: _test\.go
         linters:
           - prealloc
-          - unparam
           - gosec
-          - staticcheck
           # SELECT * in a test is a CFML fixture fed to the formatter, not a
           # query this code runs.
           - unqueryvet

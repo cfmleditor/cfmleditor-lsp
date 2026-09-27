@@ -461,17 +461,17 @@ func TestParseFunctionDefs_NestedCFMLComment(t *testing.T) {
 
 func TestParseComponentRefs_NewWithParens(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { myObj = new models.User() }`)
-	assertRef(t, refs, 0, "myObj", "models.User")
+	assertFirstRef(t, refs, "myObj", "models.User")
 }
 
 func TestParseComponentRefs_NewWithoutParens(t *testing.T) {
 	refs := ParseComponentRefs(testURI, "component {\nmyObj = new models.User\n}")
-	assertRef(t, refs, 0, "myObj", "models.User")
+	assertFirstRef(t, refs, "myObj", "models.User")
 }
 
 func TestParseComponentRefs_NewQuotedPath(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { x = new "dir.Entity"() }`)
-	assertRef(t, refs, 0, "x", "dir.Entity")
+	assertFirstRef(t, refs, "x", "dir.Entity")
 }
 
 // Lucee's `new <typesystem>:<path>()` prefix. The prefix is not part of the
@@ -479,7 +479,7 @@ func TestParseComponentRefs_NewQuotedPath(t *testing.T) {
 // "cfml", against which every later method check then failed.
 func TestParseComponentRefs_NewCfmlPrefix(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { x = new cfml:models.User() }`)
-	assertRef(t, refs, 0, "x", "models.User")
+	assertFirstRef(t, refs, "x", "models.User")
 }
 
 func TestParseComponentRefs_NewJavaPrefixResolvesLikeCreateObject(t *testing.T) {
@@ -493,7 +493,7 @@ func TestParseComponentRefs_NewJavaPrefixResolvesLikeCreateObject(t *testing.T) 
 
 	pr := ParseWithOptions(testURI, `component { f = new java:java.io.File( p ) }`,
 		&ParseOptions{Resolvers: javaStubs})
-	assertRef(t, pr.ComponentRefs, 0, "f", "stubs.java.io.File")
+	assertFirstRef(t, pr.ComponentRefs, "f", "stubs.java.io.File")
 }
 
 func TestParseComponentRefs_NewJavaPrefixWithoutStubs(t *testing.T) {
@@ -502,7 +502,7 @@ func TestParseComponentRefs_NewJavaPrefixWithoutStubs(t *testing.T) {
 	// i.e. the constructor arguments were consumed either way.
 	refs := ParseComponentRefs(testURI,
 		"component {\n\tf = new java:java.io.File( p );\n\tsvc = new models.User();\n}")
-	assertRef(t, refs, 0, "svc", "models.User")
+	assertFirstRef(t, refs, "svc", "models.User")
 
 	for _, r := range refs {
 		if r.Component == "java" {
@@ -513,42 +513,42 @@ func TestParseComponentRefs_NewJavaPrefixWithoutStubs(t *testing.T) {
 
 func TestParseComponentRefs_CreateObject(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { svc = CreateObject("component", "services.OrderService") }`)
-	assertRef(t, refs, 0, "svc", "services.OrderService")
+	assertFirstRef(t, refs, "svc", "services.OrderService")
 }
 
 func TestParseComponentRefs_EntityNew(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component { user = entityNew("User") }`)
-	assertRef(t, refs, 0, "user", "User")
+	assertFirstRef(t, refs, "user", "User")
 }
 
 func TestParseComponentRefs_CfObject(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfobject component="dir.Entity" name="obj">`)
-	assertRef(t, refs, 0, "obj", "dir.Entity")
+	assertFirstRef(t, refs, "obj", "dir.Entity")
 }
 
 func TestParseComponentRefs_CfObjectReversed(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfobject name="obj" component="dir.Entity">`)
-	assertRef(t, refs, 0, "obj", "dir.Entity")
+	assertFirstRef(t, refs, "obj", "dir.Entity")
 }
 
 func TestParseComponentRefs_CfInvoke(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfinvoke component="svc.Helper" method="init" returnvariable="h">`)
-	assertRef(t, refs, 0, "h", "svc.Helper")
+	assertFirstRef(t, refs, "h", "svc.Helper")
 }
 
 func TestParseComponentRefs_ThisAssignmentScript(t *testing.T) {
 	refs := ParseComponentRefs(testURI, "component {\n\tVARIABLES.self = this;\n}")
-	assertRef(t, refs, 0, "self", "/test.cfc")
+	assertFirstRef(t, refs, "self", "/test.cfc")
 }
 
 func TestParseComponentRefs_ThisAssignmentTag(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfcomponent><cfset VARIABLES.prs = this></cfcomponent>`)
-	assertRef(t, refs, 0, "prs", "/test.cfc")
+	assertFirstRef(t, refs, "prs", "/test.cfc")
 }
 
 func TestParseComponentRefs_CfInvokeReversed(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfinvoke returnvariable="h" method="init" component="svc.Helper">`)
-	assertRef(t, refs, 0, "h", "svc.Helper")
+	assertFirstRef(t, refs, "h", "svc.Helper")
 }
 
 func TestParseComponentRefs_Multiple(t *testing.T) {
@@ -653,16 +653,18 @@ func assertDefs(t *testing.T, defs []FunctionDef, want []string) {
 	}
 }
 
-func assertRef(t *testing.T, refs []ComponentRef, idx int, variable, component string) {
+// assertFirstRef checks the first component ref, which is the one every
+// caller's fixture declares.
+func assertFirstRef(t *testing.T, refs []ComponentRef, variable, component string) {
 	t.Helper()
 
-	if len(refs) <= idx {
-		t.Fatalf("expected at least %d refs, got %d", idx+1, len(refs))
+	if len(refs) == 0 {
+		t.Fatal("expected at least 1 ref, got 0")
 	}
 
-	if refs[idx].Variable != variable || refs[idx].Component != component {
-		t.Errorf("ref[%d]: got Variable=%q Component=%q, want %q %q",
-			idx, refs[idx].Variable, refs[idx].Component, variable, component)
+	if refs[0].Variable != variable || refs[0].Component != component {
+		t.Errorf("ref[0]: got Variable=%q Component=%q, want %q %q",
+			refs[0].Variable, refs[0].Component, variable, component)
 	}
 }
 
@@ -690,19 +692,19 @@ func TestParseComponentRefs_CreateObjectInit(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component {
 		var persist = createObject("component", "persist").init(parent=VARIABLES._parent)
 	}`)
-	assertRef(t, refs, 0, "persist", "persist")
+	assertFirstRef(t, refs, "persist", "persist")
 }
 
 func TestParseComponentRefs_CreateObjectInitTag(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `<cfset VARIABLES.persist = createObject("component","persist").init(parent=VARIABLES._parent) />`)
-	assertRef(t, refs, 0, "persist", "persist")
+	assertFirstRef(t, refs, "persist", "persist")
 }
 
 func TestParseComponentRefs_CreateObjectInitScriptDot(t *testing.T) {
 	refs := ParseComponentRefs(testURI, `component {
 		VARIABLES.persist = createObject("component", "persist").init(parent=VARIABLES._parent)
 	}`)
-	assertRef(t, refs, 0, "persist", "persist")
+	assertFirstRef(t, refs, "persist", "persist")
 }
 
 func TestTagParser_RefClassification(t *testing.T) {

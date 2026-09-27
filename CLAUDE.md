@@ -1402,8 +1402,10 @@ Some handles need both shapes; others only one, depending on how the code uses t
   Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
   used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
-  bump. Test files are exempted from `prealloc`, `unparam`,
-  `gosec`, and `staticcheck`.
+  bump. Test files are exempted from `prealloc` and `gosec` only: a test's
+  slices are not worth pre-sizing, and its paths and permissions are fixtures.
+  `staticcheck` and `unparam` run on tests too, since a deprecated API or a
+  helper parameter nobody varies is as real there as anywhere.
 - **gocritic runs every `performance` check, plus `whyNoLint` and
   `emptyStringTest`, in test files too.** `hugeParam` and `rangeValCopy` are at
   gocritic's own 80 bytes: a large struct goes by pointer, and a loop over large

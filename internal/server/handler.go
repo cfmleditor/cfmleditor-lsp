@@ -164,8 +164,8 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		}
 	}
 
-	if len(s.editorRoots()) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:all // this is for compatibility
-		if root, ok := s.usableWorkspaceRoot(string(*params.RootURI)); ok { //nolint:all // this is for compatibility
+	if len(s.editorRoots()) == 0 && params.RootURI != nil && *params.RootURI != "" { //nolint:staticcheck // rootUri is deprecated, but a client without workspaceFolders still sends only it
+		if root, ok := s.usableWorkspaceRoot(string(*params.RootURI)); ok { //nolint:staticcheck // as above
 			s.addWorkspaceRoot(root)
 		}
 	}

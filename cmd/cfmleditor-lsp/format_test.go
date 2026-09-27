@@ -12,9 +12,11 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-func cliOpts(whitespaceOnly bool) formatter.Options {
+// cliOpts is the option set the format subcommand runs with: the formatter's
+// defaults with the whitespace-only guard on.
+func cliOpts() formatter.Options {
 	opts := formatter.DefaultOptions()
-	opts.WhitespaceOnly = whitespaceOnly
+	opts.WhitespaceOnly = true
 	opts.ParseScript = func(s []byte) *sitter.Tree { return language.Parse(language.CFScript, s, nil) }
 	opts.ParseQuery = func(s []byte) *sitter.Tree { return language.Parse(language.CFQuery, s, nil) }
 	opts.ParseCFML = func(s []byte) *sitter.Tree { return language.Parse(language.CFML, s, nil) }
@@ -41,7 +43,7 @@ func TestFormatOneFileLeavesUnparseableFileIntact(t *testing.T) {
 	src := "<cfcomponent>\n\t<cfinvoke component=\"models.Widget\" method=\"render\" returnvariable=\"r\">\n</cfcomponent>\n"
 	path := writeTemp(t, "victim.cfc", src)
 
-	err := formatOneFile(path, new(cliOpts(true)), true)
+	err := formatOneFile(path, new(cliOpts()), true)
 	if err == nil {
 		t.Fatal("expected formatOneFile to refuse an unparseable file")
 	}
@@ -60,7 +62,7 @@ func TestFormatOneFileLeavesUnparseableFileIntact(t *testing.T) {
 // on the CLI path. The CLI used to build DefaultOptions(), which leaves
 // WhitespaceOnly false, so no guard ran at all.
 func TestFormatOneFileGuardIsWiredUp(t *testing.T) {
-	if !cliOpts(true).WhitespaceOnly {
+	if !cliOpts().WhitespaceOnly {
 		t.Fatal("the CLI option set does not enable the whitespaceOnly guard")
 	}
 }
@@ -72,7 +74,7 @@ func TestFormatOneFileAllowsNormalization(t *testing.T) {
 	src := "component {\n\tfunction getAll() {\n\t\treturn []\n\t}\n}\n"
 	path := writeTemp(t, "semi.cfc", src)
 
-	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts()), true); err != nil {
 		t.Fatalf("formatOneFile refused a deliberate normalisation: %v", err)
 	}
 
@@ -88,7 +90,7 @@ func TestFormatOneFileWritesCleanFile(t *testing.T) {
 	src := "component {\n        function a() {\n                return 1;\n        }\n}\n"
 	path := writeTemp(t, "clean.cfc", src)
 
-	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts()), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 
@@ -114,7 +116,7 @@ func TestFormatOneFilePreservesMode(t *testing.T) {
 		t.Fatalf("chmod: %v", err)
 	}
 
-	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts()), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 
@@ -135,7 +137,7 @@ func TestFormatOneFileSkipsUnchangedFile(t *testing.T) {
 	src := "component {\n        function a() {\n                return 1;\n        }\n}\n"
 	path := writeTemp(t, "idempotent.cfc", src)
 
-	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts()), true); err != nil {
 		t.Fatalf("first format: %v", err)
 	}
 
@@ -144,7 +146,7 @@ func TestFormatOneFileSkipsUnchangedFile(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if err := formatOneFile(path, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(path, new(cliOpts()), true); err != nil {
 		t.Fatalf("second format: %v", err)
 	}
 
@@ -170,7 +172,7 @@ func TestFormatOneFileFollowsSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	if err := formatOneFile(link, new(cliOpts(true)), true); err != nil {
+	if err := formatOneFile(link, new(cliOpts()), true); err != nil {
 		t.Fatalf("formatOneFile: %v", err)
 	}
 

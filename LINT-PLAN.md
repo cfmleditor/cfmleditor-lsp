@@ -222,6 +222,30 @@ The procedure, each time the pin in the Makefile moves:
   tests; the other three are the code map's JSONL writer and its SQLite row
   scans.
 
+## After the stages: test-file exclusions (done)
+
+Tests were excluded from `prealloc`, `unparam`, `gosec` and `staticcheck`.
+Measured with each exclusion lifted:
+
+- **`staticcheck`: 2, now enabled.** Both are `InitializeParams.RootURI`,
+  deprecated in favour of `workspaceFolders`, in a test that pins how a
+  client's `rootUri` decodes. They carry a `//nolint:staticcheck` with that
+  reason, and so do the two production reads of the field, which were
+  `//nolint:all` — a blanket that also hid every other linter on the line.
+- **`unparam`: 4, now enabled.** Helpers whose parameters every caller passed
+  the same value: `cliOpts(true)` (8 callers), `assertRef(…, 0, …)` (17,
+  renamed `assertFirstRef`) and `benchLoadedServer(5000, 8)` (6, now named
+  constants).
+- **`prealloc` (35) and `gosec` stay excluded:** pre-sizing a test's slices
+  saves nothing anyone measures, and its file paths and permissions are
+  fixtures.
+
+The global `gosec` exclusions were measured at the same time and stay: 239
+findings, 173 of them `G115` integer conversions such as `uint32(line)`, 47
+file paths from a variable (`G304`, `G703`) in a tool whose job is reading
+the files it is given, and 5 `G104` unhandled errors that `errcheck` already
+reviews.
+
 ## Left off, and why
 
 | Rule | Findings | Why it stays off |
