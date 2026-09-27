@@ -90,6 +90,7 @@ func typeDefinitionAt(t *testing.T, srv *Server, docURI uri.URI, src string, lin
 // component return type.
 func TestTypeDefinitionScript(t *testing.T) {
 	srv := newTestdataServer()
+	srv.Features.TypeDefinition = true
 	docURI := openProbe(t, srv, "typedef_probe.cfc", typeDefProbe)
 
 	cases := []struct {
@@ -136,6 +137,7 @@ const typeDefPageProbe = `<cfset user = new models.User(1, "a", "b")>
 
 func TestTypeDefinitionTagSyntaxAndPages(t *testing.T) {
 	srv := newTestdataServer()
+	srv.Features.TypeDefinition = true
 	tagURI := openProbe(t, srv, "typedef_probe_tag.cfc", typeDefTagProbe)
 	pageURI := openProbe(t, srv, "typedef_probe_page.cfm", typeDefPageProbe)
 
@@ -161,9 +163,29 @@ func TestTypeDefinitionTagSyntaxAndPages(t *testing.T) {
 }
 
 // The capability is what makes an editor offer the command at all.
-func TestTypeDefinitionIsAdvertised(t *testing.T) {
-	caps := newTestServer().capabilities()
-	if caps.TypeDefinitionProvider == nil {
-		t.Fatal("typeDefinitionProvider is not advertised")
+func TestTypeDefinitionIsNotAdvertisedUntilAskedFor(t *testing.T) {
+	if providerOn(t, initializeWithConfig(t, `{}`).capabilities().TypeDefinitionProvider) {
+		t.Error("typeDefinition is advertised without being asked for")
+	}
+
+	on := initializeWithConfig(t, `{"features": {"typeDefinition": true}}`).capabilities()
+	if !providerOn(t, on.TypeDefinitionProvider) {
+		t.Error("typeDefinition is still not advertised after being switched on")
+	}
+}
+
+// TestTypeDefinitionDeclinesWhenOff: a client that sends the request anyway
+// gets nothing, on a line that answers when the switch is on.
+func TestTypeDefinitionDeclinesWhenOff(t *testing.T) {
+	srv := newTestdataServer()
+	docURI := openProbe(t, srv, "typedef_probe.cfc", typeDefProbe)
+
+	if got := typeDefinitionAt(t, srv, docURI, typeDefProbe, 11, "u."); got != "" {
+		t.Errorf("typeDefinition answered while switched off: %s", got)
+	}
+
+	srv.Features.TypeDefinition = true
+	if got := typeDefinitionAt(t, srv, docURI, typeDefProbe, 11, "u."); got != "User.cfc" {
+		t.Errorf("typeDefinition switched on = %q, want User.cfc", got)
 	}
 }

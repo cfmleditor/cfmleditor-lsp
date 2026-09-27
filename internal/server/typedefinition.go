@@ -23,6 +23,10 @@ import (
 // from resolve.ComponentOf, the lookup call resolution already makes, so
 // go-to-type-definition and `unresolved` cannot disagree about a receiver.
 func (s *Server) handleTypeDefinition(_ context.Context, rawParams []byte) (any, error) {
+	if !s.Features.TypeDefinition {
+		return nil, nil
+	}
+
 	var params protocol.TypeDefinitionParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

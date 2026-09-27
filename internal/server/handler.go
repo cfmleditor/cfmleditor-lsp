@@ -208,6 +208,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		cflog.Bool("variableDefinitions", s.Features.VariableDefinitions),
 		cflog.Bool("documentHighlight", s.Features.DocumentHighlight),
 		cflog.Bool("folding", s.Features.Folding),
+		cflog.Bool("typeDefinition", s.Features.TypeDefinition),
 		cflog.Bool("watchedFiles", s.Features.WatchedFiles),
 		cflog.Bool("rangeFormatting", s.Features.RangeFormatting),
 		cflog.Bool("routesConfigured", s.Routes.Enabled()))

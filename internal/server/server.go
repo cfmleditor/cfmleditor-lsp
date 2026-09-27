@@ -181,7 +181,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			FirstTriggerCharacter: ">",
 		},
 		DefinitionProvider:     protocol.Boolean(true),
-		TypeDefinitionProvider: protocol.Boolean(true),
+		TypeDefinitionProvider: protocol.Boolean(s.Features.TypeDefinition),
 		// Advertised only when opted in. A client that is told the server has
 		// no references provider does not offer "Find All References" at all,
 		// which is what keeps the flag from being a capability the editor

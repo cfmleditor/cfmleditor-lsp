@@ -649,7 +649,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   folding ranges, workspace folders.
 - `textDocument/typeDefinition` (`internal/server/typedefinition.go`) goes to the component
   the symbol under the cursor holds: a variable, argument or property's component, or the
-  component a called function returns. It is the extension's `CFMLTypeDefinitionProvider`,
+  component a called function returns. **Opt-in** (`features.typeDefinition`, default off,
+  `config.typeDefinitionDefault`) while it is new. It is the extension's `CFMLTypeDefinitionProvider`,
   and the extension's source is the spec, since it has no tests for it.
 
   **What a variable holds comes from `resolve.ComponentOf`, which is `CanResolveCall`'s own
@@ -754,7 +755,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
   one opaque region, so answering one request means parsing the whole body with the CFScript
   grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
-  per open document. The fields are `*bool` for the reason the `completions` block documents — a
+  per open document. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
   `mergeFormatting` does. `featureDefaults` in `features_chain_test.go` states every default and
@@ -956,7 +958,8 @@ match.
 
 It was four. Variable definitions were the largest, and they are closed — the
 conformance suite below is what made that a measured change rather than a claim.
-`textDocument/typeDefinition` is closed too; see the LSP surface.
+`textDocument/typeDefinition` is closed too, behind `features.typeDefinition`; see the LSP
+surface.
 
 | Missing here | Extension's implementation | Notes |
 |---|---|---|
@@ -1004,7 +1007,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 

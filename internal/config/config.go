@@ -423,6 +423,12 @@ type Features struct {
 	// hashes. It is here for a codebase whose templates do something the
 	// rules do not know; see parser.outputContext for what they are.
 	OutputContextInterpolation *bool `json:"outputContextInterpolation"`
+	// TypeDefinition answers textDocument/typeDefinition: go to the component
+	// a variable, argument or property holds, or a called function returns.
+	// Off by default, like folding: it is new, and an editor that has not
+	// asked for it loses nothing it had. Turn it on with
+	// `{"features": {"typeDefinition": true}}`.
+	TypeDefinition *bool `json:"typeDefinition"`
 }
 
 // ResolvedFeatures holds the feature switches with defaults applied.
@@ -434,15 +440,19 @@ type ResolvedFeatures struct {
 	VariableDefinitions        bool
 	Routes                     bool
 	OutputContextInterpolation bool
+	TypeDefinition             bool
 }
 
 // foldingDefault is off. Named rather than inlined so the tests that assert the
 // defaults read the same constant the resolver does, instead of restating it.
 const foldingDefault = false
 
+// typeDefinitionDefault is off, and named for the same reason.
+const typeDefinitionDefault = false
+
 // ResolveFeatures applies the defaults for a `features` block: absent means
-// every feature is on except folding, which is opt-in for the reason the type
-// above gives.
+// every feature is on except folding and typeDefinition, which are opt-in for
+// the reasons the type above gives.
 //
 // As with ResolveCompletions, the defaults live here so that every path to a
 // Server agrees on them. A path that skipped this and took the zero value
@@ -463,6 +473,7 @@ func ResolveFeatures(f *Features) ResolvedFeatures {
 		VariableDefinitions:        BoolDefault(f.VariableDefinitions, true),
 		Routes:                     BoolDefault(f.Routes, true),
 		OutputContextInterpolation: BoolDefault(f.OutputContextInterpolation, true),
+		TypeDefinition:             BoolDefault(f.TypeDefinition, typeDefinitionDefault),
 	}
 }
 
@@ -866,6 +877,7 @@ func mergeFeatures(base, over *Features) *Features {
 		{&out.VariableDefinitions, &over.VariableDefinitions},
 		{&out.Routes, &over.Routes},
 		{&out.OutputContextInterpolation, &over.OutputContextInterpolation},
+		{&out.TypeDefinition, &over.TypeDefinition},
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src
