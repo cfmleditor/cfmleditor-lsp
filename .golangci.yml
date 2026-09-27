@@ -336,11 +336,13 @@ linters:
           # query this code runs.
           - unqueryvet
       # The CLI opens, stats, walks and writes the files and directories it is
-      # given on the command line; that is its job, not a path to guard.
+      # given on the command line; that is its job, not a path to guard. What
+      # it writes is still checked (G306): its reports are owner-only, as the
+      # server's are.
       - path: ^cmd/
         linters:
           - gosec
-        text: "G304|G306|G703"
+        text: "G304|G703"
       - linters:
           - godox
         text: "TODO"

@@ -95,7 +95,8 @@ func cmdCFLint(args []string) {
 			continue
 		}
 
-		if err := os.WriteFile(r.Path, []byte(r.Content), 0o644); err != nil {
+		// Owner-only, as the server writes the same report for .exportCFLint.
+		if err := os.WriteFile(r.Path, []byte(r.Content), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "could not write %s: %v\n", r.Path, err)
 			os.Exit(1)
 		}

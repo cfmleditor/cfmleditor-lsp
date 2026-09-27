@@ -254,8 +254,11 @@ one exclusion for `cmd/`:
   which imports nothing but `math`. `unresolved` over the corpus reports the
   same 91,405 entries before and after, and parse time is unchanged, measured
   against `main` alternately.
-- **`cmd/` is excluded from `G304`, `G306` and `G703`** (38): the CLI opens,
-  stats, walks and writes the files it is given on the command line.
+- **`cmd/` is excluded from `G304` and `G703`** (36): the CLI opens,
+  stats, walks and writes the files it is given on the command line. `G306`
+  was excluded too until the server's reports became owner-only; the CLI's
+  `cflint` and `unresolved` reports, the same files, were still `0644`. They
+  are `0600` now and `G306` is checked in `cmd/` again.
 - **The rest are fixed or carry their reason.** One was a real defect:
   `cfmleditor.findRefs` and `cfmleditor.exportDeps` built their report paths
   from the command's arguments, so a function name such as `x/../../escaped`
