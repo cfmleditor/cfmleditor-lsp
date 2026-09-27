@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
@@ -271,18 +270,7 @@ func cmdParse(args []string) {
 		}
 
 		if info.IsDir() {
-			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck,gosec // the callback swallows every error, so Walk has none to return
-				if err != nil {
-					return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
-				}
-
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
-					files = append(files, path)
-				}
-
-				return nil
-			})
+			files = append(files, cfmlFilesUnder(arg)...)
 		} else {
 			files = append(files, arg)
 		}

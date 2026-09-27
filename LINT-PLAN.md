@@ -271,6 +271,33 @@ one exclusion for `cmd/`:
 A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 `internal/` and not under `cmd/`.
 
+## Suppressions that were fixable (done)
+
+36 `//nolint` markers went, leaving the 80 that are needed: the complexity
+markers, `gosec` on reads and writes the server makes by design, `staticcheck`
+on the deprecated `rootUri` a client may still send, the Unix-socket
+`usetesting`, and 14 `exhaustive` token switches with no default arm.
+
+- **`nilerr` (8) and `errcheck,gosec` on `filepath.Walk` (3).** `nilerr` flags a
+  `return nil` in a branch reached with a non-nil error, but not a callback that
+  collects only when `err == nil` and returns nil once. The walks skip an
+  unreadable entry exactly as before. `parse` and `scan` shared a copy-pasted
+  walk, now `cfmlFilesUnder`; the tree-sitter oracle test collects paths first
+  and reads them after.
+- **`exhaustive` (16)**, by `default-signifies-exhaustive: true`. Each was on a
+  switch that already had a `default:` arm. A switch with no default and a
+  missing case is still flagged.
+- **`revive` (7).**
+  - An unused `t` or `req` is now `_`.
+  - `context-as-argument` allows `*testing.T` before the context.
+  - The formatter's empty `else if` branch is now `touchesPrevSibling`.
+- **`staticcheck` QF1012 (1)** and **`forcetypeassert` (1):** the
+  `WriteString(fmt.Sprintf(…))` now writes its three parts directly, and
+  `.Interface().(bool)` is now `.Bool()`.
+
+A canary confirmed that the two configuration changes still flag what they
+should.
+
 ## Left off, and why
 
 | Rule | Findings | Why it stays off |

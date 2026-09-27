@@ -320,23 +320,15 @@ func collectWorkspaceCFMLFiles(s *Server, roots []string) []string {
 	var files []string
 
 	for _, root := range roots {
-		//nolint:nilerr // an unreadable entry is skipped, not fatal: aborting the
-		// walk on one permission error would silently map a fraction of the
-		// workspace and report it as the whole thing.
+		// An unreadable entry is skipped, not fatal: aborting the walk on one
+		// permission error would silently map a fraction of the workspace and
+		// report it as the whole thing.
 		_ = s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
+			if err == nil && info.IsDir() && path != root && skipScanDir(info.Name()) {
+				return filepath.SkipDir
 			}
 
-			if info.IsDir() {
-				if path != root && skipScanDir(info.Name()) {
-					return filepath.SkipDir
-				}
-
-				return nil
-			}
-
-			if cfpath.IsCFMLFile(path) {
+			if err == nil && !info.IsDir() && cfpath.IsCFMLFile(path) {
 				files = append(files, path)
 			}
 

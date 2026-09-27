@@ -39,8 +39,7 @@ func TestConnTrackerShutdownOnLastDisconnect(t *testing.T) {
 	}
 }
 
-//nolint:revive // t is required by testing convention
-func TestConnTrackerSafeDoubleZero(t *testing.T) {
+func TestConnTrackerSafeDoubleZero(_ *testing.T) {
 	ct := NewConnTracker()
 	ct.Add()
 	ct.Remove() // closes Done
@@ -137,7 +136,7 @@ func TestProxyConnectsToExistingDaemon(t *testing.T) {
 
 	stream := jsonrpc2.NewStream(conn)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, req *jsonrpc2.Request) (any, error) { //nolint:revive // req required by handler signature
+	rpc.Go(ctx, func(context.Context, *jsonrpc2.Request) (any, error) {
 		return nil, nil
 	})
 
@@ -299,7 +298,6 @@ func waitForSocket(t *testing.T, sock string) {
 	t.Fatal("socket never became available")
 }
 
-//nolint:revive // context-as-argument: keeping t first for test helper consistency
 func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2.Conn) {
 	t.Helper()
 
@@ -310,14 +308,13 @@ func dialRPC(t *testing.T, ctx context.Context, sock string) (net.Conn, jsonrpc2
 
 	stream := jsonrpc2.NewStream(c)
 	rpc := jsonrpc2.NewConn(stream)
-	rpc.Go(ctx, func(ctx context.Context, req *jsonrpc2.Request) (any, error) { //nolint:revive // req required by handler signature
+	rpc.Go(ctx, func(context.Context, *jsonrpc2.Request) (any, error) {
 		return nil, nil
 	})
 
 	return c, rpc
 }
 
-//nolint:revive // context-as-argument: keeping t first for test helper consistency
 func callRPC(t *testing.T, ctx context.Context, rpc jsonrpc2.Conn, method, params string) json.RawMessage {
 	t.Helper()
 

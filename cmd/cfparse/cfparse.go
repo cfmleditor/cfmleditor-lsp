@@ -57,13 +57,10 @@ func collectFiles(targets []string) ([]string, error) {
 			continue
 		}
 
-		filepath.Walk(target, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck,gosec // the callback swallows every error, so Walk has none to return
-			if err != nil {
-				return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
-			}
-
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
+		// An unreadable entry is skipped rather than ending the walk, so the
+		// callback returns no error and Walk has none to report.
+		_ = filepath.Walk(target, func(path string, _ os.FileInfo, err error) error {
+			if err == nil && hasCFMLExt(path) {
 				files = append(files, path)
 			}
 
@@ -121,4 +118,14 @@ func printSummary(out io.Writer, stats benchStats) {
 
 	_, _ = fmt.Fprintf(out, "\n  total: %d files, %d funcs, %d refs in %v (avg %v/file)\n",
 		stats.Files, stats.Funcs, stats.Refs, stats.Dur, avg)
+}
+
+// hasCFMLExt reports whether path names a file cfparse reads.
+func hasCFMLExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cfc", ".cfm", ".cfml", ".cfs":
+		return true
+	}
+
+	return false
 }

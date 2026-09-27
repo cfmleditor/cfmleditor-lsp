@@ -117,7 +117,7 @@ func TestFeaturesDefaultToOn(t *testing.T) {
 				continue
 			}
 
-			if got := rv.Field(i).Interface().(bool); got != want { //nolint:forcetypeassert,revive // every field is a bool, asserted above
+			if got := rv.Field(i).Bool(); got != want {
 				t.Errorf("%s: %s defaults to %v, want %v", what, name, got, want)
 			}
 		}

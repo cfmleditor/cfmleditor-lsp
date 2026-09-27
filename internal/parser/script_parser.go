@@ -542,7 +542,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'] or arr[i]) — can't be
 			// resolved statically. Skip the whole [...] group and poison
@@ -1350,7 +1350,7 @@ func (p *scriptParser) parseCatchVar() {
 	for {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokIdent:
 			last = tok
 		case TokDot:
@@ -1726,7 +1726,7 @@ func (p *scriptParser) parseArgList() []Argument {
 	loop:
 		for {
 			peek := p.sc.PeekSkipComments()
-			switch peek.Kind { //nolint:exhaustive // only care about dot and ident
+			switch peek.Kind {
 			case TokDot:
 				p.sc.NextSkipComments() // consume dot
 
@@ -2318,7 +2318,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2447,7 +2447,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why.
 					if !p.skipBracketIndex() {
@@ -2539,7 +2539,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 			chainWalk2:
 				for {
-					switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+					switch p.sc.PeekSkipComments().Kind {
 					case TokLBracket:
 						// See checkVarRHS's identical case for why.
 						if !p.skipBracketIndex() {
@@ -2816,7 +2816,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2897,7 +2897,7 @@ func (p *scriptParser) checkBareCall(tok Token) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'].method()) — skip it and
 			// poison the receiver so it can't be misattributed to whatever
@@ -3315,7 +3315,7 @@ func (p *globalScriptParser) parsePlain(tok Token, afterLT bool) {
 func (p *globalScriptParser) consumeAssignment() {
 	p.sc.NextSkipComments() // consume =
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLBrace, TokLBracket:
 		p.skipGroup()
 	default:
@@ -3328,7 +3328,7 @@ func (p *globalScriptParser) consumeAssignment() {
 func (p *globalScriptParser) skipGroup() bool {
 	var open, closing TokenKind
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLParen:
 		open, closing = TokLParen, TokRParen
 	case TokLBrace:
@@ -3374,7 +3374,7 @@ func (p *globalScriptParser) skipTagAttrs() {
 // the same name for why it stops where it does.
 func (p *globalScriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3399,7 +3399,7 @@ func (p *globalScriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
@@ -3769,7 +3769,7 @@ func (p *scriptParser) skipInstantiation() {
 // the `=` spelling was ever affected, which is why the two look like different
 // constructs in a `.cfc` and are the same one.
 func (p *scriptParser) skipLiteralGroup() {
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLBrace, TokLBracket:
 	default:
 		return
@@ -3860,7 +3860,7 @@ func (p *scriptParser) parseScriptTagAttrs() {
 // along with the `<cfset var x = 1>` inside it.
 func (p *scriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3889,7 +3889,7 @@ func (p *scriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
