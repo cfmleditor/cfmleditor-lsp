@@ -200,7 +200,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 }
 
 // extractSignatures does a shallow parse: function names/args, component refs, scopes.
-func (pr *ParseResult) extractSignatures() {
+func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	defer func() {
 		if r := recover(); r != nil {
 			pr.logWarn("parse panic in extractSignatures", "uri", string(pr.URI), "error", fmt.Sprint(r))
@@ -246,7 +246,7 @@ func (pr *ParseResult) extractSignatures() {
 			continue
 		}
 
-		if r.Kind == RegionScript {
+		if r.Kind == RegionScript { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
 			sp.resolverSet = pr.resolverSet
 			sp.extractLinks = pr.extractLinks
@@ -825,7 +825,7 @@ func (pr *ParseResult) replaceExpressions(comp string) string {
 }
 
 // resolvePendingCalls resolves varName = funcCall(...) assignments against same-file functions.
-func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
+func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	// Build lookup of function name → return component
 	funcReturns := make(map[string]string, len(pr.Funcs))
 	for i := range pr.Funcs {
@@ -2189,7 +2189,7 @@ func (pr *ParseResult) callerAtLine(lineNum int) string {
 }
 
 // scanLineForCalls checks a line for calls to any of pr.findCalls targets.
-func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string) {
+func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	lower := strings.ToLower(line)
 	trimmed := strings.TrimSpace(lower)
 	// Skip function definition lines

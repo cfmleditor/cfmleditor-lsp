@@ -17,7 +17,7 @@ import (
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) {
+func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	var params protocol.DefinitionParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

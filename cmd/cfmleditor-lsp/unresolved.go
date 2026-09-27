@@ -17,7 +17,7 @@ import (
 
 const unresolvedUsage = "usage: cfmleditor-lsp unresolved [--json | --known-issues [--relative-to <dir>] [--include-workspace] | --write] [--global-defs] <dir> [...]\n"
 
-func cmdUnresolved(args []string) {
+func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, unresolvedUsage)
 		os.Exit(1)

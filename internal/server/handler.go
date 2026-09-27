@@ -878,7 +878,7 @@ func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile strin
 	})
 }
 
-func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) {
+func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	var params protocol.ExecuteCommandParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

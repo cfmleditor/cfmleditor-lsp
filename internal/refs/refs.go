@@ -119,7 +119,7 @@ func collectFiles(fsys vfs.FS, roots []string) []string {
 	return files
 }
 
-func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
+func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	var mu sync.Mutex
 
 	var results []Entry
@@ -212,7 +212,7 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 			}
 
 			// Function call matching (from parsed call sites — includes all scopes)
-			if funcTarget != "" {
+			if funcTarget != "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 				for j := range pr.Calls {
 					call := &pr.Calls[j]
 

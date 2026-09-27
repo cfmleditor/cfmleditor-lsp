@@ -259,7 +259,7 @@ func nextTagStart(s string) int {
 }
 
 // parse scans through tag-based CFML extracting definitions.
-func (p *tagParser) parse() {
+func (p *tagParser) parse() { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	pos := 0
 
 	for pos < len(p.src) {
@@ -1044,7 +1044,7 @@ func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 	}
 }
 
-func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
+func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	rhs = strings.TrimSpace(rhs)
 
 	switch {
@@ -1127,7 +1127,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			}
 		}
 		// Detect x = someVar.method(...) or x = funcName(...) pattern
-		if baseVar := extractMethodCallBase(rhs); baseVar != "" {
+		if baseVar := extractMethodCallBase(rhs); baseVar != "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 			// Extract method name for pendingCall
 			var methodForPending string
 

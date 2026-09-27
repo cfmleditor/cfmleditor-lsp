@@ -4,7 +4,7 @@ import "strings"
 
 // FindCallContext finds the function name being called at the cursor position
 // and which parameter the cursor is on (0-based). Also returns the full qualifier.
-func FindCallContext(content string, line, char int) (funcName string, qualifier string, activeParam int) {
+func FindCallContext(content string, line, char int) (funcName string, qualifier string, activeParam int) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return "", "", 0
@@ -137,7 +137,7 @@ func WordAtPosition(content string, line, char int) string {
 
 // QualifierBeforeWord returns the identifier before the dot preceding the word at cursor.
 // Returns "~" prefix for createObject/new patterns, "~?" for call expressions.
-func QualifierBeforeWord(content string, line, char int) string {
+func QualifierBeforeWord(content string, line, char int) string { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return ""
@@ -153,7 +153,7 @@ func QualifierBeforeWord(content string, line, char int) string {
 	}
 
 	dotPos := start - 1
-	if dotPos > 0 && (lineText[dotPos-1] == ')' || lineText[dotPos-1] == ']') {
+	if dotPos > 0 && (lineText[dotPos-1] == ')' || lineText[dotPos-1] == ']') { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		if lineText[dotPos-1] == ')' {
 			prefix := lineText[:dotPos]
 			lowerPrefix := strings.ToLower(prefix)

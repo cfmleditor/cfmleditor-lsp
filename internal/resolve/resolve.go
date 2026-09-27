@@ -441,13 +441,13 @@ func (t *callTrace) hit(kind TargetKind, component string, def *parser.FunctionD
 	}
 }
 
-func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
 	funcName := call.FuncName
 	variable := call.Variable
 
 	// Unqualified call — check same file, then extends chain.
 	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
-	if variable == "" && call.Component == "" {
+	if variable == "" && call.Component == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		tr.add("unqualified call to %q — checking same file", funcName)
 
 		for i := range pr.Funcs {
@@ -621,7 +621,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 		tr.add("call.Component already set to %q (resolved earlier via chained new/createObject)", comp)
 	}
 
-	if comp == "" {
+	if comp == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 		// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 		// scope prefix and must not be stripped there.
@@ -854,7 +854,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	// call (e.g. "kpg.generateKeyPair().getPublic().getParams()" — comp here is
 	// kpg's own component; call.Chain lists "generateKeyPair", "getPublic", each
 	// needing its own declared return type applied before checking funcName below).
-	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") {
+	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
 		for _, hop := range call.Chain {
 			// A hop that returned "$any" makes the rest of the chain dynamic.
 			// Walking on asked "$any" for the next method, which it can never
