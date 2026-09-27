@@ -643,10 +643,24 @@ project assigns components through one.
 
 Declared in `Server.capabilities()` (`internal/server/server.go`):
 
-- Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
+- Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, type definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
   actions, document formatting, range formatting, on-type formatting (`>`), document highlight,
   folding ranges, workspace folders.
+- `textDocument/typeDefinition` (`internal/server/typedefinition.go`) goes to the component
+  the symbol under the cursor holds: a variable, argument or property's component, or the
+  component a called function returns. It is the extension's `CFMLTypeDefinitionProvider`,
+  and the extension's source is the spec, since it has no tests for it.
+
+  **What a variable holds comes from `resolve.ComponentOf`, which is `CanResolveCall`'s own
+  receiver lookup** — `receiverComponent`, extracted from `canResolveCall` rather than
+  copied, so go-to-type-definition and `unresolved` cannot disagree about a receiver. The
+  extraction was checked by running `unresolved` over the testdata and the six-project
+  corpus before and after: 91,405 entries, identical. `ComponentOf` tries a
+  `componentResolver` against the variable name but not against the whole line, since that
+  fallback exists for chained calls and would answer for whatever else the line holds, and
+  reports `$any` and `$builtin.` as unknown. A return type counts only when dotted: a bare
+  word is far more often `struct` than a component in the same directory.
 - `textDocument/documentHighlight` (`internal/server/documenthighlight.go`) shades the other
   occurrences of the identifier under the cursor. Deliberately a *textual* answer, reported as
   `DocumentHighlightKindText`: matching is whole-identifier and case-folded through the same
@@ -935,22 +949,22 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 
 The `cfmleditor` extension stands its own language providers down whenever this
 server is running, on the rule that enabling the server hands it the language.
-That rule is simpler to hold than a per-capability list, and it costs three
+That rule is simpler to hold than a per-capability list, and it costs two
 things the extension could answer and this server cannot. They are listed here
 so the loss is deliberate and so whoever implements one knows what it has to
 match.
 
 It was four. Variable definitions were the largest, and they are closed — the
 conformance suite below is what made that a measured change rather than a claim.
+`textDocument/typeDefinition` is closed too; see the LSP surface.
 
 | Missing here | Extension's implementation | Notes |
 |---|---|---|
-| `textDocument/typeDefinition` | `CFMLTypeDefinitionProvider` | Go to the *type* of the symbol under the cursor, rather than its declaration. Most of the machinery exists — `CanResolveCall` already resolves a receiver to a component, which is the answer this request wants. |
 | Docblock completion | `DocBlockCompletions`, triggered on `*`, `@` and `.` | `@param`, `@return` and friends inside a `/** */` block. Note the trigger characters: `capabilities()` advertises `<`, `/`, `.` and `>`, so adding this means widening that list as well as handling the context. |
 | `textDocument/documentColor` | `CFMLDocumentColorProvider` | Colour swatches and the picker for colour literals. Wholly absent here; nothing in the parser records them. |
 
-`documentColor` is the one with no foundation at all; the other three each have
-most of their machinery already. Until they land, a user who enables the server
+`documentColor` is the one with no foundation at all; docblock completion has
+most of its machinery already. Until they land, a user who enables the server
 loses them — which is worth remembering when one is reported as a regression
 rather than a gap.
 

@@ -417,11 +417,9 @@ the unreferenced list is described as candidates rather than as dead code.
 ## Not yet implemented
 
 The VS Code extension stands its own language providers down while this server is
-running, so three capabilities it can answer are unavailable when the server is
+running, so two capabilities it can answer are unavailable when the server is
 enabled:
 
-- **`textDocument/typeDefinition`** — go to the *type* of the symbol under the
-  cursor rather than its declaration
 - **Docblock completion** — `@param`, `@return` and friends inside `/** */`
   (would also need `@` and `*` added to the completion trigger characters)
 - **`textDocument/documentColor`** — colour swatches and the picker
