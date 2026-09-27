@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
 )
 
@@ -33,7 +35,7 @@ func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 			return nil, fmt.Errorf("scanning symbol: %w", err)
 		}
 
-		s.Line = uint32(ln)
+		s.Line = conv.Uint32(ln)
 		s.Access = access.String
 		s.Component = component.String
 		s.Entry = entry != 0
@@ -195,7 +197,7 @@ func (s *Store) neighbours(id, match, join string, limit int) ([]Neighbour, erro
 			return nil, fmt.Errorf("scanning neighbour: %w", err)
 		}
 
-		n.Line = uint32(ln)
+		n.Line = conv.Uint32(ln)
 		n.Access = access.String
 		n.Component = component.String
 		n.Entry = entry != 0

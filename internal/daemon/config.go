@@ -49,7 +49,7 @@ func FindConfig(dir string) (*Config, error) {
 	for {
 		p := filepath.Join(d, ".cfmleditor.json")
 
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(p) //nolint:gosec // a .cfmleditor.json found walking up from the working directory
 		if err == nil {
 			var raw configJSON
 			if json.Unmarshal(data, &raw) == nil {

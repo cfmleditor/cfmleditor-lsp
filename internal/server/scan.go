@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // scanFiles is every CFML file scanWorkspace will read, from searchRoots
@@ -127,8 +130,8 @@ func collectErrors(n *sitter.Node, src []byte, cols *colMapper, diags *[]protoco
 
 		*diags = append(*diags, protocol.Diagnostic{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(start.Row), Character: cols.col(uint32(start.Row), uint32(start.Column))},
-				End:   protocol.Position{Line: uint32(end.Row), Character: cols.col(uint32(end.Row), uint32(end.Column))},
+				Start: protocol.Position{Line: conv.Uint32FromUint(start.Row), Character: cols.col(conv.Uint32FromUint(start.Row), conv.Uint32FromUint(start.Column))},
+				End:   protocol.Position{Line: conv.Uint32FromUint(end.Row), Character: cols.col(conv.Uint32FromUint(end.Row), conv.Uint32FromUint(end.Column))},
 			},
 			Severity: protocol.DiagnosticSeverityError,
 			Source:   protocol.NewOptional("cfmleditor"),

@@ -162,6 +162,7 @@ Editor document change
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
 | `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment` |
+| `internal/conv` | Range-checked integer conversions (`Uint32`, `Uint32FromUint`, `Int32`) for LSP line and column numbers; imports only `math` |
 
 ### Parser design (`internal/parser`)
 
@@ -860,7 +861,10 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   mentioned", and `mergeLinting` unions key by key — otherwise a child config
   naming only `minSeverity` would switch linting off while appearing to tune it.
 - `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
-  `true`. It used to write unconditionally, which meant the code action on an ordinary "find all
+  `true`, and — like `.exportDeps`' `deps-<name>.md` — only through `reportPath`, which refuses a
+  name that is not a plain file name and a directory outside the workspace roots. Both come from
+  the command's arguments: `x/../../escaped` as a function name, which `filepath.Join` cleans, wrote
+  a file one directory above the source. `TestFindRefsReportNameCannotEscape` pins it. It used to write unconditionally, which meant the code action on an ordinary "find all
   references" gesture dropped two files beside the source file being read. The plain code actions
   pass two arguments; a separate "Export references to X to a file" action passes the third.
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
@@ -1402,7 +1406,10 @@ Some handles need both shapes; others only one, depending on how the code uses t
   Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
   used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
-  bump. Test files are exempted from `prealloc` and `gosec` only: a test's
+  bump. `gosec` runs everywhere except, in `cmd/`, the rules about opening and writing the paths
+  the CLI is given; anything else it flags is fixed or carries its reason. **Convert a line or
+  column with `conv.Uint32`, not `uint32(n)`**: `internal/conv` clamps where a bare conversion
+  wraps a negative to about four billion, and `G115` flags the bare form. Test files are exempted from `prealloc` and `gosec` only: a test's
   slices are not worth pre-sizing, and its paths and permissions are fixtures.
   `staticcheck` and `unparam` run on tests too, since a deprecated API or a
   helper parameter nobody varies is as real there as anywhere.
@@ -1450,7 +1457,7 @@ Some handles need both shapes; others only one, depending on how the code uses t
   one to new code to get past a limit — split the function. Refactoring a
   marked function under the limit makes `nolintlint` fail until the marker
   goes, which is the point. `depguard` holds three package boundaries
-  (`internal/parser` imports only `internal/log`; only `daemon` and `cmd`
+  (`internal/parser` imports only `internal/log` and the dependency-free `internal/conv`; only `daemon` and `cmd`
   import `internal/server`; only `cmd` imports the code-map store and MCP
   server), and `forbidigo` bans printing to stdout under `internal/`.
   **Write an empty slice as `[]T{}`, and keep it one where it is marshalled.**

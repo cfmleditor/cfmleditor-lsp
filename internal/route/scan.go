@@ -3,6 +3,8 @@ package route
 import (
 	"sort"
 	"strings"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // Source says which syntax a route was written in.
@@ -169,7 +171,7 @@ func scanAttributes(content string, names []string) []Ref {
 		if value := content[start:end]; value != "" {
 			out = append(out, Ref{
 				Source: SourceAttribute, Name: name, Value: value,
-				Start: uint32(start), End: uint32(end),
+				Start: conv.Uint32(start), End: conv.Uint32(end),
 			})
 		}
 
@@ -221,7 +223,7 @@ func scanProperties(content string, names []string) []Ref {
 		if value := content[start:end]; value != "" {
 			out = append(out, Ref{
 				Source: SourceProperty, Name: name, Value: value,
-				Start: uint32(start), End: uint32(end),
+				Start: conv.Uint32(start), End: conv.Uint32(end),
 			})
 		}
 
@@ -275,7 +277,7 @@ func scanQueryParams(content string, names []string) []Ref {
 		if value := content[start:end]; value != "" {
 			out = append(out, Ref{
 				Source: SourceQueryParam, Name: name, Value: value,
-				Start: uint32(start), End: uint32(end),
+				Start: conv.Uint32(start), End: conv.Uint32(end),
 			})
 		}
 
@@ -441,7 +443,7 @@ func scanFunctionArgs(content string, names []string) []Ref {
 
 			out = append(out, Ref{
 				Source: SourceFunctionArg, Name: name, Value: value,
-				Start: uint32(span[0]), End: uint32(span[0] + len(value)),
+				Start: conv.Uint32(span[0]), End: conv.Uint32(span[0] + len(value)),
 			})
 		}
 

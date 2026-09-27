@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
@@ -66,7 +68,7 @@ func lineCol(text string, col int) uint32 {
 		return utf16Len(text[:col])
 	}
 
-	return utf16Len(text) + uint32(col-len(text))
+	return utf16Len(text) + conv.Uint32(col-len(text))
 }
 
 // colMapper converts byte columns to LSP characters for many positions in one

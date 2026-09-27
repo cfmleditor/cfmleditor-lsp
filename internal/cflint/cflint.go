@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 )
 
@@ -90,9 +92,9 @@ func NewRunner(ctx context.Context, minSeverity string) (*Runner, error) {
 
 // Scan runs CFLint on the given file and returns LSP diagnostics.
 func (r *Runner) Scan(ctx context.Context, filePath string) ([]protocol.Diagnostic, error) {
-	cmd := exec.CommandContext(ctx, r.binPath, "-stdin", filepath.Base(filePath), "-json", "-stdout", "-q")
+	cmd := exec.CommandContext(ctx, r.binPath, "-stdin", filepath.Base(filePath), "-json", "-stdout", "-q") //nolint:gosec // the CFLint binary this package downloaded, given a file name and fixed flags
 
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) //nolint:gosec // the workspace file being linted
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", filePath, err)
 	}
@@ -151,8 +153,8 @@ func eachDiagnostic(result Result, minRank int, fn func(file string, d protocol.
 
 			fn(loc.File, protocol.Diagnostic{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(line), Character: uint32(col)},
-					End:   protocol.Position{Line: uint32(line), Character: uint32(col)},
+					Start: protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(col)},
+					End:   protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(col)},
 				},
 				Severity: sev,
 				Source:   protocol.NewOptional("cflint"),
@@ -229,7 +231,7 @@ func (r *Runner) ScanFiles(ctx context.Context, files []string) (map[string][]pr
 // run runs the binary with args, in dir when it is not empty, and decodes its
 // JSON report.
 func (r *Runner) run(ctx context.Context, dir string, args ...string) (Result, error) {
-	cmd := exec.CommandContext(ctx, r.binPath, args...)
+	cmd := exec.CommandContext(ctx, r.binPath, args...) //nolint:gosec // the CFLint binary this package downloaded
 	cmd.Dir = dir
 
 	var stderr strings.Builder
@@ -366,7 +368,7 @@ func cacheDir(version string) (string, error) {
 
 	p := filepath.Join(dir, "cfmleditor-lsp", "cflint", version)
 
-	return p, os.MkdirAll(p, 0o755)
+	return p, os.MkdirAll(p, 0o750)
 }
 
 // downloadClient replaces http.DefaultClient, which has no timeout at all: a
@@ -651,7 +653,7 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		return err
 	}
 
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
+	if err := os.Chmod(tmpPath, 0o755); err != nil { //nolint:gosec // the downloaded CFLint binary has to be executable
 		return err
 	}
 

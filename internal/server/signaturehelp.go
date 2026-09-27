@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/protocol"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"go.lsp.dev/protocol"
 )
 
 func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, error) {
@@ -43,12 +46,12 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 	// Try builtin functions first
 	if e, ok := docs.LookupFunction(funcName); ok {
 		sig := buildBuiltinSignature(e)
-		sig.ActiveParameter = protocol.NewNullable(uint32(activeParam))
+		sig.ActiveParameter = protocol.NewNullable(conv.Uint32(activeParam))
 
 		return &protocol.SignatureHelp{
 			Signatures:      []protocol.SignatureInformation{sig},
 			ActiveSignature: &activeSignature,
-			ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+			ActiveParameter: protocol.NewNullable(conv.Uint32(activeParam)),
 		}, nil
 	}
 
@@ -56,11 +59,11 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 
 	// Try resolving via qualifier (e.g. service.method or getService("x").method)
 	if qualifier != "" {
-		if def := s.resolveUserFunc(qualifier, funcName, docURI, uint32(line)); def != nil {
+		if def := s.resolveUserFunc(qualifier, funcName, docURI, conv.Uint32(line)); def != nil {
 			return &protocol.SignatureHelp{
 				Signatures:      []protocol.SignatureInformation{buildUserSignature(def)},
 				ActiveSignature: &activeSignature,
-				ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+				ActiveParameter: protocol.NewNullable(conv.Uint32(activeParam)),
 			}, nil
 		}
 	}
@@ -77,7 +80,7 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 	return &protocol.SignatureHelp{
 		Signatures:      []protocol.SignatureInformation{buildUserSignature(def)},
 		ActiveSignature: &activeSignature,
-		ActiveParameter: protocol.NewNullable(uint32(activeParam)),
+		ActiveParameter: protocol.NewNullable(conv.Uint32(activeParam)),
 	}, nil
 }
 

@@ -12,8 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 // Call is one call site, reduced to what both implementations can agree on: the
@@ -59,7 +62,7 @@ func GrammarCalls(src []byte) []Call {
 			continue
 		}
 
-		calls = append(calls, collect(sub.RootNode(), inner, uint32(m.Node.StartPosition().Row), nil)...)
+		calls = append(calls, collect(sub.RootNode(), inner, conv.Uint32FromUint(m.Node.StartPosition().Row), nil)...)
 
 		sub.Close()
 	}
@@ -92,7 +95,7 @@ func collect(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uint]bool)
 
 		if isCallKind(n.Kind()) {
 			if m := methodOf(n, src); m != "" {
-				out = append(out, Call{Line: uint32(n.StartPosition().Row) + rowOffset, Method: m})
+				out = append(out, Call{Line: conv.Uint32FromUint(n.StartPosition().Row) + rowOffset, Method: m})
 			}
 		}
 

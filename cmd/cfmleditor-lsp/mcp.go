@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
@@ -262,7 +264,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 	pr.FuncLookup = funcLookup
 
 	// The parser numbers lines from zero; users and editors number from one.
-	target := uint32(line - 1)
+	target := conv.Uint32(line - 1)
 
 	var b strings.Builder
 

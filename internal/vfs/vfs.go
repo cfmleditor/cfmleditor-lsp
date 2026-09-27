@@ -20,7 +20,7 @@ type OS struct{}
 
 // ReadFile reads the named file.
 func (OS) ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
+	return os.ReadFile(path) //nolint:gosec // the file-system layer every read goes through; callers choose the path
 }
 
 // Stat returns file info for the named path.

@@ -34,6 +34,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 )
 
@@ -285,8 +287,8 @@ func Diagnostic(e *Entry, lines []string, severity protocol.DiagnosticSeverity, 
 
 	return protocol.Diagnostic{
 		Range: protocol.Range{
-			Start: protocol.Position{Line: uint32(line), Character: uint32(start)},
-			End:   protocol.Position{Line: uint32(line), Character: uint32(end)},
+			Start: protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(start)},
+			End:   protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(end)},
 		},
 		Severity: severity,
 		Source:   protocol.NewOptional(source),

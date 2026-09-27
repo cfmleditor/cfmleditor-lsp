@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
 func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
@@ -38,7 +41,7 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 	// User-defined function via qualifier (e.g. service.getMethod) — check first
 	docURI := params.TextDocument.URI
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
-		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+		if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
 			return &protocol.Hover{
 				Contents: &protocol.MarkupContent{
 					Kind:  protocol.MarkupKindMarkdown,

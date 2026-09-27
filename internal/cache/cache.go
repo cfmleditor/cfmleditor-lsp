@@ -152,12 +152,12 @@ func HashScope(content string, startLine, endLine int) uint64 {
 	for line <= endLine && i < len(content) {
 		idx := strings.IndexByte(content[i:], '\n')
 		if idx < 0 {
-			h.Write([]byte(content[i:]))
+			_, _ = h.Write([]byte(content[i:])) // a hash.Hash never returns an error
 
 			break
 		}
 
-		h.Write([]byte(content[i : i+idx+1]))
+		_, _ = h.Write([]byte(content[i : i+idx+1]))
 		i += idx + 1
 		line++
 	}

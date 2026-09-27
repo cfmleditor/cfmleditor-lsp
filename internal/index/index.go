@@ -7,9 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/uri"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"go.lsp.dev/uri"
 )
 
 // Index is a concurrency-safe store of function definitions keyed by name.
@@ -373,7 +376,7 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 		}
 
 		shifted := *d
-		shifted.Line = uint32(int(shifted.Line) + delta)
+		shifted.Line = conv.Uint32(int(shifted.Line) + delta)
 
 		rep := funcReplacement{old: d, new: &shifted}
 		name := strings.ToLower(d.Name)
@@ -390,7 +393,7 @@ func (idx *Index) ShiftLines(fileURI uri.URI, afterLine int, delta int) {
 		}
 
 		shifted := *r
-		shifted.Line = uint32(int(shifted.Line) + delta)
+		shifted.Line = conv.Uint32(int(shifted.Line) + delta)
 
 		rep := refReplacement{old: r, new: &shifted}
 		name := strings.ToLower(r.Variable)

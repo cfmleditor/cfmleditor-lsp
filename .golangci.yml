@@ -84,9 +84,11 @@ linters:
           files: ["**/internal/parser/**", "!$test"]
           deny:
             - pkg: github.com/cfmleditor/cfmleditor-lsp/internal
-              desc: internal/parser imports no project package but internal/log
+              desc: internal/parser imports no project package but internal/log and internal/conv
           allow:
             - github.com/cfmleditor/cfmleditor-lsp/internal/log
+            # Range-checked integer conversions; imports nothing but math.
+            - github.com/cfmleditor/cfmleditor-lsp/internal/conv
         server-importers:
           files: ["**/internal/**", "!**/internal/daemon/**", "!**/internal/server/**"]
           deny:
@@ -322,9 +324,12 @@ linters:
           # SELECT * in a test is a CFML fixture fed to the formatter, not a
           # query this code runs.
           - unqueryvet
-      - linters:
+      # The CLI opens, stats, walks and writes the files and directories it is
+      # given on the command line; that is its job, not a path to guard.
+      - path: ^cmd/
+        linters:
           - gosec
-        text: "G104|G115|G204|G301|G302|G304|G306|G703"
+        text: "G304|G306|G703"
       - linters:
           - godox
         text: "TODO"

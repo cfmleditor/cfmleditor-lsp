@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
+
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 )
 
 // logSink forwards the server's own log records to the client as
@@ -27,7 +30,7 @@ func (l logSink) Log(level int, msg string) {
 	// cancelled context would silently drop exactly the records written while
 	// something was going wrong.
 	l.s.notify(context.Background(), protocol.MethodWindowLogMessage, &protocol.LogMessageParams{
-		Type:    protocol.MessageType(level),
+		Type:    protocol.MessageType(conv.Uint32(level)),
 		Message: msg,
 	})
 }

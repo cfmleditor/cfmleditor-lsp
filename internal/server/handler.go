@@ -11,6 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
@@ -18,9 +24,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"go.lsp.dev/jsonrpc2"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 // docOf digs the document URI out of a request's parameters for logging, and
@@ -854,21 +857,31 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 // went. Only cfmleditor.findRefs' explicit export argument reaches here.
 func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result *refs.TraceResult) {
 	outDir := filepath.Dir(sourceFile)
-	if outDir == "" || outDir == "." {
-		outDir = os.TempDir()
+	if sourceFile == "" {
+		// With no source file the report goes to the workspace root. It used
+		// to go to the system temp directory, which reportPath now refuses.
+		if roots := s.searchRoots(); len(roots) > 0 {
+			outDir = roots[0]
+		}
+	}
+
+	outFile, err := s.reportPath(outDir, "refs-"+funcName+".md")
+	if err != nil {
+		s.notifyError(ctx, err.Error())
+
+		return
 	}
 
 	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 
-	outFile := filepath.Join(outDir, "refs-"+funcName+".md")
-	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
 		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 
 		return
 	}
 
-	dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
-	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+	dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
+	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
 		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 	}
 
@@ -920,7 +933,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// throughout, and the server's settings can be replaced meanwhile.
 		cfg := s.Formatting
 
-		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(cfg.IndentWidth)}, &cfg)
+		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: conv.Uint32(cfg.IndentWidth)}, &cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -938,7 +951,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 					uri.URI(docURI): {{
 						Range: protocol.Range{
 							Start: protocol.Position{Line: 0, Character: 0},
-							End:   protocol.Position{Line: uint32(lines + 1), Character: 0},
+							End:   protocol.Position{Line: conv.Uint32(lines + 1), Character: 0},
 						},
 						NewText: formatted,
 					}},
@@ -1319,13 +1332,19 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		mermaid := result.Graph.Mermaid()
 
-		outFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".md")
-		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil {
+		outFile, err := s.reportPath(filepath.Dir(filePath), "deps-"+suffix+".md")
+		if err != nil {
+			s.notifyError(ctx, err.Error())
+
+			return mermaid, nil
+		}
+
+		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
 			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 		}
 
-		dotFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".dot")
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+		dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
+		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
 			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 		}
 

@@ -4,11 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"encoding/json/v2"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 // handleFoldingRange answers textDocument/foldingRange, so the editor folds on
@@ -90,7 +93,7 @@ func foldingRanges(content string) []protocol.FoldingRange {
 
 		// Walked with the region's own bytes, since the sub-tree's positions
 		// are relative to them; row 0 of the region is the row it starts on.
-		collectFolds(sub.RootNode(), region, uint32(m.Node.StartPosition().Row), opaque, &folds, 0)
+		collectFolds(sub.RootNode(), region, conv.Uint32FromUint(m.Node.StartPosition().Row), opaque, &folds, 0)
 		sub.Close()
 	}
 
@@ -174,8 +177,8 @@ func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRang
 	// single-line.
 	r := n.Range()
 
-	start := uint32(r.StartPoint.Row)
-	end := uint32(r.EndPoint.Row)
+	start := conv.Uint32FromUint(r.StartPoint.Row)
+	end := conv.Uint32FromUint(r.EndPoint.Row)
 
 	if end <= start {
 		return protocol.FoldingRange{}, false
@@ -213,7 +216,7 @@ func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRang
 		end--
 	default:
 		if last := deepestLastToken(n); last != nil {
-			if closing := uint32(last.StartPosition().Row); closing == end && closing > start {
+			if closing := conv.Uint32FromUint(last.StartPosition().Row); closing == end && closing > start {
 				end = closing - 1
 			}
 		}

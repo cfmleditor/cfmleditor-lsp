@@ -8,9 +8,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/protocol"
+
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"go.lsp.dev/protocol"
 )
 
 // routeResolver returns the resolver for the configured routing convention, or
@@ -157,7 +160,7 @@ func (s *Server) routeAtPosition(content string, line, char int) (routepkg.Ref, 
 		start := int(ref.Col)
 		if char >= start && char <= start+len(ref.Value) {
 			// Reported against the document, not the window.
-			ref.Line = uint32(line)
+			ref.Line = conv.Uint32(line)
 
 			return ref, true
 		}
@@ -288,7 +291,7 @@ func (s *Server) routeLinks(docContent string) []protocol.DocumentLink {
 		links = append(links, protocol.DocumentLink{
 			Range: protocol.Range{
 				Start: protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col)},
-				End:   protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col+uint32(len(ref.Value)))},
+				End:   protocol.Position{Line: ref.Line, Character: cols.col(ref.Line, ref.Col+conv.Uint32(len(ref.Value)))},
 			},
 			Target:  targetRef,
 			Tooltip: &tip,

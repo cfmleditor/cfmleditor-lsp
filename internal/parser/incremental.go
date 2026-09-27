@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // EditKind describes what part of the file was affected by an edit.
@@ -165,13 +167,13 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 
 	for i := range pr.Funcs {
 		if int(pr.Funcs[i].Line) > editLine {
-			pr.Funcs[i].Line = uint32(int(pr.Funcs[i].Line) + delta)
+			pr.Funcs[i].Line = conv.Uint32(int(pr.Funcs[i].Line) + delta)
 		}
 	}
 
 	for i := range pr.ComponentRefs {
 		if int(pr.ComponentRefs[i].Line) > editLine {
-			pr.ComponentRefs[i].Line = uint32(int(pr.ComponentRefs[i].Line) + delta)
+			pr.ComponentRefs[i].Line = conv.Uint32(int(pr.ComponentRefs[i].Line) + delta)
 		}
 	}
 }
