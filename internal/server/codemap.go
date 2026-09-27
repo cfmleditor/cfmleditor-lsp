@@ -176,11 +176,11 @@ func applyCodeMapViews(m *codemap.Map, req *codeMapRequest) *codemap.Map {
 }
 
 func (s *Server) writeCodeMap(m *codemap.Map, req *codeMapRequest, out string) error {
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil { //nolint:gosec // inside the workspace (codeMapOutputPath), for the user to open and share
 		return fmt.Errorf("creating %s: %w", filepath.Dir(out), err)
 	}
 
-	file, err := os.Create(out)
+	file, err := os.Create(out) //nolint:gosec // confined to the workspace by codeMapOutputPath
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", out, err)
 	}
@@ -231,13 +231,7 @@ func (s *Server) codeMapOutputPath(req *codeMapRequest, root string) (string, er
 		return "", fmt.Errorf("resolving %s: %w", req.Out, err)
 	}
 
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolving the workspace root: %w", err)
-	}
-
-	rel, err := filepath.Rel(rootAbs, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !insideDir(root, abs) {
 		return "", fmt.Errorf("refusing to write outside the workspace: %s", req.Out)
 	}
 

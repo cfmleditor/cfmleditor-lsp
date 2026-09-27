@@ -854,21 +854,31 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 // went. Only cfmleditor.findRefs' explicit export argument reaches here.
 func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result *refs.TraceResult) {
 	outDir := filepath.Dir(sourceFile)
-	if outDir == "" || outDir == "." {
-		outDir = os.TempDir()
+	if sourceFile == "" {
+		// With no source file the report goes to the workspace root. It used
+		// to go to the system temp directory, which reportPath now refuses.
+		if roots := s.searchRoots(); len(roots) > 0 {
+			outDir = roots[0]
+		}
+	}
+
+	outFile, err := s.reportPath(outDir, "refs-"+funcName+".md")
+	if err != nil {
+		s.notifyError(ctx, err.Error())
+
+		return
 	}
 
 	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 
-	outFile := filepath.Join(outDir, "refs-"+funcName+".md")
-	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
 		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 
 		return
 	}
 
-	dotFile := filepath.Join(outDir, "refs-"+funcName+".dot")
-	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+	dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
+	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
 		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 	}
 
@@ -1319,13 +1329,19 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 
 		mermaid := result.Graph.Mermaid()
 
-		outFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".md")
-		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil {
+		outFile, err := s.reportPath(filepath.Dir(filePath), "deps-"+suffix+".md")
+		if err != nil {
+			s.notifyError(ctx, err.Error())
+
+			return mermaid, nil
+		}
+
+		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
 			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 		}
 
-		dotFile := filepath.Join(filepath.Dir(filePath), "deps-"+suffix+".dot")
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil {
+		dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
+		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
 			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 		}
 
