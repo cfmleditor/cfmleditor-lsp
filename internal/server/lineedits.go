@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"go.lsp.dev/protocol"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // lineEdits returns TextEdits that turn before into after, each replacing a run

@@ -621,180 +621,14 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 		tr.add("call.Component already set to %q (resolved earlier via chained new/createObject)", comp)
 	}
 
-	if comp == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
-		// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
-		// scope prefix and must not be stripped there.
-		lookupVar := parser.StripReceiverScope(variable)
+	if comp == "" {
+		var member bool
 
-		// Try function-scoped refs first
-		for _, scope := range pr.Scopes {
-			if int(call.Line) >= scope.Start && int(call.Line) <= scope.End {
-				refs := pr.FuncComponentRefs(scope.Start, scope.End)
+		comp, member = r.receiverComponent(variable, call.Line, call.Caller, funcName, pr, baseDir, tr)
+		if member {
+			tr.hit(TargetMember, "", nil)
 
-				for i := range refs {
-					ref := &refs[i]
-
-					if strings.EqualFold(ref.Variable, lookupVar) {
-						comp = ref.Component
-
-						tr.add("resolved %q to %q via function-scoped ComponentRef", variable, comp)
-
-						break
-					}
-				}
-
-				break
-			}
-		}
-
-		// Fall back to component refs. A scratch variable can be reassigned multiple
-		// times in the same file (e.g. once per <cfswitch>/<cfcase> branch) — using
-		// the first matching ref in file order would lock onto whichever branch
-		// happens to appear earliest, regardless of which branch the call site is
-		// actually in. Prefer the ref with the highest line number at or before the
-		// call site (the assignment that's actually in scope there); only fall back
-		// to file order for a genuine forward reference, where no preceding ref exists.
-		if comp == "" {
-			var best *parser.ComponentRef
-
-			for i := range pr.ComponentRefs {
-				ref := &pr.ComponentRefs[i]
-				if !strings.EqualFold(ref.Variable, lookupVar) {
-					continue
-				}
-
-				if ref.Line > call.Line {
-					continue
-				}
-
-				if best == nil || ref.Line > best.Line {
-					best = ref
-				}
-			}
-
-			if best == nil {
-				for i := range pr.ComponentRefs {
-					ref := &pr.ComponentRefs[i]
-					if strings.EqualFold(ref.Variable, lookupVar) {
-						best = ref
-
-						break
-					}
-				}
-			}
-
-			if best != nil {
-				comp = best.Component
-
-				tr.add("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
-			}
-		}
-
-		// Fall back to Application.cfc component refs
-		if comp == "" {
-			if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
-				for _, appName := range []string{"Application.cfc", "Application.cfm"} {
-					appURI := cfpath.ToURI(filepath.Join(appDir, appName))
-					for _, ref := range r.Index.RefsForFile(appURI) {
-						if strings.EqualFold(ref.Variable, lookupVar) {
-							comp = ref.Component
-
-							tr.add("resolved %q to %q via %s ComponentRef", variable, comp, appName)
-
-							break
-						}
-					}
-
-					if comp != "" {
-						break
-					}
-				}
-			}
-		}
-
-		// ARGUMENTS.x qualifier — resolve directly from the enclosing function's argument list.
-		// This handles cases where the argument has a component type (via hint promotion or
-		// explicit type) without requiring a ComponentRef to have been created.
-		if comp == "" && strings.HasPrefix(strings.ToUpper(variable), "ARGUMENTS.") {
-			argName := variable[10:]
-
-			for i := range pr.Funcs {
-				f := &pr.Funcs[i]
-
-				if strings.EqualFold(f.Name, call.Caller) {
-					for _, arg := range f.Arguments {
-						if !strings.EqualFold(arg.Name, argName) {
-							continue
-						}
-
-						if strings.Contains(arg.Type, ".") {
-							comp = arg.Type
-
-							tr.add("resolved %q to %q via <cfargument type>", variable, comp)
-						} else if parser.IsMemberMethod(funcName) {
-							// Primitive-typed argument (string/numeric/array/etc.)
-							// calling a known member/Java-interop method (e.g.
-							// a string argument's .toCharArray()) — no component
-							// is needed to verify it.
-							tr.add("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
-							tr.hit(TargetMember, "", nil)
-
-							return ""
-						}
-
-						break
-					}
-
-					break
-				}
-			}
-		}
-
-		// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
-		if comp == "" && pr.Extends != "" {
-			tr.add("no ref found in this file — checking extends chain (%s) for a ComponentRef", pr.Extends)
-
-			seen := make(map[string]bool)
-			extends := pr.Extends
-
-			for extends != "" && !seen[extends] {
-				seen[extends] = true
-
-				cfcPath := r.ComponentPath(extends, baseDir)
-				if cfcPath == "" {
-					break
-				}
-
-				parentURI := cfpath.ToURI(cfcPath)
-
-				// Ensure the parent is indexed so RefsForFile returns its component refs.
-				// (EnsureIndexed is a fast no-op if already indexed.)
-				r.EnsureIndexed(cfcPath)
-
-				for _, ref := range r.Index.RefsForFile(parentURI) {
-					if strings.EqualFold(ref.Variable, lookupVar) {
-						comp = ref.Component
-
-						tr.add("resolved %q to %q via ComponentRef in parent %s", variable, comp, extends)
-
-						break
-					}
-				}
-
-				if comp != "" {
-					break
-				}
-
-				// Walk up the extends chain
-				data, err := r.FS.ReadFile(cfcPath)
-				if err != nil {
-					break
-				}
-
-				parentPR := parser.Parse(parentURI, string(data))
-				extends = parentPR.Extends
-			}
+			return ""
 		}
 	}
 
@@ -1025,6 +859,220 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	}
 
 	return "method '" + funcName + "' not found in " + comp
+}
+
+// ComponentOf reports the component variable holds at line, or "" when that
+// is not known or is not a component. It is the answer go-to-type-definition
+// wants, and it runs the receiver lookup CanResolveCall runs, so the two cannot
+// disagree about what a variable holds.
+//
+// Two of CanResolveCall's fallbacks are left out on purpose. A
+// componentResolver is tried against the variable name, but not against the
+// whole line, which exists for chained calls and would answer for whatever
+// else the line holds. And "$any" and "$builtin." are not components, so they
+// are reported as unknown.
+func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseResult, baseDir string) string {
+	caller := parser.FindFuncScopeAt(int(line), pr.Scopes).Name
+
+	comp, _ := r.receiverComponent(variable, line, caller, "", pr, baseDir, nil)
+
+	if comp == "" {
+		comp, _, _ = parser.ResolveFromCallMatch(variable, r.Resolvers)
+	}
+
+	if comp == "$any" || strings.HasPrefix(comp, "$builtin.") {
+		return ""
+	}
+
+	return comp
+}
+
+// receiverComponent finds the component a qualified call's receiver holds at
+// line: a ref scoped to the enclosing function, the nearest preceding ref in the
+// file, an Application.cfc ref, an ARGUMENTS.x type, and refs up the extends
+// chain, in that order. It is canResolveCall's lookup, shared with
+// ComponentOf so that go-to-type-definition answers exactly as call
+// resolution does; the componentResolver fallbacks stay with each caller.
+//
+// member reports the one case that is not a component at all: an ARGUMENTS.x
+// of primitive type calling a known member method, which canResolveCall
+// accepts outright. It needs funcName; ComponentOf passes none.
+func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) { //nolint:gocognit // moved out of canResolveCall unchanged; LINT-PLAN.md stage 4
+	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
+	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
+	// scope prefix and must not be stripped there.
+	lookupVar := parser.StripReceiverScope(variable)
+
+	// Try function-scoped refs first
+	for _, scope := range pr.Scopes {
+		if int(line) >= scope.Start && int(line) <= scope.End {
+			refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+			for i := range refs {
+				ref := &refs[i]
+
+				if strings.EqualFold(ref.Variable, lookupVar) {
+					comp = ref.Component
+
+					tr.add("resolved %q to %q via function-scoped ComponentRef", variable, comp)
+
+					break
+				}
+			}
+
+			break
+		}
+	}
+
+	// Fall back to component refs. A scratch variable can be reassigned multiple
+	// times in the same file (e.g. once per <cfswitch>/<cfcase> branch) — using
+	// the first matching ref in file order would lock onto whichever branch
+	// happens to appear earliest, regardless of which branch the call site is
+	// actually in. Prefer the ref with the highest line number at or before the
+	// call site (the assignment that's actually in scope there); only fall back
+	// to file order for a genuine forward reference, where no preceding ref exists.
+	if comp == "" {
+		var best *parser.ComponentRef
+
+		for i := range pr.ComponentRefs {
+			ref := &pr.ComponentRefs[i]
+			if !strings.EqualFold(ref.Variable, lookupVar) {
+				continue
+			}
+
+			if ref.Line > line {
+				continue
+			}
+
+			if best == nil || ref.Line > best.Line {
+				best = ref
+			}
+		}
+
+		if best == nil {
+			for i := range pr.ComponentRefs {
+				ref := &pr.ComponentRefs[i]
+				if strings.EqualFold(ref.Variable, lookupVar) {
+					best = ref
+
+					break
+				}
+			}
+		}
+
+		if best != nil {
+			comp = best.Component
+
+			tr.add("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
+		}
+	}
+
+	// Fall back to Application.cfc component refs
+	if comp == "" {
+		if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
+			for _, appName := range []string{"Application.cfc", "Application.cfm"} {
+				appURI := cfpath.ToURI(filepath.Join(appDir, appName))
+				for _, ref := range r.Index.RefsForFile(appURI) {
+					if strings.EqualFold(ref.Variable, lookupVar) {
+						comp = ref.Component
+
+						tr.add("resolved %q to %q via %s ComponentRef", variable, comp, appName)
+
+						break
+					}
+				}
+
+				if comp != "" {
+					break
+				}
+			}
+		}
+	}
+
+	// ARGUMENTS.x qualifier — resolve directly from the enclosing function's argument list.
+	// This handles cases where the argument has a component type (via hint promotion or
+	// explicit type) without requiring a ComponentRef to have been created.
+	if comp == "" && strings.HasPrefix(strings.ToUpper(variable), "ARGUMENTS.") {
+		argName := variable[10:]
+
+		for i := range pr.Funcs {
+			f := &pr.Funcs[i]
+
+			if strings.EqualFold(f.Name, caller) {
+				for _, arg := range f.Arguments {
+					if !strings.EqualFold(arg.Name, argName) {
+						continue
+					}
+
+					if strings.Contains(arg.Type, ".") {
+						comp = arg.Type
+
+						tr.add("resolved %q to %q via <cfargument type>", variable, comp)
+					} else if parser.IsMemberMethod(funcName) {
+						// Primitive-typed argument (string/numeric/array/etc.)
+						// calling a known member/Java-interop method (e.g.
+						// a string argument's .toCharArray()) — no component
+						// is needed to verify it.
+						tr.add("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
+
+						return "", true
+					}
+
+					break
+				}
+
+				break
+			}
+		}
+	}
+
+	// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
+	if comp == "" && pr.Extends != "" {
+		tr.add("no ref found in this file — checking extends chain (%s) for a ComponentRef", pr.Extends)
+
+		seen := make(map[string]bool)
+		extends := pr.Extends
+
+		for extends != "" && !seen[extends] {
+			seen[extends] = true
+
+			cfcPath := r.ComponentPath(extends, baseDir)
+			if cfcPath == "" {
+				break
+			}
+
+			parentURI := cfpath.ToURI(cfcPath)
+
+			// Ensure the parent is indexed so RefsForFile returns its component refs.
+			// (EnsureIndexed is a fast no-op if already indexed.)
+			r.EnsureIndexed(cfcPath)
+
+			for _, ref := range r.Index.RefsForFile(parentURI) {
+				if strings.EqualFold(ref.Variable, lookupVar) {
+					comp = ref.Component
+
+					tr.add("resolved %q to %q via ComponentRef in parent %s", variable, comp, extends)
+
+					break
+				}
+			}
+
+			if comp != "" {
+				break
+			}
+
+			// Walk up the extends chain
+			data, err := r.FS.ReadFile(cfcPath)
+			if err != nil {
+				break
+			}
+
+			parentPR := parser.Parse(parentURI, string(data))
+			extends = parentPR.Extends
+		}
+	}
+
+	return comp, false
 }
 
 // softMissing reports whether comp, which names no file, came from a

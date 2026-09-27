@@ -183,19 +183,11 @@ func (cs *configSet) Configs() []string {
 // is the difference between a surprising result and an explained one.
 func (cs *configSet) preload(roots []string) {
 	for _, root := range roots {
-		//nolint:nilerr // an unreadable entry is skipped, not fatal: a preload that
-		// aborted on one permission error would silently fall back to a single
-		// config for the whole scan, which is the bug this exists to prevent.
+		// An unreadable entry is skipped, not fatal: a preload that aborted on
+		// one permission error would silently fall back to a single config for
+		// the whole scan, which is the bug this exists to prevent.
 		_ = cs.fsys.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-
-			if info.IsDir() {
-				return nil
-			}
-
-			if filepath.Base(path) == ".cfmleditor.json" {
+			if err == nil && !info.IsDir() && filepath.Base(path) == ".cfmleditor.json" {
 				cs.For(filepath.Join(filepath.Dir(path), "x.cfc"))
 			}
 

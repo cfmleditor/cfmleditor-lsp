@@ -82,7 +82,9 @@ func (s *Server) handleExport(kind string) (any, error) {
 		var written, unlisted []string
 
 		for _, r := range reports {
-			if err := os.WriteFile(r.path, []byte(r.content), 0o644); err != nil { //nolint:gosec // a report in the workspace, for the user to read and share
+			// Not writeReport: the known-issues file is named in the config,
+			// and a project may keep it behind a symlink on purpose.
+			if err := os.WriteFile(r.path, []byte(r.content), reportPerm); err != nil {
 				s.notifyError(ctx, "Could not write "+r.path+": "+err.Error())
 
 				return

@@ -209,7 +209,8 @@ func writeReport(path string, calls []unresolved.Call, regenerate string) (int, 
 
 	skipped := unresolved.WriteKnownIssues(&b, calls, filepath.Dir(path), false, regenerate, version)
 
-	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o644)
+	// Owner-only, as the server writes the same report for .exportUnresolved.
+	return len(calls) - skipped, os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
 func collectCFMLFiles(fsys vfs.FS, roots []string) []string {

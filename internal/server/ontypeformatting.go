@@ -5,10 +5,9 @@ import (
 	"encoding/json/v2"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"go.lsp.dev/protocol"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 

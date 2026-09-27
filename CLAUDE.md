@@ -329,10 +329,11 @@ the *formatter*, not the parser.
   against the file's own functions; every other scope holds a runtime value, so
   the receiver is **`$any`** — recorded unqualified, `request.getRemote()` in a
   file that declares a `getRemote` is an edge to a function the call never
-  reaches. **Read the scope from the token, not the `Scope` value**: `request`,
-  `session` and `application` are all dispatched as `ScopeVariables` so an
-  assignment through one keeps its right-hand side's component, and testing the
-  enum put every one of them in the first group.
+  reaches. **Read the scope from the token, not the `Scope` value**: the two
+  groups are "this component" and "anything else", which is not a question the
+  enum answers — `request`, `session` and `application` used to be dispatched
+  as `ScopeVariables`, and testing the enum put every one of them in the first
+  group.
 - **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
   `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
   and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the
@@ -627,7 +628,7 @@ list.
 - `internal/docs/` — generated; regenerate via `make generate`, never hand-edit
 
 **Scope-prefixed assignments:** each handled scope (`local.`, `variables.`, `this.`,
-`arguments.`, `request.`, `session.`, `application.`) needs its own `case` in *both* dispatch
+`arguments.`, `request.`, `session.`, `application.`, `server.`) needs its own `case` in *both* dispatch
 switches (`scriptParser.parse()` and `handleBodyToken`) routing to
 `parseScopedVar`/`parseBodyScopedVar` — that handler is the only one that correctly
 distinguishes `scope.name = rhs` (assignment) from `scope.name.method()` (bare call) for a
@@ -635,18 +636,43 @@ two-token-prefixed LHS. Any scope keyword *not* listed falls through to `checkAs
 default path, which only recognizes a bare `x = ...` (single identifier directly followed by
 `=`); for a scope-prefixed LHS the next token is `.` not `=`, so the statement is silently
 misread as a bare-call check and any component type the RHS establishes is dropped.
-`url.`/`form.`/`cookie.`/`cgi.`/`client.`/`server.` deliberately aren't listed (those scopes
-hold primitive request/config data, not component instances) — add them the same way if a
-project assigns components through one.
+`server.` is listed too, since `Server.cfc` declares into it and go-to-definition looks there.
+`url.`/`form.`/`cookie.`/`cgi.`/`client.` deliberately aren't listed (those scopes hold primitive
+request/config data, not component instances) — add them the same way if a project assigns
+components through one.
+
+**The shared scopes keep their own scope in the declaration.** `request.`, `session.`,
+`application.` and `server.` share the variables-scope handling for everything *except* the
+`VarDef` they record: the component ref is filed globally and the calls are extracted alike.
+They used to be dispatched as `ScopeVariables` outright, which put `application.cache` among
+the component's variables and left go-to-definition on it nothing to find in a script-syntax
+`Application.cfc` (tag syntax always had it right), and made `application.helper =
+function(){}` at component level a method of the component. `sharedScopeOf` maps the keyword;
+`TestSharedScopeAssignmentsKeepTheirScope` pins all three.
 
 ## LSP surface
 
 Declared in `Server.capabilities()` (`internal/server/server.go`):
 
-- Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, hover,
+- Incremental text sync, completion (trigger chars `<`, `/`, `.`, `>`), definition, type definition, hover,
   signature help (`(`, `,`), document + workspace symbols, document links (with resolve), code
   actions, document formatting, range formatting, on-type formatting (`>`), document highlight,
   folding ranges, workspace folders.
+- `textDocument/typeDefinition` (`internal/server/typedefinition.go`) goes to the component
+  the symbol under the cursor holds: a variable, argument or property's component, or the
+  component a called function returns. **Opt-in** (`features.typeDefinition`, default off,
+  `config.typeDefinitionDefault`) while it is new. It is the extension's `CFMLTypeDefinitionProvider`,
+  and the extension's source is the spec, since it has no tests for it.
+
+  **What a variable holds comes from `resolve.ComponentOf`, which is `CanResolveCall`'s own
+  receiver lookup** — `receiverComponent`, extracted from `canResolveCall` rather than
+  copied, so go-to-type-definition and `unresolved` cannot disagree about a receiver. The
+  extraction was checked by running `unresolved` over the testdata and the six-project
+  corpus before and after: 91,405 entries, identical. `ComponentOf` tries a
+  `componentResolver` against the variable name but not against the whole line, since that
+  fallback exists for chained calls and would answer for whatever else the line holds, and
+  reports `$any` and `$builtin.` as unknown. A return type counts only when dotted: a bare
+  word is far more often `struct` than a component in the same directory.
 - `textDocument/documentHighlight` (`internal/server/documenthighlight.go`) shades the other
   occurrences of the identifier under the cursor. Deliberately a *textual* answer, reported as
   `DocumentHighlightKindText`: matching is whole-identifier and case-folded through the same
@@ -740,7 +766,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
   one opaque region, so answering one request means parsing the whole body with the CFScript
   grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
-  per open document. The fields are `*bool` for the reason the `completions` block documents — a
+  per open document. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
   `mergeFormatting` does. `featureDefaults` in `features_chain_test.go` states every default and
@@ -864,7 +891,11 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `true`, and — like `.exportDeps`' `deps-<name>.md` — only through `reportPath`, which refuses a
   name that is not a plain file name and a directory outside the workspace roots. Both come from
   the command's arguments: `x/../../escaped` as a function name, which `filepath.Join` cleans, wrote
-  a file one directory above the source. `TestFindRefsReportNameCannotEscape` pins it. It used to write unconditionally, which meant the code action on an ordinary "find all
+  a file one directory above the source. `TestFindRefsReportNameCannotEscape` pins it. `reportPath` checks text, so the write itself
+  goes through `writeReport`/`createReport` (the code map too): an `os.Root` on the report's
+  directory, which refuses a symlink planted at the report's name — the old write followed one
+  and emptied its target — and owner-only permissions. Only the name is confined, so a
+  workspace reached through a symlinked directory still gets its reports. It used to write unconditionally, which meant the code action on an ordinary "find all
   references" gesture dropped two files beside the source file being read. The plain code actions
   pass two arguments; a separate "Export references to X to a file" action passes the third.
 - `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
@@ -935,22 +966,23 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
 
 The `cfmleditor` extension stands its own language providers down whenever this
 server is running, on the rule that enabling the server hands it the language.
-That rule is simpler to hold than a per-capability list, and it costs three
+That rule is simpler to hold than a per-capability list, and it costs two
 things the extension could answer and this server cannot. They are listed here
 so the loss is deliberate and so whoever implements one knows what it has to
 match.
 
 It was four. Variable definitions were the largest, and they are closed — the
 conformance suite below is what made that a measured change rather than a claim.
+`textDocument/typeDefinition` is closed too, behind `features.typeDefinition`; see the LSP
+surface.
 
 | Missing here | Extension's implementation | Notes |
 |---|---|---|
-| `textDocument/typeDefinition` | `CFMLTypeDefinitionProvider` | Go to the *type* of the symbol under the cursor, rather than its declaration. Most of the machinery exists — `CanResolveCall` already resolves a receiver to a component, which is the answer this request wants. |
 | Docblock completion | `DocBlockCompletions`, triggered on `*`, `@` and `.` | `@param`, `@return` and friends inside a `/** */` block. Note the trigger characters: `capabilities()` advertises `<`, `/`, `.` and `>`, so adding this means widening that list as well as handling the context. |
 | `textDocument/documentColor` | `CFMLDocumentColorProvider` | Colour swatches and the picker for colour literals. Wholly absent here; nothing in the parser records them. |
 
-`documentColor` is the one with no foundation at all; the other three each have
-most of their machinery already. Until they land, a user who enables the server
+`documentColor` is the one with no foundation at all; docblock completion has
+most of its machinery already. Until they land, a user who enables the server
 loses them — which is worth remembering when one is reported as a regression
 rather than a gap.
 
@@ -990,7 +1022,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 
@@ -1406,7 +1438,9 @@ Some handles need both shapes; others only one, depending on how the code uses t
   Go than the linter binary was built with — `can't load config: the Go language version (go1.25)
   used to build golangci-lint is lower than the targeted Go version (1.26.6)`. That is a refusal
   to start, not a finding, and it is what a distro or Homebrew binary does for weeks after each Go
-  bump. `gosec` runs everywhere except, in `cmd/`, the rules about opening and writing the paths
+  bump. It builds once, into `target/tools/golangci-lint-<version>-go<version>`, and CI caches
+  that file and golangci-lint's analysis cache between runs; a cold lint job was about 50s
+  building the linter and 90s analysing. `gosec` runs everywhere except, in `cmd/`, the rules about opening and writing the paths
   the CLI is given; anything else it flags is fixed or carries its reason. **Convert a line or
   column with `conv.Uint32`, not `uint32(n)`**: `internal/conv` clamps where a bare conversion
   wraps a negative to about four billion, and `G115` flags the bare form. Test files are exempted from `prealloc` and `gosec` only: a test's

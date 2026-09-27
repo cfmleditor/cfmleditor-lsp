@@ -186,7 +186,7 @@ func (s *Server) handleCompletionResolve(_ context.Context, rawParams []byte) (a
 func resolveCompletionItem(item *protocol.CompletionItem) {
 	var name string
 
-	switch item.Kind { //nolint:exhaustive // only the two deferred lists resolve
+	switch item.Kind {
 	case protocol.CompletionItemKindFunction:
 		if sort, _ := item.SortText.Get(); sort == SortBuiltinFuncs+item.Label {
 			name = item.Label
@@ -198,6 +198,8 @@ func resolveCompletionItem(item *protocol.CompletionItem) {
 		if len(item.Data) > 0 {
 			_ = json.Unmarshal(item.Data, &name)
 		}
+	default:
+		// Only the two deferred lists resolve.
 	}
 
 	if name == "" {

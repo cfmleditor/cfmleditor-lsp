@@ -33,6 +33,14 @@ var sqlKeywords = map[string]bool{
 
 // formatCFQuery pretty-prints a <cfquery>…</cfquery> block by re-parsing
 // the content with the CFQuery sub-grammar.
+// touchesPrevSibling reports whether n starts where its previous sibling ends,
+// so the two are written adjacent with no space between them.
+func touchesPrevSibling(n *sitter.Node) bool {
+	prev := n.PrevSibling()
+
+	return prev != nil && prev.EndByte() == n.StartByte()
+}
+
 func (f *Formatter) formatCFQuery(n *sitter.Node) {
 	attrs := f.collectAttrs(n)
 
@@ -289,8 +297,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 				f.writeIndent()
 
 				*first = false
-			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() { //nolint:revive // intentionally empty — keep adjacent
-			} else {
+			} else if !touchesPrevSibling(n) {
 				f.write(" ")
 			}
 
@@ -578,8 +585,7 @@ func (f *Formatter) formatQueryNode(n *sitter.Node, first *bool) { //nolint:goco
 				f.writeIndent()
 
 				*first = false
-			} else if prev := n.PrevSibling(); prev != nil && prev.EndByte() == n.StartByte() { //nolint:revive // intentionally empty — keep adjacent
-			} else {
+			} else if !touchesPrevSibling(n) {
 				f.write(" ")
 			}
 

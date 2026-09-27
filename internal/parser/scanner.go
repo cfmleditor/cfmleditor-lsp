@@ -266,7 +266,7 @@ func (s *Scanner) NextSkipComments() Token {
 
 	for {
 		tok := s.next()
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokBlockComment:
 			s.LastBlockComment = tok.Value
 			s.commentSeq++

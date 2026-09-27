@@ -38,6 +38,7 @@ var dispatchedScopes = []string{
 	"request",
 	"session",
 	"application",
+	"server",
 }
 
 // TestScopedAssignmentEstablishesAComponentRef covers the component-level
@@ -118,7 +119,7 @@ func TestBothDispatchSwitchesHandleEveryScope(t *testing.T) {
 		// The scopes deliberately left out of both switches. If one gains a
 		// case it needs a line in dispatchedScopes, or it is dispatched and
 		// unchecked.
-		for _, scope := range []string{"url", "form", "cookie", "cgi", "client", "server"} {
+		for _, scope := range []string{"url", "form", "cookie", "cgi", "client"} {
 			if strings.Contains(body, `case "`+scope+`"`) {
 				t.Errorf("%s now dispatches %q; add it to dispatchedScopes so both switches are "+
 					"checked for it", name, scope)
@@ -174,4 +175,59 @@ func hasComponentRef(refs []ComponentRef, variable, component string) bool {
 	}
 
 	return false
+}
+
+// TestSharedScopeAssignmentsKeepTheirScope. The dispatch arms for these
+// scopes exist so an assignment's component type is kept, and they used to
+// record the declaration as ScopeVariables to get there. `application.cache`
+// then counted as one of the component's variables, and go-to-definition on
+// it found no application-scope declaration in a script-syntax
+// Application.cfc, the common modern style. Tag syntax always had it right.
+// `server` was not dispatched at all, so a script Server.cfc declared nothing.
+func TestSharedScopeAssignmentsKeepTheirScope(t *testing.T) {
+	src := "component {\n" +
+		"\tapplication.top = 1;\n" +
+		"\tapplication.helper = function() { return 1; };\n" +
+		"\tfunction onApplicationStart() {\n" +
+		"\t\tapplication.cache = {};\n" +
+		"\t\tsession.user = 1;\n" +
+		"\t\trequest.started = now();\n" +
+		"\t\tserver.shared = {};\n" +
+		"\t}\n" +
+		"}\n"
+
+	want := map[string]Scope{
+		"top":     ScopeApplication,
+		"cache":   ScopeApplication,
+		"user":    ScopeSession,
+		"started": ScopeRequest,
+		"shared":  ScopeServer,
+		"helper":  ScopeApplication,
+	}
+
+	got := map[string]Scope{}
+	for _, v := range ParseVars(src) {
+		got[v.Name] = v.Scope
+	}
+
+	for name, scope := range want {
+		if s, ok := got[name]; !ok {
+			t.Errorf("%s: not declared", name)
+		} else if s != scope {
+			t.Errorf("%s: declared in %s scope, want %s", name, ScopeName(s), ScopeName(scope))
+		}
+	}
+
+	if globals := GlobalVars(src); len(globals) != 0 {
+		t.Errorf("shared-scope names listed among the component's variables: %v", globals)
+	}
+
+	// A function stored in the application scope is a value there, not a
+	// method of this component.
+	pr := Parse("file:///x/Application.cfc", src)
+	for i := range pr.Funcs {
+		if pr.Funcs[i].Name == "helper" {
+			t.Error("application.helper = function(){} declared a method on the component")
+		}
+	}
 }

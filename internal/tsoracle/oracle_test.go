@@ -94,39 +94,40 @@ func TestGrammarAndParserAgreeOnCalls(t *testing.T) {
 
 	seen := map[string]int{}
 
+	// A corpus entry that cannot be stat'ed or read is skipped, not fatal.
+	var paths []string
+
 	for _, root := range roots {
 		_ = filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil || info.IsDir() {
-				return nil //nolint:nilerr // a corpus entry we cannot stat is skipped, not fatal
-			}
-
 			l := strings.ToLower(p)
-			if !strings.HasSuffix(l, ".cfc") && !strings.HasSuffix(l, ".cfm") {
-				return nil
-			}
-
-			src, readErr := os.ReadFile(p)
-			if readErr != nil {
-				return nil //nolint:nilerr // same: an unreadable file is skipped
-			}
-
-			files++
-
-			missed, invented := diff(GrammarCalls(src), parserCalls(p, src))
-			for _, m := range missed {
-				seen[methodOfKey(m)]++
-			}
-
-			for _, m := range invented {
-				seen["INVENTED "+methodOfKey(m)]++
-			}
-
-			if len(missed)+len(invented) > 0 && (reporting || testing.Verbose()) {
-				t.Logf("%s\n  grammar-only: %v\n  parser-only:  %v", p, missed, invented)
+			if walkErr == nil && !info.IsDir() && (strings.HasSuffix(l, ".cfc") || strings.HasSuffix(l, ".cfm")) {
+				paths = append(paths, p)
 			}
 
 			return nil
 		})
+	}
+
+	for _, p := range paths {
+		src, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+
+		files++
+
+		missed, invented := diff(GrammarCalls(src), parserCalls(p, src))
+		for _, m := range missed {
+			seen[methodOfKey(m)]++
+		}
+
+		for _, m := range invented {
+			seen["INVENTED "+methodOfKey(m)]++
+		}
+
+		if len(missed)+len(invented) > 0 && (reporting || testing.Verbose()) {
+			t.Logf("%s\n  grammar-only: %v\n  parser-only:  %v", p, missed, invented)
+		}
 	}
 
 	names := make([]string, 0, len(seen))

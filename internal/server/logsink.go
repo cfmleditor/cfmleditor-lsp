@@ -4,10 +4,8 @@ import (
 	"context"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/protocol"
-
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"go.lsp.dev/protocol"
 )
 
 // logSink forwards the server's own log records to the client as

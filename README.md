@@ -417,11 +417,9 @@ the unreferenced list is described as candidates rather than as dead code.
 ## Not yet implemented
 
 The VS Code extension stands its own language providers down while this server is
-running, so three capabilities it can answer are unavailable when the server is
+running, so two capabilities it can answer are unavailable when the server is
 enabled:
 
-- **`textDocument/typeDefinition`** — go to the *type* of the symbol under the
-  cursor rather than its declaration
 - **Docblock completion** — `@param`, `@return` and friends inside `/** */`
   (would also need `@` and `*` added to the completion trigger characters)
 - **`textDocument/documentColor`** — colour swatches and the picker
@@ -459,7 +457,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
-| `features` | No | Per-capability switches. `documentHighlight`, `watchedFiles` and `rangeFormatting` default to `true`; `folding` defaults to `false` and is opt-in. See below. |
+| `features` | No | Per-capability switches. `documentHighlight`, `watchedFiles` and `rangeFormatting` default to `true`; `folding` and `typeDefinition` default to `false` and are opt-in. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |
 
 ### Mappings
@@ -603,8 +601,8 @@ there is nothing it could honestly do with `false` short of declining to format.
 
 Most capabilities the server adds are on by default and each can be switched off
 on its own, for when one misbehaves on a real workspace and the alternative is
-downgrading the binary. **`folding` is the exception: it is off unless you ask
-for it.**
+downgrading the binary. **`folding` and `typeDefinition` are the exceptions:
+they are off unless you ask for them.**
 
 ```json
 {
@@ -612,7 +610,8 @@ for it.**
     "documentHighlight": true,
     "folding": false,
     "watchedFiles": true,
-    "rangeFormatting": true
+    "rangeFormatting": true,
+    "typeDefinition": false
   }
 }
 ```
@@ -623,6 +622,7 @@ for it.**
 | `folding` | **off** | Syntax-aware folding ranges. With it off the editor folds by indentation, as it did before the feature existed. |
 | `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
 | `rangeFormatting` | on | "Format Selection". Switching it off leaves whole-document formatting and format-on-save working. |
+| `typeDefinition` | **off** | "Go to Type Definition": from a variable, argument or property to the component it holds, or from a call to the component the function returns. The newest capability here, so it waits to be asked for. |
 | `outputContextInterpolation` | on | Reading `#...#` in a tag file's text only where ColdFusion evaluates it: inside `<cfoutput>`, `<cfquery>`, `<cfmail>` and `output="true"` functions, and in the attributes of CF and custom tags. Also reads a `.cfm` template with no CF tags as HTML rather than CFScript. Off, every pair of hashes in text is scanned, which finds calls in JavaScript, CSS and prose between two stray hashes. Unlike the others this changes what the parser reads, not what the server advertises. |
 
 `folding` is opt-in because it is the most expensive request here to answer. A

@@ -88,6 +88,27 @@ jobs:
       #
       # What this gives up is the action's inline PR annotations: findings
       # appear in the job log rather than on the diff.
+      #
+      # Two caches, because a cold lint job was about 50s building the linter
+      # and 90s analysing. The built linter is keyed on the Makefile and
+      # go.mod, which hold the two versions its file name carries. The
+      # analysis cache is saved on every run and restored from the newest
+      # one: golangci-lint keys its entries by content and configuration, so
+      # an older cache can only miss, never answer wrongly, and it trims
+      # entries unused for five days itself. Saves from main reach every PR.
+      - name: Cache the built linter
+        uses: actions/cache@v6
+        with:
+          path: target/tools
+          key: golangci-lint-bin-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+
+      - name: Cache golangci-lint's analysis
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-analysis-${{ runner.os }}-${{ github.sha }}
+          restore-keys: golangci-lint-analysis-${{ runner.os }}-
+
       - name: Run golangci-lint
         run: make lint
 

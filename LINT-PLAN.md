@@ -254,8 +254,11 @@ one exclusion for `cmd/`:
   which imports nothing but `math`. `unresolved` over the corpus reports the
   same 91,405 entries before and after, and parse time is unchanged, measured
   against `main` alternately.
-- **`cmd/` is excluded from `G304`, `G306` and `G703`** (38): the CLI opens,
-  stats, walks and writes the files it is given on the command line.
+- **`cmd/` is excluded from `G304` and `G703`** (36): the CLI opens,
+  stats, walks and writes the files it is given on the command line. `G306`
+  was excluded too until the server's reports became owner-only; the CLI's
+  `cflint` and `unresolved` reports, the same files, were still `0644`. They
+  are `0600` now and `G306` is checked in `cmd/` again.
 - **The rest are fixed or carry their reason.** One was a real defect:
   `cfmleditor.findRefs` and `cfmleditor.exportDeps` built their report paths
   from the command's arguments, so a function name such as `x/../../escaped`
@@ -270,6 +273,71 @@ one exclusion for `cmd/`:
 
 A canary confirmed an unreasoned `os.WriteFile(p, b, 0o644)` is flagged under
 `internal/` and not under `cmd/`.
+
+## Suppressions that were fixable (done)
+
+60 `//nolint` markers went, leaving 56 that are needed: the 42 complexity
+markers, 9 `gosec`, 4 `staticcheck` on the deprecated `rootUri` a client may
+still send, and the Unix-socket `usetesting`.
+
+- **`gosec` (10 of 19).**
+  - **Shared-scope go-to-definition (1).** It read `Application.cfc` with a
+    bare `os.ReadFile`, bypassing the server's file system and its open
+    buffers. With unsaved edits the jump landed on whatever line the
+    declaration used to be on. It reads through `refsFS` now.
+    `TestSharedScopeDefinitionReadsTheOpenBuffer` fails without it.
+  - **Report writes (7).** The findRefs, exportDeps and code-map reports, and
+    the unresolved and CFLint exports, were written `0644` into a `0755`
+    directory. They are now `0600` in `0750`.
+  - **Symlinks.** The findRefs, exportDeps and code-map reports now go through
+    an `os.Root` on the report's directory. `reportPath` checks the path as
+    text, so a symlink planted at the report's name carried the write outside
+    the workspace. The old write followed one and emptied its target.
+    `TestWriteReportRefusesAPlantedSymlink` fails without the root.
+  - **Exports are not confined.** They keep a plain write, because the
+    known-issues file is named in the config and a project may keep it behind
+    a symlink on purpose.
+  - **SQL (2).** Callers and callees are two constant queries. The path
+    search's run of `?` placeholders is now one JSON array read through
+    `json_each`. That search was about 10% faster than on `main` over 4
+    alternating rounds.
+  - **The 9 kept.** Each is the program doing its job:
+    - the debug log at the path in `CFMLEDITOR_LSP_LOG` (2);
+    - the `vfs` read layer, reading `.cfmleditor.json` while walking up, and
+      CFLint reading the file it lints (3);
+    - launching CFLint (2);
+    - making the downloaded CFLint executable (1);
+    - `SearchSymbols` joining fixed WHERE conditions (1).
+
+    Those reads cannot go through an `os.Root`, because a symlinked config
+    file is legitimate. Wrapping them in
+    `filepath.Clean` would satisfy gosec without making anything safer.
+
+- **`nilerr` (8) and `errcheck,gosec` on `filepath.Walk` (3).** `nilerr` flags a
+  `return nil` in a branch reached with a non-nil error, but not a callback that
+  collects only when `err == nil` and returns nil once. The walks skip an
+  unreadable entry exactly as before. `parse` and `scan` shared a copy-pasted
+  walk, now `cfmlFilesUnder`; the tree-sitter oracle test collects paths first
+  and reads them after.
+- **`exhaustive` (30)**, by `default-signifies-exhaustive: true`.
+  - 16 markers were on switches that already had a `default:` arm.
+  - The other 14 were on switches that handle a few of many values: 11 token
+    loops in the parser, two scope filters and completion resolve. Each now
+    ends in an empty `default:` with the marker's reason as a comment. Listing
+    the other values would have meant 32 token kinds in eleven places.
+  - The parser's machine code is unchanged; only debug line numbers moved.
+  - Unlike a `//nolint`, the switch is still checked: deleting its `default:`
+    is flagged.
+- **`revive` (7).**
+  - An unused `t` or `req` is now `_`.
+  - `context-as-argument` allows `*testing.T` before the context.
+  - The formatter's empty `else if` branch is now `touchesPrevSibling`.
+- **`staticcheck` QF1012 (1)** and **`forcetypeassert` (1):** the
+  `WriteString(fmt.Sprintf(…))` now writes its three parts directly, and
+  `.Interface().(bool)` is now `.Bool()`.
+
+A canary confirmed that the two configuration changes still flag what they
+should.
 
 ## Left off, and why
 

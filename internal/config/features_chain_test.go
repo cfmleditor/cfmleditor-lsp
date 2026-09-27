@@ -82,8 +82,8 @@ func TestFeatureKeysReachTheServer(t *testing.T) {
 //
 // Enumerated rather than assumed, and checked for completeness below, so that
 // adding a switch to Features fails here until its default is stated — the
-// point of walking the struct reflectively in the first place. Folding is the
-// one that is off: see the Features doc comment.
+// point of walking the struct reflectively in the first place. Folding and
+// TypeDefinition are the ones that are off: see the Features doc comment.
 var featureDefaults = map[string]bool{
 	"DocumentHighlight":          true,
 	"Folding":                    foldingDefault,
@@ -92,6 +92,7 @@ var featureDefaults = map[string]bool{
 	"VariableDefinitions":        true,
 	"Routes":                     true,
 	"OutputContextInterpolation": true,
+	"TypeDefinition":             typeDefinitionDefault,
 }
 
 // TestFeaturesDefaultToOn is the property that makes these opt-outs. An absent
@@ -116,7 +117,7 @@ func TestFeaturesDefaultToOn(t *testing.T) {
 				continue
 			}
 
-			if got := rv.Field(i).Interface().(bool); got != want { //nolint:forcetypeassert,revive // every field is a bool, asserted above
+			if got := rv.Field(i).Bool(); got != want {
 				t.Errorf("%s: %s defaults to %v, want %v", what, name, got, want)
 			}
 		}

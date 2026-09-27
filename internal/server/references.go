@@ -5,18 +5,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"encoding/json/v2"
 
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // handleReferences answers textDocument/references.

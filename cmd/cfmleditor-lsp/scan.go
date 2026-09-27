@@ -27,18 +27,7 @@ func cmdScan(args []string) {
 		}
 
 		if info.IsDir() {
-			filepath.Walk(arg, func(path string, _ os.FileInfo, err error) error { //nolint:errcheck,gosec // the callback swallows every error, so Walk has none to return
-				if err != nil {
-					return nil //nolint:nilerr // an unreadable entry is skipped, not a reason to stop the walk
-				}
-
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".cfc" || ext == ".cfm" || ext == ".cfml" || ext == ".cfs" {
-					files = append(files, path)
-				}
-
-				return nil
-			})
+			files = append(files, cfmlFilesUnder(arg)...)
 		} else {
 			files = append(files, arg)
 		}
@@ -192,4 +181,31 @@ func printErrorsOffset(file string, lang string, n *sitter.Node, src []byte, lin
 	walk(n)
 
 	return count
+}
+
+// cfmlFilesUnder lists the CFML files beneath root, for the parse and scan
+// commands. An unreadable entry is skipped rather than ending the walk, so the
+// callback returns no error and Walk has none to report.
+func cfmlFilesUnder(root string) []string {
+	var files []string
+
+	_ = filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
+		if err == nil && hasCFMLExt(path) {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+
+	return files
+}
+
+// hasCFMLExt reports whether path names a file the parse and scan commands read.
+func hasCFMLExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cfc", ".cfm", ".cfml", ".cfs":
+		return true
+	}
+
+	return false
 }

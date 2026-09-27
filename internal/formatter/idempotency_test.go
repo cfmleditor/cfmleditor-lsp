@@ -95,13 +95,12 @@ func TestFormatIsIdempotentOnCorpus(t *testing.T) {
 	var files []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil //nolint:nilerr // unreadable entries are simply skipped
-		}
-
-		switch strings.ToLower(filepath.Ext(path)) {
-		case ".cfc", ".cfm", ".cfml":
-			files = append(files, path)
+		// Unreadable entries are simply skipped.
+		if err == nil && !info.IsDir() {
+			switch strings.ToLower(filepath.Ext(path)) {
+			case ".cfc", ".cfm", ".cfml":
+				files = append(files, path)
+			}
 		}
 
 		return nil

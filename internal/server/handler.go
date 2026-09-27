@@ -5,25 +5,22 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/jsonrpc2"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // docOf digs the document URI out of a request's parameters for logging, and
@@ -97,6 +94,8 @@ func (s *Server) Handler() jsonrpc2.Handler {
 			return s.handleCompletionResolve(ctx, req.Params())
 		case protocol.MethodTextDocumentDefinition:
 			return s.handleDefinition(ctx, req.Params())
+		case protocol.MethodTextDocumentTypeDefinition:
+			return s.handleTypeDefinition(ctx, req.Params())
 		case protocol.MethodTextDocumentReferences:
 			return s.handleReferences(ctx, req.Params())
 		case protocol.MethodTextDocumentFormatting:
@@ -208,6 +207,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 		cflog.Bool("variableDefinitions", s.Features.VariableDefinitions),
 		cflog.Bool("documentHighlight", s.Features.DocumentHighlight),
 		cflog.Bool("folding", s.Features.Folding),
+		cflog.Bool("typeDefinition", s.Features.TypeDefinition),
 		cflog.Bool("watchedFiles", s.Features.WatchedFiles),
 		cflog.Bool("rangeFormatting", s.Features.RangeFormatting),
 		cflog.Bool("routesConfigured", s.Routes.Enabled()))
@@ -874,14 +874,14 @@ func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile strin
 
 	output := result.Summary + "\n\n```mermaid\n" + result.Graph.Mermaid() + "\n```"
 
-	if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
+	if err := writeReport(outFile, []byte(output)); err != nil {
 		s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 
 		return
 	}
 
 	dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
-	if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
+	if err := writeReport(dotFile, []byte(result.Graph.DOT())); err != nil {
 		s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 	}
 
@@ -1339,12 +1339,12 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 			return mermaid, nil
 		}
 
-		if err := os.WriteFile(outFile, []byte("```mermaid\n"+mermaid+"\n```\n"), 0o644); err != nil { //nolint:gosec // a report beside the source, for the user to read and share
+		if err := writeReport(outFile, []byte("```mermaid\n"+mermaid+"\n```\n")); err != nil {
 			s.log.Error("failed to write file", cflog.String("path", outFile), cflog.Err(err))
 		}
 
 		dotFile := strings.TrimSuffix(outFile, ".md") + ".dot"
-		if err := os.WriteFile(dotFile, []byte(result.Graph.DOT()), 0o644); err != nil { //nolint:gosec // as above
+		if err := writeReport(dotFile, []byte(result.Graph.DOT())); err != nil {
 			s.log.Error("failed to write file", cflog.String("path", dotFile), cflog.Err(err))
 		}
 

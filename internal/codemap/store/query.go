@@ -10,12 +10,16 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 const symbolCols = `id, kind, name, file, line, access, component, entry, reachable, utility, island, in_degree, out_degree`
+
+// nodeCols is symbolCols qualified by the nodes table's alias, spelled out so
+// the queries built from it are constants. TestNodeColsQualifySymbolCols holds
+// the two together.
+const nodeCols = `n.id, n.kind, n.name, n.file, n.line, n.access, n.component, n.entry, n.reachable, n.utility, n.island, n.in_degree, n.out_degree`
 
 func scanSymbols(rows *sql.Rows) ([]Symbol, error) {
 	defer func() { _ = rows.Close() }()
@@ -105,10 +109,9 @@ func (s *Store) SearchSymbols(opts *SearchOptions) ([]Symbol, error) {
 	// strings, and one of two literal ORDER BYs. Not one byte comes from the
 	// caller — every value the caller supplies, including the search text, goes in
 	// as a bound parameter below.
-	//nolint:gosec // G202: the concatenated parts are constants; all values are bound
-	query := "SELECT " + prefixCols("n.", symbolCols) + " FROM " + from
+	query := "SELECT " + nodeCols + " FROM " + from
 	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+		query += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: fixed conditions; all values are bound
 	}
 
 	query += " ORDER BY " + order + " LIMIT ?"
@@ -121,15 +124,6 @@ func (s *Store) SearchSymbols(opts *SearchOptions) ([]Symbol, error) {
 	}
 
 	return scanSymbols(rows)
-}
-
-func prefixCols(prefix, cols string) string {
-	parts := strings.Split(cols, ", ")
-	for i, p := range parts {
-		parts[i] = prefix + p
-	}
-
-	return strings.Join(parts, ", ")
 }
 
 // Node returns one symbol by id.
@@ -153,25 +147,30 @@ func (s *Store) Node(id string) (Symbol, error) {
 
 // Callers returns what depends on id; Callees what id depends on.
 func (s *Store) Callers(id string, limit int) ([]Neighbour, error) {
-	return s.neighbours(id, "e.to_id = ?", "e.from_id", limit)
+	return s.neighbours(callersQuery, id, limit)
 }
 
 // Callees returns what id depends on.
 func (s *Store) Callees(id string, limit int) ([]Neighbour, error) {
-	return s.neighbours(id, "e.from_id = ?", "e.to_id", limit)
+	return s.neighbours(calleesQuery, id, limit)
 }
 
-func (s *Store) neighbours(id, match, join string, limit int) ([]Neighbour, error) {
+// callersQuery and calleesQuery differ only in which end of the edge is id.
+const (
+	callersQuery = `SELECT ` + nodeCols + `, e.kind, e.count, e.dynamic
+	                FROM edges e JOIN nodes n ON n.id = e.from_id
+	                WHERE e.to_id = ? AND e.kind != 'contains'
+	                ORDER BY e.count DESC, n.id LIMIT ?`
+	calleesQuery = `SELECT ` + nodeCols + `, e.kind, e.count, e.dynamic
+	                FROM edges e JOIN nodes n ON n.id = e.to_id
+	                WHERE e.from_id = ? AND e.kind != 'contains'
+	                ORDER BY e.count DESC, n.id LIMIT ?`
+)
+
+func (s *Store) neighbours(query, id string, limit int) ([]Neighbour, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-
-	// match and join are literals chosen by Callers/Callees, never caller input.
-	//nolint:gosec // G202: the concatenated parts are constants; id is bound below
-	query := `SELECT ` + prefixCols("n.", symbolCols) + `, e.kind, e.count, e.dynamic
-	          FROM edges e JOIN nodes n ON n.id = ` + join + `
-	          WHERE ` + match + ` AND e.kind != 'contains'
-	          ORDER BY e.count DESC, n.id LIMIT ?`
 
 	rows, err := s.db.Query(query, id, limit)
 	if err != nil {
@@ -256,10 +255,16 @@ func (s *Store) Path(from, to string, maxDepth int) ([]Symbol, error) {
 	return nil, nil
 }
 
-// sqlBatch bounds how many ids go into one IN clause. SQLite's default host
-// parameter limit is well above this; the smaller number keeps the statement cache
-// useful and the query planner honest on a frontier of tens of thousands.
+// sqlBatch bounds how many ids go into one query, so a frontier of tens of
+// thousands is read in pieces and the search stops at the piece that finds the
+// target rather than after reading every edge out of the frontier.
 const sqlBatch = 400
+
+// expandQuery takes the frontier as one JSON array, so the statement is the
+// same whatever the batch size: one bound parameter rather than a run of
+// placeholders spliced into the SQL.
+const expandQuery = `SELECT from_id, to_id FROM edges
+                     WHERE kind != 'contains' AND from_id IN (SELECT value FROM json_each(?))`
 
 // expand reads every edge out of the frontier in batched queries, recording how
 // each newly-seen node was reached. It stops as soon as the target appears.
@@ -270,19 +275,12 @@ func (s *Store) expand(frontier []string, target string, came map[string]string)
 		end := min(start+sqlBatch, len(frontier))
 		batch := frontier[start:end]
 
-		args := make([]any, 0, len(batch))
-		for _, id := range batch {
-			args = append(args, id)
+		ids, err := json.Marshal(batch)
+		if err != nil {
+			return nil, false, fmt.Errorf("encoding path frontier: %w", err)
 		}
 
-		// The only variable part is the run of "?" placeholders, whose length is
-		// the batch size. The ids themselves are bound.
-		//nolint:gosec // G202: placeholders only; every id is a bound parameter
-		query := `SELECT from_id, to_id FROM edges
-		          WHERE kind != 'contains' AND from_id IN (` +
-			strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",") + `)`
-
-		rows, err := s.db.Query(query, args...)
+		rows, err := s.db.Query(expandQuery, string(ids))
 		if err != nil {
 			return nil, false, fmt.Errorf("expanding path frontier: %w", err)
 		}

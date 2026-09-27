@@ -542,7 +542,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'] or arr[i]) — can't be
 			// resolved statically. Skip the whole [...] group and poison
@@ -659,11 +659,11 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	}
 
 	// The scope is read from the token rather than from the Scope value the
-	// dispatch passed: `request`, `session` and `application` are all dispatched
-	// as ScopeVariables, deliberately, so that an assignment through one keeps
-	// the component its right-hand side establishes. They are not this
-	// component's members, and testing the enum would record every one of them
-	// as a call to a function of that name in this file.
+	// dispatch passed: what matters is whether the scope is this component's
+	// own (this., variables.) or not, which the token says directly. Testing
+	// the enum once recorded request., session. and application. calls as calls
+	// to functions of that name in this file, when they were dispatched as
+	// ScopeVariables.
 	if !identEq(scopeTok.Value, "this") && !identEq(scopeTok.Value, "variables") {
 		call.Variable = scopeTok.Value
 		call.Component = "$any"
@@ -881,12 +881,12 @@ func (p *scriptParser) parse() {
 			p.parseScopedVar(tok, ScopeThis)
 		case "variables":
 			p.parseScopedVar(tok, ScopeVariables)
-		case "request", "session", "application":
+		case "request", "session", "application", "server":
 			// See the matching case in handleBodyToken for why this is needed:
 			// without it, a top-level (outside any function) "REQUEST.x = ..."
 			// assignment falls through to the bare-call path and its RHS
 			// component type is silently dropped.
-			p.parseScopedVar(tok, ScopeVariables)
+			p.parseScopedVar(tok, sharedScopeOf(tok))
 		case "import":
 			p.parseImport()
 		case "new":
@@ -1276,13 +1276,15 @@ func (p *scriptParser) skipParensQuiet() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF:
 			return false
 		case TokLParen:
 			depth++
 		case TokRParen:
 			depth--
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -1350,7 +1352,7 @@ func (p *scriptParser) parseCatchVar() {
 	for {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokIdent:
 			last = tok
 		case TokDot:
@@ -1514,11 +1516,13 @@ func (p *scriptParser) scanInterpolation(tok Token) {
 				break
 			}
 
-			switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+			switch t.Kind {
 			case TokIdent:
 				p.scanNestedCall(t)
 			case TokString, TokRBracket:
 				p.handleLiteralToken(t)
+			default:
+				// Any other token is passed over.
 			}
 		}
 	}
@@ -1726,7 +1730,7 @@ func (p *scriptParser) parseArgList() []Argument {
 	loop:
 		for {
 			peek := p.sc.PeekSkipComments()
-			switch peek.Kind { //nolint:exhaustive // only care about dot and ident
+			switch peek.Kind {
 			case TokDot:
 				p.sc.NextSkipComments() // consume dot
 
@@ -1795,7 +1799,7 @@ func (p *scriptParser) skipDefault() {
 
 		p.sc.NextSkipComments()
 
-		switch peek.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch peek.Kind {
 		case TokLParen, TokLBrace, TokLBracket:
 			depth++
 		case TokRParen, TokRBrace, TokRBracket:
@@ -1804,6 +1808,8 @@ func (p *scriptParser) skipDefault() {
 			p.scanNestedCall(peek)
 		case TokString:
 			p.handleLiteralToken(peek)
+		default:
+			// Any other token is passed over.
 		}
 	}
 }
@@ -1856,7 +1862,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 		afterLT := p.afterLT
 		p.afterLT = t.Kind == TokLT
 
-		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch t.Kind {
 		case TokLBrace:
 			depth++
 		case TokRBrace:
@@ -1872,6 +1878,8 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 			if depth > 0 {
 				p.handleLiteralToken(t)
 			}
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -1944,6 +1952,14 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 	return endLine
 }
 
+// sharedScopeOf is the scope a request., session., application. or server.
+// keyword names. Only called from the dispatch arms for those four.
+func sharedScopeOf(tok Token) Scope {
+	scope, _ := ScopeForPrefix(tok.Value)
+
+	return scope
+}
+
 // handleBodyToken processes an identifier inside a function body.
 func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 	var buf foldScratch
@@ -1958,8 +1974,8 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		p.parseBodyScopedVar(tok, ScopeVariables)
 	case "this":
 		p.parseBodyScopedVar(tok, ScopeThis)
-	case "request", "session", "application":
-		// Request/session/application-scoped assignments (e.g. "REQUEST.generator =
+	case "request", "session", "application", "server":
+		// Request/session/application/server-scoped assignments (e.g. "REQUEST.generator =
 		// document.createTable(1);") — checkAssignRef's default path only recognizes
 		// a bare "x = ..." (identifier directly followed by "="); for a scope-prefixed
 		// LHS the next token is "." not "=", so without this case it falls through to
@@ -1968,7 +1984,14 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		// vs "scope.name.method()" split correctly for variables./this./arguments.; the
 		// same handling applies verbatim here. Treated as global (forceGlobal), same as
 		// this./variables., since these scopes outlive the current function.
-		p.parseBodyScopedVar(tok, ScopeVariables)
+		//
+		// The declaration keeps its own scope. It used to be recorded as
+		// ScopeVariables, which put `application.cache` among the component's
+		// variables and left go-to-definition on `application.cache` nothing to
+		// find in a script-syntax Application.cfc. Only the scope is recorded
+		// differently: the component ref, the forced-global filing and the call
+		// extraction are the same for either value.
+		p.parseBodyScopedVar(tok, sharedScopeOf(tok))
 	case "return":
 		p.checkReturnComponent()
 	case "new":
@@ -2318,7 +2341,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2447,7 +2470,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why.
 					if !p.skipBracketIndex() {
@@ -2539,7 +2562,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 			chainWalk2:
 				for {
-					switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+					switch p.sc.PeekSkipComments().Kind {
 					case TokLBracket:
 						// See checkVarRHS's identical case for why.
 						if !p.skipBracketIndex() {
@@ -2715,7 +2738,7 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 		t := p.sc.NextSkipComments()
 		last = t.Line
 
-		switch t.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch t.Kind {
 		case TokEOF:
 			return last
 		case TokLBrace:
@@ -2726,6 +2749,8 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 			p.scanNestedCall(t)
 		case TokString, TokRBracket:
 			p.handleLiteralToken(t)
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -2816,7 +2841,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 
 		chainWalk:
 			for {
-				switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+				switch p.sc.PeekSkipComments().Kind {
 				case TokLBracket:
 					// See checkVarRHS's identical case for why: skip the
 					// dynamic key and poison fullChain so resolution safely
@@ -2897,7 +2922,7 @@ func (p *scriptParser) checkBareCall(tok Token) {
 
 chainWalk:
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLBracket:
 			// Dynamic key (e.g. REQUEST['a' & b & 'c'].method()) — skip it and
 			// poison the receiver so it can't be misattributed to whatever
@@ -3315,7 +3340,7 @@ func (p *globalScriptParser) parsePlain(tok Token, afterLT bool) {
 func (p *globalScriptParser) consumeAssignment() {
 	p.sc.NextSkipComments() // consume =
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLBrace, TokLBracket:
 		p.skipGroup()
 	default:
@@ -3328,7 +3353,7 @@ func (p *globalScriptParser) consumeAssignment() {
 func (p *globalScriptParser) skipGroup() bool {
 	var open, closing TokenKind
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLParen:
 		open, closing = TokLParen, TokRParen
 	case TokLBrace:
@@ -3344,13 +3369,15 @@ func (p *globalScriptParser) skipGroup() bool {
 	depth := 1
 
 	for depth > 0 {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF:
 			return false
 		case open:
 			depth++
 		case closing:
 			depth--
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -3374,7 +3401,7 @@ func (p *globalScriptParser) skipTagAttrs() {
 // the same name for why it stops where it does.
 func (p *globalScriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3399,7 +3426,7 @@ func (p *globalScriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
@@ -3648,7 +3675,7 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 
 		argStart = depth == 1 && tok.Kind == TokComma
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokLParen:
 			depth++
 		case TokRParen:
@@ -3657,6 +3684,8 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 			p.scanNestedCall(tok)
 		case TokString, TokRBracket:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 
@@ -3717,7 +3746,7 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		return
 	}
 
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLParen:
 		p.recordBareCallAndChain(tok)
 	case TokDot, TokLBracket:
@@ -3726,6 +3755,8 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 		// is consumed and dropped, which is the same thing the old scan did to
 		// it.
 		p.checkBareCall(tok)
+	default:
+		// Anything else after the name: it is not a call.
 	}
 }
 
@@ -3769,7 +3800,7 @@ func (p *scriptParser) skipInstantiation() {
 // the `=` spelling was ever affected, which is why the two look like different
 // constructs in a `.cfc` and are the same one.
 func (p *scriptParser) skipLiteralGroup() {
-	switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+	switch p.sc.PeekSkipComments().Kind {
 	case TokLBrace, TokLBracket:
 	default:
 		return
@@ -3782,7 +3813,7 @@ func (p *scriptParser) skipLiteralGroup() {
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokEOF:
 			return
 		case TokLBrace, TokLBracket:
@@ -3799,6 +3830,8 @@ func (p *scriptParser) skipLiteralGroup() {
 			p.scanNestedCall(tok)
 		case TokString:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 }
@@ -3860,7 +3893,7 @@ func (p *scriptParser) parseScriptTagAttrs() {
 // along with the `<cfset var x = 1>` inside it.
 func (p *scriptParser) skipTagAttrValue() bool {
 	for {
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokRBrace, TokLT, TokGT:
 			return false
 		case TokHash:
@@ -3889,7 +3922,7 @@ func (p *scriptParser) skipTagAttrValue() bool {
 			p.sc.NextSkipComments()
 		}
 
-		switch p.sc.PeekSkipComments().Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch p.sc.PeekSkipComments().Kind {
 		case TokLParen, TokLBracket, TokDot, TokAmpersand, TokHash:
 		default:
 			return true
@@ -3903,11 +3936,13 @@ func (p *scriptParser) skipHashExpr() bool {
 	p.sc.NextSkipComments() // consume the opening #
 
 	for {
-		switch tok := p.sc.NextSkipComments(); tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok := p.sc.NextSkipComments(); tok.Kind {
 		case TokEOF, TokSemicolon, TokLBrace, TokLT, TokGT:
 			return false
 		case TokHash:
 			return true
+		default:
+			// Any other token is part of the span.
 		}
 	}
 }
@@ -3941,7 +3976,7 @@ func (p *scriptParser) skipBracketIndex() bool {
 			return false
 		}
 
-		switch tok.Kind { //nolint:exhaustive // only the token kinds that can come next here; any other is not this construct
+		switch tok.Kind {
 		case TokLBracket:
 			depth++
 		case TokRBracket:
@@ -3950,6 +3985,8 @@ func (p *scriptParser) skipBracketIndex() bool {
 			p.scanNestedCall(tok)
 		case TokString:
 			p.handleLiteralToken(tok)
+		default:
+			// Any other token is passed over.
 		}
 	}
 

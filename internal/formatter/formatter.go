@@ -1505,7 +1505,9 @@ func (f *Formatter) renderAttrs(tagName string, attrs []cfAttr) string {
 		if a.value == "" {
 			sb.WriteString(a.name)
 		} else {
-			sb.WriteString(fmt.Sprintf("%s=%s", a.name, a.value)) //nolint:staticcheck // QF1012: intentional for readability
+			sb.WriteString(a.name)
+			sb.WriteByte('=')
+			sb.WriteString(a.value)
 		}
 
 		if i < len(attrs)-1 {
