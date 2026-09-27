@@ -17,59 +17,68 @@ import (
 
 const unresolvedUsage = "usage: cfmleditor-lsp unresolved [--json | --known-issues [--relative-to <dir>] [--include-workspace] | --write] [--global-defs] <dir> [...]\n"
 
-func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, unresolvedUsage)
-		os.Exit(1)
-	}
+// unresolvedFlags is what cmdUnresolved's flags ask for.
+type unresolvedFlags struct {
+	relativeTo       string
+	json             bool
+	knownIssues      bool
+	write            bool
+	includeWorkspace bool
+	verbose          bool
+	globalDefs       bool
+}
 
-	jsonOutput := false
-	knownIssuesOutput := false
-	writeTargets := false
-	includeWorkspace := false
-	verbose := false
-	matchGlobalDefs := false
-
+// parseUnresolvedFlags splits the flags from the files and directories.
+func parseUnresolvedFlags(args []string) (unresolvedFlags, []string) {
 	var (
-		filteredArgs []string
-		relativeTo   string
+		fl    unresolvedFlags
+		paths []string
 	)
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 
 		if v, ok := strings.CutPrefix(a, "--relative-to="); ok {
-			relativeTo = v
+			fl.relativeTo = v
 
 			continue
 		}
 
 		if a == "--relative-to" && i+1 < len(args) {
 			i++
-			relativeTo = args[i]
+			fl.relativeTo = args[i]
 
 			continue
 		}
 
 		switch a {
 		case "--json":
-			jsonOutput = true
+			fl.json = true
 		case "--known-issues":
-			knownIssuesOutput = true
+			fl.knownIssues = true
 		case "--write":
-			writeTargets = true
+			fl.write = true
 		case "--include-workspace":
-			includeWorkspace = true
+			fl.includeWorkspace = true
 		case "--verbose":
-			verbose = true
+			fl.verbose = true
 		case "--global-defs":
-			matchGlobalDefs = true
+			fl.globalDefs = true
 		default:
-			filteredArgs = append(filteredArgs, a)
+			paths = append(paths, a)
 		}
 	}
 
-	args = filteredArgs
+	return fl, paths
+}
+
+func cmdUnresolved(args []string) {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, unresolvedUsage)
+		os.Exit(1)
+	}
+
+	fl, args := parseUnresolvedFlags(args)
 
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, unresolvedUsage)
@@ -84,38 +93,8 @@ func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it 
 		searchDir = filepath.Dir(searchDir)
 	}
 
-	opt := unresolved.Options{GlobalDefs: matchGlobalDefs}
-	if verbose {
-		opt.Verbose = os.Stderr
-	}
-
 	cfg, _ := daemon.FindConfig(searchDir)
-	if cfg != nil {
-		opt.WorkspaceFolders = cfg.WorkspaceFolders()
-		opt.Mappings = cfg.Mappings()
-		opt.ExpressionMappings = cfg.ExpressionMappings()
-		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
-		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
-
-		for _, r := range cfg.ComponentResolvers() {
-			opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
-		}
-
-		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
-	} else {
-		if writeTargets {
-			fmt.Fprintf(os.Stderr, "--write needs a .cfmleditor.json to say where the report goes\n")
-			os.Exit(1)
-		}
-
-		// Fallback: use args as workspace folders
-		for _, a := range args {
-			if info, err := os.Stat(a); err == nil && info.IsDir() {
-				abs, _ := filepath.Abs(a)
-				opt.WorkspaceFolders = append(opt.WorkspaceFolders, abs)
-			}
-		}
-	}
+	opt := unresolvedOptions(cfg, args, &fl)
 
 	// Collect files from workspace folders or args
 	scanRoots := args
@@ -137,11 +116,64 @@ func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it 
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
 
-	rep := unresolved.Scan(fsys, files, scanFiles, &opt)
-	results := rep.Calls
+	rep := unresolved.Scan(fsys, files, scanFiles, opt)
+	if !writeUnresolved(rep.Calls, cfg, args, searchDir, &fl) {
+		return
+	}
 
+	fmt.Fprintf(os.Stderr, "%d unresolved calls found (%d resolved)\n", len(rep.Calls), rep.Resolved)
+
+	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
+	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", rep.IndexTime, rep.Indexed)
+	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", rep.ScanTime, rep.Scanned)
+	fmt.Fprintf(os.Stderr, "  Total:  %v\n", rep.IndexTime+rep.ScanTime)
+}
+
+// unresolvedOptions builds the scan's options from the config, or from the
+// paths given when there is none.
+func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *unresolved.Options {
+	opt := &unresolved.Options{GlobalDefs: fl.globalDefs}
+	if fl.verbose {
+		opt.Verbose = os.Stderr
+	}
+
+	if cfg != nil {
+		opt.WorkspaceFolders = cfg.WorkspaceFolders()
+		opt.Mappings = cfg.Mappings()
+		opt.ExpressionMappings = cfg.ExpressionMappings()
+		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
+		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
+
+		for _, r := range cfg.ComponentResolvers() {
+			opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+		}
+
+		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
+
+		return opt
+	}
+
+	if fl.write {
+		fmt.Fprintf(os.Stderr, "--write needs a .cfmleditor.json to say where the report goes\n")
+		os.Exit(1)
+	}
+
+	// Fallback: use args as workspace folders
+	for _, a := range args {
+		if info, err := os.Stat(a); err == nil && info.IsDir() {
+			abs, _ := filepath.Abs(a)
+			opt.WorkspaceFolders = append(opt.WorkspaceFolders, abs)
+		}
+	}
+
+	return opt
+}
+
+// writeUnresolved writes the results the way the flags ask, and reports
+// whether the summary should follow: an empty result says so and stops.
+func writeUnresolved(results []unresolved.Call, cfg *daemon.Config, args []string, searchDir string, fl *unresolvedFlags) bool {
 	switch {
-	case writeTargets:
+	case fl.write:
 		targets := config.GenerateTargets(cfg.KnownIssues(), config.GenerateUnresolved, filepath.Dir(cfg.Path))
 
 		byTarget, rest := unresolved.SplitByTarget(results, targets)
@@ -161,8 +193,8 @@ func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it 
 	case len(results) == 0:
 		fmt.Fprintf(os.Stderr, "No unresolved calls found.\n")
 
-		return
-	case jsonOutput:
+		return false
+	case fl.json:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 
@@ -170,20 +202,20 @@ func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it 
 			fmt.Fprintf(os.Stderr, "writing JSON: %v\n", err)
 			os.Exit(1)
 		}
-	case knownIssuesOutput:
+	case fl.knownIssues:
 		baseDir, _ := filepath.Abs(searchDir)
 		if cfg != nil {
 			baseDir = filepath.Dir(cfg.Path)
 		}
 
-		if relativeTo != "" {
-			if abs, err := filepath.Abs(relativeTo); err == nil {
+		if fl.relativeTo != "" {
+			if abs, err := filepath.Abs(fl.relativeTo); err == nil {
 				baseDir = abs
 			}
 		}
 
 		regenerate := "cfmleditor-lsp unresolved --known-issues " + strings.Join(args, " ")
-		if skipped := unresolved.WriteKnownIssues(os.Stdout, results, baseDir, includeWorkspace, regenerate, version); skipped > 0 {
+		if skipped := unresolved.WriteKnownIssues(os.Stdout, results, baseDir, fl.includeWorkspace, regenerate, version); skipped > 0 {
 			fmt.Fprintf(os.Stderr, "%d entries outside %s left out; --include-workspace writes them as ../ paths\n", skipped, baseDir)
 		}
 	default:
@@ -194,12 +226,7 @@ func cmdUnresolved(args []string) { //nolint:funlen // over the limit before it 
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%d unresolved calls found (%d resolved)\n", len(results), rep.Resolved)
-
-	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
-	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", rep.IndexTime, rep.Indexed)
-	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", rep.ScanTime, rep.Scanned)
-	fmt.Fprintf(os.Stderr, "  Total:  %v\n", rep.IndexTime+rep.ScanTime)
+	return true
 }
 
 // writeReport writes calls to path as a known-issues file relative to its own

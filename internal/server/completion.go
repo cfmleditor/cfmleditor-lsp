@@ -123,7 +123,55 @@ func getMemberFuncItems() []protocol.CompletionItem {
 	return memberFuncItems
 }
 
-func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, error) { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
+// completionContext is what the cursor's position says about the request.
+type completionContext struct {
+	tagName     string
+	triggerChar string
+	char        int // the cursor as a byte column; params.Position stays in UTF-16
+
+	triggeredByTag, triggeredByClose, triggeredByDot bool
+	closing, typingTag, inHashExpr, inAttrValue      bool
+}
+
+func completionContextAt(params *protocol.CompletionParams, content string, hasDoc bool) completionContext {
+	var c completionContext
+
+	line := int(params.Position.Line)
+
+	// The cursor as a byte column, which is what every helper below reads the
+	// line with; params.Position stays the client's, in UTF-16 units, for the
+	// edits that start at the cursor.
+	if hasDoc {
+		c.char = byteCol(content, line, params.Position.Character)
+		c.tagName = parser.FindEnclosingTag(content, line, c.char)
+	}
+
+	if params.Context.TriggerCharacter != nil {
+		c.triggerChar = *params.Context.TriggerCharacter
+	}
+
+	byChar := params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter
+
+	c.triggeredByTag = (byChar && c.triggerChar == "<") ||
+		(hasDoc && strings.HasSuffix(parser.TextBeforeCursor(content, line, c.char), "<"))
+	c.triggeredByClose = byChar && c.triggerChar == ">"
+	c.triggeredByDot = (byChar && c.triggerChar == ".") ||
+		(hasDoc && parser.WordBeforeDot(content, line, c.char) != "")
+
+	if hasDoc {
+		c.closing = parser.IsClosingTagContext(content, line, c.char)
+		if !c.closing && c.tagName == "" {
+			c.typingTag = parser.IsTypingTagName(content, line, c.char)
+		}
+
+		c.inHashExpr = parser.IsInsideHashExpr(content, line, c.char)
+		c.inAttrValue = parser.IsInsideAttrValue(content, line, c.char)
+	}
+
+	return c
+}
+
+func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, error) {
 	totalStart := time.Now()
 
 	var params protocol.CompletionParams
@@ -138,51 +186,8 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 	content, hasDoc := s.getDocument(params.TextDocument.URI)
 
 	t0 := time.Now()
-
-	// The cursor as a byte column, which is what every helper below reads the
-	// line with; params.Position stays the client's, in UTF-16 units, for the
-	// edits that start at the cursor.
-	char := 0
-	if hasDoc {
-		char = byteCol(content, int(params.Position.Line), params.Position.Character)
-	}
-
-	tagName := ""
-	if hasDoc {
-		tagName = parser.FindEnclosingTag(content, int(params.Position.Line), char)
-	}
-
-	triggerChar := ""
-	if params.Context.TriggerCharacter != nil {
-		triggerChar = *params.Context.TriggerCharacter
-	}
-
-	triggeredByTag := (params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
-		triggerChar == "<") ||
-		(hasDoc && strings.HasSuffix(parser.TextBeforeCursor(content, int(params.Position.Line), char), "<"))
-
-	triggeredByClose := params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
-		triggerChar == ">"
-
-	triggeredByDot := (params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter &&
-		triggerChar == ".") ||
-		(hasDoc && parser.WordBeforeDot(content, int(params.Position.Line), char) != "")
-
-	closing := false
-	typingTag := false
-	inHashExpr := false
-	inAttrValue := false
-
-	if hasDoc {
-		closing = parser.IsClosingTagContext(content, int(params.Position.Line), char)
-		if !closing && tagName == "" {
-			typingTag = parser.IsTypingTagName(content, int(params.Position.Line), char)
-		}
-
-		inHashExpr = parser.IsInsideHashExpr(content, int(params.Position.Line), char)
-		inAttrValue = parser.IsInsideAttrValue(content, int(params.Position.Line), char)
-	}
-
+	cc := completionContextAt(&params, content, hasDoc)
+	char, tagName := cc.char, cc.tagName
 	contextDur := time.Since(t0)
 
 	triggerKind := ""
@@ -191,54 +196,33 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 	case protocol.CompletionTriggerKindInvoked:
 		triggerKind = "invoked"
 	case protocol.CompletionTriggerKindTriggerCharacter:
-		triggerKind = "char:" + triggerChar
+		triggerKind = "char:" + cc.triggerChar
 	case protocol.CompletionTriggerKindTriggerForIncompleteCompletions:
 		triggerKind = "incomplete"
 	}
 
 	s.log.Debug("completion: request",
 		cflog.String("trigger", triggerKind),
-		cflog.Bool("triggeredByDot", triggeredByDot),
-		cflog.Bool("inHashExpr", inHashExpr),
-		cflog.Bool("inAttrValue", inAttrValue),
+		cflog.Bool("triggeredByDot", cc.triggeredByDot),
+		cflog.Bool("inHashExpr", cc.inHashExpr),
+		cflog.Bool("inAttrValue", cc.inAttrValue),
 		cflog.String("tagName", tagName),
 		cflog.Uint32("line", params.Position.Line),
 		cflog.Uint32("char", params.Position.Character),
 	)
 
 	switch {
-	case inHashExpr:
+	case cc.inHashExpr:
 		items = s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))
-	case inAttrValue:
+	case cc.inAttrValue:
 		if CompletionAttributes {
-			attrName := parser.FindCurrentAttr(content, int(params.Position.Line), char)
-			if attrName != "" && tagName != "" {
-				attrs := docs.TagParams(tagName)
-				if attrs == nil {
-					attrs = docs.HTMLTagParams(tagName)
-				}
-
-				for i := range attrs {
-					if strings.EqualFold(attrs[i].Name, attrName) { // attrName is lowercase ASCII already
-						for _, v := range attrs[i].ParamValues() {
-							items = append(items, protocol.CompletionItem{
-								SortText: optStr(SortProperties),
-								Label:    v,
-								Kind:     protocol.CompletionItemKindValue,
-								Detail:   optStr(attrName + " value"),
-							})
-						}
-
-						break
-					}
-				}
-			}
+			items = attrValueItems(content, int(params.Position.Line), char, tagName)
 		}
 
 		if CompletionBuiltinFunctions {
 			items = append(items, s.builtinFuncItems()...)
 		}
-	case triggeredByClose && hasDoc:
+	case cc.triggeredByClose && hasDoc:
 		if CompletionCloseTags {
 			if item, ok := duplicateGtCompletion(content, int(params.Position.Line), char); ok {
 				items = append(items, item)
@@ -248,196 +232,34 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				items = append(items, item)
 			}
 		}
-	case closing:
-		if CompletionCloseTags { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
+	case cc.closing:
+		if CompletionCloseTags {
 			t1 := time.Now()
-			trailingGt := -1
-
-			var trailingGtCol uint32 // trailingGt as an LSP character
-
-			if hasDoc {
-				lineStart := 0
-				for range params.Position.Line {
-					idx := strings.IndexByte(content[lineStart:], '\n')
-					if idx < 0 {
-						lineStart = len(content)
-
-						break
-					}
-
-					lineStart += idx + 1
-				}
-
-				lineEnd := strings.IndexByte(content[lineStart:], '\n')
-				if lineEnd < 0 {
-					lineEnd = len(content) - lineStart
-				}
-
-				lineText := content[lineStart : lineStart+lineEnd]
-				charPos := char
-
-				if charPos < len(lineText) {
-					after := lineText[charPos:]
-					if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
-						trailingGt = charPos + idx + 1
-						trailingGtCol = lineCol(lineText, trailingGt)
-					}
-				}
-			}
-
-			tags := make(map[string]int)
-			for i, tag := range s.findUnclosedTagsScoped(content, params.TextDocument.URI, int(params.Position.Line), char) {
-				_, ok := tags[tag]
-				if !ok {
-					item := protocol.CompletionItem{
-						Label:  tag,
-						Kind:   protocol.CompletionItemKindKeyword,
-						Detail: optStr("Close tag"),
-
-						SortText: optStr(fmt.Sprintf("%04d", i)),
-					}
-					if trailingGt >= 0 {
-						item.TextEdit = &protocol.TextEdit{
-							Range: protocol.Range{
-								Start: params.Position,
-								End:   protocol.Position{Line: params.Position.Line, Character: trailingGtCol},
-							},
-							NewText: tag + ">",
-						}
-					} else {
-						item.InsertText = optStr(tag + ">")
-					}
-
-					items = append(items, item)
-					tags[tag] = len(items)
-				}
-			}
+			items = s.closeTagItems(content, hasDoc, params.TextDocument.URI, params.Position, char)
 
 			s.log.Debug("completion: closeTags", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName != "" && !parser.IsSpecialTag(tagName):
 		if CompletionAttributes {
 			t1 := time.Now()
-
-			attrs := docs.TagParams(tagName)
-			if attrs == nil {
-				attrs = docs.HTMLTagParams(tagName)
-			}
-
-			for i := range attrs {
-				p := &attrs[i]
-
-				items = append(items, protocol.CompletionItem{
-					SortText: optStr(SortProperties),
-					Label:    p.Name,
-					Kind:     protocol.CompletionItemKindProperty,
-					Detail:   optStr(p.Description),
-
-					InsertText: optStr(p.Name + `="$1"`),
-
-					InsertTextFormat: protocol.InsertTextFormatSnippet,
-				})
-			}
+			items = tagAttributeItems(tagName)
 
 			s.log.Debug("completion: attributes", cflog.Duration("dur", time.Since(t1)))
 		}
 	case tagName == "cfelse":
-		// Replace from the "<" that opened the tag to the cursor. The "<" is not
-		// necessarily on the cursor's line — `<cfelse` with the cursor on the
-		// following line is an ordinary mid-edit state — so its position has to
-		// be computed rather than derived by subtracting a length from the
-		// cursor's column. Doing the latter underflowed uint32 and produced a
-		// range starting at character 4294967288, after its own end.
-		textBefore := parser.TextBeforeCursor(content, int(params.Position.Line), char)
-		openLine, openChar := params.Position.Line, params.Position.Character
-
-		if open := strings.LastIndex(textBefore, "<"); open >= 0 {
-			l, c := parser.PositionAt(content, open)
-			openLine, openChar = conv.Uint32(l), lineCol(parser.LineTextAt(content, l), c)
-		}
-
-		items = append(items, protocol.CompletionItem{
-			SortText: optStr(SortProperties),
-			Label:    "if",
-			Kind:     protocol.CompletionItemKindKeyword,
-			Detail:   optStr("Convert to cfelseif"),
-
-			FilterText: optStr("if"),
-
-			InsertTextFormat: protocol.InsertTextFormatSnippet,
-			TextEdit: &protocol.TextEdit{
-				Range: protocol.Range{
-					Start: protocol.Position{Line: openLine, Character: openChar},
-					End:   params.Position,
-				},
-				NewText: "<cfelseif $1",
-			},
-		})
-	case triggeredByTag:
+		items = append(items, cfelseifItem(content, params.Position, char))
+	case cc.triggeredByTag:
 		if CompletionTags {
 			t1 := time.Now()
-
-			for _, tag := range docs.AllTags() {
-				items = append(items, protocol.CompletionItem{
-					Label:    tag.Name,
-					SortText: optStr(SortTags + tag.Name),
-
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: optStr(tag.Description),
-
-					InsertText: optStr(buildTagSnippet(tag)),
-
-					InsertTextFormat: protocol.InsertTextFormatSnippet,
-				})
-			}
-
-			tags := docs.HTMLTags()
-
-			for i := range tags {
-				tag := &tags[i]
-
-				items = append(items, protocol.CompletionItem{
-					Label:    tag.Name,
-					SortText: optStr(SortTags + tag.Name),
-
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: optStr(tag.Description),
-				})
-			}
+			items = tagNameItems()
 
 			s.log.Debug("completion: tags", cflog.Duration("dur", time.Since(t1)))
 		}
-	case typingTag:
+	case cc.typingTag:
 		if CompletionTags {
-			for _, tag := range docs.AllTags() {
-				items = append(items, protocol.CompletionItem{
-					Label:    tag.Name,
-					SortText: optStr(SortTags + tag.Name),
-
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: optStr(tag.Description),
-
-					InsertText: optStr(buildTagSnippet(tag)),
-
-					InsertTextFormat: protocol.InsertTextFormatSnippet,
-				})
-			}
-
-			tags := docs.HTMLTags()
-
-			for i := range tags {
-				tag := &tags[i]
-
-				items = append(items, protocol.CompletionItem{
-					Label:    tag.Name,
-					SortText: optStr(SortTags + tag.Name),
-
-					Kind:   protocol.CompletionItemKindKeyword,
-					Detail: optStr(tag.Description),
-				})
-			}
+			items = tagNameItems()
 		}
-	case triggeredByDot && hasDoc:
+	case cc.triggeredByDot && hasDoc:
 		if CompletionDotMethods {
 			t1 := time.Now()
 
@@ -489,6 +311,218 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		IsIncomplete: false,
 		Items:        items,
 	}, nil
+}
+
+// attrValueItems offers the documented values of the attribute the cursor is
+// inside.
+func attrValueItems(content string, line, char int, tagName string) []protocol.CompletionItem {
+	attrName := parser.FindCurrentAttr(content, line, char)
+	if attrName == "" || tagName == "" {
+		return nil
+	}
+
+	attrs := docs.TagParams(tagName)
+	if attrs == nil {
+		attrs = docs.HTMLTagParams(tagName)
+	}
+
+	var items []protocol.CompletionItem
+
+	for i := range attrs {
+		if !strings.EqualFold(attrs[i].Name, attrName) { // attrName is lowercase ASCII already
+			continue
+		}
+
+		for _, v := range attrs[i].ParamValues() {
+			items = append(items, protocol.CompletionItem{
+				SortText: optStr(SortProperties),
+				Label:    v,
+				Kind:     protocol.CompletionItemKindValue,
+				Detail:   optStr(attrName + " value"),
+			})
+		}
+
+		break
+	}
+
+	return items
+}
+
+// trailingGtAt finds a '>' after the cursor with only whitespace before it,
+// which a close-tag completion replaces rather than doubles. It returns the
+// byte column just past it and the same column as an LSP character, or -1.
+func trailingGtAt(content string, line uint32, char int) (int, uint32) {
+	lineStart := 0
+	for range line {
+		idx := strings.IndexByte(content[lineStart:], '\n')
+		if idx < 0 {
+			lineStart = len(content)
+
+			break
+		}
+
+		lineStart += idx + 1
+	}
+
+	lineEnd := strings.IndexByte(content[lineStart:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(content) - lineStart
+	}
+
+	lineText := content[lineStart : lineStart+lineEnd]
+	if char >= len(lineText) {
+		return -1, 0
+	}
+
+	after := lineText[char:]
+	if idx := strings.IndexByte(after, '>'); idx != -1 && strings.TrimSpace(after[:idx]) == "" {
+		gt := char + idx + 1
+
+		return gt, lineCol(lineText, gt)
+	}
+
+	return -1, 0
+}
+
+// closeTagItems offers to close each tag still open at the cursor.
+func (s *Server) closeTagItems(content string, hasDoc bool, docURI uri.URI, pos protocol.Position, char int) []protocol.CompletionItem {
+	trailingGt := -1
+
+	var trailingGtCol uint32 // trailingGt as an LSP character
+
+	if hasDoc {
+		trailingGt, trailingGtCol = trailingGtAt(content, pos.Line, char)
+	}
+
+	var items []protocol.CompletionItem
+
+	tags := make(map[string]int)
+
+	for i, tag := range s.findUnclosedTagsScoped(content, docURI, int(pos.Line), char) {
+		if _, ok := tags[tag]; ok {
+			continue
+		}
+
+		item := protocol.CompletionItem{
+			Label:  tag,
+			Kind:   protocol.CompletionItemKindKeyword,
+			Detail: optStr("Close tag"),
+
+			SortText: optStr(fmt.Sprintf("%04d", i)),
+		}
+		if trailingGt >= 0 {
+			item.TextEdit = &protocol.TextEdit{
+				Range: protocol.Range{
+					Start: pos,
+					End:   protocol.Position{Line: pos.Line, Character: trailingGtCol},
+				},
+				NewText: tag + ">",
+			}
+		} else {
+			item.InsertText = optStr(tag + ">")
+		}
+
+		items = append(items, item)
+		tags[tag] = len(items)
+	}
+
+	return items
+}
+
+// tagAttributeItems offers the attributes of the tag the cursor is inside.
+func tagAttributeItems(tagName string) []protocol.CompletionItem {
+	attrs := docs.TagParams(tagName)
+	if attrs == nil {
+		attrs = docs.HTMLTagParams(tagName)
+	}
+
+	items := make([]protocol.CompletionItem, 0, len(attrs))
+
+	for i := range attrs {
+		p := &attrs[i]
+
+		items = append(items, protocol.CompletionItem{
+			SortText: optStr(SortProperties),
+			Label:    p.Name,
+			Kind:     protocol.CompletionItemKindProperty,
+			Detail:   optStr(p.Description),
+
+			InsertText: optStr(p.Name + `="$1"`),
+
+			InsertTextFormat: protocol.InsertTextFormatSnippet,
+		})
+	}
+
+	return items
+}
+
+// cfelseifItem offers to turn a `<cfelse` being typed into `<cfelseif`.
+func cfelseifItem(content string, pos protocol.Position, char int) protocol.CompletionItem {
+	// Replace from the "<" that opened the tag to the cursor. The "<" is not
+	// necessarily on the cursor's line — `<cfelse` with the cursor on the
+	// following line is an ordinary mid-edit state — so its position has to
+	// be computed rather than derived by subtracting a length from the
+	// cursor's column. Doing the latter underflowed uint32 and produced a
+	// range starting at character 4294967288, after its own end.
+	textBefore := parser.TextBeforeCursor(content, int(pos.Line), char)
+	openLine, openChar := pos.Line, pos.Character
+
+	if open := strings.LastIndex(textBefore, "<"); open >= 0 {
+		l, c := parser.PositionAt(content, open)
+		openLine, openChar = conv.Uint32(l), lineCol(parser.LineTextAt(content, l), c)
+	}
+
+	return protocol.CompletionItem{
+		SortText: optStr(SortProperties),
+		Label:    "if",
+		Kind:     protocol.CompletionItemKindKeyword,
+		Detail:   optStr("Convert to cfelseif"),
+
+		FilterText: optStr("if"),
+
+		InsertTextFormat: protocol.InsertTextFormatSnippet,
+		TextEdit: &protocol.TextEdit{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: openLine, Character: openChar},
+				End:   pos,
+			},
+			NewText: "<cfelseif $1",
+		},
+	}
+}
+
+// tagNameItems offers every CFML tag, as a snippet, and every HTML tag.
+func tagNameItems() []protocol.CompletionItem {
+	cfTags, tags := docs.AllTags(), docs.HTMLTags()
+	items := make([]protocol.CompletionItem, 0, len(cfTags)+len(tags))
+
+	for _, tag := range cfTags {
+		items = append(items, protocol.CompletionItem{
+			Label:    tag.Name,
+			SortText: optStr(SortTags + tag.Name),
+
+			Kind:   protocol.CompletionItemKindKeyword,
+			Detail: optStr(tag.Description),
+
+			InsertText: optStr(buildTagSnippet(tag)),
+
+			InsertTextFormat: protocol.InsertTextFormatSnippet,
+		})
+	}
+
+	for i := range tags {
+		tag := &tags[i]
+
+		items = append(items, protocol.CompletionItem{
+			Label:    tag.Name,
+			SortText: optStr(SortTags + tag.Name),
+
+			Kind:   protocol.CompletionItemKindKeyword,
+			Detail: optStr(tag.Description),
+		})
+	}
+
+	return items
 }
 
 // findUnclosedTagsScoped scans for unclosed tags within the enclosing function body,
@@ -1017,55 +1051,28 @@ func (s *Server) superCompletion(docURI uri.URI) []protocol.CompletionItem {
 // dotCompletionMethods returns completion items for methods on a component
 // instance variable. It extracts the word before the dot, looks up the
 // component ref, resolves the CFC path, and returns its function defs.
-func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char int) []protocol.CompletionItem {
 	// Extract variable name before the dot
 	varName := parser.WordBeforeDot(content, line, char)
 
 	// If no simple word, check for call expression before dot: e.g. getService("tours").
-	if varName == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		lineText := parser.LineTextAt(content, line)
-		dotPos := char - 1
-
-		if dotPos > 0 && dotPos < len(lineText) && lineText[dotPos] == '.' && lineText[dotPos-1] == ')' {
-			// Find matching open paren
-			depth := 0
-
-			i := dotPos - 1
-			for i >= 0 {
-				if lineText[i] == ')' {
-					depth++
-				} else if lineText[i] == '(' {
-					depth--
-					if depth == 0 {
-						// Find function name start
-						fnStart := i - 1
-						for fnStart >= 0 && parser.IsWordChar(lineText[fnStart]) {
-							fnStart--
-						}
-
-						fnStart++
-						callExpr := lineText[fnStart:dotPos]
-
-						comp := s.cfResolverSet().Resolve(callExpr)
-						if comp != "" {
-							currentPath := docURI.Path()
-							baseDir := filepath.Dir(currentPath)
-
-							cfcPath := s.getResolver().ComponentPath(comp, baseDir)
-							if cfcPath != "" {
-								return s.methodCompletionItems(cfcPath)
-							}
-						}
-
-						break
-					}
-				}
-
-				i--
-			}
+	if varName == "" {
+		callExpr := callExprBeforeDot(parser.LineTextAt(content, line), char)
+		if callExpr == "" {
+			return nil
 		}
 
-		return nil
+		comp := s.cfResolverSet().Resolve(callExpr)
+		if comp == "" {
+			return nil
+		}
+
+		cfcPath := s.getResolver().ComponentPath(comp, filepath.Dir(docURI.Path()))
+		if cfcPath == "" {
+			return nil
+		}
+
+		return s.methodCompletionItems(cfcPath)
 	}
 
 	// Scope dot completion: VARIABLES., ARGUMENTS., THIS., SUPER.
@@ -1093,9 +1100,49 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 		return nil
 	}
 
+	return s.componentMemberItems(component, docURI)
+}
+
+// callExprBeforeDot returns the call expression that ends just before the dot
+// at char-1 — `getService("tours")` in `getService("tours").` — or "" when
+// the dot does not follow a closing paren.
+func callExprBeforeDot(lineText string, char int) string {
+	dotPos := char - 1
+	if dotPos <= 0 || dotPos >= len(lineText) || lineText[dotPos] != '.' || lineText[dotPos-1] != ')' {
+		return ""
+	}
+
+	// Find matching open paren
+	depth := 0
+
+	for i := dotPos - 1; i >= 0; i-- {
+		switch lineText[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth != 0 {
+				continue
+			}
+
+			// Find function name start
+			fnStart := i - 1
+			for fnStart >= 0 && parser.IsWordChar(lineText[fnStart]) {
+				fnStart--
+			}
+
+			return lineText[fnStart+1 : dotPos]
+		}
+	}
+
+	return ""
+}
+
+// componentMemberItems lists the this-scope properties and the methods of
+// component, resolved relative to the requesting document.
+func (s *Server) componentMemberItems(component string, docURI uri.URI) []protocol.CompletionItem {
 	// Resolve the dot-path to a CFC file relative to the current file's directory
-	currentPath := docURI.Path()
-	baseDir := filepath.Dir(currentPath)
+	baseDir := filepath.Dir(docURI.Path())
 
 	var cfcPath string
 
@@ -1133,34 +1180,40 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	}
 
 	for _, d := range defs {
-		var detail strings.Builder
-		detail.WriteString(d.Name)
-		detail.WriteByte('(')
-
-		for i, arg := range d.Arguments {
-			if i > 0 {
-				detail.WriteString(", ")
-			}
-
-			if arg.Type != "" {
-				detail.WriteString(arg.Type)
-				detail.WriteByte(' ')
-			}
-
-			detail.WriteString(arg.Name)
-		}
-
-		detail.WriteString(")")
 		items = append(items, protocol.CompletionItem{
 			Label:  d.Name,
 			Kind:   protocol.CompletionItemKindMethod,
-			Detail: optStr(detail.String()),
+			Detail: optStr(signatureDetail(d.Name, d.Arguments)),
 
 			SortText: optStr(SortUserFunctions + d.Name),
 		})
 	}
 
 	return items
+}
+
+// signatureDetail renders `name(type arg, arg)` for a completion item.
+func signatureDetail(name string, args []parser.Argument) string {
+	var detail strings.Builder
+	detail.WriteString(name)
+	detail.WriteByte('(')
+
+	for i, arg := range args {
+		if i > 0 {
+			detail.WriteString(", ")
+		}
+
+		if arg.Type != "" {
+			detail.WriteString(arg.Type)
+			detail.WriteByte(' ')
+		}
+
+		detail.WriteString(arg.Name)
+	}
+
+	detail.WriteString(")")
+
+	return detail.String()
 }
 
 // argumentCompletion returns named argument completions when cursor is inside function parens.

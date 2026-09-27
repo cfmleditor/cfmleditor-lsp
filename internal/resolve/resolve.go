@@ -441,132 +441,24 @@ func (t *callTrace) hit(kind TargetKind, component string, def *parser.FunctionD
 	}
 }
 
-func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string { //nolint:gocognit,funlen // over the limit before it existed; LINT-PLAN.md stage 4
+func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
 	funcName := call.FuncName
 	variable := call.Variable
 
 	// Unqualified call — check same file, then extends chain.
 	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
-	if variable == "" && call.Component == "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		tr.addf("unqualified call to %q — checking same file", funcName)
-
-		for i := range pr.Funcs {
-			if strings.EqualFold(pr.Funcs[i].Name, funcName) {
-				tr.hit(TargetSameFile, "", &pr.Funcs[i])
-				tr.addf("found %q defined in this file", funcName)
-
-				return ""
-			}
-		}
-
-		// A bare call whose name matches a declared local variable or argument in
-		// the enclosing function is a call through a function-reference value (e.g.
-		// "var columnfn = ARGUMENTS.extend[x].column; ... columnfn(...)"), not a call
-		// to a missing/undefined function — CFML supports first-class function
-		// values assigned to locals/arguments. This is a genuinely different case
-		// from "no qualifier, not in file": the identifier IS declared, its value is
-		// just dynamic (unknown until runtime), so — same reasoning as the
-		// ARGUMENTS.x-as-function-reference case below — there's nothing further to
-		// verify statically, and it should not be reported as if it were a missing
-		// function.
-		if scope := parser.FindFuncScopeAt(int(call.Line), pr.Scopes); scope.Start != -1 {
-			for _, v := range pr.FuncVars(scope.Start, scope.End) {
-				if strings.EqualFold(v, funcName) {
-					tr.addf("%q is a declared local variable/argument in the enclosing function — treating as a call through a function-reference value, not a missing function", funcName)
-					tr.hit(TargetDynamic, "", nil)
-
-					return ""
-				}
-			}
-		}
-
-		// Check extends chain
-		if pr.Extends != "" {
-			tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
-
-			if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-				tr.hit(TargetExtends, pr.Extends, def)
-				tr.addf("found %q in extends chain", funcName)
-
-				return ""
-			}
-		}
-
-		if def, via := r.findThroughIncludes(pr, funcName); def != nil {
-			tr.hit(TargetInclude, "", def)
-			tr.addf("found %q through cfinclude, in %s", funcName, via)
-
-			return ""
-		}
-
-		// CFML looks a bare name up in the variables scope, so a bare call to
-		// one the file assigns there — VARIABLES.render = ARGUMENTS.render —
-		// is a call through that function-reference property, the same as the
-		// qualified VARIABLES.render() accepted below. The parser records
-		// VARIABLES.name() as a bare call wherever it reads it as a member of
-		// this component, which is what left `#VARIABLES._renderTemplate()#`
-		// in a string "no qualifier, not in file".
-		if pr.HasScopedAssignment(parser.ScopeVariables, funcName) {
-			tr.addf("%q is assigned in VARIABLES scope — a call through a function-reference property", funcName)
-			tr.hit(TargetDynamic, "", nil)
-
-			return ""
-		}
-
-		if pr.Extends != "" {
-			return "not found in extends chain"
-		}
-
-		return "no qualifier, not in file"
+	if variable == "" && call.Component == "" {
+		return r.resolveBareCall(call, pr, baseDir, tr)
 	}
 
 	// this. qualifier — refers to the current component
 	if strings.EqualFold(variable, "this") {
-		tr.addf("'this' qualifier — checking same file")
-
-		for i := range pr.Funcs {
-			if strings.EqualFold(pr.Funcs[i].Name, funcName) {
-				tr.hit(TargetSameFile, "", &pr.Funcs[i])
-
-				return ""
-			}
-		}
-
-		if pr.Extends != "" {
-			tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
-
-			if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-				tr.hit(TargetExtends, pr.Extends, def)
-
-				return ""
-			}
-		}
-
-		if def, via := r.findThroughIncludes(pr, funcName); def != nil {
-			tr.hit(TargetInclude, "", def)
-			tr.addf("found %q through cfinclude, in %s", funcName, via)
-
-			return ""
-		}
-
-		return "method '" + funcName + "' not found in current component"
+		return r.resolveThisCall(funcName, pr, baseDir, tr)
 	}
 
 	// super. qualifier
 	if strings.EqualFold(variable, "super") {
-		if pr.Extends == "" {
-			return "super used but no extends"
-		}
-
-		tr.addf("'super' qualifier — checking extends chain (%s)", pr.Extends)
-
-		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-			tr.hit(TargetExtends, pr.Extends, def)
-
-			return ""
-		}
-
-		return "not found in parent component"
+		return r.resolveSuperCall(funcName, pr, baseDir, tr)
 	}
 
 	// Bare VARIABLES qualifier (no further dot, e.g. "VARIABLES.someName(...)") —
@@ -595,18 +487,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	if strings.EqualFold(variable, "ARGUMENTS") {
 		tr.addf("ARGUMENTS.%s called as a function reference — checking caller %q's argument list", funcName, call.Caller)
 
-		for i := range pr.Funcs {
-			f := &pr.Funcs[i]
+		if declaresArgument(pr, call.Caller, funcName) {
+			tr.hit(TargetDynamic, "", nil)
 
-			if strings.EqualFold(f.Name, call.Caller) {
-				for _, arg := range f.Arguments {
-					if strings.EqualFold(arg.Name, funcName) {
-						tr.hit(TargetDynamic, "", nil)
-
-						return ""
-					}
-				}
-			}
+			return ""
 		}
 	}
 
@@ -634,19 +518,14 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 	if comp == "" {
 		// Try component resolvers
-		var (
-			noFollow bool
-			idx      int
-		)
+		var noFollow, soft bool
 
-		comp, noFollow, idx = parser.ResolveFromCallMatch(variable, r.Resolvers)
-		if idx >= 0 && r.Resolvers[idx].DynamicIfMissing {
-			softComp = comp
-		}
-
-		if comp != "" {
+		comp, noFollow, soft = r.matchResolver(variable, tr, func(c, desc string, nf bool) {
 			tr.addf("resolved %q to %q via componentResolver matching the variable name [%s] (noFollow=%v)",
-				variable, comp, r.describeResolver(idx), noFollow)
+				variable, c, desc, nf)
+		})
+		if soft {
+			softComp = comp
 		}
 
 		if noFollow && comp != "" {
@@ -658,19 +537,14 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 	if comp == "" && call.Text != "" {
 		// Try resolvers against the full line text (handles chained calls like x.method().prop.func())
-		var (
-			noFollow bool
-			idx      int
-		)
+		var noFollow, soft bool
 
-		comp, noFollow, idx = parser.ResolveFromCallMatch(call.Text, r.Resolvers)
-		if idx >= 0 && r.Resolvers[idx].DynamicIfMissing {
-			softComp = comp
-		}
-
-		if comp != "" {
+		comp, noFollow, soft = r.matchResolver(call.Text, tr, func(c, desc string, nf bool) {
 			tr.addf("resolved %q to %q via componentResolver matching the full line text %q [%s] (noFollow=%v)",
-				variable, comp, call.Text, r.describeResolver(idx), noFollow)
+				variable, c, call.Text, desc, nf)
+		})
+		if soft {
+			softComp = comp
 		}
 
 		if noFollow && comp != "" {
@@ -688,7 +562,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	// call (e.g. "kpg.generateKeyPair().getPublic().getParams()" — comp here is
 	// kpg's own component; call.Chain lists "generateKeyPair", "getPublic", each
 	// needing its own declared return type applied before checking funcName below).
-	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
+	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") {
 		for _, hop := range call.Chain {
 			// A hop that returned "$any" makes the rest of the chain dynamic.
 			// Walking on asked "$any" for the next method, which it can never
@@ -703,64 +577,18 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 			fd := r.ResolveFunc(comp, hop, baseDir)
 			if fd == nil {
-				if !r.componentExists(comp, baseDir) {
-					if softMissing(comp, softComp, pr) {
-						tr.addf("%q names no file and came from a dynamicIfMissing resolver — the rest of the chain is dynamic", comp)
-						tr.hit(TargetDynamic, comp, nil)
-
-						return ""
-					}
-
-					return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
-				}
-
-				return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+				return r.missingChainHop(comp, softComp, hop, funcName, pr, baseDir, tr)
 			}
 
-			ret := fd.ReturnComponent
-			if ret != "" {
-				tr.addf("chain hop %q on %q: declared/inferred ReturnComponent %q", hop, comp, ret)
-			} else if ret == "" && fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-				ret = fd.ReturnType
-
-				tr.addf("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
+			ret, noFollow, soft := r.chainHopReturn(comp, hop, fd, tr)
+			if soft {
+				softComp = ret
 			}
 
-			// An init() that declares nothing returns the object it was called
-			// on: the CFC constructor convention, and what the parser assumes
-			// when it types a variable assigned through one. Falling through to
-			// the resolvers offered them init(), which nothing can answer.
-			if ret == "" && strings.EqualFold(hop, "init") {
-				ret = comp
+			if noFollow && ret != "" {
+				tr.hit(TargetDynamic, ret, nil)
 
-				tr.addf("chain hop %q on %q: an untyped init() returns the object it is called on", hop, comp)
-			}
-
-			// The real function's declared return type isn't a component (e.g.
-			// a generic returntype="struct" on a factory method that actually
-			// returns a specific component instance) — fall back to a
-			// componentResolver matching the hop's own call shape, same as the
-			// non-chain "altComp" fallback below.
-			if ret == "" {
-				var (
-					noFollow bool
-					hopIdx   int
-				)
-
-				ret, noFollow, hopIdx = parser.ResolveFromCallMatch(hop+"()", r.Resolvers)
-				if hopIdx >= 0 && r.Resolvers[hopIdx].DynamicIfMissing {
-					softComp = ret
-				}
-
-				if ret != "" {
-					tr.addf("chain hop %q on %q: no declared return type — componentResolver matched %q(): %q (noFollow=%v)", hop, comp, hop, ret, noFollow)
-				}
-
-				if noFollow && ret != "" {
-					tr.hit(TargetDynamic, ret, nil)
-
-					return ""
-				}
+				return ""
 			}
 
 			if ret == "" {
@@ -770,6 +598,211 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 			comp = ret
 		}
 	}
+
+	return r.checkMethodOn(comp, softComp, call, pr, baseDir, tr)
+}
+
+// resolveBareCall is canResolveCall for an unqualified call: this file, a
+// function-reference local, the extends chain, cfinclude, and a
+// variables-scope function reference.
+func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	funcName := call.FuncName
+
+	tr.addf("unqualified call to %q — checking same file", funcName)
+
+	for i := range pr.Funcs {
+		if strings.EqualFold(pr.Funcs[i].Name, funcName) {
+			tr.hit(TargetSameFile, "", &pr.Funcs[i])
+			tr.addf("found %q defined in this file", funcName)
+
+			return ""
+		}
+	}
+
+	// A bare call whose name matches a declared local variable or argument in
+	// the enclosing function is a call through a function-reference value (e.g.
+	// "var columnfn = ARGUMENTS.extend[x].column; ... columnfn(...)"), not a call
+	// to a missing/undefined function — CFML supports first-class function
+	// values assigned to locals/arguments. This is a genuinely different case
+	// from "no qualifier, not in file": the identifier IS declared, its value is
+	// just dynamic (unknown until runtime), so — same reasoning as the
+	// ARGUMENTS.x-as-function-reference case below — there's nothing further to
+	// verify statically, and it should not be reported as if it were a missing
+	// function.
+	if scope := parser.FindFuncScopeAt(int(call.Line), pr.Scopes); scope.Start != -1 {
+		for _, v := range pr.FuncVars(scope.Start, scope.End) {
+			if strings.EqualFold(v, funcName) {
+				tr.addf("%q is a declared local variable/argument in the enclosing function — treating as a call through a function-reference value, not a missing function", funcName)
+				tr.hit(TargetDynamic, "", nil)
+
+				return ""
+			}
+		}
+	}
+
+	// Check extends chain
+	if pr.Extends != "" {
+		tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
+
+		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+			tr.hit(TargetExtends, pr.Extends, def)
+			tr.addf("found %q in extends chain", funcName)
+
+			return ""
+		}
+	}
+
+	if def, via := r.findThroughIncludes(pr, funcName); def != nil {
+		tr.hit(TargetInclude, "", def)
+		tr.addf("found %q through cfinclude, in %s", funcName, via)
+
+		return ""
+	}
+
+	// CFML looks a bare name up in the variables scope, so a bare call to
+	// one the file assigns there — VARIABLES.render = ARGUMENTS.render —
+	// is a call through that function-reference property, the same as the
+	// qualified VARIABLES.render() accepted below. The parser records
+	// VARIABLES.name() as a bare call wherever it reads it as a member of
+	// this component, which is what left `#VARIABLES._renderTemplate()#`
+	// in a string "no qualifier, not in file".
+	if pr.HasScopedAssignment(parser.ScopeVariables, funcName) {
+		tr.addf("%q is assigned in VARIABLES scope — a call through a function-reference property", funcName)
+		tr.hit(TargetDynamic, "", nil)
+
+		return ""
+	}
+
+	if pr.Extends != "" {
+		return "not found in extends chain"
+	}
+
+	return "no qualifier, not in file"
+}
+
+// resolveThisCall is canResolveCall for `this.name()`.
+func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	tr.addf("'this' qualifier — checking same file")
+
+	for i := range pr.Funcs {
+		if strings.EqualFold(pr.Funcs[i].Name, funcName) {
+			tr.hit(TargetSameFile, "", &pr.Funcs[i])
+
+			return ""
+		}
+	}
+
+	if pr.Extends != "" {
+		tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
+
+		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+			tr.hit(TargetExtends, pr.Extends, def)
+
+			return ""
+		}
+	}
+
+	if def, via := r.findThroughIncludes(pr, funcName); def != nil {
+		tr.hit(TargetInclude, "", def)
+		tr.addf("found %q through cfinclude, in %s", funcName, via)
+
+		return ""
+	}
+
+	return "method '" + funcName + "' not found in current component"
+}
+
+// resolveSuperCall is canResolveCall for `super.name()`.
+func (r *Resolver) resolveSuperCall(funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	if pr.Extends == "" {
+		return "super used but no extends"
+	}
+
+	tr.addf("'super' qualifier — checking extends chain (%s)", pr.Extends)
+
+	if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
+		tr.hit(TargetExtends, pr.Extends, def)
+
+		return ""
+	}
+
+	return "not found in parent component"
+}
+
+// matchResolver tries the componentResolvers against text. It reports the
+// component, the resolver's noFollow, and whether that resolver is
+// dynamicIfMissing; describe is told about a match, for the trace.
+func (r *Resolver) matchResolver(text string, tr *callTrace, describe func(comp, desc string, noFollow bool)) (comp string, noFollow, soft bool) {
+	comp, noFollow, idx := parser.ResolveFromCallMatch(text, r.Resolvers)
+	soft = idx >= 0 && r.Resolvers[idx].DynamicIfMissing
+
+	if comp != "" && tr != nil {
+		describe(comp, r.describeResolver(idx), noFollow)
+	}
+
+	return comp, noFollow, soft
+}
+
+// missingChainHop is canResolveCall's answer when a hop of a chained call is
+// not a method of the component the chain has reached.
+func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	if !r.componentExists(comp, baseDir) {
+		if softMissing(comp, softComp, pr) {
+			tr.addf("%q names no file and came from a dynamicIfMissing resolver — the rest of the chain is dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
+		return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
+	}
+
+	return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+}
+
+// chainHopReturn is the component a chain hop's method returns: its declared
+// or inferred component, a dotted return type, the receiver for an untyped
+// init(), or a componentResolver matching the hop. It reports the resolver's
+// noFollow and whether the resolver is dynamicIfMissing, for the last.
+func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *callTrace) (ret string, noFollow, soft bool) {
+	ret = fd.ReturnComponent
+	if ret != "" {
+		tr.addf("chain hop %q on %q: declared/inferred ReturnComponent %q", hop, comp, ret)
+	} else if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
+		ret = fd.ReturnType
+
+		tr.addf("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
+	}
+
+	// An init() that declares nothing returns the object it was called
+	// on: the CFC constructor convention, and what the parser assumes
+	// when it types a variable assigned through one. Falling through to
+	// the resolvers offered them init(), which nothing can answer.
+	if ret == "" && strings.EqualFold(hop, "init") {
+		ret = comp
+
+		tr.addf("chain hop %q on %q: an untyped init() returns the object it is called on", hop, comp)
+	}
+
+	if ret != "" {
+		return ret, false, false
+	}
+
+	// The real function's declared return type isn't a component (e.g.
+	// a generic returntype="struct" on a factory method that actually
+	// returns a specific component instance) — fall back to a
+	// componentResolver matching the hop's own call shape, same as the
+	// non-chain "altComp" fallback below.
+	return r.matchResolver(hop+"()", tr, func(c, _ string, nf bool) {
+		tr.addf("chain hop %q on %q: no declared return type — componentResolver matched %q(): %q (noFollow=%v)", hop, comp, hop, c, nf)
+	})
+}
+
+// checkMethodOn is canResolveCall's last step: whether the component the
+// receiver resolved to defines the method, with the dynamic, builtin,
+// member-method, onMissingMethod and altComp fallbacks.
+func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	funcName, variable := call.FuncName, call.Variable
 
 	if comp == "" {
 		return "variable '" + variable + "' has no component ref"
@@ -897,70 +930,24 @@ func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseRes
 // member reports the one case that is not a component at all: an ARGUMENTS.x
 // of primitive type calling a known member method, which canResolveCall
 // accepts outright. It needs funcName; ComponentOf passes none.
-func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) { //nolint:gocognit // moved out of canResolveCall unchanged; LINT-PLAN.md stage 4
+func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 	// scope prefix and must not be stripped there.
 	lookupVar := parser.StripReceiverScope(variable)
 
+	// Each lookup below is tried while comp is still empty. A matching ref
+	// with no component is logged and passed over, as it always was.
+
 	// Try function-scoped refs first
-	for _, scope := range pr.Scopes {
-		if int(line) >= scope.Start && int(line) <= scope.End {
-			refs := pr.FuncComponentRefs(scope.Start, scope.End)
+	if ref := funcScopedRef(pr, line, lookupVar); ref != nil {
+		comp = ref.Component
 
-			for i := range refs {
-				ref := &refs[i]
-
-				if strings.EqualFold(ref.Variable, lookupVar) {
-					comp = ref.Component
-
-					tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
-
-					break
-				}
-			}
-
-			break
-		}
+		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
 	}
 
-	// Fall back to component refs. A scratch variable can be reassigned multiple
-	// times in the same file (e.g. once per <cfswitch>/<cfcase> branch) — using
-	// the first matching ref in file order would lock onto whichever branch
-	// happens to appear earliest, regardless of which branch the call site is
-	// actually in. Prefer the ref with the highest line number at or before the
-	// call site (the assignment that's actually in scope there); only fall back
-	// to file order for a genuine forward reference, where no preceding ref exists.
 	if comp == "" {
-		var best *parser.ComponentRef
-
-		for i := range pr.ComponentRefs {
-			ref := &pr.ComponentRefs[i]
-			if !strings.EqualFold(ref.Variable, lookupVar) {
-				continue
-			}
-
-			if ref.Line > line {
-				continue
-			}
-
-			if best == nil || ref.Line > best.Line {
-				best = ref
-			}
-		}
-
-		if best == nil {
-			for i := range pr.ComponentRefs {
-				ref := &pr.ComponentRefs[i]
-				if strings.EqualFold(ref.Variable, lookupVar) {
-					best = ref
-
-					break
-				}
-			}
-		}
-
-		if best != nil {
+		if best := fileLevelRef(pr, line, lookupVar); best != nil {
 			comp = best.Component
 
 			tr.addf("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
@@ -969,22 +956,13 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 
 	// Fall back to Application.cfc component refs
 	if comp == "" {
-		if appDir := r.FindApplicationRoot(baseDir); appDir != "" {
-			for _, appName := range []string{"Application.cfc", "Application.cfm"} {
-				appURI := cfpath.ToURI(filepath.Join(appDir, appName))
-				for _, ref := range r.Index.RefsForFile(appURI) {
-					if strings.EqualFold(ref.Variable, lookupVar) {
-						comp = ref.Component
+		for _, hit := range r.applicationRefs(baseDir, lookupVar) {
+			comp = hit.ref.Component
 
-						tr.addf("resolved %q to %q via %s ComponentRef", variable, comp, appName)
+			tr.addf("resolved %q to %q via %s ComponentRef", variable, comp, hit.file)
 
-						break
-					}
-				}
-
-				if comp != "" {
-					break
-				}
+			if comp != "" {
+				break
 			}
 		}
 	}
@@ -995,33 +973,19 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	if comp == "" && strings.HasPrefix(strings.ToUpper(variable), "ARGUMENTS.") {
 		argName := variable[10:]
 
-		for i := range pr.Funcs {
-			f := &pr.Funcs[i]
+		if arg := argumentOf(pr, caller, argName); arg != nil {
+			if strings.Contains(arg.Type, ".") {
+				comp = arg.Type
 
-			if strings.EqualFold(f.Name, caller) {
-				for _, arg := range f.Arguments {
-					if !strings.EqualFold(arg.Name, argName) {
-						continue
-					}
+				tr.addf("resolved %q to %q via <cfargument type>", variable, comp)
+			} else if parser.IsMemberMethod(funcName) {
+				// Primitive-typed argument (string/numeric/array/etc.)
+				// calling a known member/Java-interop method (e.g.
+				// a string argument's .toCharArray()) — no component
+				// is needed to verify it.
+				tr.addf("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
 
-					if strings.Contains(arg.Type, ".") {
-						comp = arg.Type
-
-						tr.addf("resolved %q to %q via <cfargument type>", variable, comp)
-					} else if parser.IsMemberMethod(funcName) {
-						// Primitive-typed argument (string/numeric/array/etc.)
-						// calling a known member/Java-interop method (e.g.
-						// a string argument's .toCharArray()) — no component
-						// is needed to verify it.
-						tr.addf("ARGUMENTS.%s has primitive type %q, but %q is a known member method — accepted without a component", argName, arg.Type, funcName)
-
-						return "", true
-					}
-
-					break
-				}
-
-				break
+				return "", true
 			}
 		}
 	}
@@ -1030,49 +994,182 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	if comp == "" && pr.Extends != "" {
 		tr.addf("no ref found in this file — checking extends chain (%s) for a ComponentRef", pr.Extends)
 
-		seen := make(map[string]bool)
-		extends := pr.Extends
+		r.walkExtendsRefs(pr.Extends, baseDir, lookupVar, func(ref *parser.ComponentRef, parent string) bool {
+			comp = ref.Component
 
-		for extends != "" && !seen[extends] {
-			seen[extends] = true
+			tr.addf("resolved %q to %q via ComponentRef in parent %s", variable, comp, parent)
 
-			cfcPath := r.ComponentPath(extends, baseDir)
-			if cfcPath == "" {
-				break
-			}
-
-			parentURI := cfpath.ToURI(cfcPath)
-
-			// Ensure the parent is indexed so RefsForFile returns its component refs.
-			// (EnsureIndexed is a fast no-op if already indexed.)
-			r.EnsureIndexed(cfcPath)
-
-			for _, ref := range r.Index.RefsForFile(parentURI) {
-				if strings.EqualFold(ref.Variable, lookupVar) {
-					comp = ref.Component
-
-					tr.addf("resolved %q to %q via ComponentRef in parent %s", variable, comp, extends)
-
-					break
-				}
-			}
-
-			if comp != "" {
-				break
-			}
-
-			// Walk up the extends chain
-			data, err := r.FS.ReadFile(cfcPath)
-			if err != nil {
-				break
-			}
-
-			parentPR := parser.Parse(parentURI, string(data))
-			extends = parentPR.Extends
-		}
+			return comp != ""
+		})
 	}
 
 	return comp, false
+}
+
+// funcScopedRef is the first ref for name inside the function enclosing line.
+func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+	for _, scope := range pr.Scopes {
+		if int(line) < scope.Start || int(line) > scope.End {
+			continue
+		}
+
+		refs := pr.FuncComponentRefs(scope.Start, scope.End)
+
+		for i := range refs {
+			if strings.EqualFold(refs[i].Variable, name) {
+				return &refs[i]
+			}
+		}
+
+		return nil
+	}
+
+	return nil
+}
+
+// fileLevelRef is the file-level ref for name that is in force at line.
+//
+// A scratch variable can be reassigned multiple times in the same file (e.g.
+// once per <cfswitch>/<cfcase> branch) — using the first matching ref in file
+// order would lock onto whichever branch happens to appear earliest,
+// regardless of which branch the call site is actually in. Prefer the ref
+// with the highest line number at or before the call site (the assignment
+// that's actually in scope there); only fall back to file order for a genuine
+// forward reference, where no preceding ref exists.
+func fileLevelRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+	var best *parser.ComponentRef
+
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+		if !strings.EqualFold(ref.Variable, name) || ref.Line > line {
+			continue
+		}
+
+		if best == nil || ref.Line > best.Line {
+			best = ref
+		}
+	}
+
+	if best != nil {
+		return best
+	}
+
+	for i := range pr.ComponentRefs {
+		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) {
+			return &pr.ComponentRefs[i]
+		}
+	}
+
+	return nil
+}
+
+// appRef is a ref for a name in one of the Application files.
+type appRef struct {
+	ref  *parser.ComponentRef
+	file string
+}
+
+// applicationRefs is the first ref for name in the governing Application.cfc
+// and then Application.cfm, for each that has one.
+func (r *Resolver) applicationRefs(baseDir, name string) []appRef {
+	appDir := r.FindApplicationRoot(baseDir)
+	if appDir == "" {
+		return nil
+	}
+
+	var out []appRef
+
+	for _, appName := range []string{"Application.cfc", "Application.cfm"} {
+		appURI := cfpath.ToURI(filepath.Join(appDir, appName))
+		for _, ref := range r.Index.RefsForFile(appURI) {
+			if strings.EqualFold(ref.Variable, name) {
+				out = append(out, appRef{ref: ref, file: appName})
+
+				break
+			}
+		}
+	}
+
+	return out
+}
+
+// declaresArgument reports whether any function called caller declares an
+// argument called name.
+func declaresArgument(pr *parser.ParseResult, caller, name string) bool {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if !strings.EqualFold(f.Name, caller) {
+			continue
+		}
+
+		for _, arg := range f.Arguments {
+			if strings.EqualFold(arg.Name, name) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// argumentOf is the argument called name of the function called caller, or
+// nil. Only the first function with that name is consulted.
+func argumentOf(pr *parser.ParseResult, caller, name string) *parser.Argument {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if !strings.EqualFold(f.Name, caller) {
+			continue
+		}
+
+		for j := range f.Arguments {
+			if strings.EqualFold(f.Arguments[j].Name, name) {
+				return &f.Arguments[j]
+			}
+		}
+
+		return nil
+	}
+
+	return nil
+}
+
+// walkExtendsRefs walks the extends chain from extends, handing visit the
+// first ref for name in each ancestor that has one, until visit returns true.
+func (r *Resolver) walkExtendsRefs(extends, baseDir, name string, visit func(ref *parser.ComponentRef, parent string) bool) {
+	seen := make(map[string]bool)
+
+	for extends != "" && !seen[extends] {
+		seen[extends] = true
+
+		cfcPath := r.ComponentPath(extends, baseDir)
+		if cfcPath == "" {
+			return
+		}
+
+		parentURI := cfpath.ToURI(cfcPath)
+
+		// Ensure the parent is indexed so RefsForFile returns its component refs.
+		// (EnsureIndexed is a fast no-op if already indexed.)
+		r.EnsureIndexed(cfcPath)
+
+		for _, ref := range r.Index.RefsForFile(parentURI) {
+			if strings.EqualFold(ref.Variable, name) {
+				if visit(ref, extends) {
+					return
+				}
+
+				break
+			}
+		}
+
+		// Walk up the extends chain
+		data, err := r.FS.ReadFile(cfcPath)
+		if err != nil {
+			return
+		}
+
+		extends = parser.Parse(parentURI, string(data)).Extends
+	}
 }
 
 // softMissing reports whether comp, which names no file, came from a
