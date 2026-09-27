@@ -231,12 +231,18 @@ func TestDeclarationAxisIsWeakerThanTheCallAxis(t *testing.T) {
 		grammarAgrees  bool
 		whatItWouldSay string
 	}{
-		{`component extends="models.Base" { variables.real = 1; }`, false,
-			"the grammar reads `extends` as a tag attribute, so it would have caught this"},
-		{`component { function go() { svc.save(force = true); } }`, true,
-			"the grammar calls `force` an assignment_expression too"},
-		{`component { function go() { query name="q" datasource="ds" {} } }`, true,
-			"the grammar calls `name` and `datasource` assignments too"},
+		{
+			`component extends="models.Base" { variables.real = 1; }`, false,
+			"the grammar reads `extends` as a tag attribute, so it would have caught this",
+		},
+		{
+			`component { function go() { svc.save(force = true); } }`, true,
+			"the grammar calls `force` an assignment_expression too",
+		},
+		{
+			`component { function go() { query name="q" datasource="ds" {} } }`, true,
+			"the grammar calls `name` and `datasource` assignments too",
+		},
 	}
 
 	caught := 0

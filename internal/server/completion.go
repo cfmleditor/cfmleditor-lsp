@@ -221,10 +221,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 				for i := range attrs {
 					if strings.EqualFold(attrs[i].Name, attrName) { // attrName is lowercase ASCII already
 						for _, v := range attrs[i].ParamValues() {
-							items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
-								Label:  v,
-								Kind:   protocol.CompletionItemKindValue,
-								Detail: optStr(attrName + " value"),
+							items = append(items, protocol.CompletionItem{
+								SortText: optStr(SortProperties),
+								Label:    v,
+								Kind:     protocol.CompletionItemKindValue,
+								Detail:   optStr(attrName + " value"),
 							})
 						}
 
@@ -326,10 +327,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			for i := range attrs {
 				p := &attrs[i]
 
-				items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
-					Label:  p.Name,
-					Kind:   protocol.CompletionItemKindProperty,
-					Detail: optStr(p.Description),
+				items = append(items, protocol.CompletionItem{
+					SortText: optStr(SortProperties),
+					Label:    p.Name,
+					Kind:     protocol.CompletionItemKindProperty,
+					Detail:   optStr(p.Description),
 
 					InsertText: optStr(p.Name + `="$1"`),
 
@@ -354,10 +356,11 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 			openLine, openChar = conv.Uint32(l), lineCol(parser.LineTextAt(content, l), c)
 		}
 
-		items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
-			Label:  "if",
-			Kind:   protocol.CompletionItemKindKeyword,
-			Detail: optStr("Convert to cfelseif"),
+		items = append(items, protocol.CompletionItem{
+			SortText: optStr(SortProperties),
+			Label:    "if",
+			Kind:     protocol.CompletionItemKindKeyword,
+			Detail:   optStr("Convert to cfelseif"),
 
 			FilterText: optStr("if"),
 

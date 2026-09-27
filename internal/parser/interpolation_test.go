@@ -199,8 +199,10 @@ func TestScriptTagAttributeValuesRecordTheirCalls(t *testing.T) {
 		body string
 		want []string
 	}{
-		{`loop array=structKeyArray(rowData) item="local.col" { x(); }`,
-			[]string{"?.structKeyArray", "?.x"}},
+		{
+			`loop array=structKeyArray(rowData) item="local.col" { x(); }`,
+			[]string{"?.structKeyArray", "?.x"},
+		},
 		{`http url="u" result=serializeJson(body.data) {}`, []string{"?.serializeJson"}},
 		{`query name="q" datasource=getDatasource() { }`, []string{"?.getDatasource"}},
 		{`lock name="l" timeout=calcTimeout(x) { }`, []string{"?.calcTimeout"}},
@@ -247,8 +249,10 @@ func TestStringsNestInsideInterpolation(t *testing.T) {
 		body string
 		want []string
 	}{
-		{`assertEquals("7", "#DayOfWeek("{ts '2000-1-1'}")#");`,
-			[]string{"?.assertEquals", "?.DayOfWeek"}},
+		{
+			`assertEquals("7", "#DayOfWeek("{ts '2000-1-1'}")#");`,
+			[]string{"?.assertEquals", "?.DayOfWeek"},
+		},
 		{`x = "#f("a")#";`, []string{"?.f"}},
 		{`x = "#f("a")# and #g("b")#";`, []string{"?.f", "?.g"}},
 		{`x = "#f('a')#";`, []string{"?.f"}},

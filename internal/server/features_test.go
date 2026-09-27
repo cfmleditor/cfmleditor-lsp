@@ -2,12 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/protocol"

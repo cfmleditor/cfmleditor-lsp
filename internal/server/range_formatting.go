@@ -2,10 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json/v2"
 	"strings"
 	"time"
-
-	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"

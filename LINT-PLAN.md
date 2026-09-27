@@ -365,6 +365,19 @@ off and are cheap to satisfy. The rest of that sweep is in the table below.
   directly above `ScopeURL`, so Go read it as that constant's doc. A blank
   line now separates them.
 
+## gofumpt (done)
+
+Enabled as a formatter in `.golangci.yml`, so `make lint` fails on a file it
+would change and `make fmt` applies it. The first run changed 23 files:
+- redundant parentheses around type-assertion operands;
+- composite literals put one element per line once they span lines;
+- blank lines at the start or end of blocks removed;
+- `encoding/json/v2` moved into the standard-library import group, where
+  some files had kept it apart.
+
+It is mechanical and behaviour-neutral: the build, lint and the race tests
+are unchanged.
+
 ## Left off, and why
 
 | Rule | Findings | Why it stays off |

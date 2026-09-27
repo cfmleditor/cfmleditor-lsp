@@ -866,15 +866,18 @@ func hasWordAt(src []byte, pos int, word string) bool {
 
 	return after >= len(src) || !isIdentByte(src[after])
 }
+
 func isIdentByte(c byte) bool {
 	return c == '_' || c == '$' ||
 		(c >= '0' && c <= '9') ||
 		(c >= 'a' && c <= 'z') ||
 		(c >= 'A' && c <= 'Z')
 }
+
 func hasBytesAt(src []byte, pos int, lit string) bool {
 	return pos >= 0 && pos+len(lit) <= len(src) && string(src[pos:pos+len(lit)]) == lit
 }
+
 func indexBytesFrom(src []byte, pos int, lit string) int {
 	if pos < 0 || pos > len(src) {
 		return -1
@@ -1042,6 +1045,7 @@ func commentBodyOffset(src []byte, target int) int {
 
 	return len(src)
 }
+
 func commentSnippet(s []byte, at int) string {
 	start := max(at-10, 0)
 

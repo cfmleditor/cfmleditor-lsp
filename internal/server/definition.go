@@ -3,11 +3,10 @@ package server
 import (
 	"cmp"
 	"context"
+	"encoding/json/v2"
 	"path/filepath"
 	"slices"
 	"strings"
-
-	"encoding/json/v2"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"

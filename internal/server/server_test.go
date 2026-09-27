@@ -91,7 +91,7 @@ func TestHandleInitialize(t *testing.T) {
 		t.Error("expected server to be initialized")
 	}
 
-	res, ok := (result).(protocol.InitializeResult)
+	res, ok := result.(protocol.InitializeResult)
 	if !ok {
 		t.Fatalf("expected InitializeResult, got %T", result)
 	}
@@ -675,7 +675,7 @@ func TestDefinitionLookup(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -773,7 +773,7 @@ function saveUser() {
 		t.Fatal(replyErr)
 	}
 
-	symbols, ok := (result).([]protocol.DocumentSymbol)
+	symbols, ok := result.([]protocol.DocumentSymbol)
 	if !ok {
 		t.Fatalf("expected []DocumentSymbol, got %T", result)
 	}
@@ -803,7 +803,7 @@ func TestWorkspaceSymbol(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	symbols, ok := (result).([]protocol.SymbolInformation)
+	symbols, ok := result.([]protocol.SymbolInformation)
 	if !ok {
 		t.Fatalf("expected []SymbolInformation, got %T", result)
 	}
@@ -830,7 +830,7 @@ func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	symbols, ok := (result).([]protocol.SymbolInformation)
+	symbols, ok := result.([]protocol.SymbolInformation)
 	if !ok {
 		t.Fatalf("expected []SymbolInformation, got %T", result)
 	}
@@ -854,7 +854,7 @@ func TestHoverFunction(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok {
 		t.Fatalf("expected *Hover, got %T", result)
 	}
@@ -882,7 +882,7 @@ func TestHoverTag(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok {
 		t.Fatalf("expected *Hover, got %T", result)
 	}
@@ -1148,7 +1148,7 @@ func TestOnTypeFormattingRemovesDuplicateClose(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	edits, ok := (result).([]protocol.TextEdit)
+	edits, ok := result.([]protocol.TextEdit)
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", result)
 	}
@@ -1182,7 +1182,7 @@ func TestOnTypeFormattingMidTagWhitespaceOnly(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	edits, ok := (result).([]protocol.TextEdit)
+	edits, ok := result.([]protocol.TextEdit)
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", result)
 	}
@@ -1216,7 +1216,7 @@ func TestOnTypeFormattingNoOpNonWhitespace(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	edits, ok := (result).([]protocol.TextEdit)
+	edits, ok := result.([]protocol.TextEdit)
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", result)
 	}
@@ -1322,7 +1322,7 @@ func TestOnTypeFormattingNoOpWithoutDuplicate(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	edits, ok := (result).([]protocol.TextEdit)
+	edits, ok := result.([]protocol.TextEdit)
 	if !ok {
 		t.Fatalf("expected []TextEdit, got %T", result)
 	}
@@ -1506,7 +1506,7 @@ func TestDefinitionDotQualifiedCall(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1542,7 +1542,7 @@ func TestDefinitionDotQualifiedCallViaNew(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1579,7 +1579,7 @@ func TestDefinitionDotQualifiedCallViaDottedNew(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1614,7 +1614,7 @@ func TestDefinitionCfInvokeMethodAttribute(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1654,7 +1654,7 @@ function generateID() {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1701,7 +1701,7 @@ func TestDefinitionComponentResolver(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1744,7 +1744,7 @@ func TestDefinitionMultipleMatchesReturnsAll(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 	// Should resolve to Service1 specifically
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location (resolved to specific CFC), got %T", result)
 	}
@@ -1776,7 +1776,7 @@ func TestDefinitionPrefersCurrentFile(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1819,7 +1819,7 @@ func TestDefinitionQualifiedCallExcludesCurrentFile(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1855,7 +1855,7 @@ func TestDefinitionCfInvokeWithDottedComponent(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1895,7 +1895,7 @@ func TestDefinitionTagFunctionLookup(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1935,7 +1935,7 @@ func TestDefinitionMappingResolution(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -1975,7 +1975,7 @@ func TestDefinitionCaseInsensitiveFunctionLookup(t *testing.T) {
 		t.Fatal("expected definition result, got nil")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -2102,7 +2102,7 @@ func TestSignatureHelpQualifiedCall(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	help, ok := (result).(*protocol.SignatureHelp)
+	help, ok := result.(*protocol.SignatureHelp)
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
@@ -2139,7 +2139,7 @@ func TestHoverUserDefinedFunction(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatalf("expected *Hover, got %T", result)
 	}
@@ -2178,7 +2178,7 @@ func TestSignatureHelpInlineCallExpression(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	help, ok := (result).(*protocol.SignatureHelp)
+	help, ok := result.(*protocol.SignatureHelp)
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
@@ -2207,7 +2207,7 @@ func TestSignatureHelpBuiltinFunction(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	help, ok := (result).(*protocol.SignatureHelp)
+	help, ok := result.(*protocol.SignatureHelp)
 	if !ok || help == nil {
 		t.Fatalf("expected *SignatureHelp, got %T", result)
 	}
@@ -2273,7 +2273,7 @@ func TestHoverQualifiedCallExpression(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatalf("expected *Hover, got %T", result)
 	}
@@ -2307,7 +2307,7 @@ func TestDocumentLinkResolve(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	links, ok := (result).([]protocol.DocumentLink)
+	links, ok := result.([]protocol.DocumentLink)
 	if !ok || len(links) == 0 {
 		t.Fatal("expected at least one document link")
 	}
@@ -2324,7 +2324,7 @@ func TestDocumentLinkResolve(t *testing.T) {
 		t.Fatal(replyErr2)
 	}
 
-	resolved, ok := (result2).(protocol.DocumentLink)
+	resolved, ok := result2.(protocol.DocumentLink)
 	if !ok {
 		t.Fatalf("expected DocumentLink, got %T", result2)
 	}
@@ -2462,7 +2462,7 @@ func TestDocumentLinkSkipsHashExpressions(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for hash expression, got %d", len(links))
 	}
@@ -2478,7 +2478,7 @@ func TestDocumentLinkSkipsURLs(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for URL, got %d", len(links))
 	}
@@ -2562,7 +2562,7 @@ func TestExecuteCommandCopyPackage(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	dotPath, _ := (result).(string)
+	dotPath, _ := result.(string)
 	if dotPath != "models.User" {
 		t.Errorf("expected 'models.User', got %q", dotPath)
 	}
@@ -2578,7 +2578,7 @@ func TestHoverBuiltinCaseInsensitive(t *testing.T) {
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for uppercase ARRAYAPPEND")
 	}
@@ -2674,7 +2674,7 @@ func TestDocumentLinkMultipleOnSameLine(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) != 2 {
 		t.Errorf("expected 2 links, got %d", len(links))
 	}
@@ -2797,7 +2797,7 @@ func TestSignatureHelpUserFunctionInSameFile(t *testing.T) {
 	})
 	result, _ := srv.handleSignatureHelp(context.Background(), req)
 
-	help, ok := (result).(*protocol.SignatureHelp)
+	help, ok := result.(*protocol.SignatureHelp)
 	if !ok || help == nil || len(help.Signatures) == 0 {
 		t.Fatal("expected signature for myHelper")
 	}
@@ -2876,7 +2876,7 @@ func TestDocumentLinkHrefAndAction(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) != 2 {
 		t.Errorf("expected 2 links (href + action), got %d", len(links))
 	}
@@ -3034,7 +3034,7 @@ func TestDefinitionFallsBackToGlobalLookup(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -3064,7 +3064,7 @@ func TestDocumentLinkInsideFunction(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) == 0 {
 		t.Error("expected link inside function body via FuncRefs")
 	}
@@ -3160,7 +3160,7 @@ func TestHoverUnqualifiedUserFunction(t *testing.T) {
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for unqualified user function")
 	}
@@ -3219,7 +3219,7 @@ func TestDefinitionPrefersSameFile(t *testing.T) {
 	})
 	result, _ := srv.handleDefinition(context.Background(), req)
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}
@@ -3245,10 +3245,10 @@ func TestDocumentSymbolBasic(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	symbols, ok := (result).([]protocol.DocumentSymbol)
+	symbols, ok := result.([]protocol.DocumentSymbol)
 	if !ok {
 		// Might be SymbolInformation
-		syms, ok2 := (result).([]protocol.SymbolInformation)
+		syms, ok2 := result.([]protocol.SymbolInformation)
 		if !ok2 || len(syms) < 2 {
 			t.Fatalf("expected at least 2 symbols, got %T", result)
 		}
@@ -3275,7 +3275,7 @@ func TestWorkspaceSymbolQuery(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	symbols, ok := (result).([]protocol.SymbolInformation)
+	symbols, ok := result.([]protocol.SymbolInformation)
 	if !ok || len(symbols) == 0 {
 		t.Fatal("expected at least one workspace symbol")
 	}
@@ -3370,7 +3370,7 @@ func TestDocumentLinkEmptyDocument(t *testing.T) {
 	})
 	result, _ := srv.handleDocumentLink(context.Background(), req)
 
-	links, _ := (result).([]protocol.DocumentLink)
+	links, _ := result.([]protocol.DocumentLink)
 	if len(links) != 0 {
 		t.Errorf("expected no links for empty doc, got %d", len(links))
 	}
@@ -3440,7 +3440,7 @@ func TestExecuteCommandShowResolvers(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	msg, _ := (result).(string)
+	msg, _ := result.(string)
 	if !strings.Contains(msg, "models") {
 		t.Errorf("expected mappings in output, got %s", msg)
 	}
@@ -3468,7 +3468,7 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 		t.Fatal(replyErr)
 	}
 
-	msg, _ := (result).(string)
+	msg, _ := result.(string)
 	if !strings.Contains(msg, "init") || !strings.Contains(msg, "getData") {
 		t.Errorf("expected function names in output, got %s", msg)
 	}
@@ -3540,7 +3540,7 @@ func TestHoverQualifiedOverridesBuiltin(t *testing.T) {
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover result")
 	}
@@ -3561,7 +3561,7 @@ func TestHoverUnqualifiedShowsBuiltin(t *testing.T) {
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for builtin Len")
 	}
@@ -3614,7 +3614,7 @@ func TestHoverSingleGlobalMatch(t *testing.T) {
 	})
 	result, _ := srv.handleHover(context.Background(), req)
 
-	hover, ok := (result).(*protocol.Hover)
+	hover, ok := result.(*protocol.Hover)
 	if !ok || hover == nil {
 		t.Fatal("expected hover for globally unique function")
 	}
@@ -4246,7 +4246,7 @@ func TestBeansTestdata_InjectResolution(t *testing.T) {
 		t.Fatal("expected definition for variables.userDAO.getById via inject bean")
 	}
 
-	loc, ok := (result).(protocol.Location)
+	loc, ok := result.(protocol.Location)
 	if !ok {
 		t.Fatalf("expected Location, got %T", result)
 	}

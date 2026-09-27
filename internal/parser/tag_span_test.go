@@ -191,24 +191,36 @@ func TestATagEndsAtAQuoteAwareAngleBracket(t *testing.T) {
 		src  string
 		want []string
 	}{
-		{"markup in a cfset's string", `<cfset x = array( f( "a<br>b" ), g( "c" ) )>`,
-			[]string{"array", "f", "g"}},
-		{"an entity then a bracket", `<cfset x = array( f( "p&lt;new line>" ), g( "c" ) )>`,
-			[]string{"array", "f", "g"}},
-		{"spanning lines", "<cfset x = array(\n f( \"a<br>b\" )\n ,g( \"c\" )\n)>",
-			[]string{"array", "f", "g"}},
-		{"single quotes", `<cfset x = array( f( 'a<br>b' ), g( 'c' ) )>`,
-			[]string{"array", "f", "g"}},
+		{
+			"markup in a cfset's string", `<cfset x = array( f( "a<br>b" ), g( "c" ) )>`,
+			[]string{"array", "f", "g"},
+		},
+		{
+			"an entity then a bracket", `<cfset x = array( f( "p&lt;new line>" ), g( "c" ) )>`,
+			[]string{"array", "f", "g"},
+		},
+		{
+			"spanning lines", "<cfset x = array(\n f( \"a<br>b\" )\n ,g( \"c\" )\n)>",
+			[]string{"array", "f", "g"},
+		},
+		{
+			"single quotes", `<cfset x = array( f( 'a<br>b' ), g( 'c' ) )>`,
+			[]string{"array", "f", "g"},
+		},
 
 		// A doubled quote is CFML's escape, so it does not close the string and
 		// the `>` after it is still inside one.
-		{"a doubled quote inside the string", `<cfset x = array( f( "a""b<br>c" ), g( "d" ) )>`,
-			[]string{"array", "f", "g"}},
+		{
+			"a doubled quote inside the string", `<cfset x = array( f( "a""b<br>c" ), g( "d" ) )>`,
+			[]string{"array", "f", "g"},
+		},
 
 		// A quote that never closes falls back to the plain scan, so a
 		// malformed tag cannot swallow the rest of the file.
-		{"an unterminated quote does not run away", "<cfset x = f( \"a )>\n<cfset y = g()>",
-			[]string{"f", "g"}},
+		{
+			"an unterminated quote does not run away", "<cfset x = f( \"a )>\n<cfset y = g()>",
+			[]string{"f", "g"},
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := tagFileCalls(t, c.src); !slices.Equal(got, c.want) {

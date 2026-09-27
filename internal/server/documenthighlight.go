@@ -2,9 +2,8 @@ package server
 
 import (
 	"context"
-	"strings"
-
 	"encoding/json/v2"
+	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"

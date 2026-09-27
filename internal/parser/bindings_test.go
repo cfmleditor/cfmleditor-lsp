@@ -241,8 +241,11 @@ func TestComponentAttributesAreNotVariables(t *testing.T) {
 		want    []string
 		extends string
 	}{
-		{"component extends=\"models.Base\" accessors=\"true\" output=\"false\" {\n\tvariables.real = 1;\n}\n",
-			[]string{"real"}, "models.Base"},
+		{
+			"component extends=\"models.Base\" accessors=\"true\" output=\"false\" {\n\tvariables.real = 1;\n}\n",
+			[]string{"real"},
+			"models.Base",
+		},
 		{"interface extends=\"IBase\" {\n\tpublic string function getName();\n}\n", nil, "IBase"},
 		{"component {\n\tvariables.real = 1;\n}\n", []string{"real"}, ""},
 	}
@@ -399,17 +402,20 @@ func TestNamedNestedFunctionsAreDeclared(t *testing.T) {
 		{
 			"called before it is written",
 			"setup();\n  function setup(required string a) { return a; }",
-			[]string{"run", "setup"}, 1,
+			[]string{"run", "setup"},
+			1,
 		},
 		{
 			"inside a closure argument",
 			"describe(\"x\", function() { function helper(b, c) { return b; } });",
-			[]string{"run", "helper"}, 2,
+			[]string{"run", "helper"},
+			2,
 		},
 		{
 			"with an access modifier",
 			"private function helper(b) { return b; }",
-			[]string{"run", "helper"}, 1,
+			[]string{"run", "helper"},
+			1,
 		},
 
 		// An anonymous function is a value, not a declaration — a var-scoped
