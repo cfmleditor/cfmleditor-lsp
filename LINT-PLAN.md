@@ -181,12 +181,38 @@ A canary confirmed a sample of the new checks fire (`builtinShadow`,
 
 ## Stage 6 — upkeep, on every golangci-lint bump
 
-- Run `golangci-lint linters` and migrate anything marked `[deprecated]`.
-  At v2.13.2 those are `wsl` (→ `wsl_v5`, already used), `gomodguard`
-  (→ `gomodguard_v2`) and `exhaustruct` (→ `exhaustruct_v5`), neither of the
-  last two enabled.
-- Run the linters, gocritic checks and revive rules the new version adds, as
-  above, and sort them into the stages.
+The procedure, each time the pin in the Makefile moves:
+
+1. **Diff the vendored analyzers** between the two versions' `go.mod`
+   (gocritic, revive, staticcheck, gosec, `golang.org/x/tools`); an analyzer
+   that did not move adds nothing.
+2. **Run the existing config** on the new version. A moved analyzer can find
+   new things under an old name — `modernize` is one linter that grows checks.
+3. **Migrate anything `[deprecated]`** in `golangci-lint linters`.
+4. **Measure the checks and rules the new version adds** and sort each into a
+   stage: a bug-catcher that finds nothing goes in, a style rule is a choice,
+   and the rest go in the table below with their counts.
+5. **Benchmark against `main`, alternately,** if any fix touched the parse or
+   request path.
+
+### v2.13.2 → v2.14.0 (done)
+
+- **Moved:** gocritic v0.14.4 → v0.15.0 (no new checks), revive v1.15.0 →
+  v1.17.0 (three new rules), gosec v2.28 → v2.29, exhaustive v0.12 → v0.13,
+  `golang.org/x/tools` v0.49 → v0.50. staticcheck did not move.
+- **New findings under the existing config:** 15, all `modernize`'s new
+  `stringscut`, which replaces `strings.LastIndex`/`LastIndexByte` and the
+  slicing around it with Go 1.27's `strings.CutLast`. 13 were on the parse
+  path. Applied, then tidied by hand where the autofix invented names
+  (`ok0`, `before0`) or nested one `if` inside another. The corpus extracts
+  the same 251,313 calls with the same bytes per parse; the plain tag parse,
+  where most of the edits are, measured 122.9µs against 122.9µs by median
+  over six alternating rounds.
+- **Deprecated:** unchanged — `wsl`, `gomodguard`, `exhaustruct`, none of
+  them enabled. No linter was added.
+- **New revive rules:** `marshal-receiver` (0 findings) is enabled.
+  `use-slices-concat` (7) and `multiline-if-init` (15) are left off; see the
+  table.
 
 ## Left off, and why
 
@@ -206,5 +232,7 @@ A canary confirmed a sample of the new checks fire (`builtinShadow`,
 | gocritic `weakCond`, `rangeAppendAll`, `commentedOutCode` | 1, 1, 5 | False positives: a regexp index is nil or exactly two long; the snippet policy's copy is deliberate; the "code" is an explanatory comment |
 | revive `data-race`, `defer` | 3, 16 | False positives: the values are written under a mutex and read after `wg.Wait()`; `CapturePanic` is correct as written |
 | revive `identical-switch-branches`, `deep-exit` | 20, 40 | One case per concept on purpose; the CLI exits by design |
+| revive `use-slices-concat` | 7 | `slices.Concat` of empty inputs returns nil where `append` to `[]T{}` returns an empty slice — the `null`-versus-`[]` distinction stage 5 guards |
+| revive `multiline-if-init` | 15 | Style, not yet chosen (v2.14.0) |
 | `cyclop`, `gocyclo` | — | Duplicate `gocognit` without weighting nesting (stage 4) |
 | `arangolint`, `clickhouselint`, `ginkgolinter`, `loggercheck`, `promlinter`, `protogetter`, `sloglint`, `spancheck`, `testifylint`, `zerologlint` | 0 | For libraries this project does not use |

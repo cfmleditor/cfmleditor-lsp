@@ -171,6 +171,10 @@ linters:
         # "nil": a nil slice marshals to null and an empty one to [], and LSP
         # responses and the code-map output rely on [].
         - name: use-any
+        # Stage 6 (LINT-PLAN.md): added by revive v1.17.0 (golangci-lint
+        # v2.14.0). Found nothing; a marshal method on the wrong receiver is
+        # silently never called.
+        - name: marshal-receiver
         - name: enforce-slice-style
           arguments: ["literal"]
         # Stage 2 (LINT-PLAN.md).

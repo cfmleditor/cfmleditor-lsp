@@ -91,12 +91,12 @@ func (f *Formatter) formatScriptNode(n *sitter.Node) {
 // the `.catch` sits on the `})` line, and its callback was indented a level
 // deeper than the `then` one beside it.
 func endsInChainBreak(callee string) bool {
-	nl := strings.LastIndexByte(callee, '\n')
-	if nl < 0 {
+	_, after, ok := strings.CutLast(callee, "\n")
+	if !ok {
 		return false
 	}
 
-	last := strings.TrimLeft(callee[nl+1:], " \t")
+	last := strings.TrimLeft(after, " \t")
 
 	return strings.HasPrefix(last, ".") || strings.HasPrefix(last, "?.") || strings.HasPrefix(last, "::")
 }
@@ -949,8 +949,8 @@ func (f *Formatter) expr(n *sitter.Node) string { //nolint:gocognit,funlen // ov
 		inline := objStr + op + propStr
 		// Break if the object part is multi-line or the last line exceeds width.
 		lastLine := inline
-		if idx := strings.LastIndexByte(inline, '\n'); idx >= 0 {
-			lastLine = inline[idx+1:]
+		if _, after, ok := strings.CutLast(inline, "\n"); ok {
+			lastLine = after
 		}
 
 		if len(lastLine) > f.opts.LineWidth &&

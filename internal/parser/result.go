@@ -1961,8 +1961,8 @@ func (pr *ParseResult) resolveMethodReturnRefs(funcStart, funcEnd int, existingR
 		lhs := strings.TrimSpace(line[:eqIdx])
 
 		varName := lhs
-		if spIdx := strings.LastIndexByte(lhs, ' '); spIdx >= 0 {
-			varName = strings.TrimSpace(lhs[spIdx+1:])
+		if _, after, ok := strings.CutLast(lhs, " "); ok {
+			varName = strings.TrimSpace(after)
 		}
 
 		if dotIdx := strings.LastIndexByte(varName, '.'); dotIdx >= 0 {

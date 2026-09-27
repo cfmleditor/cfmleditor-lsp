@@ -242,8 +242,8 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	dotIdx := strings.LastIndexByte(fullChain, '.')
-	if dotIdx < 0 {
+	recv, method, ok := strings.CutLast(fullChain, ".")
+	if !ok {
 		// Bare function call (no dot)
 		p.addCall(&CallSite{
 			FuncName: fullChain,
@@ -255,8 +255,8 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 	}
 
 	p.addCall(&CallSite{
-		FuncName: fullChain[dotIdx+1:],
-		Variable: fullChain[:dotIdx],
+		FuncName: method,
+		Variable: recv,
 		Line:     uint32(p.baseLine + line),
 		Caller:   caller,
 	})
@@ -412,8 +412,8 @@ func (p *scriptParser) recordChainFromScope(fullChain string, line int) {
 	}
 
 	base, name := "", fullChain
-	if dot := strings.LastIndexByte(fullChain, '.'); dot >= 0 {
-		base, name = fullChain[:dot], fullChain[dot+1:]
+	if b, n, ok := strings.CutLast(fullChain, "."); ok {
+		base, name = b, n
 	}
 
 	p.recordChainContinuation(base, name, comp, line)
@@ -935,8 +935,8 @@ func (p *scriptParser) parse() {
 					varName := ""
 					chain := retVal.String()
 
-					if dotIdx := strings.LastIndexByte(chain, '.'); dotIdx >= 0 {
-						varName = chain[:dotIdx]
+					if recv, _, ok := strings.CutLast(chain, "."); ok {
+						varName = recv
 					}
 
 					funcName := lastIdent
@@ -2142,12 +2142,11 @@ func (p *scriptParser) parseImport() {
 		return
 	}
 
-	dot := strings.LastIndexByte(path, '.')
-	if dot < 0 {
+	_, last, ok := strings.CutLast(path, ".")
+	if !ok {
 		return
 	}
 
-	last := path[dot+1:]
 	if last == "" || last == "*" {
 		return
 	}
@@ -4084,8 +4083,8 @@ func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, l
 // from it, not from the last name before the call — which in
 // "x = REQUEST.kernel.a().b()" was "kernel".
 func receiverOf(chain string) string {
-	if dot := strings.LastIndexByte(chain, '.'); dot >= 0 {
-		return chain[:dot]
+	if recv, _, ok := strings.CutLast(chain, "."); ok {
+		return recv
 	}
 
 	return ""
