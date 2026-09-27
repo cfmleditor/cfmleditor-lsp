@@ -165,6 +165,14 @@ linters:
         - name: unnecessary-if
         - name: useless-break
         - name: waitgroup-by-value
+        # Stage 5 (LINT-PLAN.md): style that costs nothing today. Map style is
+        # left unset: both spellings are in use, and picking one is 54 or 139
+        # edits that change nothing at runtime. Slice style is "literal", not
+        # "nil": a nil slice marshals to null and an empty one to [], and LSP
+        # responses and the code-map output rely on [].
+        - name: use-any
+        - name: enforce-slice-style
+          arguments: ["literal"]
         # Stage 2 (LINT-PLAN.md).
         - name: bool-literal-in-expr
         - name: confusing-results
@@ -241,6 +249,34 @@ linters:
         - regexpPattern
         - deferUnlambda
         - sloppyReassign
+        # Stage 5 (LINT-PLAN.md): style checks that found nothing when enabled.
+        - boolExprSimplify
+        - builtinShadow
+        - builtinShadowDecl
+        - commentedOutImport
+        - docStub
+        - dupImport
+        - dupOption
+        - emptyDecl
+        - emptyFallthrough
+        - hexLiteral
+        - initClause
+        - methodExprCall
+        - octalLiteral
+        - preferFilepathJoin
+        - ptrToRefParam
+        - redundantSprint
+        - regexpSimplify
+        - stringConcatSimplify
+        - timeExprSimplify
+        - todoCommentWithoutDetail
+        - tooManyResultsChecker
+        - typeAssertChain
+        - typeUnparen
+        - unlabelStmt
+        - unnecessaryBlock
+        - unnecessaryDefer
+        - yodaStyleExpr
         # Stage 2 (LINT-PLAN.md).
         - deferInLoop
         - filepathJoin

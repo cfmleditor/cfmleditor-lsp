@@ -1451,6 +1451,10 @@ Some handles need both shapes; others only one, depending on how the code uses t
   (`internal/parser` imports only `internal/log`; only `daemon` and `cmd`
   import `internal/server`; only `cmd` imports the code-map store and MCP
   server), and `forbidigo` bans printing to stdout under `internal/`.
+  **Write an empty slice as `[]T{}`, and keep it one where it is marshalled.**
+  `enforce-slice-style` is `literal`, not `nil`, because a nil slice encodes
+  as JSON `null` and an LSP response or the code map expecting `[]` then
+  breaks a client.
   `LINT-PLAN.md` holds the stages still to come, the measurements behind them,
   and the rules left off with the reason for each; update it when a stage
   lands or the pinned golangci-lint moves.

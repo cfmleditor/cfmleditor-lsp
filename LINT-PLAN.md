@@ -153,11 +153,11 @@ purpose). Nothing matched.
 A canary per rule confirmed each fires, and raising the `gocognit` limit made
 `nolintlint` report the markers it had made unnecessary.
 
-## Stage 5 — style rules that cost nothing today
+## Stage 5 — style rules that cost nothing today (done)
 
-A choice per rule, since each fixes a style for all future code.
+29 rules, all with zero findings when enabled, so the change is config only:
 
-- **gocritic, zero findings:** `boolExprSimplify`, `builtinShadow`,
+- **gocritic (27):** `boolExprSimplify`, `builtinShadow`,
   `builtinShadowDecl`, `commentedOutImport`, `docStub`, `dupImport`,
   `dupOption`, `emptyDecl`, `emptyFallthrough`, `hexLiteral`, `initClause`,
   `methodExprCall`, `octalLiteral`, `preferFilepathJoin`, `ptrToRefParam`,
@@ -165,8 +165,19 @@ A choice per rule, since each fixes a style for all future code.
   `timeExprSimplify`, `todoCommentWithoutDetail`, `tooManyResultsChecker`,
   `typeAssertChain`, `typeUnparen`, `unlabelStmt`, `unnecessaryBlock`,
   `unnecessaryDefer`, `yodaStyleExpr`.
-- **revive:** `use-any`, and `enforce-map-style` / `enforce-slice-style`,
-  which each need a style chosen.
+- **revive:** `use-any`, and `enforce-slice-style` set to `literal`
+  (`[]T{}` rather than `make([]T, 0)`).
+
+Measured and left off:
+
+| Setting | Findings | Why |
+|---|---:|---|
+| `enforce-map-style` `make` / `literal` | 54 / 139 | Both spellings are in use; either is that many edits that change nothing at runtime |
+| `enforce-slice-style` `make` | 34 | The same churn |
+| `enforce-slice-style` `nil` | 32 | Changes behaviour: a nil slice marshals to JSON `null` and an empty one to `[]`, and LSP responses and the code-map output rely on `[]` |
+
+A canary confirmed a sample of the new checks fire (`builtinShadow`,
+`yodaStyleExpr`, `unnecessaryBlock`, `use-any`, the slice style).
 
 ## Stage 6 — upkeep, on every golangci-lint bump
 
