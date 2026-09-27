@@ -2,6 +2,8 @@ package parser
 
 import (
 	"strings"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // tagParser extracts definitions from CFML tag-based source.
@@ -665,7 +667,7 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
-				Line:      uint32(line),
+				Line:      conv.Uint32(line),
 			}
 
 			endLine := -1
@@ -714,7 +716,7 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:       name,
 		URI:        uriFromString(p.fileURI),
-		Line:       uint32(line),
+		Line:       conv.Uint32(line),
 		Arguments:  args,
 		ReturnType: returnType,
 	})
@@ -785,7 +787,7 @@ func (p *tagParser) parseCFArguments(block string, blockStart int) []Argument {
 
 			p.vars = append(p.vars, VarDef{
 				Name: name, Scope: ScopeArguments,
-				Line: uint32(p.lineAt(blockStart + idx)),
+				Line: conv.Uint32(p.lineAt(blockStart + idx)),
 			})
 		}
 
@@ -817,7 +819,7 @@ func (p *tagParser) parseReadOnlyScopeSet(inner string, line int) bool {
 		return false
 	}
 
-	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: uint32(line)})
+	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: conv.Uint32(line)})
 
 	return true
 }
@@ -849,7 +851,7 @@ func (p *tagParser) parseScopedAttrVar(tag, attr string, line int) {
 		return
 	}
 
-	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: uint32(line)})
+	p.vars = append(p.vars, VarDef{Name: name, Scope: scope, Line: conv.Uint32(line)})
 }
 
 // parseCFSet handles <cfset var x = ...>, <cfset local.x = ...>, etc.
@@ -880,7 +882,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 
 		name := extractIdent(rest)
 		if name != "" {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
+			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: conv.Uint32(line)})
 
 			if p.inFunc != "" {
 				p.markVarLocal(name)
@@ -893,7 +895,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 
 		name, rhs := splitAssign(rest)
 		if name != "" {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: uint32(line)})
+			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeLocal, Line: conv.Uint32(line)})
 
 			if p.inFunc != "" {
 				p.markVarLocal(name)
@@ -906,7 +908,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 
 		name, rhs := splitAssign(rest)
 		if name != "" {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeArguments, Line: uint32(line)})
+			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeArguments, Line: conv.Uint32(line)})
 			p.checkSetRHSStr(rhs, name, line)
 		}
 	case hasPrefixFold(inner, "this."):
@@ -914,7 +916,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 
 		name, rhs := splitAssign(rest)
 		if name != "" {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: uint32(line)})
+			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: conv.Uint32(line)})
 			p.forceGlobal = true
 			p.checkSetRHSStr(rhs, name, line)
 			p.forceGlobal = false
@@ -924,7 +926,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 
 		name, rhs := splitAssign(rest)
 		if name != "" {
-			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: conv.Uint32(line)})
 			p.forceGlobal = true
 			p.checkSetRHSStr(rhs, name, line)
 			p.forceGlobal = false
@@ -943,7 +945,7 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 				// If var was previously declared local in this function, keep it local
 				isLocal := p.inFunc != "" && p.isVarDeclaredLocal(name)
 				if !isLocal {
-					p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: uint32(line)})
+					p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeVariables, Line: conv.Uint32(line)})
 				}
 
 				p.forceGlobal = !isLocal
@@ -964,7 +966,7 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 			Variable:  name,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
-			Line:      uint32(line),
+			Line:      conv.Uint32(line),
 		})
 	}
 }
@@ -979,7 +981,7 @@ func (p *tagParser) parseCFInvoke(tag string, line int) {
 			Variable:  variable,
 			Component: component,
 			URI:       uriFromString(p.fileURI),
-			Line:      uint32(line),
+			Line:      conv.Uint32(line),
 		})
 	}
 }
@@ -1034,7 +1036,7 @@ func (p *tagParser) parseCFProperty(tag string, line int) {
 
 	typeName := getAttr(tag, "type")
 	attrs := extractAllAttrs(tag)
-	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: uint32(line), attrs: attrs})
+	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: conv.Uint32(line), attrs: attrs})
 }
 
 func (p *tagParser) checkSetRHS(rest, varName string, line int) {
@@ -1052,7 +1054,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 		if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: selfPath,
-				URI: uriFromString(p.fileURI), Line: uint32(line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 			})
 		}
 	case hasPrefixFold(rhs, "new "):
@@ -1060,7 +1062,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
-				URI: uriFromString(p.fileURI), Line: uint32(line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 			})
 		}
 
@@ -1069,13 +1071,13 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
-				URI: uriFromString(p.fileURI), Line: uint32(line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 			})
 		} else if len(p.resolvers) > 0 {
 			if comp := p.resolveCall(rhs); comp != "" {
 				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp, ChainRest: trailingCalls(rhs),
-					URI: uriFromString(p.fileURI), Line: uint32(line),
+					URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 				})
 			}
 		}
@@ -1085,7 +1087,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
-				URI: uriFromString(p.fileURI), Line: uint32(line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 			})
 		}
 	case hasPrefixFold(rhs, "entityload("):
@@ -1093,7 +1095,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
-				URI: uriFromString(p.fileURI), Line: uint32(line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 			})
 		}
 	default:
@@ -1102,7 +1104,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 			if comp := p.resolveCall(rhs); comp != "" {
 				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp,
-					URI: uriFromString(p.fileURI), Line: uint32(line),
+					URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 				})
 
 				return
@@ -1117,7 +1119,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 
 							p.addRef(&ComponentRef{
 								Variable: varName, Component: comp,
-								URI: uriFromString(p.fileURI), Line: uint32(line),
+								URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 							})
 
 							return
@@ -1153,7 +1155,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 						Variable:  varChain,
 						Component: comp,
 						Resolved:  comp != "",
-						Line:      uint32(line),
+						Line:      conv.Uint32(line),
 						Caller:    caller,
 					})
 				}
@@ -1163,7 +1165,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 				varName:  varName,
 				funcName: methodForPending,
 				baseVar:  baseVar,
-				line:     uint32(line),
+				line:     conv.Uint32(line),
 				funcKey:  p.inFunc,
 				rest:     trailingCalls(rhs),
 			})
@@ -1178,7 +1180,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 					if comp := p.builtinReturnLookup(funcName); comp != "" {
 						p.addRef(&ComponentRef{
 							Variable: varName, Component: comp,
-							URI: uriFromString(p.fileURI), Line: uint32(line),
+							URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 						})
 
 						return
@@ -1193,7 +1195,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 
 					p.addCall(&CallSite{
 						FuncName: funcName,
-						Line:     uint32(line),
+						Line:     conv.Uint32(line),
 						Caller:   caller,
 					})
 				}
@@ -1201,7 +1203,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) { //nolint:goc
 				p.pendingCalls = append(p.pendingCalls, pendingCall{
 					varName:  varName,
 					funcName: funcName,
-					line:     uint32(line),
+					line:     conv.Uint32(line),
 					funcKey:  p.inFunc,
 					rest:     trailingCalls(rhs),
 				})
@@ -1250,7 +1252,7 @@ func (p *tagParser) checkBareCallStr(expr string, line int) {
 		Variable:  varName,
 		Component: comp,
 		Resolved:  comp != "",
-		Line:      uint32(line),
+		Line:      conv.Uint32(line),
 		Caller:    caller,
 	})
 }
@@ -1845,7 +1847,7 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 	have := map[string]int{}
 
 	if topUp {
-		cs := p.callsOnLine(uint32(line))
+		cs := p.callsOnLine(conv.Uint32(line))
 
 		for i := range cs {
 			c := &cs[i]

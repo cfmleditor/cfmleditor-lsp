@@ -10,13 +10,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 // Completion feature flags — set to false to disable specific providers.
@@ -350,7 +353,7 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 
 		if open := strings.LastIndex(textBefore, "<"); open >= 0 {
 			l, c := parser.PositionAt(content, open)
-			openLine, openChar = uint32(l), lineCol(parser.LineTextAt(content, l), c)
+			openLine, openChar = conv.Uint32(l), lineCol(parser.LineTextAt(content, l), c)
 		}
 
 		items = append(items, protocol.CompletionItem{SortText: optStr(SortProperties),
@@ -545,8 +548,8 @@ func duplicateGtCompletion(content string, line, char int) (protocol.CompletionI
 
 		TextEdit: &protocol.TextEdit{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
-				End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, char)},
+				Start: protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, char-1)},
+				End:   protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, char)},
 			},
 			NewText: "",
 		},
@@ -609,8 +612,8 @@ func closeTagCompletion(content string, line, char int) (protocol.CompletionItem
 		InsertTextFormat: protocol.InsertTextFormatSnippet,
 		TextEdit: &protocol.TextEdit{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
-				End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, endChar)},
+				Start: protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, char-1)},
+				End:   protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, endChar)},
 			},
 			NewText: middle + ">",
 		},
@@ -1077,7 +1080,7 @@ func (s *Server) dotCompletionMethods(content string, docURI uri.URI, line, char
 	}
 
 	// Look up component ref for this variable in the current file
-	ref := s.index.LookupComponentRefInFile(varName, docURI, uint32(line))
+	ref := s.index.LookupComponentRefInFile(varName, docURI, conv.Uint32(line))
 
 	var component string
 
@@ -1192,7 +1195,7 @@ func (s *Server) argumentCompletion(content string, docURI uri.URI, line, char i
 
 	// Try qualified user function
 	if qualifier != "" {
-		def = s.resolveUserFunc(qualifier, funcName, docURI, uint32(line))
+		def = s.resolveUserFunc(qualifier, funcName, docURI, conv.Uint32(line))
 	}
 	// Try unqualified
 	if def == nil {

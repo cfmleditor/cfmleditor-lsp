@@ -5,15 +5,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"encoding/json/v2"
+
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 // handleReferences answers textDocument/references.
@@ -181,7 +184,7 @@ func (s *Server) declarationOf(word, content string, docURI uri.URI, line, char 
 	defs := s.index.Lookup(word)
 
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
-		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+		if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
 			return defLocation(def)
 		}
 

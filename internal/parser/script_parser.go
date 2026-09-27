@@ -3,6 +3,8 @@ package parser
 import (
 	"slices"
 	"strings"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // propertyDef holds parsed property metadata.
@@ -131,7 +133,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 
 	p.addCall(&CallSite{
 		FuncName: tok.Value,
-		Line:     uint32(p.baseLine + tok.Line),
+		Line:     conv.Uint32(p.baseLine + tok.Line),
 		Caller:   caller,
 	})
 
@@ -214,7 +216,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 				FuncName:  funcName,
 				Component: comp,
 				Chain:     hops,
-				Line:      uint32(p.baseLine + tok.Line),
+				Line:      conv.Uint32(p.baseLine + tok.Line),
 				Caller:    caller,
 				Resolved:  comp != "",
 			})
@@ -247,7 +249,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		// Bare function call (no dot)
 		p.addCall(&CallSite{
 			FuncName: fullChain,
-			Line:     uint32(p.baseLine + line),
+			Line:     conv.Uint32(p.baseLine + line),
 			Caller:   caller,
 		})
 
@@ -257,7 +259,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 	p.addCall(&CallSite{
 		FuncName: method,
 		Variable: recv,
-		Line:     uint32(p.baseLine + line),
+		Line:     conv.Uint32(p.baseLine + line),
 		Caller:   caller,
 	})
 }
@@ -384,7 +386,7 @@ func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []strin
 				Variable:  baseVar,
 				Component: baseComp,
 				Chain:     hops,
-				Line:      uint32(p.baseLine + line),
+				Line:      conv.Uint32(p.baseLine + line),
 				Caller:    caller,
 				Resolved:  baseComp != "",
 			})
@@ -492,7 +494,7 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: nameTok.Value, Scope: ScopeLocal,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	// Check RHS for component refs
@@ -588,31 +590,31 @@ chainWalk:
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
 				ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 			rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, line)
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: rest,
-				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		} else if p.builtinReturnLookup != nil {
 			if comp := p.builtinReturnLookup(lastIdent); comp != "" {
 				p.addRef(&ComponentRef{
 					Variable: varName, Component: comp,
-					URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 				})
 			} else {
 				p.pendingCalls = append(p.pendingCalls, pendingCall{
 					varName: varName, funcName: lastIdent, baseVar: prevIdent,
-					line: uint32(p.baseLine + line), funcKey: p.inFunc,
+					line: conv.Uint32(p.baseLine + line), funcKey: p.inFunc,
 				})
 				p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
 			}
 		} else {
 			p.pendingCalls = append(p.pendingCalls, pendingCall{
 				varName: varName, funcName: lastIdent, baseVar: prevIdent,
-				line: uint32(p.baseLine + line), funcKey: p.inFunc,
+				line: conv.Uint32(p.baseLine + line), funcKey: p.inFunc,
 			})
 			p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
 		}
@@ -620,7 +622,7 @@ chainWalk:
 		if comp := p.resolveCall(fullChain.String()); comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
-				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		}
 	}
@@ -652,7 +654,7 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 
 	call := CallSite{
 		FuncName: nameTok.Value,
-		Line:     uint32(p.baseLine + scopeTok.Line),
+		Line:     conv.Uint32(p.baseLine + scopeTok.Line),
 		Caller:   caller,
 	}
 
@@ -712,7 +714,7 @@ func (p *scriptParser) recordDynamicChain(recv string, line int, caller string) 
 			FuncName:  methTok.Value,
 			Variable:  recv,
 			Component: "$any",
-			Line:      uint32(p.baseLine + line),
+			Line:      conv.Uint32(p.baseLine + line),
 			Caller:    caller,
 			Resolved:  true,
 		})
@@ -782,7 +784,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: nameTok.Value, Scope: scope,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	isLocal := scope == ScopeLocal || scope == ScopeArguments
@@ -828,7 +830,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
 					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: selfPath,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + tok.Line),
 					})
 				}
 			}
@@ -950,7 +952,7 @@ func (p *scriptParser) parse() {
 					p.addCall(&CallSite{
 						FuncName: funcName,
 						Variable: varName,
-						Line:     uint32(p.baseLine + line),
+						Line:     conv.Uint32(p.baseLine + line),
 					})
 
 					// Continue walking further .method() hops chained off this
@@ -983,7 +985,7 @@ func (p *scriptParser) parse() {
 //	property string name;
 //	property name;
 func (p *scriptParser) parseProperty(startTok Token) {
-	line := uint32(p.baseLine + startTok.Line)
+	line := conv.Uint32(p.baseLine + startTok.Line)
 
 	var name, typeName string
 
@@ -1150,7 +1152,7 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
-				Line:      uint32(funcLine),
+				Line:      conv.Uint32(funcLine),
 			})
 		}
 	}
@@ -1158,7 +1160,7 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:       nameTok.Value,
 		URI:        uriFromString(p.fileURI),
-		Line:       uint32(funcLine),
+		Line:       conv.Uint32(funcLine),
 		Arguments:  args,
 		ReturnType: returnType,
 	})
@@ -1298,7 +1300,7 @@ func (p *scriptParser) recordFunctionValue(name string, startTok Token, args []A
 				Variable:  a.Name,
 				Component: a.Type,
 				URI:       uriFromString(p.fileURI),
-				Line:      uint32(funcLine),
+				Line:      conv.Uint32(funcLine),
 			})
 		}
 	}
@@ -1306,7 +1308,7 @@ func (p *scriptParser) recordFunctionValue(name string, startTok Token, args []A
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      name,
 		URI:       uriFromString(p.fileURI),
-		Line:      uint32(funcLine),
+		Line:      conv.Uint32(funcLine),
 		Arguments: args,
 	})
 
@@ -1376,7 +1378,7 @@ func (p *scriptParser) declareVar(nameTok Token, scope Scope) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: nameTok.Value, Scope: scope,
-		Line: uint32(p.baseLine + nameTok.Line),
+		Line: conv.Uint32(p.baseLine + nameTok.Line),
 	})
 }
 
@@ -1420,7 +1422,7 @@ func (p *scriptParser) recordStaticCall(component string, startTok Token) {
 	p.addCall(&CallSite{
 		FuncName:  methTok.Value,
 		Component: component,
-		Line:      uint32(p.baseLine + startTok.Line),
+		Line:      conv.Uint32(p.baseLine + startTok.Line),
 		Caller:    caller,
 		Resolved:  true,
 	})
@@ -1683,7 +1685,7 @@ func (p *scriptParser) recordLiteralMemberCall(recv Token) {
 		p.addCall(&CallSite{
 			FuncName:  methTok.Value,
 			Component: "$any",
-			Line:      uint32(p.baseLine + recv.Line),
+			Line:      conv.Uint32(p.baseLine + recv.Line),
 			Caller:    caller,
 			Resolved:  true,
 		})
@@ -2076,7 +2078,7 @@ func (p *scriptParser) checkReturnComponent() {
 
 				p.addCall(&CallSite{
 					FuncName: peek.Value,
-					Line:     uint32(p.baseLine + peek.Line),
+					Line:     conv.Uint32(p.baseLine + peek.Line),
 					Caller:   caller,
 				})
 			}
@@ -2279,7 +2281,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 	p.localVarSet[strings.ToLower(nameTok.Value)] = true
 	p.vars = append(p.vars, VarDef{
 		Name: nameTok.Value, Scope: ScopeLocal,
-		Line: uint32(p.baseLine + varTok.Line),
+		Line: conv.Uint32(p.baseLine + varTok.Line),
 	})
 
 	// Check RHS for component refs
@@ -2359,26 +2361,26 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
 					})
 				} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 					rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, varTok.Line)
 					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
 					})
 				} else if p.builtinReturnLookup != nil {
 					if comp := p.builtinReturnLookup(lastIdent); comp != "" {
 						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
-							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
 						})
 					} else {
 						p.pendingCalls = append(p.pendingCalls, pendingCall{
 							varName:  nameTok.Value,
 							funcName: lastIdent,
 							baseVar:  prevIdent,
-							line:     uint32(p.baseLine + varTok.Line),
+							line:     conv.Uint32(p.baseLine + varTok.Line),
 							funcKey:  p.inFunc,
 						})
 						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
@@ -2388,7 +2390,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 						varName:  nameTok.Value,
 						funcName: lastIdent,
 						baseVar:  prevIdent,
-						line:     uint32(p.baseLine + varTok.Line),
+						line:     conv.Uint32(p.baseLine + varTok.Line),
 						funcKey:  p.inFunc,
 					})
 					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
@@ -2397,7 +2399,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 				if comp := p.resolveCall(fullChain.String()); comp != "" {
 					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: comp,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + varTok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
 					})
 				}
 			}
@@ -2482,7 +2484,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 	p.vars = append(p.vars, VarDef{
 		Name: nameTok.Value, Scope: scope,
-		Line: uint32(p.baseLine + scopeTok.Line),
+		Line: conv.Uint32(p.baseLine + scopeTok.Line),
 	})
 
 	isLocal := scope == ScopeLocal || scope == ScopeArguments
@@ -2521,7 +2523,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 				if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
 					p.addRef(&ComponentRef{
 						Variable: nameTok.Value, Component: selfPath,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + scopeTok.Line),
 					})
 				}
 			}
@@ -2578,14 +2580,14 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
 							ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + scopeTok.Line),
 						})
 					} else {
 						p.pendingCalls = append(p.pendingCalls, pendingCall{
 							varName:  nameTok.Value,
 							funcName: lastIdent,
 							baseVar:  prevIdent,
-							line:     uint32(p.baseLine + scopeTok.Line),
+							line:     conv.Uint32(p.baseLine + scopeTok.Line),
 							funcKey:  p.inFunc,
 						})
 						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, scopeTok.Line)
@@ -2594,7 +2596,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 					if comp := p.resolveCall(fullChain.String()); comp != "" {
 						p.addRef(&ComponentRef{
 							Variable: nameTok.Value, Component: comp,
-							URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + scopeTok.Line),
+							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + scopeTok.Line),
 						})
 					}
 				}
@@ -2670,7 +2672,7 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      nameTok.Value,
 		URI:       uriFromString(p.fileURI),
-		Line:      uint32(funcLine),
+		Line:      conv.Uint32(funcLine),
 		Arguments: args,
 	})
 
@@ -2763,7 +2765,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	// Record the variable
 	p.vars = append(p.vars, VarDef{
 		Name: tok.Value, Scope: ScopeVariables,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	// If inside a function and variable is NOT declared local, route to componentRefs
@@ -2857,14 +2859,14 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 					p.addRef(&ComponentRef{
 						Variable: tok.Value, Component: comp,
 						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + tok.Line),
 					})
 				} else {
 					p.pendingCalls = append(p.pendingCalls, pendingCall{
 						varName:  tok.Value,
 						funcName: lastIdent,
 						baseVar:  prevIdent,
-						line:     uint32(p.baseLine + tok.Line),
+						line:     conv.Uint32(p.baseLine + tok.Line),
 						funcKey:  p.inFunc,
 					})
 					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, tok.Line)
@@ -2874,7 +2876,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 				if comp := p.resolveCall(fullChain.String()); comp != "" {
 					p.addRef(&ComponentRef{
 						Variable: tok.Value, Component: comp,
-						URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + tok.Line),
+						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + tok.Line),
 					})
 				}
 			}
@@ -2950,7 +2952,7 @@ chainWalk:
 	p.addCall(&CallSite{
 		FuncName: funcName,
 		Variable: varName,
-		Line:     uint32(p.baseLine + tok.Line),
+		Line:     conv.Uint32(p.baseLine + tok.Line),
 		Caller:   caller,
 	})
 
@@ -2981,7 +2983,7 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 	if component != "" {
 		p.addRef(&ComponentRef{
 			Variable: varName, Component: component, ChainRest: hops,
-			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 		})
 	}
 }
@@ -3021,7 +3023,7 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 			hops := p.scanChainedCalls(comp, line)
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		}
 	} else if len(p.resolvers) > 0 {
@@ -3048,7 +3050,7 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 			hops := p.scanChainedCalls(comp, line)
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		}
 	}
@@ -3089,7 +3091,7 @@ func (p *scriptParser) scanChainedCalls(component string, line int) []string {
 			FuncName:  methTok.Value,
 			Component: component,
 			Chain:     slices.Clone(hops),
-			Line:      uint32(p.baseLine + line),
+			Line:      conv.Uint32(p.baseLine + line),
 			Caller:    caller,
 			Resolved:  true,
 		})
@@ -3117,7 +3119,7 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 	if comp != "" {
 		p.addRef(&ComponentRef{
 			Variable: varName, Component: comp,
-			URI: uriFromString(p.fileURI), Line: uint32(p.baseLine + line),
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 		})
 	}
 }
@@ -3242,7 +3244,7 @@ func (p *globalScriptParser) parseVar(tok Token) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: name.Value, Scope: ScopeVariables,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	p.consumeAssignment()
@@ -3268,7 +3270,7 @@ func (p *globalScriptParser) parseDot(tok Token, scope Scope) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: name.Value, Scope: scope,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	p.consumeAssignment()
@@ -3299,7 +3301,7 @@ func (p *globalScriptParser) parsePlain(tok Token, afterLT bool) {
 
 	p.vars = append(p.vars, VarDef{
 		Name: tok.Value, Scope: ScopeVariables,
-		Line: uint32(p.baseLine + tok.Line),
+		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
 	p.consumeAssignment()
@@ -4063,7 +4065,7 @@ func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, l
 	if len(ext) > 1 {
 		p.addCall(&CallSite{
 			FuncName: method, Variable: recv, Component: "$any", Resolved: true,
-			Line: uint32(p.baseLine + line), Caller: caller,
+			Line: conv.Uint32(p.baseLine + line), Caller: caller,
 		})
 		p.recordDynamicChain(recv, line, caller)
 
@@ -4072,7 +4074,7 @@ func (p *scriptParser) continueExtendedChain(recv, first string, ext []string, l
 
 	p.addCall(&CallSite{
 		FuncName: method, Variable: recv, Chain: []string{first},
-		Line: uint32(p.baseLine + line), Caller: caller,
+		Line: conv.Uint32(p.baseLine + line), Caller: caller,
 	})
 
 	return p.recordChainContinuationFrom(recv, []string{first}, method, "", line)

@@ -11,6 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
@@ -18,9 +24,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"go.lsp.dev/jsonrpc2"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 // docOf digs the document URI out of a request's parameters for logging, and
@@ -930,7 +933,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 		// throughout, and the server's settings can be replaced meanwhile.
 		cfg := s.Formatting
 
-		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: uint32(cfg.IndentWidth)}, &cfg)
+		formatted, err := formatDocument(content, protocol.FormattingOptions{InsertSpaces: true, TabSize: conv.Uint32(cfg.IndentWidth)}, &cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -948,7 +951,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (an
 					uri.URI(docURI): {{
 						Range: protocol.Range{
 							Start: protocol.Position{Line: 0, Character: 0},
-							End:   protocol.Position{Line: uint32(lines + 1), Character: 0},
+							End:   protocol.Position{Line: conv.Uint32(lines + 1), Character: 0},
 						},
 						NewText: formatted,
 					}},

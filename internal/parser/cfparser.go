@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/uri"
 )
 
@@ -23,7 +25,7 @@ func ParseFunctionDefs(fileURI uri.URI, content string) []FunctionDef {
 			tp.parse()
 			// Adjust lines by region start
 			for i := range tp.funcs {
-				tp.funcs[i].Line += uint32(r.StartLine)
+				tp.funcs[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			defs = append(defs, tp.funcs...)
@@ -49,7 +51,7 @@ func ParseComponentRefs(fileURI uri.URI, content string) []ComponentRef {
 			tp.parse()
 
 			for i := range tp.componentRefs {
-				tp.componentRefs[i].Line += uint32(r.StartLine)
+				tp.componentRefs[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			refs = append(refs, tp.componentRefs...)
@@ -87,7 +89,7 @@ func ParseVars(content string) []VarDef {
 			tp.parse()
 
 			for i := range tp.vars {
-				tp.vars[i].Line += uint32(r.StartLine)
+				tp.vars[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			regionVars = tp.vars
@@ -419,7 +421,7 @@ func buildLineIdx(src string) []int32 {
 
 		off += i + 1
 
-		idx = append(idx, int32(off))
+		idx = append(idx, conv.Int32(off))
 	}
 
 	return idx

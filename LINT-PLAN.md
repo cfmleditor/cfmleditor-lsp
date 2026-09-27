@@ -243,12 +243,17 @@ Measured with each exclusion lifted:
 ## gosec in production code (done)
 
 A global exclusion hid eight `gosec` rules everywhere: 239 findings. It is now
-`G115` alone, plus one exclusion for `cmd/`:
+one exclusion for `cmd/`:
 
-- **`G115`, 173, stays excluded.** Every `int`-to-`uint32` conversion of a
-  line or column for the protocol, 111 of them in the parser. A line number
-  does not overflow, and a checked conversion at each site is cost with no
-  protection.
+- **`G115`, 173, fixed.** Every bare `int`-to-`uint32` conversion of a line or
+  column (111 of them in the parser) goes through `internal/conv`, whose
+  `Uint32`, `Uint32FromUint` and `Int32` clamp to the target's range instead of
+  wrapping. Nothing converted a legitimately negative value; the one place one
+  could arise — `ShiftLines` after a deletion — used to wrap to about four
+  billion and now stops at 0. The parser's depguard rule allows the package,
+  which imports nothing but `math`. `unresolved` over the corpus reports the
+  same 91,405 entries before and after, and parse time is unchanged, measured
+  against `main` alternately.
 - **`cmd/` is excluded from `G304`, `G306` and `G703`** (38): the CLI opens,
   stats, walks and writes the files it is given on the command line.
 - **The rest are fixed or carry their reason.** One was a real defect:

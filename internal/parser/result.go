@@ -10,8 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/uri"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/log"
 )
 
 // Logger is an optional interface for parse diagnostics.
@@ -366,15 +369,15 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 			tp.parse()
 
 			for i := range tp.funcs {
-				tp.funcs[i].Line += uint32(r.StartLine)
+				tp.funcs[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			for i := range tp.componentRefs {
-				tp.componentRefs[i].Line += uint32(r.StartLine)
+				tp.componentRefs[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			for i := range tp.properties {
-				tp.properties[i].line += uint32(r.StartLine)
+				tp.properties[i].line += conv.Uint32(r.StartLine)
 			}
 
 			pr.Funcs = append(pr.Funcs, tp.funcs...)
@@ -384,7 +387,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 			// Merge links from tag parser
 			if r.StartLine > 0 {
 				for i := range tp.links {
-					tp.links[i].Line += uint32(r.StartLine)
+					tp.links[i].Line += conv.Uint32(r.StartLine)
 				}
 			}
 
@@ -404,7 +407,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 						}
 
 						for i := range links {
-							links[i].Line += uint32(r.StartLine)
+							links[i].Line += conv.Uint32(r.StartLine)
 						}
 					}
 
@@ -429,7 +432,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 						}
 
 						for i := range refs {
-							refs[i].Line += uint32(r.StartLine)
+							refs[i].Line += conv.Uint32(r.StartLine)
 						}
 					}
 
@@ -439,7 +442,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 
 			// Collect pending calls from tag parser (offset lines and funcKey)
 			for i := range tp.pendingCalls {
-				tp.pendingCalls[i].line += uint32(r.StartLine)
+				tp.pendingCalls[i].line += conv.Uint32(r.StartLine)
 				if r.StartLine > 0 && tp.pendingCalls[i].funcKey != "" {
 					parts := strings.SplitN(tp.pendingCalls[i].funcKey, ":", 2)
 					if len(parts) == 2 {
@@ -455,7 +458,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 			// Merge calls from tag parser
 			if r.StartLine > 0 {
 				for i := range tp.calls {
-					tp.calls[i].Line += uint32(r.StartLine)
+					tp.calls[i].Line += conv.Uint32(r.StartLine)
 				}
 			}
 
@@ -475,7 +478,7 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 						}
 
 						for i := range calls {
-							calls[i].Line += uint32(r.StartLine)
+							calls[i].Line += conv.Uint32(r.StartLine)
 						}
 					}
 
@@ -585,7 +588,7 @@ func (pr *ParseResult) applyServiceProperties() {
 		}
 
 		component := strings.ReplaceAll(tmpl, "${name}", name)
-		line := uint32(strings.Count(pr.Content[:m[0]], "\n"))
+		line := conv.Uint32(strings.Count(pr.Content[:m[0]], "\n"))
 
 		// resolve.CanResolveCall strips a receiver down to the text after its last
 		// top-level "." before comparing against ComponentRef.Variable (e.g.
@@ -1395,7 +1398,7 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 			tp.parse()
 
 			for i := range tp.vars {
-				tp.vars[i].Line += uint32(r.StartLine)
+				tp.vars[i].Line += conv.Uint32(r.StartLine)
 			}
 
 			regionVars = tp.vars
@@ -1618,9 +1621,9 @@ func extractLinksFromLine(line string, lineNum int, links *[]DocumentLink) {
 			if path != "" && !strings.Contains(path, "#") && !strings.Contains(path, "://") {
 				*links = append(*links, DocumentLink{
 					Path:  path,
-					Line:  uint32(lineNum),
-					Start: uint32(start),
-					End:   uint32(end),
+					Line:  conv.Uint32(lineNum),
+					Start: conv.Uint32(start),
+					End:   conv.Uint32(end),
 				})
 			}
 
@@ -1691,8 +1694,8 @@ func ExtractLinks(content string) []DocumentLink {
 					links = append(links, DocumentLink{
 						Path:  path,
 						Line:  uint32(lineNum),
-						Start: uint32(start),
-						End:   uint32(end),
+						Start: conv.Uint32(start),
+						End:   conv.Uint32(end),
 					})
 				}
 
@@ -1820,11 +1823,11 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 	// Offset lines by funcStart for tag parser (script parser uses baseLine)
 	if regionKind != RegionScript {
 		for i := range refs {
-			refs[i].Line += uint32(funcStart)
+			refs[i].Line += conv.Uint32(funcStart)
 		}
 
 		for i := range links {
-			links[i].Line += uint32(funcStart)
+			links[i].Line += conv.Uint32(funcStart)
 		}
 	}
 
@@ -1971,7 +1974,7 @@ func (pr *ParseResult) resolveMethodReturnRefs(funcStart, funcEnd int, existingR
 
 		if varName != "" && isIdentifier(varName) {
 			existingRefs = append(existingRefs, ComponentRef{
-				Variable: varName, Component: retComp, URI: pr.URI, Line: uint32(lineNum),
+				Variable: varName, Component: retComp, URI: pr.URI, Line: conv.Uint32(lineNum),
 			})
 			allRefs = append(allRefs, existingRefs[len(existingRefs)-1])
 		}
@@ -2145,7 +2148,7 @@ func (pr *ParseResult) funcCallsUncached(funcStart, funcEnd int) []CallSite {
 		}
 
 		for i := range calls {
-			calls[i].Line += uint32(funcStart)
+			calls[i].Line += conv.Uint32(funcStart)
 		}
 	}
 
@@ -2242,12 +2245,12 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 			}
 
 			pr.Calls = append(pr.Calls, CallSite{
-				FuncName: target, Component: comp, Variable: varName, Line: uint32(lineNum), Caller: caller,
+				FuncName: target, Component: comp, Variable: varName, Line: conv.Uint32(lineNum), Caller: caller,
 				Resolved: comp != "", Text: strings.TrimSpace(line),
 			})
 		} else if strings.Contains(lower, " "+t+"(") || strings.Contains(lower, "="+t+"(") || strings.HasPrefix(lower, t+"(") {
 			pr.Calls = append(pr.Calls, CallSite{
-				FuncName: target, Line: uint32(lineNum), Caller: caller,
+				FuncName: target, Line: conv.Uint32(lineNum), Caller: caller,
 				Resolved: false, Text: strings.TrimSpace(line),
 			})
 		}

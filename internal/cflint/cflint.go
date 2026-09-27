@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 )
 
@@ -151,8 +153,8 @@ func eachDiagnostic(result Result, minRank int, fn func(file string, d protocol.
 
 			fn(loc.File, protocol.Diagnostic{
 				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(line), Character: uint32(col)},
-					End:   protocol.Position{Line: uint32(line), Character: uint32(col)},
+					Start: protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(col)},
+					End:   protocol.Position{Line: conv.Uint32(line), Character: conv.Uint32(col)},
 				},
 				Severity: sev,
 				Source:   protocol.NewOptional("cflint"),

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode/utf16"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 )
 
@@ -132,7 +134,7 @@ func splitLines(s string) []string {
 // document when i is past the last line.
 func linePos(lines []string, i int) protocol.Position {
 	if i < len(lines) {
-		return protocol.Position{Line: uint32(i)}
+		return protocol.Position{Line: conv.Uint32(i)}
 	}
 
 	if i == 0 {
@@ -141,10 +143,10 @@ func linePos(lines []string, i int) protocol.Position {
 
 	last := lines[len(lines)-1]
 	if strings.HasSuffix(last, "\n") {
-		return protocol.Position{Line: uint32(len(lines))}
+		return protocol.Position{Line: conv.Uint32(len(lines))}
 	}
 
-	return protocol.Position{Line: uint32(len(lines) - 1), Character: uint32(len(utf16.Encode([]rune(last))))}
+	return protocol.Position{Line: conv.Uint32(len(lines) - 1), Character: conv.Uint32(len(utf16.Encode([]rune(last))))}
 }
 
 type lineMatch struct{ a, b int }

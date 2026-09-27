@@ -5,6 +5,8 @@ import (
 	"encoding/json/v2"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"go.lsp.dev/protocol"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -80,8 +82,8 @@ func onTypeEdits(content string, line, char int) []protocol.TextEdit {
 	endChar := char + idx + 1
 	edits := []protocol.TextEdit{{
 		Range: protocol.Range{
-			Start: protocol.Position{Line: uint32(line), Character: lineCol(lineText, char-1)},
-			End:   protocol.Position{Line: uint32(line), Character: lineCol(lineText, endChar)},
+			Start: protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, char-1)},
+			End:   protocol.Position{Line: conv.Uint32(line), Character: lineCol(lineText, endChar)},
 		},
 		NewText: ">",
 	}}

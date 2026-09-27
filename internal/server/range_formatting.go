@@ -5,11 +5,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"encoding/json/v2"
+
+	"go.lsp.dev/protocol"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/textdiff"
-	"go.lsp.dev/protocol"
 )
 
 // handleRangeFormatting answers textDocument/rangeFormatting — the editor's
@@ -249,8 +252,8 @@ func textEdits(edits []lineEdit) []protocol.TextEdit {
 
 		out = append(out, protocol.TextEdit{
 			Range: protocol.Range{
-				Start: protocol.Position{Line: uint32(e.aStart), Character: 0},
-				End:   protocol.Position{Line: uint32(e.aEnd), Character: 0},
+				Start: protocol.Position{Line: conv.Uint32(e.aStart), Character: 0},
+				End:   protocol.Position{Line: conv.Uint32(e.aEnd), Character: 0},
 			},
 			NewText: text,
 		})

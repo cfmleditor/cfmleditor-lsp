@@ -7,14 +7,17 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+
 	"encoding/json/v2"
+
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4
@@ -165,7 +168,7 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 
 		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
 
-		if def := s.resolveUserFunc(qualifier, word, docURI, uint32(line)); def != nil {
+		if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
 			return protocol.Location{
 				URI:   def.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: def.Line}, End: protocol.Position{Line: def.Line}},
