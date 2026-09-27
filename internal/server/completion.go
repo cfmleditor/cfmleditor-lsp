@@ -10,16 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // Completion feature flags — set to false to disable specific providers.

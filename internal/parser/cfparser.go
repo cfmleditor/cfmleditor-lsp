@@ -4,9 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"go.lsp.dev/uri"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // ParseFunctionDefs extracts function definitions from CFC content.

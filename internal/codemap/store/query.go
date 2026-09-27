@@ -10,9 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 const symbolCols = `id, kind, name, file, line, access, component, entry, reachable, utility, island, in_degree, out_degree`

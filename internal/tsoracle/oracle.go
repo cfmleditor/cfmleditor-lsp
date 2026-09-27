@@ -13,10 +13,8 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	sitter "github.com/tree-sitter/go-tree-sitter"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 // Call is one call site, reduced to what both implementations can agree on: the

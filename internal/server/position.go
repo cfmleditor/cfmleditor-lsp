@@ -5,7 +5,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 

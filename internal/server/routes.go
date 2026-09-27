@@ -9,11 +9,9 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/protocol"
-
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"go.lsp.dev/protocol"
 )
 
 // routeResolver returns the resolver for the configured routing convention, or

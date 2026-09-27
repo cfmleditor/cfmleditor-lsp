@@ -7,12 +7,10 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/protocol"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"go.lsp.dev/protocol"
 )
 
 func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, error) {

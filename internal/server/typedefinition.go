@@ -6,11 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // handleTypeDefinition answers textDocument/typeDefinition: the declaration of

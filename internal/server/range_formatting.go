@@ -5,14 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"encoding/json/v2"
 
-	"go.lsp.dev/protocol"
-
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/textdiff"
+	"go.lsp.dev/protocol"
 )
 
 // handleRangeFormatting answers textDocument/rangeFormatting — the editor's

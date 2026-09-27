@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"go.lsp.dev/protocol"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 const (

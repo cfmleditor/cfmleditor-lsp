@@ -8,11 +8,9 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"go.lsp.dev/uri"
 )
 
 // Index is a concurrency-safe store of function definitions keyed by name.

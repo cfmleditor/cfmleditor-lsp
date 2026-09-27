@@ -8,14 +8,12 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	sitter "github.com/tree-sitter/go-tree-sitter"
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // scanFiles is every CFML file scanWorkspace will read, from searchRoots

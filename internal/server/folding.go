@@ -4,14 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"encoding/json/v2"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
-
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
 )
 
 // handleFoldingRange answers textDocument/foldingRange, so the editor folds on

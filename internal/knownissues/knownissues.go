@@ -34,9 +34,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"go.lsp.dev/protocol"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 )
 
 // Entry is one finding from a known-issues file.

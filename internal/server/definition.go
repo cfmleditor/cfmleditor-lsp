@@ -7,17 +7,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
 	"encoding/json/v2"
 
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4

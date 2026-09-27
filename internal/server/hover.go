@@ -8,12 +8,10 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {

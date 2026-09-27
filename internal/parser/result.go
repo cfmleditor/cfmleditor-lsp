@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-
-	"go.lsp.dev/uri"
-
 	"github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"go.lsp.dev/uri"
 )
 
 // Logger is an optional interface for parse diagnostics.
