@@ -988,7 +988,7 @@ the user-facing view and all `formatting` defaults.
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
 | `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
-| `debug` | Verbose zap development logging to stderr |
+| `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 
 ## Debugging why a call site resolved (or didn't)
 
