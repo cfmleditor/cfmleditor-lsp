@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
@@ -32,6 +33,10 @@ type Call struct {
 	Function string `json:"function"`
 	Reason   string `json:"reason"`
 	Text     string `json:"text"`
+	// Unchecked is, on the one entry for a file whose extends chain breaks,
+	// how many inherited calls that leaves unchecked. Function holds the
+	// base that does not resolve.
+	Unchecked int `json:"unchecked,omitempty"`
 }
 
 // Options is what a scan resolves with: the .cfmleditor.json settings that
@@ -182,6 +187,13 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 
 	calls := pr.AllCalls()
 
+	// Inherited calls into a base that does not resolve are one finding,
+	// not one per call: see resolve.MissingBaseReason.
+	var (
+		missingBase string
+		unchecked   int
+	)
+
 	for i := range calls {
 		call := &calls[i]
 
@@ -210,6 +222,13 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 			continue
 		}
 
+		if base, ok := resolve.MissingBaseOf(reason); ok {
+			missingBase = base
+			unchecked++
+
+			continue
+		}
+
 		out = append(out, Call{
 			File:     file,
 			Line:     call.Line,
@@ -221,7 +240,90 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		})
 	}
 
+	if unchecked > 0 {
+		out = append(out, missingBaseCall(file, string(data), pr.Extends, missingBase, unchecked))
+	}
+
 	return out, resolved
+}
+
+// missingBaseCall is the one entry for a file whose extends chain breaks at
+// base, on the line of the file's own extends, which is where the chain
+// starts: base may be further up it, in a component the file never names.
+func missingBaseCall(file, content, extends, base string, unchecked int) Call {
+	line := uint32(0)
+	lowerExtends := strings.ToLower(extends)
+
+	for i, l := range strings.Split(content, "\n") {
+		if l = strings.ToLower(l); strings.Contains(l, "extends") && strings.Contains(l, lowerExtends) {
+			line = conv.Uint32(i)
+
+			break
+		}
+	}
+
+	noun := "calls"
+	if unchecked == 1 {
+		noun = "call"
+	}
+
+	reason := fmt.Sprintf("base component does not resolve; %d inherited %s not checked", unchecked, noun)
+	if !strings.EqualFold(extends, base) {
+		reason = fmt.Sprintf("extends %s, whose chain breaks at %s, which does not resolve; %d inherited %s not checked", extends, base, unchecked, noun)
+	}
+
+	return Call{
+		File:      file,
+		Line:      line,
+		Function:  base,
+		Reason:    reason,
+		Text:      "extends " + extends,
+		Unchecked: unchecked,
+	}
+}
+
+// MissingBase is one base component that does not resolve, across a report.
+type MissingBase struct {
+	Component string
+	Files     int
+	Calls     int
+}
+
+// MissingBases totals the report's missing bases, most calls first. Each is
+// usually one mapping or workspace path away from checking every call it
+// accounts for.
+func MissingBases(calls []Call) []MissingBase {
+	by := map[string]*MissingBase{}
+
+	for i := range calls {
+		c := &calls[i]
+		if c.Unchecked == 0 {
+			continue
+		}
+
+		key := strings.ToLower(c.Function)
+		if by[key] == nil {
+			by[key] = &MissingBase{Component: c.Function}
+		}
+
+		by[key].Files++
+		by[key].Calls += c.Unchecked
+	}
+
+	out := make([]MissingBase, 0, len(by))
+	for _, m := range by {
+		out = append(out, *m)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Calls != out[j].Calls {
+			return out[i].Calls > out[j].Calls
+		}
+
+		return out[i].Component < out[j].Component
+	})
+
+	return out
 }
 
 // IsBuiltin reports whether name is a built-in function or member function,

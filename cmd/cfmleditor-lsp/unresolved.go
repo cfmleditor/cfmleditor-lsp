@@ -123,6 +123,14 @@ func cmdUnresolved(args []string) {
 
 	fmt.Fprintf(os.Stderr, "%d unresolved calls found (%d resolved)\n", len(rep.Calls), rep.Resolved)
 
+	if bases := unresolved.MissingBases(rep.Calls); len(bases) > 0 {
+		fmt.Fprintf(os.Stderr, "\nBase components that do not resolve (a mapping or workspace path for each checks its calls):\n")
+
+		for _, b := range bases {
+			fmt.Fprintf(os.Stderr, "  %-50s %5d files %7d calls\n", b.Component, b.Files, b.Calls)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
 	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", rep.IndexTime, rep.Indexed)
 	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", rep.ScanTime, rep.Scanned)

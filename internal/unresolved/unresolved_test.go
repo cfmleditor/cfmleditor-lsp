@@ -2,9 +2,13 @@ package unresolved
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
 func TestWriteKnownIssuesIsProjectRelative(t *testing.T) {
@@ -87,5 +91,45 @@ func TestIsBuiltin(t *testing.T) {
 		if got := IsMemberFunction(name); got != want {
 			t.Errorf("IsMemberFunction(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+// TestAMissingBaseIsOneEntryPerFile: every inherited call in a file whose
+// extends chain breaks is unchecked for the same reason, so the report holds
+// one entry for the file, on its extends line and counting the calls — `toBe`
+// among them, since it is chained on `expect`, and `print.line`, since `print`
+// is not declared here and so is the base's — rather than one per call. `svc`
+// is an argument, so the base cannot explain it, and it is reported as before.
+func TestAMissingBaseIsOneEntryPerFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "Spec.cfc")
+	src := "/** a spec */\ncomponent extends=\"testbox.system.BaseSpec\" {\n" +
+		"\tfunction run( svc ) {\n\t\tdescribe( \"x\", function() {\n\t\t\texpect( 1 ).toBe( 1 );\n\t\t\tit( \"y\", function() {} );\n" +
+		"\t\t\tsvc.missing();\n\t\t\tprint.line( \"z\" );\n\t\t} );\n\t}\n}\n"
+
+	if err := os.WriteFile(file, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := Scan(vfs.OS{}, []string{file}, nil, &Options{})
+
+	var got []string
+
+	for i := range rep.Calls {
+		c := &rep.Calls[i]
+		got = append(got, fmt.Sprintf("%d: %s (%s)", c.Line+1, c.CallText(), c.Reason))
+	}
+
+	want := []string{
+		"2: testbox.system.BaseSpec (base component does not resolve; 5 inherited calls not checked)",
+		"7: svc.missing (variable 'svc' has no component ref)",
+	}
+
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	if bases := MissingBases(rep.Calls); len(bases) != 1 || bases[0] != (MissingBase{Component: "testbox.system.BaseSpec", Files: 1, Calls: 5}) {
+		t.Errorf("MissingBases: got %+v", bases)
 	}
 }
