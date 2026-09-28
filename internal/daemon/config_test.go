@@ -3,7 +3,9 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"testing"
 )
 
@@ -235,5 +237,39 @@ func TestExpandGlobParentRefDoubleStar(t *testing.T) {
 
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d: %v", len(matches), matches)
+	}
+}
+
+// An absolute workspacePaths entry names its folder as written; joining it onto
+// the config's directory put it under that directory, where nothing is, and a
+// scan from there indexed no files.
+func TestAbsoluteWorkspacePathIsKept(t *testing.T) {
+	root := t.TempDir()
+	absLib := filepath.Join(root, "elsewhere", "abs-lib")
+	relLib := filepath.Join(root, "rel-lib")
+
+	for _, d := range []string{absLib, relLib} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dir := filepath.Join(root, "project")
+	writeConfig(t, dir, `{
+		"workspaceName":"proj",
+		"workspacePaths":[`+strconv.Quote(absLib)+`,"../rel-lib"],
+		"workspaceIndexGlobs":["abs-lib/**/*.cfc","rel-lib/**/*.cfc"]
+	}`)
+
+	cfg := &Config{Path: filepath.Join(dir, ".cfmleditor.json"), Name: "proj"}
+
+	folders := cfg.WorkspaceFolders()
+	if want := []string{absLib, relLib}; !slices.Equal(folders, want) {
+		t.Fatalf("WorkspaceFolders() = %v, want %v", folders, want)
+	}
+
+	globs := cfg.IndexGlobs()
+	if want := []string{absLib + "/**/*.cfc", relLib + "/**/*.cfc"}; !slices.Equal(globs, want) {
+		t.Fatalf("IndexGlobs() = %v, want %v", globs, want)
 	}
 }

@@ -48,7 +48,7 @@ func (s *Server) Handler() jsonrpc2.Handler {
 
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Error("handler panic", cflog.String("method", req.Method()), cflog.Any("panic", r))
+				cflog.Recovered(s.log, "handler panic", r, cflog.String("method", req.Method()))
 				result, err = nil, fmt.Errorf("internal error: %v", r)
 			}
 
@@ -498,7 +498,7 @@ func (s *Server) debounceCacheRebuild(docURI uri.URI, content string, editLine i
 	s.cacheTimers[docURI] = time.AfterFunc(cacheRebuildDelay, func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Error("goroutine panic", cflog.String("label", "cacheRebuild"), cflog.Any("panic", r))
+				cflog.Recovered(s.log, "goroutine panic", r, cflog.String("label", "cacheRebuild"))
 			}
 		}()
 
@@ -1447,7 +1447,7 @@ func (s *Server) safeGo(label string, fn func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Error("goroutine panic", cflog.String("label", label), cflog.Any("panic", r))
+				cflog.Recovered(s.log, "goroutine panic", r, cflog.String("label", label))
 			}
 		}()
 

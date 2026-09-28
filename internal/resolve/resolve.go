@@ -176,6 +176,10 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	if p := r.inFolderNamed(component, dirs); p != "" {
+		return p
+	}
+
 	if root, rest := r.slugRoot(component, baseDir); root != "" {
 		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
 			return p
@@ -285,6 +289,43 @@ func (r *Resolver) boxSlug(dir string) string {
 	r.mu.Unlock()
 
 	return slug
+}
+
+// inFolderNamed resolves a dot-path whose first segment names a workspace
+// folder, inside that folder: with ../tassweb among the workspace folders,
+// tassweb.packages.tass.core.kernel2 is <tassweb>/packages/tass/core/kernel2.cfc.
+//
+// That is what a mapping from a folder's name to the folder says, and it was
+// the only kind of mapping tassweb's config held: all three of its mappings,
+// tassweb, tassreporting and tassdoc, named a workspace folder by its own name.
+// Without them 250,000 of its calls stopped resolving. A workspace folder now
+// implies that mapping, so a project needs one only where the name differs
+// from the folder.
+//
+// It comes after every configured lookup and before slugRoot, so an explicit mapping,
+// an Application.cfc mapping and a path relative to the file, the application
+// or a workspace folder all come first, and nothing that resolved before
+// resolves differently now. The folders are the resolver's, which are the
+// config's workspacePaths, or the editor's folders when the config names none.
+func (r *Resolver) inFolderNamed(component string, dirs *cfpath.DirCache) string {
+	dotted := strings.ReplaceAll(strings.TrimPrefix(component, "/"), "/", ".")
+
+	seg, rest, ok := strings.Cut(dotted, ".")
+	if !ok || seg == "" || rest == "" {
+		return ""
+	}
+
+	for _, root := range r.WorkspaceFolders {
+		if !strings.EqualFold(filepath.Base(root), seg) {
+			continue
+		}
+
+		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
+			return p
+		}
+	}
+
+	return ""
 }
 
 // EnsureIndexed ensures a CFC file is indexed, loading from disk if needed.

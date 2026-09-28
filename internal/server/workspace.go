@@ -93,7 +93,7 @@ func (s *Server) indexWorkspace() {
 			defer func() { <-sem }()
 			defer func() {
 				if r := recover(); r != nil {
-					s.log.Error("panic during indexing", cflog.String("file", f), cflog.Any("panic", r))
+					cflog.Recovered(s.log, "panic during indexing", r, cflog.String("file", f))
 				}
 			}()
 

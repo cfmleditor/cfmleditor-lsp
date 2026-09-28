@@ -187,6 +187,33 @@ func ResolvePathCached(dotPath string, baseDir string, mappings map[string]strin
 	return resolveSegmentsCached(baseDir, segments, cache)
 }
 
+// InFolderNamed returns where rel lands when its first segment names one of
+// roots: the rest of rel joined onto each root whose base name is that segment,
+// case-insensitively. rel is a slash path, with or without a leading slash
+// ("/tassweb/includes/x.cfm"). It returns nothing when rel has one segment.
+//
+// It is the path form of the rule behind Resolver's folder-named fallback: a
+// workspace folder called tassweb stands for a mapping of "tassweb" onto
+// itself, so a project whose mappings only ever named its own folders needs
+// none. Callers try it last, after every configured and relative lookup, so it
+// only answers a path nothing else did.
+func InFolderNamed(roots []string, rel string) []string {
+	seg, rest, ok := strings.Cut(strings.TrimPrefix(filepath.ToSlash(rel), "/"), "/")
+	if !ok || seg == "" || rest == "" {
+		return nil
+	}
+
+	var out []string
+
+	for _, root := range roots {
+		if strings.EqualFold(filepath.Base(root), seg) {
+			out = append(out, filepath.Join(root, filepath.FromSlash(rest)))
+		}
+	}
+
+	return out
+}
+
 // lookupFold returns the value for the first key in m that matches key
 // case-insensitively, and whether one was found.
 func lookupFold(m map[string]string, key string) (string, bool) {
@@ -340,6 +367,18 @@ func resolveSegmentsCached(baseDir string, segments []string, cache *DirCache) s
 	return dir
 }
 
+// ResolveFrom resolves a path written in a config file: an absolute path is
+// kept as it is, and a relative one is taken from baseDir. Joining an absolute
+// path onto baseDir unconditionally puts it under baseDir, where it names
+// nothing.
+func ResolveFrom(baseDir, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(baseDir, p)
+}
+
 // ResolveMappings resolves relative paths in a map to absolute using baseDir.
 func ResolveMappings(raw map[string]string, baseDir string) map[string]string {
 	if len(raw) == 0 {
@@ -349,11 +388,7 @@ func ResolveMappings(raw map[string]string, baseDir string) map[string]string {
 	out := make(map[string]string, len(raw))
 
 	for k, v := range raw {
-		if filepath.IsAbs(v) {
-			out[k] = v
-		} else {
-			out[k] = filepath.Join(baseDir, v)
-		}
+		out[k] = ResolveFrom(baseDir, v)
 	}
 
 	return out

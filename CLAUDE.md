@@ -161,7 +161,7 @@ Editor document change
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
-| `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment` |
+| `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment`. `EnableCrashReports` (called from `runServer` only, so test binaries never write to the user's cache) sends the runtime's crash output and every panic record to `CFMLEDITOR_LSP_LOG` or, unset, `<os.UserCacheDir>/cfmleditor-lsp/crash.log`. A recover site calls `cflog.Recovered`, not `log.Error`, so the record carries its stack and reaches that file |
 | `internal/conv` | Range-checked integer conversions (`Uint32`, `Uint32FromUint`, `Int32`) for LSP line and column numbers; imports only `math` |
 
 ### Parser design (`internal/parser`)
@@ -1100,7 +1100,7 @@ the user-facing view and all `formatting` defaults.
 |---|---|
 | `workspaceName` | Required for daemon mode; derives the socket path |
 | `workspacePaths`, `workspaceIndexGlobs` | Which roots / `.cfc` files to index |
-| `mappings` | Virtual dot-path root → directory |
+| `mappings` | Virtual dot-path root → directory. A workspace folder implies one of its own name (`Resolver.inFolderNamed`, `cfpath.InFolderNamed`), tried after every mapping and relative lookup, so explicit entries are needed only for roots that are not a folder's name |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |

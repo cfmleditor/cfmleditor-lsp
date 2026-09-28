@@ -73,6 +73,15 @@ The server communicates over stdio using JSON-RPC 2.0 with LSP headers:
 
 Configure your editor to launch this binary as an LSP server for `.cfm`, `.cfc`, `.cfml`, and `.cfs` files.
 
+### Logs and crash reports
+
+The server logs to stderr, which the editor keeps in its language-server log. Two files outlast that:
+
+- **Crash reports** always go to a file, with nothing to configure: `crash.log` in the server's cache directory. That is `~/Library/Caches/cfmleditor-lsp/crash.log` on macOS, `~/.cache/cfmleditor-lsp/crash.log` on Linux (or under `$XDG_CACHE_HOME`), and `%LocalAppData%\cfmleditor-lsp\crash.log` on Windows. Each start adds one line naming the version, the process and the time; anything else in the file is a crash record. That covers a crash that ended the process, whatever caused it, and a panic the server recovered from and kept running after, each with its stack.
+- **A copy of the whole log** goes to the file named by `CFMLEDITOR_LSP_LOG`, when that is set in the environment the editor starts the server with. Crash reports then go to that file instead of `crash.log`.
+
+For a fatal Go error, such as a stack overflow, the one-line reason (`fatal error: stack overflow`) appears only on stderr. The file gets the traceback that follows it.
+
 ## Code map
 
 `cfmleditor-lsp graph` builds a map of a whole project: every function and file, and
@@ -452,7 +461,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `workspaceName` | Yes | Unique project name. Used to derive the daemon socket path so multiple projects don't collide. |
 | `workspacePaths` | No | Relative paths to folders the LSP should treat as workspace roots. Resolved relative to the config file location. |
 | `workspaceIndexGlobs` | No | Glob patterns to filter which `.cfc` files are indexed. |
-| `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). |
+| `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). A workspace folder already implies a mapping of its own name; see [Mappings](#mappings). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
@@ -463,6 +472,8 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 ### Mappings
 
 Mappings let you resolve component dot-paths that use a virtual root. For example, with `"models": "./src/models"`, the dot-path `models.User` resolves to `./src/models/User.cfc`.
+
+A workspace folder also stands for a mapping of its own name, so a root that is just a folder's name needs no entry. With `"workspacePaths": ["../tassweb"]`, the dot-path `tassweb.packages.core.Kernel` resolves to `../tassweb/packages/core/Kernel.cfc`, and the include `/tassweb/includes/header.cfm` to the matching file. This is tried last, after every mapping, every `Application.cfc` mapping and every relative lookup, so it never changes a path those already resolve. Mappings are still what you need for any root that is not a workspace folder's name: a virtual root such as `models` above, a directory outside `workspacePaths`, or a name that should point somewhere other than the folder it matches. An explicit mapping for a folder's own name is harmless; it wins, and says the same thing.
 
 ### Component resolvers
 
