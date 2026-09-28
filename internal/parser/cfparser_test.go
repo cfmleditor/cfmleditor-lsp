@@ -4432,3 +4432,58 @@ func TestTagAssignmentThroughThisIsMarked(t *testing.T) {
 		}
 	}
 }
+
+// TestTagFunctionScopeEndsAtItsCloseTag: the walk reached the </cffunction>
+// check only for a tag whose second byte is 'c', which a close tag's '/'
+// never is, so a tag function's scope ran on to the next <cffunction>. Every
+// top-level <cfset> after one was the function's: a pending call typed a
+// variable of the function, an unscoped name was read against the function's
+// var'd locals, and a qualified call named the function as its caller —
+// Lucee's admin pages, which declare addZero() first, credited it with every
+// call on the page.
+func TestTagFunctionScopeEndsAtItsCloseTag(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="make" returntype="a.B">
+	<cfset var svc = 1>
+	<cfreturn createObject("component", "a.B")>
+</cffunction>
+<cfset d = make()>
+<cfset svc = createObject("component", "a.Svc")>
+<cfset svc.afterFunction()>
+</cfcomponent>`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true})
+
+	global := map[string]string{}
+	for _, r := range pr.ComponentRefs {
+		global[r.Variable] = r.Component
+	}
+
+	if global["d"] != "a.B" || global["svc"] != "a.Svc" {
+		t.Errorf("top-level refs after the function: %v, want d -> a.B and svc -> a.Svc", global)
+	}
+
+	for _, s := range pr.Scopes {
+		refs, _ := pr.FuncRefs(s.Start, s.End)
+		for _, r := range refs {
+			if r.Variable == "d" || strings.EqualFold(r.Component, "a.Svc") {
+				t.Errorf("%s holds a ref from after its close tag: %+v", s.Name, r)
+			}
+		}
+	}
+
+	found := false
+
+	for _, c := range pr.AllCalls() {
+		if c.FuncName == "afterFunction" {
+			found = true
+
+			if c.Caller != "" {
+				t.Errorf("svc.afterFunction() is top-level code, but its caller is %q", c.Caller)
+			}
+		}
+	}
+
+	if !found {
+		t.Error("svc.afterFunction() was not recorded")
+	}
+}

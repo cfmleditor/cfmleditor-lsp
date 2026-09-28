@@ -312,6 +312,10 @@ func (p *tagParser) parse() {
 
 		// Check for CF tags we care about
 		switch {
+		case idx+1 < len(p.src) && p.src[idx+1] == '/':
+			p.closeTag(idx)
+
+			pos = idx + 1
 		case idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f':
 			pos = p.handleCFTag(idx)
 		case p.gated && customPrefixTag(p.src[idx:], p.importPrefixes):
@@ -397,6 +401,28 @@ func (p *tagParser) parseNestedScript(idx int) int {
 	return bodyEnd + 11 // len("</cfscript>")
 }
 
+// closeTag handles the close tag at idx. </cffunction> ends the function
+// scope, so what follows is top-level code again.
+//
+// This was dead code three times over. "</cffunction>" is exactly 13 bytes
+// so `len(tag) > 13` was false, and tag[2:13] is "cffunction>", 11 bytes,
+// which never equals the 10-byte "cffunction". Once that was fixed the check
+// sat in handleCFTag, which the walk reaches only for a tag whose second byte
+// is 'c' — never a close tag's '/'. The scope was never exited, and every
+// top-level <cfset> after a function was that function's: its pending calls
+// typed a variable of the function, its unscoped names were read against the
+// function's var'd locals, and a call the tag parser records itself named
+// the function as its caller.
+func (p *tagParser) closeTag(idx int) {
+	if !isCloseTagFor(p.src[idx:], "cffunction") {
+		return
+	}
+
+	p.inFunc = ""
+	p.localVars = p.localVars[:0]
+	p.forceGlobal = false
+}
+
 // handleCFTag handles the CF tag opening at idx, returning where the walk
 // continues.
 func (p *tagParser) handleCFTag(idx int) int {
@@ -433,20 +459,6 @@ func (p *tagParser) handleCFTag(idx int) int {
 	// A handled tag is stepped over whole, so its own attributes are in
 	// no text gap: `<cfloop array="#svc.list()#">` is scanned here.
 	p.scanInterpolatedText(tag, idx)
-
-	// Detect </cffunction> to exit function scope.
-	//
-	// This was dead code twice over: "</cffunction>" is exactly 13
-	// bytes so `len(tag) > 13` was false, and tag[2:13] is
-	// "cffunction>" — 11 bytes — which never equals the 10-byte
-	// "cffunction". Function scope was therefore never exited.
-	if isCloseTagFor(tag, "cffunction") {
-		p.inFunc = ""
-		p.localVars = p.localVars[:0]
-		p.forceGlobal = false
-
-		return tagEnd
-	}
 
 	p.dispatchCFTag(ch, tag, idx, tagEnd, line)
 
@@ -872,6 +884,12 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 	// and pending calls that decide what a variable now holds.
 	defer p.scanSetExpressionCalls(inner, line)
 
+	p.setAssign(inner, line)
+}
+
+// setAssign handles the assignment a <cfset> holds, whose calls
+// parseCFSet's caller scans.
+func (p *tagParser) setAssign(inner string, line int) {
 	switch {
 	case hasPrefixFold(inner, "var "):
 		rest := strings.TrimSpace(inner[4:])
@@ -1047,6 +1065,12 @@ func (p *tagParser) checkSetRHS(rest, varName string, line int) {
 func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 	rhs = strings.TrimSpace(rhs)
 
+	if chainedSetTarget(rhs) {
+		p.chainedSet(rhs, varName, line)
+
+		return
+	}
+
 	switch {
 	case strings.EqualFold(rhs, "this"):
 		if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
@@ -1117,6 +1141,25 @@ func (p *tagParser) currentCaller() string {
 	}
 
 	return ""
+}
+
+// chainedSet handles `<cfset a = b = rhs>`: the inner assignment is made as
+// the statement it is, and what it made is made again for varName under the
+// state the outer assignment set up. See chained.go.
+func (p *tagParser) chainedSet(inner, varName string, line int) {
+	forceGlobal, refThis := p.forceGlobal, p.refThis
+	nGlobal, nLocal, nPending := len(p.componentRefs), len(p.funcRefs[p.inFunc]), len(p.pendingCalls)
+
+	p.setAssign(inner, line)
+
+	made := refsMadeFor(p.componentRefs, nGlobal, p.funcRefs[p.inFunc], nLocal, varName)
+	p.forceGlobal, p.refThis = forceGlobal, refThis
+
+	for i := range made {
+		p.addRef(&made[i])
+	}
+
+	p.pendingCalls = appendPendingFor(p.pendingCalls, nPending, varName, refThis)
 }
 
 // resolveRHS types varName through a componentResolver matching the whole

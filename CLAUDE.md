@@ -486,9 +486,17 @@ the *formatter*, not the parser.
   that here and a narrower rule was not measured. Two things came with it, each with
   a test that fails without it: `x = a[ k ].f()` no longer takes `a` as its base
   (the element is not the variable — a Lucee date had been typed as its entity), and
-  `variables.x = this.x = rhs` records a ref in each scope (`chainedScopedAssign`),
-  which TestBox's `$assert` relies on. `a = b = rhs` unscoped, and the tag parser's
-  chained `<cfset>`, still record nothing for either name.
+  `variables.x = this.x = rhs` records a ref in each scope, which TestBox's `$assert`
+  relies on.
+- **`a = b = rhs` gives both names what `rhs` holds, in either syntax** (`chained.go`).
+  Only the scoped script form used to, and `request.calc = calc = new Calculator()` typed
+  neither. Each parser handles the inner assignment as the statement it is
+  (`chainedAssign`, `tagParser.chainedSet` through `setAssign`), then re-adds what it made
+  for the outer name through `addRef` under the outer assignment's own state, so
+  `var a = b = new X()` makes a local `a` and a variables-scope `b`. `a = b == c` is a
+  comparison and chains nothing. The script check runs on every assignment, so it
+  decides from the cached peek and `Scanner.bytesAfterPeek` rather than a save and
+  restore, which drops the peek and cost 4.5% of a script parse.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -1819,6 +1827,15 @@ rule, and without the second half every route path short-circuits and the test
 passes whatever the code does. And a window test needs both documents to present
 a **full** window, or it compares a five-line window against a fifty-line one and
 fails for that instead.
+
+**A close tag reaches the walk as `</`, not `<c`.** The `</cffunction>` check sat in
+`handleCFTag`, which the walk calls only for a tag whose second byte is `c`, so a tag
+function's scope ran on until the next `<cffunction>`. Every top-level `<cfset>` after one
+was the function's: its pending calls typed a variable of the function, its unscoped names
+were read against the function's `var`'d locals, and a qualified call the tag parser
+records itself named the function as its caller — Lucee's admin pages, which declare
+`addZero()` first, credited it with every call on the page. `closeTag` handles it now;
+`TestTagFunctionScopeEndsAtItsCloseTag` fails on each of the three if it goes.
 
 **Where a tag holds an expression, hand it to the script parser.** The tag
 parser matches tags and pulls attributes out with string searches; it has no

@@ -303,6 +303,27 @@ func (s *Scanner) PeekSkipComments() Token {
 	return tok
 }
 
+// bytesAfterPeek are the first two bytes after the peeked token, past
+// spaces, tabs and newlines, with 0 for past the end. Nothing moves, so the
+// peek stays cached. It answers "could an `=` follow" without a save and
+// restore, which drop the peek; a comment in between reads as '/', a no.
+func (s *Scanner) bytesAfterPeek() (first, second byte) {
+	i := s.peekPos
+	for i < len(s.src) && (s.src[i] == ' ' || s.src[i] == '\t' || s.src[i] == '\r' || s.src[i] == '\n') {
+		i++
+	}
+
+	if i < len(s.src) {
+		first = s.src[i]
+	}
+
+	if i+1 < len(s.src) {
+		second = s.src[i+1]
+	}
+
+	return first, second
+}
+
 func (s *Scanner) skipWhitespaceNoNewline() {
 	for s.pos < len(s.src) {
 		ch := s.src[s.pos]

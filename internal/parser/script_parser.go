@@ -600,6 +600,10 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
+	if p.chainedAssign(nameTok.Value) {
+		return
+	}
+
 	// Check RHS for component refs
 	p.skipLiteralGroup()
 
@@ -852,7 +856,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 	p.refThis = scope == ScopeThis
 	defer func() { p.refThis = false }()
 
-	if p.chainedScopedAssign(nameTok.Value, p.parseScopedVar) {
+	if p.chainedAssign(nameTok.Value) {
 		p.forceGlobal = false
 
 		return
@@ -2438,6 +2442,10 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 		Line: conv.Uint32(p.baseLine + varTok.Line),
 	})
 
+	if p.chainedAssign(nameTok.Value) {
+		return
+	}
+
 	// Check RHS for component refs
 	p.skipLiteralGroup()
 
@@ -2512,7 +2520,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	p.refThis = scope == ScopeThis
 	defer func() { p.refThis = false }()
 
-	if p.chainedScopedAssign(nameTok.Value, p.parseBodyScopedVar) {
+	if p.chainedAssign(nameTok.Value) {
 		p.forceGlobal = false
 
 		return
@@ -2844,6 +2852,12 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		p.forceGlobal = true
 	}
 
+	if p.chainedAssign(tok.Value) {
+		p.forceGlobal = false
+
+		return
+	}
+
 	if p.parseFunctionValue(tok.Value, tok) {
 		p.forceGlobal = false
 
@@ -2893,74 +2907,94 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	p.forceGlobal = false
 }
 
-// chainedScopedAssign handles the right-hand side of `outer = this.x = rhs`
-// and `outer = variables.x = rhs`, which TestBox writes to keep one object in
-// both scopes. The inner assignment is parsed as the statement it is, with
-// parse — the caller's own handler — and every ref and pending call it makes
-// is made for outer as well, in outer's scope. Reports whether the right-hand
-// side was such an assignment; the scanner has not moved if it was not.
-func (p *scriptParser) chainedScopedAssign(outer string, parse func(Token, Scope)) bool {
-	st := p.sc.Save()
+// chainedAssign handles a right-hand side that is itself an assignment:
+// `outer = b = rhs`, `outer = this.b = rhs` or `outer = variables.b = rhs`.
+// TestBox keeps `$assert` in both scopes that way. The inner assignment is
+// parsed as the statement it is, and every ref and pending call it makes is
+// made again for outer under the state the outer assignment set up, so
+// `var a = b = new X()` makes a local a and a variables-scope b. Reports
+// whether the right-hand side was one; the scanner has not moved if not.
+func (p *scriptParser) chainedAssign(outer string) bool {
+	// Decided from the peek and the bytes after it, which leave the peek
+	// cached for the caller: saving and restoring on every assignment was
+	// 4.5% of a script parse, because a restore drops it.
+	peek := p.sc.PeekSkipComments()
+	if peek.Kind != TokIdent {
+		return false
+	}
 
+	switch first, second := p.sc.bytesAfterPeek(); {
+	case first == '=' && second != '=':
+		if isKeyword(peek.Value) {
+			return false
+		}
+	case first == '.' && (identEq(peek.Value, "this") || identEq(peek.Value, "variables")):
+	default:
+		return false
+	}
+
+	st := p.sc.Save()
 	tok := p.sc.NextSkipComments()
 
-	var scope Scope
+	scope, ok := p.assignmentAhead(tok)
+	if !ok {
+		p.sc.Restore(st)
+
+		return false
+	}
+
+	forceGlobal, refThis := p.forceGlobal, p.refThis
+	nGlobal, nLocal, nPending := len(p.componentRefs), len(p.funcRefs[p.inFunc]), len(p.pendingCalls)
 
 	switch {
-	case tok.Kind == TokIdent && strings.EqualFold(tok.Value, "this"):
-		scope = ScopeThis
-	case tok.Kind == TokIdent && strings.EqualFold(tok.Value, "variables"):
-		scope = ScopeVariables
+	case scope == ScopeLocal:
+		p.checkAssignRef(tok)
+	case p.inFunc != "":
+		p.parseBodyScopedVar(tok, scope)
 	default:
-		p.sc.Restore(st)
-
-		return false
+		p.parseScopedVar(tok, scope)
 	}
 
-	// `.name =`, and not `.name ==`: a comparison is two `=` tokens.
-	inner := p.sc.Save()
-	dot := p.sc.NextSkipComments()
-	name := p.sc.NextSkipComments()
-	eq := p.sc.NextSkipComments()
-	after := p.sc.PeekSkipComments()
-	p.sc.Restore(inner)
+	made := refsMadeFor(p.componentRefs, nGlobal, p.funcRefs[p.inFunc], nLocal, outer)
+	p.forceGlobal, p.refThis = forceGlobal, refThis
 
-	if dot.Kind != TokDot || name.Kind != TokIdent || eq.Kind != TokEquals || after.Kind == TokEquals {
-		p.sc.Restore(st)
-
-		return false
+	for i := range made {
+		p.addRef(&made[i])
 	}
 
-	outerThis := p.refThis
-	nGlobal, nFunc, nPending := len(p.componentRefs), len(p.funcRefs[p.inFunc]), len(p.pendingCalls)
-
-	parse(tok, scope)
-
-	p.componentRefs = appendRefsAs(p.componentRefs, nGlobal, outer, outerThis)
-
-	if refs := p.funcRefs[p.inFunc]; len(refs) > nFunc {
-		p.funcRefs[p.inFunc] = appendRefsAs(refs, nFunc, outer, outerThis)
-	}
-
-	for i, n := nPending, len(p.pendingCalls); i < n; i++ {
-		pc := p.pendingCalls[i]
-		pc.varName, pc.refThis = outer, outerThis
-		p.pendingCalls = append(p.pendingCalls, pc)
-	}
+	p.pendingCalls = appendPendingFor(p.pendingCalls, nPending, outer, refThis)
 
 	return true
 }
 
-// appendRefsAs appends a copy of refs[from:] made for name, in this scope or
-// not.
-func appendRefsAs(refs []ComponentRef, from int, name string, this bool) []ComponentRef {
-	for i, n := from, len(refs); i < n; i++ {
-		ref := refs[i]
-		ref.Variable, ref.This = name, this
-		refs = append(refs, ref)
+// assignmentAhead reports whether tok, just read, starts an assignment:
+// `tok =`, or `this.name =` / `variables.name =`, and not `==`, which is two
+// `=` tokens. An unscoped target is reported as ScopeLocal, meaning "no
+// scope written"; the scanner does not move.
+func (p *scriptParser) assignmentAhead(tok Token) (Scope, bool) {
+	st := p.sc.Save()
+	defer p.sc.Restore(st)
+
+	scope := ScopeLocal
+
+	switch {
+	case identEq(tok.Value, "this"):
+		scope = ScopeThis
+	case identEq(tok.Value, "variables"):
+		scope = ScopeVariables
 	}
 
-	return refs
+	if scope != ScopeLocal {
+		if p.sc.NextSkipComments().Kind != TokDot || p.sc.NextSkipComments().Kind != TokIdent {
+			return 0, false
+		}
+	}
+
+	if p.sc.NextSkipComments().Kind != TokEquals || p.sc.PeekSkipComments().Kind == TokEquals {
+		return 0, false
+	}
+
+	return scope, true
 }
 
 // addPendingCall records `varName = …prevIdent.lastIdent(…)` for
