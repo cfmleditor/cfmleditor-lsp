@@ -49,13 +49,13 @@ type configSet struct {
 	seen     map[string]string // config path → content hash, for the fingerprint
 }
 
-func newConfigSet(fsys vfs.FS, shared *index.Index, fallback codemap.FileConfig) *configSet {
+func newConfigSet(fsys vfs.FS, shared *index.Index, fallback *codemap.FileConfig) *configSet {
 	return &configSet{
 		fsys:     fsys,
 		shared:   shared,
 		byDir:    make(map[string]codemap.FileConfig),
 		byPath:   make(map[string]codemap.FileConfig),
-		fallback: fallback,
+		fallback: *fallback,
 		seen:     make(map[string]string),
 	}
 }
@@ -119,6 +119,8 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Resolvers:                resolvers,
 		ExpressionMappings:       found.ExpressionMappings(),
 		ServicePropertyResolvers: found.ServicePropertyResolvers(),
+		PropertyResolvers:        configPropertyResolvers(found),
+		BeanLookup:               cs.shared.LookupBean,
 		InterpolateAllText:       !found.ResolvedFeatures().OutputContextInterpolation,
 	}
 
@@ -270,4 +272,16 @@ func routeResolver(fsys vfs.FS, resolver *resolve.Resolver, cfg *daemon.Config) 
 			},
 		},
 	}
+}
+
+// configPropertyResolvers is cfg's propertyResolvers in the parser's form.
+func configPropertyResolvers(cfg *daemon.Config) []parser.PropertyResolver {
+	triples := cfg.PropertyResolvers()
+	out := make([]parser.PropertyResolver, 0, len(triples))
+
+	for _, p := range triples {
+		out = append(out, parser.PropertyResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+	}
+
+	return out
 }

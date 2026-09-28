@@ -868,6 +868,19 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			comp = pr.baseVarComponent(c)
 		}
 
+		// A mock made through the MockBox a spec holds,
+		// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
+		if comp == "" {
+			last := c.funcName
+			if len(c.rest) > 0 {
+				last = c.rest[len(c.rest)-1]
+			}
+
+			if comp = dynamicCall(last + "()"); comp != "" {
+				c.rest = nil // the chain ends in the mock; nothing to walk
+			}
+		}
+
 		if comp == "" {
 			continue
 		}
@@ -907,6 +920,16 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 			continue
 		}
 
+		// `return this;` returns the component that declares the function:
+		// its file, named by path, which is how the resolver takes it.
+		if f.returnVar == returnsThis {
+			if path, ok := strings.CutPrefix(string(f.URI), "file://"); ok && path != "" {
+				f.ReturnComponent = path
+			}
+
+			continue
+		}
+
 		if scope := findFuncScope(int(f.Line), pr.Scopes); scope.Start >= 0 {
 			out = append(out, returnPending{
 				funcIdx: i,
@@ -918,6 +941,10 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 
 	return out
 }
+
+// returnsThis is the returnVar of a function whose return is `this` alone,
+// a name no variable can have.
+const returnsThis = "$this"
 
 // settleReturnVars gives each pending function without a return component
 // the component its return variable holds, when a ref in its body says.
@@ -936,9 +963,19 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 
 // hasRefFor reports whether the variable a pending call assigns already has a
 // ref, in its function or at file level.
+//
+// Only a ref in the pending call's own scope counts: a sibling closure's `t`
+// is another variable, and letting it stand for this one left this `t`
+// untyped whenever an earlier test in the spec declared a `t` of its own.
 func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
-	if c.funcKey != "" && firstRefNamed(pr.funcRefsMap[c.funcKey], c.varName) != nil {
-		return true
+	if c.funcKey != "" {
+		refs := pr.funcRefsMap[c.funcKey]
+		for i := range refs {
+			if ref := &refs[i]; strings.EqualFold(ref.Variable, c.varName) &&
+				ref.VisibleFrom == c.visibleFrom && ref.VisibleTo == c.visibleTo {
+				return true
+			}
+		}
 	}
 
 	return firstRefNamed(pr.ComponentRefs, c.varName) != nil
@@ -1114,12 +1151,56 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			}
 		}
 
+		if comp == "" {
+			comp = injectedComponent(prop.attrs["inject"])
+		}
+
 		if comp != "" {
 			pr.ComponentRefs = append(pr.ComponentRefs, ComponentRef{
 				Variable: prop.name, Component: comp, URI: u, Line: prop.line,
 			})
 		}
 	}
+}
+
+// injectedComponent is the component a WireBox injection names, when no
+// beanPaths entry or propertyResolver said: `inject="HTMLHelper@coldbox"`,
+// `inject="id:settingService@contentbox"` and `inject="model:UserService"`
+// name the component UserService, which the resolver then finds by path and,
+// failing that, by file name — WireBox's own convention is that a model's id
+// is its file's. A dotted id is a path already.
+//
+// Everything else in the injection DSL names something that is not a
+// component file, and resolving it by name would find an unrelated one:
+// `coldbox:setting:x` is a setting, `logbox:logger:{this}` a logger,
+// `provider:x` a provider, and the bare `wirebox`, `coldbox`, `cachebox` and
+// `logbox` are the frameworks' own objects, each under another file name.
+func injectedComponent(inject string) string {
+	id := strings.TrimSpace(inject)
+
+	for _, prefix := range []string{"id:", "model:"} {
+		if len(id) > len(prefix) && strings.EqualFold(id[:len(prefix)], prefix) {
+			id = id[len(prefix):]
+
+			break
+		}
+	}
+
+	if at := strings.IndexByte(id, '@'); at >= 0 {
+		id = id[:at]
+	}
+
+	if id == "" || strings.ContainsAny(id, ":{}$#/\\ ") {
+		return ""
+	}
+
+	var buf foldScratch
+	switch string(buf.lowerFold(id)) {
+	case "wirebox", "coldbox", "cachebox", "logbox", "box", "executor", "java", "entityservice":
+		return ""
+	}
+
+	return id
 }
 
 // GlobalVars returns this.x and variables.x names declared outside any function.

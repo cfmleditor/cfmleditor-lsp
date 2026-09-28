@@ -16,6 +16,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
@@ -247,7 +248,7 @@ func buildGraph(f *graphFlags) (*codemap.Map, error) {
 		return nil, fmt.Errorf("no CFML files found under %s", strings.Join(scanRoots, ", "))
 	}
 
-	configs := newConfigSet(fsys, shared, fallback)
+	configs := newConfigSet(fsys, shared, &fallback)
 	if !f.oneConfig {
 		configs.preload(scanRoots)
 
@@ -286,6 +287,8 @@ func buildGraph(f *graphFlags) (*codemap.Map, error) {
 		Resolvers:                fallback.Resolvers,
 		ExpressionMappings:       fallback.ExpressionMappings,
 		ServicePropertyResolvers: fallback.ServicePropertyResolvers,
+		PropertyResolvers:        fallback.PropertyResolvers,
+		BeanLookup:               fallback.BeanLookup,
 		Workers:                  f.workers,
 		ConfigExtra:              configs.Fingerprint(),
 		EntryGlobs:               f.entryGlobs,
@@ -461,6 +464,8 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		mappings                 map[string]string
 		expressionMappings       map[string]string
 		servicePropertyResolvers map[string]string
+		propertyResolvers        []parser.PropertyResolver
+		beanPaths                map[string]string
 		workspaceFolders         []string
 	)
 
@@ -469,6 +474,8 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		mappings = cfg.Mappings()
 		expressionMappings = cfg.ExpressionMappings()
 		servicePropertyResolvers = cfg.ServicePropertyResolvers()
+		propertyResolvers = configPropertyResolvers(cfg)
+		beanPaths = cfg.BeanPaths()
 
 		for _, r := range cfg.ComponentResolvers() {
 			resolvers = append(resolvers, parser.Resolver{
@@ -498,18 +505,34 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	// a property of the workspace, not of whose resolvers you read them under.
 	shared = index.New()
 
+	resolver := &resolve.Resolver{
+		FS:                 fsys,
+		Index:              shared,
+		Resolvers:          resolvers,
+		Mappings:           mappings,
+		ExpressionMappings: expressionMappings,
+		WorkspaceFolders:   workspaceFolders,
+	}
+
+	// The bean map is the root config's, with each scanned root's
+	// Application.cfc beanPaths, as the editor builds it. One map serves
+	// every config, as one index does.
+	appDirs := make([]string, 0, len(scanRoots))
+	for _, r := range scanRoots {
+		appDirs = append(appDirs, resolver.FindApplicationRoot(r))
+	}
+
+	if all := cfpath.BeanPathsFor(beanPaths, appDirs); len(all) > 0 {
+		shared.SetBeans(cfpath.BuildBeanMap(all, fsys))
+	}
+
 	fallback = codemap.FileConfig{
-		Resolver: &resolve.Resolver{
-			FS:                 fsys,
-			Index:              shared,
-			Resolvers:          resolvers,
-			Mappings:           mappings,
-			ExpressionMappings: expressionMappings,
-			WorkspaceFolders:   workspaceFolders,
-		},
+		Resolver:                 resolver,
 		Resolvers:                resolvers,
 		ExpressionMappings:       expressionMappings,
 		ServicePropertyResolvers: servicePropertyResolvers,
+		PropertyResolvers:        propertyResolvers,
+		BeanLookup:               shared.LookupBean,
 	}
 
 	return scanRoots, fallback, shared, settings

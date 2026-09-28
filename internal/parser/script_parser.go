@@ -78,10 +78,85 @@ func newScriptParser(src, fileURI string, baseLine int, resolvers []Resolver) *s
 
 func (p *scriptParser) resolveCall(expr string) string {
 	if p.resolverSet != nil {
-		return p.resolverSet.Resolve(expr)
+		if comp := p.resolverSet.Resolve(expr); comp != "" {
+			return comp
+		}
+
+		return dynamicCall(expr)
 	}
 
-	return ResolveFromCall(expr, p.resolvers)
+	if comp := ResolveFromCall(expr, p.resolvers); comp != "" {
+		return comp
+	}
+
+	return dynamicCall(expr)
+}
+
+// dynamicCall is the component a call returns when no componentResolver
+// said and the value is known to be one no component describes: "$any",
+// or "" for any other call. A configured resolver is asked first, so a
+// project can still type either.
+//
+//   - A MockBox mock — createMock, createEmptyMock, prepareMock and
+//     createStub, whatever they are called on. Its methods are added at
+//     runtime ($(), $property()), so typing it as the mocked component would
+//     report those missing; left untyped, every call on one was "no
+//     component ref", about 2,600 over the six-project corpus.
+//   - A Java object with no stub to check it against, createObject("java",
+//     …): a javaStubsPath resolver types it when one is configured.
+func dynamicCall(expr string) string {
+	name, args := finalCall(expr)
+
+	var buf foldScratch
+	switch string(buf.lowerFold(name)) {
+	case "createmock", "createemptymock", "preparemock", "createstub":
+		return "$any"
+	case "createobject":
+		if args = strings.TrimLeft(args, " \t"); args != "" && (args[0] == '"' || args[0] == '\'') &&
+			hasPrefixFold(args[1:], "java") && len(args) > 5 && args[5] == args[0] {
+			return "$any"
+		}
+	}
+
+	return ""
+}
+
+// finalCall is the name of the last call in expr and the text after its
+// `(`: `getMockBox().createEmptyMock("x")` gives createEmptyMock and `"x")`.
+// A `(` inside another call's arguments is not the final call's.
+func finalCall(expr string) (name, args string) {
+	depth, open := 0, -1
+
+	for i := 0; i < len(expr); i++ {
+		switch expr[i] {
+		case '(':
+			if depth == 0 {
+				open = i
+			}
+
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case '"', '\'':
+			// Skip a string, whose parentheses are text.
+			if end := strings.IndexByte(expr[i+1:], expr[i]); end >= 0 {
+				i += end + 1
+			}
+		}
+	}
+
+	if open < 0 {
+		return "", ""
+	}
+
+	start := open
+	for start > 0 && isIdentPart(expr[start-1]) {
+		start--
+	}
+
+	return expr[start:open], expr[open+1:]
 }
 
 func (p *scriptParser) addRef(ref *ComponentRef) {
@@ -2071,16 +2146,38 @@ func (p *scriptParser) checkReturnComponent() {
 
 		p.scanChainedCalls(comp, peek.Line)
 	default:
+		bareThis := identEq(peek.Value, "this") && p.returnsBareThis()
+
 		p.returnCall(peek)
 
 		// return varName — track for resolution after body parse
 		p.returnVar = peek.Value
+		if bareThis {
+			p.returnVar = returnsThis
+		}
 
 		return
 	}
 
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// returnsBareThis reports whether the `this` the scanner is on is the whole
+// returned expression — `return this;` rather than `return this.x;` —
+// without moving the scanner.
+func (p *scriptParser) returnsBareThis() bool {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	p.sc.NextSkipComments() // this
+
+	switch p.sc.PeekSkipComments().Kind {
+	case TokSemicolon, TokRBrace, TokEOF:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -3066,8 +3163,9 @@ func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
 				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 			})
 		}
-	} else if len(p.resolvers) > 0 {
-		// Try resolvers for non-component createObject (e.g. java)
+	} else {
+		// Try resolvers for non-component createObject (e.g. java), which
+		// fall back to dynamicCall when none is configured
 		comma := p.sc.NextSkipComments()
 		if comma.Kind != TokComma {
 			return
@@ -3474,6 +3572,24 @@ func looksLikeCFCType(t string) bool {
 // Called when scanner is positioned at '(' (peeked, not consumed).
 // Reconstructs the call expression (e.g. getService("foo")) and tries resolvers.
 func (p *scriptParser) tryResolveCall(callExpr string) string {
+	if comp := p.tryConfiguredResolvers(callExpr); comp != "" {
+		return comp
+	}
+
+	// No resolver typed it; a call whose value no component describes is
+	// dynamic (dynamicCall). Its arguments are consumed as a match's are.
+	if dynamicCall(callExpr+"()") == "" || p.sc.PeekSkipComments().Kind != TokLParen {
+		return ""
+	}
+
+	p.sc.NextSkipComments() // consume (
+	p.skipParenBody()
+
+	return "$any"
+}
+
+// tryConfiguredResolvers is tryResolveCall against the componentResolvers.
+func (p *scriptParser) tryConfiguredResolvers(callExpr string) string {
 	if len(p.resolvers) == 0 {
 		return ""
 	}

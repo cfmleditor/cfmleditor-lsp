@@ -122,6 +122,19 @@ func LookupTag(name string) (*Entry, bool) {
 	return e, ok
 }
 
+// IsTagFunction reports whether name is a tag called as a function, which
+// Lucee and Adobe ColdFusion both allow in script: `cfheader( name = "x" )`,
+// `cfhttp( url = u )`. The name is the tag's own, cf prefix included.
+func IsTagFunction(name string) bool {
+	if len(name) <= 2 || !strings.EqualFold(name[:2], "cf") {
+		return false
+	}
+
+	_, ok := LookupTag(name)
+
+	return ok
+}
+
 // LookupFunction returns the documentation entry for a CFML function by name.
 func LookupFunction(name string) (*Entry, bool) {
 	e, ok := funcMap[strings.ToLower(name)]

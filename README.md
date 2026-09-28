@@ -808,11 +808,50 @@ on the file's `extends` line:
 tests/specs/UserSpec.cfc:1: testbox.system.BaseSpec (base component does not resolve; 212 inherited calls not checked)
 ```
 
+A call on a component whose own chain breaks is unchecked for the same reason —
+`settingService.findWhere()` where the service extends cborm's
+`VirtualEntityService` and cborm is not on disk — and the calls on such
+components in a file are one entry, on the first of them:
+
+```
+handlers/settings.cfc:48: cborm.models.VirtualEntityService (calls a component whose chain breaks at cborm.models.VirtualEntityService, which does not resolve; 12 calls not checked)
+```
+
 The command line also totals them after the list, most calls first, since each
 is usually one `mappings` entry or `workspacePaths` directory away from checking
 every call it accounts for. Over six open-source projects scanned with no
 configuration, 59,600 of 89,000 entries were calls into 67 such bases, and a
-dozen of them held 57,000; the report is 32,000 entries now.
+dozen of them held 57,000. With these and the defaults below the report is 22,300 entries.
+
+**An injected property is typed by its id.** With no `beanPaths` entry or
+`propertyResolvers` rule to say otherwise, `property name="html"
+inject="HTMLHelper@coldbox"` holds the component `HTMLHelper`, and so do
+`inject="id:HTMLHelper@coldbox"` and `inject="model:HTMLHelper"` — WireBox's
+convention is that a model's id is its file's name. The component is found by
+path, then by file name, nearest first; one that is not on disk is reported as
+not existing, which names the missing dependency. The rest of the injection DSL
+(`coldbox:setting:x`, `logbox:logger:{this}`, `provider:x`, the bare `wirebox`,
+`coldbox`, `cachebox` and `logbox`) names something that is not a component
+file and is left alone. A file of the same name in the wrong place is still
+found: with ColdBox not checked out, `HTMLHelper@coldbox` finds ContentBox's own
+module config called `HTMLHelper.cfc`, and a `mappings` entry for `coldbox` is
+the fix.
+
+**Some values are typed without configuration.** Each rule below is a default
+that a `mappings` entry, `componentResolvers` rule or `javaStubsPath` still
+overrides:
+
+| Source | Treated as |
+|---|---|
+| `coldbox.system.EventHandler` in a checkout of the package whose `box.json` slug is `coldbox` | The package's own `system/EventHandler.cfc`: a package spells its components under the name it is installed as |
+| A method whose return is `return this;` (or `<cfreturn this>`) | Its own component, so a fluent chain is checked hop by hop |
+| `expect( x ).toBe( 1 )`, a call chained on an unqualified one | A call on what `expect` returns, found in the file, its extends chain or its includes |
+| `cfheader( … )`, `cfhttp( … )` — any documented tag called as a function | A builtin |
+| `createMock( … )`, `createEmptyMock`, `prepareMock`, `createStub` (MockBox) | Dynamic: a mock's methods are added at runtime |
+| `createObject( "java", … )` and `new java:…` with no stub for the class | Dynamic: there is nothing to check a Java object against |
+
+`beanPaths` and `propertyResolvers` apply to the report and the code map as
+they do in the editor.
 
 To print a report instead of writing it, `cfmleditor-lsp unresolved
 --known-issues <dir>` writes the same format to stdout, relative to the config's

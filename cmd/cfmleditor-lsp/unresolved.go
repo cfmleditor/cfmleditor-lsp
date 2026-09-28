@@ -150,6 +150,8 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		opt.Mappings = cfg.Mappings()
 		opt.ExpressionMappings = cfg.ExpressionMappings()
 		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
+		opt.BeanPaths = cfg.BeanPaths()
+		opt.PropertyResolvers = configPropertyResolvers(cfg)
 		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range cfg.ComponentResolvers() {

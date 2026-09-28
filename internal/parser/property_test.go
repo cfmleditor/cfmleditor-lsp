@@ -242,8 +242,13 @@ func TestPropertyAccessors_BeanLookup(t *testing.T) {
 		t.Errorf("orderDAO: expected dao.OrderDAO, got %q", refMap["orderDAO"])
 	}
 
-	if _, ok := refMap["missing"]; ok {
-		t.Error("missing should not have a ref")
+	// An injection the bean map does not know still names a component, by
+	// its id: the resolver finds it by path or file name, or reports
+	// "component 'nonexistent' does not exist", which names the missing
+	// dependency. It used to be given no ref, reported as "variable
+	// 'missing' has no component ref" on every call.
+	if refMap["missing"] != "nonexistent" {
+		t.Errorf("missing: expected the injected id nonexistent, got %q", refMap["missing"])
 	}
 }
 
@@ -331,6 +336,44 @@ func TestNormalizeBeanKey(t *testing.T) {
 		got := normalizeBeanKey(tt.input)
 		if got != tt.expected {
 			t.Errorf("normalizeBeanKey(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+// TestAnInjectionNamesItsComponent: with no beanPaths or propertyResolvers to
+// say otherwise, a WireBox id names the component whose file carries it, so
+// `property name="html" inject="HTMLHelper@coldbox"` types html. Over the
+// six-project corpus that was 3,600 calls reported as "no component ref".
+// The rest of the injection DSL names something that is not a component
+// file, and must not be read as one.
+func TestAnInjectionNamesItsComponent(t *testing.T) {
+	for inject, want := range map[string]string{
+		"HTMLHelper@coldbox":             "HTMLHelper",
+		"id:settingService@contentbox":   "settingService",
+		"model:UserService":              "UserService",
+		"MODEL:UserService@users":        "UserService",
+		"models.UserService":             "models.UserService",
+		"PrintBuffer":                    "PrintBuffer",
+		"coldbox:setting:appName":        "",
+		"logbox:logger:{this}":           "",
+		"provider:UserService":           "",
+		"wirebox":                        "",
+		"cachebox:default":               "",
+		"Coldbox":                        "",
+		"":                               "",
+		"id:":                            "",
+		"#application.settings.service#": "",
+	} {
+		src := "component {\n\tproperty name=\"dep\" inject=\"" + inject + "\";\n}"
+		pr := Parse(uri.URI("file:///test.cfc"), src)
+
+		got := ""
+		if ref := refNamed(pr.ComponentRefs, "dep"); ref != nil {
+			got = ref.Component
+		}
+
+		if got != want {
+			t.Errorf("inject=%q: got %q, want %q", inject, got, want)
 		}
 	}
 }

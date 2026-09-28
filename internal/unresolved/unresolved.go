@@ -46,6 +46,8 @@ type Options struct {
 	Mappings                 map[string]string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	PropertyResolvers        []parser.PropertyResolver
+	BeanPaths                map[string]string // configured beanPaths; Application.cfc's are added
 	WorkspaceFolders         []string
 	InterpolateAll           bool // features.outputContextInterpolation off
 	GlobalDefs               bool // accept a bare call any indexed file defines
@@ -95,6 +97,8 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 
 		resolver.Index.IndexFile(fileURI, string(data))
 	}
+
+	loadBeans(resolver, opt)
 
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
 
@@ -146,6 +150,21 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	return rep
 }
 
+// loadBeans gives the resolver's index the bean map the server would build
+// for the same workspace, so an injected property is typed the same way in
+// the report as in the editor. The report used to ignore beanPaths and
+// propertyResolvers altogether.
+func loadBeans(resolver *resolve.Resolver, opt *Options) {
+	appDirs := make([]string, 0, len(opt.WorkspaceFolders))
+	for _, root := range opt.WorkspaceFolders {
+		appDirs = append(appDirs, resolver.FindApplicationRoot(root))
+	}
+
+	if all := cfpath.BeanPathsFor(opt.BeanPaths, appDirs); len(all) > 0 {
+		resolver.Index.SetBeans(cfpath.BuildBeanMap(all, resolver.FS))
+	}
+}
+
 func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options) (out []Call, resolved int) {
 	data, err := fsys.ReadFile(file)
 	if err != nil || cfpath.IsBinary(data) {
@@ -176,6 +195,8 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		Resolvers:                opt.Resolvers,
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
+		PropertyResolvers:        opt.PropertyResolvers,
+		BeanLookup:               resolver.Index.LookupBean,
 		InterpolateAllText:       opt.InterpolateAll,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,
@@ -187,12 +208,11 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 
 	calls := pr.AllCalls()
 
-	// Inherited calls into a base that does not resolve are one finding,
-	// not one per call: see resolve.MissingBaseReason.
-	var (
-		missingBase string
-		unchecked   int
-	)
+	// Calls into a base that does not resolve are one finding per file and
+	// base, not one per call: see resolve.MissingBaseReason. The base is the
+	// file's own, for an inherited call, or a receiver's, for a call on a
+	// component whose chain breaks.
+	var bases baseGroups
 
 	for i := range calls {
 		call := &calls[i]
@@ -223,8 +243,7 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		}
 
 		if base, ok := resolve.MissingBaseOf(reason); ok {
-			missingBase = base
-			unchecked++
+			bases.add(base, call)
 
 			continue
 		}
@@ -240,11 +259,78 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		})
 	}
 
-	if unchecked > 0 {
-		out = append(out, missingBaseCall(file, string(data), pr.Extends, missingBase, unchecked))
+	if len(bases.order) > 0 {
+		own := ""
+		if pr.Extends != "" {
+			own = resolver.MissingBase(pr.Extends, baseDir)
+		}
+
+		for _, g := range bases.order {
+			if strings.EqualFold(g.base, own) {
+				out = append(out, missingBaseCall(file, string(data), pr.Extends, g.base, g.calls))
+			} else {
+				out = append(out, receiverBaseCall(file, g))
+			}
+		}
 	}
 
 	return out, resolved
+}
+
+// baseGroup is the calls in one file left unchecked by one missing base, and
+// the first of them.
+type baseGroup struct {
+	first *parser.CallSite
+	base  string
+	calls int
+}
+
+// baseGroups collects baseGroup by base, in the order each base is first met.
+type baseGroups struct {
+	by    map[string]*baseGroup
+	order []*baseGroup
+}
+
+func (b *baseGroups) add(base string, call *parser.CallSite) {
+	key := strings.ToLower(base)
+	if g, ok := b.by[key]; ok {
+		g.calls++
+
+		return
+	}
+
+	if b.by == nil {
+		b.by = map[string]*baseGroup{}
+	}
+
+	g := &baseGroup{base: base, calls: 1, first: call}
+	b.by[key] = g
+	b.order = append(b.order, g)
+}
+
+// receiverBaseCall is the one entry for the calls in a file made on
+// components whose extends chain breaks at a base that is not the file's own:
+// ContentBox's services extend cborm's VirtualEntityService, and with cborm
+// missing every findWhere and save on one is unchecked. It sits on the first
+// such call.
+func receiverBaseCall(file string, g *baseGroup) Call {
+	return Call{
+		File:      file,
+		Line:      g.first.Line,
+		Caller:    g.first.Caller,
+		Function:  g.base,
+		Reason:    fmt.Sprintf("calls a component whose chain breaks at %s, which does not resolve; %d %s not checked", g.base, g.calls, plural(g.calls, "call", "calls")),
+		Text:      g.first.Text,
+		Unchecked: g.calls,
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+
+	return many
 }
 
 // missingBaseCall is the one entry for a file whose extends chain breaks at
@@ -262,10 +348,7 @@ func missingBaseCall(file, content, extends, base string, unchecked int) Call {
 		}
 	}
 
-	noun := "calls"
-	if unchecked == 1 {
-		noun = "call"
-	}
+	noun := plural(unchecked, "call", "calls")
 
 	reason := fmt.Sprintf("base component does not resolve; %d inherited %s not checked", unchecked, noun)
 	if !strings.EqualFold(extends, base) {
@@ -330,6 +413,10 @@ func MissingBases(calls []Call) []MissingBase {
 // which the report leaves out.
 func IsBuiltin(name string) bool {
 	if _, ok := docs.LookupFunction(name); ok {
+		return true
+	}
+
+	if docs.IsTagFunction(name) {
 		return true
 	}
 

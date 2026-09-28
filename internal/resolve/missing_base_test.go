@@ -136,3 +136,60 @@ func TestAReceiverTheFileNeverDeclaresIsTheMissingBases(t *testing.T) {
 		}
 	}
 }
+
+// TestACallOnAComponentWithAMissingBaseBlamesTheBase: a method a component
+// does not declare may be its base's, so when the component's own chain
+// breaks the method was never looked for. ContentBox's services extend
+// cborm's VirtualEntityService, and without cborm every findWhere and save
+// on one was "method not found" — the call and a chain hop alike. A method
+// missing from a component whose chain resolves is still reported.
+func TestACallOnAComponentWithAMissingBaseBlamesTheBase(t *testing.T) {
+	dir := t.TempDir()
+
+	for name, src := range map[string]string{
+		"Service.cfc": `component extends="cborm.models.VirtualEntityService" { function own() {} }`,
+		"Plain.cfc":   `component { function own() {} }`,
+		"Caller.cfc": `component {
+	function f() {
+		var svc = new Service();
+		svc.findWhere();
+		svc.own();
+		var plain = new Plain();
+		plain.missing();
+	}
+}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	file := filepath.Join(dir, "Caller.cfc")
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{ExtractCalls: true})
+	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
+	got := map[string]string{}
+
+	for _, c := range pr.AllCalls() {
+		if c.Variable != "" {
+			got[c.Variable+"."+c.FuncName] = r.CanResolveCall(&c, pr, dir)
+		}
+	}
+
+	if base, ok := MissingBaseOf(got["svc.findWhere"]); !ok || base != "cborm.models.VirtualEntityService" {
+		t.Errorf("svc.findWhere: %q, want the chain to break at cborm.models.VirtualEntityService", got["svc.findWhere"])
+	}
+
+	if got["svc.own"] != "" {
+		t.Errorf("svc.own: %q, want resolved", got["svc.own"])
+	}
+
+	if want := "method 'missing' not found in Plain"; got["plain.missing"] != want {
+		t.Errorf("plain.missing: %q, want %q", got["plain.missing"], want)
+	}
+}

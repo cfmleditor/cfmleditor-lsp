@@ -2,6 +2,7 @@
 package resolve
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Resolver struct {
 	Resolvers          []parser.Resolver
 	mu                 sync.RWMutex
 	appRootCache       map[string]string // dir → Application.cfc root
+	slugCache          map[string]string // dir → its box.json slug, "" for none
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
 	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
 	incGraph           *includeGraph     // the index's cfincludes, rebuilt when they change
@@ -147,6 +149,14 @@ func (r *Resolver) dirs() *cfpath.DirCache {
 }
 
 func (r *Resolver) componentPathUncached(component, baseDir string) string {
+	// A component already named by its file: what a function returning
+	// `this` returns.
+	if filepath.IsAbs(component) && strings.HasSuffix(strings.ToLower(component), ".cfc") {
+		if info, err := r.FS.Stat(component); err == nil && !info.IsDir() {
+			return component
+		}
+	}
+
 	mappings := r.effectiveMappings(baseDir)
 	dirs := r.dirs()
 
@@ -168,6 +178,12 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 
 	if p := r.inFolderNamed(component, dirs); p != "" {
 		return p
+	}
+
+	if root, rest := r.slugRoot(component, baseDir); root != "" {
+		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
+			return p
+		}
 	}
 
 	// For bare names (no dots/slashes), search the index by filename as a last resort.
@@ -213,6 +229,68 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	return ""
 }
 
+// slugRoot finds the package a dot-path names itself by: the nearest
+// directory at or above baseDir whose box.json slug is the path's first
+// segment. It returns that directory and the rest of the path.
+//
+// A CommandBox package is installed under its slug, so its own code spells
+// its components that way: coldbox-platform's handlers extend
+// `coldbox.system.EventHandler`, which is its own system/EventHandler.cfc. A
+// checkout of the package has no mapping for it, and every such path was a
+// component that did not exist — over ten thousand calls between
+// coldbox-platform and TestBox. A configured mapping still comes first.
+func (r *Resolver) slugRoot(component, baseDir string) (root, rest string) {
+	first, rest, ok := strings.Cut(component, ".")
+	if !ok || first == "" || rest == "" || r.FS == nil {
+		return "", ""
+	}
+
+	for dir := baseDir; ; {
+		if slug := r.boxSlug(dir); slug != "" && strings.EqualFold(slug, first) {
+			return dir, rest
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ""
+		}
+
+		dir = parent
+	}
+}
+
+// boxSlug is the slug of dir's box.json, "" when it has none; remembered per
+// directory, since every unresolved path walks the same ancestors.
+func (r *Resolver) boxSlug(dir string) string {
+	r.mu.RLock()
+	slug, ok := r.slugCache[dir]
+	r.mu.RUnlock()
+
+	if ok {
+		return slug
+	}
+
+	if data, err := r.FS.ReadFile(filepath.Join(dir, "box.json")); err == nil {
+		var box struct {
+			Slug string `json:"slug"`
+		}
+
+		if json.Unmarshal(data, &box) == nil {
+			slug = strings.TrimSpace(box.Slug)
+		}
+	}
+
+	r.mu.Lock()
+	if r.slugCache == nil {
+		r.slugCache = make(map[string]string)
+	}
+
+	r.slugCache[dir] = slug
+	r.mu.Unlock()
+
+	return slug
+}
+
 // inFolderNamed resolves a dot-path whose first segment names a workspace
 // folder, inside that folder: with ../tassweb among the workspace folders,
 // tassweb.packages.tass.core.kernel2 is <tassweb>/packages/tass/core/kernel2.cfc.
@@ -224,7 +302,7 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 // implies that mapping, so a project needs one only where the name differs
 // from the folder.
 //
-// It is the last lookup before the file-name search, so an explicit mapping,
+// It comes after every configured lookup and before slugRoot, so an explicit mapping,
 // an Application.cfc mapping and a path relative to the file, the application
 // or a workspace folder all come first, and nothing that resolved before
 // resolves differently now. The folders are the resolver's, which are the
@@ -523,6 +601,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	// Unqualified call — check same file, then extends chain.
 	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
 	if variable == "" && call.Component == "" {
+		if len(call.Chain) > 0 {
+			return r.resolveBareChain(call, pr, baseDir, tr)
+		}
+
 		return r.resolveBareCall(call, pr, baseDir, tr)
 	}
 
@@ -667,7 +749,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 			}
 
 			if ret == "" {
-				return "method '" + hop + "' in " + comp + " has no component return type (chain to '" + funcName + "')"
+				return "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')"
 			}
 
 			comp = ret
@@ -757,6 +839,69 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 	}
 
 	return "no qualifier, not in file"
+}
+
+// resolveBareChain is canResolveCall for a call chained onto a bare one,
+// `expect( x ).toBe( 1 )`: the first call is looked up as a bare call is —
+// this file, its extends chain, what it includes — and the rest of the chain
+// is checked on what it returns.
+//
+// It was resolved as a bare call to the *last* name, which looked for toBe
+// among the spec's own methods and reported it "not found in extends chain"
+// — once the chain resolved, in every TestBox assertion.
+func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	first := call.Chain[0]
+
+	tr.addf("chained on a call to %q — looking it up as an unqualified call", first)
+
+	def := r.bareFunc(first, pr, baseDir)
+	if def == nil {
+		if pr.Extends != "" {
+			if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+				return MissingBaseReason(base)
+			}
+		}
+
+		return "chained on '" + first + "', which is not found (calling '" + call.FuncName + "')"
+	}
+
+	ret, noFollow, _ := r.chainHopReturn("this component", first, def, tr)
+	if noFollow && ret != "" {
+		tr.hit(TargetDynamic, ret, nil)
+
+		return ""
+	}
+
+	if ret == "" {
+		return "method '" + first + "' has no component return type (chain to '" + call.FuncName + "')"
+	}
+
+	rest := *call
+	rest.Chain = call.Chain[1:]
+	rest.Component = ret
+
+	return r.canResolveCall(&rest, pr, baseDir, tr)
+}
+
+// bareFunc finds what an unqualified call to name reaches: this file's own
+// function, one its extends chain declares, or one a file it includes or is
+// included by declares.
+func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string) *parser.FunctionDef {
+	for i := range pr.Funcs {
+		if strings.EqualFold(pr.Funcs[i].Name, name) {
+			return &pr.Funcs[i]
+		}
+	}
+
+	if pr.Extends != "" {
+		if def := r.ResolveFunc(pr.Extends, name, baseDir); def != nil {
+			return def
+		}
+	}
+
+	def, _ := r.findThroughIncludes(pr, name)
+
+	return def
 }
 
 // resolveThisCall is canResolveCall for `this.name()`.
@@ -946,10 +1091,41 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 			return ""
 		}
 
-		return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
+		return "component '" + displayComponent(comp) + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 	}
 
-	return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+	if base := r.componentMissingBase(comp, baseDir); base != "" {
+		return MissingBaseReason(base)
+	}
+
+	return "method '" + hop + "' not found in " + displayComponent(comp) + " (chain to '" + funcName + "')"
+}
+
+// componentMissingBase is MissingBase for the chain comp extends: a method
+// comp does not declare may be its base's, and when a link of that chain
+// names no file the method was never looked for. ContentBox's services extend
+// cborm's VirtualEntityService, and without cborm on disk every findWhere,
+// save and list was "not found in" the service.
+func (r *Resolver) componentMissingBase(comp, baseDir string) string {
+	if strings.Contains(comp, "|") {
+		return ""
+	}
+
+	p := comp
+	if !filepath.IsAbs(p) {
+		p = r.ComponentPath(comp, baseDir)
+	}
+
+	if p == "" {
+		return ""
+	}
+
+	ext, ok := r.extendsOf(p, cfpath.ToURI(p))
+	if !ok || ext == "" {
+		return ""
+	}
+
+	return r.MissingBase(ext, filepath.Dir(p))
 }
 
 // chainHopReturn is the component a chain hop's method returns: its declared
@@ -1084,10 +1260,26 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 			return ""
 		}
 
-		return "component '" + comp + "' does not exist (calling '" + funcName + "')"
+		return "component '" + displayComponent(comp) + "' does not exist (calling '" + funcName + "')"
 	}
 
-	return "method '" + funcName + "' not found in " + comp
+	if base := r.componentMissingBase(comp, baseDir); base != "" {
+		return MissingBaseReason(base)
+	}
+
+	return "method '" + funcName + "' not found in " + displayComponent(comp)
+}
+
+// displayComponent is how a reason names comp. A component named by its file
+// — what a function returning `this` returns — is named by the file's name:
+// a reason is written into a known-issues file that is committed and read on
+// other machines, where an absolute path would not mean anything.
+func displayComponent(comp string) string {
+	if filepath.IsAbs(comp) {
+		return strings.TrimSuffix(filepath.Base(comp), filepath.Ext(comp))
+	}
+
+	return comp
 }
 
 // ComponentOf reports the component variable holds at line, or "" when that
