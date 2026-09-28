@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/log"
 )
 
 // EditKind describes what part of the file was affected by an edit.
@@ -48,7 +49,7 @@ func (pr *ParseResult) ApplyEditResult(startLine, startChar, endLine, _ int, new
 func (pr *ParseResult) applyEdit(startLine, startChar, endLine int, newText string, edited func() string) (kind EditKind) {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r))
+			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r), log.PanicStack())
 			pr.reparseShallow()
 
 			kind = EditGlobal

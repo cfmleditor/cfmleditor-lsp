@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A crash now reaches the `CFMLEDITOR_LSP_LOG` file.** Set it, and the server sends the Go runtime's own crash report there as well as to stderr (`debug.SetCrashOutput`). That covers the crashes nothing in the server can catch: a panic in a goroutine with no `recover`, and fatal errors such as a fault in tree-sitter's C code, a concurrent map write, a stack overflow or running out of memory. Until now each left only a traceback on stderr, which belongs to the editor and is lost when it stops reading. For a fatal error the one-line reason (`fatal error: stack overflow`) still goes to stderr only; the file gets the traceback, which names the fault in its frames.
+- **A recovered panic's log record carries its stack.** The eight places that recover a panic and keep going, among them the request handler, background jobs, both edit timers, workspace indexing and three parser entry points, logged the panic's value alone, such as `index out of range [3] with length 3`, which names no function. Each record now has a `stack` field.
+
 ### Changed
 
 - **Completion sends less when the editor can fetch the rest.** A client that lists `documentation` and `detail` in its `resolveSupport` (VS Code and Neovim do) is sent the built-in and member-function items without them, and `completionItem/resolve` fills them in for the item it highlights. The response shrinks from 322KB to 144KB and takes 40% less time to build and encode. A client that does not list them is sent the full items, as before.

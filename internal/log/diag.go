@@ -62,6 +62,24 @@ func openLogFile() *os.File {
 
 	logFile = f
 
+	// The runtime's own crash report goes to the file too. A panic in a
+	// goroutine nothing recovers, and a fatal error — a fault in tree-sitter's
+	// C code, a concurrent map write, a stack overflow, running out of memory —
+	// ends the process without passing through CapturePanic or any logger, and
+	// all the runtime writes is a traceback on stderr. That was the one record
+	// of the crashes this file exists to catch, and it went to a pipe the
+	// client may already have stopped reading.
+	//
+	// For a fatal error the runtime prints its one-line reason ("fatal error:
+	// stack overflow", "fatal error: concurrent map writes") to stderr alone,
+	// before it switches output here. The file gets the traceback, which names
+	// the fault in its frames — runtime.throw and runtime.newstack for a stack
+	// overflow, maps.fatal for a concurrent map write — and the function it
+	// happened in.
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot send crash output to %s: %v\n", path, err)
+	}
+
 	return f
 }
 
@@ -97,7 +115,20 @@ func fileCore(debugMode bool) zapcore.Core {
 	return zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), zapcore.Lock(f), level)
 }
 
+// PanicStack is the current goroutine's stack as a log field, for the record
+// of a recovered panic.
+//
+// Called from the deferred function that recovered, it still shows the frames
+// that panicked: they are not unwound until that function returns. Without it
+// the record held only the panic's value — "index out of range [3] with length
+// 3" — which names no function and cannot be traced back to one.
+func PanicStack() Field { return zap.String("stack", string(debug.Stack())) }
+
 // WritePanic records a panic and its stack everywhere it can, then returns.
+//
+// With a log file configured, a panic that CapturePanic lets continue is then
+// written to it a second time, by the runtime (see SetCrashOutput above). This
+// record is the one with the time and the place it was caught.
 //
 // Directly to the file rather than through the logger: a panic means the
 // process is in a state nothing should be trusted in, and the whole point of

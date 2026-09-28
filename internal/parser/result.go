@@ -208,7 +208,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 func (pr *ParseResult) extractSignatures() {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in extractSignatures", "uri", string(pr.URI), "error", fmt.Sprint(r))
+			pr.logWarn("parse panic in extractSignatures", "uri", string(pr.URI), "error", fmt.Sprint(r), log.PanicStack())
 		}
 	}()
 
@@ -1312,7 +1312,7 @@ func (pr *ParseResult) InvalidateFunc(funcStart, funcEnd int) {
 func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in parseFuncBody", "uri", string(pr.URI), "funcStart", funcStart, "error", fmt.Sprint(r))
+			pr.logWarn("parse panic in parseFuncBody", "uri", string(pr.URI), "funcStart", funcStart, "error", fmt.Sprint(r), log.PanicStack())
 		}
 	}()
 

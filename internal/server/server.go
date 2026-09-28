@@ -368,7 +368,7 @@ func (s *Server) scheduleReparse(docURI uri.URI) {
 	s.reindexTimers[docURI] = time.AfterFunc(reparseDelay, func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Error("goroutine panic", cflog.String("label", "reparseTimer"), cflog.Any("panic", r))
+				s.log.Error("goroutine panic", cflog.String("label", "reparseTimer"), cflog.Any("panic", r), cflog.PanicStack())
 			}
 		}()
 
