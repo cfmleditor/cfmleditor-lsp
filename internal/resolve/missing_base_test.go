@@ -83,8 +83,8 @@ func TestAnInheritedCallIntoAMissingBaseBlamesTheBase(t *testing.T) {
 // so with the base missing a call on one is as unchecked as an inherited
 // method. A receiver the file declares — however it declares it — is the
 // file's, and is still reported as having no component. The arrow-function
-// `var` and the closure parameter are the shapes the parser's body scan does
-// not see.
+// `var` and the closure parameter are the parser's to declare: a text check
+// did it once, and read `f( print )` as declaring `print`.
 func TestAReceiverTheFileNeverDeclaresIsTheMissingBases(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "Spec.cfc")

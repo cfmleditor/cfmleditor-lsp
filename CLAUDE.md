@@ -428,6 +428,24 @@ the *formatter*, not the parser.
   function lost everything it called while the same closure passed as an
   argument kept it, because that path counts parentheses instead. The calls are
   attributed to the enclosing function, which is where the closure runs from.
+- **A closure's body is read as statements, and what it declares is its own.**
+  It was scanned for calls alone, so every `var`, assignment and parameter in a
+  closure declared and typed nothing — most of a TestBox spec, where each test
+  is `it( "x", () => { var t = … } )`. `scanClosureBody` runs `handleBodyToken`
+  over it inside a function (outside one there is no scope for its locals, so
+  the call-only scan stays), for `function(){}` and a block-bodied arrow alike;
+  an expression-bodied arrow declares only its parameters, which the argument
+  scan remembers from the last `(...)` group (`arrowParams`) because `=>`
+  arrives after them. Three things keep the closure's names from leaking into
+  the enclosing function, each with a failing case in `closure_test.go`: a ref
+  it declares carries the closure's lines (`ComponentRef.VisibleFrom/To`), so
+  `FuncComponentRefs` leaves it out and `FuncComponentRefsAt` — which
+  `funcScopedRef` reads, innermost closure first — includes it where it is in
+  force; `localVarSet` is copied, so its `var t` does not make a later `t = …`
+  in the function a local; and its `return` is not the function's return type.
+  Its `VarDef`s do count in `FuncVars`, since a declaration list has no lines to
+  scope by. `new component { … }` is `$any`: it was read as a component called
+  `component`.
 - **A *named* nested function is a declaration; an anonymous one is a value.**
   CFML hoists `function setup(){…}` written inside another function into the
   component's variables scope, which is what lets the enclosing function call it
@@ -1447,7 +1465,7 @@ fallback resolver, and the altComp fallback resolver.
 
 | Error form | Meaning | Fix |
 |---|---|---|
-| `extends chain breaks at 'X', which does not resolve` / `X (base component does not resolve; N inherited calls not checked)` | A component in the file's extends chain names no file, so an inherited call — bare, `this.`, `super.`, or on a receiver the file never declares (`print`, `$assert`) — was never checked. `unresolved` reports it once per file, on the `extends` line, and totals the bases after the list | Add the `mappings` entry or `workspacePaths` directory that makes `X` resolve. `resolve.MissingBase` finds the link; `inheritedFromMissingBase` decides a receiver is the base's, reading the text for a declaration too (`declaredInText`) because the body scan misses a `var` inside an arrow function |
+| `extends chain breaks at 'X', which does not resolve` / `X (base component does not resolve; N inherited calls not checked)` | A component in the file's extends chain names no file, so an inherited call — bare, `this.`, `super.`, or on a receiver the file never declares (`print`, `$assert`) — was never checked. `unresolved` reports it once per file, on the `extends` line, and totals the bases after the list | Add the `mappings` entry or `workspacePaths` directory that makes `X` resolve. `resolve.MissingBase` finds the link; `inheritedFromMissingBase` decides a receiver is the base's when neither the file nor the enclosing function's `FuncVars` declares it — closure locals and parameters included |
 | `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name |
 | `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or `"noFollow": true` on the resolver |
 | `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |
