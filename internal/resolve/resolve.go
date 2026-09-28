@@ -825,8 +825,9 @@ func (r *Resolver) inheritedFromMissingBase(variable string, line uint32, pr *pa
 		return ""
 	}
 
-	// A closure's locals and a catch variable are the enclosing function's
-	// to the body scan, and not in the file-wide declarations.
+	// A closure's locals and parameters and a catch variable are the
+	// enclosing function's to the body scan, and not in the file-wide
+	// declarations.
 	if scope := parser.FindFuncScopeAt(int(line), pr.Scopes); scope.Start != -1 {
 		for _, v := range pr.FuncVars(scope.Start, scope.End) {
 			if strings.EqualFold(v, root) {
@@ -835,89 +836,7 @@ func (r *Resolver) inheritedFromMissingBase(variable string, line uint32, pr *pa
 		}
 	}
 
-	// And the body scan does not see a `var` inside an arrow function, or a
-	// closure's parameters, which is most of a TestBox spec. Reading the
-	// text for the shapes of a declaration errs towards "declared", which
-	// only leaves the call reported as it was.
-	if declaredInText(pr.Content, root) {
-		return ""
-	}
-
 	return r.MissingBase(pr.Extends, baseDir)
-}
-
-// declaredInText reports whether content holds name, as a whole word, in the
-// shape of a declaration: after `var`, before an `=` that is not `==`, as the
-// variable of a catch, or alone between `(` or `,` and `)` or `,`, which is a
-// parameter list — or an argument, which counts too.
-func declaredInText(content, name string) bool {
-	for from := 0; ; {
-		i := indexWordFold(content[from:], name)
-		if i < 0 {
-			return false
-		}
-
-		i += from
-		from = i + len(name)
-		before := strings.TrimRight(content[:i], " \t\r\n")
-		after := strings.TrimLeft(content[from:], " \t\r\n")
-
-		switch {
-		case hasSuffixFold(before, "var") && !isWordByte(before, len(before)-4):
-			return true
-		case strings.HasPrefix(after, "=") && !strings.HasPrefix(after, "=="):
-			return true
-		case strings.HasPrefix(after, ")") && isCatchHead(before):
-			return true
-		case (strings.HasSuffix(before, "(") || strings.HasSuffix(before, ",")) &&
-			(strings.HasPrefix(after, ")") || strings.HasPrefix(after, ",")):
-			return true
-		}
-	}
-}
-
-// indexWordFold is the index of name in s as a whole identifier,
-// ASCII case-insensitively; -1 when it is not there.
-func indexWordFold(s, name string) int {
-	for i := 0; i+len(name) <= len(s); i++ {
-		if strings.EqualFold(s[i:i+len(name)], name) && !isWordByte(s, i-1) && !isWordByte(s, i+len(name)) {
-			return i
-		}
-	}
-
-	return -1
-}
-
-// isWordByte reports whether s[i] is part of an identifier; false out of
-// range.
-func isWordByte(s string, i int) bool {
-	if i < 0 || i >= len(s) {
-		return false
-	}
-
-	c := s[i]
-
-	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-func hasSuffixFold(s, suffix string) bool {
-	return len(s) >= len(suffix) && strings.EqualFold(s[len(s)-len(suffix):], suffix)
-}
-
-// isCatchHead reports whether before ends `catch ( type`, what precedes a
-// catch's variable.
-func isCatchHead(before string) bool {
-	j := len(before)
-	for j > 0 && (isWordByte(before, j-1) || before[j-1] == '.') {
-		j--
-	}
-
-	head := strings.TrimRight(before[:j], " \t\r\n")
-	if !strings.HasSuffix(head, "(") {
-		return false
-	}
-
-	return hasSuffixFold(strings.TrimRight(head[:len(head)-1], " \t\r\n"), "catch")
 }
 
 // isScopeName reports whether name is a CFML scope other than variables and
@@ -1249,15 +1168,35 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.Com
 			continue
 		}
 
-		refs := pr.FuncComponentRefs(scope.Start, scope.End)
+		refs, _ := pr.FuncRefs(scope.Start, scope.End)
+
+		// A closure holding line may declare the name itself, which shadows
+		// the function's: the innermost closure's latest declaration at or
+		// before line wins. Failing that, the function's own.
+		var closure, wide *parser.ComponentRef
 
 		for i := range refs {
-			if strings.EqualFold(refs[i].Variable, name) {
-				return &refs[i]
+			ref := &refs[i]
+			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) {
+				continue
+			}
+
+			switch {
+			case ref.VisibleTo == 0:
+				if wide == nil {
+					wide = ref
+				}
+			case ref.Line <= line && (closure == nil || ref.VisibleFrom > closure.VisibleFrom ||
+				ref.VisibleFrom == closure.VisibleFrom && ref.Line > closure.Line):
+				closure = ref
 			}
 		}
 
-		return nil
+		if closure != nil {
+			return closure
+		}
+
+		return wide
 	}
 
 	return nil

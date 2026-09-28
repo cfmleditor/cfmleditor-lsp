@@ -876,6 +876,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		ref := ComponentRef{
 			Variable: c.varName, Component: comp, ChainRest: c.rest,
 			URI: pr.URI, Line: c.line,
+			VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 		}
 		if c.funcKey == "" {
 			pr.ComponentRefs = append(pr.ComponentRefs, ref)
@@ -927,7 +928,8 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 			continue
 		}
 
-		if ref := firstRefNamed(pr.funcRefsMap[rp.funcKey], rp.varName); ref != nil {
+		// A closure's local of the same name is not what the function returns.
+		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], rp.varName); ref != nil {
 			pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
 		}
 	}
@@ -979,6 +981,18 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 func firstRefNamed(refs []ComponentRef, name string) *ComponentRef {
 	for i := range refs {
 		if strings.EqualFold(refs[i].Variable, name) {
+			return &refs[i]
+		}
+	}
+
+	return nil
+}
+
+// firstWideRefNamed is firstRefNamed over the refs the whole function sees,
+// passing over the ones a closure declared.
+func firstWideRefNamed(refs []ComponentRef, name string) *ComponentRef {
+	for i := range refs {
+		if refs[i].VisibleTo == 0 && strings.EqualFold(refs[i].Variable, name) {
 			return &refs[i]
 		}
 	}
@@ -1684,8 +1698,55 @@ func ExtractLinks(content string) []DocumentLink {
 }
 
 // FuncComponentRefs returns cached component refs for a function scope.
+//
+// A ref a closure in the function declared is left out: it exists only inside
+// the closure. FuncComponentRefsAt includes the ones in force at a line.
 func (pr *ParseResult) FuncComponentRefs(funcStart, funcEnd int) []ComponentRef {
 	refs, _ := pr.cachedFuncRefs(funcStart, funcEnd)
+
+	scoped := 0
+
+	for i := range refs {
+		if refs[i].VisibleTo != 0 {
+			scoped++
+		}
+	}
+
+	if scoped == 0 {
+		return refs
+	}
+
+	wide := make([]ComponentRef, 0, len(refs)-scoped)
+
+	for i := range refs {
+		if refs[i].VisibleTo == 0 {
+			wide = append(wide, refs[i])
+		}
+	}
+
+	return wide
+}
+
+// FuncComponentRefsAt returns the function's refs in force at line: the ones
+// the whole function sees, and the ones declared by a closure holding line.
+// The slice is the parse's own storage when no closure declared anything, so
+// callers must not write to it.
+func (pr *ParseResult) FuncComponentRefsAt(funcStart, funcEnd int, line uint32) []ComponentRef {
+	refs, _ := pr.cachedFuncRefs(funcStart, funcEnd)
+
+	for i := range refs {
+		if !refs[i].VisibleAt(line) {
+			out := slices.Clone(refs[:i])
+
+			for j := i + 1; j < len(refs); j++ {
+				if refs[j].VisibleAt(line) {
+					out = append(out, refs[j])
+				}
+			}
+
+			return out
+		}
+	}
 
 	return refs
 }

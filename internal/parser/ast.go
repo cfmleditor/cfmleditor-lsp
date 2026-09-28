@@ -174,6 +174,19 @@ type ComponentRef struct {
 	// by the last call rather than the first, and then drops it: nothing after
 	// the parse reads it, and the index keeps refs for the life of a workspace.
 	ChainRest []string
+
+	// VisibleFrom and VisibleTo are the lines of the closure that declared
+	// this ref, when a closure did: `it( "x", () => { var t = new Foo(); } )`
+	// makes a `t` that exists only inside the closure. Zero for a ref the
+	// whole function (or file) sees. FuncComponentRefs leaves ranged refs out
+	// and FuncComponentRefsAt includes the ones in force at a line.
+	VisibleFrom, VisibleTo uint32
+}
+
+// VisibleAt reports whether the ref is in force at line: always, unless a
+// closure declared it and line is outside that closure.
+func (r *ComponentRef) VisibleAt(line uint32) bool {
+	return r.VisibleTo == 0 || line >= r.VisibleFrom && line <= r.VisibleTo
 }
 
 // DocumentLink represents a file path reference in source (cfinclude, href, etc.).

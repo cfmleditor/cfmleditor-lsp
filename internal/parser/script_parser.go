@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -49,6 +50,7 @@ type scriptParser struct {
 	extractCalls bool // whether to extract all call sites
 	afterLT      bool // previous token was '<' — see looksLikeTagAttrs
 	forceGlobal  bool // when true, addRef routes to componentRefs
+	inClosure    bool // scanning a closure's body as statements — see scanClosureBody
 }
 
 // pendingCall records an unresolved assignment from a function call.
@@ -59,6 +61,10 @@ type pendingCall struct {
 	line     uint32
 	funcKey  string   // scope key, empty if global
 	rest     []string // calls chained after funcName, carried to the ref as ChainRest
+
+	// The closure the assignment was made in, carried to the ref; see
+	// ComponentRef.VisibleFrom.
+	visibleFrom, visibleTo uint32
 }
 
 func newScriptParser(src, fileURI string, baseLine int, resolvers []Resolver) *scriptParser {
@@ -1981,6 +1987,17 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 		// extraction are the same for either value.
 		p.parseBodyScopedVar(tok, sharedScopeOf(tok))
 	case "return":
+		if p.inClosure {
+			// A closure's return is the closure's, not the enclosing
+			// function's: its call is recorded, its type is not the
+			// function's return type.
+			if peek := p.sc.PeekSkipComments(); peek.Kind == TokIdent {
+				p.returnCall(peek)
+			}
+
+			return
+		}
+
 		p.checkReturnComponent()
 	case "new":
 		p.parseStandaloneNew(tok)
@@ -2140,6 +2157,14 @@ func (p *scriptParser) readNewComponent() string {
 		}
 
 		return p.resolveCall("createObject(\"java\",\"" + path + "\")")
+	}
+
+	// An inline component, `new component { … }` (Lucee), has no file to
+	// name: its type is the body that follows. It was read as a path, a
+	// component literally called "component", which then failed every
+	// method check against it.
+	if identEq(tok.Value, "component") && p.sc.PeekSkipComments().Kind == TokLBrace {
+		return "$any"
 	}
 
 	return p.applyImport(p.readDottedPath(tok))
@@ -2450,14 +2475,11 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 	// Skip name (or handle anonymous function)
 	nameTok := p.sc.NextSkipComments()
 	if nameTok.Kind == TokLParen {
-		// Anonymous function: function() { ... }. The '(' is already consumed,
-		// so the argument list is scanned from inside it — an argument default
-		// there holds calls like any other.
-		if _, ok := p.scanParenBody(); !ok {
-			return
-		}
-
-		p.scanNestedFunctionBody()
+		// Anonymous function: function() { ... }. The '(' is already consumed.
+		// parseArgList records the calls an argument default holds, and the
+		// names are the closure's parameters.
+		args := p.parseArgList()
+		p.scanNestedFunctionBody(argNames(args))
 
 		return
 	}
@@ -2493,7 +2515,7 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 
 	p.skipFunctionAttrs()
 
-	endLine := p.scanNestedFunctionBody()
+	endLine := p.scanNestedFunctionBody(argNames(args))
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Start: funcLine, End: p.baseLine + endLine})
 }
 
@@ -2511,7 +2533,7 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 // already did. An anonymous closure declares no scope of its own — it is a
 // value, for the reason parseFunctionValue gives — so the line this returns is
 // read only by the named branch, which does.
-func (p *scriptParser) scanNestedFunctionBody() int {
+func (p *scriptParser) scanNestedFunctionBody(params []string) int {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		p.sc.NextSkipComments()
@@ -2525,12 +2547,114 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 
 	p.sc.NextSkipComments()
 
+	return p.scanClosureBody(tok.Line, params)
+}
+
+// argNames is the names of args, a closure's parameters.
+func argNames(args []Argument) []string {
+	names := make([]string, 0, len(args))
+	for i := range args {
+		names = append(names, args[i].Name)
+	}
+
+	return names
+}
+
+// declareClosureParams declares a closure's parameters, on the line it
+// starts, in the enclosing function. Outside a function there is nowhere to
+// put them, as scanClosureBody says of its locals.
+func (p *scriptParser) declareClosureParams(params []string, line int) {
+	if p.inFunc == "" {
+		return
+	}
+
+	for _, name := range params {
+		p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeArguments, Line: conv.Uint32(p.baseLine + line)})
+	}
+}
+
+// scopeToClosure gives the function refs and pending calls recorded since
+// refsBefore and pendingBefore the closure's lines, from and to, as their
+// visibility. One a nested closure already scoped keeps its narrower range.
+func (p *scriptParser) scopeToClosure(refsBefore, pendingBefore, from, to int) {
+	refs := p.funcRefs[p.inFunc]
+	for i := refsBefore; i < len(refs); i++ {
+		if refs[i].VisibleTo == 0 {
+			refs[i].VisibleFrom, refs[i].VisibleTo = conv.Uint32(from), conv.Uint32(to)
+		}
+	}
+
+	for i := pendingBefore; i < len(p.pendingCalls); i++ {
+		if c := &p.pendingCalls[i]; c.visibleTo == 0 {
+			c.visibleFrom, c.visibleTo = conv.Uint32(from), conv.Uint32(to)
+		}
+	}
+}
+
+// scanClosureBody consumes the body of a closure, an anonymous or arrow
+// function, whose `{` has been consumed, and returns the line of its `}`.
+//
+// Inside a function it is read as statements, the way the function's own body
+// is: `it( "x", () => { var t = prepareMock( … ); t.go(); } )` declares `t`
+// and records what it holds. The body used to be scanned for calls alone, so
+// every `var` and every assignment in a closure declared nothing and typed
+// nothing — which is most of a TestBox spec, where each test is a closure,
+// and go-to-definition, completion and `unresolved` all read `t` as unknown.
+// What a closure declares is attributed to the enclosing function, as its
+// calls always were: that is the scope the parse has, and a local of one
+// closure is visible to the function's other closures only by name.
+//
+// Outside a function the old call-only scan is kept, because there is no
+// function scope to put a closure's locals in, and at component level a
+// `var` would land among the component's variables.
+func (p *scriptParser) scanClosureBody(line int, params []string) int {
+	statements := p.inFunc != "" && p.argNesting < maxArgNesting
+	prevInClosure, prevLocals := p.inClosure, p.localVarSet
+	p.inClosure = statements || p.inClosure
+
+	// What the closure declares is its own: its `var t` must not make a
+	// later unscoped `t = …` in the enclosing function a local.
+	if statements {
+		p.localVarSet = maps.Clone(prevLocals)
+		if p.localVarSet == nil {
+			p.localVarSet = make(map[string]bool)
+		}
+	}
+
+	refsBefore, pendingBefore := len(p.funcRefs[p.inFunc]), len(p.pendingCalls)
+
+	// The parameters are declared where the closure starts: `( table ) => {`
+	// and `function( ctx ) {` bind names the body reads.
+	if statements {
+		for _, name := range params {
+			p.localVarSet[strings.ToLower(name)] = true
+		}
+
+		p.declareClosureParams(params, line)
+	}
+
+	p.argNesting++
+
+	defer func() {
+		p.inClosure, p.localVarSet = prevInClosure, prevLocals
+		p.argNesting--
+	}()
+
 	depth := 1
-	last := tok.Line
+	last := line
+
+	defer func() {
+		if statements {
+			p.scopeToClosure(refsBefore, pendingBefore, p.baseLine+line, p.baseLine+last)
+		}
+	}()
 
 	for depth > 0 {
 		t := p.sc.NextSkipComments()
 		last = t.Line
+
+		afterLT := p.afterLT
+		p.afterLT = t.Kind == TokLT
 
 		switch t.Kind {
 		case TokEOF:
@@ -2540,7 +2664,11 @@ func (p *scriptParser) scanNestedFunctionBody() int {
 		case TokRBrace:
 			depth--
 		case TokIdent:
-			p.scanNestedCall(t)
+			if statements {
+				p.handleBodyToken(t, depth, afterLT)
+			} else {
+				p.scanNestedCall(t)
+			}
 		case TokString, TokRBracket:
 			p.handleLiteralToken(t)
 		default:
@@ -3536,11 +3664,33 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 	argStart, collecting := true, true
 	pending, havePending := "", false
 
+	var arrow arrowParams
+
 	for depth > 0 {
 		tok := p.sc.NextSkipComments()
 		if tok.Kind == TokEOF {
 			return "", nil, false
 		}
+
+		// An arrow function's block body: `=>` is `=` then `>`.
+		if tok.Kind == TokGT && arrow.prev == TokEquals && p.sc.PeekSkipComments().Kind == TokLBrace {
+			p.sc.NextSkipComments() // consume {
+			p.scanClosureBody(tok.Line, arrow.params())
+
+			arrow = arrowParams{prev: TokRBrace}
+			argStart = false
+
+			continue
+		}
+
+		// An expression-bodied arrow, `( v ) => v.isActive()`: its body is
+		// scanned here as it always was, and only its parameters need
+		// declaring.
+		if tok.Kind == TokGT && arrow.prev == TokEquals {
+			p.declareClosureParams(arrow.params(), tok.Line)
+		}
+
+		arrow.see(tok, depth)
 
 		if tok.Kind == TokString && firstArg == "" && depth == 1 {
 			firstArg = unquote(tok.Value)
@@ -3577,6 +3727,62 @@ func (p *scriptParser) scanParenArgs() (firstArg string, positional []string, ok
 	}
 
 	return firstArg, positional, true
+}
+
+// arrowParams follows an argument list's tokens closely enough to name an
+// arrow function's parameters once its `=>` arrives, since by then they have
+// been scanned: the names in the last (...) group, one per slot (the last
+// identifier before each `,` or `)`, so `(any a)` names `a`), or the single
+// identifier before `=>` in `x => {…}`.
+type arrowParams struct {
+	slot       string
+	group      []string
+	last       []string
+	lastIdent  string
+	groupDepth int
+	prev       TokenKind
+	prevprev   TokenKind
+}
+
+func (a *arrowParams) see(tok Token, depth int) {
+	switch tok.Kind {
+	case TokLParen:
+		// depth has not counted this `(` yet.
+		a.groupDepth, a.group, a.slot = depth+1, nil, ""
+	case TokIdent:
+		if depth == a.groupDepth {
+			a.slot = tok.Value
+		}
+
+		a.lastIdent = tok.Value
+	case TokComma:
+		if depth == a.groupDepth && a.slot != "" {
+			a.group, a.slot = append(a.group, a.slot), ""
+		}
+	case TokRParen:
+		if depth == a.groupDepth {
+			if a.slot != "" {
+				a.group = append(a.group, a.slot)
+			}
+
+			a.last, a.group, a.slot, a.groupDepth = a.group, nil, "", 0
+		}
+	default:
+	}
+
+	a.prevprev, a.prev = a.prev, tok.Kind
+}
+
+// params is the parameters of the arrow whose `=` was the last token seen.
+func (a *arrowParams) params() []string {
+	switch a.prevprev {
+	case TokRParen:
+		return a.last
+	case TokIdent:
+		return []string{a.lastIdent}
+	default:
+		return nil
+	}
 }
 
 // resolverCallExpr builds the expression a first hop is offered to the
