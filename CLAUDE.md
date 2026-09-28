@@ -703,7 +703,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   It used to fold on the tree-sitter CST, which also folds every block — ifs, loops, tags,
   literals — at the cost of a full parse per request, twice over for a script `.cfc`, whose
   body the CFML grammar hands to the CFScript grammar as one opaque region. Functions and
-  comments are about a quarter of those folds, and the rest is to be added from the parser.
+  comments are about a quarter of those folds, and the rest is to be added from the parser:
+  `FOLDING-PLAN.md` measures what is missing by construct and sets out the order.
   Over the six-project corpus the two agree on those, with two kinds of exception: tree-sitter's
   comment node starts at the end of the line *before* the comment, so it folded a one-line
   comment together with the line above it (about 3,000 folds, which this does not reproduce);
