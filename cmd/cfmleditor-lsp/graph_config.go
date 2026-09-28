@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -111,6 +112,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Mappings:           found.Mappings(),
 		ExpressionMappings: found.ExpressionMappings(),
 		WorkspaceFolders:   found.WorkspaceFolders(),
+		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),
 	}
 
 	cfg = codemap.FileConfig{

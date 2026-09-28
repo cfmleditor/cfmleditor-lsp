@@ -72,6 +72,11 @@ type JSON struct {
 	// KnownIssuesConfig, and internal/knownissues for the format.
 	KnownIssues *KnownIssuesConfig `json:"knownIssues"`
 
+	// Frameworks names the framework presets the project uses — "coldbox"
+	// — each adding the resolvers and implicit base components that framework
+	// implies. See frameworks.go.
+	Frameworks []string `json:"frameworks"`
+
 	ComponentResolvers []Resolver        `json:"componentResolvers"`
 	PropertyResolvers  []PropResolver    `json:"propertyResolvers"`
 	BeanPaths          map[string]string `json:"beanPaths"`
@@ -589,6 +594,7 @@ type Resolved struct {
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
+	Frameworks               []string
 	Formatting               ResolvedFormatting
 	Features                 ResolvedFeatures
 	Linting                  bool
@@ -657,6 +663,9 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if jr := JavaStubResolver(cfg.JavaStubsPath); jr.Match != "" {
 		r.ComponentResolvers = append(r.ComponentResolvers, jr)
 	}
+
+	r.Frameworks = cfg.Frameworks
+	r.ComponentResolvers = append(r.ComponentResolvers, FrameworkResolvers(cfg.Frameworks)...)
 
 	for _, pr := range cfg.PropertyResolvers {
 		if pr.Match != "" && pr.Resolve != "" && pr.Attribute != "" {
@@ -802,6 +811,9 @@ func Merge(base, over *JSON) *JSON {
 	// Resolvers from both sides stay active. Order is priority — the first
 	// match wins at lookup time — so over's entries lead.
 	out.ComponentResolvers = slices.Concat(over.ComponentResolvers, base.ComponentResolvers)
+
+	// A child names the frameworks it adds; its parent's still apply.
+	out.Frameworks = mergeFrameworks(base.Frameworks, over.Frameworks)
 	out.PropertyResolvers = slices.Concat(over.PropertyResolvers, base.PropertyResolvers)
 
 	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
@@ -989,6 +1001,19 @@ func mergeStringMap(base, over map[string]string) map[string]string {
 	maps.Copy(out, base)
 
 	maps.Copy(out, over)
+
+	return out
+}
+
+// mergeFrameworks unions two frameworks lists, over's first, each name once.
+func mergeFrameworks(base, over []string) []string {
+	var out []string
+
+	for _, f := range slices.Concat(over, base) {
+		if !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, f) }) {
+			out = append(out, f)
+		}
+	}
 
 	return out
 }

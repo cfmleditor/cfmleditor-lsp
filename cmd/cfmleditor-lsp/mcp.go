@@ -9,6 +9,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
@@ -155,6 +156,7 @@ func newExplainer(root string) mcp.Explainer {
 
 type explainConfig struct {
 	resolvers                []parser.Resolver
+	implicitExtends          func(string) string
 	expressionMappings       map[string]string
 	servicePropertyResolvers map[string]string
 	interpolateAll           bool
@@ -178,6 +180,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		workspaceFolders = c.WorkspaceFolders()
 		mappings = c.Mappings()
 		cfg.expressionMappings = c.ExpressionMappings()
+		cfg.implicitExtends = config.ImplicitExtends(c.Frameworks())
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
 		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
@@ -201,6 +204,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		Mappings:           mappings,
 		ExpressionMappings: cfg.expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    cfg.implicitExtends,
 	}
 
 	for _, f := range collectCFMLFiles(fsys, scanRoots) {

@@ -152,7 +152,13 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
 		opt.BeanPaths = cfg.BeanPaths()
 		opt.PropertyResolvers = configPropertyResolvers(cfg)
+		opt.ImplicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
+
+		if unknown := config.UnknownFrameworks(cfg.Frameworks()); len(unknown) > 0 {
+			fmt.Fprintf(os.Stderr, "frameworks: no preset named %s (known: %s)\n",
+				strings.Join(unknown, ", "), strings.Join(config.KnownFrameworks(), ", "))
+		}
 
 		for _, r := range cfg.ComponentResolvers() {
 			opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})

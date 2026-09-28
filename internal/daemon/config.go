@@ -387,7 +387,17 @@ func (c *Config) ComponentResolvers() []config.Resolver {
 		out = append(out, jr)
 	}
 
-	return out
+	return append(out, config.FrameworkResolvers(raw.Frameworks)...)
+}
+
+// Frameworks returns the framework presets the config names.
+func (c *Config) Frameworks() []string {
+	raw := c.raw()
+	if raw == nil {
+		return nil
+	}
+
+	return raw.Frameworks
 }
 
 // PropertyResolvers returns the configured property resolver patterns as [match, resolve, attribute] triples.
@@ -503,6 +513,7 @@ func SettingsFrom(c *Config) server.Settings {
 		ComponentResolvers:       c.ComponentResolvers(),
 		PropertyResolvers:        props,
 		BeanPaths:                c.BeanPaths(),
+		Frameworks:               c.Frameworks(),
 		Formatting:               c.ResolvedFormatting(),
 		Features:                 c.ResolvedFeatures(),
 		Linting:                  c.Linting(),

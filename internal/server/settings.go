@@ -36,6 +36,7 @@ type Settings struct {
 	ComponentResolvers       []config.Resolver
 	PropertyResolvers        []config.PropResolver
 	BeanPaths                map[string]string
+	Frameworks               []string
 	Formatting               config.ResolvedFormatting
 	Features                 config.ResolvedFeatures
 	Linting                  bool
@@ -60,6 +61,7 @@ func (set *Settings) Apply(s *Server) {
 	s.ComponentResolvers = append(s.ComponentResolvers, set.ComponentResolvers...)
 	s.PropertyResolvers = append(s.PropertyResolvers, set.PropertyResolvers...)
 	s.BeanPaths = set.BeanPaths
+	s.Frameworks = set.Frameworks
 	s.Formatting = set.Formatting
 	s.Features = set.Features
 	s.Linting = set.Linting

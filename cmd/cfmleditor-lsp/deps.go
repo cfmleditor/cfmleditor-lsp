@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
@@ -132,7 +133,10 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		searchDir = filepath.Dir(args[0])
 	}
 
+	var implicitExtends func(string) string
+
 	if cfg, _ := daemon.FindConfig(searchDir); cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
@@ -180,6 +184,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		Mappings:           mappings,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
 	}, idx
 }
 

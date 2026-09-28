@@ -17,7 +17,15 @@ import (
 func reasonsIn(t *testing.T, dir, page string) map[string]string {
 	t.Helper()
 
-	r := &Resolver{FS: vfs.OS{}, Index: index.New(), WorkspaceFolders: []string{dir}}
+	return reasonsWith(t, &Resolver{}, dir, page)
+}
+
+// reasonsWith is reasonsIn with a resolver carrying settings of its own; its
+// file system, index and workspace folder are filled in.
+func reasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string {
+	t.Helper()
+
+	r.FS, r.Index, r.WorkspaceFolders = vfs.OS{}, index.New(), []string{dir}
 
 	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
 		if err != nil || !strings.HasSuffix(p, ".cfc") {

@@ -1103,6 +1103,7 @@ the user-facing view and all `formatting` defaults.
 | `mappings` | Virtual dot-path root → directory. A workspace folder implies one of its own name (`Resolver.inFolderNamed`, `cfpath.InFolderNamed`), tried after every mapping and relative lookup, so explicit entries are needed only for roots that are not a folder's name |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
+| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, and an implicit base for a file that names no `extends`. See "Framework presets" below |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
 | `servicePropertyResolvers` | `@serviceproperty <var> <kind>\|<name>` doc-comment kind → `${name}` dot-path template, for generically-typed dependencies |
 | `beanPaths` | namespace → directory; `.cfc`s registered as `name@namespace`, plus a bare `name` when unique across all namespaces |
@@ -1320,6 +1321,23 @@ on it as dynamic. It never falls to the file-name search, which answered `new db
 whatever `dbinfo.cfc` the workspace held. Lucee functions its docs omit (hidden ones, like
 `struct()`) are `docs.undocumentedFunctions`, behind `docs.IsBuiltinFunction` — the one
 builtin test `unresolved` and the code map share.
+
+**Framework presets** (`frameworks`, `internal/config/frameworks.go`) are data, not code
+paths: a list of resolvers and implicit bases per framework, so a preset can only say what a
+project could have written by hand. Three rules hold them together, each with a test:
+- **Every preset resolver is `dynamicIfMissing`**, and an implied base that does not resolve
+  is dynamic too (`impliedBase`), so an app without the framework checked out gets nothing
+  reported against components that are not on disk, while one with it is checked for real.
+  A base the file names itself is still reported when it breaks.
+- **Variables match whole names**, anchored and escaped (`variableResolver`): unanchored,
+  prefix `event` finds itself inside `oEvent`. Return types are unanchored on purpose
+  (`returnResolver`), so `x = variables.controller.getRequestContext()` types `x`; the match
+  is still the whole remainder, so a further hop is not claimed.
+- **The implicit base is the resolver's, not the parse's.** `Resolver.ImplicitExtends` is a
+  hook `config.ImplicitExtends` builds, because `resolve` must not import `config` (which
+  pulls in tree-sitter). Every read of a file's extends in `resolve.go` goes through
+  `fileExtends`/`extendsFor`, memoised per path; the deepest matching directory wins. Each of
+  the seven places that builds a `Resolver` sets the hook from its config.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

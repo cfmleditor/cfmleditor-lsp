@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
@@ -86,10 +87,12 @@ func cmdExplain(args []string) {
 		servicePropertyResolvers map[string]string
 		interpolateAll           bool
 		workspaceFolders         []string
+		implicitExtends          func(string) string
 	)
 
 	cfg, _ := daemon.FindConfig(searchDir)
 	if cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		expressionMappings = cfg.ExpressionMappings()
@@ -114,6 +117,7 @@ func cmdExplain(args []string) {
 		Mappings:           mappings,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
 	}
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))

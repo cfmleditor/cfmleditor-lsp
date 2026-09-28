@@ -78,6 +78,7 @@ type Server struct {
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
+	Frameworks               []string                  // framework presets (config.FrameworkResolvers adds their resolvers)
 	Formatting               config.ResolvedFormatting // formatting settings
 	Features                 config.ResolvedFeatures   // per-capability off switches (all default on)
 	Linting                  bool                      // enable cflint diagnostics
@@ -434,6 +435,11 @@ func (s *Server) getResolver() *resolve.Resolver {
 	defer s.resolverMu.Unlock()
 
 	if s.resolver == nil {
+		if unknown := config.UnknownFrameworks(s.Frameworks); len(unknown) > 0 {
+			s.log.Warn("frameworks names presets that do not exist",
+				cflog.Strings("unknown", unknown), cflog.Strings("known", config.KnownFrameworks()))
+		}
+
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
 			WorkspaceFolders:   s.searchRoots(),
@@ -441,6 +447,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
 			Resolvers:          s.buildResolvers(),
+			ImplicitExtends:    config.ImplicitExtends(s.Frameworks),
 		}
 	}
 

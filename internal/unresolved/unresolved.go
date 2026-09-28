@@ -49,8 +49,9 @@ type Options struct {
 	PropertyResolvers        []parser.PropertyResolver
 	BeanPaths                map[string]string // configured beanPaths; Application.cfc's are added
 	WorkspaceFolders         []string
-	InterpolateAll           bool // features.outputContextInterpolation off
-	GlobalDefs               bool // accept a bare call any indexed file defines
+	ImplicitExtends          func(path string) string // frameworks' implicit bases; see config.ImplicitExtends
+	InterpolateAll           bool                     // features.outputContextInterpolation off
+	GlobalDefs               bool                     // accept a bare call any indexed file defines
 	Verbose                  io.Writer
 }
 
@@ -74,6 +75,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		Mappings:           opt.Mappings,
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
+		ImplicitExtends:    opt.ImplicitExtends,
 	}
 
 	started := time.Now()

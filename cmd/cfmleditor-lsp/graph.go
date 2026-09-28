@@ -505,6 +505,11 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	// a property of the workspace, not of whose resolvers you read them under.
 	shared = index.New()
 
+	var implicitExtends func(string) string
+	if cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+	}
+
 	resolver := &resolve.Resolver{
 		FS:                 fsys,
 		Index:              shared,
@@ -512,6 +517,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		Mappings:           mappings,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
 	}
 
 	// The bean map is the root config's, with each scanned root's
