@@ -1310,7 +1310,9 @@ resolver types a call, `dynamicCall` makes a MockBox mock and an unstubbed Java 
 from both `resolveCall`s, `tryResolveCall` and `resolvePendingCalls` — the chained
 `getMockBox().createEmptyMock()` reaches only the last. A component the parse names by file
 path (a function returning `this`) is reported by `displayComponent` under its file name,
-since reasons land in committed known-issues files. An engine component — bare `Query`, `http`, `dbinfo` and the
+since reasons land in committed known-issues files. The methods MockBox's `decorateMock` adds
+(`$`, `$results`, `$never`, … — `mockDecorations`) are accepted on any component, as a last
+call or a chain hop, since a test mocks a real component in place. An engine component — bare `Query`, `http`, `dbinfo` and the
 other script-tag names, or `org.lucee.cfml.*`/`com.adobe.coldfusion.*` — is `engineComponent`:
 once nothing configured resolves it, `engineSource` looks for an indexed file ending in its
 path (a Lucee checkout's `org/lucee/cfml/`), and without one `canResolveCall` accepts calls

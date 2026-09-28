@@ -447,6 +447,24 @@ func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.Funct
 	return nil
 }
 
+// mockDecorations are the methods MockBox's decorateMock adds to an object it
+// mocks (TestBox system/MockBox.cfc). A test mocks a real component in place —
+// prepareMock( event ), getMockRequestContext() — and then calls these on it,
+// so a component that is otherwise known is the wrong place to look for
+// them: event.$( "getValue" ) was "method '$' not found in RequestContext".
+// Every one starts with $, which no component's own method conventionally does.
+var mockDecorations = map[string]bool{
+	"$": true, "$spy": true, "$property": true, "$getproperty": true,
+	"$results": true, "$throws": true, "$callback": true, "$args": true,
+	"$calllog": true, "$count": true, "$times": true, "$never": true,
+	"$verifycallcount": true, "$atleast": true, "$once": true, "$atmost": true,
+	"$debug": true, "$reset": true,
+}
+
+func mockDecoration(name string) bool {
+	return strings.HasPrefix(name, "$") && mockDecorations[strings.ToLower(name)]
+}
+
 // extendsOf reports what cfcPath extends, reading and parsing the file only if
 // the index cannot say.
 //
@@ -1172,6 +1190,13 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 		return "component '" + displayComponent(comp) + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 	}
 
+	if mockDecoration(hop) {
+		tr.addf("%q is a method MockBox adds to a mock — chain hop accepted, the rest of the chain is dynamic", hop)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
 	// A hop onMissingMethod answers is as valid as a last call it answers, and
 	// what it returns is whatever the dispatcher decides. Lucee's own Http and
 	// Query build their setters this way: new Http().setUrl(u).send().
@@ -1292,6 +1317,13 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 
 	if def := r.ResolveFunc(comp, funcName, baseDir); def != nil {
 		tr.hit(TargetComponent, comp, def)
+
+		return ""
+	}
+
+	if mockDecoration(funcName) {
+		tr.addf("%q is a method MockBox adds to a mock of %q — accepted", funcName, comp)
+		tr.hit(TargetDynamic, comp, nil)
 
 		return ""
 	}
