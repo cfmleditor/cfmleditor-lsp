@@ -187,6 +187,33 @@ func ResolvePathCached(dotPath string, baseDir string, mappings map[string]strin
 	return resolveSegmentsCached(baseDir, segments, cache)
 }
 
+// InFolderNamed returns where rel lands when its first segment names one of
+// roots: the rest of rel joined onto each root whose base name is that segment,
+// case-insensitively. rel is a slash path, with or without a leading slash
+// ("/tassweb/includes/x.cfm"). It returns nothing when rel has one segment.
+//
+// It is the path form of the rule behind Resolver's folder-named fallback: a
+// workspace folder called tassweb stands for a mapping of "tassweb" onto
+// itself, so a project whose mappings only ever named its own folders needs
+// none. Callers try it last, after every configured and relative lookup, so it
+// only answers a path nothing else did.
+func InFolderNamed(roots []string, rel string) []string {
+	seg, rest, ok := strings.Cut(strings.TrimPrefix(filepath.ToSlash(rel), "/"), "/")
+	if !ok || seg == "" || rest == "" {
+		return nil
+	}
+
+	var out []string
+
+	for _, root := range roots {
+		if strings.EqualFold(filepath.Base(root), seg) {
+			out = append(out, filepath.Join(root, filepath.FromSlash(rest)))
+		}
+	}
+
+	return out
+}
+
 // lookupFold returns the value for the first key in m that matches key
 // case-insensitively, and whether one was found.
 func lookupFold(m map[string]string, key string) (string, bool) {

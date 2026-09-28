@@ -35,7 +35,8 @@ func pathKey(p string) string {
 // IncludePath resolves a cfinclude template path written in fromFile to a file
 // that exists, or "" when it names none. The order is go-to-definition's: the
 // including file's directory, the Application.cfc root, a mapping named by the
-// first segment, then each workspace folder.
+// first segment, then each workspace folder, then a workspace folder named
+// by the first segment.
 func (r *Resolver) IncludePath(raw, fromFile string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "#") || strings.Contains(raw, "://") {
@@ -63,6 +64,9 @@ func (r *Resolver) IncludePath(raw, fromFile string) string {
 	for _, root := range r.WorkspaceFolders {
 		candidates = append(candidates, filepath.Join(root, filepath.FromSlash(trimmed)))
 	}
+
+	// Last, a first segment naming a workspace folder: see inFolderNamed.
+	candidates = append(candidates, cfpath.InFolderNamed(r.WorkspaceFolders, trimmed)...)
 
 	for _, c := range candidates {
 		if info, err := r.FS.Stat(c); err == nil && !info.IsDir() {

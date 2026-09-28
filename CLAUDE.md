@@ -1100,7 +1100,7 @@ the user-facing view and all `formatting` defaults.
 |---|---|
 | `workspaceName` | Required for daemon mode; derives the socket path |
 | `workspacePaths`, `workspaceIndexGlobs` | Which roots / `.cfc` files to index |
-| `mappings` | Virtual dot-path root → directory |
+| `mappings` | Virtual dot-path root → directory. A workspace folder implies one of its own name (`Resolver.inFolderNamed`, `cfpath.InFolderNamed`), tried after every mapping and relative lookup, so explicit entries are needed only for roots that are not a folder's name |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
