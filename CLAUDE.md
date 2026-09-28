@@ -710,9 +710,12 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   it runs the parse's own scanner in CFScript mode (a `#...#` inside a string can hold strings of
   its own, and a plain quote-to-quote scan pairs them wrongly) with a stack of open `{`, `(` and
   `[`, reporting comments, blocks, multi-line argument and parameter lists and array literals,
-  and switch cases. A fold ends on the line before the one holding its closer, so the `}`, `)`
-  or `</cffunction>` stays on screen; a comment folds to its last line. Tags in a page do not
-  fold yet — `FOLDING-PLAN.md` §2.3.
+  and switch cases. The markup around the script regions is walked once by `tagStructure` (a
+  stack of open tags; a close pops to its opener and discards what is left open above it), so a
+  `<cfscript>` pairs with its `</cfscript>` across the region between them. A fold ends on the
+  line before the one holding its closer, so the `}`, `)` or `</cfif>` stays on screen; a
+  comment folds to its last line, and a `<cfelse>` branch or switch case to the line before its
+  last content. `TestTagStructureSpans` has a case per tag rule.
 
   The rules that make the bracket pass agree with the tree-sitter folding it replaced, each with
   a case in `TestStructureSpans` that fails without it:
@@ -735,11 +738,12 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   - A word is classified once, by `classify`: one switch on the word lowercased without
     allocating. Lists compared with `EqualFold` were a fifth of the scan.
 
-  Over the six-project corpus it reproduces 83.5% of tree-sitter's 156,241 folds, and makes 937
-  that tree-sitter did not. The rest is tags in pages (about 18,000), comments where tree-sitter's
-  node started a line early (about 3,100), multi-line binary expressions and conditions left out
-  on purpose, and method chains and concatenations inside declarations. 91µs for a 60-function
-  component, against 3.5ms for tree-sitter.
+  Over the six-project corpus it reproduces 93.9% of tree-sitter's 156,241 folds, and makes about
+  2,000 that tree-sitter did not. The rest is comments where tree-sitter's node started a line
+  early (about 3,100), multi-line binary expressions and conditions left out on purpose, method
+  chains and concatenations inside declarations, and pages where tree-sitter closes `<td>` or
+  `<li>` implicitly. About 80µs for a 60-function component and 116µs for a 490-line page,
+  against 3.5ms for tree-sitter on the component.
 
   **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init` installs allocator
   hooks that call back into Go for every `malloc` and `free` a parse makes;
@@ -797,8 +801,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
   Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
-  (`config.foldingDefault`), until tags in a page fold: an editor given folding ranges drops its
-  own indentation folding for them, and a page would fold only its comments and functions. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  (`config.foldingDefault`), as it has been since it was expensive; it now covers 93.9% of what
+  the tree-sitter version folded, and switching the default is `FOLDING-PLAN.md` §5. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
   the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
@@ -1054,7 +1058,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in until tags in a page fold, since it replaces the editor's indentation folding); `typeDefinition` defaults **off** (opt-in while new). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in; see `FOLDING-PLAN.md` §5 on switching it); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 

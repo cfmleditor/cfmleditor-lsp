@@ -619,17 +619,15 @@ they are off unless you ask for them.**
 | Key | Default | Controls |
 |---|---|---|
 | `documentHighlight` | on | Shading the other occurrences of the identifier under the cursor. |
-| `folding` | **off** | Folding ranges for functions, comments and, in CFScript, every block, closure, literal, multi-line argument list and switch case. Tags in a page do not fold yet. With it off the editor folds by indentation, as it did before the feature existed. |
+| `folding` | **off** | Folding ranges for functions and comments; in CFScript every block, closure, literal, multi-line argument list and switch case; in markup every element, CF tag and `<cfelse>` branch. With it off the editor folds by indentation, as it did before the feature existed. |
 | `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
 | `rangeFormatting` | on | "Format Selection". Switching it off leaves whole-document formatting and format-on-save working. |
 | `typeDefinition` | **off** | "Go to Type Definition": from a variable, argument or property to the component it holds, or from a call to the component the function returns. The newest capability here, so it waits to be asked for. |
 | `outputContextInterpolation` | on | Reading `#...#` in a tag file's text only where ColdFusion evaluates it: inside `<cfoutput>`, `<cfquery>`, `<cfmail>` and `output="true"` functions, and in the attributes of CF and custom tags. Also reads a `.cfm` template with no CF tags as HTML rather than CFScript. Off, every pair of hashes in text is scanned, which finds calls in JavaScript, CSS and prose between two stray hashes. Unlike the others this changes what the parser reads, not what the server advertises. |
 
-`folding` is opt-in until tags in a page fold too. A script component already
-folds everything indentation would, but a `.cfm` page folds only its comments and
-functions, and an editor that is given folding ranges uses them in place of its
-own indentation folding. Turn it on with `{"features": {"folding": true}}` if you
-mostly work in script.
+`folding` is opt-in. An editor that is given folding ranges uses them in place of
+its own indentation folding, so it is a change to how every file folds. Turn it on
+with `{"features": {"folding": true}}`.
 
 Set only the keys you want to change — the block is merged key by key, so naming
 one leaves the rest alone, and an editor's `initializationOptions` and a project's

@@ -12,10 +12,10 @@ import (
 )
 
 // handleFoldingRange answers textDocument/foldingRange from the parser: every
-// function (the cached ParseResult's scopes), every comment, and in CFScript
-// every block, closure, literal, multi-line argument list and switch case
-// (parser.StructureSpans). Tags in a page do not fold yet; FOLDING-PLAN.md has
-// the plan.
+// function (the cached ParseResult's scopes), and from parser.StructureSpans
+// every comment, in CFScript every block, closure, literal, multi-line argument
+// list and switch case, and in markup every element, CF tag and `<cfelse>`
+// branch. FOLDING-PLAN.md has how each was measured.
 //
 // Folding used to come from the tree-sitter CST, which cost a full parse per
 // request, twice over for a script-syntax component.

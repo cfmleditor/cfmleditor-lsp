@@ -193,6 +193,88 @@ func TestStructureSpans(t *testing.T) {
 	}
 }
 
+// Each case is one rule of the tag pass, and each fails with its rule removed.
+// The expected spans were checked against what the tree-sitter folding this
+// replaced reported for the same source.
+func TestTagStructureSpans(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      []string
+	}{
+		{
+			// Tags pair on a stack. <cfset> and <br> have no closing tag and
+			// an unclosed <p> is discarded when </div> pops past it.
+			name: "elements and bodiless tags",
+			src:  "<div>\n\t<cfset x = 1>\n\t<br>\n\t<p>unclosed\n\t<ul>\n\t\t<li>a</li>\n\t</ul>\n</div>\n",
+			want: []string{"4-6 1", "0-7 1"},
+		},
+		{
+			// Each branch runs to the last content before </cfif>: a
+			// <cfelseif> holds the branches after it, and a branch has no
+			// closer of its own to keep on screen.
+			name: "cfif branches",
+			src:  "<cfif a>\n\tone\n<cfelseif b>\n\ttwo\n\ttwo\n<cfelse>\n\tthree\n\tthree\n</cfif>\n",
+			want: []string{"0-8 1", "2-7 3", "5-7 3"},
+		},
+		{
+			// <cfscript> pairs with </cfscript> across the script region
+			// between them, which the bracket pass reads.
+			name: "cfscript block",
+			src:  "<cfoutput>\n<cfscript>\n\tif ( a ) {\n\t\tx();\n\t}\n</cfscript>\n</cfoutput>\n",
+			want: []string{"2-4 1", "1-5 1", "0-6 1"},
+		},
+		{
+			// ClassifyRegions makes this one script region; the tags around
+			// it are still there to fold, and the code inside to read.
+			name: "a page that is one cfscript block",
+			src:  "<cfscript>\n\tif ( a ) {\n\t\tx();\n\t}\n</cfscript>\n",
+			want: []string{"1-3 1", "0-4 1"},
+		},
+		{
+			// JavaScript's `a<b` is not a tag, and a "</div>" in one of its
+			// strings does not close the page's <div>.
+			name: "raw script",
+			src:  "<div>\n<script>\n\tvar s = \"</div>\";\n\tif (a<b) {\n\t}\n</script>\n</div>\n",
+			want: []string{"1-5 1", "0-6 1"},
+		},
+		{
+			// A <script> holding CF tags is walked, as ClassifyRegions
+			// treats it.
+			name: "script holding CF tags",
+			src:  "<script>\n\t<cfif a>\n\t\tx();\n\t\ty();\n\t</cfif>\n</script>\n",
+			want: []string{"1-4 1", "0-5 1"},
+		},
+		{
+			// An opening tag whose attributes wrap folds by itself; and a
+			// page of plain HTML, which ClassifyRegions reads as CFScript,
+			// is walked as markup.
+			name: "wrapping attributes in plain HTML",
+			src:  "<button\n\ttype=\"button\"\n\tvalue=\"x\"\n>\n\tgo\n</button>\n",
+			want: []string{"0-3 1", "0-5 1"},
+		},
+		{
+			// A CF tag inside an HTML tag is read, not swallowed as part of
+			// the attributes, so the <cfif> folds. (0-1 is the <tr>'s
+			// opening tag up to the <cfif>, which the server drops: its fold
+			// would cover no line.)
+			name: "CF tag inside an HTML tag",
+			src:  "<tr\n\t<cfif a>\n\t\tclass=\"x\"\n\t</cfif>\n>\n\t<td>x</td>\n</tr>\n",
+			want: []string{"0-1 1", "1-3 1", "0-6 1"},
+		},
+		{
+			name: "comments",
+			src:  "<!--- a\n b --->\n<!-- c\n d -->\n",
+			want: []string{"0-1 0", "2-3 0"},
+		},
+	}
+
+	for _, c := range cases {
+		if got, want := spanSet(StructureSpans(c.src)), strings.Join(c.want, " | "); got != want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, want)
+		}
+	}
+}
+
 // Classifying a word is on every identifier of the document, and was a fifth
 // of the scan when it compared lists with EqualFold.
 func TestClassifyDoesNotAllocate(t *testing.T) {

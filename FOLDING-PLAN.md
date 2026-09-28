@@ -199,39 +199,54 @@ The rules that make this match tree-sitter, rather than merely resemble it:
   closure passed to a call can share both lines with the call. Dedupe as the
   handler already does.
 
-### 2.3 A tag pass over tag regions: CF tags, branches, HTML elements
+### 2.3 A tag pass over markup — done
 
-About 18,000 folds (12%), and nearly all of what a `.cfm` page has: today a page
-folds only its comments and its `<cffunction>`s.
+`tagStructure` (`internal/parser/tagstructure.go`) walks the markup with a stack
+of open tags. A closing tag pops to its opener, and whatever is left open above it
+is discarded. Measured against the tree-sitter folds over the corpus:
 
-One pass over each tag region, keeping a stack of open tags:
+| Group | Before | After |
+|---|---:|---:|
+| HTML elements | 0% | 89.2% |
+| CF tags in tag files | 9.5% | 91.2% |
+| Other (multi-line `<cfset>`, `<cfsavecontent>`, …) | 34.5% | 80.6% |
+| **All folds** | **83.5%** | **93.9%** |
 
-- Push on `<name …>`; on `</name>` pop to the matching entry and fold it.
-  Unclosed tags between the two are discarded — that is how `<cfset>`,
-  `<cfreturn>`, `<cfargument>`, `<br>`, `<img>` and `<input>` fall out without a
-  list of which tags have bodies, and how an unclosed `<p>` does no harm.
-  Self-closing `<… />` never pushes.
-- Find a tag's end with `tagEndIndex`, which steps over quoted attribute
-  values, not with a bare search for `>`. Step over `<!--- --->` and `<!-- -->`
-  so a tag inside a comment is not read.
-- **`<cfelse>` and `<cfelseif>` start a branch** that ends on the line before
-  the next branch or the closing `</cfif>`; the `<cfif>` itself folds to the
-  line before its first branch. This is the case the tree-sitter version
-  handled with its leading-whitespace rule, and it had a test
-  (`TestFoldingRangesInATagDocument`, as of commit `d8dffc1`). `<cfcase>` and
-  `<cfdefaultcase>` inside `<cfswitch>` are the same shape.
-- **A `<cfset>` spanning lines folds**, from its line to the line before its
-  last: `<cfset cfg = {` over twenty lines is the tag-syntax form of the
-  declarations above (132 folds, counted under "other" in §1).
-- **A `<script>` or `<style>` element folds as one element** and is not looked
-  inside: its content is a `RegionSkip`, JavaScript or CSS, not CFML.
-- **Match tag names case-insensitively**, CFML being case-insensitive, with the
-  allocation-free fold the parser uses elsewhere (`fold.go`).
+`<cfif>` is at 99.1% and `<cfscript>` at 1,374 of 1,375. `<cfquery>`,
+`<cffunction>`, `<cfsavecontent>`, `<script>` and `<style>` match exactly.
 
-`internal/parser/tags.go` already pairs tags for go-to-matching-tag
-(`FindMatchingTag`, `findOpenTagBefore`, `findCloseTagAfter`), but it answers one
-position at a time by searching outward. The pass here is a single forward walk.
-The two should agree on what pairs with what, and a test should hold them to it.
+Where it differs from the plan above, and why:
+
+- **One walk over the whole file**, stepping over the script regions, not one
+  per tag region. ClassifyRegions cuts a region at `<cfscript>` and resumes after
+  `</cfscript>`, leaving both tags between regions. A walk per region never sees
+  the pair.
+- **A `<cfif>`'s branches all run to the last content before `</cfif>`**, not to
+  the next branch. Tree-sitter reads a `<cfelseif>` as holding every branch after
+  it. A branch has no closing tag of its own to keep on screen, so, like a switch
+  case, it keeps its last line.
+- **A `<script>` holding a CF tag is walked**, not skipped, as ClassifyRegions
+  treats it. Only CF-free blocks are raw text, where `a<b` and a `"</div>"`
+  string are not tags.
+- **A CF tag inside an HTML tag ends it**: `<input <cfif a>checked</cfif>>` and
+  a `<tr` whose attributes are wrapped in `<cfif>`. Swallowing the CF tag as an
+  attribute left its `</cfif>` unpaired.
+- **An opening tag whose attributes wrap folds by itself**, bodiless or not.
+  That covers a multi-line `<cfset>` and tree-sitter's 523 `start_tag` folds in
+  one rule.
+- **A page of plain HTML is walked as markup.** ClassifyRegions reads a file
+  with no CF tag as CFScript, which is the parse's rule. A file whose first
+  token is `<` cannot be CFScript.
+- **Not done:** a test holding this walk and `FindMatchingTag` to the same
+  pairing. They answer different questions — every pair in one forward walk,
+  against one tag's partner found by searching outward — and they disagree
+  wherever one of them meets an implied close.
+
+What remains is mostly where tree-sitter's own reading is doubtful. It closes
+`<td>` and `<li>` implicitly. It gives a lone `<hr>` a fold. It lets an
+unclosed custom tag such as `<cfinputClassic>` or `<cfchartdata>` hold
+everything up to its parent's close. 758 of the 1,040 element misses are in
+Lucee's admin pages, which are written that way.
 
 ### 2.4 Leave out
 
@@ -274,9 +289,10 @@ above should be measured against it rather than against fixtures:
 
 ## 5. When to switch the default on
 
-When §2.1, §2.2 (braces) and §2.3 have landed, the parser will cover about 85%
-of what tree-sitter folded, including every block an indentation fold would
-have found in a script file and the tag structure of a page. At that point
-switching folding on is an improvement for everyone rather than a trade, and
-`config.foldingDefault` can become `true`. `featureDefaults` in
-`features_chain_test.go` states every default and has to change with it.
+§2.1 to §2.3 have landed. The parser covers 93.9% of what tree-sitter folded,
+including every block an indentation fold would have found in a script file and
+the tag structure of a page. Switching folding on is now an improvement rather
+than a trade, and `config.foldingDefault` can become `true`.
+`featureDefaults` in `features_chain_test.go` states every default and has to
+change with it. That is a change to what every user sees, so it is left for its
+own decision.

@@ -57,16 +57,20 @@ const tagSrc = `<!--- a comment
 </cfcomponent>
 `
 
-// TestFoldingRangesInATagDocument: a function folds to the line before its
-// closing one, so `</cffunction>` and `}` stay on screen — a fold that hides
-// them reads as though the construct had been deleted. A comment folds to its
-// last line, which has content of its own, and a comment on one line has
-// nothing to fold. Blocks inside a function (the <cfif>) do not fold yet.
+// TestFoldingRangesInATagDocument: every construct folds to the line before
+// its closing one, so `</cffunction>`, `</cfif>` and `}` stay on screen — a
+// fold that hides them reads as though the construct had been deleted. A
+// comment folds to its last line, which has content of its own, and a comment
+// on one line has nothing to fold. The <cfscript> block folds as a tag, and
+// the function in it from the script pass.
 func TestFoldingRangesInATagDocument(t *testing.T) {
 	assertFolds(t, tagSrc, []string{
 		"0-1 comment",  // <!--- --->
+		"2-17",         // <cfcomponent>
 		"4-7",          // <cffunction>, leaving </cffunction> shown
+		"5-6",          // <cfif>
 		"9-10 comment", // <!-- -->
+		"11-16",        // <cfscript>
 		"12-15",        // function greet, in the <cfscript> block
 		"13-14 comment",
 	})

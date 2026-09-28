@@ -31,42 +31,61 @@ type Span struct {
 }
 
 // StructureSpans returns the multi-line constructs of a document, for
-// folding: every comment, every `{ }` in CFScript, every argument list,
-// parameter list and array literal in CFScript, and every switch case.
+// folding: every comment; in CFScript every `{ }`, argument list, parameter
+// list, array literal and switch case; and in markup every element, CF tag and
+// `<cfif>` branch.
 //
 // Which syntax a stretch of the file is in comes from ClassifyRegions, the same
 // split the parse makes. A script region is read with the parse's own scanner
 // in CFScript mode, so strings — including one inside a `#...#` inside a
-// string — are stepped over exactly as the parse steps over them. A tag region
-// is searched for comments only, for now: `/*` in markup is CSS or prose, and
-// pairing its apostrophes as quotes would be wrong. A RegionSkip is a literal
-// <script> block of JavaScript, whose comments and braces are not CFML's.
+// string — are stepped over exactly as the parse steps over them. The markup
+// around the script regions is walked as one text (tagStructure), so a
+// `<cfscript>` pairs with its `</cfscript>` across the region between them.
 func StructureSpans(content string) []Span {
 	regions, idx := ClassifyRegionsIdx(content)
+
+	var (
+		spans  []Span
+		script [][2]int
+	)
+
+	// ClassifyRegions reads a file with no CF tag in it as CFScript, which is
+	// the parse's rule. A page of plain HTML is such a file, and CFScript
+	// cannot begin with `<`, so a file whose first token is one is walked as
+	// the markup it is.
+	if len(regions) == 1 && regions[0].Kind == RegionScript && len(regions[0].Text) == len(content) && startsWithMarkup(content) {
+		if idx == nil {
+			idx = buildLineIdx(content)
+		}
+
+		return tagStructure(content, nil, idx, nil)
+	}
+
+	for i := range regions {
+		r := &regions[i]
+		if r.Kind == RegionScript {
+			spans = scriptStructure(r.Text, r.StartLine, spans)
+			script = append(script, [2]int{r.Offset, r.Offset + len(r.Text)})
+		}
+	}
+
+	// A script file is one script region covering it all; anything else —
+	// a page that is one <cfscript> block included — has markup to walk.
+	if len(regions) == 1 && regions[0].Kind == RegionScript && len(regions[0].Text) == len(content) {
+		return spans
+	}
+
 	if idx == nil {
 		idx = buildLineIdx(content)
 	}
 
-	var spans []Span
+	return tagStructure(content, script, idx, spans)
+}
 
-	for i := range regions {
-		r := &regions[i]
-
-		switch r.Kind {
-		case RegionScript:
-			spans = scriptStructure(r.Text, r.StartLine, spans)
-		case RegionTag:
-			tagComments(r.Text, func(from, to int) {
-				start, end := lineAtOffset(idx, r.Offset+from), lineAtOffset(idx, r.Offset+to)
-				if end > start {
-					spans = append(spans, Span{Start: start, End: end, Kind: SpanComment})
-				}
-			})
-		case RegionSkip:
-		}
-	}
-
-	return spans
+// startsWithMarkup reports whether content's first token, after any comments,
+// is a `<`.
+func startsWithMarkup(content string) bool {
+	return NewScanner(content).NextSkipComments().Kind == TokLT
 }
 
 // structFrame is one open bracket in scriptStructure's stack.
@@ -581,33 +600,4 @@ func (st *structScan) closeCase(f *structFrame) {
 	}
 
 	f.caseStart = -1
-}
-
-// tagComments reports each `<!--- --->` and HTML `<!-- -->` in tag-syntax
-// text, as the byte offsets of its first and last characters. CFML comments
-// nest, and neither kind is string-aware — an engine ends one at the first
-// closing delimiter whatever quotes precede it, and so does a browser — so
-// neither is this.
-func tagComments(text string, add func(from, to int)) {
-	for i := 0; i < len(text); {
-		k := strings.Index(text[i:], "<!--")
-		if k < 0 {
-			return
-		}
-
-		start := i + k
-
-		var end int
-
-		if strings.HasPrefix(text[start:], "<!---") {
-			end = skipCFMLComment(text, start)
-		} else if c := strings.Index(text[start+4:], "-->"); c >= 0 {
-			end = start + 4 + c + 3
-		} else {
-			end = len(text)
-		}
-
-		add(start, end-1)
-		i = end
-	}
 }

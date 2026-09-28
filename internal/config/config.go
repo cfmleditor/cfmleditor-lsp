@@ -380,11 +380,11 @@ type References struct {
 // block, so they keep their own top-level keys; `references` additionally
 // defaults *off*, since answering one request scans the whole workspace.
 //
-// `folding` defaults off as well, until tags in a page fold. It folds a
-// script component as fully as indentation would, but a `.cfm` page only by
-// its comments and functions, and an editor given folding ranges uses them in
-// place of its own indentation folding. An editor that never asked for it
-// loses nothing it had. Turn it on with `{"features": {"folding": true}}`.
+// `folding` defaults off as well. An editor given folding ranges uses them in
+// place of its own indentation folding, so switching it on changes how every
+// file folds; FOLDING-PLAN.md §5 is the case for making it the default. An
+// editor that never asked for it loses nothing it had. Turn it on with
+// `{"features": {"folding": true}}`.
 type Features struct {
 	DocumentHighlight *bool `json:"documentHighlight"`
 	Folding           *bool `json:"folding"`
