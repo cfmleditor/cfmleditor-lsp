@@ -29,35 +29,71 @@ func TestEveryAcceptPathRecordsATarget(t *testing.T) {
 		t.Fatalf("parsing resolve.go: %v", err)
 	}
 
-	fn := findFunc(file, "canResolveCall")
-	if fn == nil {
+	// canResolveCall and every piece split out of it: a function that takes the
+	// trace and answers with one string answers the same question, "" for
+	// accepted. Checking canResolveCall alone would let an accept path move
+	// into a helper and out of sight.
+	fns := verdictFuncs(file)
+	if findFunc(file, "canResolveCall") == nil {
 		t.Fatal("canResolveCall not found in resolve.go — did it move or get renamed?")
 	}
 
-	var missing []string
+	var (
+		missing []string
+		accepts int
+	)
 
-	walkAccepts(fn.Body, false, func(pos token.Pos, hitSeen bool) {
-		if !hitSeen {
-			missing = append(missing, fset.Position(pos).String())
-		}
-	})
+	for _, fn := range fns {
+		walkAccepts(fn.Body, false, func(pos token.Pos, hitSeen bool) {
+			accepts++
+
+			if !hitSeen {
+				missing = append(missing, fn.Name.Name+" "+fset.Position(pos).String())
+			}
+		})
+	}
 
 	if len(missing) > 0 {
-		t.Errorf("%d accept path(s) in canResolveCall return \"\" without calling tr.hit first:\n  %s\n\n"+
+		t.Errorf("%d accept path(s) return \"\" without calling tr.hit first:\n  %s\n\n"+
 			"Each `return \"\"` accepts a call, so the call graph needs to know what it accepted it as. "+
 			"Add a tr.hit(Target..., component, def) before the return — see the kinds in target.go.",
 			len(missing), strings.Join(missing, "\n  "))
 	}
 
 	// Guard the guard: a test that found nothing to check would pass forever.
-	var accepts int
-
-	walkAccepts(fn.Body, false, func(token.Pos, bool) { accepts++ })
-
 	if accepts < 15 {
-		t.Errorf("only found %d `return \"\"` accept paths in canResolveCall; expected at least 15 — "+
-			"the walk is probably no longer finding them", accepts)
+		t.Errorf("only found %d `return \"\"` accept paths in %d functions; expected at least 15 — "+
+			"the walk is probably no longer finding them", accepts, len(fns))
 	}
+}
+
+// verdictFuncs is every function that takes a *callTrace and returns a single
+// string: canResolveCall's shape.
+func verdictFuncs(file *ast.File) []*ast.FuncDecl {
+	var out []*ast.FuncDecl
+
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 || len(fn.Type.Results.List[0].Names) > 1 {
+			continue
+		}
+
+		if id, ok := fn.Type.Results.List[0].Type.(*ast.Ident); !ok || id.Name != "string" {
+			continue
+		}
+
+		for _, p := range fn.Type.Params.List {
+			if star, ok := p.Type.(*ast.StarExpr); ok {
+				if id, ok := star.X.(*ast.Ident); ok && id.Name == "callTrace" {
+					out = append(out, fn)
+
+					break
+				}
+			}
+		}
+	}
+
+	return out
 }
 
 // TestNoTargetKindIsUnclassified pins Definite against the full kind list, so a kind

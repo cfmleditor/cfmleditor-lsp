@@ -104,10 +104,20 @@ func dedupEntries(entries []Entry) []Entry {
 }
 
 // FormatResult builds a summary and graph from trace entries.
-func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
-	// Summary
-	lines := make([]string, 0, 1+len(entries))
+func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) TraceResult {
 	sourceRel := relativePath(strings.TrimPrefix(sourceURI, "file://"), roots)
+
+	return TraceResult{
+		Entries: entries,
+		Summary: traceSummary(entries, funcName, sourceRel, roots),
+		Graph:   graph.Graph{Direction: "TD", Edges: traceEdges(entries, funcName, sourceRel, roots)},
+	}
+}
+
+// traceSummary is FormatResult's text: the entries grouped by how far they
+// are from the traced function.
+func traceSummary(entries []Entry, funcName, sourceRel string, roots []string) string {
+	lines := make([]string, 0, 1+len(entries))
 	lines = append(lines, fmt.Sprintf("Calls to '%s' (%s): %d match(es)", funcName, sourceRel, len(entries)))
 
 	// Group by relationship to the traced target: depth 0 is a direct call;
@@ -149,41 +159,50 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 		}
 
 		for i := range groups[gk] {
-			e := &groups[gk][i]
-
-			rel := relativePath(e.File, roots)
-
-			marker := ""
-			if !e.Resolved {
-				marker = " [unresolved]"
-				if e.Reason != "" {
-					marker = " [unresolved: " + e.Reason + "]"
-				}
-			}
-
-			caller := ""
-			if e.Function != "" {
-				caller = " in " + e.Function + "()"
-			}
-
-			call := ""
-			if e.Call != "" {
-				call = "  " + e.Call
-			}
-
-			lines = append(lines, fmt.Sprintf("  %s:%d%s%s%s", rel, e.Line+1, marker, caller, call))
+			lines = append(lines, entrySummaryLine(&groups[gk][i], roots))
 		}
 	}
 
-	// Build graph edges
+	return strings.Join(lines, "\n")
+}
+
+// entrySummaryLine is one entry's line in the summary.
+func entrySummaryLine(e *Entry, roots []string) string {
+	rel := relativePath(e.File, roots)
+
+	marker := ""
+	if !e.Resolved {
+		marker = " [unresolved]"
+		if e.Reason != "" {
+			marker = " [unresolved: " + e.Reason + "]"
+		}
+	}
+
+	caller := ""
+	if e.Function != "" {
+		caller = " in " + e.Function + "()"
+	}
+
+	call := ""
+	if e.Call != "" {
+		call = "  " + e.Call
+	}
+
+	return fmt.Sprintf("  %s:%d%s%s%s", rel, e.Line+1, marker, caller, call)
+}
+
+// traceNode is a call site as a graph node.
+type traceNode struct {
+	label, fileBase string
+}
+
+// traceEdges is FormatResult's graph: an edge into each call site, from the
+// traced function or from the entry whose file the call's component names.
+func traceEdges(entries []Entry, funcName, sourceRel string, roots []string) []graph.Edge {
 	sourceLabel := sourceRel + "::" + funcName
 	sourceBase := strings.ToLower(strings.TrimSuffix(filepath.Base(sourceRel), filepath.Ext(sourceRel)))
 
-	type nodeInfo struct {
-		label, fileBase string
-	}
-
-	var nodes []nodeInfo
+	var nodes []traceNode
 
 	seen := make(map[string]bool)
 
@@ -203,53 +222,50 @@ func FormatResult(entries []Entry, funcName, sourceURI string, roots []string) T
 
 		seen[label] = true
 		fileBase := strings.ToLower(strings.TrimSuffix(filepath.Base(e.File), filepath.Ext(e.File)))
-		nodes = append(nodes, nodeInfo{label: label, fileBase: fileBase})
+		nodes = append(nodes, traceNode{label: label, fileBase: fileBase})
 	}
 
 	var edges []graph.Edge
 
 	for i := range entries {
-		e := &entries[i]
-
 		if i >= len(nodes) {
 			break
 		}
 
-		n := nodes[i]
-		from := sourceLabel
-		dashed := !e.Resolved
+		e := &entries[i]
+		from, dashed := edgeSource(e, i, nodes, sourceLabel, sourceBase)
 
-		if e.Component != "" {
-			compBase := strings.ToLower(e.Component)
-			if dotIdx := strings.LastIndexByte(compBase, '.'); dotIdx >= 0 {
-				compBase = compBase[dotIdx+1:]
-			}
+		edges = append(edges, graph.Edge{From: from, To: nodes[i].label, Dashed: dashed})
+	}
 
-			compBase = strings.TrimSuffix(compBase, ".cfc")
-			if !strings.EqualFold(compBase, sourceBase) {
-				for j, other := range nodes {
-					if j == i {
-						continue
-					}
+	return edges
+}
 
-					if strings.EqualFold(compBase, other.fileBase) {
-						from = other.label
-						dashed = false
+// edgeSource is where the edge into entry i starts: the node for the file its
+// component names, when that is another entry's file, else the traced
+// function, dashed when the call did not resolve.
+func edgeSource(e *Entry, i int, nodes []traceNode, sourceLabel, sourceBase string) (string, bool) {
+	if e.Component == "" {
+		return sourceLabel, !e.Resolved
+	}
 
-						break
-					}
-				}
-			}
+	compBase := strings.ToLower(e.Component)
+	if dotIdx := strings.LastIndexByte(compBase, '.'); dotIdx >= 0 {
+		compBase = compBase[dotIdx+1:]
+	}
+
+	compBase = strings.TrimSuffix(compBase, ".cfc")
+	if strings.EqualFold(compBase, sourceBase) {
+		return sourceLabel, !e.Resolved
+	}
+
+	for j, other := range nodes {
+		if j != i && strings.EqualFold(compBase, other.fileBase) {
+			return other.label, false
 		}
-
-		edges = append(edges, graph.Edge{From: from, To: n.label, Dashed: dashed})
 	}
 
-	return TraceResult{
-		Entries: entries,
-		Summary: strings.Join(lines, "\n"),
-		Graph:   graph.Graph{Direction: "TD", Edges: edges},
-	}
+	return sourceLabel, !e.Resolved
 }
 
 func pluralS(n int) string {

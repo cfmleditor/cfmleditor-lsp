@@ -339,15 +339,25 @@ func BenchmarkCompletionWithMarshal(b *testing.B) {
 // tree-sitter node is a cgo call, so this is the handler most sensitive to how
 // the walk is written rather than to what it computes.
 func BenchmarkFoldingRange(b *testing.B) {
-	for _, funcs := range []int{20, 60} {
-		b.Run(fmt.Sprintf("funcs%d", funcs), func(b *testing.B) {
+	docs := []struct {
+		name, uri, src string
+	}{
+		{"funcs20", "/ws/open/Doc.cfc", benchDoc(20)},
+		{"funcs60", "/ws/open/Doc.cfc", benchDoc(60)},
+		// A page: markup, CF tags and a <cfscript> block, which the tag walk
+		// and the bracket pass both read.
+		{"page", "/ws/open/page.cfm", benchPage(60)},
+	}
+
+	for _, d := range docs {
+		b.Run(d.name, func(b *testing.B) {
 			s := newTestServer()
 			// Folding is opt-in, and with the switch off the handler returns
 			// before reading anything: this measured 2ns of early return.
 			s.Features.Folding = true
-			docURI := uri.File("/ws/open/Doc.cfc")
+			docURI := uri.File(d.uri)
 
-			benchOpen(b, s, docURI, benchDoc(funcs))
+			benchOpen(b, s, docURI, d.src)
 
 			req, err := json.Marshal(protocol.FoldingRangeParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
@@ -366,6 +376,30 @@ func BenchmarkFoldingRange(b *testing.B) {
 			}
 		})
 	}
+}
+
+// benchPage builds a tag-syntax page of rows rows: a table with a <cfif> per
+// row, a <cfscript> block and comments.
+func benchPage(rows int) string {
+	var b strings.Builder
+
+	b.WriteString("<!--- A page --->\n<cfoutput>\n<cfscript>\n\tif ( structKeyExists( url, \"id\" ) ) {\n\t\tid = url.id;\n\t}\n</cfscript>\n<table class=\"list\">\n")
+
+	for i := range rows {
+		fmt.Fprintf(&b, `	<tr>
+		<td>#item%d.name#</td>
+		<cfif item%d.active>
+			<td class="on">yes</td>
+		<cfelse>
+			<td class="off">no</td>
+		</cfif>
+	</tr>
+`, i, i)
+	}
+
+	b.WriteString("</table>\n</cfoutput>\n")
+
+	return b.String()
 }
 
 // The handlers that answer from the index rather than from a parse. Grouped so

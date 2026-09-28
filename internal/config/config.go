@@ -380,14 +380,10 @@ type References struct {
 // block, so they keep their own top-level keys; `references` additionally
 // defaults *off*, since answering one request scans the whole workspace.
 //
-// `folding` defaults off as well, and is the one member of this block that
-// does. It is new, and it is the most expensive thing here to answer: a
-// script-syntax component's body reaches the CFML grammar as one opaque
-// region, so folding it means parsing the whole body with the CFScript grammar
-// on every request. That is a few milliseconds on a large component even after
-// the walk around it was cut down, and an editor that never asked for it loses
-// nothing it had — it falls back to folding by indentation, which is what it
-// did before the feature existed. Turn it on with
+// `folding` defaults off as well. An editor given folding ranges uses them in
+// place of its own indentation folding, so switching it on changes how every
+// file folds; FOLDING-PLAN.md §5 is the case for making it the default. An
+// editor that never asked for it loses nothing it had. Turn it on with
 // `{"features": {"folding": true}}`.
 type Features struct {
 	DocumentHighlight *bool `json:"documentHighlight"`

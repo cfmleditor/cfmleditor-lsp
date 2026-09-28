@@ -119,7 +119,7 @@ func collectFiles(fsys vfs.FS, roots []string) []string {
 	return files
 }
 
-func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry {
 	var mu sync.Mutex
 
 	var results []Entry
@@ -127,9 +127,6 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry { //nolint:
 	var wg sync.WaitGroup
 
 	sem := make(chan struct{}, 8)
-
-	funcTarget := strings.ToLower(opts.FuncName)
-	compTarget := strings.ToLower(opts.Component)
 
 	for _, f := range files {
 		wg.Add(1)
@@ -140,155 +137,7 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry { //nolint:
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			data, err := fsys.ReadFile(f)
-			if err != nil {
-				return
-			}
-
-			// Quick check: skip files that don't contain the function name
-			if funcTarget != "" && !containsFold(data, funcTarget) {
-				return
-			}
-
-			content := string(data)
-			absPath := f
-			fileURI := uri.URI("file://" + absPath)
-
-			// Call sites don't carry their own source text (CallSite.Text is only
-			// populated by the uncached fallback parse path, not the ExtractCalls
-			// path used here) — split lines so we can pull the call's line text
-			// ourselves for display.
-			//
-			// Split on first use, not here. Every file reaching this point merely
-			// *contains* the name somewhere; most yield no call site at all, and
-			// one that does may already carry its own text. Splitting eagerly
-			// billed every candidate file for a slice the common case never
-			// reads, on a request that walks the whole workspace.
-			var contentLines []string
-
-			lines := func() []string {
-				if contentLines == nil {
-					contentLines = strings.Split(content, "\n")
-				}
-
-				return contentLines
-			}
-
-			// Parse once with resolvers and call scanning — scan all scopes
-			parseOpts := parser.ParseOptions{
-				Resolvers:          opts.Resolvers,
-				PropertyResolvers:  opts.PropertyResolvers,
-				ExtractCalls:       true,
-				ScanAllScopes:      true,
-				InterpolateAllText: opts.InterpolateAllText,
-			}
-			// Build per-file bean lookup from nearest Application.cfc
-			if opts.BeanLookup != nil {
-				parseOpts.BeanLookup = opts.BeanLookup
-			} else {
-				fileDir := filepath.Dir(absPath)
-				parseOpts.BeanLookup = fileBeanLookup(fsys, fileDir)
-			}
-
-			if funcTarget != "" {
-				parseOpts.FindCalls = []string{opts.FuncName}
-			}
-
-			pr := parser.ParseWithOptions(fileURI, content, &parseOpts)
-
-			var entries []Entry
-
-			// Component ref matching (from parsed refs — includes all scopes)
-			if compTarget != "" {
-				for i := range pr.ComponentRefs {
-					ref := &pr.ComponentRefs[i]
-
-					if strings.EqualFold(ref.Component, compTarget) {
-						entries = append(entries, Entry{
-							File: f, Variable: ref.Variable, Line: ref.Line, Resolved: true,
-						})
-					}
-				}
-			}
-
-			// Function call matching (from parsed call sites — includes all scopes)
-			if funcTarget != "" { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-				for j := range pr.Calls {
-					call := &pr.Calls[j]
-
-					if opts.VerifyCall != nil && call.Component != "" {
-						if !opts.VerifyCall(call.Component, call.FuncName, filepath.Dir(absPath)) {
-							continue
-						}
-					}
-
-					if opts.VerifyTarget != nil && call.Component != "" {
-						if !opts.VerifyTarget(call.Component, filepath.Dir(absPath), opts.SourceFile) {
-							continue
-						}
-					}
-
-					resolved := call.Resolved
-					if !resolved && call.Component == "" {
-						// Check if the function exists in the same file
-						sameFile := false
-
-						for i := range pr.Funcs {
-							fn := &pr.Funcs[i]
-
-							if strings.EqualFold(fn.Name, call.FuncName) {
-								sameFile = true
-
-								break
-							}
-						}
-
-						if sameFile {
-							// Same-file call — only a match if this IS the source file
-							if !cfpath.SamePath(absPath, opts.SourceFile) {
-								continue
-							}
-
-							resolved = true
-						} else if call.Variable == "" {
-							// Truly unqualified, function not in this file — skip
-							continue
-						}
-					}
-
-					callText := call.Text
-					if callText == "" {
-						if src := lines(); int(call.Line) < len(src) {
-							callText = strings.TrimSpace(strings.TrimSuffix(src[call.Line], "\r"))
-						}
-					}
-
-					reason := ""
-					if !resolved && opts.Reason != nil {
-						reason = opts.Reason(*call, pr, filepath.Dir(absPath))
-						if reason != "" {
-							// Restate the call target so the reason reads standalone —
-							// readers scanning one line at a time (without the group
-							// header above it) can otherwise lose track of which
-							// function/hop this failure was checked against.
-							target := call.FuncName
-							if call.Variable != "" {
-								target = call.Variable + "." + call.FuncName
-							}
-
-							reason = fmt.Sprintf("%s (needed for %s())", reason, target)
-						}
-					}
-
-					entries = append(entries, Entry{
-						File: f, Function: call.Caller, Call: callText,
-						Component: call.Component,
-						Line:      call.Line, Resolved: resolved, Reason: reason,
-					})
-				}
-			}
-
-			if len(entries) > 0 {
+			if entries := findInFile(fsys, f, opts); len(entries) > 0 {
 				mu.Lock()
 
 				results = append(results, entries...)
@@ -300,6 +149,179 @@ func findInFiles(fsys vfs.FS, files []string, opts *Options) []Entry { //nolint:
 	wg.Wait()
 
 	return results
+}
+
+// findInFile is findInFiles for one file.
+func findInFile(fsys vfs.FS, f string, opts *Options) []Entry {
+	funcTarget := strings.ToLower(opts.FuncName)
+	compTarget := strings.ToLower(opts.Component)
+
+	data, err := fsys.ReadFile(f)
+	if err != nil {
+		return nil
+	}
+
+	// Quick check: skip files that don't contain the function name
+	if funcTarget != "" && !containsFold(data, funcTarget) {
+		return nil
+	}
+
+	content := string(data)
+	absPath := f
+	fileURI := uri.URI("file://" + absPath)
+
+	// Parse once with resolvers and call scanning — scan all scopes
+	parseOpts := parser.ParseOptions{
+		Resolvers:          opts.Resolvers,
+		PropertyResolvers:  opts.PropertyResolvers,
+		ExtractCalls:       true,
+		ScanAllScopes:      true,
+		InterpolateAllText: opts.InterpolateAllText,
+	}
+	// Build per-file bean lookup from nearest Application.cfc
+	if opts.BeanLookup != nil {
+		parseOpts.BeanLookup = opts.BeanLookup
+	} else {
+		fileDir := filepath.Dir(absPath)
+		parseOpts.BeanLookup = fileBeanLookup(fsys, fileDir)
+	}
+
+	if funcTarget != "" {
+		parseOpts.FindCalls = []string{opts.FuncName}
+	}
+
+	pr := parser.ParseWithOptions(fileURI, content, &parseOpts)
+
+	var entries []Entry
+
+	// Component ref matching (from parsed refs — includes all scopes)
+	if compTarget != "" {
+		for i := range pr.ComponentRefs {
+			ref := &pr.ComponentRefs[i]
+
+			if strings.EqualFold(ref.Component, compTarget) {
+				entries = append(entries, Entry{
+					File: f, Variable: ref.Variable, Line: ref.Line, Resolved: true,
+				})
+			}
+		}
+	}
+
+	if funcTarget == "" {
+		return entries
+	}
+
+	// Call sites don't carry their own source text (CallSite.Text is only
+	// populated by the uncached fallback parse path, not the ExtractCalls
+	// path used here) — split lines so we can pull the call's line text
+	// ourselves for display.
+	//
+	// Split on first use, not here. Every file reaching this point merely
+	// *contains* the name somewhere; most yield no call site at all, and
+	// one that does may already carry its own text. Splitting eagerly
+	// billed every candidate file for a slice the common case never
+	// reads, on a request that walks the whole workspace.
+	var contentLines []string
+
+	lines := func() []string {
+		if contentLines == nil {
+			contentLines = strings.Split(content, "\n")
+		}
+
+		return contentLines
+	}
+
+	// Function call matching (from parsed call sites — includes all scopes)
+	for j := range pr.Calls {
+		call := &pr.Calls[j]
+
+		resolved, ok := matchCall(call, pr, absPath, opts)
+		if !ok {
+			continue
+		}
+
+		entries = append(entries, callEntry(call, pr, f, resolved, lines, opts))
+	}
+
+	return entries
+}
+
+// matchCall reports whether call is a reference to the function being
+// searched for, and whether it resolved.
+func matchCall(call *parser.CallSite, pr *parser.ParseResult, absPath string, opts *Options) (resolved, ok bool) {
+	if opts.VerifyCall != nil && call.Component != "" {
+		if !opts.VerifyCall(call.Component, call.FuncName, filepath.Dir(absPath)) {
+			return false, false
+		}
+	}
+
+	if opts.VerifyTarget != nil && call.Component != "" {
+		if !opts.VerifyTarget(call.Component, filepath.Dir(absPath), opts.SourceFile) {
+			return false, false
+		}
+	}
+
+	if call.Resolved || call.Component != "" {
+		return call.Resolved, true
+	}
+
+	// Check if the function exists in the same file
+	sameFile := false
+
+	for i := range pr.Funcs {
+		fn := &pr.Funcs[i]
+
+		if strings.EqualFold(fn.Name, call.FuncName) {
+			sameFile = true
+
+			break
+		}
+	}
+
+	if sameFile {
+		// Same-file call — only a match if this IS the source file
+		if !cfpath.SamePath(absPath, opts.SourceFile) {
+			return false, false
+		}
+
+		return true, true
+	}
+
+	// Truly unqualified, function not in this file — skip
+	return false, call.Variable != ""
+}
+
+// callEntry is the report entry for a matched call.
+func callEntry(call *parser.CallSite, pr *parser.ParseResult, f string, resolved bool, lines func() []string, opts *Options) Entry {
+	callText := call.Text
+	if callText == "" {
+		if src := lines(); int(call.Line) < len(src) {
+			callText = strings.TrimSpace(strings.TrimSuffix(src[call.Line], "\r"))
+		}
+	}
+
+	reason := ""
+	if !resolved && opts.Reason != nil {
+		reason = opts.Reason(*call, pr, filepath.Dir(f))
+		if reason != "" {
+			// Restate the call target so the reason reads standalone —
+			// readers scanning one line at a time (without the group
+			// header above it) can otherwise lose track of which
+			// function/hop this failure was checked against.
+			target := call.FuncName
+			if call.Variable != "" {
+				target = call.Variable + "." + call.FuncName
+			}
+
+			reason = fmt.Sprintf("%s (needed for %s())", reason, target)
+		}
+	}
+
+	return Entry{
+		File: f, Function: call.Caller, Call: callText,
+		Component: call.Component,
+		Line:      call.Line, Resolved: resolved, Reason: reason,
+	}
 }
 
 // beanLookupCache caches bean maps per Application.cfc directory.

@@ -4,7 +4,7 @@ import "strings"
 
 // FindMatchingTag finds the matching open/close tag at the given position.
 // Returns a map with "line" and "character" keys, or nil if no match.
-func FindMatchingTag(content string, line, char int) map[string]any { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func FindMatchingTag(content string, line, char int) map[string]any {
 	lineText := LineTextAt(content, line)
 	if lineText == "" {
 		return nil
@@ -56,77 +56,95 @@ func FindMatchingTag(content string, line, char int) map[string]any { //nolint:g
 
 	cursorOffset := offset + pos
 
-	if isClose { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		depth := 0
+	if isClose {
+		return findOpenTagBefore(content, cursorOffset, tagName)
+	}
 
-		i := cursorOffset - 1
-		for i >= 0 {
-			if i > 0 && content[i-1] == '<' && content[i] == '/' {
-				end := strings.IndexByte(content[i:], '>')
-				if end > 0 {
-					name := strings.ToLower(strings.TrimSpace(content[i+1 : i+end]))
-					if name == tagName {
-						depth++
-					}
-				}
-			} else if content[i] == '<' && (i+1 >= len(content) || content[i+1] != '/') {
-				end := i + 1
-				for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
-					end++
-				}
+	return findCloseTagAfter(content, offset+nameEnd, tagName)
+}
 
-				name := strings.ToLower(content[i+1 : end])
+// findOpenTagBefore walks back from cursorOffset to the tag that the close
+// tag being read closes, skipping nested pairs of the same name.
+func findOpenTagBefore(content string, cursorOffset int, tagName string) map[string]any {
+	depth := 0
+
+	for i := cursorOffset - 1; i >= 0; i-- {
+		if i > 0 && content[i-1] == '<' && content[i] == '/' {
+			end := strings.IndexByte(content[i:], '>')
+			if end > 0 {
+				name := strings.ToLower(strings.TrimSpace(content[i+1 : i+end]))
 				if name == tagName {
-					if depth == 0 {
-						return offsetToPosition(content, i)
-					}
-
-					depth--
+					depth++
 				}
 			}
 
-			i--
-		}
-	} else {
-		searchStart := offset + nameEnd
-		for searchStart < len(content) && content[searchStart] != '>' {
-			searchStart++
+			continue
 		}
 
+		if content[i] != '<' || (i+1 < len(content) && content[i+1] == '/') {
+			continue
+		}
+
+		end := i + 1
+		for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
+			end++
+		}
+
+		if strings.ToLower(content[i+1:end]) != tagName {
+			continue
+		}
+
+		if depth == 0 {
+			return offsetToPosition(content, i)
+		}
+
+		depth--
+	}
+
+	return nil
+}
+
+// findCloseTagAfter walks forward from the end of the open tag's name at
+// nameEnd to the tag that closes it, skipping nested pairs of the same name.
+func findCloseTagAfter(content string, nameEnd int, tagName string) map[string]any {
+	searchStart := nameEnd
+	for searchStart < len(content) && content[searchStart] != '>' {
 		searchStart++
-		depth := 0
+	}
 
-		i := searchStart
-		for i < len(content) {
-			if content[i] == '<' {
-				if i+1 < len(content) && content[i+1] == '/' {
-					end := i + 2
-					for end < len(content) && content[end] != '>' && content[end] != ' ' {
-						end++
-					}
+	depth := 0
 
-					name := strings.ToLower(content[i+2 : end])
-					if name == tagName {
-						if depth == 0 {
-							return offsetToPosition(content, i)
-						}
+	for i := searchStart + 1; i < len(content); i++ {
+		if content[i] != '<' {
+			continue
+		}
 
-						depth--
-					}
-				} else {
-					end := i + 1
-					for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
-						end++
-					}
-
-					name := strings.ToLower(content[i+1 : end])
-					if name == tagName {
-						depth++
-					}
-				}
+		if i+1 < len(content) && content[i+1] == '/' {
+			end := i + 2
+			for end < len(content) && content[end] != '>' && content[end] != ' ' {
+				end++
 			}
 
-			i++
+			if strings.ToLower(content[i+2:end]) != tagName {
+				continue
+			}
+
+			if depth == 0 {
+				return offsetToPosition(content, i)
+			}
+
+			depth--
+
+			continue
+		}
+
+		end := i + 1
+		for end < len(content) && content[end] != ' ' && content[end] != '>' && content[end] != '/' {
+			end++
+		}
+
+		if strings.ToLower(content[i+1:end]) == tagName {
+			depth++
 		}
 	}
 

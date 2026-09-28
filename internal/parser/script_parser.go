@@ -434,42 +434,7 @@ func (p *scriptParser) isVarDeclaredLocal(name string) bool {
 // extractAllLinks scans source lines for document links, routing them to
 // global links or funcLinks based on which scope the line falls in.
 func (p *scriptParser) extractAllLinks() {
-	src := p.sc.src
-	lineNum := p.baseLine
-	scopeIdx := 0
-
-	for src != "" {
-		nl := strings.IndexByte(src, '\n')
-
-		var line string
-		if nl < 0 {
-			line = src
-			src = ""
-		} else {
-			line = src[:nl]
-			src = src[nl+1:]
-		}
-
-		// Find which scope this line belongs to
-		for scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].End {
-			scopeIdx++
-		}
-
-		if scopeIdx < len(p.scopes) && lineNum > p.scopes[scopeIdx].Start && lineNum < p.scopes[scopeIdx].End {
-			key := funcKey(p.scopes[scopeIdx].Start, p.scopes[scopeIdx].End)
-			if p.funcLinks == nil {
-				p.funcLinks = make(map[string][]DocumentLink)
-			}
-
-			links := p.funcLinks[key]
-			extractLinksFromLine(line, lineNum, &links)
-			p.funcLinks[key] = links
-		} else {
-			extractLinksFromLine(line, lineNum, &p.links)
-		}
-
-		lineNum++
-	}
+	p.funcLinks = extractLinksByScope(p.sc.src, p.baseLine, p.scopes, p.funcLinks, &p.links)
 }
 
 // parseVarDecl handles: var name = expr.
@@ -534,52 +499,12 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 
 	p.sc.NextSkipComments() // consume first ident
 
-	prevIdent := ""
-	lastIdent := rhs.Value
-
 	var fullChain chainBuilder
 	fullChain.reset(rhs.Value)
 
-chainWalk:
-	for {
-		switch p.sc.PeekSkipComments().Kind {
-		case TokLBracket:
-			// Dynamic key (e.g. REQUEST['a' & b & 'c'] or arr[i]) — can't be
-			// resolved statically. Skip the whole [...] group and poison
-			// fullChain with a marker that can never collide with a real
-			// resolver/ComponentRef match, so tryResolveCall/resolveCall
-			// below safely fail instead of misattributing to whatever the
-			// bare base identifier happens to resolve to elsewhere.
-			if !p.skipBracketIndex() {
-				return
-			}
-
-			fullChain.writeString("[]")
-		case TokDoubleColon:
-			// `var x = models.Foo::bar()`. The chain so far is a component,
-			// not a receiver — see parseStaticCall. The assignment's own type
-			// inference stops here, as it already did.
-			p.recordStaticCall(fullChain.String(), Token{Line: line})
-
-			return
-		case TokDot:
-			p.sc.NextSkipComments() // consume .
-
-			next := p.sc.PeekSkipComments()
-			if next.Kind == TokIdent {
-				p.sc.NextSkipComments()
-
-				prevIdent = lastIdent
-				lastIdent = next.Value
-
-				fullChain.writeDot()
-				fullChain.writeString(next.Value)
-			} else {
-				break chainWalk
-			}
-		default:
-			break chainWalk
-		}
+	prevIdent, lastIdent, ok := p.walkChain(&fullChain, rhs.Value, Token{Line: line})
+	if !ok {
+		return
 	}
 
 	if p.sc.PeekSkipComments().Kind == TokLParen {
@@ -605,18 +530,10 @@ chainWalk:
 					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
 				})
 			} else {
-				p.pendingCalls = append(p.pendingCalls, pendingCall{
-					varName: varName, funcName: lastIdent, baseVar: prevIdent,
-					line: conv.Uint32(p.baseLine + line), funcKey: p.inFunc,
-				})
-				p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
+				p.addPendingCall(varName, prevIdent, lastIdent, fullChain.String(), line)
 			}
 		} else {
-			p.pendingCalls = append(p.pendingCalls, pendingCall{
-				varName: varName, funcName: lastIdent, baseVar: prevIdent,
-				line: conv.Uint32(p.baseLine + line), funcKey: p.inFunc,
-			})
-			p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, line)
+			p.addPendingCall(varName, prevIdent, lastIdent, fullChain.String(), line)
 		}
 	} else if len(p.resolvers) > 0 {
 		if comp := p.resolveCall(fullChain.String()); comp != "" {
@@ -1058,31 +975,34 @@ func (p *scriptParser) parseComponentAttrs() {
 
 		p.sc.NextSkipComments()
 
-		if tok.Kind == TokIdent { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-			if strings.EqualFold(tok.Value, "extends") {
-				eq := p.sc.PeekSkipComments()
-				if eq.Kind == TokEquals {
-					p.sc.NextSkipComments()
+		if tok.Kind != TokIdent {
+			continue
+		}
 
-					val := p.sc.NextSkipComments()
-					if val.Kind == TokString {
-						p.extends = unquote(val.Value)
-					}
-				}
-			} else if strings.EqualFold(tok.Value, "persistent") {
-				eq := p.sc.PeekSkipComments()
-				if eq.Kind == TokEquals {
-					p.sc.NextSkipComments()
-
-					val := p.sc.NextSkipComments()
-					if (val.Kind == TokString && isTruthy(unquote(val.Value))) ||
-						(val.Kind == TokIdent && isTruthy(val.Value)) {
-						p.persistent = true
-					}
-				}
+		switch {
+		case strings.EqualFold(tok.Value, "extends"):
+			if val, ok := p.attrValue(); ok && val.Kind == TokString {
+				p.extends = unquote(val.Value)
+			}
+		case strings.EqualFold(tok.Value, "persistent"):
+			if val, ok := p.attrValue(); ok &&
+				((val.Kind == TokString && isTruthy(unquote(val.Value))) || (val.Kind == TokIdent && isTruthy(val.Value))) {
+				p.persistent = true
 			}
 		}
 	}
+}
+
+// attrValue reads `= value` after an attribute name, returning the value
+// token, or false when no `=` follows.
+func (p *scriptParser) attrValue() (Token, bool) {
+	if p.sc.PeekSkipComments().Kind != TokEquals {
+		return Token{}, false
+	}
+
+	p.sc.NextSkipComments()
+
+	return p.sc.NextSkipComments(), true
 }
 
 func (p *scriptParser) parseAccessModified(accessTok Token) {
@@ -1119,6 +1039,21 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 		p.sc.NextSkipComments()
 		p.parseFunction(accessTok, accessTok.Value, retVal.String())
 	}
+}
+
+// skipFunctionAttrs steps over a declaration's attributes (the shared
+// skipFunctionAttrs), reading each value as the expression it is: a string's
+// #...# spans and a bare call are recorded like any other.
+func (p *scriptParser) skipFunctionAttrs() {
+	skipFunctionAttrs(p.sc, func(v Token) {
+		switch {
+		case v.Kind == TokString:
+			p.scanInterpolation(v)
+		case v.Kind == TokIdent && p.sc.PeekSkipComments().Kind == TokLParen:
+			p.recordBareCallAndChain(v)
+		default:
+		}
+	})
 }
 
 func (p *scriptParser) parseFunction(startTok Token, access string, returnType string) {
@@ -1166,6 +1101,8 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	})
 
 	// Process body: set inFunc scope, parse assignments, then clear
+	p.skipFunctionAttrs()
+
 	endLine := p.parseBody(funcLine, args)
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Access: access, ReturnType: returnType, Start: funcLine, End: p.baseLine + endLine})
 }
@@ -1816,7 +1753,7 @@ func (p *scriptParser) skipDefault() {
 
 // parseBody processes { ... } or ; for a function body, extracting refs.
 // Sets inFunc/localVarSet on entry, clears on exit. Returns the line of the closing token.
-func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	tok := p.sc.PeekSkipComments()
 	if tok.Kind == TokSemicolon {
 		t := p.sc.NextSkipComments()
@@ -1883,65 +1820,14 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int { //nolint:g
 		}
 	}
 
-	// Remap funcRefs from temp key to real key
 	realKey := funcKey(funcLine, p.baseLine+endLine)
-	if p.funcRefs != nil {
-		if refs, ok := p.funcRefs[tempKey]; ok {
-			delete(p.funcRefs, tempKey)
-			p.funcRefs[realKey] = refs
-		}
-	}
-
-	// Remap funcCalls from temp key to real key
-	if p.funcCalls != nil {
-		if calls, ok := p.funcCalls[tempKey]; ok {
-			delete(p.funcCalls, tempKey)
-			p.funcCalls[realKey] = calls
-		}
-	}
-
-	// Remap pending calls
-	for i := range p.pendingCalls {
-		if p.pendingCalls[i].funcKey == tempKey {
-			p.pendingCalls[i].funcKey = realKey
-		}
-	}
+	p.rekeyFunc(tempKey, realKey)
 
 	p.inFunc = realKey
 
 	// Resolve ReturnComponent on the current function
-	if len(p.funcs) > 0 { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-		f := &p.funcs[len(p.funcs)-1]
-		if f.ReturnComponent == "" && p.returnVar != "" {
-			// Look up returnVar in this function's refs
-			if refs := p.funcRefs[p.inFunc]; refs != nil {
-				for i := range refs {
-					ref := &refs[i]
-
-					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(ref) {
-						f.ReturnComponent = ref.Component
-
-						break
-					}
-				}
-			}
-			// Also check componentRefs (for variables./this. scoped)
-			if f.ReturnComponent == "" {
-				for i := range p.componentRefs {
-					ref := &p.componentRefs[i]
-
-					if strings.EqualFold(ref.Variable, p.returnVar) && !chainPending(ref) {
-						f.ReturnComponent = ref.Component
-
-						break
-					}
-				}
-			}
-			// If still unresolved, store for deferred resolution
-			if f.ReturnComponent == "" {
-				f.returnVar = p.returnVar
-			}
-		}
+	if len(p.funcs) > 0 {
+		p.settleReturnComponent(&p.funcs[len(p.funcs)-1])
 	}
 
 	// Exit function scope
@@ -1958,6 +1844,54 @@ func sharedScopeOf(tok Token) Scope {
 	scope, _ := ScopeForPrefix(tok.Value)
 
 	return scope
+}
+
+// rekeyFunc moves what a function body recorded under the placeholder key it
+// was parsed with to its real key, once its end is known.
+func (p *scriptParser) rekeyFunc(tempKey, realKey string) {
+	if refs, ok := p.funcRefs[tempKey]; ok {
+		delete(p.funcRefs, tempKey)
+		p.funcRefs[realKey] = refs
+	}
+
+	if calls, ok := p.funcCalls[tempKey]; ok {
+		delete(p.funcCalls, tempKey)
+		p.funcCalls[realKey] = calls
+	}
+
+	for i := range p.pendingCalls {
+		if p.pendingCalls[i].funcKey == tempKey {
+			p.pendingCalls[i].funcKey = realKey
+		}
+	}
+}
+
+// settleReturnComponent gives f the component its return variable holds,
+// from a ref in its body or at component level, or records the variable for
+// resolvePendingCalls to settle later.
+func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
+	if f.ReturnComponent != "" || p.returnVar == "" {
+		return
+	}
+
+	// Look up returnVar in this function's refs, then in componentRefs
+	// (for variables./this. scoped).
+	for _, refs := range [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs} {
+		for i := range refs {
+			if strings.EqualFold(refs[i].Variable, p.returnVar) && !chainPending(&refs[i]) {
+				f.ReturnComponent = refs[i].Component
+
+				break
+			}
+		}
+
+		if f.ReturnComponent != "" {
+			return
+		}
+	}
+
+	// If still unresolved, store for deferred resolution
+	f.returnVar = p.returnVar
 }
 
 // handleBodyToken processes an identifier inside a function body.
@@ -2330,108 +2264,13 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, varTok.Line)
 	default:
-		if !isKeyword(rhs.Value) { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-			p.sc.NextSkipComments()
-
-			prevIdent := ""
-			lastIdent := rhs.Value
-
-			var fullChain chainBuilder
-			fullChain.reset(rhs.Value)
-
-		chainWalk:
-			for {
-				switch p.sc.PeekSkipComments().Kind {
-				case TokLBracket:
-					// See checkVarRHS's identical case for why: skip the
-					// dynamic key and poison fullChain so resolution safely
-					// fails instead of misattributing to the bare base var.
-					if !p.skipBracketIndex() {
-						return
-					}
-
-					fullChain.writeString("[]")
-				case TokDoubleColon:
-					// See checkVarRHS's identical case.
-					p.recordStaticCall(fullChain.String(), varTok)
-
-					return
-				case TokDot:
-					p.sc.NextSkipComments()
-
-					next := p.sc.PeekSkipComments()
-					if next.Kind == TokIdent {
-						p.sc.NextSkipComments()
-
-						prevIdent = lastIdent
-						lastIdent = next.Value
-
-						fullChain.writeDot()
-						fullChain.writeString(next.Value)
-					} else {
-						break chainWalk
-					}
-				default:
-					break chainWalk
-				}
-			}
-
-			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), varTok.Line)
-
-				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, varTok.Line)
-					p.addRef(&ComponentRef{
-						Variable: nameTok.Value, Component: comp,
-						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
-					})
-				} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
-					rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, varTok.Line)
-					p.addRef(&ComponentRef{
-						Variable: nameTok.Value, Component: comp, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
-					})
-				} else if p.builtinReturnLookup != nil {
-					if comp := p.builtinReturnLookup(lastIdent); comp != "" {
-						p.addRef(&ComponentRef{
-							Variable: nameTok.Value, Component: comp,
-							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
-						})
-					} else {
-						p.pendingCalls = append(p.pendingCalls, pendingCall{
-							varName:  nameTok.Value,
-							funcName: lastIdent,
-							baseVar:  prevIdent,
-							line:     conv.Uint32(p.baseLine + varTok.Line),
-							funcKey:  p.inFunc,
-						})
-						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
-					}
-				} else {
-					p.pendingCalls = append(p.pendingCalls, pendingCall{
-						varName:  nameTok.Value,
-						funcName: lastIdent,
-						baseVar:  prevIdent,
-						line:     conv.Uint32(p.baseLine + varTok.Line),
-						funcKey:  p.inFunc,
-					})
-					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, varTok.Line)
-				}
-			} else if len(p.resolvers) > 0 {
-				if comp := p.resolveCall(fullChain.String()); comp != "" {
-					p.addRef(&ComponentRef{
-						Variable: nameTok.Value, Component: comp,
-						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + varTok.Line),
-					})
-				}
-			}
-		}
+		// The same right-hand side an assignment outside a function has.
+		p.checkVarRHS(nameTok.Value, varTok.Line)
 	}
 }
 
 // parseBodyScopedVar handles: scope.name = expr inside a function body.
-func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 	dot := p.sc.PeekSkipComments()
 	if dot.Kind != TokDot {
 		// Not "scope.name" at all — e.g. REQUEST[key].method(), indexing the
@@ -2463,41 +2302,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 
 		// Not an assignment — check for method call chain: scope.name.method(...)
 		if eq.Kind == TokDot {
-			var fullChain chainBuilder
-			fullChain.reset(scopeTok.Value)
-			fullChain.writeDot()
-			fullChain.writeString(nameTok.Value)
-
-		chainWalk:
-			for {
-				switch p.sc.PeekSkipComments().Kind {
-				case TokLBracket:
-					// See checkVarRHS's identical case for why.
-					if !p.skipBracketIndex() {
-						return
-					}
-
-					fullChain.writeString("[]")
-				case TokDot:
-					p.sc.NextSkipComments()
-
-					next := p.sc.PeekSkipComments()
-					if next.Kind == TokIdent {
-						p.sc.NextSkipComments()
-
-						fullChain.writeDot()
-						fullChain.writeString(next.Value)
-					} else {
-						break chainWalk
-					}
-				default:
-					break chainWalk
-				}
-			}
-
-			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordChainFromScope(fullChain.String(), scopeTok.Line)
-			}
+			p.scopedChainCall(scopeTok, nameTok)
 		}
 
 		return
@@ -2521,7 +2326,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 	p.skipLiteralGroup()
 
 	rhs := p.sc.PeekSkipComments()
-	if rhs.Kind == TokIdent { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
+	if rhs.Kind == TokIdent {
 		var buf foldScratch
 		switch string(buf.lowerFold(rhs.Value)) {
 		case "new":
@@ -2554,75 +2359,15 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) { //nolin
 			if !isKeyword(rhs.Value) {
 				p.sc.NextSkipComments()
 
-				prevIdent := ""
-				lastIdent := rhs.Value
-
 				var fullChain chainBuilder
 				fullChain.reset(rhs.Value)
 
-			chainWalk2:
-				for {
-					switch p.sc.PeekSkipComments().Kind {
-					case TokLBracket:
-						// See checkVarRHS's identical case for why.
-						if !p.skipBracketIndex() {
-							return
-						}
-
-						fullChain.writeString("[]")
-					case TokDoubleColon:
-						// See checkVarRHS's identical case.
-						p.recordStaticCall(fullChain.String(), scopeTok)
-
-						return
-					case TokDot:
-						p.sc.NextSkipComments()
-
-						next := p.sc.PeekSkipComments()
-						if next.Kind == TokIdent {
-							p.sc.NextSkipComments()
-
-							prevIdent = lastIdent
-							lastIdent = next.Value
-
-							fullChain.writeDot()
-							fullChain.writeString(next.Value)
-						} else {
-							break chainWalk2
-						}
-					default:
-						break chainWalk2
-					}
+				prevIdent, lastIdent, ok := p.walkChain(&fullChain, rhs.Value, scopeTok)
+				if !ok {
+					return
 				}
 
-				if p.sc.PeekSkipComments().Kind == TokLParen {
-					p.recordCallFromChain(fullChain.String(), scopeTok.Line)
-
-					if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-						rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, scopeTok.Line)
-						p.addRef(&ComponentRef{
-							Variable: nameTok.Value, Component: comp,
-							ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + scopeTok.Line),
-						})
-					} else {
-						p.pendingCalls = append(p.pendingCalls, pendingCall{
-							varName:  nameTok.Value,
-							funcName: lastIdent,
-							baseVar:  prevIdent,
-							line:     conv.Uint32(p.baseLine + scopeTok.Line),
-							funcKey:  p.inFunc,
-						})
-						p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, scopeTok.Line)
-					}
-				} else if len(p.resolvers) > 0 {
-					if comp := p.resolveCall(fullChain.String()); comp != "" {
-						p.addRef(&ComponentRef{
-							Variable: nameTok.Value, Component: comp,
-							URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + scopeTok.Line),
-						})
-					}
-				}
+				p.assignFromChain(nameTok.Value, &fullChain, prevIdent, lastIdent, scopeTok.Line)
 			}
 		}
 	}
@@ -2698,6 +2443,8 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 		Line:      conv.Uint32(funcLine),
 		Arguments: args,
 	})
+
+	p.skipFunctionAttrs()
 
 	endLine := p.scanNestedFunctionBody()
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Start: funcLine, End: p.baseLine + endLine})
@@ -2829,86 +2576,157 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		p.parseEntityNewRef(tok.Value, tok.Line)
 	default:
 		// Check if RHS is a function call: funcName( or someVar.method(
-		if !isKeyword(rhs.Value) { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
+		if !isKeyword(rhs.Value) {
 			p.sc.NextSkipComments() // consume first ident
-
-			// Walk dot chain: [scope.]varName.method(
-			prevIdent := ""
-			lastIdent := rhs.Value
 
 			var fullChain chainBuilder
 			fullChain.reset(rhs.Value)
 
-		chainWalk:
-			for {
-				switch p.sc.PeekSkipComments().Kind {
-				case TokLBracket:
-					// See checkVarRHS's identical case for why: skip the
-					// dynamic key and poison fullChain so resolution safely
-					// fails instead of misattributing to the bare base var.
-					if !p.skipBracketIndex() {
-						return
-					}
-
-					fullChain.writeString("[]")
-				case TokDoubleColon:
-					// See checkVarRHS's identical case.
-					p.recordStaticCall(fullChain.String(), tok)
-
-					return
-				case TokDot:
-					p.sc.NextSkipComments() // consume .
-
-					next := p.sc.PeekSkipComments()
-					if next.Kind == TokIdent {
-						p.sc.NextSkipComments()
-
-						prevIdent = lastIdent
-						lastIdent = next.Value
-
-						fullChain.writeDot()
-						fullChain.writeString(next.Value)
-					} else {
-						break chainWalk
-					}
-				default:
-					break chainWalk
-				}
+			prevIdent, lastIdent, ok := p.walkChain(&fullChain, rhs.Value, tok)
+			if !ok {
+				return
 			}
 
-			if p.sc.PeekSkipComments().Kind == TokLParen {
-				p.recordCallFromChain(fullChain.String(), tok.Line)
-
-				if comp := p.tryResolveCall(fullChain.String()); comp != "" {
-					rest := p.recordChainContinuation(receiverOf(fullChain.String()), lastIdent, comp, tok.Line)
-					p.addRef(&ComponentRef{
-						Variable: tok.Value, Component: comp,
-						ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
-						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + tok.Line),
-					})
-				} else {
-					p.pendingCalls = append(p.pendingCalls, pendingCall{
-						varName:  tok.Value,
-						funcName: lastIdent,
-						baseVar:  prevIdent,
-						line:     conv.Uint32(p.baseLine + tok.Line),
-						funcKey:  p.inFunc,
-					})
-					p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(fullChain.String()), lastIdent, tok.Line)
-				}
-			} else if len(p.resolvers) > 0 {
-				// Try generic resolver match on non-call RHS (e.g. "_parent")
-				if comp := p.resolveCall(fullChain.String()); comp != "" {
-					p.addRef(&ComponentRef{
-						Variable: tok.Value, Component: comp,
-						URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + tok.Line),
-					})
-				}
-			}
+			p.assignFromChain(tok.Value, &fullChain, prevIdent, lastIdent, tok.Line)
 		}
 	}
 
 	p.forceGlobal = false
+}
+
+// addPendingCall records `varName = …prevIdent.lastIdent(…)` for
+// resolvePendingCalls, which types varName once every function's return type
+// is known, carrying on along whatever the chain calls after lastIdent.
+func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain string, line int) {
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName:  varName,
+		funcName: lastIdent,
+		baseVar:  prevIdent,
+		line:     conv.Uint32(p.baseLine + line),
+		funcKey:  p.inFunc,
+	})
+	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
+}
+
+// scopedChainCall records `scope.name.a.b(…)`, a call on a scoped variable
+// that is a statement rather than an assignment.
+func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
+	var fullChain chainBuilder
+	fullChain.reset(scopeTok.Value)
+	fullChain.writeDot()
+	fullChain.writeString(nameTok.Value)
+
+	for {
+		switch p.sc.PeekSkipComments().Kind {
+		case TokLBracket:
+			// See walkChain for why.
+			if !p.skipBracketIndex() {
+				return
+			}
+
+			fullChain.writeString("[]")
+
+			continue
+		case TokDot:
+			p.sc.NextSkipComments()
+
+			next := p.sc.PeekSkipComments()
+			if next.Kind == TokIdent {
+				p.sc.NextSkipComments()
+
+				fullChain.writeDot()
+				fullChain.writeString(next.Value)
+
+				continue
+			}
+		default:
+		}
+
+		break
+	}
+
+	if p.sc.PeekSkipComments().Kind == TokLParen {
+		p.recordChainFromScope(fullChain.String(), scopeTok.Line)
+	}
+}
+
+// assignFromChain types varName from the chain on the right of its `=`: a
+// call's resolved component, else a pending call for resolvePendingCalls; a
+// chain that is not a call only through a componentResolver.
+func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIdent, lastIdent string, line int) {
+	if p.sc.PeekSkipComments().Kind != TokLParen {
+		if len(p.resolvers) > 0 {
+			// Try generic resolver match on non-call RHS (e.g. "_parent")
+			if comp := p.resolveCall(c.String()); comp != "" {
+				p.addRef(&ComponentRef{
+					Variable: varName, Component: comp,
+					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+				})
+			}
+		}
+
+		return
+	}
+
+	p.recordCallFromChain(c.String(), line)
+
+	if comp := p.tryResolveCall(c.String()); comp != "" {
+		rest := p.recordChainContinuation(receiverOf(c.String()), lastIdent, comp, line)
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+		})
+
+		return
+	}
+
+	p.addPendingCall(varName, prevIdent, lastIdent, c.String(), line)
+}
+
+// walkChain walks the `.name` hops after the identifier first, already
+// consumed and already in c, writing each into c. A bracket index is skipped
+// and marked "[]": a dynamic key cannot be resolved statically, and the marker
+// can never match a real resolver or ComponentRef, so resolution fails rather
+// than being misattributed to whatever the bare base identifier resolves to
+// elsewhere. A `::` makes what was walked a component, not a receiver: the
+// static call is recorded against staticTok (see parseStaticCall) and the
+// walk reports the statement consumed, as does a bracket index that does not
+// close. Otherwise it reports the last two identifiers walked.
+func (p *scriptParser) walkChain(c *chainBuilder, first string, staticTok Token) (prevIdent, lastIdent string, ok bool) {
+	lastIdent = first
+
+	for {
+		switch p.sc.PeekSkipComments().Kind {
+		case TokLBracket:
+			if !p.skipBracketIndex() {
+				return prevIdent, lastIdent, false
+			}
+
+			c.writeString("[]")
+		case TokDoubleColon:
+			p.recordStaticCall(c.String(), staticTok)
+
+			return prevIdent, lastIdent, false
+		case TokDot:
+			p.sc.NextSkipComments() // consume .
+
+			next := p.sc.PeekSkipComments()
+			if next.Kind != TokIdent {
+				return prevIdent, lastIdent, true
+			}
+
+			p.sc.NextSkipComments()
+
+			prevIdent = lastIdent
+			lastIdent = next.Value
+
+			c.writeDot()
+			c.writeString(next.Value)
+		default:
+			return prevIdent, lastIdent, true
+		}
+	}
 }
 
 // checkBareCall handles obj.method() calls (not in assignment context),

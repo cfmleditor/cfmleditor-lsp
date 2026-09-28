@@ -17,7 +17,7 @@ import (
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) { //nolint:funlen // over the limit before it existed; LINT-PLAN.md stage 4
+func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DefinitionParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
@@ -163,79 +163,93 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		defer dt.mark("qualified")
 
-		s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
-
-		if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
-			return protocol.Location{
-				URI:   def.URI,
-				Range: protocol.Range{Start: protocol.Position{Line: def.Line}, End: protocol.Position{Line: def.Line}},
-			}, nil
-		}
-
-		// Qualified call that can't be resolved — fall through to all matches
-		if !s.GlobalFunctionResolution {
-			return nil, nil
-		}
-
-		defs := s.index.Lookup(word)
-		s.log.Debug("definition: qualified fallback to global lookup", cflog.String("word", word), cflog.Int("matches", len(defs)))
-
-		// A definition in the requesting file is kept, and ranked last.
-		//
-		// It used to be discarded, on the reasoning that `x.doThing()` is not a
-		// call to this file's own `doThing()` — which is true, and is why it
-		// sorts last, but is not a reason to answer nothing. Where a name is
-		// declared only here, discarding it left the one shape this fallback
-		// exists for with no answer at all: an unresolvable receiver
-		// (`VARIABLES._svc.`, `ARGUMENTS.a.`, a chain, a bracket index) on a
-		// method this component also declares. Every one of those returned nil
-		// while the name sat in the index.
-		//
-		// Last rather than first because the qualifier is evidence against it:
-		// nearest-first would otherwise put it at the top, since nothing is
-		// nearer than the same file, and `myObj.init()` would jump to this
-		// component's own `init()` ahead of a real candidate elsewhere.
-		var locations, sameFile []protocol.Location
-
-		for _, d := range defs {
-			loc := protocol.Location{
-				URI:   d.URI,
-				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
-			}
-
-			if d.URI == docURI {
-				sameFile = append(sameFile, loc)
-
-				continue
-			}
-
-			locations = append(locations, loc)
-		}
-
-		// Nearest first, and the lowest URI among equals. The editor lists
-		// these in the order they are returned, and that order used to be the
-		// index's bucket order — the order eight parallel indexing goroutines
-		// finished in, so the same "3 definitions found" list could come back
-		// differently after a restart. Nearest is also the more useful first
-		// entry, since it is the one the caller most likely meant.
-		orderByNearest(locations, docURI)
-
-		locations = append(locations, sameFile...)
-
-		if len(locations) == 1 {
-			return locations[0], nil
-		}
-
-		if len(locations) > 1 {
-			return locations, nil
-		}
-
-		return nil, nil
+		return s.qualifiedDefinition(qualifier, word, docURI, line), nil
 	}
 
 	// No qualifier — prefer current file's definition
 	defer dt.mark("unqualified")
 
+	return s.unqualifiedDefinition(word, docURI), nil
+}
+
+// qualifiedDefinition answers go-to-definition on `qualifier.word`: the
+// method the receiver resolves to, else every declaration of the name when
+// global resolution is on.
+func (s *Server) qualifiedDefinition(qualifier, word string, docURI uri.URI, line int) any {
+	s.log.Debug("definition: qualifier found", cflog.String("qualifier", qualifier), cflog.String("word", word))
+
+	if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
+		return protocol.Location{
+			URI:   def.URI,
+			Range: protocol.Range{Start: protocol.Position{Line: def.Line}, End: protocol.Position{Line: def.Line}},
+		}
+	}
+
+	// Qualified call that can't be resolved — fall through to all matches
+	if !s.GlobalFunctionResolution {
+		return nil
+	}
+
+	defs := s.index.Lookup(word)
+	s.log.Debug("definition: qualified fallback to global lookup", cflog.String("word", word), cflog.Int("matches", len(defs)))
+
+	// A definition in the requesting file is kept, and ranked last.
+	//
+	// It used to be discarded, on the reasoning that `x.doThing()` is not a
+	// call to this file's own `doThing()` — which is true, and is why it
+	// sorts last, but is not a reason to answer nothing. Where a name is
+	// declared only here, discarding it left the one shape this fallback
+	// exists for with no answer at all: an unresolvable receiver
+	// (`VARIABLES._svc.`, `ARGUMENTS.a.`, a chain, a bracket index) on a
+	// method this component also declares. Every one of those returned nil
+	// while the name sat in the index.
+	//
+	// Last rather than first because the qualifier is evidence against it:
+	// nearest-first would otherwise put it at the top, since nothing is
+	// nearer than the same file, and `myObj.init()` would jump to this
+	// component's own `init()` ahead of a real candidate elsewhere.
+	var locations, sameFile []protocol.Location
+
+	for _, d := range defs {
+		loc := protocol.Location{
+			URI:   d.URI,
+			Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
+		}
+
+		if d.URI == docURI {
+			sameFile = append(sameFile, loc)
+
+			continue
+		}
+
+		locations = append(locations, loc)
+	}
+
+	// Nearest first, and the lowest URI among equals. The editor lists
+	// these in the order they are returned, and that order used to be the
+	// index's bucket order — the order eight parallel indexing goroutines
+	// finished in, so the same "3 definitions found" list could come back
+	// differently after a restart. Nearest is also the more useful first
+	// entry, since it is the one the caller most likely meant.
+	orderByNearest(locations, docURI)
+
+	locations = append(locations, sameFile...)
+
+	if len(locations) == 1 {
+		return locations[0]
+	}
+
+	if len(locations) > 1 {
+		return locations
+	}
+
+	return nil
+}
+
+// unqualifiedDefinition answers go-to-definition on a bare name: this file's
+// declaration, then the extends chain, then every declaration of the name
+// when global resolution is on.
+func (s *Server) unqualifiedDefinition(word string, docURI uri.URI) any {
 	defs := s.index.Lookup(word)
 
 	for _, d := range defs {
@@ -243,22 +257,22 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 			return protocol.Location{
 				URI:   d.URI,
 				Range: protocol.Range{Start: protocol.Position{Line: d.Line}, End: protocol.Position{Line: d.Line}},
-			}, nil
+			}
 		}
 	}
 
 	// Check extends chain of current file
 	if loc := s.resolveSuper(word, docURI); loc != nil {
-		return *loc, nil
+		return *loc
 	}
 
 	if len(defs) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	// Not in current file — only return if global resolution is enabled
 	if !s.GlobalFunctionResolution {
-		return nil, nil
+		return nil
 	}
 
 	var locations []protocol.Location
@@ -270,10 +284,10 @@ func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, err
 	}
 
 	if len(locations) == 1 {
-		return locations[0], nil
+		return locations[0]
 	}
 
-	return locations, nil
+	return locations
 }
 
 // func (s *Server) resolveQualifiedDef(qualifier, funcName string, docURI uri.URI, line uint32) *protocol.Location {

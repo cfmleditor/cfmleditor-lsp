@@ -201,7 +201,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 }
 
 // extractSignatures does a shallow parse: function names/args, component refs, scopes.
-func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (pr *ParseResult) extractSignatures() {
 	defer func() {
 		if r := recover(); r != nil {
 			pr.logWarn("parse panic in extractSignatures", "uri", string(pr.URI), "error", fmt.Sprint(r))
@@ -247,252 +247,10 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 			continue
 		}
 
-		if r.Kind == RegionScript { //nolint:nestif // over the limit before it existed; LINT-PLAN.md stage 4
-			sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
-			sp.resolverSet = pr.resolverSet
-			sp.extractLinks = pr.extractLinks
-			sp.extractCalls = pr.extractCalls
-			sp.builtinReturnLookup = pr.BuiltinReturnLookup
-
-			// If this <cfscript> region sits inside a tag <cffunction> body
-			// (nested script island — ClassifyRegions splits the file there),
-			// seed inFunc so refs/pending calls in it route to that function's
-			// scope instead of global. scriptParser bakes baseLine into its own
-			// keys, so the seed must be the function's absolute funcKey — unlike
-			// the tag-region continuation seed below, which stays region-relative.
-			for _, s := range tagScopes {
-				if s.Start < r.StartLine && r.StartLine <= s.End {
-					sp.inFunc = funcKey(s.Start, s.End)
-					sp.localVarSet = make(map[string]bool)
-
-					for i := range pr.Funcs {
-						if int(pr.Funcs[i].Line) == s.Start {
-							for _, arg := range pr.Funcs[i].Arguments {
-								sp.localVarSet[strings.ToLower(arg.Name)] = true
-							}
-
-							break
-						}
-					}
-
-					break
-				}
-			}
-
-			sp.parse()
-			pr.Funcs = append(pr.Funcs, sp.funcs...)
-			pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
-			pr.Scopes = append(pr.Scopes, sp.scopes...)
-			pr.Properties = append(pr.Properties, sp.properties...)
-
-			// Merge function-scoped refs from script parser
-			if len(sp.funcRefs) > 0 {
-				if pr.funcRefsMap == nil {
-					pr.funcRefsMap = make(map[string][]ComponentRef)
-				}
-
-				for k, refs := range sp.funcRefs {
-					pr.funcRefsMap[k] = append(pr.funcRefsMap[k], refs...)
-				}
-			}
-
-			// Merge links from script parser
-			pr.Links = append(pr.Links, sp.links...)
-			if len(sp.funcLinks) > 0 {
-				if pr.funcLinksMap == nil {
-					pr.funcLinksMap = make(map[string][]DocumentLink)
-				}
-
-				for k, links := range sp.funcLinks {
-					pr.funcLinksMap[k] = append(pr.funcLinksMap[k], links...)
-				}
-			}
-
-			// Merge calls from script parser
-			pr.Calls = append(pr.Calls, sp.calls...)
-			if len(sp.funcCalls) > 0 {
-				if pr.funcCallsMap == nil {
-					pr.funcCallsMap = make(map[string][]CallSite)
-				}
-
-				for k, calls := range sp.funcCalls {
-					pr.funcCallsMap[k] = append(pr.funcCallsMap[k], calls...)
-				}
-			}
-
-			allPendingCalls = append(allPendingCalls, sp.pendingCalls...)
-
-			if sp.extends != "" {
-				pr.Extends = sp.extends
-			}
-
-			if sp.persistent {
-				pr.Persistent = true
-			}
+		if r.Kind == RegionScript {
+			allPendingCalls = append(allPendingCalls, pr.mergeScriptRegion(&r, tagScopes)...)
 		} else {
-			tp := newTagParser(r.Text, string(pr.URI))
-			tp.resolvers = pr.Resolvers
-			tp.resolverSet = pr.resolverSet
-			tp.extractLinks = pr.extractLinks
-			tp.extractCalls = pr.extractCalls
-			tp.builtinReturnLookup = pr.BuiltinReturnLookup
-			tp.baseLine = r.StartLine
-			tp.knownScopes = tagScopes
-			tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
-			tp.srcOffset = r.Offset
-
-			// If this region starts partway through a function whose opening
-			// <cffunction> tag was in an earlier region (interrupted by a
-			// nested <cfscript> region split), seed inFunc/localVars so refs
-			// in this region still route to function scope instead of global.
-			for _, s := range tagScopes {
-				if s.Start < r.StartLine && r.StartLine <= s.End {
-					tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
-					tp.localVars = nil
-
-					for i := range pr.Funcs {
-						if int(pr.Funcs[i].Line) == s.Start {
-							for _, arg := range pr.Funcs[i].Arguments {
-								tp.markVarLocal(arg.Name)
-							}
-
-							break
-						}
-					}
-
-					break
-				}
-			}
-
-			tp.parse()
-
-			for i := range tp.funcs {
-				tp.funcs[i].Line += conv.Uint32(r.StartLine)
-			}
-
-			for i := range tp.componentRefs {
-				tp.componentRefs[i].Line += conv.Uint32(r.StartLine)
-			}
-
-			for i := range tp.properties {
-				tp.properties[i].line += conv.Uint32(r.StartLine)
-			}
-
-			pr.Funcs = append(pr.Funcs, tp.funcs...)
-			pr.ComponentRefs = append(pr.ComponentRefs, tp.componentRefs...)
-			pr.Properties = append(pr.Properties, tp.properties...)
-
-			// Merge links from tag parser
-			if r.StartLine > 0 {
-				for i := range tp.links {
-					tp.links[i].Line += conv.Uint32(r.StartLine)
-				}
-			}
-
-			pr.Links = append(pr.Links, tp.links...)
-			if len(tp.funcLinks) > 0 {
-				if pr.funcLinksMap == nil {
-					pr.funcLinksMap = make(map[string][]DocumentLink)
-				}
-
-				for k, links := range tp.funcLinks {
-					if r.StartLine > 0 {
-						parts := strings.SplitN(k, ":", 2)
-						if len(parts) == 2 {
-							start := atoi(parts[0]) + r.StartLine
-							end := atoi(parts[1]) + r.StartLine
-							k = funcKey(start, end)
-						}
-
-						for i := range links {
-							links[i].Line += conv.Uint32(r.StartLine)
-						}
-					}
-
-					pr.funcLinksMap[k] = append(pr.funcLinksMap[k], links...)
-				}
-			}
-
-			// Merge function-scoped refs from tag parser
-			if len(tp.funcRefs) > 0 {
-				if pr.funcRefsMap == nil {
-					pr.funcRefsMap = make(map[string][]ComponentRef)
-				}
-
-				for k, refs := range tp.funcRefs {
-					// Offset the key and ref lines by region start line
-					if r.StartLine > 0 {
-						parts := strings.SplitN(k, ":", 2)
-						if len(parts) == 2 {
-							start := atoi(parts[0]) + r.StartLine
-							end := atoi(parts[1]) + r.StartLine
-							k = funcKey(start, end)
-						}
-
-						for i := range refs {
-							refs[i].Line += conv.Uint32(r.StartLine)
-						}
-					}
-
-					pr.funcRefsMap[k] = append(pr.funcRefsMap[k], refs...)
-				}
-			}
-
-			// Collect pending calls from tag parser (offset lines and funcKey)
-			for i := range tp.pendingCalls {
-				tp.pendingCalls[i].line += conv.Uint32(r.StartLine)
-				if r.StartLine > 0 && tp.pendingCalls[i].funcKey != "" {
-					parts := strings.SplitN(tp.pendingCalls[i].funcKey, ":", 2)
-					if len(parts) == 2 {
-						start := atoi(parts[0]) + r.StartLine
-						end := atoi(parts[1]) + r.StartLine
-						tp.pendingCalls[i].funcKey = funcKey(start, end)
-					}
-				}
-			}
-
-			allPendingCalls = append(allPendingCalls, tp.pendingCalls...)
-
-			// Merge calls from tag parser
-			if r.StartLine > 0 {
-				for i := range tp.calls {
-					tp.calls[i].Line += conv.Uint32(r.StartLine)
-				}
-			}
-
-			pr.Calls = append(pr.Calls, tp.calls...)
-			if len(tp.funcCalls) > 0 {
-				if pr.funcCallsMap == nil {
-					pr.funcCallsMap = make(map[string][]CallSite)
-				}
-
-				for k, calls := range tp.funcCalls {
-					if r.StartLine > 0 {
-						parts := strings.SplitN(k, ":", 2)
-						if len(parts) == 2 {
-							start := atoi(parts[0]) + r.StartLine
-							end := atoi(parts[1]) + r.StartLine
-							k = funcKey(start, end)
-						}
-
-						for i := range calls {
-							calls[i].Line += conv.Uint32(r.StartLine)
-						}
-					}
-
-					pr.funcCallsMap[k] = append(pr.funcCallsMap[k], calls...)
-				}
-			}
-
-			// Tag scopes are computed from full content after region processing
-			// to handle functions spanning region boundaries.
-			if tp.extends != "" {
-				pr.Extends = tp.extends
-			}
-
-			if tp.persistent {
-				pr.Persistent = true
-			}
+			allPendingCalls = append(allPendingCalls, pr.mergeTagRegion(&r, tagScopes)...)
 		}
 	}
 
@@ -544,6 +302,230 @@ func (pr *ParseResult) extractSignatures() { //nolint:gocognit // over the limit
 		// first call of a longer chain is wrong, so such a ref is dynamic.
 		dropChainRest(pr, dynamicIfTyped)
 	}
+}
+
+// mergeScriptRegion parses a script region and merges what it found into pr,
+// returning its pending calls for resolvePendingCalls.
+func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+	sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
+	sp.resolverSet = pr.resolverSet
+	sp.extractLinks = pr.extractLinks
+	sp.extractCalls = pr.extractCalls
+	sp.builtinReturnLookup = pr.BuiltinReturnLookup
+
+	// If this <cfscript> region sits inside a tag <cffunction> body
+	// (nested script island — ClassifyRegions splits the file there),
+	// seed inFunc so refs/pending calls in it route to that function's
+	// scope instead of global. scriptParser bakes baseLine into its own
+	// keys, so the seed must be the function's absolute funcKey — unlike
+	// the tag-region continuation seed below, which stays region-relative.
+	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+		sp.inFunc = funcKey(s.Start, s.End)
+		sp.localVarSet = make(map[string]bool)
+
+		for _, arg := range pr.argsOfFuncAt(s.Start) {
+			sp.localVarSet[strings.ToLower(arg.Name)] = true
+		}
+	}
+
+	sp.parse()
+	pr.Funcs = append(pr.Funcs, sp.funcs...)
+	pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
+	pr.Scopes = append(pr.Scopes, sp.scopes...)
+	pr.Properties = append(pr.Properties, sp.properties...)
+
+	// Merge function-scoped refs from script parser
+	for k, refs := range sp.funcRefs {
+		pr.funcRefsMap = appendKeyed(pr.funcRefsMap, k, refs)
+	}
+
+	// Merge links from script parser
+	pr.Links = append(pr.Links, sp.links...)
+	for k, links := range sp.funcLinks {
+		pr.funcLinksMap = appendKeyed(pr.funcLinksMap, k, links)
+	}
+
+	// Merge calls from script parser
+	pr.Calls = append(pr.Calls, sp.calls...)
+	for k, calls := range sp.funcCalls {
+		pr.funcCallsMap = appendKeyed(pr.funcCallsMap, k, calls)
+	}
+
+	if sp.extends != "" {
+		pr.Extends = sp.extends
+	}
+
+	if sp.persistent {
+		pr.Persistent = true
+	}
+
+	return sp.pendingCalls
+}
+
+// mergeTagRegion parses a tag region and merges what it found into pr, with
+// its lines and function keys moved from region-relative to file lines,
+// returning its pending calls for resolvePendingCalls.
+func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+	tp := newTagParser(r.Text, string(pr.URI))
+	tp.resolvers = pr.Resolvers
+	tp.resolverSet = pr.resolverSet
+	tp.extractLinks = pr.extractLinks
+	tp.extractCalls = pr.extractCalls
+	tp.builtinReturnLookup = pr.BuiltinReturnLookup
+	tp.baseLine = r.StartLine
+	tp.knownScopes = tagScopes
+	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
+	tp.srcOffset = r.Offset
+
+	// If this region starts partway through a function whose opening
+	// <cffunction> tag was in an earlier region (interrupted by a
+	// nested <cfscript> region split), seed inFunc/localVars so refs
+	// in this region still route to function scope instead of global.
+	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+		tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
+		tp.localVars = nil
+
+		for _, arg := range pr.argsOfFuncAt(s.Start) {
+			tp.markVarLocal(arg.Name)
+		}
+	}
+
+	tp.parse()
+
+	for i := range tp.funcs {
+		tp.funcs[i].Line += conv.Uint32(r.StartLine)
+	}
+
+	for i := range tp.componentRefs {
+		tp.componentRefs[i].Line += conv.Uint32(r.StartLine)
+	}
+
+	for i := range tp.properties {
+		tp.properties[i].line += conv.Uint32(r.StartLine)
+	}
+
+	pr.Funcs = append(pr.Funcs, tp.funcs...)
+	pr.ComponentRefs = append(pr.ComponentRefs, tp.componentRefs...)
+	pr.Properties = append(pr.Properties, tp.properties...)
+
+	// Merge links from tag parser
+	if r.StartLine > 0 {
+		for i := range tp.links {
+			tp.links[i].Line += conv.Uint32(r.StartLine)
+		}
+	}
+
+	pr.Links = append(pr.Links, tp.links...)
+	for k, links := range tp.funcLinks {
+		if r.StartLine > 0 {
+			k = shiftFuncKey(k, r.StartLine)
+
+			for i := range links {
+				links[i].Line += conv.Uint32(r.StartLine)
+			}
+		}
+
+		pr.funcLinksMap = appendKeyed(pr.funcLinksMap, k, links)
+	}
+
+	// Merge function-scoped refs from tag parser
+	for k, refs := range tp.funcRefs {
+		// Offset the key and ref lines by region start line
+		if r.StartLine > 0 {
+			k = shiftFuncKey(k, r.StartLine)
+
+			for i := range refs {
+				refs[i].Line += conv.Uint32(r.StartLine)
+			}
+		}
+
+		pr.funcRefsMap = appendKeyed(pr.funcRefsMap, k, refs)
+	}
+
+	// Collect pending calls from tag parser (offset lines and funcKey)
+	for i := range tp.pendingCalls {
+		tp.pendingCalls[i].line += conv.Uint32(r.StartLine)
+		if r.StartLine > 0 && tp.pendingCalls[i].funcKey != "" {
+			tp.pendingCalls[i].funcKey = shiftFuncKey(tp.pendingCalls[i].funcKey, r.StartLine)
+		}
+	}
+
+	// Merge calls from tag parser
+	if r.StartLine > 0 {
+		for i := range tp.calls {
+			tp.calls[i].Line += conv.Uint32(r.StartLine)
+		}
+	}
+
+	pr.Calls = append(pr.Calls, tp.calls...)
+	for k, calls := range tp.funcCalls {
+		if r.StartLine > 0 {
+			k = shiftFuncKey(k, r.StartLine)
+
+			for i := range calls {
+				calls[i].Line += conv.Uint32(r.StartLine)
+			}
+		}
+
+		pr.funcCallsMap = appendKeyed(pr.funcCallsMap, k, calls)
+	}
+
+	// Tag scopes are computed from full content after region processing
+	// to handle functions spanning region boundaries.
+	if tp.extends != "" {
+		pr.Extends = tp.extends
+	}
+
+	if tp.persistent {
+		pr.Persistent = true
+	}
+
+	return tp.pendingCalls
+}
+
+// enclosingTagScope is the tag function a region starting at startLine opens
+// inside of: one whose opening <cffunction> is in an earlier region, the file
+// having been split around a nested <cfscript>.
+func enclosingTagScope(tagScopes []FuncScope, startLine int) (FuncScope, bool) {
+	for _, s := range tagScopes {
+		if s.Start < startLine && startLine <= s.End {
+			return s, true
+		}
+	}
+
+	return FuncScope{}, false
+}
+
+// argsOfFuncAt is the argument list of the first function declared at line.
+func (pr *ParseResult) argsOfFuncAt(line int) []Argument {
+	for i := range pr.Funcs {
+		if int(pr.Funcs[i].Line) == line {
+			return pr.Funcs[i].Arguments
+		}
+	}
+
+	return nil
+}
+
+// shiftFuncKey moves a "start:end" function key by delta lines.
+func shiftFuncKey(k string, delta int) string {
+	parts := strings.SplitN(k, ":", 2)
+	if len(parts) != 2 {
+		return k
+	}
+
+	return funcKey(atoi(parts[0])+delta, atoi(parts[1])+delta)
+}
+
+// appendKeyed appends v to m[k], making the map on first use, and returns it.
+func appendKeyed[T any](m map[string][]T, k string, v []T) map[string][]T {
+	if m == nil {
+		m = make(map[string][]T)
+	}
+
+	m[k] = append(m[k], v...)
+
+	return m
 }
 
 // servicePropertyRe matches a "@serviceproperty varName kind|name" annotation inside a
@@ -826,61 +808,14 @@ func (pr *ParseResult) replaceExpressions(comp string) string {
 }
 
 // resolvePendingCalls resolves varName = funcCall(...) assignments against same-file functions.
-func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
-	// Build lookup of function name → return component
-	funcReturns := make(map[string]string, len(pr.Funcs))
-	for i := range pr.Funcs {
-		f := &pr.Funcs[i]
-
-		comp := f.ReturnComponent
-		if comp == "" && isComponentType(f.ReturnType) {
-			comp = f.ReturnType
-		}
-
-		if comp != "" {
-			funcReturns[strings.ToLower(f.Name)] = comp
-		}
-	}
-
-	// Track which functions have pending return vars to resolve
-	type returnPending struct {
-		funcIdx int
-		varName string
-		funcKey string
-	}
-
-	var returnPendings []returnPending
-
-	for i := range pr.Funcs {
-		f := &pr.Funcs[i]
-		if f.ReturnComponent == "" && f.returnVar != "" {
-			scope := findFuncScope(int(f.Line), pr.Scopes)
-			if scope.Start >= 0 {
-				returnPendings = append(returnPendings, returnPending{
-					funcIdx: i,
-					varName: f.returnVar,
-					funcKey: funcKey(scope.Start, scope.End),
-				})
-			}
-		}
-	}
+func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
+	returnPendings := pr.pendingReturnVars()
 
 	// Resolve ReturnComponent from return var before processing calls
-	for _, rp := range returnPendings {
-		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
-			for i := range refs {
-				ref := &refs[i]
+	pr.settleReturnVars(returnPendings)
 
-				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
-
-					break
-				}
-			}
-		}
-	}
-
-	// Rebuild funcReturns with newly resolved ReturnComponents
+	// Function name → return component, including the ones just settled.
+	funcReturns := make(map[string]string, len(pr.Funcs))
 	for i := range pr.Funcs {
 		f := &pr.Funcs[i]
 
@@ -898,34 +833,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) { //nolint:gocog
 		c := &calls[j]
 
 		// Skip if this variable already has a ref (e.g. from appendResolverRefs)
-		varLower := strings.ToLower(c.varName)
-		alreadyResolved := false
-
-		if c.funcKey != "" && pr.funcRefsMap != nil {
-			for i := range pr.funcRefsMap[c.funcKey] {
-				ref := &pr.funcRefsMap[c.funcKey][i]
-
-				if strings.EqualFold(ref.Variable, varLower) {
-					alreadyResolved = true
-
-					break
-				}
-			}
-		}
-
-		if !alreadyResolved {
-			for i := range pr.ComponentRefs {
-				ref := &pr.ComponentRefs[i]
-
-				if strings.EqualFold(ref.Variable, varLower) {
-					alreadyResolved = true
-
-					break
-				}
-			}
-		}
-
-		if alreadyResolved {
+		if pr.hasRefFor(c) {
 			continue
 		}
 
@@ -933,42 +841,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) { //nolint:gocog
 
 		// Fallback: x = baseVar.method() — assign x same component as baseVar
 		if comp == "" && c.baseVar != "" {
-			baseVarLower := strings.ToLower(c.baseVar)
-
-			for i := range pr.ComponentRefs {
-				ref := &pr.ComponentRefs[i]
-
-				if strings.EqualFold(ref.Variable, baseVarLower) {
-					comp = pr.settledComponent(ref)
-
-					break
-				}
-			}
-
-			if comp == "" && c.funcKey != "" && pr.funcRefsMap != nil {
-				refs := pr.funcRefsMap[c.funcKey]
-				for i := range refs {
-					ref := &refs[i]
-
-					if strings.EqualFold(ref.Variable, baseVarLower) {
-						comp = pr.settledComponent(ref)
-
-						break
-					}
-				}
-			}
-
-			// If FuncLookup is available, prefer the called method's own declared
-			// return type over the "same as baseVar" guess — it may differ from the
-			// receiver's type. If the method declares no component return type, don't
-			// propagate the base variable's component at all.
-			if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
-				if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
-					comp = ret
-				} else {
-					comp = "$any"
-				}
-			}
+			comp = pr.baseVarComponent(c)
 		}
 
 		if comp == "" {
@@ -982,32 +855,110 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) { //nolint:gocog
 		if c.funcKey == "" {
 			pr.ComponentRefs = append(pr.ComponentRefs, ref)
 		} else {
-			if pr.funcRefsMap == nil {
-				pr.funcRefsMap = make(map[string][]ComponentRef)
-			}
-
-			pr.funcRefsMap[c.funcKey] = append(pr.funcRefsMap[c.funcKey], ref)
+			pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
 		}
 	}
 
 	// Second pass: resolve ReturnComponent for functions whose return var was just added by calls
-	for _, rp := range returnPendings {
+	pr.settleReturnVars(returnPendings)
+}
+
+// returnPending is a function whose return type is whatever a variable it
+// returns holds, still to be looked up.
+type returnPending struct {
+	funcIdx int
+	varName string
+	funcKey string
+}
+
+// pendingReturnVars lists the functions that return a variable and have no
+// return component yet.
+func (pr *ParseResult) pendingReturnVars() []returnPending {
+	var out []returnPending
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if f.ReturnComponent != "" || f.returnVar == "" {
+			continue
+		}
+
+		if scope := findFuncScope(int(f.Line), pr.Scopes); scope.Start >= 0 {
+			out = append(out, returnPending{
+				funcIdx: i,
+				varName: f.returnVar,
+				funcKey: funcKey(scope.Start, scope.End),
+			})
+		}
+	}
+
+	return out
+}
+
+// settleReturnVars gives each pending function without a return component
+// the component its return variable holds, when a ref in its body says.
+func (pr *ParseResult) settleReturnVars(pending []returnPending) {
+	for _, rp := range pending {
 		if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
 			continue
 		}
 
-		if refs := pr.funcRefsMap[rp.funcKey]; refs != nil {
-			for i := range refs {
-				ref := &refs[i]
-
-				if strings.EqualFold(ref.Variable, rp.varName) {
-					pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
-
-					break
-				}
-			}
+		if ref := firstRefNamed(pr.funcRefsMap[rp.funcKey], rp.varName); ref != nil {
+			pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
 		}
 	}
+}
+
+// hasRefFor reports whether the variable a pending call assigns already has a
+// ref, in its function or at file level.
+func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
+	if c.funcKey != "" && firstRefNamed(pr.funcRefsMap[c.funcKey], c.varName) != nil {
+		return true
+	}
+
+	return firstRefNamed(pr.ComponentRefs, c.varName) != nil
+}
+
+// baseVarComponent is the component `x = baseVar.method()` gives x: the
+// method's declared return type when FuncLookup can say, else baseVar's own
+// component, or "$any" when the method is known to declare none.
+func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
+	var comp string
+
+	if ref := firstRefNamed(pr.ComponentRefs, c.baseVar); ref != nil {
+		comp = pr.settledComponent(ref)
+	}
+
+	if comp == "" && c.funcKey != "" {
+		if ref := firstRefNamed(pr.funcRefsMap[c.funcKey], c.baseVar); ref != nil {
+			comp = pr.settledComponent(ref)
+		}
+	}
+
+	// If FuncLookup is available, prefer the called method's own declared
+	// return type over the "same as baseVar" guess — it may differ from the
+	// receiver's type. If the method declares no component return type, don't
+	// propagate the base variable's component at all.
+	if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
+		if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
+			return ret
+		}
+
+		return "$any"
+	}
+
+	return comp
+}
+
+// firstRefNamed is the first ref in refs for the variable name, compared
+// case-insensitively, or nil.
+func firstRefNamed(refs []ComponentRef, name string) *ComponentRef {
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, name) {
+			return &refs[i]
+		}
+	}
+
+	return nil
 }
 
 // extractBeanName strips framework namespace prefixes from an inject value.
@@ -2190,7 +2141,7 @@ func (pr *ParseResult) callerAtLine(lineNum int) string {
 }
 
 // scanLineForCalls checks a line for calls to any of pr.findCalls targets.
-func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string) { //nolint:gocognit // over the limit before it existed; LINT-PLAN.md stage 4
+func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string) {
 	lower := strings.ToLower(line)
 	trimmed := strings.TrimSpace(lower)
 	// Skip function definition lines
@@ -2202,45 +2153,7 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 	for _, target := range pr.findCalls {
 		t := strings.ToLower(target)
 		if idx := strings.Index(lower, "."+t+"("); idx >= 0 {
-			// Extract variable name before the dot
-			varEnd := idx
-
-			varStart := varEnd - 1
-			for varStart >= 0 && (line[varStart] >= 'a' && line[varStart] <= 'z' || line[varStart] >= 'A' && line[varStart] <= 'Z' || line[varStart] >= '0' && line[varStart] <= '9' || line[varStart] == '_' || line[varStart] == '$') {
-				varStart--
-			}
-
-			varStart++
-			varName := line[varStart:varEnd]
-			comp := pr.resolveVarComponent(varName)
-			// If no variable match, try resolving call expression before the dot
-			if comp == "" && varEnd > 0 && line[varEnd-1] == ')' && len(pr.Resolvers) > 0 {
-				// Find matching open paren
-				depth := 0
-
-				j := varEnd - 1
-				for j >= 0 {
-					if line[j] == ')' {
-						depth++
-					} else if line[j] == '(' {
-						depth--
-						if depth == 0 {
-							fnStart := j - 1
-							for fnStart >= 0 && (line[fnStart] >= 'a' && line[fnStart] <= 'z' || line[fnStart] >= 'A' && line[fnStart] <= 'Z' || line[fnStart] >= '0' && line[fnStart] <= '9' || line[fnStart] == '_' || line[fnStart] == '$') {
-								fnStart--
-							}
-
-							fnStart++
-							callExpr := line[fnStart:varEnd]
-							comp = ResolveFromCall(callExpr, pr.Resolvers)
-
-							break
-						}
-					}
-
-					j--
-				}
-			}
+			varName, comp := pr.qualifiedTarget(line, idx)
 
 			pr.Calls = append(pr.Calls, CallSite{
 				FuncName: target, Component: comp, Variable: varName, Line: conv.Uint32(lineNum), Caller: caller,
@@ -2253,6 +2166,54 @@ func (pr *ParseResult) scanLineForCalls(line string, lineNum int, caller string)
 			})
 		}
 	}
+}
+
+// qualifiedTarget reads the receiver of a call whose dot is at dot: the
+// variable before it and its component, or, when the receiver is itself a
+// call, the component a resolver gives that call.
+func (pr *ParseResult) qualifiedTarget(line string, dot int) (varName, comp string) {
+	varStart := dot - 1
+	for varStart >= 0 && isLineIdentByte(line[varStart]) {
+		varStart--
+	}
+
+	varName = line[varStart+1 : dot]
+	comp = pr.resolveVarComponent(varName)
+
+	// If no variable match, try resolving call expression before the dot
+	if comp != "" || dot == 0 || line[dot-1] != ')' || len(pr.Resolvers) == 0 {
+		return varName, comp
+	}
+
+	// Find matching open paren
+	depth := 0
+
+	for j := dot - 1; j >= 0; j-- {
+		switch line[j] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth != 0 {
+				continue
+			}
+
+			fnStart := j - 1
+			for fnStart >= 0 && isLineIdentByte(line[fnStart]) {
+				fnStart--
+			}
+
+			return varName, ResolveFromCall(line[fnStart+1:dot], pr.Resolvers)
+		}
+	}
+
+	return varName, comp
+}
+
+// isLineIdentByte is the identifier test scanLineForCalls has always used:
+// ASCII letters, digits, '_' and '$'.
+func isLineIdentByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '$'
 }
 
 // resolveVarComponent finds the component a variable resolves to from pr.ComponentRefs.

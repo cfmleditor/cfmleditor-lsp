@@ -352,11 +352,18 @@ the *formatter*, not the parser.
   stays `$any`). **`make gapcheck` cannot see this**: it compares line and method
   name and deliberately not the receiver, so a call against the wrong receiver
   still counts as found.
-- **The parser walks a chain in five separate places** (`checkVarRHS`, `parseBodyVarDecl`,
-  `parseBodyScopedVar`, `checkAssignRef`, `checkBareCall`) and a construct met mid-chain needs
-  the case in all of them. Three of the five were still reporting a bare `bar` when the first
-  two handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
-  reason; add to it rather than fixing one walk.
+- **The parser walks a chain in three places, and a construct met mid-chain needs the case in
+  all of them.** `walkChain` is the one behind every assignment's right-hand side
+  (`checkVarRHS`, which `parseBodyVarDecl` now calls, `parseBodyScopedVar` and
+  `checkAssignRef`); `scopedChainCall` walks `scope.name.a.b()` as a statement, and
+  `checkBareCall` walks a bare receiver into a list rather than a string. It was five
+  hand-copied loops, and three of the five were still reporting a bare `bar` when the first two
+  handled `::`. `TestStaticCallCarriesItsComponent` lists every assignment form for that
+  reason; add to it rather than fixing one walk. **`checkVarRHS` and `assignFromChain` are not
+  the same answer**: after the walk, `checkVarRHS` also tries `tryExtendChain` and the builtin
+  return lookup, and `assignFromChain` (behind the scoped and unscoped assignments) never has.
+  That is how the code was found, kept as it was; unifying them is a behaviour change to measure
+  on the corpus, not a refactor.
 - **"This function calls nothing" is not "this is not a function".** `FuncCalls`
   answered both by falling back to every call in the file, so a leaf method was
   handed its siblings' calls — `deps` drew an edge out of an empty function,
@@ -415,6 +422,18 @@ the *formatter*, not the parser.
   **The call axis could not see this**: the calls were already recorded at the
   right lines under the wrong function, so `make gapcheck` agreed. Asking the
   grammar which *names* it declares found it in one run.
+- **A script function may carry attributes after its parameter list**
+  (`localmode=true`, `restPath="x"`, a bare `cbMethod`,
+  `cachedwithin=createTimeSpan(0,1,0,0)`). Every reader of a declaration
+  expected the `{` right after the `)`, so such a function got a scope ending
+  on its own line and its body was read as component-level code: 728 functions
+  in the corpus, and 794 of their locals reported as variables of the
+  component. `skipFunctionAttrs` steps over them in the parse,
+  `findScriptFuncScopes` and a named nested function, and the parse reads each
+  value as an expression so a call in one is still recorded. It is **only for a
+  named declaration**: after an arrow function's parameters comes an
+  expression, and consuming an identifier there takes the receiver off a call —
+  `TestArrowFunctionBodyKeepsItsReceiver` fails if it moves into `parseBody`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -683,35 +702,54 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   things with `=` — an assignment, a named argument (`f( name = 1 )`), a tag attribute
   (`<cffunction name="x">`) — so a cheap "is the next token `=`" rule would mark the attribute
   *name* in every tag as a write. A wrong Write badge is worse than none.
-- `textDocument/foldingRange` (`internal/server/folding.go`) folds on the CST rather than on
-  indentation, which gets tags wrong constantly. A script-syntax `.cfc` is the case that makes
-  this more than a tree walk: the CFML grammar hands its whole body to the CFScript grammar as
-  one opaque `cf_component_content`, so walking only the outer tree yields exactly one fold for
-  the file. Each injected region is parsed with its own grammar and walked too, its rows offset
-  by where the region starts.
+- `textDocument/foldingRange` (`internal/server/folding.go`) folds from the parser. Functions
+  come from the document's cached ParseResult (`pr.Scopes`), so the handler takes `lockDoc`,
+  which pays any reparse didChange deferred — `TestFoldingFollowsEdits` fails if it takes
+  `lockDocOnly`. Everything else comes from `parser.StructureSpans`, one pass per request over
+  the text split by `ClassifyRegions`: in a tag region it finds comments, and in a script region
+  it runs the parse's own scanner in CFScript mode (a `#...#` inside a string can hold strings of
+  its own, and a plain quote-to-quote scan pairs them wrongly) with a stack of open `{`, `(` and
+  `[`, reporting comments, blocks, multi-line argument and parameter lists and array literals,
+  and switch cases. The markup around the script regions is walked once by `tagStructure` (a
+  stack of open tags; a close pops to its opener and discards what is left open above it), so a
+  `<cfscript>` pairs with its `</cfscript>` across the region between them. A fold ends on the
+  line before the one holding its closer, so the `}`, `)` or `</cfif>` stays on screen; a
+  comment folds to its last line, and a `<cfelse>` branch or switch case to the line before its
+  last content. `TestTagStructureSpans` has a case per tag rule.
 
-  **The walk descends through named children only**, and every accessor on a
-  tree-sitter node is a cgo call — the walk measured 71% `runtime.cgocall`. An
-  anonymous node is a grammar literal and tokens are leaves, so nothing
-  foldable hides under one (`TestAnonymousNodesAreLeaves`; also checked by
-  running both walks over the corpus — 92,001 folds, none different). For the
-  same reason `Range()` is read once per node instead of
-  `StartPosition`/`EndPosition`/`EndByte`, the single-line rejection runs
-  before anything else, and a `depth` counter replaces a `Parent()` call. What
-  is left is dominated by the CFScript sub-parse of a script `.cfc` body,
-  which is inherent to the design above: 6.5ms for a 500-line component,
-  against 13ms before.
+  The rules that make the bracket pass agree with the tree-sitter folding it replaced, each with
+  a case in `TestStructureSpans` that fails without it:
+  - **A fold starts on its statement's first line**, not the bracket's, so a wrapped `if` folds
+    from the `if`; a bracket further down folds from its own line too. A statement spanning lines
+    folds from its first line to its last bracket even when that bracket is on one line, which is
+    how a chain written a call per line gets its fold.
+  - **`if`/`else` and `try`/`catch` chains fold whole** as well as branch by branch, and an
+    `else` that is not the last folds to the end of the chain. Two folds on one line are one arrow
+    in VS Code, and with folds sorted outermost first the chain is the one shown.
+  - **A parenthesis after `if`, `while`, an operator or `=` groups; one after a name holds
+    arguments.** Only the second folds. A `[` after a name is an index and does not.
+  - **A newline ends a statement** in a block when the last token could end an expression and the
+    next is a word that is not an operator: CFScript does not require the semicolon, and cfwheels
+    omits it throughout. Not after a lone word (`admin` then its attributes), and not inside an
+    **attribute statement** (`component` or `property` with attributes over lines, a
+    script-syntax tag `word word=`), where a new line's word is another attribute if `=`, a `{`
+    or the next line follows it and a new statement if it is a keyword or anything else follows.
+    `default="x"` is the commonest attribute and `default` a keyword, so `=` is checked first.
+  - A word is classified once, by `classify`: one switch on the word lowercased without
+    allocating. Lists compared with `EqualFold` were a fifth of the scan.
 
-  Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
-  it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
-  **closing line stays visible**, which takes two separate checks: the deepest last *token* is
-  what closes a node (a `function_declaration`'s `}` belongs to its `statement_block`, so
-  reading the immediate last child misses every wrapper), and a node ending inside the **leading
-  whitespace** of its last line has no closing token of its own (`<cfelse>`'s branch ends at the
-  tab before the enclosing `</cfif>`). Identical ranges are **deduped**, keeping the outermost,
-  since the CST nests wrappers that add no lines. And a node whose whole extent is one opaque
-  injected region is **skipped**: `component_file` wraps a script `.cfc` and would fold the file
-  to nothing.
+  Over the six-project corpus it reproduces 93.9% of tree-sitter's 156,241 folds, and makes about
+  2,000 that tree-sitter did not. The rest is comments where tree-sitter's node started a line
+  early (about 3,100), multi-line binary expressions and conditions left out on purpose, method
+  chains and concatenations inside declarations, and pages where tree-sitter closes `<td>` or
+  `<li>` implicitly. About 80µs for a 60-function component and 116µs for a 490-line page,
+  against 3.5ms for tree-sitter on the component.
+
+  **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init` installs allocator
+  hooks that call back into Go for every `malloc` and `free` a parse makes;
+  `internal/language/alloc.go` resets them to tree-sitter's defaults. That was 24% of a
+  tree-sitter folding request, and it applies to every tree-sitter parse — the formatter's
+  now. `TestTreeSitterAllocatesThroughLibc` fails if the reset is lost.
 - `textDocument/rangeFormatting` (`internal/server/range_formatting.go`) formats the **whole**
   document and returns only the edits inside the requested lines. Formatting the selected text
   alone is the obvious approach and wrong twice over: a selection rarely parses standalone, and
@@ -763,10 +801,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
   Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
-  (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
-  one opaque region, so answering one request means parsing the whole body with the CFScript
-  grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
-  per open document. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  (`config.foldingDefault`), as it has been since it was expensive; it now covers 93.9% of what
+  the tree-sitter version folded, and switching the default is `FOLDING-PLAN.md` §5. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
   the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
@@ -1022,7 +1058,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer); `typeDefinition` defaults **off** (opt-in while new). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in; see `FOLDING-PLAN.md` §5 on switching it); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 
@@ -1490,12 +1526,12 @@ Some handles need both shapes; others only one, depending on how the code uses t
   fails on the zero value — which is only true if that check does not
   dereference it. `thelper` does not check benchmark functions, because every
   one here is a body handed to `testing.Benchmark`.
-  **Complexity has limits, and the functions already over them are marked.**
-  `gocognit` 50, `nestif` 10, `funlen` 80 statements; a function that was
-  over one when the limit went in carries a `//nolint` saying so. Do not add
-  one to new code to get past a limit — split the function. Refactoring a
-  marked function under the limit makes `nolintlint` fail until the marker
-  goes, which is the point. `depguard` holds three package boundaries
+  **Complexity has limits, and nothing is excused from them.**
+  `gocognit` 50, `nestif` 10, `funlen` 80 statements. The 42 functions that
+  were over one when the limits went in have all been split; do not add a
+  `//nolint` to get past a limit — split the function. `dupl` runs outside
+  tests for the same reason: the two parsers' `extractAllLinks` and three
+  copies of the chain walk were what it found. `depguard` holds three package boundaries
   (`internal/parser` imports only `internal/log` and the dependency-free `internal/conv`; only `daemon` and `cmd`
   import `internal/server`; only `cmd` imports the code-map store and MCP
   server), and `forbidigo` bans printing to stdout under `internal/`.
