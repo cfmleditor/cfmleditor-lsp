@@ -3191,22 +3191,95 @@ func TestTagParser_BareCallAssignment_ExtractCalls(t *testing.T) {
 func TestScriptParser_ChainedAssignment_NoSpuriousRef(t *testing.T) {
 	// variables.$assert = this.$assert = new testbox.system.Assertion()
 	// The `this.$assert` in the middle is an assignment TO this, not a source;
-	// only the final `new testbox.system.Assertion()` should produce a ref.
+	// only the final `new testbox.system.Assertion()` is — and it is assigned
+	// to both scopes, which are separate stores, so there is one ref in each.
 	content := `component {
 	variables.$assert = this.$assert = new testbox.system.Assertion();
 }`
 	pr := Parse(testURI, content)
 
-	var got []string
+	got := map[bool]string{}
 
 	for _, r := range pr.ComponentRefs {
 		if strings.EqualFold(r.Variable, "$assert") {
-			got = append(got, r.Component)
+			if prev, dup := got[r.This]; dup {
+				t.Errorf("two $assert refs with This=%v: %q and %q", r.This, prev, r.Component)
+			}
+
+			got[r.This] = r.Component
 		}
 	}
 
-	if len(got) != 1 || got[0] != "testbox.system.Assertion" {
-		t.Errorf("expected exactly one $assert ref → testbox.system.Assertion, got %v", got)
+	if got[true] != "testbox.system.Assertion" || got[false] != "testbox.system.Assertion" || len(got) != 2 {
+		t.Errorf("expected one $assert ref → testbox.system.Assertion in each scope, got %v", got)
+	}
+}
+
+// TestThisAndVariablesAreSeparateStores: `this.SCOPES = new Scopes()` says
+// nothing about `variables.scopes`, which ColdBox's Injector keeps as a
+// struct of scope objects beside it. Folding the two made `variables.scopes[
+// k ].getFromScope()` a Scopes, and getInstance() with it, so every call on
+// an instance WireBox built was checked against Scopes. A ref records which
+// scope it was assigned through; an unqualified receiver still sees both, and
+// an index into a variable is not the variable.
+func TestThisAndVariablesAreSeparateStores(t *testing.T) {
+	content := `component {
+	function init() {
+		this.SCOPES = new Scopes();
+		variables.scopes = {};
+	}
+	function viaVariables( k ) {
+		var a = variables.scopes.getFromScope( k );
+		return a;
+	}
+	function viaThis() {
+		var b = this.scopes.getFromScope();
+		return b;
+	}
+	function viaIndex( k ) {
+		var c = scopes[ k ].getFromScope();
+		return c;
+	}
+	function unscoped() {
+		var d = scopes.getFromScope();
+		return d;
+	}
+}`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+
+	for name, want := range map[string]string{
+		"viaVariables": "",
+		"viaThis":      "Scopes",
+		"viaIndex":     "",
+		"unscoped":     "Scopes",
+	} {
+		for i := range pr.Funcs {
+			if pr.Funcs[i].Name == name && pr.Funcs[i].ReturnComponent != want {
+				t.Errorf("%s returns %q, want %q", name, pr.Funcs[i].ReturnComponent, want)
+			}
+		}
+	}
+}
+
+func TestReceiverRefScope(t *testing.T) {
+	this, vars := &ComponentRef{This: true}, &ComponentRef{}
+
+	for recv, want := range map[string][2]bool{
+		"this.x":          {true, false},
+		"THIS.x":          {true, false},
+		"variables.x":     {false, true},
+		"x":               {true, true},
+		"this.x.y":        {true, true},
+		"variables.x[k]":  {true, true},
+		"request.x":       {true, true},
+		"this.":           {true, true},
+		"arguments.x":     {true, true},
+		"Variables.$mock": {false, true},
+	} {
+		s := ReceiverRefScope(recv)
+		if got := [2]bool{s.Admits(this), s.Admits(vars)}; got != want {
+			t.Errorf("%s admits this/variables refs %v, want %v", recv, got, want)
+		}
 	}
 }
 
@@ -4326,6 +4399,36 @@ func TestNameOnlyResolverDoesNotTypeWhatACallOnItReturns(t *testing.T) {
 
 		if nameOnly && (got["e"] != "" || got["i"] != "") {
 			t.Errorf("nameOnly: a call or index on event was typed: %v", got)
+		}
+	}
+}
+
+// TestTagAssignmentThroughThisIsMarked: the tag parser records which scope
+// a `<cfset>` assigned through, directly and through a pending call.
+func TestTagAssignmentThroughThisIsMarked(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="make" returntype="models.Svc"><cfreturn createObject("component", "models.Svc")></cffunction>
+<cfset this.a = createObject("component", "Svc")>
+<cfset variables.b = createObject("component", "Svc")>
+<cfset this.c = make()>
+</cfcomponent>`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+
+	got := map[string]bool{}
+	for _, r := range pr.ComponentRefs {
+		got[r.Variable] = r.This
+	}
+
+	for _, sc := range pr.Scopes {
+		refs, _ := pr.FuncRefs(sc.Start, sc.End)
+		for _, r := range refs {
+			got[r.Variable] = r.This
+		}
+	}
+
+	for name, want := range map[string]bool{"a": true, "b": false, "c": true} {
+		if this, ok := got[name]; !ok || this != want {
+			t.Errorf("%s: recorded %v, This %v; want This %v (all: %v)", name, ok, this, want, got)
 		}
 	}
 }

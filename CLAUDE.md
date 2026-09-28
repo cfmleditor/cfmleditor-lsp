@@ -475,6 +475,20 @@ the *formatter*, not the parser.
   named declaration**: after an arrow function's parameters comes an
   expression, and consuming an identifier there takes the receiver off a call —
   `TestArrowFunctionBodyKeepsItsReceiver` fails if it moves into `parseBody`.
+- **`this.` and `variables.` are separate stores, and a ref says which it was
+  assigned through** (`ComponentRef.This`). The lookup had stripped every scope, so
+  ColdBox's Injector — `this.SCOPES = new Scopes()` beside a struct `variables.scopes`
+  — checked `variables.scopes[ k ].getFromScope()` against `Scopes`, typed
+  `getInstance()` as returning one, and so every call on an instance WireBox built,
+  29 over the corpus. A receiver qualified with either scope reads its own scope's
+  refs, in the resolver (`funcScopedRef`, `fileLevelRef`) and in `baseVarComponent`;
+  an unqualified one still reads both, since CFML's own lookup is not what decides
+  that here and a narrower rule was not measured. Two things came with it, each with
+  a test that fails without it: `x = a[ k ].f()` no longer takes `a` as its base
+  (the element is not the variable — a Lucee date had been typed as its entity), and
+  `variables.x = this.x = rhs` records a ref in each scope (`chainedScopedAssign`),
+  which TestBox's `$assert` relies on. `a = b = rhs` unscoped, and the tag parser's
+  chained `<cfset>`, still record nothing for either name.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -1235,7 +1249,9 @@ qualified call `x.method()`, the receiver's component is looked up in this order
 the first hit — (1) `call.Component`, if already set at parse time (e.g. a chained
 `new`/`createObject`, or a bare-call site where the tag/script parser resolved the receiver
 inline via `lookupComponentRef`); (2) a function-scoped `ComponentRef` for `x`; (3) a file-level
-(global/`VARIABLES.`/`this.`) `ComponentRef`; (4) a `ComponentRef` on
+(global/`VARIABLES.`/`this.`) `ComponentRef` — for (2) and (3) a receiver written `this.x`
+reads only refs assigned through `this.` and one written `variables.x` only the rest
+(`parser.ReceiverRefScope`); (4) a `ComponentRef` on
 `Application.cfc`/`Application.cfm`; (5) for `ARGUMENTS.x`, the `<cfargument type>` if it's a
 dotted path; (6) walking the `extends` chain's own `ComponentRef`s; (7) a `componentResolver`
 matched against the variable name text; (8) a `componentResolver` matched against the full line

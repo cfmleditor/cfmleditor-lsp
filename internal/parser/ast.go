@@ -158,6 +158,13 @@ type ComponentRef struct {
 	URI       uri.URI
 	Line      uint32
 
+	// This is set when the assignment was made through `this.`: this scope
+	// and variables scope are separate stores, and `this.SCOPES = new
+	// Scopes()` says nothing about `variables.scopes`. A receiver written
+	// with either qualifier is looked up among its own scope's refs only; an
+	// unqualified one still sees both.
+	This bool
+
 	// ChainBase and ChainMethod record the receiver.method() shape that produced
 	// this ref (e.g. "var x = jss.getInstance()" → ChainBase "jss", ChainMethod
 	// "getInstance"). Empty unless Component came from a receiver.method(...) call.

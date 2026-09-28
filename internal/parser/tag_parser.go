@@ -45,6 +45,7 @@ type tagParser struct {
 	// lookup — together 7% of everything a tag parse allocated.
 	localVars   []string
 	forceGlobal bool // when true, addRef routes to componentRefs regardless of inFunc
+	refThis     bool // the assignment being parsed is through `this.` — see ComponentRef.This
 
 	// baseLine is this region's absolute start line (0 if parsing the whole
 	// file as one region). knownScopes, when set by the caller, gives the
@@ -912,9 +913,9 @@ func (p *tagParser) parseCFSet(tag string, line int) {
 		name, rhs := splitAssign(rest)
 		if name != "" {
 			p.vars = append(p.vars, VarDef{Name: name, Scope: ScopeThis, Line: conv.Uint32(line)})
-			p.forceGlobal = true
+			p.forceGlobal, p.refThis = true, true
 			p.checkSetRHSStr(rhs, name, line)
-			p.forceGlobal = false
+			p.forceGlobal, p.refThis = false, false
 		}
 	case hasPrefixFold(inner, "variables."):
 		rest := inner[10:]
@@ -1201,6 +1202,10 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		line:     conv.Uint32(line),
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
+		refThis:  p.refThis,
+		// varChain is the receiver: `variables.a.m()` reads a from
+		// variables scope only.
+		baseScope: ReceiverRefScope(varChain),
 	})
 }
 
@@ -1241,6 +1246,7 @@ func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int)
 		line:     conv.Uint32(line),
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
+		refThis:  p.refThis,
 	})
 }
 
@@ -1622,6 +1628,8 @@ func (p *tagParser) resolveCall(expr string) string {
 
 // Refs assigned to VARIABLES. or this. scopes are always global.
 func (p *tagParser) addRef(ref *ComponentRef) {
+	ref.This = p.refThis
+
 	if p.inFunc == "" || p.forceGlobal {
 		p.componentRefs = append(p.componentRefs, *ref)
 	} else {

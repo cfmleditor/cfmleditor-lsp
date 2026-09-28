@@ -1688,19 +1688,20 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 	// scope prefix and must not be stripped there.
 	lookupVar := parser.StripReceiverScope(variable)
+	scope := parser.ReceiverRefScope(variable)
 
 	// Each lookup below is tried while comp is still empty. A matching ref
 	// with no component is logged and passed over, as it always was.
 
 	// Try function-scoped refs first
-	if ref := funcScopedRef(pr, line, lookupVar); ref != nil {
+	if ref := funcScopedRef(pr, line, lookupVar, scope); ref != nil {
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
 	}
 
 	if comp == "" {
-		if best := fileLevelRef(pr, line, lookupVar); best != nil {
+		if best := fileLevelRef(pr, line, lookupVar, scope); best != nil {
 			comp = best.Component
 
 			tr.addf("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
@@ -1765,8 +1766,9 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	return comp, false
 }
 
-// funcScopedRef is the first ref for name inside the function enclosing line.
-func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+// funcScopedRef is the first ref for name inside the function enclosing line,
+// among those scope admits.
+func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.RefScope) *parser.ComponentRef {
 	for _, scope := range pr.Scopes {
 		if int(line) < scope.Start || int(line) > scope.End {
 			continue
@@ -1781,7 +1783,7 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.Com
 
 		for i := range refs {
 			ref := &refs[i]
-			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) {
+			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) {
 				continue
 			}
 
@@ -1815,12 +1817,12 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.Com
 // with the highest line number at or before the call site (the assignment
 // that's actually in scope there); only fall back to file order for a genuine
 // forward reference, where no preceding ref exists.
-func fileLevelRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser.RefScope) *parser.ComponentRef {
 	var best *parser.ComponentRef
 
 	for i := range pr.ComponentRefs {
 		ref := &pr.ComponentRefs[i]
-		if !strings.EqualFold(ref.Variable, name) || ref.Line > line {
+		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) {
 			continue
 		}
 
@@ -1834,7 +1836,7 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string) *parser.Comp
 	}
 
 	for i := range pr.ComponentRefs {
-		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) {
+		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) && scope.Admits(&pr.ComponentRefs[i]) {
 			return &pr.ComponentRefs[i]
 		}
 	}
