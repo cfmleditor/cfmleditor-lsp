@@ -366,3 +366,38 @@ func TestUnusableAddedFolderIsDeclined(t *testing.T) {
 		t.Errorf("workspaceRoots = %q, want the original root untouched", s.workspaceRoots)
 	}
 }
+
+// TestDefinitionFollowsAFolderNamedByThePath is go-to-definition's half of the
+// folder-named fallback (resolve's inFolderNamed): /app/includes/header.cfm,
+// written in a file under a second workspace folder, is the header in the
+// workspace folder called app.
+func TestDefinitionFollowsAFolderNamedByThePath(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	other := filepath.Join(root, "other")
+
+	header := filepath.Join(app, "includes", "header.cfm")
+	caller := filepath.Join(other, "page.cfm")
+
+	for _, f := range []string{header, caller} {
+		if err := os.MkdirAll(filepath.Dir(f), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(f, []byte("<cfoutput>x</cfoutput>"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{app, other}
+
+	loc := srv.resolveFilePathDef("/app/includes/header.cfm", cfpath.ToURI(caller))
+	if loc == nil {
+		t.Fatal("the path through the folder's name did not resolve")
+	}
+
+	if want := cfpath.ToURI(header); loc.URI != want {
+		t.Errorf("resolved to %s, want %s", loc.URI, want)
+	}
+}

@@ -411,6 +411,17 @@ func (s *Server) resolveFilePathDef(filePath string, docURI uri.URI) *protocol.L
 		}
 	}
 
+	// Last, a workspace folder named by the first segment, which is the
+	// mapping a folder implies (resolve's inFolderNamed).
+	for _, candidate := range cfpath.InFolderNamed(s.searchRoots(), filePath) {
+		if _, err := s.FS.Stat(candidate); err == nil {
+			return &protocol.Location{
+				URI:   cfpath.ToURI(candidate),
+				Range: protocol.Range{},
+			}
+		}
+	}
+
 	return nil
 }
 

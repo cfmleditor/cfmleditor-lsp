@@ -461,7 +461,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `workspaceName` | Yes | Unique project name. Used to derive the daemon socket path so multiple projects don't collide. |
 | `workspacePaths` | No | Relative paths to folders the LSP should treat as workspace roots. Resolved relative to the config file location. |
 | `workspaceIndexGlobs` | No | Glob patterns to filter which `.cfc` files are indexed. |
-| `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). |
+| `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). A workspace folder already implies a mapping of its own name; see [Mappings](#mappings). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
@@ -472,6 +472,8 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 ### Mappings
 
 Mappings let you resolve component dot-paths that use a virtual root. For example, with `"models": "./src/models"`, the dot-path `models.User` resolves to `./src/models/User.cfc`.
+
+A workspace folder also stands for a mapping of its own name, so a root that is just a folder's name needs no entry. With `"workspacePaths": ["../tassweb"]`, the dot-path `tassweb.packages.core.Kernel` resolves to `../tassweb/packages/core/Kernel.cfc`, and the include `/tassweb/includes/header.cfm` to the matching file. This is tried last, after every mapping, every `Application.cfc` mapping and every relative lookup, so it never changes a path those already resolve. Mappings are still what you need for any root that is not a workspace folder's name: a virtual root such as `models` above, a directory outside `workspacePaths`, or a name that should point somewhere other than the folder it matches. An explicit mapping for a folder's own name is harmless; it wins, and says the same thing.
 
 ### Component resolvers
 
