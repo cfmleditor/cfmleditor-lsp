@@ -512,7 +512,7 @@ warned about. When the `box.json` beside the config depends on a framework
 with a preset the config does not name (`coldbox`, `testbox`,
 `commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
 and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
-it uses, the `unresolved` report goes from 23,560 entries to 14,088.
+it uses, the `unresolved` report goes from 23,560 entries to 14,083.
 
 A preset's variable resolvers are `nameOnly` (below), so in tag syntax
 `<cfset x = event.getValue( "a" )>` does not make `x` a request context.
