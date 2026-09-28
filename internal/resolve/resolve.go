@@ -29,6 +29,7 @@ type Resolver struct {
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
 	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
 	incGraph           *includeGraph     // the index's cfincludes, rebuilt when they change
+	exprKeys           []string          // ExpressionMappings' keys in the order they apply
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -48,7 +49,9 @@ func (r *Resolver) describeResolver(idx int) string {
 func (r *Resolver) ComponentPath(component, baseDir string) string {
 	// Apply expression mappings (replace runtime expressions with static values).
 	// A key may list multiple pipe-delimited alternatives that all map to the same value.
-	for key, value := range r.ExpressionMappings {
+	for _, key := range r.expressionKeys() {
+		value := r.ExpressionMappings[key]
+
 		for expr := range strings.SplitSeq(key, "|") {
 			if expr != "" && strings.Contains(component, expr) {
 				component = strings.ReplaceAll(component, expr, value)
@@ -93,6 +96,31 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 	r.mu.Unlock()
 
 	return result
+}
+
+// expressionKeys returns ExpressionMappings' keys in the order they apply
+// (parser.ExpressionMappingOrder), worked out once: the resolver is dropped
+// wherever its configuration changes.
+func (r *Resolver) expressionKeys() []string {
+	if len(r.ExpressionMappings) == 0 {
+		return nil
+	}
+
+	r.mu.RLock()
+	keys := r.exprKeys
+	r.mu.RUnlock()
+
+	if keys != nil {
+		return keys
+	}
+
+	keys = parser.ExpressionMappingOrder(r.ExpressionMappings)
+
+	r.mu.Lock()
+	r.exprKeys = keys
+	r.mu.Unlock()
+
+	return keys
 }
 
 // dirs returns the resolver's directory-listing cache, creating it on first
@@ -148,7 +176,13 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 
 		if len(candidates) > 1 {
-			// Multiple matches — pick the one with the shortest relative path from baseDir.
+			// Multiple matches — pick the one with the shortest relative path
+			// from baseDir, and the lowest path among equals, as
+			// Index.LookupPreferred does for a function. Several copies of a
+			// component in sibling directories — ContentBox keeps one
+			// RailoDBInfo.cfc per patch — are all equally near a sibling that
+			// has none, and taking whichever came first made the answer, and
+			// every code-map edge through it, change from run to run.
 			best := ""
 			bestDist := -1
 
@@ -160,7 +194,7 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 
 				dist := strings.Count(rel, string(filepath.Separator))
 
-				if bestDist < 0 || dist < bestDist {
+				if bestDist < 0 || dist < bestDist || dist == bestDist && c < best {
 					best = c
 					bestDist = dist
 				}

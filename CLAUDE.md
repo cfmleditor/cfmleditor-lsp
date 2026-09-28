@@ -650,6 +650,18 @@ was `.git`/`.svn`/`node_modules`/`target`/`vendor`, and on a real workspace it l
 which doubled every count and added thousands of phantom entries to the unreferenced
 list.
 
+**The same workspace gives the same map, and a map is never the order to decide
+with.** A bare component name no path answers is looked up by file name
+(`Index.FindFilesByBasename`), and ContentBox keeps a `RailoDBInfo.cfc` in several
+patch directories, all equally near a patch that has none. The index lists them out of
+a map, filled by a parallel scan, and the resolver took the first, so an edge — and the
+island numbering after it — moved between runs of one build. The list is sorted now,
+and `componentPathUncached` breaks a tie by the lowest path, as `LookupPreferred` does;
+`expressionMappings` apply longest key first (`parser.ExpressionMappingOrder`) for the
+same reason. `TestTheSameWorkspaceGivesTheSameMap` builds one workspace ten times.
+Check a change here by building a project's map several times and comparing the files
+byte for byte (only `buildMillis` differs).
+
 ## Key structural notes
 
 - `internal/parser/result.go` — `ParseResult`, `ParseOptions`, `Parse()`/`ParseWithOptions()`,
@@ -1338,6 +1350,11 @@ runtime expressions collapsing to the same static value don't need separate entr
 alternative is checked and replaced independently — plain substring alternation, unrelated to
 the regex-triggering `\` in `componentResolvers.match`. Implemented in
 `internal/resolve/resolve.go: ComponentPath` and `internal/parser/result.go: replaceExpressions`.
+
+Keys apply **longest first**, then by key (`parser.ExpressionMappingOrder`, which both
+implementations use). They were applied in map order, so two overlapping keys — `#core#`
+and `#core#legacy.` — replaced in either order from run to run, and one path named two
+different components.
 
 **Unmapped `#...#` expressions become `$any`, not literal garbage.** Any component-path string
 captured from CFML source — `CreateObject("component", "...")`, `<cfinvoke component="...">`,
