@@ -149,6 +149,10 @@ func runServer() {
 	debug := cfg != nil && cfg.Debug()
 	log := cflog.NewLogger(debug)
 
+	// Before anything that can crash: every crash record goes to a file from
+	// here on, configured or not. See EnableCrashReports.
+	crashPath := cflog.EnableCrashReports(version)
+
 	// Any panic that gets past the per-request handlers is recorded before the
 	// process goes. Those handlers recover where recovery is right; one reaching
 	// here is one nothing expected, and without this the only trace is a stack on
@@ -171,6 +175,10 @@ func runServer() {
 
 	if path := cflog.FilePath(); path != "" {
 		log.Info("logging to file", cflog.String("path", path))
+	}
+
+	if crashPath != "" {
+		log.Info("crash reports go to", cflog.String("path", crashPath))
 	}
 
 	if debug {
