@@ -462,6 +462,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	var (
 		resolvers                []parser.Resolver
 		mappings                 map[string]string
+		startupFiles             []string
 		expressionMappings       map[string]string
 		servicePropertyResolvers map[string]string
 		propertyResolvers        []parser.PropertyResolver
@@ -472,6 +473,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	if cfg != nil {
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
+		startupFiles = cfg.StartupFiles()
 		expressionMappings = cfg.ExpressionMappings()
 		servicePropertyResolvers = cfg.ServicePropertyResolvers()
 		propertyResolvers = configPropertyResolvers(cfg)
@@ -510,6 +512,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		Index:              shared,
 		Resolvers:          resolvers,
 		Mappings:           mappings,
+		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 	}

@@ -148,6 +148,7 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 	if cfg != nil {
 		opt.WorkspaceFolders = cfg.WorkspaceFolders()
 		opt.Mappings = cfg.Mappings()
+		opt.StartupFiles = cfg.StartupFiles()
 		opt.ExpressionMappings = cfg.ExpressionMappings()
 		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
 		opt.BeanPaths = cfg.BeanPaths()

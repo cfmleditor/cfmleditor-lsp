@@ -55,6 +55,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 	// combining. ResolvePaths passes absolute values through untouched.
 	if editorCfg != nil {
 		editorCfg.Mappings = config.ResolvePaths(editorCfg.Mappings, baseDir)
+		editorCfg.StartupFiles = config.ResolvePathList(editorCfg.StartupFiles, baseDir)
 		editorCfg.BeanPaths = config.ResolvePaths(editorCfg.BeanPaths, baseDir)
 	}
 
@@ -63,6 +64,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 	if fileCfg != nil {
 		dir = filepath.Dir(path)
 		fileCfg.Mappings = config.ResolvePaths(fileCfg.Mappings, dir)
+		fileCfg.StartupFiles = config.ResolvePathList(fileCfg.StartupFiles, dir)
 		fileCfg.BeanPaths = config.ResolvePaths(fileCfg.BeanPaths, dir)
 
 		s.log.Info("loaded config from workspace", cflog.String("path", path))
@@ -264,6 +266,10 @@ func (s *Server) applyConfig(r *config.Resolved) {
 
 	if len(r.Mappings) > 0 && len(s.Mappings) == 0 {
 		s.Mappings = r.Mappings
+	}
+
+	if len(r.StartupFiles) > 0 && len(s.StartupFiles) == 0 {
+		s.StartupFiles = r.StartupFiles
 	}
 
 	if len(r.ExpressionMappings) > 0 && len(s.ExpressionMappings) == 0 {

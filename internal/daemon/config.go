@@ -113,6 +113,16 @@ func (c *Config) Mappings() map[string]string {
 	return cfpath.ResolveMappings(raw.Mappings, filepath.Dir(c.Path))
 }
 
+// StartupFiles returns the configured startup templates as absolute paths.
+func (c *Config) StartupFiles() []string {
+	raw := c.raw()
+	if raw == nil {
+		return nil
+	}
+
+	return config.ResolvePathList(raw.StartupFiles, filepath.Dir(c.Path))
+}
+
 // ExpressionMappings returns expression-to-value substitutions from config.
 func (c *Config) ExpressionMappings() map[string]string {
 	raw := c.raw()
@@ -498,6 +508,7 @@ func SettingsFrom(c *Config) server.Settings {
 		WorkspaceFolders:         c.WorkspaceFolders(),
 		IndexGlobs:               c.IndexGlobs(),
 		Mappings:                 c.Mappings(),
+		StartupFiles:             c.StartupFiles(),
 		ExpressionMappings:       c.ExpressionMappings(),
 		ServicePropertyResolvers: c.ServicePropertyResolvers(),
 		ComponentResolvers:       c.ComponentResolvers(),
