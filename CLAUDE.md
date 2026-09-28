@@ -704,10 +704,20 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   running both walks over the corpus — 92,001 folds, none different). For the
   same reason `Range()` is read once per node instead of
   `StartPosition`/`EndPosition`/`EndByte`, the single-line rejection runs
-  before anything else, and a `depth` counter replaces a `Parent()` call. What
-  is left is dominated by the CFScript sub-parse of a script `.cfc` body,
-  which is inherent to the design above: 6.5ms for a 500-line component,
-  against 13ms before.
+  before anything else, and a `depth` counter replaces a `Parent()` call. The
+  rejection also **ends the descent**: nothing under a one-line node can fold,
+  and most of a file's nodes are under one, which halved the walk's cgo calls
+  and allocations (156,241 corpus folds, none different). What is left is
+  dominated by the CFScript sub-parse of a script `.cfc` body, which is
+  inherent to the design above.
+
+  **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init`
+  installs allocator hooks that call back into Go for every `malloc` and
+  `free` a parse makes; `internal/language/alloc.go` resets them to
+  tree-sitter's defaults. That alone was 24% of a folding request, and it
+  applies to every tree-sitter parse, the formatter's included.
+  `TestTreeSitterAllocatesThroughLibc` fails if the reset is lost. The two
+  changes together took the 60-function benchmark from 5.0ms to 3.2ms.
 
   Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
   it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The

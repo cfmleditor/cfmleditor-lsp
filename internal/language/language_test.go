@@ -51,3 +51,11 @@ func TestParseCFQuery(t *testing.T) {
 		t.Fatal("expected children in CFQuery parse tree")
 	}
 }
+
+// go-tree-sitter routes tree-sitter's allocations through a Go callback unless
+// something resets it; the reset is this package's init.
+func TestTreeSitterAllocatesThroughLibc(t *testing.T) {
+	if !nativeAllocator() {
+		t.Fatal("tree-sitter allocates through go-tree-sitter's Go callbacks, not libc")
+	}
+}

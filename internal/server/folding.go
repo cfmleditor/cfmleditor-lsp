@@ -109,8 +109,8 @@ func foldingRanges(content string) []protocol.FoldingRange {
 // only to recognise the root. Range() reads both positions and both byte
 // offsets in one call where StartPosition/EndPosition/EndByte were three. And
 // the cheap rejection — a node that begins and ends on one line cannot fold —
-// runs before anything else, because most nodes in a file are single-line and
-// each one that stops here stops after a single accessor.
+// runs before anything else and ends the descent too, because most nodes in a
+// file are single-line or inside one that is.
 func collectFolds(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uintptr]bool, out *[]protocol.FoldingRange, depth int) {
 	// Id() is itself a call, so it is only worth asking when something can be
 	// opaque — that is, when the file has injected regions at all.
@@ -119,7 +119,19 @@ func collectFolds(n *sitter.Node, src []byte, rowOffset uint32, opaque map[uintp
 	}
 
 	if depth > 0 {
-		if f, ok := foldFor(n, src, rowOffset); ok && !wrapsOnlyOpaque(n, opaque) {
+		// One call for both positions and both byte offsets, and the first
+		// thing asked of the node.
+		r := n.Range()
+
+		// A node on one line cannot fold, and nothing under it can either:
+		// its descendants lie within the same line. So the walk stops here
+		// rather than asking the same question of every node beneath, which
+		// is where most of a file's nodes are.
+		if r.EndPoint.Row <= r.StartPoint.Row {
+			return
+		}
+
+		if f, ok := foldFor(n, r, src, rowOffset); ok && !wrapsOnlyOpaque(n, opaque) {
 			*out = append(*out, f)
 		}
 	}
@@ -168,12 +180,7 @@ func wrapsOnlyOpaque(n *sitter.Node, opaque map[uintptr]bool) bool {
 
 // foldFor turns one node into a folding range, or reports that it is not worth
 // folding.
-func foldFor(n *sitter.Node, src []byte, rowOffset uint32) (protocol.FoldingRange, bool) {
-	// One call for both positions and both byte offsets, and the first thing
-	// asked of the node: a single-line node cannot fold, and most nodes are
-	// single-line.
-	r := n.Range()
-
+func foldFor(n *sitter.Node, r sitter.Range, src []byte, rowOffset uint32) (protocol.FoldingRange, bool) {
 	start := conv.Uint32FromUint(r.StartPoint.Row)
 	end := conv.Uint32FromUint(r.EndPoint.Row)
 
