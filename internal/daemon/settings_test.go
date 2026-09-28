@@ -13,6 +13,7 @@ const fullConfig = `{
 	"workspacePaths": ["."],
 	"workspaceIndexGlobs": ["**/*.cfc"],
 	"mappings": {"models": "./models"},
+	"startupFiles": ["bootstrap.cfm"],
 	"expressionMappings": {"#CORE#": "packages.core."},
 	"servicePropertyResolvers": {"package": "packages.${name}"},
 	"componentResolvers": [{"match": "getService(\"$1\")", "resolve": "svc.$1", "prefix": "getService"}],

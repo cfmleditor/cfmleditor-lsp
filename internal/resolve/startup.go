@@ -65,12 +65,14 @@ func splitSharedScope(variable string) (string, bool) {
 
 // startupAssigns returns the shared-scope assignments made by the templates
 // the Application.cfc (or .cfm) governing baseDir includes, transitively, and
-// by that file itself, in the order they are met. It is cached per
-// application root for the life of the resolver, which the server drops
-// wherever a path answer may have gone stale.
+// by that file itself, then by the configured StartupFiles and what they
+// include, in the order they are met. It is cached per application root —
+// "" for a file under none, which the configured files still reach — for the
+// life of the resolver, which the server drops wherever a path answer may
+// have gone stale.
 func (r *Resolver) startupAssigns(baseDir string) []startupAssign {
 	appDir := r.FindApplicationRoot(baseDir)
-	if appDir == "" {
+	if appDir == "" && len(r.StartupFiles) == 0 {
 		return nil
 	}
 
@@ -88,9 +90,13 @@ func (r *Resolver) startupAssigns(baseDir string) []startupAssign {
 		queue []string
 	)
 
-	for _, name := range []string{"Application.cfc", "Application.cfm"} {
-		queue = append(queue, filepath.Join(appDir, name))
+	if appDir != "" {
+		for _, name := range []string{"Application.cfc", "Application.cfm"} {
+			queue = append(queue, filepath.Join(appDir, name))
+		}
 	}
+
+	queue = append(queue, r.configuredStartupFiles()...)
 
 	for len(queue) > 0 && len(seen) < maxStartupTemplates {
 		file := queue[0]
@@ -124,6 +130,38 @@ func (r *Resolver) startupAssigns(baseDir string) []startupAssign {
 
 	r.startupCache[appDir] = out
 	r.mu.Unlock()
+
+	return out
+}
+
+// configuredStartupFiles is StartupFiles as files on disk. An entry that names
+// a file is used as it is; one that does not and starts with "/" is a CFML
+// template path, resolved as a cfinclude of it would be — through the
+// mappings, the workspace folders and a folder named by its first segment —
+// so "/tassweb/packages/tass/core/bootstrap.cfm" is written the way every
+// Application.cfc that includes the template writes it, and reads the same
+// from any application's config.
+func (r *Resolver) configuredStartupFiles() []string {
+	out := make([]string, 0, len(r.StartupFiles))
+
+	for _, p := range r.StartupFiles {
+		if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+			out = append(out, p)
+
+			continue
+		}
+
+		if !strings.HasPrefix(filepath.ToSlash(p), "/") || len(r.WorkspaceFolders) == 0 {
+			continue
+		}
+
+		// IncludePath tries the including file's own directory first; a
+		// template path from config has no including file, and a leading
+		// slash makes that candidate a workspace-folder one anyway.
+		if target := r.IncludePath(filepath.ToSlash(p), filepath.Join(r.WorkspaceFolders[0], "startupFiles")); target != "" {
+			out = append(out, target)
+		}
+	}
 
 	return out
 }
@@ -170,7 +208,7 @@ func (r *Resolver) startupComponent(variable, baseDir string, tr *callTrace) str
 
 	comp := r.typeOfShared(key, assigns, map[string]bool{})
 	if comp != "" {
-		tr.addf("resolved %q to %q from an assignment in a template the Application.cfc includes", variable, comp)
+		tr.addf("resolved %q to %q from an assignment in a startup template (one the Application.cfc includes, or a configured startupFiles entry)", variable, comp)
 	}
 
 	return comp

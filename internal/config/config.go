@@ -45,6 +45,11 @@ type JSON struct {
 	WorkspaceIndexGlobs []string          `json:"workspaceIndexGlobs"`
 	Mappings            map[string]string `json:"mappings"`
 	ExpressionMappings  map[string]string `json:"expressionMappings"`
+	// StartupFiles names templates that set up shared-scope variables for the
+	// whole workspace — a bootstrap included by every application, say.
+	// Their REQUEST, SESSION, APPLICATION and SERVER assignments type a
+	// variable no nearer assignment types. Paths are relative to the config.
+	StartupFiles []string `json:"startupFiles"`
 	// ServicePropertyResolvers maps a "@serviceproperty" annotation kind (e.g. "package",
 	// "service", "controller") to a dot-path template containing "${name}". Recognizes
 	// "<!--- @serviceproperty varName kind|name --->" comments as documenting the real
@@ -581,6 +586,7 @@ func IntDefault(p *int, def int) int {
 // Resolved holds fully resolved configuration ready for use by the server.
 type Resolved struct {
 	Mappings                 map[string]string
+	StartupFiles             []string // absolute
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
 	Routes                   route.Config
@@ -626,6 +632,10 @@ type ResolvedFormatting struct {
 // Resolve takes a parsed JSON config and its directory, returning a fully resolved config.
 func Resolve(cfg *JSON, dir string) *Resolved {
 	r := &Resolved{}
+	if len(cfg.StartupFiles) > 0 {
+		r.StartupFiles = ResolvePathList(cfg.StartupFiles, dir)
+	}
+
 	if len(cfg.Mappings) > 0 {
 		r.Mappings = ResolvePaths(cfg.Mappings, dir)
 	}
@@ -712,6 +722,26 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	return r
 }
 
+// ResolvePathList resolves each relative path in raw against baseDir, keeping
+// an absolute one as written.
+func ResolvePathList(raw []string, baseDir string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(raw))
+
+	for _, p := range raw {
+		if filepath.IsAbs(p) {
+			out = append(out, p)
+		} else {
+			out = append(out, filepath.Join(baseDir, p))
+		}
+	}
+
+	return out
+}
+
 // ResolvePaths resolves relative paths in a map to absolute using baseDir.
 func ResolvePaths(raw map[string]string, baseDir string) map[string]string {
 	if len(raw) == 0 {
@@ -771,6 +801,10 @@ func Merge(base, over *JSON) *JSON {
 
 	if over.JavaStubsPath != "" {
 		out.JavaStubsPath = over.JavaStubsPath
+	}
+
+	if len(over.StartupFiles) > 0 {
+		out.StartupFiles = over.StartupFiles
 	}
 
 	out.Mappings = mergeStringMap(base.Mappings, over.Mappings)

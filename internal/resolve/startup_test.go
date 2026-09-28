@@ -135,3 +135,46 @@ REQUEST.context.help();
 		t.Errorf("the calling file's own assignment did not win over the startup template's: %s", reason)
 	}
 }
+
+// TestConfiguredStartupFilesReachEveryFile is the startupFiles key: a template
+// named there sets up shared scopes for every file in the workspace, those
+// under no Application.cfc included — which in tassweb is the 692 calls the
+// Application.cfc's includes could not reach.
+func TestConfiguredStartupFilesReachEveryFile(t *testing.T) {
+	app := startupWorkspace(t)
+	outside := t.TempDir()
+
+	r := &resolve.Resolver{
+		FS: vfs.OS{}, Index: index.New(),
+		WorkspaceFolders: []string{app, outside},
+		StartupFiles:     []string{filepath.Join(app, "startup.cfm")},
+	}
+
+	got := reasonsFor(t, r, filepath.Join(outside, "page.cfm"), `<cfset u = REQUEST.context.getUser()>
+<cfset h = SESSION.helper.help()>`)
+
+	for _, call := range []string{"REQUEST.context.getUser", "SESSION.helper.help"} {
+		if reason := got[call]; reason != "" {
+			t.Errorf("%s() under no Application.cfc did not resolve through the configured startup file: %s", call, reason)
+		}
+	}
+}
+
+// TestAStartupFileMayBeATemplatePath: "/app/startup.cfm" is resolved as a
+// cfinclude of it would be, here through the workspace folder named app, so a
+// config can name the template the way the Application.cfc includes it.
+func TestAStartupFileMayBeATemplatePath(t *testing.T) {
+	app := startupWorkspace(t)
+	outside := t.TempDir()
+
+	r := &resolve.Resolver{
+		FS: vfs.OS{}, Index: index.New(),
+		WorkspaceFolders: []string{app, outside},
+		StartupFiles:     []string{"/" + filepath.Base(app) + "/startup.cfm"},
+	}
+
+	got := reasonsFor(t, r, filepath.Join(outside, "page.cfm"), `<cfset u = REQUEST.context.getUser()>`)
+	if reason := got["REQUEST.context.getUser"]; reason != "" {
+		t.Errorf("a template-path startup file did not resolve: %s", reason)
+	}
+}

@@ -22,6 +22,7 @@ type Resolver struct {
 	FS                 vfs.FS
 	WorkspaceFolders   []string
 	Mappings           map[string]string
+	StartupFiles       []string // configured startup templates, absolute; see startup.go
 	ExpressionMappings map[string]string
 	Index              *index.Index
 	Resolvers          []parser.Resolver

@@ -28,6 +28,7 @@ type Settings struct {
 	WorkspaceFolders         []string
 	IndexGlobs               []string
 	Mappings                 map[string]string
+	StartupFiles             []string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
 	Routes                   route.Config
@@ -52,6 +53,7 @@ func (set *Settings) Apply(s *Server) {
 	s.WorkspaceFolders = set.WorkspaceFolders
 	s.IndexGlobs = set.IndexGlobs
 	s.Mappings = set.Mappings
+	s.StartupFiles = set.StartupFiles
 	s.ExpressionMappings = set.ExpressionMappings
 	s.ServicePropertyResolvers = set.ServicePropertyResolvers
 	s.Routes = set.Routes
