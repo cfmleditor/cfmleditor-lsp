@@ -55,10 +55,12 @@ func scopedCall(t *testing.T, stmt string) []string {
 // assignment) or `.` (a longer chain), so the shape where the statement *is*
 // the call recorded nothing at all.
 //
-// `x = request.getRemote()` and `request.a.getRemote()` both worked, which is
-// why this survived: only the bare statement form was lost, and that is how a
-// component calls its own method with an explicit scope. 109 sites on the
-// corpus under `getRemoteClients` alone.
+// `x = request.getRemote()` and `request.a.getRemote()` both recorded a call,
+// which is why this survived: only the bare statement form was lost, and that
+// is how a component calls its own method with an explicit scope. 109 sites on
+// the corpus under `getRemoteClients` alone. The assignment and `return` forms
+// recorded the scope as the receiver, though, which scopeReceiver now
+// settles the same way for all three.
 func TestACallDirectlyOnAScopeIsRecorded(t *testing.T) {
 	for _, c := range []struct {
 		stmt string
@@ -85,8 +87,17 @@ func TestACallDirectlyOnAScopeIsRecorded(t *testing.T) {
 		// The argument list is scanned, like any other.
 		{`variables.helper( svc.load() );`, []string{"?.helper", "svc.load"}},
 
+		// A `return` and an assignment's right-hand side are the same call,
+		// and used to keep the scope as the receiver: `x = variables.f()`
+		// reported "variable 'variables' has no component ref".
+		{`return this.init();`, []string{"?.init"}},
+		{`return variables.buildCache();`, []string{"?.buildCache"}},
+		{`x = variables.buildCache();`, []string{"?.buildCache"}},
+		{`var x = this.init();`, []string{"?.init"}},
+		{`return request.getRemote();`, []string{"request[$any].getRemote"}},
+		{`x = request.getRemote();`, []string{"request[$any].getRemote"}},
+
 		// Shapes that already worked and must not change.
-		{`x = request.getRemote();`, []string{"request.getRemote"}},
 		{`request.a.getRemote();`, []string{"request.a.getRemote"}},
 		{`variables.svc.save();`, []string{"variables.svc.save"}},
 		{`this.x = 1;`, nil},
@@ -259,5 +270,90 @@ func TestAHopChainedOntoAScopeMemberCallKeepsItsReceiver(t *testing.T) {
 				t.Errorf("got %v want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// callShapes renders every call in a function body as receiver[component]{chain}.name.
+func callShapes(t *testing.T, body string) []string {
+	t.Helper()
+
+	src := "component {\n function go() {\n  " + body + "\n }\n}\n"
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
+
+	var out []string
+
+	calls := pr.AllCalls()
+	for i := range calls {
+		c := &calls[i]
+
+		s := c.Variable
+		if c.Component != "" {
+			s += "[" + c.Component + "]"
+		}
+
+		if len(c.Chain) > 0 {
+			s += "{" + strings.Join(c.Chain, ",") + "}"
+		}
+
+		out = append(out, s+"."+c.FuncName)
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// A `return` and an assignment's right-hand side record what their expression
+// records as a statement. The return walked a
+// chain of its own, recording the first call and leaving the rest to the outer
+// loop, which met `.b()` with nothing before it and recorded a bare call to
+// `b` — an edge, in a component declaring a `b`, that the call never takes.
+func TestReturnRecordsWhatTheStatementRecords(t *testing.T) {
+	for _, expr := range []string{
+		"svc.a().b()",
+		"variables.a.b().c()",
+		"variables.f().g()",
+		"request.f().g()",
+		"f().g()",
+		"models.Foo::bar()",
+	} {
+		stmt := callShapes(t, expr+";")
+
+		if ret := callShapes(t, "return "+expr+";"); !slices.Equal(stmt, ret) {
+			t.Errorf("%s: statement %v, return %v", expr, stmt, ret)
+		}
+
+		if asg := callShapes(t, "x = "+expr+";"); !slices.Equal(stmt, asg) {
+			t.Errorf("%s: statement %v, assignment %v", expr, stmt, asg)
+		}
+	}
+}
+
+// A call chained onto a bare call is made on what that call returns, so the
+// call goes into the hop's chain. Without it, `f().g()` recorded a `g`
+// indistinguishable from a bare call to a function named g.
+func TestAChainOnABareCallCarriesTheCall(t *testing.T) {
+	for _, body := range []string{"f().g();", "return f().g();", "x = f().g();"} {
+		if got, want := callShapes(t, body), []string{".f", "{f}.g"}; !slices.Equal(got, want) {
+			t.Errorf("%s: got %v want %v", body, got, want)
+		}
+	}
+}
+
+// A return holds an expression, and read as a statement `x == 1` is the
+// assignment `x = …`. The return walk reaches only the walkers that record
+// calls, so it declares nothing.
+func TestReturnOfAComparisonDeclaresNothing(t *testing.T) {
+	for _, body := range []string{"return x == 1;", "return variables.x == 1;", "return local.x == 1;"} {
+		src := "component {\n function go() {\n  " + body + "\n }\n}\n"
+		pr := Parse(testURI, src)
+
+		if vv := pr.VariablesVars(); len(vv) != 0 {
+			t.Errorf("%s declared %v in variables scope", body, vv)
+		}
+
+		if fv := pr.FuncVars(pr.Scopes[0].Start, pr.Scopes[0].End); len(fv) != 0 {
+			t.Errorf("%s declared %v in the function", body, fv)
+		}
 	}
 }

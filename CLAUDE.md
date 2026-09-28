@@ -333,7 +333,30 @@ the *formatter*, not the parser.
   groups are "this component" and "anything else", which is not a question the
   enum answers — `request`, `session` and `application` used to be dispatched
   as `ScopeVariables`, and testing the enum put every one of them in the first
-  group.
+  group. **`scopeReceiver` is that rule, and every path that records such a call
+  goes through it**: the statement, a `return`, an assignment's right-hand side
+  (`recordCallFromChain`), an argument list (`checkBareCall`, and
+  `scanNestedCall` lets a scope word past its keyword guard) and the hops chained
+  on (`recordChainContinuation`). Each of those had kept the scope as the
+  receiver, so `x = variables.f()` reported "variable 'variables' has no
+  component ref" where the statement resolved.
+- **A `return` records what its expression records as a statement**
+  (`returnCall`). It had a chain walk of its own that recorded the first call and
+  left the rest to the outer loop, which met `.b()` with nothing before it and
+  recorded a bare `b` — and read a named argument, `return f( a = 1 )`, as an
+  assignment: 1,081 phantom variables over the corpus. It reaches only the walkers
+  that record calls, never the statement dispatch, because `==` is two `=` tokens
+  and `return x == 1` read as a statement is the assignment `x = …`;
+  `TestReturnOfAComparisonDeclaresNothing` fails if it is routed there.
+  `TestReturnRecordsWhatTheStatementRecords` holds the statement, the `return`
+  and the assignment forms of each chain shape to the same calls.
+- **A call chained onto a bare call is made on what that call returns**, so the
+  call goes into the hop's chain: `f().g()` records `g` with Chain `[f]`, which
+  resolution walks through `f`'s declared return type. `recordBareCallAndChain`
+  left it out unless a resolver had named `f`'s component, and a `g` with no
+  receiver and no chain is indistinguishable from a bare call to a function named
+  g. 26,014 hops over the corpus. `super::m()` is `super.m()`, not a static call
+  on a component named super.
 - **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
   `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
   and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the
@@ -626,6 +649,18 @@ was `.git`/`.svn`/`node_modules`/`target`/`vendor`, and on a real workspace it l
 `.claude/worktrees` — git worktrees holding a complete second copy of the codebase,
 which doubled every count and added thousands of phantom entries to the unreferenced
 list.
+
+**The same workspace gives the same map, and a map is never the order to decide
+with.** A bare component name no path answers is looked up by file name
+(`Index.FindFilesByBasename`), and ContentBox keeps a `RailoDBInfo.cfc` in several
+patch directories, all equally near a patch that has none. The index lists them out of
+a map, filled by a parallel scan, and the resolver took the first, so an edge — and the
+island numbering after it — moved between runs of one build. The list is sorted now,
+and `componentPathUncached` breaks a tie by the lowest path, as `LookupPreferred` does;
+`expressionMappings` apply longest key first (`parser.ExpressionMappingOrder`) for the
+same reason. `TestTheSameWorkspaceGivesTheSameMap` builds one workspace ten times.
+Check a change here by building a project's map several times and comparing the files
+byte for byte (only `buildMillis` differs).
 
 ## Key structural notes
 
@@ -1315,6 +1350,11 @@ runtime expressions collapsing to the same static value don't need separate entr
 alternative is checked and replaced independently — plain substring alternation, unrelated to
 the regex-triggering `\` in `componentResolvers.match`. Implemented in
 `internal/resolve/resolve.go: ComponentPath` and `internal/parser/result.go: replaceExpressions`.
+
+Keys apply **longest first**, then by key (`parser.ExpressionMappingOrder`, which both
+implementations use). They were applied in map order, so two overlapping keys — `#core#`
+and `#core#legacy.` — replaced in either order from run to run, and one path named two
+different components.
 
 **Unmapped `#...#` expressions become `$any`, not literal garbage.** Any component-path string
 captured from CFML source — `CreateObject("component", "...")`, `<cfinvoke component="...">`,

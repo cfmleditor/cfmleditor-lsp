@@ -1020,6 +1020,10 @@ func (idx *Index) FindFilesByBasename(name string) []string {
 		}
 	}
 
+	// The loop ranges over a map, so without this the order changed from call
+	// to call — and a caller choosing among equals took whichever came first.
+	slices.Sort(paths)
+
 	return paths
 }
 

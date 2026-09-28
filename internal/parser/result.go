@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -40,6 +42,7 @@ type ParseResult struct {
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
 	expressionMappings  map[string]string                       // runtime expression → static value substitutions
+	expressionKeys      []string                                // expressionMappings' keys, in the order they apply
 	// ServicePropertyResolvers maps a "@serviceproperty" annotation kind (e.g. "package",
 	// "service", "controller") to a dot-path template containing "${name}". Lets a project
 	// document the real component type of a generically-typed (e.g. <cfargument type="struct">)
@@ -180,6 +183,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
 		FuncLookup:               opts.FuncLookup,
 		expressionMappings:       opts.ExpressionMappings,
+		expressionKeys:           ExpressionMappingOrder(opts.ExpressionMappings),
 		ServicePropertyResolvers: opts.ServicePropertyResolvers,
 		extractLinks:             opts.ExtractLinks,
 		extractCalls:             opts.ExtractCalls,
@@ -787,12 +791,33 @@ func (pr *ParseResult) applyExpressionMappings() {
 	}
 }
 
+// ExpressionMappingOrder returns the keys of an expressionMappings block in the
+// order they are applied: longest first, and by key among equals. Applying
+// them in map order let two overlapping keys — `#A#` and `#A#.b` — replace in
+// either order from run to run, so one component path named two different
+// components, and a code-map edge moved between them. The longer, more
+// specific expression goes first, as route aliases do.
+func ExpressionMappingOrder(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+
+	keys := slices.Collect(maps.Keys(m))
+	slices.SortFunc(keys, func(a, b string) int {
+		return cmp.Or(cmp.Compare(len(b), len(a)), strings.Compare(a, b))
+	})
+
+	return keys
+}
+
 func (pr *ParseResult) replaceExpressions(comp string) string {
 	if !strings.Contains(comp, "#") {
 		return comp
 	}
 
-	for key, value := range pr.expressionMappings {
+	for _, key := range pr.expressionKeys {
+		value := pr.expressionMappings[key]
+
 		for expr := range strings.SplitSeq(key, "|") {
 			if expr != "" && strings.Contains(comp, expr) {
 				comp = strings.ReplaceAll(comp, expr, value)

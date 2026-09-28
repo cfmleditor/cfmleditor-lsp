@@ -1,6 +1,8 @@
 package index
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -287,5 +289,22 @@ func TestSetFuncRefs_ReplacesRatherThanAccumulates(t *testing.T) {
 
 	if n := len(idx.LookupComponentRef("dao")); n != 1 {
 		t.Errorf("replacing one scope disturbed another: dao has %d refs, want 1", n)
+	}
+}
+
+// The files come out of a map, so without a sort their order changed from call
+// to call, and a caller choosing among equals took whichever came first. Ten
+// matches make an accidental pass one in 3.6 million.
+func TestFindFilesByBasenameIsSorted(t *testing.T) {
+	idx := New()
+
+	for i := 9; i >= 0; i-- {
+		u := uri.URI(fmt.Sprintf("file:///proj/patches/d%d/Widget.cfc", i))
+		idx.IndexFileFromResult(u, []parser.FunctionDef{{Name: "run", URI: u, Line: 1}}, nil)
+	}
+
+	paths := idx.FindFilesByBasename("widget")
+	if len(paths) != 10 || !slices.IsSorted(paths) {
+		t.Errorf("want 10 sorted paths, got %v", paths)
 	}
 }

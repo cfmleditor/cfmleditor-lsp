@@ -202,7 +202,13 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 		p.sc.NextSkipComments() // consume method name
 
 		if p.sc.PeekSkipComments().Kind == TokLParen {
-			if !first {
+			// The bare call is the first hop's receiver. When a resolver
+			// named its component the hop carries that instead; otherwise
+			// the call goes at the front of the chain, so resolution walks
+			// its declared return type. Leaving it out made `f().g()` record
+			// a `g` indistinguishable from a bare call to a function named
+			// g, as recordChainContinuationFrom already avoids.
+			if comp == "" || !first {
 				chainHops = append(chainHops, funcName)
 			}
 
@@ -236,6 +242,31 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 	}
 }
 
+// scopeReceiver says how a call made directly on a scope is recorded, for the
+// scopes a function body dispatches as call receivers. `this.` and
+// `variables.` name a member of the component being parsed, so the call is
+// recorded unqualified and resolves against the file's own functions. Every
+// other scope holds a value put there at runtime, so the receiver is kept and
+// the component is `$any`. ok is false for a word that is not one of them.
+//
+// Every path that records such a call goes through here — a statement, a
+// `return` and an assignment's right-hand side. The last two used to record
+// the scope itself as the receiver, so `x = variables.f()` reported
+// "variable 'variables' has no component ref" where the statement
+// `variables.f()` resolved.
+func scopeReceiver(word string) (variable, component string, ok bool) {
+	var buf foldScratch
+
+	switch string(buf.lowerFold(word)) {
+	case "this", "variables":
+		return "", "", true
+	case "local", "arguments", "request", "session", "application", "server":
+		return word, "$any", true
+	default:
+		return "", "", false
+	}
+}
+
 // recordCallFromChain records a call site when a dot chain ending in ( is detected.
 // fullChain is e.g. "VARIABLES.service.GetData" or just "GetData", line is the source line.
 func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
@@ -256,12 +287,18 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		return
 	}
 
-	p.addCall(&CallSite{
+	call := CallSite{
 		FuncName: method,
 		Variable: recv,
 		Line:     conv.Uint32(p.baseLine + line),
 		Caller:   caller,
-	})
+	}
+
+	if v, comp, ok := scopeReceiver(recv); ok {
+		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
+	}
+
+	p.addCall(&call)
 }
 
 // continueChainCalls consumes the rest of a chained call expression whose
@@ -335,6 +372,17 @@ func (p *scriptParser) skipParensResolving(callExpr string) (comp string, ok boo
 // an assignment keeps on its ref (ComponentRef.ChainRest) so the variable is
 // typed by the last call rather than by funcName.
 func (p *scriptParser) recordChainContinuation(baseVar, funcName, baseComp string, line int) (consumed []string) {
+	// A chain on a call made directly on a scope carries the receiver
+	// scopeReceiver gives that call: none for this component's own scopes,
+	// and a dynamic one, all the way down, for the rest.
+	if v, comp, ok := scopeReceiver(baseVar); ok {
+		baseVar = v
+
+		if comp != "" {
+			baseComp = comp
+		}
+	}
+
 	return p.recordChainContinuationFrom(baseVar, nil, funcName, baseComp, line)
 }
 
@@ -581,10 +629,8 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	// the enum once recorded request., session. and application. calls as calls
 	// to functions of that name in this file, when they were dispatched as
 	// ScopeVariables.
-	if !identEq(scopeTok.Value, "this") && !identEq(scopeTok.Value, "variables") {
-		call.Variable = scopeTok.Value
-		call.Component = "$any"
-		call.Resolved = true
+	if v, comp, ok := scopeReceiver(scopeTok.Value); ok {
+		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
 	}
 
 	p.addCall(&call)
@@ -1358,13 +1404,21 @@ func (p *scriptParser) recordStaticCall(component string, startTok Token) {
 		caller = p.funcs[len(p.funcs)-1].Name
 	}
 
-	p.addCall(&CallSite{
+	call := CallSite{
 		FuncName:  methTok.Value,
 		Component: component,
 		Line:      conv.Uint32(p.baseLine + startTok.Line),
 		Caller:    caller,
 		Resolved:  true,
-	})
+	}
+
+	// `super::method()` is the parent's method, the call `super.method()` is,
+	// not a static call on a component named super.
+	if identEq(component, "super") {
+		call.Variable, call.Component, call.Resolved = component, "", false
+	}
+
+	p.addCall(&call)
 
 	p.skipParens()
 }
@@ -2000,46 +2054,7 @@ func (p *scriptParser) checkReturnComponent() {
 
 		p.scanChainedCalls(comp, peek.Line)
 	default:
-		// Check for return obj.method(...) or return func(...).
-		if !isKeyword(peek.Value) {
-			p.sc.NextSkipComments() // consume first ident
-
-			nextKind := p.sc.PeekSkipComments().Kind
-			if nextKind == TokDot {
-				var fullChain chainBuilder
-				fullChain.reset(peek.Value)
-
-				for p.sc.PeekSkipComments().Kind == TokDot {
-					p.sc.NextSkipComments() // consume .
-
-					seg := p.sc.PeekSkipComments()
-					if seg.Kind == TokIdent {
-						p.sc.NextSkipComments()
-
-						fullChain.writeDot()
-						fullChain.writeString(seg.Value)
-					} else {
-						break
-					}
-				}
-
-				if p.sc.PeekSkipComments().Kind == TokLParen {
-					p.recordCallFromChain(fullChain.String(), peek.Line)
-				}
-			} else if nextKind == TokLParen {
-				// Bare function call: return funcName(...)
-				caller := ""
-				if len(p.funcs) > 0 {
-					caller = p.funcs[len(p.funcs)-1].Name
-				}
-
-				p.addCall(&CallSite{
-					FuncName: peek.Value,
-					Line:     conv.Uint32(p.baseLine + peek.Line),
-					Caller:   caller,
-				})
-			}
-		}
+		p.returnCall(peek)
 
 		// return varName — track for resolution after body parse
 		p.returnVar = peek.Value
@@ -2049,6 +2064,48 @@ func (p *scriptParser) checkReturnComponent() {
 
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// returnCall records the call a `return` statement makes, through the same
+// walkers a statement uses: `return svc.a().b()` and `return f().g()` carry
+// the receiver to every hop, and `return variables.f()` is recorded as the
+// statement `variables.f()` is. It had a chain walk of its own that recorded
+// the first call and left the rest to the outer loop, which met `.b()` with
+// nothing before it and recorded a bare call to `b`.
+//
+// Only walkers that record calls are reached, never the statement dispatch
+// itself: a return holds an expression, and `return x == 1` read as a
+// statement is the assignment `x = …`. tok is the peeked first token after
+// `return`; a keyword other than a scope is left for the caller's loop.
+func (p *scriptParser) returnCall(tok Token) {
+	_, _, isScope := scopeReceiver(tok.Value)
+	if !isScope && isKeyword(tok.Value) {
+		return
+	}
+
+	p.sc.NextSkipComments()
+
+	next := p.sc.PeekSkipComments()
+
+	switch {
+	case isScope && next.Kind == TokDot:
+		p.sc.NextSkipComments()
+
+		nameTok := p.sc.PeekSkipComments()
+		if nameTok.Kind != TokIdent {
+			return
+		}
+
+		p.sc.NextSkipComments()
+		p.scopedCall(tok, nameTok)
+	case next.Kind == TokLParen:
+		p.recordBareCallAndChain(tok)
+	case next.Kind == TokDot || next.Kind == TokLBracket:
+		p.checkBareCall(tok)
+	case next.Kind == TokDoubleColon:
+		p.parseStaticCall(tok)
+	default:
 	}
 }
 
@@ -2292,18 +2349,8 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		return
 	}
 
-	eq := p.sc.PeekSkipComments()
-	if eq.Kind != TokEquals {
-		if eq.Kind == TokLParen {
-			p.recordScopedMemberCall(scopeTok, nameTok)
-
-			return
-		}
-
-		// Not an assignment — check for method call chain: scope.name.method(...)
-		if eq.Kind == TokDot {
-			p.scopedChainCall(scopeTok, nameTok)
-		}
+	if p.sc.PeekSkipComments().Kind != TokEquals {
+		p.scopedCall(scopeTok, nameTok)
 
 		return
 	}
@@ -2610,6 +2657,19 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 
 // scopedChainCall records `scope.name.a.b(…)`, a call on a scoped variable
 // that is a statement rather than an assignment.
+// scopedCall records the call a `scope.name` begins when it is not an
+// assignment: `scope.name(…)` directly on the scope, or a chain on a value it
+// holds, `scope.name.method(…)`. The scanner must sit just past the name.
+func (p *scriptParser) scopedCall(scopeTok, nameTok Token) {
+	switch p.sc.PeekSkipComments().Kind {
+	case TokLParen:
+		p.recordScopedMemberCall(scopeTok, nameTok)
+	case TokDot:
+		p.scopedChainCall(scopeTok, nameTok)
+	default:
+	}
+}
+
 func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
 	var fullChain chainBuilder
 	fullChain.reset(scopeTok.Value)
@@ -2792,12 +2852,21 @@ chainWalk:
 		return
 	}
 
-	p.addCall(&CallSite{
+	call := CallSite{
 		FuncName: funcName,
 		Variable: varName,
 		Line:     conv.Uint32(p.baseLine + tok.Line),
 		Caller:   caller,
-	})
+	}
+
+	// A call made directly on a scope, reached here from an argument list —
+	// `f( server.getTestService() )` — is the call the statement
+	// `server.getTestService()` is.
+	if v, sc, ok := scopeReceiver(varName); ok {
+		call.Variable, call.Component, call.Resolved = v, sc, sc != ""
+	}
+
+	p.addCall(&call)
 
 	// Continue walking further .method() hops chained off this call's return
 	// value. Each hop's CallSite keeps Variable pointing at the original
@@ -3559,8 +3628,9 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 	}
 
 	// Any other keyword is handled by what follows it rather than by being
-	// read as a receiver.
-	if isKeyword(tok.Value) {
+	// read as a receiver — bar a scope, which is one: `f( local.g() )` left
+	// `.g()` to the next loop, which recorded a bare call to g.
+	if _, _, scope := scopeReceiver(tok.Value); !scope && isKeyword(tok.Value) {
 		return
 	}
 
