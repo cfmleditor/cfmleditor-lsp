@@ -83,6 +83,7 @@ func cmdExplain(args []string) {
 	var (
 		cfResolvers              []parser.Resolver
 		mappings                 map[string]string
+		startupFiles             []string
 		expressionMappings       map[string]string
 		servicePropertyResolvers map[string]string
 		interpolateAll           bool
@@ -95,6 +96,7 @@ func cmdExplain(args []string) {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
+		startupFiles = cfg.StartupFiles()
 		expressionMappings = cfg.ExpressionMappings()
 		servicePropertyResolvers = cfg.ServicePropertyResolvers()
 		interpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
@@ -115,6 +117,7 @@ func cmdExplain(args []string) {
 		Index:              index.New(),
 		Resolvers:          cfResolvers,
 		Mappings:           mappings,
+		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,

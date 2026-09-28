@@ -122,6 +122,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 	var (
 		workspaceFolders   []string
 		mappings           map[string]string
+		startupFiles       []string
 		expressionMappings map[string]string
 		cfResolvers        []parser.Resolver
 	)
@@ -140,6 +141,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
+		startupFiles = cfg.StartupFiles()
 		expressionMappings = cfg.ExpressionMappings()
 
 		for _, r := range cfg.ComponentResolvers() {
@@ -182,6 +184,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		Index:              idx,
 		Resolvers:          cfResolvers,
 		Mappings:           mappings,
+		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,

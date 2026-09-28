@@ -173,12 +173,14 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 	var (
 		cfg              explainConfig
 		mappings         map[string]string
+		startupFiles     []string
 		workspaceFolders []string
 	)
 
 	if c, _ := daemon.FindConfig(abs); c != nil {
 		workspaceFolders = c.WorkspaceFolders()
 		mappings = c.Mappings()
+		startupFiles = c.StartupFiles()
 		cfg.expressionMappings = c.ExpressionMappings()
 		cfg.implicitExtends = config.ImplicitExtends(c.Frameworks())
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
@@ -202,6 +204,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		Index:              index.New(),
 		Resolvers:          cfg.resolvers,
 		Mappings:           mappings,
+		StartupFiles:       startupFiles,
 		ExpressionMappings: cfg.expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    cfg.implicitExtends,

@@ -58,6 +58,7 @@ type Server struct {
 	WorkspaceFolders         []string             // project folders from config
 	IndexGlobs               []string             // optional glob filters (absolute paths)
 	Mappings                 map[string]string    // component path mappings (key -> abs path)
+	StartupFiles             []string             // configured startup templates (abs paths)
 	ExpressionMappings       map[string]string    // runtime expression → static value substitutions
 	ServicePropertyResolvers map[string]string    // "@serviceproperty" annotation kind → dot-path template
 	Routes                   route.Config         // framework routing convention (see internal/route)
@@ -444,6 +445,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			FS:                 s.FS,
 			WorkspaceFolders:   s.searchRoots(),
 			Mappings:           s.Mappings,
+			StartupFiles:       s.StartupFiles,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
 			Resolvers:          s.buildResolvers(),

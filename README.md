@@ -462,6 +462,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `workspacePaths` | No | Relative paths to folders the LSP should treat as workspace roots. Resolved relative to the config file location. |
 | `workspaceIndexGlobs` | No | Glob patterns to filter which `.cfc` files are indexed. |
 | `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). A workspace folder already implies a mapping of its own name; see [Mappings](#mappings). |
+| `startupFiles` | No | Templates that set up shared-scope variables for the whole workspace. See [Startup files](#startup-files). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
 | `frameworks` | No | Framework presets the project uses, e.g. `["coldbox"]`. Each adds the resolvers and implicit base components that framework implies. See [Frameworks](#frameworks). |
 | `formatting` | No | Formatter configuration object. See below. |
@@ -513,6 +514,21 @@ One case is not covered: in tag syntax, `<cfset x = event.getValue( "a" )>`
 types `x` as the request context. The tag parser's bare-name fallback types an
 assignment from a call on a resolved variable as that variable's component,
 which some projects rely on for their own resolvers.
+
+### Startup files
+
+A `REQUEST`, `SESSION`, `APPLICATION` or `SERVER` variable is usually set up in one place and read everywhere else, so the file calling `REQUEST.context.getUser()` has no assignment to learn its component from. The server looks for one in the templates that set the request up:
+
+- **Automatically**, in the templates the governing `Application.cfc` (or `.cfm`) includes, and in what they include in turn. This needs no configuration.
+- **In `startupFiles`**, for code under no `Application.cfc`, or for a template no `Application.cfc` includes. An entry here applies to every file in the workspace:
+
+  ```json
+  "startupFiles": ["/tassweb/packages/tass/core/bootstrap.cfm"]
+  ```
+
+  An entry is a file path, relative to the config or absolute, or a template path starting with `/`, resolved as a `cfinclude` of it would be: through `mappings`, the workspace folders and a folder named by its first segment.
+
+Only one-line assignments of the form `SCOPE.name = value` are read, in tag or script syntax. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
 
 ### Component resolvers
 

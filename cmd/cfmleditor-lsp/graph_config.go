@@ -110,6 +110,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Index:              cs.shared,
 		Resolvers:          resolvers,
 		Mappings:           found.Mappings(),
+		StartupFiles:       found.StartupFiles(),
 		ExpressionMappings: found.ExpressionMappings(),
 		WorkspaceFolders:   found.WorkspaceFolders(),
 		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),

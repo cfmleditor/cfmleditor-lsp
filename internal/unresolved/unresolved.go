@@ -44,6 +44,7 @@ type Call struct {
 type Options struct {
 	Resolvers                []parser.Resolver
 	Mappings                 map[string]string
+	StartupFiles             []string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
 	PropertyResolvers        []parser.PropertyResolver
@@ -73,6 +74,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		Index:              index.New(),
 		Resolvers:          opt.Resolvers,
 		Mappings:           opt.Mappings,
+		StartupFiles:       opt.StartupFiles,
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
 		ImplicitExtends:    opt.ImplicitExtends,

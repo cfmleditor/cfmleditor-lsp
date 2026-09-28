@@ -27,6 +27,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		WorkspaceFolders:         []string{"/w"},
 		IndexGlobs:               []string{"**/*.cfc"},
 		Mappings:                 map[string]string{"models": "/w/models"},
+		StartupFiles:             []string{"/w/bootstrap.cfm"},
 		ExpressionMappings:       map[string]string{"#CORE#": "packages.core."},
 		ServicePropertyResolvers: map[string]string{"package": "packages.${name}"},
 		ComponentResolvers:       []config.Resolver{{Match: "getService(\"$1\")", Resolve: "services.$1", Prefix: "getService"}},
@@ -74,6 +75,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 func TestSettingsApplyIsIdenticalAcrossSessions(t *testing.T) {
 	set := Settings{
 		Mappings:                 map[string]string{"models": "/w/models"},
+		StartupFiles:             []string{"/w/bootstrap.cfm"},
 		ExpressionMappings:       map[string]string{"#CORE#": "packages.core."},
 		ServicePropertyResolvers: map[string]string{"package": "packages.${name}"},
 		BeanPaths:                map[string]string{"svc": "/w/services"},
