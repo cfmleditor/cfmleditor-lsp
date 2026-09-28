@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -49,7 +48,7 @@ func (pr *ParseResult) ApplyEditResult(startLine, startChar, endLine, _ int, new
 func (pr *ParseResult) applyEdit(startLine, startChar, endLine int, newText string, edited func() string) (kind EditKind) {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in ApplyEdit", "uri", string(pr.URI), "error", fmt.Sprint(r), log.PanicStack())
+			log.Recovered(pr.log, "parse panic in ApplyEdit", r, "uri", string(pr.URI))
 			pr.reparseShallow()
 
 			kind = EditGlobal

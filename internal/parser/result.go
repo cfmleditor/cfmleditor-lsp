@@ -2,7 +2,6 @@ package parser
 
 import (
 	"cmp"
-	"fmt"
 	"maps"
 	"regexp"
 	"slices"
@@ -208,7 +207,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 func (pr *ParseResult) extractSignatures() {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in extractSignatures", "uri", string(pr.URI), "error", fmt.Sprint(r), log.PanicStack())
+			log.Recovered(pr.log, "parse panic in extractSignatures", r, "uri", string(pr.URI))
 		}
 	}()
 
@@ -1312,7 +1311,7 @@ func (pr *ParseResult) InvalidateFunc(funcStart, funcEnd int) {
 func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 	defer func() {
 		if r := recover(); r != nil {
-			pr.logWarn("parse panic in parseFuncBody", "uri", string(pr.URI), "funcStart", funcStart, "error", fmt.Sprint(r), log.PanicStack())
+			log.Recovered(pr.log, "parse panic in parseFuncBody", r, "uri", string(pr.URI), "funcStart", funcStart)
 		}
 	}()
 
@@ -2406,12 +2405,6 @@ func lineOffsets(content string, startLine, endLine int) (start, end int) {
 func (pr *ParseResult) logDebug(msg string, keysAndValues ...any) {
 	if pr.log != nil {
 		pr.log.Debug(msg, keysAndValues...)
-	}
-}
-
-func (pr *ParseResult) logWarn(msg string, keysAndValues ...any) {
-	if pr.log != nil {
-		pr.log.Warn(msg, keysAndValues...)
 	}
 }
 
