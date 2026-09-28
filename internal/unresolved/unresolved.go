@@ -395,6 +395,10 @@ func IsBuiltin(name string) bool {
 		return true
 	}
 
+	if docs.IsTagFunction(name) {
+		return true
+	}
+
 	if parser.IsMemberMethod(name) {
 		return true
 	}
