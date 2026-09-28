@@ -1303,6 +1303,15 @@ target name isn't derived from it at all (e.g. an `itextObj.Foo` family mapping 
 Java class names), each name still needs its own entry. Since path resolution is itself fully
 case-insensitive, `${N:lower}`/`${N:upper}` are for config explicitness, not correctness.
 
+**Defaults a configuration still overrides.** When no mapping, directory or workspace folder
+resolves a dot-path, `slugRoot` looks above the calling file for a `box.json` whose `slug` is
+the path's first segment (coldbox-platform spells its own `system/` as `coldbox.system`). When no
+resolver types a call, `dynamicCall` makes a MockBox mock and an unstubbed Java object `$any`,
+from both `resolveCall`s, `tryResolveCall` and `resolvePendingCalls` — the chained
+`getMockBox().createEmptyMock()` reaches only the last. A component the parse names by file
+path (a function returning `this`) is reported by `displayComponent` under its file name,
+since reasons land in committed known-issues files.
+
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a
 resolved dot-path into an actual `.cfc` file is also fully case-insensitive at every path
@@ -1466,6 +1475,7 @@ fallback resolver, and the altComp fallback resolver.
 | Error form | Meaning | Fix |
 |---|---|---|
 | `extends chain breaks at 'X', which does not resolve` / `X (base component does not resolve; N inherited calls not checked)` | A component in the file's extends chain names no file, so an inherited call — bare, `this.`, `super.`, or on a receiver the file never declares (`print`, `$assert`) — was never checked. `unresolved` reports it once per file, on the `extends` line, and totals the bases after the list | Add the `mappings` entry or `workspacePaths` directory that makes `X` resolve. `resolve.MissingBase` finds the link; `inheritedFromMissingBase` decides a receiver is the base's when neither the file nor the enclosing function's `FuncVars` declares it — closure locals and parameters included. A call on a component whose *own* chain breaks gets the same reason (`componentMissingBase`), and `unresolved` groups those per file and base, on the first call |
+| `chained on 'f', which is not found` / `method 'f' has no component return type (chain to 'g')` | `f().g()`: the call is on what `f` returns (`resolveBareChain`), and `f` is not found as a bare call, or declares no component return type | Declare `f`'s return type; a `return this;` body is typed by itself (`returnsThis`) |
 | `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name. An injected property is typed by its id without one (`injectedComponent`: `inject="X@module"`, `id:X`, `model:X` → `X`, found by path then file name); add a `beanPaths` entry when the id is not the file's name |
 | `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or `"noFollow": true` on the resolver |
 | `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |

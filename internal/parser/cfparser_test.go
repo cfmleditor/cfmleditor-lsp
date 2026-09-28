@@ -497,12 +497,16 @@ func TestParseComponentRefs_NewJavaPrefixResolvesLikeCreateObject(t *testing.T) 
 }
 
 func TestParseComponentRefs_NewJavaPrefixWithoutStubs(t *testing.T) {
-	// With no resolver to map it, the honest answer is no ref at all rather
-	// than one named "java" — and the statement after it must still parse,
-	// i.e. the constructor arguments were consumed either way.
+	// With no stub to check it against, a Java object is dynamic — $any,
+	// never a component named "java" — and the statement after it must still
+	// parse, i.e. the constructor arguments were consumed either way.
 	refs := ParseComponentRefs(testURI,
 		"component {\n\tf = new java:java.io.File( p );\n\tsvc = new models.User();\n}")
-	assertFirstRef(t, refs, "svc", "models.User")
+	assertFirstRef(t, refs, "f", "$any")
+
+	if len(refs) < 2 || refs[1].Variable != "svc" || refs[1].Component != "models.User" {
+		t.Errorf("the statement after it: got %+v, want svc models.User second", refs)
+	}
 
 	for _, r := range refs {
 		if r.Component == "java" {

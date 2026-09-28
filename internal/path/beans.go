@@ -1,6 +1,7 @@
 package path
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,9 +107,7 @@ func BeanPathsFor(configured map[string]string, appDirs []string) map[string]str
 		}
 	}
 
-	for ns, dir := range configured {
-		all[ns] = dir
-	}
+	maps.Copy(all, configured)
 
 	return all
 }

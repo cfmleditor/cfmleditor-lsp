@@ -424,11 +424,11 @@ func scanFile(opts *Options, root, file, fingerprint string) *FileGraph {
 	// method name just as often, so marking only the file would leave everything
 	// inside it looking unreachable.
 	res.addFunctions(pr, rel, isApplication, MatchesEntryGlob(opts.EntryGlobs, rel), utility)
-	res.addExtends(cfg, pr, rel, baseDir, root)
-	res.addRefs(cfg, pr, rel, baseDir, root)
-	res.addIncludes(opts, cfg, pr, rel, baseDir, root)
-	res.addCalls(opts, cfg, pr, rel, baseDir, root)
-	res.addRoutes(cfg, rel, root, content)
+	res.addExtends(&cfg, pr, rel, baseDir, root)
+	res.addRefs(&cfg, pr, rel, baseDir, root)
+	res.addIncludes(opts, &cfg, pr, rel, baseDir, root)
+	res.addCalls(opts, &cfg, pr, rel, baseDir, root)
+	res.addRoutes(&cfg, rel, root, content)
 
 	if opts.Cache != nil {
 		// A cache write that fails is a slow next build, not a wrong one, so it is
@@ -476,7 +476,7 @@ func (res *FileGraph) addFunctions(pr *parser.ParseResult, rel string, isApplica
 	}
 }
 
-func (res *FileGraph) addExtends(cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+func (res *FileGraph) addExtends(cfg *FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
 	if pr.Extends == "" {
 		return
 	}
@@ -489,7 +489,7 @@ func (res *FileGraph) addExtends(cfg FileConfig, pr *parser.ParseResult, rel, ba
 	res.Edges = append(res.Edges, Edge{From: FileID(rel), To: to, Kind: EdgeExtends, Count: 1})
 }
 
-func (res *FileGraph) addRefs(cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+func (res *FileGraph) addRefs(cfg *FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
 	for i := range pr.ComponentRefs {
 		ref := &pr.ComponentRefs[i]
 		if ref.Component == "" || ref.Component == "$any" {
@@ -523,7 +523,7 @@ func (res *FileGraph) addRefs(cfg FileConfig, pr *parser.ParseResult, rel, baseD
 // statically, so picking one would be a guess presented as a fact; all of them
 // marked Dynamic is the honest shape. On one workspace 497 of 523 resolvable
 // routes had exactly one target anyway.
-func (res *FileGraph) addRoutes(cfg FileConfig, rel, root, content string) {
+func (res *FileGraph) addRoutes(cfg *FileConfig, rel, root, content string) {
 	if cfg.Routes == nil || !cfg.Routes.Config.Enabled() {
 		return
 	}
@@ -584,7 +584,7 @@ func routeNodeName(t *route.Target, rel string) string {
 // addIncludes emits an edge only for a link that resolves to a real CFML file.
 // Links carry hrefs and src attributes too, and turning every one of those into a
 // node would bury the code map under the site's static assets and outbound URLs.
-func (res *FileGraph) addIncludes(opts *Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+func (res *FileGraph) addIncludes(opts *Options, cfg *FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
 	for i := range pr.Links {
 		link := &pr.Links[i]
 
@@ -604,7 +604,7 @@ func (res *FileGraph) addIncludes(opts *Options, cfg FileConfig, pr *parser.Pars
 	}
 }
 
-func (res *FileGraph) addCalls(opts *Options, cfg FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
+func (res *FileGraph) addCalls(opts *Options, cfg *FileConfig, pr *parser.ParseResult, rel, baseDir, root string) {
 	calls := pr.AllCalls()
 
 	for i := range calls {
@@ -691,7 +691,7 @@ func (res *FileGraph) callerID(pr *parser.ParseResult, rel string, line uint32) 
 
 // targetFile turns a component dot-path into a file node id, recording a
 // provisional node for it. It reports false when the path names no file on disk.
-func (res *FileGraph) targetFile(cfg FileConfig, component, baseDir, root string) (string, bool) {
+func (res *FileGraph) targetFile(cfg *FileConfig, component, baseDir, root string) (string, bool) {
 	if component == "" || component == "$any" || strings.HasPrefix(component, "$builtin.") {
 		return "", false
 	}
@@ -732,7 +732,7 @@ func externalLabel(component string, call *parser.CallSite) string {
 
 // resolveInclude turns a cfinclude-style path into an absolute file, or "" when it
 // does not name a CFML file that exists.
-func resolveInclude(opts *Options, cfg FileConfig, raw, baseDir string) string {
+func resolveInclude(opts *Options, cfg *FileConfig, raw, baseDir string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "#") || strings.Contains(raw, "://") {
 		return ""

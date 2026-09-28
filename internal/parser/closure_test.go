@@ -107,3 +107,77 @@ func TestAnInlineComponentIsDynamic(t *testing.T) {
 		t.Errorf("comp: got %+v, want $any", ref)
 	}
 }
+
+// TestMocksAndUnstubbedJavaAreDynamic: a MockBox mock's methods are added at
+// runtime, and a Java object has nothing to be checked against without a
+// stub, so both are $any rather than untyped — every call on one was "no
+// component ref". A configured resolver still answers first, so a
+// javaStubsPath keeps typing Java objects.
+func TestMocksAndUnstubbedJavaAreDynamic(t *testing.T) {
+	src := `component {
+	function f() {
+		var a = createMock( "models.User" );
+		var b = prepareMock( entityNew( "User" ) );
+		var c = getMockBox().createEmptyMock( "models.User" );
+		var d = createObject( "java", "java.io.File" ).init( p );
+		var e = createObject( 'java', 'java.lang.System' );
+		var g = createObject( "component", "models.User" );
+		var h = mockUser();
+	}
+}`
+	pr := ParseWithOptions(testURI, src, &ParseOptions{})
+	refs := pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End)
+
+	for name, want := range map[string]string{
+		"a": "$any", "b": "$any", "c": "$any", "d": "$any", "e": "$any",
+		"g": "models.User", "h": "",
+	} {
+		got := ""
+		if ref := refNamed(refs, name); ref != nil {
+			got = ref.Component
+		}
+
+		if got != want {
+			t.Errorf("%s: got %q, want %q", name, got, want)
+		}
+	}
+
+	stubs := []Resolver{{Match: `^createObject\("java",\s*"(.+)"\)`, Resolve: "stubs.$1", Prefix: "createObject"}}
+	pr = ParseWithOptions(testURI, src, &ParseOptions{Resolvers: stubs})
+
+	if ref := refNamed(pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End), "d"); ref == nil || ref.Component == "$any" {
+		t.Errorf("with a stub resolver d is %+v, want the stub's type", ref)
+	}
+}
+
+// TestASiblingClosuresLocalDoesNotStandForThisOne: each test in a spec
+// declares its own `t`, and a `t` typed after the parse — from a call's
+// return type — was skipped when any closure in the function already had a
+// ref called t, so every test after the first stayed untyped.
+func TestASiblingClosuresLocalDoesNotStandForThisOne(t *testing.T) {
+	src := `component {
+	models.Widget function make() { return new models.Widget(); }
+	function run() {
+		it( "a", function() {
+			var t = createMock( "models.Other" );
+		} );
+		it( "b", function() {
+			var t = make();
+			t.go();
+		} );
+	}
+}`
+	pr := ParseWithOptions(testURI, src, &ParseOptions{})
+
+	var run FuncScope
+
+	for _, sc := range pr.Scopes {
+		if sc.Name == "run" {
+			run = sc
+		}
+	}
+
+	if ref := refNamed(pr.FuncComponentRefsAt(run.Start, run.End, 8), "t"); ref == nil || ref.Component != "models.Widget" {
+		t.Errorf("t in the second test: got %+v, want models.Widget", ref)
+	}
+}

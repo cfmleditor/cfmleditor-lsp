@@ -810,7 +810,7 @@ The command line also totals them after the list, most calls first, since each
 is usually one `mappings` entry or `workspacePaths` directory away from checking
 every call it accounts for. Over six open-source projects scanned with no
 configuration, 59,600 of 89,000 entries were calls into 67 such bases, and a
-dozen of them held 57,000. With these and the rules below the report is 27,200 entries.
+dozen of them held 57,000. With these and the defaults below the report is 22,300 entries.
 
 **An injected property is typed by its id.** With no `beanPaths` entry or
 `propertyResolvers` rule to say otherwise, `property name="html"
@@ -825,6 +825,22 @@ file and is left alone. A file of the same name in the wrong place is still
 found: with ColdBox not checked out, `HTMLHelper@coldbox` finds ContentBox's own
 module config called `HTMLHelper.cfc`, and a `mappings` entry for `coldbox` is
 the fix.
+
+**Some values are typed without configuration.** Each rule below is a default
+that a `mappings` entry, `componentResolvers` rule or `javaStubsPath` still
+overrides:
+
+| Source | Treated as |
+|---|---|
+| `coldbox.system.EventHandler` in a checkout of the package whose `box.json` slug is `coldbox` | The package's own `system/EventHandler.cfc`: a package spells its components under the name it is installed as |
+| A method whose return is `return this;` (or `<cfreturn this>`) | Its own component, so a fluent chain is checked hop by hop |
+| `expect( x ).toBe( 1 )`, a call chained on an unqualified one | A call on what `expect` returns, found in the file, its extends chain or its includes |
+| `cfheader( … )`, `cfhttp( … )` — any documented tag called as a function | A builtin |
+| `createMock( … )`, `createEmptyMock`, `prepareMock`, `createStub` (MockBox) | Dynamic: a mock's methods are added at runtime |
+| `createObject( "java", … )` and `new java:…` with no stub for the class | Dynamic: there is nothing to check a Java object against |
+
+`beanPaths` and `propertyResolvers` apply to the report and the code map as
+they do in the editor.
 
 To print a report instead of writing it, `cfmleditor-lsp unresolved
 --known-issues <dir>` writes the same format to stdout, relative to the config's

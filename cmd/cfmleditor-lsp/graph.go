@@ -248,7 +248,7 @@ func buildGraph(f *graphFlags) (*codemap.Map, error) {
 		return nil, fmt.Errorf("no CFML files found under %s", strings.Join(scanRoots, ", "))
 	}
 
-	configs := newConfigSet(fsys, shared, fallback)
+	configs := newConfigSet(fsys, shared, &fallback)
 	if !f.oneConfig {
 		configs.preload(scanRoots)
 

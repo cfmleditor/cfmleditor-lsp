@@ -869,6 +869,19 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			comp = pr.baseVarComponent(c)
 		}
 
+		// A mock made through the MockBox a spec holds,
+		// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
+		if comp == "" {
+			last := c.funcName
+			if len(c.rest) > 0 {
+				last = c.rest[len(c.rest)-1]
+			}
+
+			if comp = dynamicCall(last + "()"); comp != "" {
+				c.rest = nil // the chain ends in the mock; nothing to walk
+			}
+		}
+
 		if comp == "" {
 			continue
 		}
@@ -951,9 +964,19 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 
 // hasRefFor reports whether the variable a pending call assigns already has a
 // ref, in its function or at file level.
+//
+// Only a ref in the pending call's own scope counts: a sibling closure's `t`
+// is another variable, and letting it stand for this one left this `t`
+// untyped whenever an earlier test in the spec declared a `t` of its own.
 func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
-	if c.funcKey != "" && firstRefNamed(pr.funcRefsMap[c.funcKey], c.varName) != nil {
-		return true
+	if c.funcKey != "" {
+		refs := pr.funcRefsMap[c.funcKey]
+		for i := range refs {
+			if ref := &refs[i]; strings.EqualFold(ref.Variable, c.varName) &&
+				ref.VisibleFrom == c.visibleFrom && ref.VisibleTo == c.visibleTo {
+				return true
+			}
+		}
 	}
 
 	return firstRefNamed(pr.ComponentRefs, c.varName) != nil
