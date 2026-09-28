@@ -690,45 +690,31 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   things with `=` — an assignment, a named argument (`f( name = 1 )`), a tag attribute
   (`<cffunction name="x">`) — so a cheap "is the next token `=`" rule would mark the attribute
   *name* in every tag as a write. A wrong Write badge is worse than none.
-- `textDocument/foldingRange` (`internal/server/folding.go`) folds on the CST rather than on
-  indentation, which gets tags wrong constantly. A script-syntax `.cfc` is the case that makes
-  this more than a tree walk: the CFML grammar hands its whole body to the CFScript grammar as
-  one opaque `cf_component_content`, so walking only the outer tree yields exactly one fold for
-  the file. Each injected region is parsed with its own grammar and walked too, its rows offset
-  by where the region starts.
+- `textDocument/foldingRange` (`internal/server/folding.go`) folds every function and every
+  comment spanning more than one line, and nothing else yet. Functions come from the document's
+  cached ParseResult (`pr.Scopes`), so the handler takes `lockDoc`, which pays any reparse
+  didChange deferred — `TestFoldingFollowsEdits` fails if it takes `lockDocOnly`. Comments come
+  from `parser.CommentSpans`, which splits the text with `ClassifyRegions` and reads a script
+  region with the parse's own scanner in CFScript mode: a `#...#` inside a string can hold
+  strings of its own, and a plain quote-to-quote scan pairs them wrongly and then reads every
+  later comment as code. A function folds to the line before its closing one, so the `}` or
+  `</cffunction>` stays on screen; a comment folds to its last line.
 
-  **The walk descends through named children only**, and every accessor on a
-  tree-sitter node is a cgo call — the walk measured 71% `runtime.cgocall`. An
-  anonymous node is a grammar literal and tokens are leaves, so nothing
-  foldable hides under one (`TestAnonymousNodesAreLeaves`; also checked by
-  running both walks over the corpus — 92,001 folds, none different). For the
-  same reason `Range()` is read once per node instead of
-  `StartPosition`/`EndPosition`/`EndByte`, the single-line rejection runs
-  before anything else, and a `depth` counter replaces a `Parent()` call. The
-  rejection also **ends the descent**: nothing under a one-line node can fold,
-  and most of a file's nodes are under one, which halved the walk's cgo calls
-  and allocations (156,241 corpus folds, none different). What is left is
-  dominated by the CFScript sub-parse of a script `.cfc` body, which is
-  inherent to the design above.
+  It used to fold on the tree-sitter CST, which also folds every block — ifs, loops, tags,
+  literals — at the cost of a full parse per request, twice over for a script `.cfc`, whose
+  body the CFML grammar hands to the CFScript grammar as one opaque region. Functions and
+  comments are about a quarter of those folds, and the rest is to be added from the parser.
+  Over the six-project corpus the two agree on those, with two kinds of exception: tree-sitter's
+  comment node starts at the end of the line *before* the comment, so it folded a one-line
+  comment together with the line above it (about 3,000 folds, which this does not reproduce);
+  and a few dozen edge cases, such as a `/** */` above a tag-syntax `<cfinterface>`, which a tag
+  region does not look for. 48µs for a 60-function component, against 3.5ms.
 
-  **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init`
-  installs allocator hooks that call back into Go for every `malloc` and
-  `free` a parse makes; `internal/language/alloc.go` resets them to
-  tree-sitter's defaults. That alone was 24% of a folding request, and it
-  applies to every tree-sitter parse, the formatter's included.
-  `TestTreeSitterAllocatesThroughLibc` fails if the reset is lost. The two
-  changes together took the 60-function benchmark from 5.0ms to 3.2ms.
-
-  Four rules, each with a test that fails without it. A node needs a **named child** to fold, or
-  it is a run of text and folding it is gutter noise — a comment is the deliberate exception. The
-  **closing line stays visible**, which takes two separate checks: the deepest last *token* is
-  what closes a node (a `function_declaration`'s `}` belongs to its `statement_block`, so
-  reading the immediate last child misses every wrapper), and a node ending inside the **leading
-  whitespace** of its last line has no closing token of its own (`<cfelse>`'s branch ends at the
-  tab before the enclosing `</cfif>`). Identical ranges are **deduped**, keeping the outermost,
-  since the CST nests wrappers that add no lines. And a node whose whole extent is one opaque
-  injected region is **skipped**: `component_file` wraps a script `.cfc` and would fold the file
-  to nothing.
+  **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init` installs allocator
+  hooks that call back into Go for every `malloc` and `free` a parse makes;
+  `internal/language/alloc.go` resets them to tree-sitter's defaults. That was 24% of a
+  tree-sitter folding request, and it applies to every tree-sitter parse — the formatter's
+  now. `TestTreeSitterAllocatesThroughLibc` fails if the reset is lost.
 - `textDocument/rangeFormatting` (`internal/server/range_formatting.go`) formats the **whole**
   document and returns only the edits inside the requested lines. Formatting the selected text
   alone is the obvious approach and wrong twice over: a selection rarely parses standalone, and
@@ -780,10 +766,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
   Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
-  (`config.foldingDefault`), because a script-syntax component's body reaches the CFML grammar as
-  one opaque region, so answering one request means parsing the whole body with the CFScript
-  grammar — a few milliseconds on a large component, and irreducible without caching a parse tree
-  per open document. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  (`config.foldingDefault`), because it folds functions and comments only and an editor given
+  folding ranges drops its own indentation folding for them. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
   the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
@@ -1039,7 +1023,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it is the most expensive request to answer); `typeDefinition` defaults **off** (opt-in while new). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it folds functions and comments only, in place of the editor's indentation folding); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 

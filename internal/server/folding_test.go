@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // foldSet renders the folds as "start-end" strings, plus the kind when set, so
@@ -27,7 +30,7 @@ func foldSet(folds []protocol.FoldingRange) []string {
 func assertFolds(t *testing.T, src string, want []string) {
 	t.Helper()
 
-	got := foldSet(foldingRanges(src))
+	got := foldSet(foldingRanges(parser.Parse("file:///doc.cfm", src), src))
 	if strings.Join(got, " | ") != strings.Join(want, " | ") {
 		t.Errorf("folds:\n got %v\nwant %v", got, want)
 	}
@@ -35,44 +38,37 @@ func assertFolds(t *testing.T, src string, want []string) {
 
 const tagSrc = `<!--- a comment
       spanning lines --->
-<cfoutput>
-	<cfif x GT 1>
-		<p>
-			hello
-		</p>
-	<cfelse>
-		bye
-	</cfif>
-</cfoutput>
-<cfscript>
-	function greet( a, b ) {
-		if ( a ) {
+<cfcomponent>
+	<!--- one line --->
+	<cffunction name="get">
+		<cfif x GT 1>
+			<cfreturn 1>
+		</cfif>
+	</cffunction>
+	<!-- an html
+	     comment -->
+	<cfscript>
+		function greet( a, b ) {
+			/* a script
+			   comment */
 			writeOutput( b );
 		}
-	}
-</cfscript>
+	</cfscript>
+</cfcomponent>
 `
 
-// TestFoldingRangesInATagDocument. Every range stops one line short of its
-// closing delimiter, so folding leaves `</cfif>` and `}` on screen — a fold
-// that hides them reads as though the construct had been deleted.
-//
-// Two of these are the cases the naive rule got wrong. `<cfelse>` (7-8) has no
-// closing token of its own: it ends in the whitespace before the enclosing
-// `</cfif>`, which belongs to the `<cfif>`. And the cfscript function (12-15)
-// keeps its `}` only because the closing token is found by descending to the
-// deepest last token — it is the statement_block's child, not the function
-// declaration's.
+// TestFoldingRangesInATagDocument: a function folds to the line before its
+// closing one, so `</cffunction>` and `}` stay on screen — a fold that hides
+// them reads as though the construct had been deleted. A comment folds to its
+// last line, which has content of its own, and a comment on one line has
+// nothing to fold. Blocks inside a function (the <cfif>) do not fold yet.
 func TestFoldingRangesInATagDocument(t *testing.T) {
 	assertFolds(t, tagSrc, []string{
-		"0-1 comment", // the <!--- ---> block
-		"2-9",         // <cfoutput>, leaving </cfoutput> shown
-		"3-8",         // <cfif>, leaving </cfif> shown
-		"4-5",         // <p>
-		"7-8",         // the <cfelse> branch
-		"11-16",       // <cfscript>, leaving </cfscript> shown
-		"12-15",       // function greet, from the injected sub-parse
-		"13-14",       // if ( a )
+		"0-1 comment",  // <!--- --->
+		"4-7",          // <cffunction>, leaving </cffunction> shown
+		"9-10 comment", // <!-- -->
+		"12-15",        // function greet, in the <cfscript> block
+		"13-14 comment",
 	})
 }
 
@@ -84,78 +80,79 @@ component accessors="true" {
 	property name="id";
 
 	function init( required string a ) {
-		if ( a EQ "x" ) {
-			for ( var i = 1; i <= 3; i++ ) {
-				writeOutput( i );
-			}
-		}
+		var q = "'#replace( a, "'", "''", "all" )#'";
 
+		/*
+		 * after the string
+		 */
 		return this;
 	}
 
 	private void function helper() {
 		// one liner
 	}
+
+	function oneLine() { return 1; }
 }
 `
 
-// TestFoldingRangesInAScriptComponent is the case that makes this more than a
-// tree walk: the CFML grammar hands a script-syntax .cfc's whole body to the
-// CFScript grammar as one opaque node, so without following the injection the
-// only fold in the file would be the file itself.
+// TestFoldingRangesInAScriptComponent. The string in init is what a plain
+// quote-to-quote scan gets wrong: the `#...#` inside it holds strings of its
+// own, and pairing the quotes naively leaves the scan inside a string from
+// there on, so the comment below it is never found. The comment scan reads
+// script with the parse's own scanner for that reason.
 func TestFoldingRangesInAScriptComponent(t *testing.T) {
 	assertFolds(t, scriptComponentSrc, []string{
-		"0-2 comment", // the /** */ doc block
-		"3-19",        // component { }
-		"7-14",        // function init
-		"8-11",        // if
-		"9-10",        // for
-		"17-18",       // function helper
+		"0-2 comment",   // the /** */ doc block
+		"7-13",          // function init
+		"10-12 comment", // the comment after the string
+		"16-17",         // function helper
 	})
-}
-
-// TestFoldingRangesSkipTheWholeFileWrapper pins the absence of a fold rather
-// than its presence. The CFML grammar wraps a script .cfc in a component_file
-// spanning the entire document; folding that collapses the file to one line and
-// hides everything, which is not a fold anyone wants offered.
-func TestFoldingRangesSkipTheWholeFileWrapper(t *testing.T) {
-	lastLine := uint32(strings.Count(scriptComponentSrc, "\n"))
-
-	for _, f := range foldingRanges(scriptComponentSrc) {
-		if f.StartLine == 0 && f.EndLine >= lastLine-1 {
-			t.Errorf("a fold covers the whole document: %d-%d", f.StartLine, f.EndLine)
-		}
-	}
-}
-
-// TestFoldingRangesIgnoreUnstructuredText: a run of prose is not a construct,
-// and offering a fold arrow for every paragraph of template text is noise. A
-// comment is the deliberate exception — it has no inner structure either, and
-// is exactly the thing a reader collapses.
-func TestFoldingRangesIgnoreUnstructuredText(t *testing.T) {
-	// The nested <b> is what makes this discriminate. Without it the element
-	// holds one text run covering the same lines, and the duplicate fold is
-	// removed by dedupeFolds whether or not text nodes are skipped — the first
-	// version of this test passed with the rule deleted. Split in two by the
-	// <b>, the runs fold to 0-2 and 3-5, neither of which the element produces.
-	assertFolds(t, "<div>\n\tone\n\ttwo\n\t<b>x</b>\n\tthree\n\tfour\n</div>\n", []string{"0-5"})
-
-	assertFolds(t, "<!--- just\na comment --->\n", []string{"0-1 comment"})
 }
 
 // TestFoldingRangesNeedTwoLines: a construct written on one line has nothing to
 // hide, and a client is entitled to reject a range whose end is not past its
-// start.
+// start. A function on two lines has none either, once its closing line stays
+// visible.
 func TestFoldingRangesNeedTwoLines(t *testing.T) {
-	assertFolds(t, "<cfoutput>hello</cfoutput>\n", nil)
-	assertFolds(t, "component { function f() {} }\n", nil)
+	assertFolds(t, "component { function f() {} }\n", []string{})
+	assertFolds(t, "component {\n\tfunction f() {\n\t}\n}\n", []string{})
 }
 
-// TestFoldingRangesOnAnUnparseableDocument: folding is decoration, so a file
-// mid-edit must degrade to fewer ranges rather than an error. Unlike
-// formatting, there is nothing here that could damage the source.
-func TestFoldingRangesOnAnUnparseableDocument(t *testing.T) {
-	if got := foldingRanges("<cfoutput>\n\t<cfif unclosed\n"); got == nil {
-		t.Error("got a nil slice for an unparseable document, want an empty one")
+// TestFoldingRangesOnAnUnfinishedDocument: folding is decoration, so a file
+// mid-edit must degrade to fewer ranges rather than an error, and an empty
+// answer is `[]`, not null.
+func TestFoldingRangesOnAnUnfinishedDocument(t *testing.T) {
+	src := "<cfoutput>\n\t<cfif unclosed\n<!--- open\n"
+	if got := foldingRanges(parser.Parse("file:///doc.cfm", src), src); got == nil {
+		t.Error("got a nil slice, want an empty one")
+	}
+}
+
+// TestFoldingFollowsEdits: the functions come from the document's cached
+// parse, not a fresh one, so the answer is only right if that parse is kept
+// current. A line added above a function at component level is the edit whose
+// reparse is deferred; the handler must take the document's lock the way that
+// pays it, or it folds the function one line too high.
+func TestFoldingFollowsEdits(t *testing.T) {
+	srv := newTestServer()
+	srv.Features.Folding = true
+	docURI := uri.URI("file:///fold.cfc")
+	openDoc(t, srv, docURI, "component {\n\tfunction a() {\n\t\tvar x = 1;\n\t\treturn x;\n\t}\n}\n")
+
+	editDoc(t, srv, docURI, protocol.Position{Line: 1}, "\tproperty name=\"p\";\n")
+
+	req := makeCall(t, protocol.MethodTextDocumentFoldingRange, protocol.FoldingRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+	})
+
+	res, err := srv.handleFoldingRange(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folds, _ := res.([]protocol.FoldingRange)
+	if got := strings.Join(foldSet(folds), " | "); got != "2-4" {
+		t.Errorf("folds after the edit: got %q, want %q", got, "2-4")
 	}
 }
