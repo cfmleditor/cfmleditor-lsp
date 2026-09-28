@@ -1115,12 +1115,56 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			}
 		}
 
+		if comp == "" {
+			comp = injectedComponent(prop.attrs["inject"])
+		}
+
 		if comp != "" {
 			pr.ComponentRefs = append(pr.ComponentRefs, ComponentRef{
 				Variable: prop.name, Component: comp, URI: u, Line: prop.line,
 			})
 		}
 	}
+}
+
+// injectedComponent is the component a WireBox injection names, when no
+// beanPaths entry or propertyResolver said: `inject="HTMLHelper@coldbox"`,
+// `inject="id:settingService@contentbox"` and `inject="model:UserService"`
+// name the component UserService, which the resolver then finds by path and,
+// failing that, by file name — WireBox's own convention is that a model's id
+// is its file's. A dotted id is a path already.
+//
+// Everything else in the injection DSL names something that is not a
+// component file, and resolving it by name would find an unrelated one:
+// `coldbox:setting:x` is a setting, `logbox:logger:{this}` a logger,
+// `provider:x` a provider, and the bare `wirebox`, `coldbox`, `cachebox` and
+// `logbox` are the frameworks' own objects, each under another file name.
+func injectedComponent(inject string) string {
+	id := strings.TrimSpace(inject)
+
+	for _, prefix := range []string{"id:", "model:"} {
+		if len(id) > len(prefix) && strings.EqualFold(id[:len(prefix)], prefix) {
+			id = id[len(prefix):]
+
+			break
+		}
+	}
+
+	if at := strings.IndexByte(id, '@'); at >= 0 {
+		id = id[:at]
+	}
+
+	if id == "" || strings.ContainsAny(id, ":{}$#/\\ ") {
+		return ""
+	}
+
+	var buf foldScratch
+	switch string(buf.lowerFold(id)) {
+	case "wirebox", "coldbox", "cachebox", "logbox", "box", "executor", "java", "entityservice":
+		return ""
+	}
+
+	return id
 }
 
 // GlobalVars returns this.x and variables.x names declared outside any function.

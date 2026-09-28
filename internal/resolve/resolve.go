@@ -908,7 +908,38 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 		return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 	}
 
+	if base := r.componentMissingBase(comp, baseDir); base != "" {
+		return MissingBaseReason(base)
+	}
+
 	return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+}
+
+// componentMissingBase is MissingBase for the chain comp extends: a method
+// comp does not declare may be its base's, and when a link of that chain
+// names no file the method was never looked for. ContentBox's services extend
+// cborm's VirtualEntityService, and without cborm on disk every findWhere,
+// save and list was "not found in" the service.
+func (r *Resolver) componentMissingBase(comp, baseDir string) string {
+	if strings.Contains(comp, "|") {
+		return ""
+	}
+
+	p := comp
+	if !filepath.IsAbs(p) {
+		p = r.ComponentPath(comp, baseDir)
+	}
+
+	if p == "" {
+		return ""
+	}
+
+	ext, ok := r.extendsOf(p, cfpath.ToURI(p))
+	if !ok || ext == "" {
+		return ""
+	}
+
+	return r.MissingBase(ext, filepath.Dir(p))
 }
 
 // chainHopReturn is the component a chain hop's method returns: its declared
@@ -1044,6 +1075,10 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		}
 
 		return "component '" + comp + "' does not exist (calling '" + funcName + "')"
+	}
+
+	if base := r.componentMissingBase(comp, baseDir); base != "" {
+		return MissingBaseReason(base)
 	}
 
 	return "method '" + funcName + "' not found in " + comp
