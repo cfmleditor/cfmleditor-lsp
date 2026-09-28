@@ -2,6 +2,7 @@
 package resolve
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Resolver struct {
 	Resolvers          []parser.Resolver
 	mu                 sync.RWMutex
 	appRootCache       map[string]string // dir → Application.cfc root
+	slugCache          map[string]string // dir → its box.json slug, "" for none
 	resolveCache       map[string]string // component+"\t"+baseDir → file path
 	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
 	incGraph           *includeGraph     // the index's cfincludes, rebuilt when they change
@@ -166,6 +168,12 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	if root, rest := r.slugRoot(component, baseDir); root != "" {
+		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
+			return p
+		}
+	}
+
 	// For bare names (no dots/slashes), search the index by filename as a last resort.
 	// This handles `extends="BaseAssertionsTest"` where the file isn't in the same
 	// directory or workspace root but is somewhere in the indexed workspace.
@@ -207,6 +215,68 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	}
 
 	return ""
+}
+
+// slugRoot finds the package a dot-path names itself by: the nearest
+// directory at or above baseDir whose box.json slug is the path's first
+// segment. It returns that directory and the rest of the path.
+//
+// A CommandBox package is installed under its slug, so its own code spells
+// its components that way: coldbox-platform's handlers extend
+// `coldbox.system.EventHandler`, which is its own system/EventHandler.cfc. A
+// checkout of the package has no mapping for it, and every such path was a
+// component that did not exist — over ten thousand calls between
+// coldbox-platform and TestBox. A configured mapping still comes first.
+func (r *Resolver) slugRoot(component, baseDir string) (root, rest string) {
+	first, rest, ok := strings.Cut(component, ".")
+	if !ok || first == "" || rest == "" || r.FS == nil {
+		return "", ""
+	}
+
+	for dir := baseDir; ; {
+		if slug := r.boxSlug(dir); slug != "" && strings.EqualFold(slug, first) {
+			return dir, rest
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ""
+		}
+
+		dir = parent
+	}
+}
+
+// boxSlug is the slug of dir's box.json, "" when it has none; remembered per
+// directory, since every unresolved path walks the same ancestors.
+func (r *Resolver) boxSlug(dir string) string {
+	r.mu.RLock()
+	slug, ok := r.slugCache[dir]
+	r.mu.RUnlock()
+
+	if ok {
+		return slug
+	}
+
+	if data, err := r.FS.ReadFile(filepath.Join(dir, "box.json")); err == nil {
+		var box struct {
+			Slug string `json:"slug"`
+		}
+
+		if json.Unmarshal(data, &box) == nil {
+			slug = strings.TrimSpace(box.Slug)
+		}
+	}
+
+	r.mu.Lock()
+	if r.slugCache == nil {
+		r.slugCache = make(map[string]string)
+	}
+
+	r.slugCache[dir] = slug
+	r.mu.Unlock()
+
+	return slug
 }
 
 // EnsureIndexed ensures a CFC file is indexed, loading from disk if needed.
@@ -482,6 +552,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	// Unqualified call — check same file, then extends chain.
 	// Skip if call.Component is already set (e.g. resolved via chained new/createObject).
 	if variable == "" && call.Component == "" {
+		if len(call.Chain) > 0 {
+			return r.resolveBareChain(call, pr, baseDir, tr)
+		}
+
 		return r.resolveBareCall(call, pr, baseDir, tr)
 	}
 
@@ -716,6 +790,69 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 	}
 
 	return "no qualifier, not in file"
+}
+
+// resolveBareChain is canResolveCall for a call chained onto a bare one,
+// `expect( x ).toBe( 1 )`: the first call is looked up as a bare call is —
+// this file, its extends chain, what it includes — and the rest of the chain
+// is checked on what it returns.
+//
+// It was resolved as a bare call to the *last* name, which looked for toBe
+// among the spec's own methods and reported it "not found in extends chain"
+// — once the chain resolved, in every TestBox assertion.
+func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	first := call.Chain[0]
+
+	tr.addf("chained on a call to %q — looking it up as an unqualified call", first)
+
+	def := r.bareFunc(first, pr, baseDir)
+	if def == nil {
+		if pr.Extends != "" {
+			if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+				return MissingBaseReason(base)
+			}
+		}
+
+		return "chained on '" + first + "', which is not found (calling '" + call.FuncName + "')"
+	}
+
+	ret, noFollow, _ := r.chainHopReturn("this component", first, def, tr)
+	if noFollow && ret != "" {
+		tr.hit(TargetDynamic, ret, nil)
+
+		return ""
+	}
+
+	if ret == "" {
+		return "method '" + first + "' has no component return type (chain to '" + call.FuncName + "')"
+	}
+
+	rest := *call
+	rest.Chain = call.Chain[1:]
+	rest.Component = ret
+
+	return r.canResolveCall(&rest, pr, baseDir, tr)
+}
+
+// bareFunc finds what an unqualified call to name reaches: this file's own
+// function, one its extends chain declares, or one a file it includes or is
+// included by declares.
+func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string) *parser.FunctionDef {
+	for i := range pr.Funcs {
+		if strings.EqualFold(pr.Funcs[i].Name, name) {
+			return &pr.Funcs[i]
+		}
+	}
+
+	if pr.Extends != "" {
+		if def := r.ResolveFunc(pr.Extends, name, baseDir); def != nil {
+			return def
+		}
+	}
+
+	def, _ := r.findThroughIncludes(pr, name)
+
+	return def
 }
 
 // resolveThisCall is canResolveCall for `this.name()`.
