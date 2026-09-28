@@ -849,6 +849,9 @@ overrides:
 | `cfheader( … )`, `cfhttp( … )` — any documented tag called as a function | A builtin |
 | `createMock( … )`, `createEmptyMock`, `prepareMock`, `createStub` (MockBox) | Dynamic: a mock's methods are added at runtime |
 | `createObject( "java", … )` and `new java:…` with no stub for the class | Dynamic: there is nothing to check a Java object against |
+| `new Query()`, `new http()`, `new dbinfo()` and the engine's other script-tag components; `org.lucee.cfml.*`, `com.adobe.coldfusion.*` | The engine's own component, never another file of that name. Checked against its source when the workspace holds it by that path (a Lucee checkout's `org/lucee/cfml/`), otherwise dynamic |
+| `struct()`, `sessionTouch()` and Lucee's other functions its published docs leave out | A builtin |
+| A call chained on a method `onMissingMethod` answers | Accepted, and the rest of the chain is dynamic, as it already was for a last call |
 
 `beanPaths` and `propertyResolvers` apply to the report and the code map as
 they do in the editor.

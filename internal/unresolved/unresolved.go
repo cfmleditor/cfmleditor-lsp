@@ -412,11 +412,7 @@ func MissingBases(calls []Call) []MissingBase {
 // IsBuiltin reports whether name is a built-in function or member function,
 // which the report leaves out.
 func IsBuiltin(name string) bool {
-	if _, ok := docs.LookupFunction(name); ok {
-		return true
-	}
-
-	if docs.IsTagFunction(name) {
+	if docs.IsBuiltinFunction(name) {
 		return true
 	}
 

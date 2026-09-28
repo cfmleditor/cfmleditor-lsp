@@ -186,6 +186,13 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	// A component the engine ships is the engine's, not whatever file of that
+	// name the workspace happens to hold, so the file-name search below never
+	// answers for one.
+	if qualified, ok := engineComponent(component); ok {
+		return r.engineSource(qualified)
+	}
+
 	// For bare names (no dots/slashes), search the index by filename as a last resort.
 	// This handles `extends="BaseAssertionsTest"` where the file isn't in the same
 	// directory or workspace root but is somewhere in the indexed workspace.
@@ -289,6 +296,70 @@ func (r *Resolver) boxSlug(dir string) string {
 	r.mu.Unlock()
 
 	return slug
+}
+
+// engineImports are the components an engine imports implicitly, so that
+// `new Query()` and `new http()` need no path: Lucee's org.lucee.cfml.* and
+// Adobe ColdFusion's com.adobe.coldfusion.*, which script-tag components
+// share names across.
+var engineImports = map[string]bool{
+	"dbinfo":     true,
+	"feed":       true,
+	"ftp":        true,
+	"http":       true,
+	"ldap":       true,
+	"mail":       true,
+	"pop":        true,
+	"query":      true,
+	"storedproc": true,
+}
+
+const (
+	luceeComponents = "org.lucee.cfml."
+	adobeComponents = "com.adobe.coldfusion."
+)
+
+// engineComponent reports whether component names one the engine provides,
+// and how Lucee's source tree spells it: bare `Query` is
+// org.lucee.cfml.Query. An Adobe component has no source to find, so its
+// spelling is "".
+//
+// It is asked only once nothing configured resolved the path, so a project's
+// own Query.cfc beside the caller, or a mapping for org.lucee.cfml, still
+// wins, as it does at runtime.
+func engineComponent(component string) (qualified string, ok bool) {
+	lower := strings.ToLower(component)
+
+	switch {
+	case engineImports[lower]:
+		return luceeComponents + component, true
+	case strings.HasPrefix(lower, luceeComponents) && len(lower) > len(luceeComponents):
+		return component, true
+	case strings.HasPrefix(lower, adobeComponents):
+		return "", true
+	}
+
+	return "", false
+}
+
+// engineSource finds an engine component's own source in the workspace: an
+// indexed file whose path ends in the component's path, as a Lucee checkout
+// keeps org/lucee/cfml/Query.cfc and the org/lucee/cfml/test/LuceeTestCase
+// its tests extend. Calls on it are then checked against the real methods.
+// Without the source the component is still the engine's, and canResolveCall
+// accepts calls on it as dynamic (engineComponent) rather than reporting a
+// component that does not exist.
+func (r *Resolver) engineSource(qualified string) string {
+	if qualified == "" || r.Index == nil {
+		return ""
+	}
+
+	candidates := r.Index.FindFilesByBasename(strings.ReplaceAll(qualified, ".", "/"))
+	if len(candidates) == 0 {
+		return ""
+	}
+
+	return candidates[0]
 }
 
 // inFolderNamed resolves a dot-path whose first segment names a workspace
@@ -1091,7 +1162,24 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 			return ""
 		}
 
+		if _, ok := engineComponent(comp); ok {
+			tr.addf("%q is a component the engine provides and its source is not in the workspace — the rest of the chain is dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
 		return "component '" + displayComponent(comp) + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
+	}
+
+	// A hop onMissingMethod answers is as valid as a last call it answers, and
+	// what it returns is whatever the dispatcher decides. Lucee's own Http and
+	// Query build their setters this way: new Http().setUrl(u).send().
+	if r.ResolveFunc(comp, "onMissingMethod", baseDir) != nil {
+		tr.addf("%q defines onMissingMethod — chain hop %q accepted, the rest of the chain is dynamic", comp, hop)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
 	}
 
 	if base := r.componentMissingBase(comp, baseDir); base != "" {
@@ -1255,6 +1343,15 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		// missing. A component named any other way is still reported.
 		if softMissing(comp, softComp, pr) {
 			tr.addf("%q names no file and came from a dynamicIfMissing resolver — accepted as dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
+		// Nor one the engine provides: `new Query()` is Lucee's or Adobe's
+		// own component, whose methods are the engine's to answer for.
+		if _, ok := engineComponent(comp); ok {
+			tr.addf("%q is a component the engine provides and its source is not in the workspace — accepted as dynamic", comp)
 			tr.hit(TargetDynamic, comp, nil)
 
 			return ""
