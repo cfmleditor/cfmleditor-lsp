@@ -97,7 +97,7 @@ func (c *Config) WorkspaceFolders() []string {
 	out := make([]string, 0, len(raw.WorkspacePaths))
 
 	for _, p := range raw.WorkspacePaths {
-		out = append(out, filepath.Join(dir, p))
+		out = append(out, cfpath.ResolveFrom(dir, p))
 	}
 
 	return out
@@ -434,7 +434,7 @@ func (c *Config) IndexGlobs() []string {
 	folderMap := make(map[string]string)
 
 	for _, p := range raw.WorkspacePaths {
-		resolved := filepath.Join(dir, p)
+		resolved := cfpath.ResolveFrom(dir, p)
 		base := filepath.Base(resolved)
 		folderMap[base] = resolved
 	}

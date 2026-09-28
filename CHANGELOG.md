@@ -20,6 +20,7 @@
 
 - **Typing outside a function no longer reparses the file on every keystroke.** An edit at component level (a property, a comment above a function, the component's attributes) made the server reparse every function signature in the file before it read the next message: 95ms per keystroke in a 65,000-line component. The reparse now waits until something needs the result, and the next request pays for it once. Keystrokes there cost under 3ms.
 - **`cfmleditor.goToMatchingTag` and known-issues underlines counted columns in bytes.** On a line with an `é` or an emoji before the tag, go-to-matching-tag found no tag or jumped to the wrong column. A known-issues entry's underline landed after the method it names, and a whole-line one ran past the end of the line. Both now use UTF-16 units. CFLint's own columns were already right, since CFLint counts UTF-16 units.
+- **An absolute path in `workspacePaths` is used as written.** Every entry was joined onto the config's directory, so `/srv/shared-lib` became `<config dir>/srv/shared-lib`, a folder that does not exist: the server indexed nothing from it, a `workspaceIndexGlobs` entry naming it matched no files, and `cfmleditor-lsp unresolved .` reported "Indexing 0 files". A relative entry is still taken from the config's directory, as `mappings` and `beanPaths` always were.
 
 ## [0.3.8]
 
