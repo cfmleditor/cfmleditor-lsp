@@ -26,12 +26,13 @@ type Resolver struct {
 	Index              *index.Index
 	Resolvers          []parser.Resolver
 	mu                 sync.RWMutex
-	appRootCache       map[string]string // dir → Application.cfc root
-	slugCache          map[string]string // dir → its box.json slug, "" for none
-	resolveCache       map[string]string // component+"\t"+baseDir → file path
-	dirCache           *cfpath.DirCache  // directory listings behind those resolutions
-	incGraph           *includeGraph     // the index's cfincludes, rebuilt when they change
-	exprKeys           []string          // ExpressionMappings' keys in the order they apply
+	appRootCache       map[string]string          // dir → Application.cfc root
+	slugCache          map[string]string          // dir → its box.json slug, "" for none
+	resolveCache       map[string]string          // component+"\t"+baseDir → file path
+	dirCache           *cfpath.DirCache           // directory listings behind those resolutions
+	incGraph           *includeGraph              // the index's cfincludes, rebuilt when they change
+	exprKeys           []string                   // ExpressionMappings' keys in the order they apply
+	startupCache       map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -1486,6 +1487,12 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 
 			return comp != ""
 		})
+	}
+
+	// Last, a shared-scope variable set up by a template the application's
+	// Application.cfc includes (see startup.go).
+	if comp == "" {
+		comp = r.startupComponent(variable, baseDir, tr)
 	}
 
 	return comp, false
