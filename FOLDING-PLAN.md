@@ -113,6 +113,30 @@ The rules that make this match tree-sitter, rather than merely resemble it:
 - **`case` labels have no brackets.** A `switch` case folds from its `case` line
   to the line before the next `case`, `default` or closing `}`: 1,638 folds, a
   small addition once the stack exists.
+- **Variable declarations and assignments mostly come for free.** Tree-sitter
+  folded 4,786 multi-line declarations: 4,265 `var x = …` and 521 plain
+  assignments. About 4,400 of them hold a bracketed right-hand side, and the
+  statement-start rule gives each the same range tree-sitter gave the whole
+  declaration:
+
+  | Right-hand side | Folds |
+  |---|---:|
+  | A call with multi-line arguments, including `new`, `createObject` and `queryExecute` | 2,332 |
+  | Struct literal | 1,594 |
+  | Array literal | 440 |
+  | String concatenation | 209 |
+  | Method chain split across lines | 211 |
+
+  The config structs of `Application.cfc` and a ColdBox `Router`/`ModuleConfig`
+  are here, and are among the most useful folds in the corpus.
+
+  The last two rows, about 420, have no bracket spanning the statement:
+  a chain such as `var app = builder( x )` followed by `.authority( … )` and
+  `.build();` on lines of their own, and strings joined with a trailing `&`. To cover them, a statement spanning lines with no bracket pair
+  over it would fold from its first line to the line before its last. That is
+  cheap, since the pass tracks where a statement starts, but it is a separate,
+  optional step. Measure it before taking it: 44% of all declaration folds are
+  two or three lines long, and folding a three-line chain is close to noise.
 - **Folds on the same lines are one fold.** The component body and the file
   can coincide (a script `.cfc` with nothing outside `component { }`), and a
   closure passed to a call can share both lines with the call. Dedupe as the
@@ -139,6 +163,9 @@ One pass over each tag region, keeping a stack of open tags:
   handled with its leading-whitespace rule, and it had a test
   (`TestFoldingRangesInATagDocument`, as of commit `d8dffc1`). `<cfcase>` and
   `<cfdefaultcase>` inside `<cfswitch>` are the same shape.
+- **A `<cfset>` spanning lines folds**, from its line to the line before its
+  last: `<cfset cfg = {` over twenty lines is the tag-syntax form of the
+  declarations above (132 folds, counted under "other" in §1).
 - **A `<script>` or `<style>` element folds as one element** and is not looked
   inside: its content is a `RegionSkip`, JavaScript or CSS, not CFML.
 - **Match tag names case-insensitively**, CFML being case-insensitive, with the
