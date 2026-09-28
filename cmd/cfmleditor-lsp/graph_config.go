@@ -119,6 +119,8 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Resolvers:                resolvers,
 		ExpressionMappings:       found.ExpressionMappings(),
 		ServicePropertyResolvers: found.ServicePropertyResolvers(),
+		PropertyResolvers:        configPropertyResolvers(found),
+		BeanLookup:               cs.shared.LookupBean,
 		InterpolateAllText:       !found.ResolvedFeatures().OutputContextInterpolation,
 	}
 
@@ -270,4 +272,15 @@ func routeResolver(fsys vfs.FS, resolver *resolve.Resolver, cfg *daemon.Config) 
 			},
 		},
 	}
+}
+
+// configPropertyResolvers is cfg's propertyResolvers in the parser's form.
+func configPropertyResolvers(cfg *daemon.Config) []parser.PropertyResolver {
+	var out []parser.PropertyResolver
+
+	for _, p := range cfg.PropertyResolvers() {
+		out = append(out, parser.PropertyResolver{Match: p[0], Resolve: p[1], Attribute: p[2]})
+	}
+
+	return out
 }

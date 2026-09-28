@@ -124,11 +124,15 @@ func (s *Server) buildCodeMap(req *codeMapRequest, roots []string) (*codemap.Map
 	// One resolution environment for the whole scan: unlike the CLI, a server
 	// session is already governed by one config — the one it was started in — so
 	// there is nothing to vary per file.
+	s.ensureBeansLoaded()
+
 	cfg := codemap.FileConfig{
 		Resolver:                 s.getResolver(),
 		Resolvers:                s.cfResolvers(),
 		ExpressionMappings:       s.ExpressionMappings,
 		ServicePropertyResolvers: s.ServicePropertyResolvers,
+		PropertyResolvers:        s.cfPropertyResolvers(),
+		BeanLookup:               s.index.LookupBean,
 		Routes:                   s.routeResolver(),
 		InterpolateAllText:       !s.Features.OutputContextInterpolation,
 	}

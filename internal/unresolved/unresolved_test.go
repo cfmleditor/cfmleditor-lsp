@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -174,5 +175,51 @@ func TestCallsOnAComponentWithAMissingBaseAreOneEntry(t *testing.T) {
 
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestTheReportReadsBeanPathsAndPropertyResolvers: the editor types an
+// injected property from the workspace's beanPaths and propertyResolvers, and
+// the report ignored both, so it disagreed with the editor about the same
+// line. Both cases here are ones the defaults cannot answer: a caller beside a
+// Mailer.cfc of its own, when the bean named Mailer@app is another, and a
+// `thing:` injection only a propertyResolver knows.
+func TestTheReportReadsBeanPathsAndPropertyResolvers(t *testing.T) {
+	dir := t.TempDir()
+
+	for name, src := range map[string]string{
+		"beans/Mailer.cfc":    "component { function send() {} }",
+		"lib/Clock.cfc":       "component { function tick() {} }",
+		"handlers/Mailer.cfc": "component {}",
+		"handlers/Main.cfc": "component {\n\tproperty name=\"mailer\" inject=\"Mailer@app\";\n" +
+			"\tproperty name=\"clock\" inject=\"thing:Clock\";\n" +
+			"\tfunction f() {\n\t\tmailer.send();\n\t\tclock.tick();\n\t}\n}\n",
+	} {
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(full, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var files []string
+
+	for _, name := range []string{"beans/Mailer.cfc", "lib/Clock.cfc", "handlers/Mailer.cfc", "handlers/Main.cfc"} {
+		files = append(files, filepath.Join(dir, filepath.FromSlash(name)))
+	}
+
+	opt := &Options{
+		BeanPaths:         map[string]string{"app": filepath.Join(dir, "beans")},
+		PropertyResolvers: []parser.PropertyResolver{{Match: "thing:$1", Resolve: "lib.$1", Attribute: "inject"}},
+		WorkspaceFolders:  []string{dir},
+	}
+
+	if rep := Scan(vfs.OS{}, files, files[3:], opt); len(rep.Calls) != 0 {
+		for i := range rep.Calls {
+			t.Errorf("%s (%s)", rep.Calls[i].CallText(), rep.Calls[i].Reason)
+		}
 	}
 }

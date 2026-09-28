@@ -46,6 +46,8 @@ type Options struct {
 	Mappings                 map[string]string
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	PropertyResolvers        []parser.PropertyResolver
+	BeanPaths                map[string]string // configured beanPaths; Application.cfc's are added
 	WorkspaceFolders         []string
 	InterpolateAll           bool // features.outputContextInterpolation off
 	GlobalDefs               bool // accept a bare call any indexed file defines
@@ -95,6 +97,8 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 
 		resolver.Index.IndexFile(fileURI, string(data))
 	}
+
+	loadBeans(resolver, opt)
 
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
 
@@ -146,6 +150,21 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	return rep
 }
 
+// loadBeans gives the resolver's index the bean map the server would build
+// for the same workspace, so an injected property is typed the same way in
+// the report as in the editor. The report used to ignore beanPaths and
+// propertyResolvers altogether.
+func loadBeans(resolver *resolve.Resolver, opt *Options) {
+	appDirs := make([]string, 0, len(opt.WorkspaceFolders))
+	for _, root := range opt.WorkspaceFolders {
+		appDirs = append(appDirs, resolver.FindApplicationRoot(root))
+	}
+
+	if all := cfpath.BeanPathsFor(opt.BeanPaths, appDirs); len(all) > 0 {
+		resolver.Index.SetBeans(cfpath.BuildBeanMap(all, resolver.FS))
+	}
+}
+
 func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options) (out []Call, resolved int) {
 	data, err := fsys.ReadFile(file)
 	if err != nil || cfpath.IsBinary(data) {
@@ -176,6 +195,8 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		Resolvers:                opt.Resolvers,
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
+		PropertyResolvers:        opt.PropertyResolvers,
+		BeanLookup:               resolver.Index.LookupBean,
 		InterpolateAllText:       opt.InterpolateAll,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,

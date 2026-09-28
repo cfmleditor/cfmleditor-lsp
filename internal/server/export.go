@@ -124,6 +124,8 @@ func (s *Server) unresolvedReports(files, targets []string) ([]report, int) {
 		Mappings:                 s.Mappings,
 		ExpressionMappings:       s.ExpressionMappings,
 		ServicePropertyResolvers: s.ServicePropertyResolvers,
+		PropertyResolvers:        s.cfPropertyResolvers(),
+		BeanPaths:                s.BeanPaths,
 		WorkspaceFolders:         s.WorkspaceFolders,
 		InterpolateAll:           !s.Features.OutputContextInterpolation,
 	}

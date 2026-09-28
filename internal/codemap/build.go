@@ -53,6 +53,12 @@ type FileConfig struct {
 	Resolvers                []parser.Resolver
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	PropertyResolvers        []parser.PropertyResolver
+
+	// BeanLookup types an injected property from the workspace's bean map,
+	// as the editor does (parser.ParseOptions.BeanLookup). Nil leaves the
+	// injection's id to name the component.
+	BeanLookup func(string) string
 
 	// Routes, when set, resolves the framework routes found in this file's
 	// source. Nil leaves route edges out entirely.
@@ -79,6 +85,8 @@ type Options struct {
 	Resolvers                []parser.Resolver
 	ExpressionMappings       map[string]string
 	ServicePropertyResolvers map[string]string
+	PropertyResolvers        []parser.PropertyResolver
+	BeanLookup               func(string) string
 
 	// Workers bounds the scan's parallelism. Zero means GOMAXPROCS.
 	Workers int
@@ -208,6 +216,8 @@ func Build(opts *Options) *Map {
 			Resolvers:                opts.Resolvers,
 			ExpressionMappings:       opts.ExpressionMappings,
 			ServicePropertyResolvers: opts.ServicePropertyResolvers,
+			PropertyResolvers:        opts.PropertyResolvers,
+			BeanLookup:               opts.BeanLookup,
 		}
 		opts.ConfigFor = func(string) FileConfig { return single }
 	}
@@ -379,6 +389,8 @@ func scanFile(opts *Options, root, file, fingerprint string) *FileGraph {
 		Resolvers:                cfg.Resolvers,
 		ExpressionMappings:       cfg.ExpressionMappings,
 		ServicePropertyResolvers: cfg.ServicePropertyResolvers,
+		PropertyResolvers:        cfg.PropertyResolvers,
+		BeanLookup:               cfg.BeanLookup,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,
 		ExtractLinks:             true,
