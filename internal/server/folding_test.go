@@ -104,6 +104,7 @@ component accessors="true" {
 func TestFoldingRangesInAScriptComponent(t *testing.T) {
 	assertFolds(t, scriptComponentSrc, []string{
 		"0-2 comment",   // the /** */ doc block
+		"3-20",          // component { }
 		"7-13",          // function init
 		"10-12 comment", // the comment after the string
 		"16-17",         // function helper
@@ -113,10 +114,10 @@ func TestFoldingRangesInAScriptComponent(t *testing.T) {
 // TestFoldingRangesNeedTwoLines: a construct written on one line has nothing to
 // hide, and a client is entitled to reject a range whose end is not past its
 // start. A function on two lines has none either, once its closing line stays
-// visible.
+// visible; the four-line component around it does.
 func TestFoldingRangesNeedTwoLines(t *testing.T) {
 	assertFolds(t, "component { function f() {} }\n", []string{})
-	assertFolds(t, "component {\n\tfunction f() {\n\t}\n}\n", []string{})
+	assertFolds(t, "component {\n\tfunction f() {\n\t}\n}\n", []string{"0-2"})
 }
 
 // TestFoldingRangesOnAnUnfinishedDocument: folding is decoration, so a file
@@ -152,7 +153,10 @@ func TestFoldingFollowsEdits(t *testing.T) {
 	}
 
 	folds, _ := res.([]protocol.FoldingRange)
-	if got := strings.Join(foldSet(folds), " | "); got != "2-4" {
-		t.Errorf("folds after the edit: got %q, want %q", got, "2-4")
+	// 0-5 is the component; 2-4 the function, one line lower than before
+	// the edit. A stale parse adds its scope's 1-3 beside the brace pass's
+	// 2-4, which reads the current text.
+	if got, want := strings.Join(foldSet(folds), " | "), "0-5 | 2-4"; got != want {
+		t.Errorf("folds after the edit: got %q, want %q", got, want)
 	}
 }

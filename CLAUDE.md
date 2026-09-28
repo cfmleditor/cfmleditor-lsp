@@ -702,26 +702,44 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   things with `=` — an assignment, a named argument (`f( name = 1 )`), a tag attribute
   (`<cffunction name="x">`) — so a cheap "is the next token `=`" rule would mark the attribute
   *name* in every tag as a write. A wrong Write badge is worse than none.
-- `textDocument/foldingRange` (`internal/server/folding.go`) folds every function and every
-  comment spanning more than one line, and nothing else yet. Functions come from the document's
-  cached ParseResult (`pr.Scopes`), so the handler takes `lockDoc`, which pays any reparse
-  didChange deferred — `TestFoldingFollowsEdits` fails if it takes `lockDocOnly`. Comments come
-  from `parser.CommentSpans`, which splits the text with `ClassifyRegions` and reads a script
-  region with the parse's own scanner in CFScript mode: a `#...#` inside a string can hold
-  strings of its own, and a plain quote-to-quote scan pairs them wrongly and then reads every
-  later comment as code. A function folds to the line before its closing one, so the `}` or
-  `</cffunction>` stays on screen; a comment folds to its last line.
+- `textDocument/foldingRange` (`internal/server/folding.go`) folds from the parser. Functions
+  come from the document's cached ParseResult (`pr.Scopes`), so the handler takes `lockDoc`,
+  which pays any reparse didChange deferred — `TestFoldingFollowsEdits` fails if it takes
+  `lockDocOnly`. Everything else comes from `parser.StructureSpans`, one pass per request over
+  the text split by `ClassifyRegions`: in a tag region it finds comments, and in a script region
+  it runs the parse's own scanner in CFScript mode (a `#...#` inside a string can hold strings of
+  its own, and a plain quote-to-quote scan pairs them wrongly) with a stack of open `{`, `(` and
+  `[`, reporting comments, blocks, multi-line argument and parameter lists and array literals,
+  and switch cases. A fold ends on the line before the one holding its closer, so the `}`, `)`
+  or `</cffunction>` stays on screen; a comment folds to its last line. Tags in a page do not
+  fold yet — `FOLDING-PLAN.md` §2.3.
 
-  It used to fold on the tree-sitter CST, which also folds every block — ifs, loops, tags,
-  literals — at the cost of a full parse per request, twice over for a script `.cfc`, whose
-  body the CFML grammar hands to the CFScript grammar as one opaque region. Functions and
-  comments are about a quarter of those folds, and the rest is to be added from the parser:
-  `FOLDING-PLAN.md` measures what is missing by construct and sets out the order.
-  Over the six-project corpus the two agree on those, with two kinds of exception: tree-sitter's
-  comment node starts at the end of the line *before* the comment, so it folded a one-line
-  comment together with the line above it (about 3,000 folds, which this does not reproduce);
-  and a few dozen edge cases, such as a `/** */` above a tag-syntax `<cfinterface>`, which a tag
-  region does not look for. 48µs for a 60-function component, against 3.5ms.
+  The rules that make the bracket pass agree with the tree-sitter folding it replaced, each with
+  a case in `TestStructureSpans` that fails without it:
+  - **A fold starts on its statement's first line**, not the bracket's, so a wrapped `if` folds
+    from the `if`; a bracket further down folds from its own line too. A statement spanning lines
+    folds from its first line to its last bracket even when that bracket is on one line, which is
+    how a chain written a call per line gets its fold.
+  - **`if`/`else` and `try`/`catch` chains fold whole** as well as branch by branch, and an
+    `else` that is not the last folds to the end of the chain. Two folds on one line are one arrow
+    in VS Code, and with folds sorted outermost first the chain is the one shown.
+  - **A parenthesis after `if`, `while`, an operator or `=` groups; one after a name holds
+    arguments.** Only the second folds. A `[` after a name is an index and does not.
+  - **A newline ends a statement** in a block when the last token could end an expression and the
+    next is a word that is not an operator: CFScript does not require the semicolon, and cfwheels
+    omits it throughout. Not after a lone word (`admin` then its attributes), and not inside an
+    **attribute statement** (`component` or `property` with attributes over lines, a
+    script-syntax tag `word word=`), where a new line's word is another attribute if `=`, a `{`
+    or the next line follows it and a new statement if it is a keyword or anything else follows.
+    `default="x"` is the commonest attribute and `default` a keyword, so `=` is checked first.
+  - A word is classified once, by `classify`: one switch on the word lowercased without
+    allocating. Lists compared with `EqualFold` were a fifth of the scan.
+
+  Over the six-project corpus it reproduces 83.5% of tree-sitter's 156,241 folds, and makes 937
+  that tree-sitter did not. The rest is tags in pages (about 18,000), comments where tree-sitter's
+  node started a line early (about 3,100), multi-line binary expressions and conditions left out
+  on purpose, and method chains and concatenations inside declarations. 91µs for a 60-function
+  component, against 3.5ms for tree-sitter.
 
   **tree-sitter allocates through libc, not Go.** go-tree-sitter's `init` installs allocator
   hooks that call back into Go for every `malloc` and `free` a parse makes;
@@ -779,8 +797,8 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   (`report = myCtrl.getReport()` is a ref to myCtrl's component on a line that never names it).
 - **`features`** (`config.Features`/`ResolvedFeatures`) switches off individual capabilities.
   Three default to **on** and are opt-outs; **`folding` defaults off** and is opt-in
-  (`config.foldingDefault`), because it folds functions and comments only and an editor given
-  folding ranges drops its own indentation folding for them. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
+  (`config.foldingDefault`), until tags in a page fold: an editor given folding ranges drops its
+  own indentation folding for them, and a page would fold only its comments and functions. **`typeDefinition` defaults off** too (`config.typeDefinitionDefault`), as
   the newest capability. The fields are `*bool` for the reason the `completions` block documents — a
   defaults-true flag as a plain bool cannot tell "turned off" from "not mentioned", so naming one
   key would switch off its siblings. `mergeFeatures` unions key by key for the same reason
@@ -1036,7 +1054,7 @@ the user-facing view and all `formatting` defaults.
 | `linting.enabled` | Enable CFLint diagnostics |
 | `linting.minSeverity` | Least severe CFLint level reported, on CFLint's own scale (`FATAL`…`COSMETIC`); unset reports everything. See below |
 | `references.enabled` | Answer `textDocument/references` (off by default; see the LSP surface above) |
-| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in — it folds functions and comments only, in place of the editor's indentation folding); `typeDefinition` defaults **off** (opt-in while new). See below |
+| `features` | Per-capability switches: `documentHighlight`, `watchedFiles`, `rangeFormatting` default **on** (opt-outs, for when one misbehaves); `folding` defaults **off** (opt-in until tags in a page fold, since it replaces the editor's indentation folding); `typeDefinition` defaults **off** (opt-in while new). See below |
 | `completions` | `tagSnippets`, `functionSnippets`, `globalFunctionResolution` |
 | `debug` | Verbose zap development logging to stderr. Without it `Debug` records are dropped before anything is formatted, and never reach the client as `window/logMessage` (`TestDebugRecordsNeedTheDebugFlag`) |
 

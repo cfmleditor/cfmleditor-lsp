@@ -98,7 +98,47 @@ ordinary function has as well. They are small and separate from this fix:
   the receiver object, where a statement `variables.f()` is recorded
   unqualified. 21 corpus entries.
 
-### 2.2 A bracket pass over script: blocks, closures, literals, the component body
+### 2.2 A bracket pass over script — done
+
+`parser.StructureSpans` replaced `CommentSpans`: one pass over each script
+region with the parse's scanner, a stack of open brackets, and the rules below.
+Measured against the tree-sitter folds over the corpus:
+
+| Group | Before | After |
+|---|---:|---:|
+| Script control blocks | 0% | 99.5% |
+| Closures and multi-line calls | 0.1% | 98.6% |
+| Component body | 0% | 99.9% |
+| Script-syntax tags | 0% | 99.2% |
+| Expressions and literals | 0% | 78.8% |
+| **All folds** | **22.0%** | **83.5%** |
+
+937 of its 131,420 folds are ones tree-sitter did not make. The plan below
+predicted most of the rules; four were found by the corpus comparison:
+
+- **CFScript without semicolons.** cfwheels omits them throughout, and without a
+  rule every fold in such code started on some earlier statement's line. A
+  newline ends a statement in a block when the last token could end an
+  expression and the next is a word that is not an operator.
+- **Attribute statements.** `component`, `property` and script-syntax tags
+  (`admin action="x"` over several lines) broke that rule, one attribute per
+  line. Inside one, a word on a new line is another attribute when `=` follows
+  it — `default="x"` included, though `default` is a keyword — or a valueless
+  one when a `{` or the next line does. A keyword or anything else on its own
+  line begins a new statement. One ending in `;` folds as a statement, as
+  tree-sitter folded a tag statement.
+- **Whole chains.** Tree-sitter folds an `if … else …` and a `try … catch …` as
+  one statement as well as branch by branch, and an `else if` to the end of the
+  chain. VS Code keeps one fold per line, the outermost first, so the chain is
+  what a user of the tree-sitter version saw on an `if` line.
+- **A bracket not on its statement's first line** folds from its own line too,
+  as tree-sitter folded a statement block and an argument list.
+
+Left as they are: multi-line binary expressions and conditions (about 1,500,
+noise), and method chains and concatenations inside declarations (about 420).
+The design notes that follow are kept for the reasoning; §2.3 is next.
+
+#### Design as planned
 
 One pass over each script region with the parse's scanner, in CFScript mode —
 the same tokenisation `CommentSpans` already does — keeping a stack of open
