@@ -157,6 +157,7 @@ func newExplainer(root string) mcp.Explainer {
 type explainConfig struct {
 	resolvers                []parser.Resolver
 	implicitExtends          func(string) string
+	helperScope              func(string) bool
 	expressionMappings       map[string]string
 	servicePropertyResolvers map[string]string
 	interpolateAll           bool
@@ -183,6 +184,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		startupFiles = c.StartupFiles()
 		cfg.expressionMappings = c.ExpressionMappings()
 		cfg.implicitExtends = config.ImplicitExtends(c.Frameworks())
+		cfg.helperScope = config.HelperScope(c.Frameworks())
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
 		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
@@ -208,6 +210,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		ExpressionMappings: cfg.expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    cfg.implicitExtends,
+		HelperScope:        cfg.helperScope,
 	}
 
 	for _, f := range collectCFMLFiles(fsys, scanRoots) {

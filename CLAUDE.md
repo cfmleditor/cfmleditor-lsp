@@ -1349,6 +1349,13 @@ project could have written by hand. Three rules hold them together, each with a 
   pulls in tree-sitter). Every read of a file's extends in `resolve.go` goes through
   `fileExtends`/`extendsFor`, memoised per path; the deepest matching directory wins. Each of
   the seven places that builds a `Resolver` sets the hook from its config.
+- **Helpers a framework mixes in are found like includes.** `Resolver.HelperScope` (from a
+  preset's `helperDirs`) says which files receive them; `internal/resolve/helpers.go` finds
+  them — every `ModuleConfig.cfc`'s `this.applicationHelper` and
+  `includeUDF( "#moduleMapping#/…" )`, each `config/ColdBox.cfc`'s `applicationHelper`, and a
+  view's `<view>Helper.cfm`/`<folder>Helper.cfm` — and `findThroughIncludes` tries them last.
+  Application helpers are workspace-wide, cached per set of config files. With ColdBox mapped
+  into ContentBox it resolves all 40 of the admin module's helper calls.
 - **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
   `task()` return different things, so CommandBox's preset leaves `task()` alone.
   `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.

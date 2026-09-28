@@ -180,3 +180,26 @@ func TestSuggestFrameworksFromBoxJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestColdBoxHelperScope: ColdBox mixes its helpers into handlers,
+// interceptors, views and layouts, at any depth, and into nothing else; a
+// preset with no helpers gives no scope, so the resolver pays nothing.
+func TestColdBoxHelperScope(t *testing.T) {
+	scope := HelperScope([]string{"coldbox"})
+	for path, want := range map[string]bool{
+		"/app/handlers/Main.cfc":                true,
+		"/app/modules/blog/views/post/show.cfm": true,
+		"/app/layouts/Main.cfm":                 true,
+		"/app/interceptors/Security.cfc":        true,
+		"/app/models/User.cfc":                  false,
+		"/app/config/Router.cfc":                false,
+	} {
+		if got := scope(path); got != want {
+			t.Errorf("%s: %v, want %v", path, got, want)
+		}
+	}
+
+	if HelperScope([]string{"testbox"}) != nil {
+		t.Error("a preset with no helper directories should give no scope")
+	}
+}

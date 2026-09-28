@@ -488,6 +488,7 @@ without saying so. `"frameworks": ["coldbox"]` teaches the LSP both:
 | `getRequestContext()`, `getController()`, `getRequestService()`, `getResponse()` and the other framework getters, however they are reached | Their ColdBox return types, so a chain on them is checked |
 | A `.cfc` under `handlers/` or `interceptors/`, `config/Router.cfc`, `config/Scheduler.cfc` that names no `extends` | An `EventHandler`, `Interceptor`, `Router` or `ColdBoxScheduler`, so a bare `getInstance()` or `route()` is found on the base |
 | A `.cfm` under `views/` or `layouts/` | Rendered by the `Renderer`, so a bare `view()` or `announce()` is found there |
+| A helper ColdBox mixes in: a module's `this.applicationHelper` or `includeUDF( "#moduleMapping#/…" )`, the app's `applicationHelper` setting, a view's `<view>Helper.cfm` and `<folder>Helper.cfm` | Found from any handler, view, layout or interceptor, so `cbMessageBox()` resolves where its module is installed |
 
 The other presets, named alongside it as a project uses them:
 

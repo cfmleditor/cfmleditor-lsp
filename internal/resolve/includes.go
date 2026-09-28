@@ -222,21 +222,15 @@ func (r *Resolver) findThroughIncludes(pr *parser.ParseResult, funcName string) 
 
 	file := cfpath.FromURI(string(pr.URI))
 
-	g := r.includes()
-	if g == nil {
-		return nil, ""
-	}
-
-	scope := g.includeScope(file)
-	if len(scope) == 0 {
-		return nil, ""
-	}
-
-	for _, p := range scope {
-		if def := r.LookupFuncWithExtends(p, funcName); def != nil {
-			return def, p
+	if g := r.includes(); g != nil {
+		for _, p := range g.includeScope(file) {
+			if def := r.LookupFuncWithExtends(p, funcName); def != nil {
+				return def, p
+			}
 		}
 	}
 
-	return nil, ""
+	// A framework's helper templates are included by the framework rather
+	// than by the file, which is the only difference that matters here.
+	return r.findThroughHelpers(file, funcName)
 }

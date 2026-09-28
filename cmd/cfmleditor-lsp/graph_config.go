@@ -114,6 +114,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		ExpressionMappings: found.ExpressionMappings(),
 		WorkspaceFolders:   found.WorkspaceFolders(),
 		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),
+		HelperScope:        config.HelperScope(found.Frameworks()),
 	}
 
 	cfg = codemap.FileConfig{

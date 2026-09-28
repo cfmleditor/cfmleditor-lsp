@@ -51,6 +51,7 @@ type Options struct {
 	BeanPaths                map[string]string // configured beanPaths; Application.cfc's are added
 	WorkspaceFolders         []string
 	ImplicitExtends          func(path string) string // frameworks' implicit bases; see config.ImplicitExtends
+	HelperScope              func(path string) bool   // files frameworks mix helpers into; see config.HelperScope
 	InterpolateAll           bool                     // features.outputContextInterpolation off
 	GlobalDefs               bool                     // accept a bare call any indexed file defines
 	Verbose                  io.Writer
@@ -78,6 +79,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
 		ImplicitExtends:    opt.ImplicitExtends,
+		HelperScope:        opt.HelperScope,
 	}
 
 	started := time.Now()

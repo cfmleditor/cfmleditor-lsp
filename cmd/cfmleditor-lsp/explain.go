@@ -88,11 +88,13 @@ func cmdExplain(args []string) {
 		interpolateAll           bool
 		workspaceFolders         []string
 		implicitExtends          func(string) string
+		helperScope              func(string) bool
 	)
 
 	cfg, _ := daemon.FindConfig(searchDir)
 	if cfg != nil {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		helperScope = config.HelperScope(cfg.Frameworks())
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		startupFiles = cfg.StartupFiles()
@@ -120,6 +122,7 @@ func cmdExplain(args []string) {
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,
+		HelperScope:        helperScope,
 	}
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))

@@ -22,6 +22,9 @@ import (
 type frameworkPreset struct {
 	resolvers []Resolver
 	bases     []implicitBase
+	// helperDirs are the directories whose files the framework mixes its
+	// helper templates into; the resolver finds the templates (helpers.go).
+	helperDirs []string
 }
 
 // implicitBase is the component a file extends when it names none: a
@@ -142,6 +145,9 @@ var frameworkPresets = map[string]frameworkPreset{
 			{dir: "views", ext: ".cfm", component: coldboxSystem + "web.Renderer"},
 			{dir: "layouts", ext: ".cfm", component: coldboxSystem + "web.Renderer"},
 		},
+		// ColdBox's application helpers — its own config, each module's
+		// ModuleConfig, and a view's own helpers — reach these.
+		helperDirs: []string{"handlers", "interceptors", "views", "layouts"},
 	},
 
 	// TestBox: the assertion and MockBox objects a spec is handed, a
@@ -267,6 +273,31 @@ func FrameworkResolvers(frameworks []string) []Resolver {
 	}
 
 	return slices.Concat(lists...)
+}
+
+// HelperScope returns whether the named frameworks mix their helper templates
+// into the file at path, or nil when none does: a file under one of a
+// preset's helper directories, at any depth.
+func HelperScope(frameworks []string) func(path string) bool {
+	lists := make([][]string, 0, len(frameworks))
+	for _, f := range frameworks {
+		lists = append(lists, frameworkPresets[strings.ToLower(f)].helperDirs)
+	}
+
+	dirs := slices.Concat(lists...)
+	if len(dirs) == 0 {
+		return nil
+	}
+
+	return func(path string) bool {
+		for d := range strings.SplitSeq(filepath.ToSlash(filepath.Dir(path)), "/") {
+			if slices.ContainsFunc(dirs, func(h string) bool { return strings.EqualFold(h, d) }) {
+				return true
+			}
+		}
+
+		return false
+	}
 }
 
 // ImplicitExtends returns the rule the named frameworks set for a file that

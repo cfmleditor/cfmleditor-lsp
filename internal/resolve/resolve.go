@@ -30,15 +30,20 @@ type Resolver struct {
 	// from its path: a framework preset's rule that a ColdBox handler is an
 	// EventHandler without saying so. Nil for none. See config.ImplicitExtends.
 	ImplicitExtends func(path string) string
-	mu              sync.RWMutex
-	appRootCache    map[string]string          // dir → Application.cfc root
-	slugCache       map[string]string          // dir → its box.json slug, "" for none
-	resolveCache    map[string]string          // component+"\t"+baseDir → file path
-	dirCache        *cfpath.DirCache           // directory listings behind those resolutions
-	incGraph        *includeGraph              // the index's cfincludes, rebuilt when they change
-	exprKeys        []string                   // ExpressionMappings' keys in the order they apply
-	implicitCache   map[string]string          // path → ImplicitExtends(path)
-	startupCache    map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	// HelperScope reports whether a framework mixes its helper templates into
+	// the file at path: a ColdBox handler, view, layout or interceptor. Nil for
+	// none. See helpers.go and config.HelperScope.
+	HelperScope   func(path string) bool
+	mu            sync.RWMutex
+	appRootCache  map[string]string          // dir → Application.cfc root
+	slugCache     map[string]string          // dir → its box.json slug, "" for none
+	resolveCache  map[string]string          // component+"\t"+baseDir → file path
+	dirCache      *cfpath.DirCache           // directory listings behind those resolutions
+	incGraph      *includeGraph              // the index's cfincludes, rebuilt when they change
+	exprKeys      []string                   // ExpressionMappings' keys in the order they apply
+	implicitCache map[string]string          // path → ImplicitExtends(path)
+	helpers       *helperSet                 // application helper templates, per set of config files
+	startupCache  map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be

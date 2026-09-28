@@ -159,6 +159,7 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		opt.BeanPaths = cfg.BeanPaths()
 		opt.PropertyResolvers = configPropertyResolvers(cfg)
 		opt.ImplicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		opt.HelperScope = config.HelperScope(cfg.Frameworks())
 		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
 		if unknown := config.UnknownFrameworks(cfg.Frameworks()); len(unknown) > 0 {

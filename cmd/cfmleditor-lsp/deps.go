@@ -134,10 +134,14 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		searchDir = filepath.Dir(args[0])
 	}
 
-	var implicitExtends func(string) string
+	var (
+		implicitExtends func(string) string
+		helperScope     func(string) bool
+	)
 
 	if cfg, _ := daemon.FindConfig(searchDir); cfg != nil {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		helperScope = config.HelperScope(cfg.Frameworks())
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
@@ -188,6 +192,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,
+		HelperScope:        helperScope,
 	}, idx
 }
 

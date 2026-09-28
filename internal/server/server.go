@@ -452,6 +452,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			Index:              s.index,
 			Resolvers:          s.buildResolvers(),
 			ImplicitExtends:    config.ImplicitExtends(s.Frameworks),
+			HelperScope:        config.HelperScope(s.Frameworks),
 		}
 	}
 
