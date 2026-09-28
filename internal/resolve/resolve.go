@@ -149,6 +149,14 @@ func (r *Resolver) dirs() *cfpath.DirCache {
 }
 
 func (r *Resolver) componentPathUncached(component, baseDir string) string {
+	// A component already named by its file: what a function returning
+	// `this` returns.
+	if filepath.IsAbs(component) && strings.HasSuffix(strings.ToLower(component), ".cfc") {
+		if info, err := r.FS.Stat(component); err == nil && !info.IsDir() {
+			return component
+		}
+	}
+
 	mappings := r.effectiveMappings(baseDir)
 	dirs := r.dirs()
 
@@ -700,7 +708,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 			}
 
 			if ret == "" {
-				return "method '" + hop + "' in " + comp + " has no component return type (chain to '" + funcName + "')"
+				return "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')"
 			}
 
 			comp = ret
@@ -1042,14 +1050,14 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 			return ""
 		}
 
-		return "component '" + comp + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
+		return "component '" + displayComponent(comp) + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 	}
 
 	if base := r.componentMissingBase(comp, baseDir); base != "" {
 		return MissingBaseReason(base)
 	}
 
-	return "method '" + hop + "' not found in " + comp + " (chain to '" + funcName + "')"
+	return "method '" + hop + "' not found in " + displayComponent(comp) + " (chain to '" + funcName + "')"
 }
 
 // componentMissingBase is MissingBase for the chain comp extends: a method
@@ -1211,14 +1219,26 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 			return ""
 		}
 
-		return "component '" + comp + "' does not exist (calling '" + funcName + "')"
+		return "component '" + displayComponent(comp) + "' does not exist (calling '" + funcName + "')"
 	}
 
 	if base := r.componentMissingBase(comp, baseDir); base != "" {
 		return MissingBaseReason(base)
 	}
 
-	return "method '" + funcName + "' not found in " + comp
+	return "method '" + funcName + "' not found in " + displayComponent(comp)
+}
+
+// displayComponent is how a reason names comp. A component named by its file
+// — what a function returning `this` returns — is named by the file's name:
+// a reason is written into a known-issues file that is committed and read on
+// other machines, where an absolute path would not mean anything.
+func displayComponent(comp string) string {
+	if filepath.IsAbs(comp) {
+		return strings.TrimSuffix(filepath.Base(comp), filepath.Ext(comp))
+	}
+
+	return comp
 }
 
 // ComponentOf reports the component variable holds at line, or "" when that

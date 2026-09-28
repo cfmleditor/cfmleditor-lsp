@@ -908,6 +908,16 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 			continue
 		}
 
+		// `return this;` returns the component that declares the function:
+		// its file, named by path, which is how the resolver takes it.
+		if f.returnVar == returnsThis {
+			if path, ok := strings.CutPrefix(string(f.URI), "file://"); ok && path != "" {
+				f.ReturnComponent = path
+			}
+
+			continue
+		}
+
 		if scope := findFuncScope(int(f.Line), pr.Scopes); scope.Start >= 0 {
 			out = append(out, returnPending{
 				funcIdx: i,
@@ -919,6 +929,10 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 
 	return out
 }
+
+// returnsThis is the returnVar of a function whose return is `this` alone,
+// a name no variable can have.
+const returnsThis = "$this"
 
 // settleReturnVars gives each pending function without a return component
 // the component its return variable holds, when a ref in its body says.

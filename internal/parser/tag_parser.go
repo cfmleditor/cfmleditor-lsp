@@ -1013,6 +1013,8 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 		if comp := extractCreateObjectArg(inner[13:]); comp != "" {
 			f.ReturnComponent = comp
 		}
+	case strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(inner), "/"), "this"):
+		f.returnVar = returnsThis
 	default:
 		// return varName — store for deferred resolution
 		varName := extractIdent(inner)

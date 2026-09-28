@@ -2071,16 +2071,38 @@ func (p *scriptParser) checkReturnComponent() {
 
 		p.scanChainedCalls(comp, peek.Line)
 	default:
+		bareThis := identEq(peek.Value, "this") && p.returnsBareThis()
+
 		p.returnCall(peek)
 
 		// return varName — track for resolution after body parse
 		p.returnVar = peek.Value
+		if bareThis {
+			p.returnVar = returnsThis
+		}
 
 		return
 	}
 
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// returnsBareThis reports whether the `this` the scanner is on is the whole
+// returned expression — `return this;` rather than `return this.x;` —
+// without moving the scanner.
+func (p *scriptParser) returnsBareThis() bool {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	p.sc.NextSkipComments() // this
+
+	switch p.sc.PeekSkipComments().Kind {
+	case TokSemicolon, TokRBrace, TokEOF:
+		return true
+	default:
+		return false
 	}
 }
 

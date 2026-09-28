@@ -108,3 +108,57 @@ func TestACallChainedOnABareCallIsCheckedOnWhatItReturns(t *testing.T) {
 		}
 	}
 }
+
+// TestAFluentChainIsCheckedAgainstItsBuilder: a method that returns `this`
+// returns its own component, so every hop of `b.setName( "x" ).setAge( 1 )`
+// is checked on the builder and a hop it lacks is reported against it.
+func TestAFluentChainIsCheckedAgainstItsBuilder(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Builder.cfc": `component {
+	function setName( n ) { return this; }
+	function setAge( a ) { return this; }
+}`,
+		"Page.cfc": `component {
+	function f() {
+		var b = new Builder();
+		b.setName( "x" ).setAge( 1 );
+		b.setName( "x" ).nope();
+	}
+}`,
+	})
+
+	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
+
+	for _, name := range []string{"Builder.cfc", "Page.cfc"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r.Index.IndexFile(cfpath.ToURI(filepath.Join(dir, name)), string(data))
+	}
+
+	file := filepath.Join(dir, "Page.cfc")
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{ExtractCalls: true})
+	got := map[string]string{}
+
+	for _, c := range pr.AllCalls() {
+		got[c.FuncName] = r.CanResolveCall(&c, pr, dir)
+	}
+
+	if got["setAge"] != "" {
+		t.Errorf("setAge: %q, want resolved on the builder", got["setAge"])
+	}
+
+	// Named by the file's name: a reason is written into a committed report.
+	if want := "method 'nope' not found in Builder"; got["nope"] != want {
+		t.Errorf("nope: %q, want %q", got["nope"], want)
+	}
+}

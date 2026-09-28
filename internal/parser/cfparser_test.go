@@ -1594,19 +1594,40 @@ func TestScriptParser_NoReturnComponent(t *testing.T) {
 	}
 }
 
+// TestScriptParser_ReturnThis: `return this;` is the builder pattern, and the
+// function returns the component that declares it, named by its file — so a
+// chain `b.setName( "x" ).setAge( 1 )` is checked against it. It used to be
+// left untyped: "method 'setName' has no component return type" on every such
+// chain. `return this.name;` returns a property, not the component, and the
+// tag form is the same rule.
 func TestScriptParser_ReturnThis(t *testing.T) {
-	// return this — common builder pattern, should not crash
 	content := `component {
 	function setName(required string name) {
 		variables.name = arguments.name;
 		return this;
 	}
+	function getName() {
+		return this.name;
+	}
 }`
 	pr := Parse(testURI, content)
 
-	// "this" is a keyword, should not set ReturnComponent
-	if pr.Funcs[0].ReturnComponent != "" {
-		t.Errorf("expected empty ReturnComponent for 'return this', got %q", pr.Funcs[0].ReturnComponent)
+	if got := pr.Funcs[0].ReturnComponent; got != "/test.cfc" {
+		t.Errorf("setName: ReturnComponent %q, want the file /test.cfc", got)
+	}
+
+	if got := pr.Funcs[1].ReturnComponent; got != "" {
+		t.Errorf("getName: ReturnComponent %q, want none for return this.name", got)
+	}
+
+	tag := `<cfcomponent>
+	<cffunction name="setName">
+		<cfreturn this>
+	</cffunction>
+</cfcomponent>`
+
+	if got := Parse(testURI, tag).Funcs[0].ReturnComponent; got != "/test.cfc" {
+		t.Errorf("<cfreturn this>: ReturnComponent %q, want the file /test.cfc", got)
 	}
 }
 
