@@ -240,22 +240,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 	content := string(data)
 	baseDir := filepath.Dir(abs)
 
-	funcLookup := func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(cfpath.ToURI(abs), content, &parser.ParseOptions{
 		Resolvers:                cfg.resolvers,

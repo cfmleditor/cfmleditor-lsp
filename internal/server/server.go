@@ -797,24 +797,9 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 // funcLookup resolves a method's declared return-type component across files
 // (e.g. a Java stub's getInstance() modeling its own return type), so the parser
 // can prefer a verified cross-file answer over a componentResolver's guess on
-// the call-site text. Shared shape with cmd/cfmleditor-lsp/unresolved.go.
+// the call-site text. It is resolve.Resolver.FuncLookup, which every scan shares.
 func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, funcName string) string {
-	return func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	return resolver.FuncLookup(baseDir)
 }
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).

@@ -908,6 +908,7 @@ overrides:
 | `struct()`, `sessionTouch()` and Lucee's other functions its published docs leave out | A builtin |
 | A call chained on a method `onMissingMethod` answers | Accepted, and the rest of the chain is dynamic, as it already was for a last call |
 | `$()`, `$results()`, `$never()` and the other methods MockBox adds to a mock | Accepted on any component, since a test mocks a real component in place |
+| A bare-word return type, `Task function task()`, naming a component beside the declaring one | That component, as CFML finds it; a CFML type name (`query`, `struct`, …) stays the type |
 
 `beanPaths` and `propertyResolvers` apply to the report and the code map as
 they do in the editor.

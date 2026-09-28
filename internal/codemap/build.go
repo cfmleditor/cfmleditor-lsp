@@ -368,22 +368,7 @@ func scanFile(opts *Options, root, file, fingerprint string) *FileGraph {
 	isCFC := cfpath.IsCFCFile(file)
 	cfg := opts.ConfigFor(file)
 
-	funcLookup := func(component, funcName string) string {
-		fd := cfg.Resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := cfg.Resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:                cfg.Resolvers,

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
@@ -148,22 +147,7 @@ func cmdExplain(args []string) {
 	fileURI := uri.URI("file://" + file)
 	baseDir := filepath.Dir(file)
 
-	funcLookup := func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:                cfResolvers,

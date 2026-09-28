@@ -1240,9 +1240,12 @@ inline via `lookupComponentRef`); (2) a function-scoped `ComponentRef` for `x`; 
 dotted path; (6) walking the `extends` chain's own `ComponentRef`s; (7) a `componentResolver`
 matched against the variable name text; (8) a `componentResolver` matched against the full line
 text (handles chains like `x.method().prop.func()`). If the call is itself chained
-(`call.Chain`), each hop repeats a scaled-down version of this: the hop function's declared
-`ReturnComponent`/dotted `ReturnType`, falling back to a `componentResolver` matched against
-`hop()`. Because steps (7)/(8) and the per-hop fallback all go through the same substring-prefix
+(`call.Chain`), each hop repeats a scaled-down version of this: what the hop function returns
+(`Resolver.ReturnComponentOf` — its inferred `ReturnComponent`, a dotted `ReturnType`, or a
+bare-word `ReturnType` naming a component beside the declaring file, never a CFML type name),
+falling back to a `componentResolver` matched against `hop()`. `ReturnComponentOf` is also
+behind `Resolver.FuncLookup`, the parser hook every scan passes, so a hop and a variable
+assigned from the same call cannot disagree; it replaced five copies of the rule. Because steps (7)/(8) and the per-hop fallback all go through the same substring-prefix
 matching described below, a broad catch-all resolver (e.g. `get$1()`) can win at *any* of these
 steps, not just the ones that look like factory-method calls.
 

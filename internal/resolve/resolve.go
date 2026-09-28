@@ -1405,13 +1405,9 @@ func (r *Resolver) componentMissingBase(comp, baseDir string) (base string, impl
 // init(), or a componentResolver matching the hop. It reports the resolver's
 // noFollow and whether the resolver is dynamicIfMissing, for the last.
 func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *callTrace) (ret string, noFollow, soft bool) {
-	ret = fd.ReturnComponent
+	ret = r.ReturnComponentOf(fd)
 	if ret != "" {
-		tr.addf("chain hop %q on %q: declared/inferred ReturnComponent %q", hop, comp, ret)
-	} else if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-		ret = fd.ReturnType
-
-		tr.addf("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
+		tr.addf("chain hop %q on %q: returns %q (declared %q)", hop, comp, ret, fd.ReturnType)
 	}
 
 	// An init() that declares nothing returns the object it was called
@@ -1436,6 +1432,68 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 	return r.matchResolver(hop+"()", tr, func(c, _ string, nf bool) {
 		tr.addf("chain hop %q on %q: no declared return type — componentResolver matched %q(): %q (noFollow=%v)", hop, comp, hop, c, nf)
 	})
+}
+
+// ReturnComponentOf is the component fd returns: the one the parse inferred
+// from its return statements, a dotted return type, or a bare-word return type
+// naming a component beside the declaring one. Every question about what a
+// function returns asks this, so a chain hop and a variable assigned from the
+// same call cannot disagree.
+func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
+	switch {
+	case fd.ReturnComponent != "":
+		return fd.ReturnComponent
+	case strings.Contains(fd.ReturnType, "."):
+		return fd.ReturnType
+	}
+
+	return r.bareReturnComponent(fd)
+}
+
+// FuncLookup is the parser's hook for what a method of a component returns,
+// resolved from baseDir: ParseOptions.FuncLookup, which types a variable
+// assigned from a call on another component.
+func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) string {
+	return func(component, funcName string) string {
+		fd := r.ResolveFunc(component, funcName, baseDir)
+		if fd == nil {
+			return ""
+		}
+
+		return r.ReturnComponentOf(fd)
+	}
+}
+
+// cfmlTypes are the return types CFML itself defines. A component of one of
+// these names beside the declaring file does not make returntype="query" a
+// component: the engine's type wins, as it does at runtime.
+var cfmlTypes = map[string]bool{
+	"any": true, "array": true, "binary": true, "boolean": true, "component": true,
+	"date": true, "datetime": true, "email": true, "function": true, "closure": true,
+	"guid": true, "numeric": true, "integer": true, "number": true, "query": true,
+	"string": true, "struct": true, "uuid": true, "variablename": true, "void": true,
+	"xml": true, "object": true, "regex": true, "url": true, "double": true,
+}
+
+// bareReturnComponent is the component a bare-word return type names:
+// ColdBox declares `ColdBoxScheduledTask function task( name )`, and CFML
+// finds that component beside the declaring one. Only there — the resolver's
+// wider search would take any file of the name anywhere in the workspace, and
+// a bare word is far more often a type than a component, which is why a
+// dotted return type was the only one taken. The answer is the file's path,
+// as a method returning `this` is typed.
+func (r *Resolver) bareReturnComponent(fd *parser.FunctionDef) string {
+	t := strings.TrimSpace(fd.ReturnType)
+	if t == "" || r.FS == nil || strings.ContainsAny(t, "./\\[]<> ") || cfmlTypes[strings.ToLower(t)] {
+		return ""
+	}
+
+	file := cfpath.FromURI(string(fd.URI))
+	if file == "" {
+		return ""
+	}
+
+	return cfpath.ResolvePathCached(t, filepath.Dir(file), nil, r.dirs())
 }
 
 // checkMethodOn is canResolveCall's last step: whether the component the
