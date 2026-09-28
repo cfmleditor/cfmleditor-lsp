@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
 
@@ -306,6 +307,19 @@ type Resolver struct {
 	// file as dynamic rather than reporting it missing. For a broad catch-all
 	// such as get$1(): see parser.Resolver.
 	DynamicIfMissing bool `json:"dynamicIfMissing"`
+	// NameOnly says what a variable of that name holds, and nothing about
+	// what a call on it returns: see parser.Resolver.
+	NameOnly bool `json:"nameOnly"`
+}
+
+// Parser is the resolver as the parser and resolver use it. Every
+// config-to-parser conversion goes through here, so a field added to one
+// reaches the other everywhere at once.
+func (r *Resolver) Parser() parser.Resolver {
+	return parser.Resolver{
+		Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
+		NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing, NameOnly: r.NameOnly,
+	}
 }
 
 // PropResolver maps a property attribute to a component path.

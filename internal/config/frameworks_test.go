@@ -45,7 +45,7 @@ func TestColdBoxImplicitBases(t *testing.T) {
 func TestColdBoxResolversMatchWholeNames(t *testing.T) {
 	var rs []parser.Resolver
 	for _, r := range FrameworkResolvers([]string{"coldbox"}) {
-		rs = append(rs, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+		rs = append(rs, r.Parser())
 	}
 
 	const rc = "coldbox.system.web.context.RequestContext"
@@ -135,7 +135,7 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 	} {
 		var rs []parser.Resolver
 		for _, r := range FrameworkResolvers([]string{tc.framework}) {
-			rs = append(rs, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, Anchored: r.Anchored})
+			rs = append(rs, r.Parser())
 		}
 
 		if got, _ := parser.ResolveFromCallFull(tc.expr, rs); got != tc.want {

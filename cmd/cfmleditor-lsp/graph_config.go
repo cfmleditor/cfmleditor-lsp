@@ -99,10 +99,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 
 	var resolvers []parser.Resolver
 	for _, r := range found.ComponentResolvers() {
-		resolvers = append(resolvers, parser.Resolver{
-			Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-			NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-		})
+		resolvers = append(resolvers, r.Parser())
 	}
 
 	resolver := &resolve.Resolver{

@@ -1359,11 +1359,13 @@ project could have written by hand. Three rules hold them together, each with a 
 - **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
   `task()` return different things, so CommandBox's preset leaves `task()` alone.
   `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.
-- **Known limit:** the tag parser's bare-name fallback (`resolveRHS`) types
-  `<cfset x = event.getValue()>` as `event`'s component. It is deliberate for a project's
-  own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`), so a preset
-  resolver takes part in it too; a flag to exclude one would need threading through every
-  config-to-parser resolver conversion.
+- **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
+  (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
+  project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong
+  for `event.getValue()`. `NameOnly` keeps the alias `x = event` and drops anything derived
+  from it. **Every config-to-parser conversion is `config.Resolver.Parser()`** — there were
+  ten struct literals, and a field one of them forgot is a setting that parses and does
+  nothing; `TestParserCarriesEveryResolverField` sets every field and fails on one dropped.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

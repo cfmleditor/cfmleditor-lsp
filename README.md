@@ -512,12 +512,10 @@ warned about. When the `box.json` beside the config depends on a framework
 with a preset the config does not name (`coldbox`, `testbox`,
 `commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
 and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
-it uses, the `unresolved` report goes from 23,560 entries to 14,126.
+it uses, the `unresolved` report goes from 23,560 entries to 14,106.
 
-One case is not covered: in tag syntax, `<cfset x = event.getValue( "a" )>`
-types `x` as the request context. The tag parser's bare-name fallback types an
-assignment from a call on a resolved variable as that variable's component,
-which some projects rely on for their own resolvers.
+A preset's variable resolvers are `nameOnly` (below), so in tag syntax
+`<cfset x = event.getValue( "a" )>` does not make `x` a request context.
 
 ### Startup files
 
@@ -607,6 +605,16 @@ It is per resolver, and only that resolver's output is affected. A missing compo
 other way — a `getService("$1")` resolver's, a literal `createObject("component", ...)` — is
 still reported, which is the point: those are findings. So is a missing method on a component
 the catch-all got right, since that component exists.
+
+#### `nameOnly`
+
+In tag syntax, `<cfset style = document.loadStylesheet()>` types `style` as whatever a
+resolver says `document` is: an assignment from a call on a variable that a resolver
+matches by name takes that variable's component. A project whose one stub answers every
+call on a family of objects relies on that. A resolver that says what a variable *holds*,
+and nothing about what calls on it return, sets `"nameOnly": true`: `x = document` is still
+typed, `x = document.load()` and `x = document[ "k" ]` are not. The framework presets' variable
+resolvers are all `nameOnly`.
 
 ### Formatting
 

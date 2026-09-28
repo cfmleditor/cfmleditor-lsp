@@ -149,10 +149,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		expressionMappings = cfg.ExpressionMappings()
 
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			cfResolvers = append(cfResolvers, r.Parser())
 		}
 	} else {
 		for _, a := range args {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -168,7 +167,7 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		}
 
 		for _, r := range cfg.ComponentResolvers() {
-			opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+			opt.Resolvers = append(opt.Resolvers, r.Parser())
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)

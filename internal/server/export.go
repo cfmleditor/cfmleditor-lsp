@@ -12,7 +12,6 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
 )
 
@@ -131,7 +130,7 @@ func (s *Server) unresolvedReports(files, targets []string) ([]report, int) {
 	}
 
 	for _, r := range s.ComponentResolvers {
-		opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+		opt.Resolvers = append(opt.Resolvers, r.Parser())
 	}
 
 	rep := unresolved.Scan(s.FS, files, nil, &opt)

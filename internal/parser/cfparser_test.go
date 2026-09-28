@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/uri"
 )
 
@@ -3395,36 +3394,6 @@ func TestTagParser_ConcatenatedAssignment_NoSpuriousCall(t *testing.T) {
 	}
 }
 
-// TestTagParser_JavaStubResolver_ResolvesCreateObjectJava is the parser-level
-// integration test for config.JavaStubResolver: confirms the synthesized
-// resolver actually resolves through the parser's own regex/simple-match
-// heuristics and $1 substitution, not just via a raw regexp.MatchString check.
-func TestTagParser_JavaStubResolver_ResolvesCreateObjectJava(t *testing.T) {
-	cr := config.JavaStubResolver("tassweb.packages.tass.javastubs")
-	resolvers := []Resolver{{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}}
-
-	content := `<cfcomponent>
-<cffunction name="work">
-	<cfset variables.jss = createObject('java', 'java.security.Signature') />
-</cffunction>
-</cfcomponent>`
-
-	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers})
-
-	found := ""
-
-	for _, ref := range pr.ComponentRefs {
-		if ref.Variable == "jss" {
-			found = ref.Component
-		}
-	}
-
-	want := "tassweb.packages.tass.javastubs.java.security.Signature"
-	if found != want {
-		t.Errorf("expected jss -> %s, got %q", want, found)
-	}
-}
-
 // TestFuncLookup_ChainedCallOverridesGenericResolver simulates the java stub
 // factory pattern (Signature.getInstance() returning another Signature): a
 // generic catch-all componentResolver (get(\w+)() -> packages.tass.<name>)
@@ -4319,6 +4288,44 @@ func TestArrowFunctionBodyKeepsItsReceiver(t *testing.T) {
 	for _, c := range pr.AllCalls() {
 		if c.FuncName == "get" && c.Variable != "svc" {
 			t.Errorf("get() recorded with receiver %q, want svc", c.Variable)
+		}
+	}
+}
+
+// TestNameOnlyResolverDoesNotTypeWhatACallOnItReturns: the tag parser's
+// bare-name fallback types `<cfset style = document.loadStylesheet()>` as
+// document's component, which a project whose one stub answers every call
+// relies on. A NameOnly resolver — a framework preset's `event` — says what
+// the variable holds and nothing about what a call on it returns, so
+// `<cfset e = event.getValue( "x" )>` is not a request context. An alias of
+// the variable itself still is.
+func TestNameOnlyResolverDoesNotTypeWhatACallOnItReturns(t *testing.T) {
+	content := `<cfset e = event.getValue( "x" )>
+<cfset alias = event>
+<cfset i = event[ "k" ]>`
+
+	for _, nameOnly := range []bool{false, true} {
+		rs := []Resolver{{Match: `^(?:variables\.)?event$`, Resolve: "fw.Ctx", Prefix: "event", Anchored: true, NameOnly: nameOnly}}
+		pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: rs})
+
+		got := map[string]string{}
+		for _, ref := range pr.ComponentRefs {
+			got[ref.Variable] = ref.Component
+		}
+
+		want := map[string]string{"e": "fw.Ctx", "alias": "fw.Ctx", "i": "fw.Ctx"}
+		if nameOnly {
+			want = map[string]string{"alias": "fw.Ctx"}
+		}
+
+		for v, w := range want {
+			if got[v] != w {
+				t.Errorf("nameOnly=%v: %s = %q, want %q (all: %v)", nameOnly, v, got[v], w, got)
+			}
+		}
+
+		if nameOnly && (got["e"] != "" || got["i"] != "") {
+			t.Errorf("nameOnly: a call or index on event was typed: %v", got)
 		}
 	}
 }

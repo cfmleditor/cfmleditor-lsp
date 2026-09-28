@@ -189,10 +189,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range c.ComponentResolvers() {
-			cfg.resolvers = append(cfg.resolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			cfg.resolvers = append(cfg.resolvers, r.Parser())
 		}
 	}
 

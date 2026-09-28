@@ -1141,9 +1141,14 @@ func (p *tagParser) resolveRHS(rhs, varName string, line int) bool {
 		return false
 	}
 
+	// Anything after the name — a call on it, an index into it — makes the
+	// value something the variable produced, which a NameOnly resolver has
+	// nothing to say about; `x = event` alone is still event.
+	derived := strings.TrimSpace(rhs[len(funcName):]) != ""
+
 	for i := range p.resolvers {
 		r := &p.resolvers[i]
-		if r.Prefix == "" || !prefixEqualFold(funcName, r.Prefix) {
+		if r.Prefix == "" || (r.NameOnly && derived) || !prefixEqualFold(funcName, r.Prefix) {
 			continue
 		}
 

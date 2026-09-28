@@ -773,7 +773,7 @@ func (s *Server) buildResolvers() []parser.Resolver {
 
 	r := make([]parser.Resolver, len(s.ComponentResolvers))
 	for i, cr := range s.ComponentResolvers {
-		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix, NoFollow: cr.NoFollow, Anchored: cr.Anchored, DynamicIfMissing: cr.DynamicIfMissing}
+		r[i] = cr.Parser()
 	}
 
 	s.cachedResolverSet = parser.BuildResolverSet(r)

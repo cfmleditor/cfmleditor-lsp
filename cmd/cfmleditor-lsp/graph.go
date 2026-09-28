@@ -480,10 +480,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		beanPaths = cfg.BeanPaths()
 
 		for _, r := range cfg.ComponentResolvers() {
-			resolvers = append(resolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			resolvers = append(resolvers, r.Parser())
 		}
 
 		settings = cfg.CodeMap()

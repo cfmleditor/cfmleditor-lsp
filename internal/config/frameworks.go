@@ -55,6 +55,7 @@ func variableResolver(component string, names ...string) Resolver {
 		Prefix:           strings.Join(prefixes, "|"),
 		Anchored:         true,
 		DynamicIfMissing: true,
+		NameOnly:         true,
 	}
 }
 

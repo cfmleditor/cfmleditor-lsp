@@ -256,9 +256,16 @@ type Resolver struct {
 	// broad pattern — `get$1()` → `app.$1` — that is right for the factories it
 	// was written for and invents a path for every other getter.
 	DynamicIfMissing bool
-	re               *regexp.Regexp // compiled regex, lazily initialized
-	simple           bool           // true if pattern is a plain string (no regex, no $N)
-	reOnce           sync.Once
+	// NameOnly types a variable by its name and says nothing about what a
+	// call on it returns. The tag parser's bare-name fallback types
+	// `<cfset style = document.loadStylesheet()>` as document's component,
+	// which a project whose one stub answers every call relies on; a framework
+	// preset's `event` resolver must not make event.getValue() a request
+	// context too.
+	NameOnly bool
+	re       *regexp.Regexp // compiled regex, lazily initialized
+	simple   bool           // true if pattern is a plain string (no regex, no $N)
+	reOnce   sync.Once
 	// Precomputed for simple matches
 	simplePrefix   string // part before $1
 	simpleSuffix   string // part after $1
