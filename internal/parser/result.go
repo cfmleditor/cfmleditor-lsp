@@ -2416,3 +2416,36 @@ func isMemberMethod(name string) bool {
 
 	return false
 }
+
+// Declares reports whether the file declares name anywhere, case-insensitively:
+// a variable in any scope, a property, a function or a function's argument.
+// A name it does not declare is one it expects from elsewhere — its base
+// component, an injector, the framework — which is what the resolver needs to
+// know before blaming a missing base for a receiver with no component.
+func (pr *ParseResult) Declares(name string) bool {
+	for i := range pr.Funcs {
+		if strings.EqualFold(pr.Funcs[i].Name, name) {
+			return true
+		}
+
+		for j := range pr.Funcs[i].Arguments {
+			if strings.EqualFold(pr.Funcs[i].Arguments[j].Name, name) {
+				return true
+			}
+		}
+	}
+
+	for i := range pr.Properties {
+		if strings.EqualFold(pr.Properties[i].name, name) {
+			return true
+		}
+	}
+
+	for _, v := range pr.AllVars() {
+		if strings.EqualFold(v.Name, name) {
+			return true
+		}
+	}
+
+	return false
+}

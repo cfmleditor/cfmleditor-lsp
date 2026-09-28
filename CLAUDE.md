@@ -1447,6 +1447,7 @@ fallback resolver, and the altComp fallback resolver.
 
 | Error form | Meaning | Fix |
 |---|---|---|
+| `extends chain breaks at 'X', which does not resolve` / `X (base component does not resolve; N inherited calls not checked)` | A component in the file's extends chain names no file, so an inherited call — bare, `this.`, `super.`, or on a receiver the file never declares (`print`, `$assert`) — was never checked. `unresolved` reports it once per file, on the `extends` line, and totals the bases after the list | Add the `mappings` entry or `workspacePaths` directory that makes `X` resolve. `resolve.MissingBase` finds the link; `inheritedFromMissingBase` decides a receiver is the base's, reading the text for a declaration too (`declaredInText`) because the body scan misses a `var` inside an arrow function |
 | `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name |
 | `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or `"noFollow": true` on the resolver |
 | `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |

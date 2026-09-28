@@ -786,6 +786,23 @@ report shows its entries again for files that are not open. The export works
 with `linting.enabled` off, honours `linting.minSeverity`, and finds what a run
 on save finds for the same file.
 
+**A base component that does not resolve is one entry, not one per call.** A
+call a file inherits — a bare `expect()`, `this.helper()`, `super.init()`, or a
+call on a name the file never declares, such as CommandBox's `print` or
+TestBox's `$assert` — is looked for up the extends chain. When a link of that
+chain names no file, the call was never checked, and the report says so once,
+on the file's `extends` line:
+
+```
+tests/specs/UserSpec.cfc:1: testbox.system.BaseSpec (base component does not resolve; 212 inherited calls not checked)
+```
+
+The command line also totals them after the list, most calls first, since each
+is usually one `mappings` entry or `workspacePaths` directory away from checking
+every call it accounts for. Over six open-source projects scanned with no
+configuration, 59,600 of 89,000 entries were calls into 67 such bases, and a
+dozen of them held 57,000; the report is 32,000 entries now.
+
 To print a report instead of writing it, `cfmleditor-lsp unresolved
 --known-issues <dir>` writes the same format to stdout, relative to the config's
 directory or `--relative-to <dir>`. Findings outside it are left out, and
