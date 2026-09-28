@@ -4176,3 +4176,124 @@ func TestChainedCall_FirstHopOfferedEveryLeadingStringArgument(t *testing.T) {
 		}
 	}
 }
+
+// --- Script functions with attributes after the parameter list ---
+
+const trailingAttrsSrc = `component {
+	public void function modeless() localmode=true skip="true" {
+		var inner = 1;
+		svc.run();
+	}
+
+	remote function rest() restPath="name" httpMethod="GET" {
+		var r = 2;
+	}
+
+	function marked() cbMethod {
+		var m = 3;
+	}
+
+	private function cached(id) cachedwithin=createTimeSpan(0,1,0,0) {
+		var c = 4;
+	}
+
+	private function cachedString(id) cachedWithin="#createTimeSpan(0,0,0,1)#" {
+		var s = 5;
+	}
+
+	function plain() {
+		var p = 6;
+	}
+}
+`
+
+// A script function may carry attributes between its parameter list and its
+// body, and every reader of a declaration expected the `{` right after the
+// `)`. Finding an attribute there, the scope ended on the function's own line
+// and the body was read as component-level code: its locals became variables
+// of the component and its calls were attributed to no function. Each shape
+// here is one Lucee's own test suite writes — a value that is a literal, a
+// quoted string, missing, a bare call, or a call inside a string.
+func TestFunctionAttributesAfterTheParameterList(t *testing.T) {
+	pr := ParseWithOptions(testURI, trailingAttrsSrc, &ParseOptions{ExtractCalls: true})
+
+	// The parse records scopes, and FindFuncScopes — behind ParseVars, which
+	// go-to-definition on a variable reads — finds them again for itself.
+	// Both must see every function whole.
+	assertTrailingAttrScopes(t, "Parse", pr.Scopes)
+	assertTrailingAttrScopes(t, "FindFuncScopes", FindFuncScopes(trailingAttrsSrc))
+
+	for _, v := range ParseVars(trailingAttrsSrc) {
+		if v.Name == "inner" && v.FuncStart != 1 {
+			t.Errorf("ParseVars: inner declared in the function starting at %d, want 1", v.FuncStart)
+		}
+	}
+
+	if vv := pr.VariablesVars(); len(vv) != 0 {
+		t.Errorf("function locals leaked into variables scope: %v", vv)
+	}
+
+	var timeSpans int
+
+	for _, c := range pr.AllCalls() {
+		switch c.FuncName {
+		case "run":
+			if c.Caller != "modeless" {
+				t.Errorf("svc.run() attributed to %q, want modeless", c.Caller)
+			}
+		case "createTimeSpan":
+			timeSpans++
+		}
+	}
+
+	// A value is an expression: reading past it must not lose the call in it.
+	if timeSpans != 2 {
+		t.Errorf("got %d createTimeSpan calls, want 2 (a bare one and one in a string)", timeSpans)
+	}
+}
+
+func assertTrailingAttrScopes(t *testing.T, from string, scopes []FuncScope) {
+	t.Helper()
+
+	want := map[string][2]int{
+		"modeless":     {1, 4},
+		"rest":         {6, 8},
+		"marked":       {10, 12},
+		"cached":       {14, 16},
+		"cachedString": {18, 20},
+		"plain":        {22, 24},
+	}
+
+	for _, sc := range scopes {
+		w, ok := want[sc.Name]
+		if !ok {
+			t.Errorf("%s: unexpected scope %q", from, sc.Name)
+
+			continue
+		}
+
+		if sc.Start != w[0] || sc.End != w[1] {
+			t.Errorf("%s: scope %s is %d-%d, want %d-%d", from, sc.Name, sc.Start, sc.End, w[0], w[1])
+		}
+
+		delete(want, sc.Name)
+	}
+
+	for name := range want {
+		t.Errorf("%s: no scope for %s", from, name)
+	}
+}
+
+// Skipping attributes is only for a named declaration. After an arrow
+// function's parameters comes an expression, and consuming an identifier
+// there would take the receiver off the call and record a bare get().
+func TestArrowFunctionBodyKeepsItsReceiver(t *testing.T) {
+	src := "component {\n\tvariables.x = (a) => svc.get(a);\n}\n"
+	pr := ParseWithOptions(testURI, src, &ParseOptions{ExtractCalls: true})
+
+	for _, c := range pr.AllCalls() {
+		if c.FuncName == "get" && c.Variable != "svc" {
+			t.Errorf("get() recorded with receiver %q, want svc", c.Variable)
+		}
+	}
+}

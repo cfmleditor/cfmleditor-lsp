@@ -47,7 +47,8 @@ Four things in that table need reading correctly:
   line early (363). The parser folds the comment's own lines. A few dozen real
   differences remain, the largest a `/** */` above a tag-syntax `<cfinterface>`
   (2 files), which a tag region does not look for.
-- **The 776 missing functions are a parser bug, not a folding gap.** See §2.1.
+- **The 776 missing functions were a parser bug, not a folding gap.** See
+  §2.1; 8 remain.
 - **"Other" is noise worth leaving**: multi-line `<cfset>`, `<cfsavecontent>`
   bodies, destructuring patterns, `static { }` initialisers.
 
@@ -56,28 +57,46 @@ Four things in that table need reading correctly:
 Ordered by what each step is worth against what it costs. Each is a separate
 change with its own corpus comparison (§4).
 
-### 2.1 Fix the scope of a function with trailing attributes — a parser bug
+### 2.1 Fix the scope of a function with trailing attributes — done
 
 ```cfml
 public void function testAbort() localmode=true skip=true {
 remote function getName() restPath="name" httpMethod="GET" {
+private function cached(id) cachedwithin=createTimeSpan(0,1,0,0) {
 ```
 
-A script function with attributes after its parameter list gets a `FuncScope`
-that **ends on its own first line** (`Start == End`). The `FunctionDef` is
-recorded, so the function still appears in document symbols and the index.
-But everything that maps a line to its enclosing function through `pr.Scopes`
-reads that function's body as *outside* it: `callerAtLine` (behind
-`fillCallers`, which names the caller of every call), `findFuncScope`, and
-`ApplyEdit`'s `funcContaining`, which decides whether an edit is inside a
-function.
+Every reader of a script function declaration expected the `{` straight after
+the `)`. Finding an attribute there, it recorded a scope ending on the
+function's own first line and read the body as component-level code.
+`skipFunctionAttrs` (`cfparser.go`) now steps over the attributes for the parse,
+for `findScriptFuncScopes` (behind `ParseVars`) and for a named nested
+function. The parse reads each value as the expression it is, so the
+`createTimeSpan` in either spelling is still recorded as a call.
 
-739 of the 776 missing function folds are this shape, nearly all in Lucee's
-test suite (`skip=`, `localmode=`, `restPath=`). Fix it in the parser first,
-with a test in `cfparser_test.go` that asserts the scope's end line; the fold
-follows for free. Measure the other consequences on the corpus as well — call
-attribution will change for every call inside such a function — since that is
-the larger effect.
+Measured over the corpus, 241 files changed:
+
+- **Scopes.** Those ending on their own first line went from 728 to 10, and the
+  10 left are genuine one-line functions (`function setUp(){}`).
+- **Variables.** 794 function locals are no longer reported as variables of the
+  component, and none were added.
+- **Callers.** Calls with no caller went from 5,511 to 200, because the calls
+  are now attributed to their function. 22 duplicate calls, recorded once from
+  the function and once from the component-level read, are gone.
+- **`unresolved`.** About 2,100 entries changed, almost all only in their
+  `caller`, and 19 changed in substance. The largest group is TestBox's
+  `runRemote(…) output=true`: its local `var runner = new
+  testbox.system.TestBox(…)` had been filed as a component-wide reference, so
+  every other function's untyped `runner` argument resolved through it.
+- **Folds.** Function folds missing against tree-sitter went from 776 to 8.
+
+Reading these bodies as function bodies exposed two existing gaps, which every
+ordinary function has as well. They are small and separate from this fix:
+
+- `return variables.a.b().c()` records `c` as a bare call with no receiver. The
+  same chain assigned or written as a statement keeps it. 6 corpus entries.
+- `x = variables.f()` on an assignment's right-hand side records `variables` as
+  the receiver object, where a statement `variables.f()` is recorded
+  unqualified. 21 corpus entries.
 
 ### 2.2 A bracket pass over script: blocks, closures, literals, the component body
 

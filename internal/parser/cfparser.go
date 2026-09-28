@@ -228,6 +228,7 @@ func findScriptFuncScopes(src string, baseLine int) []FuncScope {
 		}
 
 		skipToClose(sc, TokLParen, TokRParen)
+		skipFunctionAttrs(sc, nil)
 
 		// Find body end
 		brace := sc.PeekSkipComments()
@@ -288,6 +289,53 @@ func startsFunction(sc *Scanner, tok Token) bool {
 	}
 
 	return false
+}
+
+// skipFunctionAttrs consumes the attributes a script function declaration may
+// carry after its parameter list — `localmode=true`, `skip="true"`,
+// `restPath="x" httpMethod="GET"`, `cachedWithin=createTimeSpan(0,1,0,0)` — so
+// the next token is the body's `{`, or the `;` of an abstract declaration. A
+// value is optional, as in tag syntax.
+//
+// Every reader of a declaration expected the `{` straight after the `)`, and
+// finding an attribute there it recorded a scope ending on the function's own
+// line and read the body as component-level code: its locals became variables
+// of the component and its calls were attributed to no function. Lucee's test
+// suite writes 739 functions this way. It is only for a *named* declaration:
+// after an arrow function's parameters comes an expression, and consuming an
+// identifier there would take the receiver off a call.
+//
+// A value is an expression, and value is called with its first token once
+// that is consumed; it must leave the scanner past the value. That is how the
+// script parser records `createTimeSpan` in either spelling — a bare call, or
+// inside a string's #...# — as the component-level read of the body used to.
+// With value nil, a call's argument list is skipped.
+func skipFunctionAttrs(sc *Scanner, value func(Token)) {
+	for sc.PeekSkipComments().Kind == TokIdent {
+		sc.NextSkipComments()
+
+		if sc.PeekSkipComments().Kind != TokEquals {
+			continue
+		}
+
+		sc.NextSkipComments()
+
+		v := sc.PeekSkipComments()
+		if v.Kind != TokString && v.Kind != TokIdent && v.Kind != TokNumber {
+			continue
+		}
+
+		sc.NextSkipComments()
+
+		switch {
+		case value != nil:
+			value(v)
+		case v.Kind == TokIdent && sc.PeekSkipComments().Kind == TokLParen:
+			sc.NextSkipComments()
+			skipToClose(sc, TokLParen, TokRParen)
+		default:
+		}
+	}
 }
 
 // skipToClose consumes tokens up to the close that balances an open already

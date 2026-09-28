@@ -1041,6 +1041,21 @@ func (p *scriptParser) parseAccessModified(accessTok Token) {
 	}
 }
 
+// skipFunctionAttrs steps over a declaration's attributes (the shared
+// skipFunctionAttrs), reading each value as the expression it is: a string's
+// #...# spans and a bare call are recorded like any other.
+func (p *scriptParser) skipFunctionAttrs() {
+	skipFunctionAttrs(p.sc, func(v Token) {
+		switch {
+		case v.Kind == TokString:
+			p.scanInterpolation(v)
+		case v.Kind == TokIdent && p.sc.PeekSkipComments().Kind == TokLParen:
+			p.recordBareCallAndChain(v)
+		default:
+		}
+	})
+}
+
 func (p *scriptParser) parseFunction(startTok Token, access string, returnType string) {
 	// Capture JSDoc comment that preceded this function
 	docComment := p.sc.LastBlockComment
@@ -1086,6 +1101,8 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	})
 
 	// Process body: set inFunc scope, parse assignments, then clear
+	p.skipFunctionAttrs()
+
 	endLine := p.parseBody(funcLine, args)
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Access: access, ReturnType: returnType, Start: funcLine, End: p.baseLine + endLine})
 }
@@ -2426,6 +2443,8 @@ func (p *scriptParser) skipNestedFunction(tok Token, _ int) {
 		Line:      conv.Uint32(funcLine),
 		Arguments: args,
 	})
+
+	p.skipFunctionAttrs()
 
 	endLine := p.scanNestedFunctionBody()
 	p.scopes = append(p.scopes, FuncScope{Name: nameTok.Value, Start: funcLine, End: p.baseLine + endLine})

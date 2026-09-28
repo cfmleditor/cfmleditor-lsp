@@ -422,6 +422,18 @@ the *formatter*, not the parser.
   **The call axis could not see this**: the calls were already recorded at the
   right lines under the wrong function, so `make gapcheck` agreed. Asking the
   grammar which *names* it declares found it in one run.
+- **A script function may carry attributes after its parameter list**
+  (`localmode=true`, `restPath="x"`, a bare `cbMethod`,
+  `cachedwithin=createTimeSpan(0,1,0,0)`). Every reader of a declaration
+  expected the `{` right after the `)`, so such a function got a scope ending
+  on its own line and its body was read as component-level code: 728 functions
+  in the corpus, and 794 of their locals reported as variables of the
+  component. `skipFunctionAttrs` steps over them in the parse,
+  `findScriptFuncScopes` and a named nested function, and the parse reads each
+  value as an expression so a call in one is still recorded. It is **only for a
+  named declaration**: after an arrow function's parameters comes an
+  expression, and consuming an identifier there takes the receiver off a call —
+  `TestArrowFunctionBodyKeepsItsReceiver` fails if it moves into `parseBody`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
