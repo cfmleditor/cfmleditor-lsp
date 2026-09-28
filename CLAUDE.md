@@ -333,7 +333,30 @@ the *formatter*, not the parser.
   groups are "this component" and "anything else", which is not a question the
   enum answers — `request`, `session` and `application` used to be dispatched
   as `ScopeVariables`, and testing the enum put every one of them in the first
-  group.
+  group. **`scopeReceiver` is that rule, and every path that records such a call
+  goes through it**: the statement, a `return`, an assignment's right-hand side
+  (`recordCallFromChain`), an argument list (`checkBareCall`, and
+  `scanNestedCall` lets a scope word past its keyword guard) and the hops chained
+  on (`recordChainContinuation`). Each of those had kept the scope as the
+  receiver, so `x = variables.f()` reported "variable 'variables' has no
+  component ref" where the statement resolved.
+- **A `return` records what its expression records as a statement**
+  (`returnCall`). It had a chain walk of its own that recorded the first call and
+  left the rest to the outer loop, which met `.b()` with nothing before it and
+  recorded a bare `b` — and read a named argument, `return f( a = 1 )`, as an
+  assignment: 1,081 phantom variables over the corpus. It reaches only the walkers
+  that record calls, never the statement dispatch, because `==` is two `=` tokens
+  and `return x == 1` read as a statement is the assignment `x = …`;
+  `TestReturnOfAComparisonDeclaresNothing` fails if it is routed there.
+  `TestReturnRecordsWhatTheStatementRecords` holds the statement, the `return`
+  and the assignment forms of each chain shape to the same calls.
+- **A call chained onto a bare call is made on what that call returns**, so the
+  call goes into the hop's chain: `f().g()` records `g` with Chain `[f]`, which
+  resolution walks through `f`'s declared return type. `recordBareCallAndChain`
+  left it out unless a resolver had named `f`'s component, and a `g` with no
+  receiver and no chain is indistinguishable from a bare call to a function named
+  g. 26,014 hops over the corpus. `super::m()` is `super.m()`, not a static call
+  on a component named super.
 - **A bracket index is an expression, and `skipBracketIndex` mirrored the *old*
   `skipParens`** — it discarded its group a token at a time. `sorted[ sorted.len() ]`
   and `arr[ f() ]` recorded nothing at all, and `g( arr[ f() ] )` only `g`: the

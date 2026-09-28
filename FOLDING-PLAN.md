@@ -90,13 +90,14 @@ Measured over the corpus, 241 files changed:
 - **Folds.** Function folds missing against tree-sitter went from 776 to 8.
 
 Reading these bodies as function bodies exposed two existing gaps, which every
-ordinary function has as well. They are small and separate from this fix:
+ordinary function had as well, since fixed on their own — CLAUDE.md's parser
+notes have the rules:
 
-- `return variables.a.b().c()` records `c` as a bare call with no receiver. The
-  same chain assigned or written as a statement keeps it. 6 corpus entries.
-- `x = variables.f()` on an assignment's right-hand side records `variables` as
+- `return variables.a.b().c()` recorded `c` as a bare call with no receiver,
+  where the same chain assigned or written as a statement kept it.
+- `x = variables.f()` on an assignment's right-hand side recorded `variables` as
   the receiver object, where a statement `variables.f()` is recorded
-  unqualified. 21 corpus entries.
+  unqualified.
 
 ### 2.2 A bracket pass over script — done
 
