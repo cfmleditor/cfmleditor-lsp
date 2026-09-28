@@ -1310,7 +1310,14 @@ resolver types a call, `dynamicCall` makes a MockBox mock and an unstubbed Java 
 from both `resolveCall`s, `tryResolveCall` and `resolvePendingCalls` — the chained
 `getMockBox().createEmptyMock()` reaches only the last. A component the parse names by file
 path (a function returning `this`) is reported by `displayComponent` under its file name,
-since reasons land in committed known-issues files.
+since reasons land in committed known-issues files. An engine component — bare `Query`, `http`, `dbinfo` and the
+other script-tag names, or `org.lucee.cfml.*`/`com.adobe.coldfusion.*` — is `engineComponent`:
+once nothing configured resolves it, `engineSource` looks for an indexed file ending in its
+path (a Lucee checkout's `org/lucee/cfml/`), and without one `canResolveCall` accepts calls
+on it as dynamic. It never falls to the file-name search, which answered `new dbinfo()` with
+whatever `dbinfo.cfc` the workspace held. Lucee functions its docs omit (hidden ones, like
+`struct()`) are `docs.undocumentedFunctions`, behind `docs.IsBuiltinFunction` — the one
+builtin test `unresolved` and the code map share.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

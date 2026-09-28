@@ -762,11 +762,7 @@ func resolveInclude(opts *Options, cfg *FileConfig, raw, baseDir string) string 
 }
 
 func isBuiltin(name string) bool {
-	if _, ok := docs.LookupFunction(name); ok {
-		return true
-	}
-
-	if docs.IsTagFunction(name) {
+	if docs.IsBuiltinFunction(name) {
 		return true
 	}
 
