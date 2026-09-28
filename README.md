@@ -488,13 +488,31 @@ without saying so. `"frameworks": ["coldbox"]` teaches the LSP both:
 | A `.cfc` under `handlers/` or `interceptors/`, `config/Router.cfc`, `config/Scheduler.cfc` that names no `extends` | An `EventHandler`, `Interceptor`, `Router` or `ColdBoxScheduler`, so a bare `getInstance()` or `route()` is found on the base |
 | A `.cfm` under `views/` or `layouts/` | Rendered by the `Renderer`, so a bare `view()` or `announce()` is found there |
 
-With ColdBox's source in the workspace (a `coldbox` mapping, or a checkout of
-it), calls are checked against its real methods. Without it they are accepted
-as dynamic, rather than reported against components that are not on disk.
-Everything a preset adds can be overridden: your own `componentResolvers` come
-first, and a file that names its `extends` keeps it. A child config's
-`frameworks` adds to its parent's. On ContentBox and coldbox-platform the
-preset takes the `unresolved` report down by 47%.
+The other presets, named alongside it as a project uses them:
+
+| Preset | Adds |
+|---|---|
+| `testbox` | `$assert`/`assert`, `mockbox`, `testbox`, a reporter's `results`; what `getMockBox()`, `expect()` and `expectAll()` return |
+| `commandbox` | `print` (the print buffer); what `command()` returns; a `.cfc` under `commands/` is a `BaseCommand`, and `task.cfc` or a `.cfc` under `build/` a `BaseTask` |
+| `cfmigrations` | a migration's `schema`, `qb`/`query`, and the `table` a schema callback is handed, as qb's builders. Common names, so name it only where cfmigrations is used |
+| `contentbox` | the `cb` helper; `prc.oCurrentAuthor`, `prc.oCurrentSite`, and `prc.oContent` as any kind of content. Use with `coldbox` |
+| `wheels` | `application.wo`; a view or layout runs inside its controller, with every view and controller mixin Wheels integrates, so `linkTo()` and `startFormTag()` are found |
+| `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found |
+
+With a framework's source in the workspace (a mapping, or a checkout of it),
+calls are checked against its real methods. Without it they are accepted as
+dynamic, rather than reported against components that are not on disk — and
+so are calls a file inherits through a base the preset implies, however far up
+the chain it breaks. Everything a preset adds can be overridden: your own
+`componentResolvers` come first, and a file that names its `extends` keeps it.
+A child config's `frameworks` adds to its parent's, and an unknown name is
+warned about. Over the six-project corpus, each project naming the frameworks
+it uses, the `unresolved` report goes from 23,560 entries to 14,126.
+
+One case is not covered: in tag syntax, `<cfset x = event.getValue( "a" )>`
+types `x` as the request context. The tag parser's bare-name fallback types an
+assignment from a call on a resolved variable as that variable's component,
+which some projects rely on for their own resolvers.
 
 ### Component resolvers
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -26,7 +27,7 @@ type frameworkPreset struct {
 // and a view is rendered from inside the Renderer, so a bare view() or
 // getInstance() in either is the framework's.
 type implicitBase struct {
-	dir       string // a directory of the file's path, at any depth
+	dir       string // a directory of the file's path, at any depth; "" for any
 	file      string // the file's name, when the rule is for one file
 	ext       string // ".cfc" or ".cfm"
 	component string
@@ -39,7 +40,7 @@ func variableResolver(component string, names ...string) Resolver {
 	prefixes := make([]string, 0, len(names)*3)
 
 	for _, n := range names {
-		alts = append(alts, strings.ReplaceAll(n, ".", `\.`))
+		alts = append(alts, regexp.QuoteMeta(n))
 		prefixes = append(prefixes, n, "variables."+n, "arguments."+n)
 	}
 
@@ -66,7 +67,27 @@ func returnResolver(component string, names ...string) []Resolver {
 	return out
 }
 
-const coldboxSystem = "coldbox.system."
+const (
+	coldboxSystem    = "coldbox.system."
+	testboxSystem    = "testbox.system."
+	commandboxSystem = "commandbox.system."
+	qbModels         = "qb.models."
+	contentboxModels = "contentbox.models."
+)
+
+// wheelsView is what a Wheels view runs inside: the controller rendering it,
+// which integrates every component of wheels.view and wheels.controller when
+// it starts. No one component declares linkTo(), so the base is the
+// controller and the mixins a view calls, tried in turn.
+var wheelsView = strings.Join([]string{
+	"wheels.Controller",
+	"wheels.view.links", "wheels.view.forms", "wheels.view.formsobject",
+	"wheels.view.formsplain", "wheels.view.formsassociation", "wheels.view.formsdate",
+	"wheels.view.formsdateobject", "wheels.view.formsdateplain", "wheels.view.miscellaneous",
+	"wheels.view.assets", "wheels.view.csrf", "wheels.view.errors", "wheels.view.pagination",
+	"wheels.view.sanitize",
+	"wheels.controller.rendering", "wheels.controller.flash", "wheels.controller.miscellaneous",
+}, "|")
 
 var frameworkPresets = map[string]frameworkPreset{
 	// ColdBox: what FrameworkSupertype injects (controller, log, wirebox,
@@ -107,6 +128,9 @@ var frameworkPresets = map[string]frameworkPreset{
 			returnResolver(coldboxSystem+"core.conversion.DataMarshaller", "getDataMarshaller"),
 			returnResolver(coldboxSystem+"web.context.Response", "getResponse"),
 			returnResolver(coldboxSystem+"core.util.Util", "getUtil"),
+			// Declared, but as a bare word, which the resolver does not take
+			// for a component: ColdBoxScheduledTask function task( name ).
+			returnResolver(coldboxSystem+"web.tasks.ColdBoxScheduledTask", "task"),
 		),
 		bases: []implicitBase{
 			{dir: "handlers", ext: ".cfc", component: coldboxSystem + "EventHandler"},
@@ -115,6 +139,93 @@ var frameworkPresets = map[string]frameworkPreset{
 			{dir: "config", file: "Scheduler.cfc", ext: ".cfc", component: coldboxSystem + "web.tasks.ColdBoxScheduler"},
 			{dir: "views", ext: ".cfm", component: coldboxSystem + "web.Renderer"},
 			{dir: "layouts", ext: ".cfm", component: coldboxSystem + "web.Renderer"},
+		},
+	},
+
+	// TestBox: the assertion and MockBox objects a spec is handed, a
+	// reporter's results and runner, and what the spec DSL returns. Specs
+	// extend BaseSpec themselves, so there is no implied base.
+	"testbox": {
+		resolvers: slices.Concat(
+			[]Resolver{
+				variableResolver(testboxSystem+"Assertion", "assert", "$assert", "assertions"),
+				variableResolver(testboxSystem+"MockBox", "mockbox", "$mockbox"),
+				variableResolver(testboxSystem+"TestBox", "testbox"),
+				variableResolver(testboxSystem+"TestResult", "results", "testResults"),
+			},
+			returnResolver(testboxSystem+"MockBox", "getMockBox"),
+			returnResolver(testboxSystem+"Expectation", "expect"),
+			returnResolver(testboxSystem+"CollectionExpectation", "expectAll"),
+		),
+	},
+
+	// CommandBox: the print buffer every command and task writes to, and the
+	// DSL command() returns — not task()'s: a ColdBox scheduler's task() is a
+	// different thing by the same name. A .cfc under commands/ is a command, and
+	// task.cfc, or a .cfc under build/, a task runner.
+	"commandbox": {
+		resolvers: slices.Concat(
+			[]Resolver{
+				variableResolver(commandboxSystem+"util.PrintBuffer", "print"),
+			},
+			returnResolver(commandboxSystem+"util.CommandDSL", "command"),
+			returnResolver(commandboxSystem+"util.PrintBuffer", "getPrint"),
+		),
+		bases: []implicitBase{
+			{dir: "commands", ext: ".cfc", component: commandboxSystem + "BaseCommand"},
+			{file: "task.cfc", ext: ".cfc", component: commandboxSystem + "BaseTask"},
+			{dir: "build", ext: ".cfc", component: commandboxSystem + "BaseTask"},
+		},
+	},
+
+	// cfmigrations, and the qb it builds on: a migration's up( schema, qb ) —
+	// or ( schema, query ) — and the table a schema.create() callback is
+	// handed. These are common names, which is why they are a preset and not a
+	// default: name it only in a project that uses cfmigrations.
+	"cfmigrations": {
+		resolvers: []Resolver{
+			variableResolver(qbModels+"Schema.SchemaBuilder", "schema"),
+			variableResolver(qbModels+"Schema.Blueprint", "table"),
+			variableResolver(qbModels+"Query.QueryBuilder", "qb", "query"),
+		},
+	},
+
+	// ContentBox, on top of the coldbox preset: the CB helper its themes and
+	// views call, and what its request interceptors put in prc.
+	"contentbox": {
+		resolvers: []Resolver{
+			variableResolver(contentboxModels+"system.CBHelper", "cb"),
+			variableResolver(contentboxModels+"security.Author", "prc.oCurrentAuthor", "prc.oAuthor"),
+			variableResolver(contentboxModels+"system.Site", "prc.oCurrentSite", "prc.oSite"),
+			// Whichever kind of content the request is about: a method only a
+			// page has, hasParent(), is not missing from an entry's content.
+			variableResolver(contentboxModels+"content.BaseContent|"+contentboxModels+"content.Entry|"+
+				contentboxModels+"content.Page|"+contentboxModels+"content.ContentStore", "prc.oContent"),
+		},
+	},
+
+	// Wheels 3: the global object in application scope, and a view rendered by
+	// its controller, mixins included.
+	"wheels": {
+		resolvers: []Resolver{
+			variableResolver("wheels.Global", "application.wo"),
+		},
+		bases: []implicitBase{
+			{dir: "views", ext: ".cfm", component: wheelsView},
+			{dir: "layouts", ext: ".cfm", component: wheelsView},
+		},
+	},
+
+	// FW/1: the framework object controllers are handed, its bean factory, and
+	// views and layouts, which framework.one includes.
+	"fw1": {
+		resolvers: []Resolver{
+			variableResolver("framework.one", "fw", "framework"),
+			variableResolver("framework.ioc", "beanFactory"),
+		},
+		bases: []implicitBase{
+			{dir: "views", ext: ".cfm", component: "framework.one"},
+			{dir: "layouts", ext: ".cfm", component: "framework.one"},
 		},
 	},
 }
@@ -181,7 +292,7 @@ func ImplicitExtends(frameworks []string) func(path string) string {
 
 		for _, dir := range slices.Backward(dirs) {
 			for _, b := range bases {
-				if b.ext == ext && strings.EqualFold(b.dir, dir) && (b.file == "" || strings.EqualFold(b.file, name)) {
+				if b.ext == ext && (b.dir == "" || strings.EqualFold(b.dir, dir)) && (b.file == "" || strings.EqualFold(b.file, name)) {
 					return b.component
 				}
 			}

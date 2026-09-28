@@ -1325,10 +1325,17 @@ builtin test `unresolved` and the code map share.
 **Framework presets** (`frameworks`, `internal/config/frameworks.go`) are data, not code
 paths: a list of resolvers and implicit bases per framework, so a preset can only say what a
 project could have written by hand. Three rules hold them together, each with a test:
-- **Every preset resolver is `dynamicIfMissing`**, and an implied base that does not resolve
-  is dynamic too (`impliedBase`), so an app without the framework checked out gets nothing
-  reported against components that are not on disk, while one with it is checked for real.
-  A base the file names itself is still reported when it breaks.
+- **Every preset resolver is `dynamicIfMissing`**, and a chain that breaks after passing
+  through an implied link is dynamic too, so an app without the framework checked out gets
+  nothing reported against components that are not on disk, while one with it is checked
+  for real. `chainBreak` is the one walk behind it: it names the first link that does not
+  resolve and whether any link up to it was implied — the file's own base, a base class that
+  names none (`handlers/Base.cfc`), or the base of a component a call is made on
+  (`componentMissingBase`). A chain every file wrote is still reported where it breaks. An
+  implied base may be a list of alternatives (a Wheels view is its controller and every
+  mixin); `MissingBase` answers nothing for a list, so `chainBreak` checks each alternative
+  of an implied one. The bare-chain walk carries a `dynamicIfMissing` return type's flag
+  too (`resolveBareChain`), which it used to drop.
 - **Variables match whole names**, anchored and escaped (`variableResolver`): unanchored,
   prefix `event` finds itself inside `oEvent`. Return types are unanchored on purpose
   (`returnResolver`), so `x = variables.controller.getRequestContext()` types `x`; the match
@@ -1338,6 +1345,14 @@ project could have written by hand. Three rules hold them together, each with a 
   pulls in tree-sitter). Every read of a file's extends in `resolve.go` goes through
   `fileExtends`/`extendsFor`, memoised per path; the deepest matching directory wins. Each of
   the seven places that builds a `Resolver` sets the hook from its config.
+- **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
+  `task()` return different things, so CommandBox's preset leaves `task()` alone.
+  `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.
+- **Known limit:** the tag parser's bare-name fallback (`resolveRHS`) types
+  `<cfset x = event.getValue()>` as `event`'s component. It is deliberate for a project's
+  own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`), so a preset
+  resolver takes part in it too; a flag to exclude one would need threading through every
+  config-to-parser resolver conversion.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

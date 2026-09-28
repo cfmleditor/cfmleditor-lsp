@@ -103,11 +103,56 @@ func TestFrameworksMergeAndOrder(t *testing.T) {
 }
 
 func TestUnknownFrameworks(t *testing.T) {
-	if got := UnknownFrameworks([]string{"ColdBox", "coldbx", "wheels"}); !slices.Equal(got, []string{"coldbx", "wheels"}) {
+	if got := UnknownFrameworks([]string{"ColdBox", "coldbx", "rails"}); !slices.Equal(got, []string{"coldbx", "rails"}) {
 		t.Errorf("UnknownFrameworks = %v", got)
 	}
 
 	if !slices.Contains(KnownFrameworks(), "coldbox") {
 		t.Errorf("KnownFrameworks = %v", KnownFrameworks())
+	}
+}
+
+// TestEveryPresetResolverMatchesItsOwnNames: a name is taken literally — the
+// $ in TestBox's $assert is a character, not an end-of-line anchor, and the
+// dots in prc.oCurrentAuthor are dots — so each preset's variables resolve to
+// what it says, and a near miss resolves to nothing.
+func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
+	for _, tc := range []struct{ framework, expr, want string }{
+		{"testbox", "$assert", "testbox.system.Assertion"},
+		{"testbox", "variables.assert", "testbox.system.Assertion"},
+		{"testbox", "getMockBox()", "testbox.system.MockBox"},
+		{"commandbox", "print", "commandbox.system.util.PrintBuffer"},
+		{"commandbox", "command()", "commandbox.system.util.CommandDSL"},
+		{"commandbox", "task()", ""}, // a ColdBox scheduler's task() is not CommandBox's
+		{"coldbox", "task()", "coldbox.system.web.tasks.ColdBoxScheduledTask"},
+		{"contentbox", "prc.oContent", "contentbox.models.content.BaseContent|contentbox.models.content.Entry|contentbox.models.content.Page|contentbox.models.content.ContentStore"},
+		{"cfmigrations", "table", "qb.models.Schema.Blueprint"},
+		{"cfmigrations", "arguments.qb", "qb.models.Query.QueryBuilder"},
+		{"contentbox", "prc.oCurrentAuthor", "contentbox.models.security.Author"},
+		{"contentbox", "prcXoCurrentAuthor", ""},
+		{"wheels", "application.wo", "wheels.Global"},
+		{"fw1", "variables.fw", "framework.one"},
+	} {
+		var rs []parser.Resolver
+		for _, r := range FrameworkResolvers([]string{tc.framework}) {
+			rs = append(rs, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, Anchored: r.Anchored})
+		}
+
+		if got, _ := parser.ResolveFromCallFull(tc.expr, rs); got != tc.want {
+			t.Errorf("%s %s: %q, want %q", tc.framework, tc.expr, got, tc.want)
+		}
+	}
+
+	implicit := ImplicitExtends([]string{"commandbox", "fw1"})
+	for path, want := range map[string]string{
+		"/p/task.cfc":                     "commandbox.system.BaseTask",
+		"/p/deep/in/tree/Task.cfc":        "commandbox.system.BaseTask",
+		"/p/commands/wheels/Generate.cfc": "commandbox.system.BaseCommand",
+		"/p/views/main/default.cfm":       "framework.one",
+		"/p/models/task.cfm":              "",
+	} {
+		if got := implicit(path); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
 	}
 }
