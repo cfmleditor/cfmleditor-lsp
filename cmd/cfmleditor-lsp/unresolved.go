@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
@@ -129,6 +130,10 @@ func cmdUnresolved(args []string) {
 		for _, b := range bases {
 			fmt.Fprintf(os.Stderr, "  %-50s %5d files %7d calls\n", b.Component, b.Files, b.Calls)
 		}
+	}
+
+	if hint := presetHint(cfg, searchDir); hint != "" {
+		fmt.Fprintf(os.Stderr, "\n%s\n", hint)
 	}
 
 	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
@@ -308,4 +313,35 @@ func skipDir(name string) bool {
 	default:
 		return false
 	}
+}
+
+// presetHint suggests the framework presets the project's box.json implies
+// and its config does not name — how a project finds out a preset exists.
+// It reads box.json beside the config, or in the scanned directory without one.
+func presetHint(cfg *daemon.Config, searchDir string) string {
+	dir, have := searchDir, []string(nil)
+	if cfg != nil {
+		dir, have = filepath.Dir(cfg.Path), cfg.Frameworks()
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "box.json"))
+	if err != nil {
+		return ""
+	}
+
+	suggest := config.SuggestFrameworks(data, have)
+	if len(suggest) == 0 {
+		return ""
+	}
+
+	all := slices.Concat(have, suggest)
+
+	where := "a .cfmleditor.json"
+	if cfg != nil {
+		where = cfg.Path
+	}
+
+	return fmt.Sprintf("box.json names %s, which have framework presets: add `\"frameworks\": [\"%s\"]` to %s\n"+
+		"so the values those frameworks hand your code are typed rather than reported.",
+		strings.Join(suggest, ", "), strings.Join(all, `", "`), where)
 }

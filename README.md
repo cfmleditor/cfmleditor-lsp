@@ -507,7 +507,10 @@ so are calls a file inherits through a base the preset implies, however far up
 the chain it breaks. Everything a preset adds can be overridden: your own
 `componentResolvers` come first, and a file that names its `extends` keeps it.
 A child config's `frameworks` adds to its parent's, and an unknown name is
-warned about. Over the six-project corpus, each project naming the frameworks
+warned about. When the `box.json` beside the config depends on a framework
+with a preset the config does not name (`coldbox`, `testbox`,
+`commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
+and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
 it uses, the `unresolved` report goes from 23,560 entries to 14,126.
 
 One case is not covered: in tag syntax, `<cfset x = event.getValue( "a" )>`

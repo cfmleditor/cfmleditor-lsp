@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -300,4 +302,54 @@ func ImplicitExtends(frameworks []string) func(path string) string {
 
 		return ""
 	}
+}
+
+// boxDependencyPresets maps a box.json dependency, or a package's own slug,
+// to the preset it implies. Only names that say which framework the code is
+// written against: a commandbox-cfformat dev dependency says nothing about
+// whether the project has commands or task runners, so commandbox is not here.
+var boxDependencyPresets = map[string]string{
+	"coldbox":               "coldbox",
+	"testbox":               "testbox",
+	"cfmigrations":          "cfmigrations",
+	"commandbox-migrations": "cfmigrations",
+	"contentbox":            "contentbox",
+	"wheels-core":           "wheels",
+	"cfwheels":              "wheels",
+	"wheels":                "wheels",
+	"fw1":                   "fw1",
+}
+
+// SuggestFrameworks names the presets a box.json implies that frameworks
+// does not already list, sorted: what `unresolved` suggests and the server
+// logs, so a project that would benefit from a preset hears about it. Nothing
+// is turned on by it — a preset types variables by name, which is a project's
+// call to make. Unreadable JSON suggests nothing.
+func SuggestFrameworks(boxJSON []byte, frameworks []string) []string {
+	var box struct {
+		Slug            string            `json:"slug"`
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+
+	if json.Unmarshal(boxJSON, &box) != nil {
+		return nil
+	}
+
+	names := slices.Concat([]string{box.Slug}, slices.Collect(maps.Keys(box.Dependencies)), slices.Collect(maps.Keys(box.DevDependencies)))
+
+	var out []string
+
+	for _, n := range names {
+		p, ok := boxDependencyPresets[strings.ToLower(n)]
+		if !ok || slices.Contains(out, p) || slices.ContainsFunc(frameworks, func(f string) bool { return strings.EqualFold(f, p) }) {
+			continue
+		}
+
+		out = append(out, p)
+	}
+
+	slices.Sort(out)
+
+	return out
 }

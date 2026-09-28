@@ -156,3 +156,27 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		}
 	}
 }
+
+// TestSuggestFrameworksFromBoxJSON: a project finds out a preset exists from
+// its own box.json — a dependency, a dev dependency or the package's own slug
+// (coldbox-platform is the package named coldbox) — minus the presets the
+// config already names. A dependency that says nothing about the framework
+// the code is written against suggests nothing.
+func TestSuggestFrameworksFromBoxJSON(t *testing.T) {
+	for _, tc := range []struct {
+		box  string
+		have []string
+		want []string
+	}{
+		{`{"dependencies":{"coldbox":"^7"},"devDependencies":{"testbox":"*","commandbox-migrations":"*"}}`, nil, []string{"cfmigrations", "coldbox", "testbox"}},
+		{`{"slug":"coldbox","devDependencies":{"testbox":"*"}}`, []string{"ColdBox"}, []string{"testbox"}},
+		{`{"dependencies":{"wheels-core":"^3"}}`, nil, []string{"wheels"}},
+		{`{"slug":"fw1"}`, nil, []string{"fw1"}},
+		{`{"devDependencies":{"commandbox-cfformat":"*","cbproxies":"*"}}`, nil, nil},
+		{`not json`, nil, nil},
+	} {
+		if got := SuggestFrameworks([]byte(tc.box), tc.have); !slices.Equal(got, tc.want) {
+			t.Errorf("%s with %v: %v, want %v", tc.box, tc.have, got, tc.want)
+		}
+	}
+}

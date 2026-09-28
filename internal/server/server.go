@@ -441,6 +441,8 @@ func (s *Server) getResolver() *resolve.Resolver {
 				cflog.Strings("unknown", unknown), cflog.Strings("known", config.KnownFrameworks()))
 		}
 
+		s.logPresetSuggestion()
+
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
 			WorkspaceFolders:   s.searchRoots(),
@@ -454,6 +456,26 @@ func (s *Server) getResolver() *resolve.Resolver {
 	}
 
 	return s.resolver
+}
+
+// logPresetSuggestion logs the framework presets the box.json beside the
+// config implies and the config does not name, as `unresolved` suggests them.
+// A log line rather than a message: it is advice, and it would otherwise
+// interrupt every start of a project that has decided against a preset.
+func (s *Server) logPresetSuggestion() {
+	if s.ConfigPath == "" || s.FS == nil {
+		return
+	}
+
+	data, err := s.FS.ReadFile(filepath.Join(filepath.Dir(s.ConfigPath), "box.json"))
+	if err != nil {
+		return
+	}
+
+	if suggest := config.SuggestFrameworks(data, s.Frameworks); len(suggest) > 0 {
+		s.log.Info("box.json names frameworks with presets the config does not use; add them to \"frameworks\" to type what they provide",
+			cflog.Strings("suggest", suggest))
+	}
 }
 
 // invalidateResolver drops the resolver and both cached resolver forms, so the
