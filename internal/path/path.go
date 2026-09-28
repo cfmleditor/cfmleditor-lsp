@@ -340,6 +340,18 @@ func resolveSegmentsCached(baseDir string, segments []string, cache *DirCache) s
 	return dir
 }
 
+// ResolveFrom resolves a path written in a config file: an absolute path is
+// kept as it is, and a relative one is taken from baseDir. Joining an absolute
+// path onto baseDir unconditionally puts it under baseDir, where it names
+// nothing.
+func ResolveFrom(baseDir, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(baseDir, p)
+}
+
 // ResolveMappings resolves relative paths in a map to absolute using baseDir.
 func ResolveMappings(raw map[string]string, baseDir string) map[string]string {
 	if len(raw) == 0 {
@@ -349,11 +361,7 @@ func ResolveMappings(raw map[string]string, baseDir string) map[string]string {
 	out := make(map[string]string, len(raw))
 
 	for k, v := range raw {
-		if filepath.IsAbs(v) {
-			out[k] = v
-		} else {
-			out[k] = filepath.Join(baseDir, v)
-		}
+		out[k] = ResolveFrom(baseDir, v)
 	}
 
 	return out
