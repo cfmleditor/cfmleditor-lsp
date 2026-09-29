@@ -195,10 +195,13 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 <cfset REQUEST.ui = REQUEST.kernel.getTools().getUI(
 	companyCode=REQUEST.user.code
 	, path="a(b)"
-	, symbol=REQUEST.kernel.getInit().getSymbol()) />`,
+	, symbol=REQUEST.kernel.getInit().getSymbol()) />
+<cfset REQUEST.ui2 = REQUEST.kernel.getTools().getBareUI()>
+<cfset REQUEST.raw = REQUEST.kernel.getTools().make(type="x")>`,
 		"lib/Kernel.cfc": `<cfcomponent><cffunction name="init"><cfreturn this></cffunction><cffunction name="getTools" returntype="lib.Tools"></cffunction></cfcomponent>`,
 		"lib/Tools.cfc": `<cfcomponent>
 <cffunction name="getUI" returntype="lib.UI"><cfset var r = make(type="ui")><cfreturn r></cffunction>
+<cffunction name="getBareUI" returntype="UI"><cfset var r = make(type="ui")><cfreturn r></cffunction>
 <cffunction name="make" returntype="struct"><cfargument name="type"><cfset var r = createObject("component", "objs.#ARGUMENTS.type#")><cfreturn r></cffunction>
 </cfcomponent>`,
 		"lib/UI.cfc": `<cfcomponent><cffunction name="symbol"></cffunction></cfcomponent>`,
@@ -220,6 +223,9 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 	got := reasonsFor(t, r, filepath.Join(app, "pages", "page.cfm"), `<cfoutput>
 <cfset a = REQUEST.ui.symbol()>
 <cfset b = REQUEST.ui.nope()>
+<cfset c = REQUEST.ui2.symbol()>
+<cfset d = REQUEST.ui2.nope()>
+<cfset e = REQUEST.raw.anything()>
 </cfoutput>`)
 
 	if reason := got["REQUEST.ui.symbol"]; reason != "" {
@@ -228,5 +234,21 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 
 	if reason := got["REQUEST.ui.nope"]; !strings.Contains(reason, "not found") {
 		t.Errorf("REQUEST.ui.nope() should be reported as missing from lib.UI, got %q", reason)
+	}
+
+	// A bare-word return type naming a component beside the declaring file
+	// outranks the inferred $any exactly as a dotted one does.
+	if reason := got["REQUEST.ui2.symbol"]; reason != "" {
+		t.Errorf("REQUEST.ui2.symbol() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.ui2.nope"]; !strings.Contains(reason, "not found") {
+		t.Errorf("REQUEST.ui2.nope() should be reported as missing, got %q", reason)
+	}
+
+	// A CFML type name is not a component: make() is returntype="struct" over
+	// a runtime createObject, so it stays dynamic rather than becoming "struct".
+	if reason := got["REQUEST.raw.anything"]; reason != "" {
+		t.Errorf("REQUEST.raw.anything() should stay dynamic, got %q", reason)
 	}
 }

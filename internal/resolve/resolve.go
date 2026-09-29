@@ -1579,20 +1579,27 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // function returns asks this, so a chain hop and a variable assigned from the
 // same call cannot disagree.
 //
-// An inferred `$any` does not outrank a declared component. It means the body
+// An inferred `$any` does not outrank a declared component, dotted or a bare
+// word naming one beside the declaring file. It means the body
 // builds its result from a runtime expression (`getCustomObject(type="tassui")`
 // goes through `createObject("component", "customobjects.#type#")`), while
 // `returntype="pkg.tassui"` is a contract the engine enforces. Any other
 // inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
-	switch {
-	case fd.ReturnComponent != "" && (fd.ReturnComponent != "$any" || !strings.Contains(fd.ReturnType, ".")):
+	if fd.ReturnComponent != "" && fd.ReturnComponent != "$any" {
 		return fd.ReturnComponent
-	case strings.Contains(fd.ReturnType, "."):
-		return fd.ReturnType
 	}
 
-	return r.bareReturnComponent(fd)
+	declared := fd.ReturnType
+	if !strings.Contains(declared, ".") {
+		declared = r.bareReturnComponent(fd)
+	}
+
+	if declared == "" {
+		return fd.ReturnComponent
+	}
+
+	return declared
 }
 
 // FuncLookup is the parser's hook for what a method of a component returns,
