@@ -9,6 +9,11 @@
 - **An `Application.cfc` mapping written `getDirectoryFromPath(getCurrentTemplatePath())` is read.** `this.mappings["/myapp"] = getDirectoryFromPath(getCurrentTemplatePath())`, the usual way to say "this folder", was ignored: only `expandPath("…")` and a plain string were understood. It maps to the `Application.cfc`'s folder, or to a folder under it with `& "sub/dir"` appended.
 - **A declared component return type, dotted or a bare word, outranks an inferred `$any`.** `getTassUI` declares `returntype="…customobjects.tassui"` but builds its result through `createObject("component", "customobjects.#type#")`, so the body inferred `$any` and that beat the declaration. The engine enforces a declared type; an inferred `$any` only says the path is computed. Any other inferred component is still kept over the declared one.
 
+### Changed
+
+- Bumped `tree-sitter-cfml` grammar to v0.26.43
+- Bumped `modernc.org/sqlite` to v1.60.1 (with `modernc.org/libc` v1.77.1), `golang.org/x/sys` to v0.48.0, `go-humanize` to v1.1.0 and `go-json-experiment/json`
+
 ## [0.4.0]
 
 ### Fixed
