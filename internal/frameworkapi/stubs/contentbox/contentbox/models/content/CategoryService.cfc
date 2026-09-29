@@ -11,6 +11,7 @@ component extends="cborm.models.VirtualEntityService" {
 	property name="contentService" inject="contentService@contentbox";
 	property name="dateUtil" inject="DateUtil@contentbox";
 	variables.contentService = new contentbox.models.content.ContentService();
+	variables.dateUtil = new contentbox.models.util.DateUtil();
 	/**
 	 * Constructor
 	 */

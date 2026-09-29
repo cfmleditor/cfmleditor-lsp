@@ -12,6 +12,7 @@ component {
 	property name="convert" inject="DataConverter";
 	property name="job" inject="InteractiveJob";
 	variables.print = new commandbox.system.util.PrintBuffer();
+	variables.shell = new commandbox.system.Shell();
 	variables.convert = new commandbox.system.util.DataConverter();
 	variables.job = new commandbox.system.util.InteractiveJob();
 	/**

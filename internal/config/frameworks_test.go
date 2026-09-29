@@ -135,7 +135,7 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		// What WireBox builds is the component its id names; a DSL string
 		// is ColdBox's own class; a computed id, or a call chained on the
 		// result, is left alone.
-		{"coldbox", `getInstance( "UserService@users" )`, "UserService"},
+		{"coldbox", `getInstance( "UserService@users" )`, "UserService@users"},
 		{"coldbox", `wirebox.getInstance( name = "id:models.UserService" )`, "models.UserService"},
 		{"coldbox", `getInstance( "UserService", { a = 1 } )`, "UserService"},
 		{"coldbox", `getInstance( "wirebox:populator" )`, "coldbox.system.core.dynamic.ObjectPopulator"},
@@ -144,6 +144,7 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"coldbox", `getInstance( "UserService" ).init()`, ""},
 		{"coldbox", `Calendar.getInstance()`, ""},
 		{"wheels", `model( "User" )`, "User"},
+		{"fw1", `getBeanFactory().getBean( "userService" )`, "userService"},
 		{"wheels", `model( "User" ).findAll()`, ""},
 	} {
 		var rs []parser.Resolver

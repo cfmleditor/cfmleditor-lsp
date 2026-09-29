@@ -152,6 +152,11 @@ func TestDeferredReparseRunsOnItsOwn(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	// flushReparse clears the flag before it reparses, under the document's
+	// lock; taking that lock waits for the timer's reparse to finish rather
+	// than reading the parse while it is being written.
+	defer srv.lockDocOnly(docURI)()
+
 	srv.mu.RLock()
 	defer srv.mu.RUnlock()
 

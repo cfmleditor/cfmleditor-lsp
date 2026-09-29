@@ -15,6 +15,9 @@ var beanPathRe = regexp.MustCompile(`(?i)this\.beanPaths\[\s*["']([^"']*)["']\s*
 // diLocationsRe matches: variables.framework.diLocations = "path1,path2".
 var diLocationsRe = regexp.MustCompile(`(?i)(?:variables\.)?framework\.diLocations\s*=\s*["']([^"']+)["']`)
 
+// fw1AppRe is an Application.cfc that is an FW/1 application.
+var fw1AppRe = regexp.MustCompile(`(?i)extends\s*=\s*["']framework\.one["']`)
+
 // ormCfcLocationRe matches: cfcLocation = "path" or cfcLocation: "path" (inside ormSettings struct).
 var ormCfcLocationRe = regexp.MustCompile(`(?i)cfcLocation\s*[:=]\s*["']([^"']+)["']`)
 
@@ -314,25 +317,31 @@ func ParseAppBeanPaths(content string, appDir string) map[string]string {
 		out[ns] = filepath.Clean(val)
 	}
 
-	if len(out) == 0 {
-		if m := diLocationsRe.FindStringSubmatch(content); m != nil {
-			for p := range strings.SplitSeq(m[1], ",") {
-				p = strings.TrimSpace(p)
-				if p == "" {
-					continue
-				}
+	// An FW/1 application that names no diLocations has DI/1 search
+	// "model,controllers" (framework/one.cfc's default).
+	locations := ""
+	if m := diLocationsRe.FindStringSubmatch(content); m != nil {
+		locations = m[1]
+	} else if fw1AppRe.MatchString(content) {
+		locations = "model,controllers"
+	}
 
-				abs := p
-				if !filepath.IsAbs(p) {
-					abs = filepath.Join(appDir, p)
-				}
+	if len(out) == 0 && locations != "" {
+		for p := range strings.SplitSeq(locations, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
 
-				if strings.Contains(m[1], ",") {
-					ns := filepath.Base(abs)
-					out[ns] = filepath.Clean(abs)
-				} else {
-					out[""] = filepath.Clean(abs)
-				}
+			abs := p
+			if !filepath.IsAbs(p) {
+				abs = filepath.Join(appDir, p)
+			}
+
+			if strings.Contains(locations, ",") {
+				out[filepath.Base(abs)] = filepath.Clean(abs)
+			} else {
+				out[""] = filepath.Clean(abs)
 			}
 		}
 	}

@@ -10,6 +10,7 @@ component extends="cborm.models.VirtualEntityService" {
 	property name="permissionService" inject="permissionService@contentbox";
 	property name="dateUtil" inject="DateUtil@contentbox";
 	variables.permissionService = new contentbox.models.security.PermissionService();
+	variables.dateUtil = new contentbox.models.util.DateUtil();
 	/**
 	 * Constructor
 	 */

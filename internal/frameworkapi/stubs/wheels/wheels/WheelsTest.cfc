@@ -16,7 +16,7 @@ component extends="wheels.wheelstest.system.BaseSpec" {
 	 * init() covers that path. The binding is idempotent, so engines that
 	 * run both paths are unaffected.
 	 */
-	public any function $bindApplicationHelpers() {}
+	public wheels.WheelsTest function $bindApplicationHelpers() {}
 	/**
 	 * Constructor — re-runs the helper binding so a directly instantiated
 	 * WheelsTest works on engines that skip pseudo-constructor code for
@@ -78,7 +78,7 @@ component extends="wheels.wheelstest.system.BaseSpec" {
 	 * fixture HTTP binds the isolated test application (issue #3374). Pass
 	 * false to address the live application (isolation specs).
 	 */
-	public any function $testClient( boolean testContext ) {}
+	public wheels.wheelstest.TestClient function $testClient( boolean testContext ) {}
 	/**
 	 * Auto-detect the base URL of the running test server. Resolved through
 	 * a layered lookup mirroring BrowserTest.$resolveBaseUrl, so HTTPS,

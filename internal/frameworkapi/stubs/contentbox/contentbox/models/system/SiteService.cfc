@@ -20,6 +20,11 @@ component extends="cborm.models.VirtualEntityService" {
 	property name="mediaService" inject="provider:mediaService@contentbox";
 	property = "siteID,name,slug,domainRegex,domainAliases,isActive" ) .asStruct() .list( sortOrder = "name" );
 	variables.settingService = new contentbox.models.system.SettingService();
+	variables.categoryService = new contentbox.models.content.CategoryService();
+	variables.contentService = new contentbox.models.content.ContentService();
+	variables.menuService = new contentbox.models.menu.MenuService();
+	variables.themeService = new contentbox.models.ui.ThemeService();
+	variables.mediaService = new contentbox.models.media.MediaService();
 	/**
 	 * Constructor
 	 */

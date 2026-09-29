@@ -1,6 +1,9 @@
 package resolve
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // TestAChainOnABuiltinIsDynamic: getPageContext().getRequest() is a call on
 // what the engine returns, not on a function the file lost track of. Lucee's
@@ -33,7 +36,8 @@ func TestAChainOnABuiltinIsDynamic(t *testing.T) {
 // Expectation( a )` in lib/BaseSpec.cfc names lib/Expectation.cfc, whatever
 // directory the call is made from. Read from the caller's, it named nothing,
 // and every expect( x ).toBe() in cfwheels' CLI specs — 3,099 of them — was a
-// call on a component that does not exist.
+// call on a component that does not exist. A dotted relative path is the
+// same: ColdBox's AsyncManager returns `new tasks.Future()`.
 func TestAnInferredBareReturnIsBesideTheDeclaringFile(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
@@ -41,11 +45,21 @@ func TestAnInferredBareReturnIsBesideTheDeclaringFile(t *testing.T) {
 		// Nearer the caller, and not what the base returns: a file-name
 		// search from the caller's directory takes this one.
 		"specs/Expectation.cfc": `component { function other() {} }`,
-		"lib/BaseSpec.cfc":      `component { function expect( a ) { return new Expectation( a ); } }`,
+		"lib/BaseSpec.cfc": `component {
+	function expect( a ) { return new Expectation( a ); }
+	Future function later() {
+		return new tasks.Future();
+	}
+}`,
+		"lib/tasks/Future.cfc": `component { function get() {} }`,
+		// A relative path read from the caller's directory would take this.
+		"specs/deep/tasks/Future.cfc": `component { function other() {} }`,
 		"specs/deep/MySpec.cfc": `component extends="lib.BaseSpec" {
 	function run() {
 		expect( 1 ).toBe( 1 );
 		expect( 1 ).notAMatcher();
+		var base = new lib.BaseSpec();
+		base.later().get();
 	}
 }`,
 	})
@@ -53,6 +67,7 @@ func TestAnInferredBareReturnIsBesideTheDeclaringFile(t *testing.T) {
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "specs/deep/MySpec.cfc"), map[string]string{
 		"expect.toBe":        "",
 		"expect.notAMatcher": "method 'notAMatcher' not found in Expectation",
+		"base.later.get":     "",
 	})
 }
 
@@ -85,4 +100,33 @@ func TestAComponentHasTheFunctionsOfWhatItIncludes(t *testing.T) {
 		"wo.$simpleLock":  "",
 		"wo.notIncluded":  "method 'notIncluded' not found in wheels.Global",
 	})
+}
+
+// TestARelativeReturnIsTheDeclaringFiles: ReturnComponentOf answers every
+// question about what a function returns, and a relative path it hands on is
+// read from wherever the question was asked. ColdBox's AsyncManager declares
+// `Future function newFuture()` returning `new tasks.Future()`, and a spec in
+// tests/specs/async resolved tasks.Future there: calls on a
+// component that does not exist. The answer is the declaring file's.
+func TestARelativeReturnIsTheDeclaringFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"lib/Async.cfc":        "component {\n\tFuture function later() {\n\t\treturn new tasks.Future();\n\t}\n\ttasks.Future function declared() {}\n}",
+		"lib/tasks/Future.cfc": `component { function get() {} }`,
+	})
+
+	r := &Resolver{}
+	_ = reasonsWith(t, r, dir, "lib/Async.cfc")
+	want := filepath.Join(dir, "lib", "tasks", "Future.cfc")
+
+	for _, fn := range []string{"later", "declared"} {
+		d := r.LookupFuncWithExtends(filepath.Join(dir, "lib", "Async.cfc"), fn)
+		if d == nil {
+			t.Fatalf("no %s", fn)
+		}
+
+		if got := r.ReturnComponentOf(d); got != want {
+			t.Errorf("%s returns %q, want %q", fn, got, want)
+		}
+	}
 }

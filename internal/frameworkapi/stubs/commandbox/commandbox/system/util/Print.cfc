@@ -36,7 +36,9 @@ component {
 	property name='formatterUtil' inject='formatter';
 	property name='JSONService' inject='JSONService';
 	property name='tablePrinter' inject='provider:TablePrinter';
+	variables.shell = new commandbox.system.Shell();
 	variables.formatterUtil = new commandbox.system.util.Formatter();
+	variables.JSONService = new commandbox.system.services.JSONService();
 	variables.tablePrinter = new commandbox.system.util.TablePrinter();
 	/**
 	 * Removes ANSI attributes from string
@@ -49,7 +51,7 @@ component {
 	 * Any other token in the name that exists in the list of ANSI attributes above will be picked up and applied to the text
 	 */
 	function onMissingMethod( missingMethodName, missingMethodArguments ) {}
-	private commandbox.system.util.Formatter function _onMissingMethod( missingMethodName, missingMethodArguments ) {}
+	private function _onMissingMethod( missingMethodName, missingMethodArguments ) {}
 	/**
 	 * Outputs a table to the screen
 	 * @data Any type of data for the table.  Each item in the array may either be

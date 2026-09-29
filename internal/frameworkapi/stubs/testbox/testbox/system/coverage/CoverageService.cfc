@@ -71,7 +71,7 @@ component {
 	/**
 	 * Generate statistics from the coverage data
 	 */
-	private testbox.system.coverage.stats.CoverageStats function processStats( required query qryCoverageData ) {}
+	private function processStats( required query qryCoverageData ) {}
 	/**
 	 * Generate code browser
 	 */
@@ -84,9 +84,9 @@ component {
 	/**
 	 * Acquire a CoverageGenerator component which does the hard work.
 	 */
-	private component function loadCoverageGenerator() {}
+	private testbox.system.coverage.data.CoverageGenerator function loadCoverageGenerator() {}
 	/**
 	 * Acquire a CoverageGenerator component which does the hard work.
 	 */
-	private component function loadCoverageReporter() {}
+	private testbox.system.coverage.CoverageReporter function loadCoverageReporter() {}
 }

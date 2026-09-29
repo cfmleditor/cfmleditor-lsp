@@ -129,6 +129,47 @@ func (s *Set) Path(dotted string) string {
 	return ""
 }
 
+// Packages lists the dot-path packages the set's stubs hold components in.
+func (s *Set) Packages() []string {
+	if s == nil {
+		return nil
+	}
+
+	seen := map[string]bool{}
+
+	var out []string
+
+	for _, fw := range s.frameworks {
+		for rel := range index()[fw] {
+			if i := strings.LastIndexByte(rel, '/'); i > 0 {
+				if pkg := strings.ReplaceAll(rel[:i], "/", "."); !seen[pkg] {
+					seen[pkg] = true
+					out = append(out, pkg)
+				}
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// IDPackages lists the packages the set's frameworks map by file name, in
+// which a bare WireBox id is looked for (idPackages).
+func (s *Set) IDPackages() []string {
+	if s == nil {
+		return nil
+	}
+
+	var out []string
+	for _, fw := range s.frameworks {
+		out = append(out, idPackages[fw]...)
+	}
+
+	return out
+}
+
 // namespaces are the dot-path prefixes that can only mean one framework,
 // with the framework whose stubs hold them. framework.* (FW/1) and wheels.*
 // are left to their presets: a project may well have a folder of that name.
@@ -138,6 +179,7 @@ var namespaces = []struct{ prefix, framework string }{
 	{"commandbox.system.", "commandbox"},
 	{"qb.models.", "cfmigrations"},
 	{"contentbox.models.", "contentbox"},
+	{"cborm.models.", "cborm"},
 }
 
 // Namespaced is the stub for a dot-path in one of namespaces, whatever the

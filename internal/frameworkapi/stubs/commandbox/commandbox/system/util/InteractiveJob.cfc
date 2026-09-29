@@ -17,6 +17,7 @@ component {
 	property name='printBuffer' inject='printBuffer';
 	property name='print' inject='print';
 	property name='ConsolePainter' inject='provider:ConsolePainter';
+	variables.shell = new commandbox.system.Shell();
 	variables.printBuffer = new commandbox.system.util.PrintBuffer();
 	variables.print = new commandbox.system.util.Print();
 	variables.ConsolePainter = new commandbox.system.util.ConsolePainter();

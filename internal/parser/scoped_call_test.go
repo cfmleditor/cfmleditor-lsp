@@ -357,3 +357,31 @@ func TestReturnOfAComparisonDeclaresNothing(t *testing.T) {
 		}
 	}
 }
+
+// A function returns what its return variable holds only when the variable
+// is the whole expression. `return shell.pwd()` read as `return shell`
+// declared CommandBox's getCWD() a Shell, and every call on the directory it
+// returns was then checked against Shell. A call on a dynamic value is
+// dynamic, though: Lucee's tests return `di.toClazz( c )` on a Java object.
+func TestReturnOfACallOnAVariableIsNotTheVariable(t *testing.T) {
+	src := `component {
+	variables.shell = new Shell();
+	function getCWD() { return shell.pwd(); }
+	function field() { return shell.prompt; }
+	function indexed() { return shell[ "x" ]; }
+	function whole() { return shell; }
+	function onDynamic( name ) {
+		var di = new "tools.#name#"();
+		return di.toClazz( name );
+	}
+}`
+	pr := Parse(testURI, src)
+	want := map[string]string{"getCWD": "", "field": "", "indexed": "", "whole": "Shell", "onDynamic": "$any"}
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if got := f.ReturnComponent; got != want[f.Name] {
+			t.Errorf("%s returns %q, want %q", f.Name, got, want[f.Name])
+		}
+	}
+}

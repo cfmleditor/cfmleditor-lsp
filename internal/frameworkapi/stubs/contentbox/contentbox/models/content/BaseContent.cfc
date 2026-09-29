@@ -88,7 +88,10 @@ component extends="contentbox.models.BaseEntityMethods" {
 	variables.contentService = new contentbox.models.content.ContentService();
 	variables.contentVersionService = new contentbox.models.content.ContentVersionService();
 	variables.contentTemplateService = new contentbox.models.content.ContentTemplateService();
+	variables.commentService = new contentbox.models.comments.CommentService();
 	variables.customFieldService = new contentbox.models.content.CustomFieldService();
+	variables.settingService = new contentbox.models.system.SettingService();
+	variables.mediaService = new contentbox.models.media.MediaService();
 	variables.statsService = new contentbox.models.content.StatsService();
 	/**
 	 * Base constructor
@@ -375,23 +378,23 @@ component extends="contentbox.models.BaseEntityMethods" {
 	/**
 	 * add published timestamp to property
 	 */
-	any function addPublishedTime( required hour, required minute ) {}
+	contentbox.models.content.BaseContent function addPublishedTime( required hour, required minute ) {}
 	/**
 	 * add published timestamp to property
 	 *
 	 * @timeString The joined time string (e.g., 12:00)
 	 */
-	any function addJoinedPublishedTime( required string timeString ) {}
+	contentbox.models.content.BaseContent function addJoinedPublishedTime( required string timeString ) {}
 	/**
 	 * add expired timestamp to property
 	 */
-	any function addExpiredTime( required hour, required minute ) {}
+	contentbox.models.content.BaseContent function addExpiredTime( required hour, required minute ) {}
 	/**
 	 * add expired timestamp to property
 	 *
 	 * @timeString The joined time string (e.g., 12:00)
 	 */
-	any function addJoinedExpiredTime( required string timeString ) {}
+	contentbox.models.content.BaseContent function addJoinedExpiredTime( required string timeString ) {}
 	/**
 	 * Build content cache keys according to sent content object
 	 */
@@ -425,7 +428,7 @@ component extends="contentbox.models.BaseEntityMethods" {
 	/**
 	 * Inflate custom fields from the incoming count and memento structure
 	 */
-	any function inflateCustomFields( required numeric fieldCount, required struct memento ) {}
+	contentbox.models.content.BaseContent function inflateCustomFields( required numeric fieldCount, required struct memento ) {}
 	/**
 	 * Get an array of category slugs for this content object
 	 */

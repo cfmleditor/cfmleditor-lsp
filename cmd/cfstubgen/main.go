@@ -135,6 +135,8 @@ type generator struct {
 	todo []string
 	// names indexes the source's components by file name, for byName.
 	names map[string][]string
+	// parsed holds signatures' parses.
+	parsed map[string]*parser.ParseResult
 }
 
 func generate(src *frameworkapi.Source, repo, out string) error {
@@ -150,6 +152,18 @@ func generate(src *frameworkapi.Source, repo, out string) error {
 	}
 
 	for _, c := range slices.Concat(config.PresetComponents(src.Framework), src.Extra) {
+		// `a.b.*` is every component in the package a.b.
+		if pkg, ok := strings.CutSuffix(c, ".*"); ok {
+			added, err := g.packageComponents(pkg)
+			if err != nil {
+				return err
+			}
+
+			g.todo = append(g.todo, added...)
+
+			continue
+		}
+
 		if abs, _ := g.resolve(c, g.root); abs != "" {
 			g.todo = append(g.todo, abs)
 		} else if strings.HasPrefix(strings.ToLower(c), strings.ToLower(src.Prefix)+".") {
@@ -179,6 +193,32 @@ func generate(src *frameworkapi.Source, repo, out string) error {
 	fmt.Printf("%s: %d components\n", src.Framework, n)
 
 	return nil
+}
+
+// packageComponents lists the components directly in the package a dot-path
+// names in the framework's source.
+func (g *generator) packageComponents(pkg string) ([]string, error) {
+	segs := strings.Split(pkg, ".")
+	if len(segs) < 2 || !strings.EqualFold(segs[0], g.src.Prefix) {
+		return nil, fmt.Errorf("%s: %s.* is not in the framework's namespace", g.src.Framework, pkg)
+	}
+
+	dir := filepath.Join(append([]string{g.root}, segs[1:]...)...)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []string
+
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".cfc") {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+
+	return out, nil
 }
 
 // resolve finds the component a dot-path names from a file in dir: through
@@ -270,7 +310,7 @@ type source struct {
 	pr         *parser.ParseResult
 }
 
-func load(path string) (*source, error) {
+func (g *generator) load(path string) (*source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -282,12 +322,107 @@ func load(path string) (*source, error) {
 		path:  path,
 		text:  text,
 		lines: strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"),
-		pr:    parser.Parse(uri.URI("file://"+filepath.ToSlash(path)), text),
+		pr: parser.ParseWithOptions(uri.URI("file://"+filepath.ToSlash(path)), text, &parser.ParseOptions{
+			Resolvers:  getInstanceResolvers,
+			FuncLookup: g.funcLookup(filepath.Dir(path)),
+		}),
 	}, nil
 }
 
+// funcLookup answers the parse's question of what a method returns from the
+// framework's own source. Without it the parse guesses the receiver's type
+// for any call on a typed variable, and BaseCommand's `return shell.pwd()`
+// declared getCWD() a Shell. A method that declares no component answers "",
+// which the parse reads as not a component.
+func (g *generator) funcLookup(dir string) func(component, funcName string) string {
+	return func(component, funcName string) string {
+		abs := g.locate(component, dir)
+		if abs == "" {
+			return ""
+		}
+
+		pr := g.signatures(abs)
+		if pr == nil {
+			return ""
+		}
+
+		for i := range pr.Funcs {
+			fd := &pr.Funcs[i]
+			if !strings.EqualFold(fd.Name, funcName) {
+				continue
+			}
+
+			for _, t := range []string{fd.ReturnType, fd.ReturnComponent} {
+				if !validType(t) || strings.EqualFold(t, "any") || strings.EqualFold(t, "component") {
+					continue
+				}
+
+				if _, q := g.resolve(t, filepath.Dir(abs)); q != "" {
+					return q
+				}
+			}
+
+			return ""
+		}
+
+		return ""
+	}
+}
+
+// locate is the file a component names from dir: a path, a dot-path, or a
+// WireBox id, which is the framework's one file of that name.
+func (g *generator) locate(component, dir string) string {
+	if filepath.IsAbs(component) {
+		return component
+	}
+
+	if abs, _ := g.resolve(component, dir); abs != "" {
+		return abs
+	}
+
+	if name, _, _ := strings.Cut(component, "@"); !strings.Contains(name, ".") {
+		return g.byName(name)
+	}
+
+	return ""
+}
+
+// signatures is abs parsed with no lookups, remembered: funcLookup reads a
+// component's declarations, which a plain parse gives without asking
+// funcLookup again.
+func (g *generator) signatures(abs string) *parser.ParseResult {
+	if pr, ok := g.parsed[abs]; ok {
+		return pr
+	}
+
+	var pr *parser.ParseResult
+
+	if data, err := os.ReadFile(abs); err == nil {
+		pr = parser.Parse(uri.URI("file://"+filepath.ToSlash(abs)), strings.TrimPrefix(string(data), "\ufeff"))
+	}
+
+	if g.parsed == nil {
+		g.parsed = map[string]*parser.ParseResult{}
+	}
+
+	g.parsed[abs] = pr
+
+	return pr
+}
+
+// getInstanceResolvers types `variables.print = wirebox.getInstance(
+// "PrintBuffer" )` as the id it is handed, which is how CommandBox's
+// BaseCommand and ColdBox's own services build what they hold. The id is a
+// file name in the framework (writeTypedVariables' byName), since WireBox
+// maps the framework's directories by name.
+var getInstanceResolvers = []parser.Resolver{{
+	Match:   `(?i)(?:^|\.)getInstance\(\s*(?:name\s*=\s*)?["']([A-Za-z_][\w.]*(?:@[\w.-]+)?)["']\s*\)$`,
+	Resolve: "$1",
+	Prefix:  "getInstance",
+}}
+
 func (g *generator) emit(abs string) error {
-	src, err := load(abs)
+	src, err := g.load(abs)
 	if err != nil {
 		return err
 	}
@@ -373,7 +508,7 @@ func (g *generator) includes(src *source, seen map[string]bool) []*source {
 
 		seen[p] = true
 
-		s, err := load(p)
+		s, err := g.load(p)
 		if err != nil {
 			continue
 		}
@@ -411,7 +546,7 @@ func (g *generator) integrated(src *source) []*source {
 				continue
 			}
 
-			if s, err := load(filepath.Join(dir, e.Name())); err == nil {
+			if s, err := g.load(filepath.Join(dir, e.Name())); err == nil {
 				s.publicOnly = true
 				out = append(out, s)
 			}
@@ -505,6 +640,16 @@ func (g *generator) writeTypedVariables(b *strings.Builder, src *source) {
 		}
 
 		abs, q := g.resolve(ref.Component, dir)
+
+		// An injection's `Name@module`, and a bare getInstance() id, is the
+		// framework's file of that name.
+		if name, _, _ := strings.Cut(ref.Component, "@"); abs == "" && !strings.Contains(name, ".") {
+			if abs, q = g.resolve(name, dir); abs == "" {
+				abs = g.byName(name)
+				q = g.qualify(abs)
+			}
+		}
+
 		if abs == "" || q == "" || isInterface(abs) {
 			continue
 		}
@@ -544,7 +689,13 @@ func validType(t string) bool { return t != "" && validTypeRe.MatchString(t) }
 func (g *generator) returnType(src *source, def *parser.FunctionDef) string {
 	dir := filepath.Dir(src.path)
 
-	if t := def.ReturnType; validType(t) {
+	// `any` and `component` say nothing about which component, and cborm
+	// declares `any function newCriteria()` while returning `new
+	// criterion.CriteriaBuilder()` and documenting that; the return statement
+	// or the doc answers, and `any` stays when neither does.
+	generic := strings.EqualFold(def.ReturnType, "any") || strings.EqualFold(def.ReturnType, "component")
+
+	if t := def.ReturnType; validType(t) && !generic {
 		if abs, q := g.resolve(t, dir); abs != "" {
 			g.todo = append(g.todo, abs)
 
@@ -553,6 +704,22 @@ func (g *generator) returnType(src *source, def *parser.FunctionDef) string {
 
 		return t
 	}
+
+	if generic {
+		if q := g.componentReturn(src, def); q != "" {
+			return q
+		}
+
+		return def.ReturnType
+	}
+
+	return g.componentReturn(src, def)
+}
+
+// componentReturn is the component def returns by its return statements or,
+// failing that, its doc comment.
+func (g *generator) componentReturn(src *source, def *parser.FunctionDef) string {
+	dir := filepath.Dir(src.path)
 
 	switch rc := def.ReturnComponent; {
 	case rc == "":

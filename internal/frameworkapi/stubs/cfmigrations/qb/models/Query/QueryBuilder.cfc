@@ -1467,7 +1467,7 @@ component extends="qb.models.Query.JsonQueryBuilderSupport" {
 	 *
 	 * @return qb.models.Query.QueryBuilder
 	 */
-	public any function delete( any id, string idColumnName, struct options, boolean toSql ) {}
+	public qb.models.Query.QueryBuilder function delete( any id, string idColumnName, struct options, boolean toSql ) {}
 	/**
 	 * Returns a flat array of bindings.  Used as the parameter list for `queryExecute`.
 	 *

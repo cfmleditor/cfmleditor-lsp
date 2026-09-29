@@ -95,7 +95,7 @@ component {
 	 * @skip     A flag or a closure that tells TestBox to skip this suite group from testing if true. If this is a closure it must return boolean.
 	 * @focused  A flag that tells TestBox to only run this suite and no other
 	 */
-	any function describe( required string title, required any body, any labels, boolean asyncAll, any skip, boolean focused ) {}
+	testbox.system.BaseSpec function describe( required string title, required any body, any labels, boolean asyncAll, any skip, boolean focused ) {}
 	/**
 	 * The way to describe BDD test suites in TestBox. The story is an alias for describe usually use when you are writing using Gherkin-esque language
 	 * The body is the function that implements the suite.
@@ -225,7 +225,7 @@ component {
 	 * @throws TestBox.InvalidBody    If the body is not a closure
 	 * @throws TestBox.InvalidContext If the spec is not defined within a suite
 	 */
-	any function it( required string title, required any body, any labels, any skip, struct data, boolean focused ) {}
+	testbox.system.BaseSpec function it( required string title, required any body, any labels, any skip, struct data, boolean focused ) {}
 	/**
 	 * An alias to the it() function to provide a more natural language for BDD.
 	 *
@@ -476,7 +476,7 @@ component {
 	 * @showUDFs Show UDFs in the dump, by default it does not
 	 * @label    A label to add to the console output
 	 */
-	any function console( required var, numeric top, boolean showUDFs, string label ) {}
+	testbox.system.BaseSpec function console( required var, numeric top, boolean showUDFs, string label ) {}
 	/**
 	 * Debug some information into the TestBox debugger array buffer
 	 *
@@ -485,11 +485,11 @@ component {
 	 * @deepCopy By default we do not duplicate the incoming information, but you can :)
 	 * @top      The top numeric number to dump on the screen in the report, defaults to 999
 	 */
-	any function debug( any var, string label, boolean deepCopy, numeric top, boolean showUDFs ) {}
+	testbox.system.BaseSpec function debug( any var, string label, boolean deepCopy, numeric top, boolean showUDFs ) {}
 	/**
 	 * Clear the debug array buffer
 	 */
-	any function clearDebugBuffer() {}
+	testbox.system.BaseSpec function clearDebugBuffer() {}
 	/**
 	 * Get the debug array buffer from scope
 	 */
@@ -497,7 +497,7 @@ component {
 	/**
 	 * Write some output to the ColdFusion output buffer
 	 */
-	any function print( required message ) {}
+	testbox.system.BaseSpec function print( required message ) {}
 	/**
 	 * Write some output to the ColdFusion output buffer using a <br> attached
 	 */

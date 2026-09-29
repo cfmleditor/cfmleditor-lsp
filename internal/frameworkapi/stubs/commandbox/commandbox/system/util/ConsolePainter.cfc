@@ -20,6 +20,7 @@ component {
 	variables.progressBarGeneric = new commandbox.system.util.ProgressBarGeneric();
 	variables.progressBar = new commandbox.system.util.ProgressBar();
 	variables.job = new commandbox.system.util.InteractiveJob();
+	variables.shell = new commandbox.system.Shell();
 	variables.SystemSettings = new commandbox.system.util.SystemSettings();
 	function onDIComplete() {}
 	/**

@@ -22,7 +22,7 @@ component {
 	 *
 	 * @return java.time.Duration
 	 */
-	any function getNative() {}
+	coldbox.system.async.time.Duration function getNative() {}
 	/**
 	 * Returns a copy of this duration with a positive length.
 	 */

@@ -9,6 +9,8 @@
 component {
 	property name='commandService' inject='CommandService';
 	property name='interceptorService' inject='interceptorService';
+	variables.commandService = new commandbox.system.services.CommandService();
+	variables.interceptorService = new commandbox.system.services.InterceptorService();
 	/**
 	 * Retrieve a Java System property or env value by name.
 	 *

@@ -143,13 +143,14 @@ func TestAReceiverTheFileNeverDeclaresIsTheMissingBases(t *testing.T) {
 // does not declare may be its base's, so when the component's own chain
 // breaks the method was never looked for. ContentBox's services extend
 // cborm's VirtualEntityService, and without cborm every findWhere and save
-// on one was "method not found" — the call and a chain hop alike. A method
-// missing from a component whose chain resolves is still reported.
+// on one was "method not found" — the call and a chain hop alike (cborm now
+// resolves to its bundled API, so the fixture's base is one that cannot). A
+// method missing from a component whose chain resolves is still reported.
 func TestACallOnAComponentWithAMissingBaseBlamesTheBase(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, src := range map[string]string{
-		"Service.cfc": `component extends="cborm.models.VirtualEntityService" { function own() {} }`,
+		"Service.cfc": `component extends="vendor.orm.VirtualEntityService" { function own() {} }`,
 		"Plain.cfc":   `component { function own() {} }`,
 		"Caller.cfc": `component {
 	function f() {
@@ -183,8 +184,8 @@ func TestACallOnAComponentWithAMissingBaseBlamesTheBase(t *testing.T) {
 		}
 	}
 
-	if base, ok := MissingBaseOf(got["svc.findWhere"]); !ok || base != "cborm.models.VirtualEntityService" {
-		t.Errorf("svc.findWhere: %q, want the chain to break at cborm.models.VirtualEntityService", got["svc.findWhere"])
+	if base, ok := MissingBaseOf(got["svc.findWhere"]); !ok || base != "vendor.orm.VirtualEntityService" {
+		t.Errorf("svc.findWhere: %q, want the chain to break at vendor.orm.VirtualEntityService", got["svc.findWhere"])
 	}
 
 	if got["svc.own"] != "" {

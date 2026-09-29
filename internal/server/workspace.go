@@ -184,6 +184,10 @@ func (s *Server) applyIndexResult(fileURI uri.URI, path string, pr *parser.Parse
 
 	if pr.Persistent && s.isOrmPath(path) {
 		s.index.SetEntity(cfpath.CfcNameFromURI(string(fileURI)), fileURI)
+
+		if name := pr.EntityName(); name != "" {
+			s.index.SetEntity(name, fileURI)
+		}
 	}
 }
 

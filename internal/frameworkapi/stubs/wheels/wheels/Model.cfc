@@ -35,7 +35,7 @@ component extends="wheels.Global" {
 	/**
 	 * Internal function.
 	 */
-	public any function $initModelClass( required string name, required string path ) {}
+	public wheels.Model function $initModelClass( required string name, required string path ) {}
 	/**
 	 * Internal function.
 	 */
@@ -51,7 +51,7 @@ component extends="wheels.Global" {
 	/**
 	 * Internal function.
 	 */
-	public any function $initModelObject( required string name, required any properties, required boolean persisted, numeric row, boolean base, boolean useFilterLists ) {}
+	public wheels.Model function $initModelObject( required string name, required any properties, required boolean persisted, numeric row, boolean base, boolean useFilterLists ) {}
 	/**
 	 * Internal function.
 	 */

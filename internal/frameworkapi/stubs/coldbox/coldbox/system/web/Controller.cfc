@@ -75,6 +75,7 @@ component {
 	variables.asyncManager = new coldbox.system.async.AsyncManager();
 	variables.cacheBox = new coldbox.system.cache.CacheFactory();
 	variables.wireBox = new coldbox.system.ioc.Injector();
+	variables.renderer = new coldbox.system.web.Renderer();
 	/**
 	 * Constructor
 	 *

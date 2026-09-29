@@ -27,6 +27,7 @@ component extends="contentbox.models.BaseEntity" {
 	variables.pageService = new contentbox.models.content.PageService();
 	variables.entryService = new contentbox.models.content.EntryService();
 	variables.contentStoreService = new contentbox.models.content.ContentStoreService();
+	variables.settingService = new contentbox.models.system.SettingService();
 	/**
 	 * Constructor
 	 */

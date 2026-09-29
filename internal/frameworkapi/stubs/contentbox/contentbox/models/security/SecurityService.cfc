@@ -21,6 +21,9 @@ component {
 	property name="cbCSRF" inject="@cbcsrf";
 	property name="encryptionKey";
 	variables.authorService = new contentbox.models.security.AuthorService();
+	variables.settingService = new contentbox.models.system.SettingService();
+	variables.siteService = new contentbox.models.system.SiteService();
+	variables.CBHelper = new contentbox.models.system.CBHelper();
 	/**
 	 * Constructor
 	 */

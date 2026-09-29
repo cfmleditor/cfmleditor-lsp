@@ -13,11 +13,11 @@ component extends="wheels.Global" {
 	/**
 	 * Initialize the controller class level object and return it.
 	 */
-	public any function $initControllerClass( string name ) {}
+	public wheels.Controller function $initControllerClass( string name ) {}
 	/**
 	 * Initialize the controller instance level object and return it.
 	 */
-	public any function $initControllerObject( required string name, required struct params ) {}
+	public wheels.Controller function $initControllerObject( required string name, required struct params ) {}
 	/**
 	 * Get the class level data from the controller object in the application scope and set it to this controller.
 	 * By class level we mean that it's stored in the controller object in the application scope.
@@ -157,7 +157,7 @@ component extends="wheels.Global" {
 	 *
 	 * @collection The model class to narrow.
 	 */
-	public any function policyScope( required any collection ) {}
+	public wheels.Policy function policyScope( required any collection ) {}
 	/**
 	 * Internal function. Resolves and instantiates the policy for a record.
 	 * Returns the initialized policy object, or an empty string when no policy

@@ -30,6 +30,7 @@ func CompactDefs(defs []FunctionDef) []FunctionDef {
 		d.Name = strings.Clone(d.Name)
 		d.ReturnType = strings.Clone(d.ReturnType)
 		d.ReturnComponent = strings.Clone(d.ReturnComponent)
+		d.DocReturn = strings.Clone(d.DocReturn)
 		d.returnVar = strings.Clone(d.returnVar)
 
 		// An empty argument list is dropped rather than kept: the script

@@ -874,6 +874,14 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			comp = pr.baseVarComponent(c)
 		}
 
+		// x = inherited(): a method the file does not declare is its base's,
+		// which FuncLookup reaches from the file itself. ContentBox's
+		// services write `var c = newCriteria()`, a method of cborm's
+		// BaseORMService, and c was untyped.
+		if comp == "" && c.baseVar == "" && pr.FuncLookup != nil && pr.URI.IsFile() {
+			comp = pr.FuncLookup(pr.URI.Path(), c.funcName)
+		}
+
 		// A mock made through the MockBox a spec holds,
 		// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
 		if comp == "" {
@@ -952,6 +960,34 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 // a name no variable can have.
 const returnsThis = "$this"
 
+// returnsCallOn prefixes the returnVar of a function returning a call made
+// on a variable — `return di.toClazz( c )` — for which the variable's
+// component answers only when it is dynamic. It holds a colon, which no
+// variable name can.
+const returnsCallOn = "$call:"
+
+// returnedVar is the variable a returnVar names, and whether the function
+// returns a call made on it rather than the variable itself.
+func returnedVar(returnVar string) (name string, called bool) {
+	if name, ok := strings.CutPrefix(returnVar, returnsCallOn); ok {
+		return name, true
+	}
+
+	return returnVar, false
+}
+
+// returnedComponent is what a function returns, given the component its
+// return variable holds: that component, or for a call made on the variable,
+// "$any" when the variable is dynamic and nothing otherwise — what a method
+// returns is not the component it is a method of.
+func returnedComponent(comp string, called bool) string {
+	if !called || comp == "$any" {
+		return comp
+	}
+
+	return ""
+}
+
 // settleReturnVars gives each pending function without a return component
 // the component its return variable holds, when a ref in its body says.
 func (pr *ParseResult) settleReturnVars(pending []returnPending) {
@@ -960,9 +996,11 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 			continue
 		}
 
+		name, called := returnedVar(rp.varName)
+
 		// A closure's local of the same name is not what the function returns.
-		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], rp.varName); ref != nil {
-			pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
+		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name); ref != nil {
+			pr.Funcs[rp.funcIdx].ReturnComponent = returnedComponent(pr.settledComponent(ref), called)
 		}
 	}
 }
@@ -1131,12 +1169,19 @@ func (pr *ParseResult) generatePropertyAccessors() {
 
 	u := pr.URI
 
+	// A generated setter returns the component, for chaining — Lucee's and
+	// Adobe's alike — so it is typed as `return this;` is: by the file's path.
+	self, _ := strings.CutPrefix(string(u), "file://")
+
 	for _, prop := range pr.Properties {
 		capName := ucFirst(prop.name)
+
+		getterIdx := -1
 
 		getter := "get" + strings.ToLower(prop.name)
 		if !existing[getter] {
 			existing[getter] = true
+			getterIdx = len(pr.Funcs)
 
 			pr.Funcs = append(pr.Funcs, FunctionDef{
 				Name: "get" + capName, URI: u, Line: prop.line,
@@ -1149,7 +1194,8 @@ func (pr *ParseResult) generatePropertyAccessors() {
 
 			pr.Funcs = append(pr.Funcs, FunctionDef{
 				Name: "set" + capName, URI: u, Line: prop.line,
-				Arguments: []Argument{{Name: prop.name, Type: prop.typeName}},
+				Arguments:       []Argument{{Name: prop.name, Type: prop.typeName}},
+				ReturnComponent: self,
 			})
 		}
 
@@ -1199,6 +1245,12 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			pr.ComponentRefs = append(pr.ComponentRefs, ComponentRef{
 				Variable: prop.name, Component: comp, URI: u, Line: prop.line,
 			})
+
+			// A generated getter returns the property, so it returns what
+			// the property holds: cborm's getWireBox() is the injector.
+			if getterIdx >= 0 {
+				pr.Funcs[getterIdx].ReturnComponent = comp
+			}
 		}
 	}
 }
@@ -1245,25 +1297,32 @@ func injectedComponent(inject string) string {
 		}
 	}
 
-	if name, module, ok := strings.Cut(id, "@"); ok {
+	name, module, qualified := strings.Cut(id, "@")
+	if qualified {
 		if c, found := coldboxModels[strings.ToLower(name)]; found && strings.EqualFold(module, "coldbox") {
 			return coldboxSystem + c
 		}
-
-		id = name
 	}
 
-	if id == "" || strings.ContainsAny(id, ":{}$#/\\ ") {
+	if name == "" || strings.ContainsAny(name, ":{}$#/\\ ") {
 		return ""
 	}
 
 	var buf foldScratch
-	switch string(buf.lowerFold(id)) {
+	switch string(buf.lowerFold(name)) {
 	case "box", "executor", "java", "entityservice":
 		return ""
 	}
 
-	return id
+	// The module is kept: `X@cbstorages` is X as that module registers it,
+	// which the resolver finds in the module's own models and, with no such
+	// module in the workspace, takes as the module not being installed
+	// (resolve.wireboxID).
+	if qualified && module != "" && !strings.ContainsAny(module, ":{}$#/\\ ") {
+		return name + "@" + module
+	}
+
+	return name
 }
 
 const coldboxSystem = "coldbox.system."

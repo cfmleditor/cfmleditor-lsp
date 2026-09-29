@@ -488,7 +488,7 @@ without saying so. `"frameworks": ["coldbox"]` teaches the LSP both:
 | `getRequestContext()`, `getController()`, `getRequestService()`, `getResponse()` and the other framework getters, however they are reached | Their ColdBox return types, so a chain on them is checked |
 | A `.cfc` under `handlers/` or `interceptors/`, `config/Router.cfc`, `config/Scheduler.cfc` that names no `extends` | An `EventHandler`, `Interceptor`, `Router` or `ColdBoxScheduler`, so a bare `getInstance()` or `route()` is found on the base |
 | A `.cfm` under `views/` or `layouts/` | Rendered by the `Renderer`, so a bare `view()` or `announce()` is found there |
-| `getInstance( "UserService@users" )`, `getInstance( name = "id:models.UserService" )`, however it is reached | The component the id names, found as an injected property's is (below). A WireBox DSL string, `getInstance( "logbox:root" )`, is ColdBox's own class. An id with no file behind it is dynamic, and a computed one is left alone |
+| `getInstance( "UserService@users" )`, `getInstance( name = "id:models.UserService" )`, however it is reached | The component the id names, found as an injected property's is (below). A WireBox DSL string, `getInstance( "logbox:root" )`, is ColdBox's own class. An id with no file behind it is dynamic, and a computed one is left alone. The workspace's modules decide what an id means, as WireBox's do (below) |
 | A helper ColdBox mixes in: a module's `this.applicationHelper` or `includeUDF( "#moduleMapping#/…" )`, the app's `applicationHelper` setting, a view's `<view>Helper.cfm` and `<folder>Helper.cfm` | Found from any handler, view, layout or interceptor, so `cbMessageBox()` resolves where its module is installed |
 
 The other presets, named alongside it as a project uses them:
@@ -500,7 +500,7 @@ The other presets, named alongside it as a project uses them:
 | `cfmigrations` | a migration's `schema`, `qb`/`query`, and the `table` a schema callback is handed, as qb's builders. Common names, so name it only where cfmigrations is used |
 | `contentbox` | the `cb` helper; `prc.oCurrentAuthor`, `prc.oCurrentSite`, and `prc.oContent` as any kind of content. Use with `coldbox` |
 | `wheels` | `application.wo`; `model( "User" )` is the `User` model, found by file name nearest the calling file, so a test's own models come before the application's; a view or layout runs inside its controller, with every view and controller mixin Wheels integrates, so `linkTo()` and `startFormTag()` are found |
-| `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found |
+| `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found; `getBean( "userService" )` is the bean DI/1 registers under that name (below) |
 
 With a framework's source in the workspace (a mapping, or a checkout of it),
 calls are checked against its real methods and go-to-definition opens them.
@@ -534,7 +534,11 @@ bundled API: `var event = execute( event = "main.index" )` in a test is a
 request context, and `getMockController()` a mock controller. A documented
 path that does not exist is looked up by file name within the framework, and
 an interface is left out: `getCache()` is documented as an `ICacheProvider`,
-which declares less than every cache it hands back.
+which declares less than every cache it hands back. The same comments are read
+from a framework's own source when it is in the workspace, where the documented
+path names a file: there an interface is kept, and a method it does not declare
+is accepted as dynamic, since the object behind it is an implementation with
+more.
 
 A preset's variable resolvers are `nameOnly` (below), so in tag syntax
 `<cfset x = event.getValue( "a" )>` does not make `x` a request context.
@@ -945,10 +949,33 @@ A mapping whose name has several segments (`/modules/wheels`) is used for
 paths under it, the longest match first.
 
 **A framework's own namespace needs no preset.** `coldbox.system.*`,
-`testbox.system.*`, `commandbox.system.*`, `qb.models.*` and
-`contentbox.models.*` resolve to the bundled framework API when nothing on
-disk does, so a component extending `testbox.system.BaseSpec` is checked
-without naming the `testbox` preset.
+`testbox.system.*`, `commandbox.system.*`, `qb.models.*`,
+`contentbox.models.*` and `cborm.models.*` resolve to the bundled framework
+API when nothing on disk does, so a component extending
+`testbox.system.BaseSpec` is checked without naming the `testbox` preset. A
+bare id no file answers, `getInstance( "PackageService" )` in a CommandBox
+command, is looked for among CommandBox's services and utilities, which is
+where CommandBox's WireBox maps them.
+
+**WireBox ids are read the way the workspace's modules register them.** A
+module registers its models under its `this.modelNamespace`, which defaults to
+its directory's name, so `UserService@users` is the `UserService` in the
+`users` module's `models/`, not whichever `UserService.cfc` is nearest. A
+module's `this.cfmapping` is a mapping to its directory, and `binder.map(
+"Mailer" ).to( "#moduleMapping#.models.MailService" )` in a `ModuleConfig.cfc`
+or `config/WireBox.cfc` makes `Mailer` that component. An id whose module is
+not in the workspace — `RequestStorage@cbstorages` without cbstorages — is
+dynamic, since that is the module not being installed.
+
+**ORM entities are found by the name code uses.** `entityNew( "cbRole" )` and
+`entityLoad( "cbRole" )` find the component declaring
+`entityname="cbRole"`, whatever its file is called. A cborm
+`VirtualEntityService` bound with `super.init( entityName = "cbRole" )`
+returns that entity from `new()`, `get()`, `getOrFail()` and `findWhere()`, and
+its dynamic finders, `this.findBySlug( slug )`, are answered by
+`onMissingMethod`: any method called through `this.` on a component that has
+one is accepted, while an unscoped call, which CFML never hands to
+`onMissingMethod`, is not.
 
 **Methods a framework adds at run time are found.** A WireBox delegate —
 `property name="memory" inject delegate delegatePrefix;` or
@@ -958,7 +985,22 @@ bare `inject` injects the model named by the property. CFML's ORM generates
 `hasX()`, `addX()` and `removeX()` for a relationship property, and those are
 declared too. With the `wheels` preset, the application's
 `global/functions.cfm`, and what it includes, reaches every controller, model
-and view.
+and view. A Wheels model's `findByKey()`, `findOne()`, `new()` and `create()`
+return the model they are called on, and an association declared in its
+`config()` — `hasMany( "comments" )`, `belongsTo( "author" )` — gives it the
+methods Wheels documents for one (`comments()`, `commentCount()`,
+`newComment()`, `author()`, …), typed as the associated model. An object
+declaring `this.memento` has mementifier's `getMemento()`. A ColdBox handler
+or interceptor has the helpers the cbi18n (`$r()`, `getResource()`, …), cbfs
+(`cbfs()`) and HTMLHelper (`addAsset()`) modules mix in, whether or not the
+module is on disk.
+
+**DI/1 beans are found by the names DI/1 gives them.** In an FW/1 application
+(an `Application.cfc` extending `framework.one`) the bean factory's default
+folders are `model` and `controllers`, and a component is registered both
+under its file name and under its name followed by its folder's singular:
+`services/user.cfc` is `user` and `userService`. A property named after a bean,
+`property userService;`, holds it.
 
 **Some values are typed without configuration.** Each rule below is a default
 that a `mappings` entry, `componentResolvers` rule or `javaStubsPath` still
@@ -970,13 +1012,21 @@ overrides:
 | A method whose return is `return this;` (or `<cfreturn this>`) | Its own component, so a fluent chain is checked hop by hop |
 | `expect( x ).toBe( 1 )`, a call chained on an unqualified one | A call on what `expect` returns, found in the file, its extends chain or its includes |
 | `cfheader( … )`, `cfhttp( … )` — any documented tag called as a function | A builtin |
-| `createMock( … )`, `createEmptyMock`, `prepareMock`, `createStub` (MockBox) | Dynamic: a mock's methods are added at runtime |
+| `createMock( "models.User" )`, `createEmptyMock( className = "models.User" )` (MockBox) | A mock of that class: a call on it is checked against the class, and dynamic when the class does not resolve |
+| `prepareMock`, `createStub`, a mock of a computed class | Dynamic: a mock's methods are added at runtime |
 | `createObject( "java", … )` and `new java:…` with no stub for the class | Dynamic: there is nothing to check a Java object against |
 | `new Query()`, `new http()`, `new dbinfo()` and the engine's other script-tag components; `org.lucee.cfml.*`, `com.adobe.coldfusion.*` | The engine's own component, never another file of that name. Checked against its source when the workspace holds it by that path (a Lucee checkout's `org/lucee/cfml/`), otherwise dynamic |
 | `struct()`, `sessionTouch()` and Lucee's other functions its published docs leave out | A builtin |
 | A call chained on a method `onMissingMethod` answers | Accepted, and the rest of the chain is dynamic, as it already was for a last call |
 | `$()`, `$results()`, `$never()` and the other methods MockBox adds to a mock | Accepted on any component, since a test mocks a real component in place |
 | A bare-word return type, `Task function task()`, naming a component beside the declaring one | That component, as CFML finds it; a CFML type name (`query`, `struct`, …) stays the type |
+| A relative return, `return new tasks.Future()` or `tasks.Future function f()` | Read from the declaring file's directory, not the caller's |
+| A function with no declared type, or `any`, whose doc comment says `@return models.User` | That component, where the path names a file |
+| `return svc.load()` | What `load()` returns, not the component `svc` holds; a call on a dynamic value is dynamic |
+| A setter CFML generates for a property | Its own component, so `setError( true ).setStatusCode( 401 )` chains |
+| A getter CFML generates for a property | What the property holds: its `type`, or what its `inject` names |
+| A method declared on a base class to return that class, called on a subclass | The subclass, since a fluent method returns `this`: cborm's `add()` on a `CriteriaBuilder` |
+| An unqualified call, in a function, to a method the component inherits and whose result is assigned | Typed by that method's return, as a call on another component is |
 
 `beanPaths` and `propertyResolvers` apply to the report and the code map as
 they do in the editor.

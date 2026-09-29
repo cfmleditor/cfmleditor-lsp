@@ -22,6 +22,7 @@
  */
 component extends="cborm.models.VirtualEntityService" {
 	property name="settingService" inject="settingService@contentbox";
+	variables.settingService = new contentbox.models.system.SettingService();
 	/**
 	 * Constructor
 	 */

@@ -19,10 +19,14 @@ component extends="cborm.models.VirtualEntityService" {
 	property name="settingService" inject="provider:settingService@contentbox";
 	property name="securityService" inject="provider:securityService@contentbox";
 	property name="siteService" inject="provider:siteService@contentbox";
+	variables.dateUtil = new contentbox.models.util.DateUtil();
+	variables.CBHelper = new contentbox.models.system.CBHelper();
 	variables.permissionService = new contentbox.models.security.PermissionService();
 	variables.permissionGroupService = new contentbox.models.security.PermissionGroupService();
 	variables.roleService = new contentbox.models.security.RoleService();
+	variables.settingService = new contentbox.models.system.SettingService();
 	variables.securityService = new contentbox.models.security.SecurityService();
+	variables.siteService = new contentbox.models.system.SiteService();
 	/**
 	 * Constructor
 	 */

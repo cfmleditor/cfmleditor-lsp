@@ -218,7 +218,7 @@ component {
 	 * @mapping.doc_generic coldbox.system.ioc.config.Mapping
 	 * @initArguments       The constructor structure of arguments to passthrough when initializing the instance
 	 */
-	coldbox.system.ioc.Builder function buildInstance( required mapping, struct initArguments ) {}
+	function buildInstance( required mapping, struct initArguments ) {}
 	/**
 	 * Register a new requested mapping object instance thread safely and returns the mapping configured for this instance
 	 *
@@ -437,5 +437,5 @@ component {
 	 * @binder     The data CFC configuration instance, instantiation path or programmatic binder object to configure this injector with
 	 * @properties A map of binding properties to passthrough to the Configuration CFC
 	 */
-	private any function buildBinder( required binder, required properties ) {}
+	private coldbox.system.ioc.config.Binder function buildBinder( required binder, required properties ) {}
 }

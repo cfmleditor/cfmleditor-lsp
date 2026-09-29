@@ -14,6 +14,7 @@ component {
 	property name='ConsolePainter' inject='provider:ConsolePainter';
 	property name='active' type='boolean' default='false';
 	property name='memento' type='struct';
+	variables.shell = new commandbox.system.Shell();
 	variables.print = new commandbox.system.util.Print();
 	variables.job = new commandbox.system.util.InteractiveJob();
 	variables.ConsolePainter = new commandbox.system.util.ConsolePainter();

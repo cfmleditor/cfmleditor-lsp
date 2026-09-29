@@ -219,7 +219,7 @@ component {
 	 * @targetObject The target object we are building the DSL dependency for. If empty, means we are just requesting building
 	 * @targetID     The target ID we are building this dependency for
 	 */
-	private any function getProviderDSL( required definition, targetObject, targetID ) {}
+	private coldbox.system.ioc.Provider function getProviderDSL( required definition, targetObject, targetID ) {}
 	/**
 	 * Get dependencies using the mapped type
 	 *

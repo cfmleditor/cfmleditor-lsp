@@ -8,6 +8,7 @@
  */
 component extends="cborm.models.VirtualEntityService" {
 	property name="dateUtil" inject="DateUtil@contentbox";
+	variables.dateUtil = new contentbox.models.util.DateUtil();
 	/**
 	 * Constructor
 	 */

@@ -25,7 +25,10 @@ func reasonsIn(t *testing.T, dir, page string) map[string]string {
 func reasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string {
 	t.Helper()
 
-	r.FS, r.Index, r.WorkspaceFolders = vfs.OS{}, index.New(), []string{dir}
+	r.FS, r.WorkspaceFolders = vfs.OS{}, []string{dir}
+	if r.Index == nil {
+		r.Index = index.New()
+	}
 
 	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
 		if err != nil || !strings.HasSuffix(p, ".cfc") {
@@ -52,7 +55,11 @@ func reasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string 
 		t.Fatal(err)
 	}
 
-	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{ExtractCalls: true})
+	// FuncLookup as the unresolved scan passes it, so a variable assigned
+	// from a call is typed by what the call returns.
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{
+		ExtractCalls: true, FuncLookup: r.FuncLookup(filepath.Dir(file)), BeanLookup: r.Index.LookupBean,
+	})
 	got := map[string]string{}
 
 	calls := pr.AllCalls()

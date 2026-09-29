@@ -25,13 +25,19 @@ component extends="cborm.models.VirtualEntityService" {
 	property name="relocationService" inject="RelocationService@contentbox";
 	property name="asyncManager" inject="coldbox:asyncManager";
 	property = "contentID,title,slug,createdDate,modifiedDate" ) .asStruct() .list( sortOrder = arguments.sortOrder );
+	variables.settingService = new contentbox.models.system.SettingService();
 	variables.customFieldService = new contentbox.models.content.CustomFieldService();
 	variables.categoryService = new contentbox.models.content.CategoryService();
+	variables.commentService = new contentbox.models.comments.CommentService();
 	variables.contentVersionService = new contentbox.models.content.ContentVersionService();
+	variables.authorService = new contentbox.models.security.AuthorService();
 	variables.contentStoreService = new contentbox.models.content.ContentStoreService();
 	variables.pageService = new contentbox.models.content.PageService();
 	variables.entryService = new contentbox.models.content.EntryService();
 	variables.statsService = new contentbox.models.content.StatsService();
+	variables.dateUtil = new contentbox.models.util.DateUtil();
+	variables.commentSubscriptionService = new contentbox.models.subscriptions.CommentSubscriptionService();
+	variables.subscriberService = new contentbox.models.subscriptions.SubscriberService();
 	variables.relocationService = new contentbox.models.content.RelocationService();
 	/**
 	 * Constructor
@@ -174,7 +180,7 @@ component extends="cborm.models.VirtualEntityService" {
 	 * @contentID The list or array of ID's to bulk update
 	 * @status    The status either 'publish' or 'draft'
 	 */
-	any function bulkPublishStatus( required any contentID, required any status ) {}
+	contentbox.models.content.ContentService function bulkPublishStatus( required any contentID, required any status ) {}
 	/**
 	 * Get all the expired content in the system by filters
 	 *

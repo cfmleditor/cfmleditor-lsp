@@ -1468,6 +1468,34 @@ project could have written by hand. Three rules hold them together, each with a 
   ten struct literals, and a field one of them forgot is a setting that parses and does
   nothing; `TestParserCarriesEveryResolverField` sets every field and fails on one dropped.
 
+**What each framework says about its own components is applied without a preset**, each
+rule in its own file with a test that fails without it. `resolve/wirebox.go`: a
+`Name@namespace` id is the Name in the module whose `this.modelNamespace` (default: its
+directory) is that namespace, a `binder.map( id ).to( path )` in any `ModuleConfig.cfc` or
+`config/WireBox.cfc` is exact, a module's `this.cfmapping` maps its directory, and an id of a
+module the workspace lacks is dynamic (`uninstalledModule`). **`injectedComponent` keeps the
+`@module`** so this can run; the stubs' `IDPackages` answer a bare CommandBox id.
+`resolve/orm.go`: `entityname` is indexed (`ParseResult.EntityName`) and looked up last in
+`lastResortPath`; a cborm `VirtualEntityService` bound by `super.init( entityName = … )`
+returns its entity from `new`/`get`/`getOrFail`/`findWhere`. `resolve/wheels.go`: a Wheels
+model's finders return the receiver, and `hasMany`/`belongsTo`/`hasOne` generate typed
+methods. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
+and cbi18n/cbfs/HTMLHelper helpers on a component whose chain reaches `coldbox.system.` —
+the lists are read from each module's source at the commit named there.
+`resolve/missing_method.go`: `this.x()` on a component with `onMissingMethod` is dynamic (an
+unscoped call is not — CFML never routes it there, and the parser records both alike, so the
+line is read); a method declared to return its own class, called on a subclass, returns the
+subclass (`selfTyped`, which only widens what is accepted). A call on an interface that lacks
+the method is dynamic, since an implementation has more. DI/1 (`path/beans.go`,
+`ParseAppBeanPaths`): default folders `model,controllers`, aliases name+singular(folder).
+MockBox: `createMock( "cls" )` is `parser.MockPrefix`+cls, checked against cls. The parser
+side: a `@return` doc is kept (`FunctionDef.DocReturn`, used only where it names a file);
+generated setters return their component and getters what the property holds;
+**`return x.m()` is not `return x`** (`returnsCallOn`: it is `$any` when x is, nothing
+otherwise — it used to declare CommandBox's `getCWD()` a `Shell`); and an unqualified call to
+an inherited method types what it is assigned to through `FuncLookup`. cborm's stubs are
+pinned to 4.12.1, the version ContentBox's stubs use: 5.x dropped `getBeanPopulator`.
+
 **`Application.cfc` mappings are evaluated, not just matched** (`parser.evaluatedMappings`).
 The literal-only regex read 20 of the corpus's 110 `this.mappings` assignments; the rest are
 built from the file's own directory and from variables set a line above —

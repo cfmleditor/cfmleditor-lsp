@@ -22,6 +22,7 @@
  */
 component extends="cborm.models.VirtualEntityService" {
 	property name="CBHelper" inject="CBHelper@contentbox";
+	variables.CBHelper = new contentbox.models.system.CBHelper();
 	/**
 	 * Constructor
 	 */

@@ -11,7 +11,10 @@ component {
 	property name="shell" inject="shell";
 	property name="print" inject="print";
 	property name="JSONPrettyPrint" inject="provider:JSONPrettyPrint";
+	variables.configService = new commandbox.system.services.ConfigService();
+	variables.shell = new commandbox.system.Shell();
 	variables.print = new commandbox.system.util.Print();
+	variables.JSONPrettyPrint = new commandbox.system.modules.JSONPrettyPrint.models.JSONPrettyPrint();
 	/**
 	 * Constructor
 	 */

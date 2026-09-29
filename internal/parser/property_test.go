@@ -354,16 +354,16 @@ func TestAnInjectionNamesItsComponent(t *testing.T) {
 	const cb = "coldbox.system."
 
 	for inject, want := range map[string]string{
-		"id:settingService@contentbox":   "settingService",
+		"id:settingService@contentbox":   "settingService@contentbox",
 		"model:UserService":              "UserService",
-		"MODEL:UserService@users":        "UserService",
+		"MODEL:UserService@users":        "UserService@users",
 		"models.UserService":             "models.UserService",
 		"PrintBuffer":                    "PrintBuffer",
 		"provider:UserService":           "UserService",
-		"provider:settingService@cb":     "settingService",
+		"provider:settingService@cb":     "settingService@cb",
 		"HTMLHelper@coldbox":             cb + "modules.HTMLHelper.models.HTMLHelper",
 		"Provider:Renderer@coldbox":      cb + "web.Renderer",
-		"Renderer@myModule":              "Renderer",
+		"Renderer@myModule":              "Renderer@myModule",
 		"Coldbox":                        cb + "web.Controller",
 		"coldbox:requestService":         cb + "web.services.RequestService",
 		"wirebox":                        cb + "ioc.Injector",

@@ -481,6 +481,14 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	idx.thisVars[fk] = thisVars
 	idx.extends[fk] = strings.Clone(pr.Extends)
 	idx.delegates[fk] = cloneDelegates(pr.Delegates)
+
+	// An ORM entity is named by its entityname attribute, which is often not
+	// its file's name: ContentBox's Author.cfc is cbAuthor, and
+	// entityNew( "cbAuthor" ) names it.
+	if name := pr.EntityName(); name != "" && pr.Persistent {
+		idx.entities[strings.ToLower(name)] = uri.URI(strings.Clone(string(fileURI)))
+	}
+
 	idx.setIncludesLocked(fileURI, parser.ExtractIncludes(content))
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))

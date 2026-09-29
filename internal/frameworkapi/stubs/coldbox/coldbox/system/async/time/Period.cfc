@@ -29,7 +29,7 @@ component {
 	 *
 	 * @return java.time.Period
 	 */
-	any function getNative() {}
+	coldbox.system.async.time.Period function getNative() {}
 	/**
 	 * Checks if the period is negative, excluding zero
 	 */

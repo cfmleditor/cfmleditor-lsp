@@ -50,6 +50,7 @@ component extends="contentbox.models.BaseEntity" {
 	property name="numberOfContentStore" formula="select count(*) from cb_contentStore as contentStore, cb_content as content where contentStore.contentID=content.contentID and content.FK_siteID = siteID";
 	property name="numberOfMenus" formula="select count(*) from cb_menu as menu where menu.FK_siteID = siteID";
 	property name="numberOfCategories" formula="select count(*) from cb_category as category where category.FK_siteID = siteID";
+	variables.contentService = new contentbox.models.content.ContentService();
 	/**
 	 * Constructor
 	 */
