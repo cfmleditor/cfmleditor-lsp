@@ -105,15 +105,7 @@ func cmdUnresolved(args []string) {
 
 	files := collectCFMLFiles(fsys, scanRoots)
 
-	// Filter scan targets if specific files were passed
-	var scanFiles []string
-
-	for _, a := range args {
-		if info, err := os.Stat(a); err == nil && !info.IsDir() {
-			abs, _ := filepath.Abs(a)
-			scanFiles = append(scanFiles, abs)
-		}
-	}
+	scanFiles := scanTargets(fsys, args, len(opt.WorkspaceFolders) > 0)
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
 
@@ -346,4 +338,37 @@ func presetHint(cfg *daemon.Config, searchDir string) string {
 	return fmt.Sprintf("box.json names %s, which have framework presets: add `\"frameworks\": [\"%s\"]` to %s\n"+
 		"so the values those frameworks hand your code are typed rather than reported.",
 		strings.Join(suggest, ", "), strings.Join(all, `", "`), where)
+}
+
+// scanTargets is the files a report covers, as absolute paths; nil covers
+// everything indexed. Files are always named. A directory narrows the report
+// only when the config's workspace folders set the index wider than the
+// arguments: the index must stay whole, since resolving a call reads every
+// other component, but the report should hold what was asked for. Without
+// workspace folders the arguments are the whole index and nothing is narrowed.
+func scanTargets(fsys vfs.FS, args []string, indexWiderThanArgs bool) []string {
+	abs := make([]string, 0, len(args))
+
+	for _, a := range args {
+		p, err := filepath.Abs(a)
+		if err != nil {
+			p = a
+		}
+
+		abs = append(abs, p)
+	}
+
+	if indexWiderThanArgs {
+		return collectCFMLFiles(fsys, abs)
+	}
+
+	var files []string
+
+	for _, p := range abs {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			files = append(files, p)
+		}
+	}
+
+	return files
 }

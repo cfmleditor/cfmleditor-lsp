@@ -82,6 +82,34 @@ The server logs to stderr, which the editor keeps in its language-server log. Tw
 
 For a fatal Go error, such as a stack overflow, the one-line reason (`fatal error: stack overflow`) appears only on stderr. The file gets the traceback that follows it.
 
+### Scanning a project for unresolved calls
+
+`unresolved` reports every call the server cannot resolve to a definition. It takes files or directories and walks directories itself, so there is no glob to pass. It skips dot-directories such as `.git` and `.claude/worktrees`. It reads the `.cfmleditor.json` governing the first path it is given.
+
+The whole workspace is always *indexed* (every folder in `workspacePaths`), because resolving a call reads every other component. The *report* holds only what you name: a directory or file argument narrows it, so `unresolved packages/tass/core` lists calls in that directory alone.
+
+macOS and Linux:
+
+```sh
+cfmleditor-lsp unresolved ~/projects/myapp > unresolved.txt
+```
+
+Windows PowerShell (`cmd.exe` and PowerShell do not expand `**/*.cfc`, and neither needs it):
+
+```powershell
+cfmleditor-lsp.exe unresolved "$HOME\projects\myapp" | Out-File -Encoding utf8 unresolved.txt
+```
+
+Windows `cmd.exe`:
+
+```bat
+cfmleditor-lsp.exe unresolved "%USERPROFILE%\projects\myapp" > unresolved.txt
+```
+
+Use `>>` (or `Out-File -Append`) to add to an earlier report. Windows PowerShell 5.1 writes UTF-16 for a plain `>` or `>>`, hence `Out-File -Encoding utf8`; PowerShell 7 writes UTF-8 either way. Progress and timing go to stderr, so they stay on the console and out of the file.
+
+Use the binary from `target/release/` after `make build`, or a release download; give its full path if it is not on `PATH`. Add `--json` for machine-readable output, `--verbose` for the reason behind each entry, and `--write` to write `.cfmleditor-unresolved.txt` beside the config (see [Generated reports](#generated-reports)). `cfmleditor-lsp explain <file> <line>` traces one call.
+
 ## Code map
 
 `cfmleditor-lsp graph` builds a map of a whole project: every function and file, and
