@@ -178,3 +178,92 @@ func TestAStartupFileMayBeATemplatePath(t *testing.T) {
 		t.Errorf("a template-path startup file did not resolve: %s", reason)
 	}
 }
+
+// TestAMultiLineStartupAssignmentWithCallsInItsArguments is tassweb's
+// REQUEST.tassui: one assignment written a named argument per line, one of
+// them a call of its own, whose method declares a component return type but
+// builds the result through a runtime createObject path. Three things used to
+// stop it: the scan read one line at a time and so never saw the closing `>`,
+// the chain check refused parentheses inside an argument list, and the body's
+// inferred `$any` outranked the declared return type.
+func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
+	app := t.TempDir()
+
+	files := map[string]string{
+		"Application.cfc": `<cfcomponent><cffunction name="onRequestStart"><cfinclude template="startup.cfm"></cffunction></cfcomponent>`,
+		"startup.cfm": `<cfset REQUEST.kernel = createObject("component", "lib.Kernel").init()>
+<cfset REQUEST.ui = REQUEST.kernel.getTools().getUI(
+	companyCode=REQUEST.user.code
+	, path="a(b)"
+	, symbol=REQUEST.kernel.getInit().getSymbol()) />
+<cfset REQUEST.ui2 = REQUEST.kernel.getTools().getBareUI()>
+<cfset REQUEST.raw = REQUEST.kernel.getTools().make(type="x")>
+<cfscript>
+REQUEST.sc
+	= new lib.UI();
+</cfscript>`,
+		"lib/Kernel.cfc": `<cfcomponent><cffunction name="init"><cfreturn this></cffunction><cffunction name="getTools" returntype="lib.Tools"></cffunction></cfcomponent>`,
+		"lib/Tools.cfc": `<cfcomponent>
+<cffunction name="getUI" returntype="lib.UI"><cfset var r = make(type="ui")><cfreturn r></cffunction>
+<cffunction name="getBareUI" returntype="UI"><cfset var r = make(type="ui")><cfreturn r></cffunction>
+<cffunction name="make" returntype="struct"><cfargument name="type"><cfset var r = createObject("component", "objs.#ARGUMENTS.type#")><cfreturn r></cffunction>
+</cfcomponent>`,
+		"lib/UI.cfc": `<cfcomponent><cffunction name="symbol"></cffunction></cfcomponent>`,
+	}
+
+	for rel, src := range files {
+		p := filepath.Join(app, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := &resolve.Resolver{FS: vfs.OS{}, Index: index.New(), WorkspaceFolders: []string{app}}
+
+	got := reasonsFor(t, r, filepath.Join(app, "pages", "page.cfm"), `<cfoutput>
+<cfset a = REQUEST.ui.symbol()>
+<cfset b = REQUEST.ui.nope()>
+<cfset c = REQUEST.ui2.symbol()>
+<cfset d = REQUEST.ui2.nope()>
+<cfset e = REQUEST.raw.anything()>
+<cfset f = REQUEST.sc.symbol()>
+<cfset g = REQUEST.sc.nope()>
+</cfoutput>`)
+
+	if reason := got["REQUEST.ui.symbol"]; reason != "" {
+		t.Errorf("REQUEST.ui.symbol() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.ui.nope"]; !strings.Contains(reason, "not found") {
+		t.Errorf("REQUEST.ui.nope() should be reported as missing from lib.UI, got %q", reason)
+	}
+
+	// A bare-word return type naming a component beside the declaring file
+	// outranks the inferred $any exactly as a dotted one does.
+	if reason := got["REQUEST.ui2.symbol"]; reason != "" {
+		t.Errorf("REQUEST.ui2.symbol() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.ui2.nope"]; !strings.Contains(reason, "not found") {
+		t.Errorf("REQUEST.ui2.nope() should be reported as missing, got %q", reason)
+	}
+
+	// A script assignment may put its `=` on the next line.
+	if reason := got["REQUEST.sc.symbol"]; reason != "" {
+		t.Errorf("REQUEST.sc.symbol() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.sc.nope"]; !strings.Contains(reason, "not found") {
+		t.Errorf("REQUEST.sc.nope() should be reported as missing, got %q", reason)
+	}
+
+	// A CFML type name is not a component: make() is returntype="struct" over
+	// a runtime createObject, so it stays dynamic rather than becoming "struct".
+	if reason := got["REQUEST.raw.anything"]; reason != "" {
+		t.Errorf("REQUEST.raw.anything() should stay dynamic, got %q", reason)
+	}
+}
