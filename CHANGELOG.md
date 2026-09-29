@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Fixed
 
 - **`unresolved <dir>` reported the whole workspace, not the directory.** With workspace folders in the config, only a *file* argument narrowed the report; a directory was used just to find `.cfmleditor.json`, so `unresolved packages/tass/core` listed calls from every application in the workspace. The index still covers the whole workspace, because resolving a call reads every other component, but the report now holds the files and directories named.
