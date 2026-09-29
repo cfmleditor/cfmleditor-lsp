@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`unresolved <dir>` reported the whole workspace, not the directory.** With workspace folders in the config, only a *file* argument narrowed the report; a directory was used just to find `.cfmleditor.json`, so `unresolved packages/tass/core` listed calls from every application in the workspace. The index still covers the whole workspace, because resolving a call reads every other component, but the report now holds the files and directories named.
+
+### Documentation
+
+- **How to run `unresolved` on macOS, Linux and Windows.** The README gains a section with the PowerShell and `cmd.exe` forms, why no glob is needed, and the UTF-16 default of a plain `>` in Windows PowerShell 5.1.
+
 ## [0.3.9]
 
 ### Added
