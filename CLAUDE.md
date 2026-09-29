@@ -1495,6 +1495,8 @@ generated setters return their component and getters what the property holds;
 otherwise — it used to declare CommandBox's `getCWD()` a `Shell`); and an unqualified call to
 an inherited method types what it is assigned to through `FuncLookup`. cborm's stubs are
 pinned to 4.12.1, the version ContentBox's stubs use: 5.x dropped `getBeanPopulator`.
+`RESOLUTION-GAPS.md` lists what `unresolved` still reports over the corpus, the cause of
+each large group and where its fix goes, with the corpus setup to measure a change against.
 
 **`Application.cfc` mappings are evaluated, not just matched** (`parser.evaluatedMappings`).
 The literal-only regex read 20 of the corpus's 110 `this.mappings` assignments; the rest are

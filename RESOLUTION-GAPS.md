@@ -1,0 +1,287 @@
+# Resolution gaps
+
+What `unresolved` still reports over the six-project corpus after PR #184, what
+is behind each large group, and where a fix would go. Each item says how it was
+found, so it can be re-checked rather than taken on trust. Items are ordered by
+how many corpus entries they account for, largest first, within each section.
+
+## Measuring
+
+The corpus is six public projects at these commits:
+
+| Project | Commit | Repository |
+|---|---|---|
+| ContentBox | 312f182 | https://github.com/Ortus-Solutions/ContentBox |
+| Lucee | 4602447 | https://github.com/lucee/Lucee |
+| TestBox | af36cdd | https://github.com/Ortus-Solutions/TestBox |
+| cfwheels | ef04365 | https://github.com/cfwheels/cfwheels |
+| coldbox-platform | c318d8d | https://github.com/ColdBox/coldbox-platform |
+| fw1 | d7fb9ad | https://github.com/framework-one/fw1 |
+
+Each is measured twice, with a `.cfmleditor.json` at its root:
+
+| Project | "Presets" config | "No presets" config |
+|---|---|---|
+| ContentBox | `{"frameworks":["coldbox","contentbox","testbox","commandbox","cfmigrations"]}` | `{}` |
+| Lucee | `{}` | `{}` |
+| TestBox | `{"frameworks":["testbox","commandbox"]}` | `{}` |
+| cfwheels | `{"frameworks":["wheels","testbox","commandbox"]}` | `{}` |
+| coldbox-platform | `{"frameworks":["coldbox","testbox","commandbox"]}` | `{}` |
+| fw1 | `{"frameworks":["fw1"]}` | `{}` |
+
+Run `cfmleditor-lsp unresolved --json <project>` for each project and
+concatenate the arrays. Sort each entry's JSON with its keys sorted, so two
+runs can be diffed line by line. Then compare two runs **per entry**, keyed by
+file (relative to the corpus), line, function and reason. Comparing totals
+hides a change that fixes one entry and breaks another.
+
+```python
+import json, sys, collections
+
+def load(path):
+    out = collections.Counter()
+    for line in open(path):
+        if line.startswith("{"):
+            d = json.loads(line)
+            out[(d["file"].split("/corpus/")[-1], d["line"], d["function"], d["reason"])] += 1
+    return out
+
+a, b = load(sys.argv[1]), load(sys.argv[2])
+print("added", sum((b - a).values()), "removed", sum((a - b).values()))
+```
+
+At PR #184 the totals are **9,520** with presets and **18,618** without. Use
+`cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
+lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
+file's own directory unless given `--root <project>`, so pass `--root` or it
+can disagree with the batch scan.
+
+## Where the entries are
+
+With presets, the largest groups by project and reason are:
+
+| Entries | Project | Reason |
+|---|---|---|
+| 2,081 | ContentBox | variable has no component ref |
+| 1,596 | coldbox-platform | variable has no component ref |
+| 1,155 | Lucee | variable has no component ref |
+| 863 | cfwheels | variable has no component ref |
+| 557 | Lucee | no qualifier, not in file |
+| 395 | cfwheels | not found in extends chain |
+| 232 | fw1 | variable has no component ref |
+| 181 | cfwheels | component does not exist |
+| 164 | cfwheels | base component does not resolve |
+
+"Variable has no component ref" is two thirds of the report. The variables
+behind it, most frequent first:
+
+| Project | Variables |
+|---|---|
+| coldbox-platform | `scheduler` 156, `iservice` 105, `arguments.mapping` 73, `oexception` 70, `now` 50, `arguments.prc.response` 47 |
+| ContentBox | `content` 83, `thiscontent` 74, `comment` 65, `prc.author` 60, `c` 54, `entry` 53, `c.restrictions` 47 |
+| Lucee | `field` 160, `driver` 97, `coll` 62 |
+| cfwheels | `variables.helpers` 70, `details` 64, `arguments.printer` 53, `ssh` 49 |
+| fw1 | `user` / `local.user` 29 each, `answer` 18, `rc.question` 17 |
+
+The gaps below explain the largest of these.
+
+## Gaps with a known cause
+
+### 1. An assignment in one closure is invisible to its sibling closures
+
+- **Evidence:** coldbox-platform `scheduler` (156 entries) and most of the
+  TestBox-spec variables across the corpus.
+- **Shape:**
+
+  ```cfml
+  beforeEach( function(){ scheduler = asyncManager.newScheduler( "x" ); } );
+  it( "…", function(){ scheduler.task( "a" ); } );
+  ```
+
+  The unscoped assignment in `beforeEach`'s closure lands in the component's
+  variables scope at run time, and every `it` closure reads it there.
+- **Cause:** a ref declared in a closure carries the closure's lines
+  (`ComponentRef.VisibleFrom/To`, see "A closure's body is read as statements"
+  in CLAUDE.md). That keeps it out of the enclosing function, but it also keeps
+  it out of every other closure.
+- **Fix direction:** an *unscoped* assignment in a closure (not `var`, not
+  `local.`) should be filed where CFML puts it: in variables scope, visible
+  file-wide from its line onward. `var` and `local.` refs keep the closure's
+  lines.
+- **Caveat:** measure the change on the corpus. A closure assigning an unscoped
+  name that shadows a real variable is the risk.
+
+### 2. A MockBox decoration chain loses the mock's type
+
+- **Evidence:** coldbox-platform `iservice` (105 entries), and assignments in
+  specs generally.
+- **Shape:**
+
+  ```cfml
+  variables.iService = model.init( mockController ).$( "getCache", mockCache ).$property( … );
+  ```
+
+  `$()`, `$property()`, `$results()` and the rest return the mock itself.
+- **Cause:** `mockDecoration` hops are accepted as dynamic (`missingChainHop`,
+  `checkMethodOn`), which is right for a last call. An *assignment* through
+  them therefore records no component for the variable.
+- **Fix direction:** make a decoration hop return its receiver's component,
+  since it returns the mock. The same list is `mockDecorations` in
+  `internal/resolve`.
+  - In the resolver: `hopReturn`.
+  - In the parser: the pending-call path, which types `x = a.b().c()` through
+    `FuncLookup`. The hook would need to answer for decoration names, or the
+    parser would need to know the list.
+
+### 3. `return variables.x;` does not type the function
+
+- **Evidence:** cfwheels `DetailOutputService.getPrint()` is
+  `return variables.print;`, where `print` is `inject="PrintBuffer"`. About 60
+  no-preset entries chain on it.
+- **Cause:** `checkReturnComponent` (`internal/parser/script_parser.go`) records
+  the *first* identifier of the return expression. For `variables.print` that
+  is the scope word. `returnCall` walks it as a scoped call and reports "not
+  bare", so `returnVar` becomes `returnsCallOn + "variables"`, which matches no
+  ref. It was already untyped before #184, when `returnVar` was `"variables"`.
+- **Fix direction:** when the first token is a scope word (`scopeReceiver`), a
+  `.`, a name, and then the end of the statement, set `returnVar` to the name
+  and carry the scope (`this.` versus `variables.`, `parser.ReceiverRefScope`),
+  so the right ref is read. `settleReturnComponent` and `settleReturnVars` both
+  need it.
+- **Tag syntax:** the tag parser's `<cfreturn>` path (`tag_parser.go`, near
+  `f.returnVar = varName`) should get the same rule.
+
+### 4. A function returning a resolver-matched call is untyped
+
+- **Evidence:** CommandBox `BaseCommand.command()` is
+  `return getInstance( name='CommandDSL', … );`. That accounts for 49
+  no-preset cfwheels entries: `command( … ).run()` and `.params()`.
+- **Cause:** `checkReturnComponent` types a return only when it is a variable,
+  `new`, `createObject` or `entityNew`. A call that a `componentResolver` would
+  type in an assignment (`x = getInstance( "X" )`) is not typed in a
+  `return`.
+- **Fix direction:** in the default arm, when the return is a bare call,
+  capture the call text and run the same resolver match an assignment's
+  right-hand side gets. The stub generator then needs its resolver
+  (`getInstanceResolvers` in `cmd/cfstubgen`) widened to accept further
+  arguments (`(?:,[^()]*)?` before the closing parenthesis). That widening was
+  tried and changed no stub, because the parser half is missing.
+- **Scope:** this helps every project, not only the stubs.
+
+### 5. Calls on Java objects are "no component ref" rather than dynamic
+
+- **Evidence:** Lucee `field` (160), `driver` (97), and most of the rest of
+  Lucee's no-component-ref entries.
+- **Shape:**
+
+  ```cfml
+  var field = createObject( "java", "…QueryImpl" ).getClass().getDeclaredField( "x" );
+  ```
+
+- **Cause:** a chain that starts at an unstubbed Java object is dynamic when
+  called, but the variable it is *assigned* to gets no ref. A later
+  `field.setAccessible( true )` is then reported.
+- **Fix direction:** a pending call whose chain base is dynamic (`$any`,
+  including a Java `createObject` with no stub) should give the variable
+  `$any`.
+- **Where:** `resolvePendingCalls` / `baseVarComponent` in
+  `internal/parser/result.go`. `returnedComponent` (added in #184) already
+  applies this rule to returns.
+- **Caveat:** check it doesn't swallow calls that a `javaStubsPath` would type.
+
+### 6. Methods assigned onto an object at run time
+
+- **Evidence:** fw1 `tests/CircularTest.cfc`, 8 entries.
+- **Shape:**
+
+  ```cfml
+  a.getVariables = getVariables;
+  a.getVariables();
+  ```
+
+- **Fix direction:** a call `x.m()` where the same function assigns `x.m = …`
+  on an earlier line is dynamic. The parser would need to record member
+  assignments on locals, as `HasScopedAssignment` does for the variables scope.
+- **Priority:** small, and only common in tests.
+
+### 7. `this.x()` detection reads the source line
+
+`thisCallAnswered` (`internal/resolve/missing_method.go`) accepts `this.x()` on
+a component with `onMissingMethod`. Only a `this.`-qualified call reaches
+`onMissingMethod`, and the parser records `this.x()` and `x()` as the same
+bare call. So the resolver re-reads the line text, only on the failure path.
+
+- **Cleaner fix:** add a `This bool` to `parser.CallSite`, set where
+  `scopeReceiver` returns the `this` case.
+- **Size:** CallSite's small fields are grouped at the end, and a bool fits in
+  the existing padding. `TestParserStructsKeepTheirSize` will say if it
+  doesn't.
+- **What to check:** every path that records such a call goes through
+  `scopeReceiver` (see CLAUDE.md), so that is the one place to set it. Then
+  delete `lineAt` and the text scan.
+
+## Hand-maintained lists that could be generated
+
+- **`moduleHelpers`** (`internal/resolve/modules.go`): the cbi18n, cbfs and
+  HTMLHelper helper names, copied from each module's `helpers/Mixins.cfm` at the
+  commits noted there.
+  - `cmd/cfstubgen` could fetch those modules like the framework sources and
+    emit the list, so a new module or a renamed helper is one `make
+    framework-stubs` away.
+  - Other ColdBox modules with an `applicationHelper` (cbmessagebox,
+    cbsecurity, cbauth, …) are not covered.
+- **The rule's scope:** it only fires where the component's extends chain
+  reaches `coldbox.system.`. A `.cfm` view calling `$r()` without the `coldbox`
+  preset is not covered. With the preset, `HelperScope` covers views when the
+  module is installed.
+
+## Version skew in the bundled stubs
+
+Each framework is stubbed at one pinned commit
+(`internal/frameworkapi/sources.go`). A project written against another version
+sees the other version's API.
+
+- **cborm:** pinned to 4.12.1 because ContentBox declares `^4.10.0`, and 5.x
+  dropped `getBeanPopulator`. A cborm 5 project would now see 4.12's API.
+- **CommandBox:** `ServerService.getServerInfoJSON` (cfwheels'
+  `benchmark.cfc`) is absent from the pinned CommandBox. It was not checked
+  whether it exists in another version or is a genuine error.
+- **Direction:** pick the stub version from the project's `box.json`
+  dependency range when it names one. That means stubs for several versions of
+  a framework, which is a size question: the stubs are about 1.8MB now.
+
+## Untyped, but correctly so for now
+
+These appear in the added-entries diff of #184 and were left as they are:
+
+| Entry | Why it is not a bug |
+|---|---|
+| `getBeanPopulator()` has no return type (16 entries, ContentBox) | cborm 4.12 declares none and documents none. A fix belongs in the stub generator (infer from its body) or nowhere. |
+| cborm's `getWireBox()` has no return type (13, no presets) | The property is assigned `application.wirebox`, which nothing types. |
+| `DetailOutputService.error()` has no return type (13, cfwheels) | `error()` returns nothing, so `.output()` chained on it is a genuine error in wheels-cli. |
+| `getStats()`, `getRootLogger()`, `site()` and similar have no return type | They declare and document no type. |
+
+## Genuine findings the new rules exposed
+
+These were hidden while the component didn't resolve, and each was checked
+against the source:
+
+- `addPermission` / `removePermission` on `cbRole` (70 entries), in
+  ContentBox's old `build/patches/1-0-x` upgrade scripts. The Role entity's
+  `permissions` property has no `singularname`, so CFML generates
+  `addPermissions`.
+- `generatePasswordResetToken` (ContentBox `authSpec.cfc`), `humanize` on
+  wheels-cli's `helpers`, and `isInstanceCheck` / `getAppStartHandlerFired`
+  (coldbox-platform tests) exist nowhere in the corpus.
+- `evictEntity` (ContentBox `CommentService`) is not in cborm 4.12 or 5.x.
+
+## Small loose ends
+
+- **FW/1 stub guess:** `framework.one`'s private `getCachedController` /
+  `getController` are stubbed from their first `return this;`. The stub
+  generator takes a function's first return, and these functions return `this`
+  in one special case. They are private, so no application code calls them.
+- **`entityLoad`:** `entityNew( "name" )` is tested to find an entity by its
+  `entityname`. `entityLoad` and `entityLoadByPK` were not checked.
+- **Merge commit attribution:** the merge commit of `origin/main` on this
+  branch lacks the attribution lines. Fixing it would need a force-push.
