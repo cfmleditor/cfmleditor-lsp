@@ -34,7 +34,7 @@ var sharedScopes = []string{"request", "session", "application", "server"}
 
 var (
 	tagSharedAssign    = regexp.MustCompile(`(?i)<cfset\s+(request|session|application|server)\.([A-Za-z_$][\w$]*)\s*=`)
-	scriptSharedAssign = regexp.MustCompile(`(?im)^[ \t]*(request|session|application|server)\.([A-Za-z_$][\w$]*)[ \t]*=`)
+	scriptSharedAssign = regexp.MustCompile(`(?im)^[ \t]*(request|session|application|server)\.([A-Za-z_$][\w$]*)\s*=`)
 	createdComponent   = regexp.MustCompile(`(?i)^createObject\s*\(\s*["']component["']\s*,\s*["']([^"']+)["']`)
 	newComponent       = regexp.MustCompile(`(?i)^new\s+(?:cfml:)?([A-Za-z_$#][\w$.#]*)\s*\(`)
 )

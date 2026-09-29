@@ -197,7 +197,11 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 	, path="a(b)"
 	, symbol=REQUEST.kernel.getInit().getSymbol()) />
 <cfset REQUEST.ui2 = REQUEST.kernel.getTools().getBareUI()>
-<cfset REQUEST.raw = REQUEST.kernel.getTools().make(type="x")>`,
+<cfset REQUEST.raw = REQUEST.kernel.getTools().make(type="x")>
+<cfscript>
+REQUEST.sc
+	= new lib.UI();
+</cfscript>`,
 		"lib/Kernel.cfc": `<cfcomponent><cffunction name="init"><cfreturn this></cffunction><cffunction name="getTools" returntype="lib.Tools"></cffunction></cfcomponent>`,
 		"lib/Tools.cfc": `<cfcomponent>
 <cffunction name="getUI" returntype="lib.UI"><cfset var r = make(type="ui")><cfreturn r></cffunction>
@@ -226,6 +230,8 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 <cfset c = REQUEST.ui2.symbol()>
 <cfset d = REQUEST.ui2.nope()>
 <cfset e = REQUEST.raw.anything()>
+<cfset f = REQUEST.sc.symbol()>
+<cfset g = REQUEST.sc.nope()>
 </cfoutput>`)
 
 	if reason := got["REQUEST.ui.symbol"]; reason != "" {
@@ -244,6 +250,15 @@ func TestAMultiLineStartupAssignmentWithCallsInItsArguments(t *testing.T) {
 
 	if reason := got["REQUEST.ui2.nope"]; !strings.Contains(reason, "not found") {
 		t.Errorf("REQUEST.ui2.nope() should be reported as missing, got %q", reason)
+	}
+
+	// A script assignment may put its `=` on the next line.
+	if reason := got["REQUEST.sc.symbol"]; reason != "" {
+		t.Errorf("REQUEST.sc.symbol() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.sc.nope"]; !strings.Contains(reason, "not found") {
+		t.Errorf("REQUEST.sc.nope() should be reported as missing, got %q", reason)
 	}
 
 	// A CFML type name is not a component: make() is returntype="struct" over
