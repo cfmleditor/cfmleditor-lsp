@@ -3,6 +3,8 @@
  * The main ColdBox utility library.
  */
 component {
+	variables.classMappingHelper = new coldbox.system.core.util.BoxLangMappingHelper();
+	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
 	/**
 	 * SERVER/USER/CFML ENGINE HELPERS *
 	 */

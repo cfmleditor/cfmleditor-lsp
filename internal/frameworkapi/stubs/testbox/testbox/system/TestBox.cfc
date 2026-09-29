@@ -19,6 +19,10 @@ component {
 	property name="coverageService";
 	property name="modules";
 	property name="bundlesPattern";
+	variables.utility = new testbox.system.util.Util();
+	variables.coverageService = new testbox.system.coverage.CoverageService();
+	variables.env = new testbox.system.util.Env();
+	variables.testResults = new testbox.system.TestResult();
 	/**
 	 * Constructor
 	 *
@@ -31,7 +35,7 @@ component {
 	 * @options        A structure of configuration options that are optionally used to configure a runner.
 	 * @bundlesPattern A globbing pattern list to match bundles to test ONLY, matches directoryList() filters! Ex: *Spec|*Test
 	 */
-	any function init( any bundles, any directory, any directories, any reporter, any labels, any excludes, struct options, string bundlesPattern ) {}
+	testbox.system.TestBox function init( any bundles, any directory, any directories, any reporter, any labels, any excludes, struct options, string bundlesPattern ) {}
 	/**
 	 * Load the TestBox Modules
 	 */
@@ -80,19 +84,19 @@ component {
 	 *
 	 * @directory A directory to test which can be a simple mapping path or a struct with the following options: [ mapping = the path to the directory using dot notation (myapp.testing.specs), recurse = boolean, filter = closure that receives the path of the class found, it must return true to process or false to continue process ]
 	 */
-	any function addDirectory( required any directory, boolean recurse ) {}
+	testbox.system.TestBox function addDirectory( required any directory, boolean recurse ) {}
 	/**
 	 * Constructor
 	 *
 	 * @directories A set of directories to test which can be a list of simple mapping paths or an array of structs with the following options: [ mapping = the path to the directory using dot notation (myapp.testing.specs), recurse = boolean, filter = closure that receives the path of the class found, it must return true to process or false to continue process ]
 	 */
-	any function addDirectories( required any directories, boolean recurse ) {}
+	testbox.system.TestBox function addDirectories( required any directories, boolean recurse ) {}
 	/**
 	 * Add bundles to the TestBox `bundles` target to test
 	 *
 	 * @bundles The path, list of paths or array of paths of the spec bundle classess to run and test
 	 */
-	any function addBundles( required any bundles ) {}
+	testbox.system.TestBox function addBundles( required any bundles ) {}
 	/**
 	 * Run me some testing goodness, this can use the constructed object variables or the ones
 	 * you can send right here.

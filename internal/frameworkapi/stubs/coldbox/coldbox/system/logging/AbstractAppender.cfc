@@ -50,6 +50,9 @@ component {
 	 * A base Log Listener Queue
 	 */
 	property name="logListener" type="struct";
+	this.logLevels = new coldbox.system.logging.LogLevels();
+	variables.logEvent = new coldbox.system.logging.LogEvent();
+	variables.util = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
 	 *

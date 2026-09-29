@@ -135,6 +135,8 @@ component extends="coldbox.system.cache.AbstractCacheBoxProvider" {
 	 * @doc.type coldbox.system.cache.util.CacheStats
 	 */
 	property name="stats";
+	variables.elementCleaner = new coldbox.system.cache.util.ElementCleaner();
+	variables.stats = new coldbox.system.cache.util.CacheStats();
 	/**
 	 * Constructor
 	 */
@@ -315,7 +317,7 @@ component extends="coldbox.system.cache.AbstractCacheBoxProvider" {
 	/**
 	 * Reap the cache, clear out everything that is dead in a synchronous manner
 	 */
-	any function reap() {}
+	coldbox.system.cache.providers.CacheBoxProvider function reap() {}
 	/**
 	 * Announce a key expiration
 	 *

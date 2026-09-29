@@ -96,6 +96,8 @@ component {
 	 * The configuration DEFAULTS struct
 	 */
 	property name ="DEFAULTS" setter="false" type ="struct";
+	this.SCOPES = new coldbox.system.ioc.Scopes();
+	this.TYPES = new coldbox.system.ioc.Types();
 	/**
 	 * Constructor
 	 *

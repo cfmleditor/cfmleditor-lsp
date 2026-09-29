@@ -28,6 +28,21 @@ component {
 	property name="securityService" inject="securityService@contentbox";
 	property name="markdown" inject="Processor@cbmarkdown";
 	property name="requestStorage" inject="requestStorage@cbstorages";
+	variables.categoryService = new contentbox.models.content.CategoryService();
+	variables.settingService = new contentbox.models.system.SettingService();
+	variables.entryService = new contentbox.models.content.EntryService();
+	variables.pageService = new contentbox.models.content.PageService();
+	variables.authorService = new contentbox.models.security.AuthorService();
+	variables.commentService = new contentbox.models.comments.CommentService();
+	variables.contentStoreService = new contentbox.models.content.ContentStoreService();
+	variables.widgetService = new contentbox.models.ui.WidgetService();
+	variables.moduleService = new contentbox.models.modules.ModuleService();
+	variables.themeService = new contentbox.models.ui.ThemeService();
+	variables.mobileDetector = new contentbox.models.util.MobileDetector();
+	variables.menuService = new contentbox.models.menu.MenuService();
+	variables.menuItemService = new contentbox.models.menu.MenuItemService();
+	variables.siteService = new contentbox.models.system.SiteService();
+	variables.securityService = new contentbox.models.security.SecurityService();
 	/**
 	 * Constructor
 	 */

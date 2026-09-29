@@ -6,6 +6,8 @@
  * Mail Utility library for TestBox
  */
 component {
+	variables.mixerUtil = new wheels.wheelstest.system.util.MixerUtil();
+	variables.engineMappingHelper = new wheels.wheelstest.system.util.BoxLangMappingHelper();
 	/**
 	 * Get the mixer utility object instance. It lazy loads into variables scope for faster execution next time.
 	 *

@@ -1063,7 +1063,7 @@ component {
 	 * bootstrap). Sharing one instance is safe because $initializeMixins keeps
 	 * its scratch state local-scoped.
 	 */
-	public any function $pluginObj() {}
+	public wheels.Plugins function $pluginObj() {}
 	/**
 	 * Internal function. Records a deprecation warning through a single shared
 	 * policy: the first call for a given feature logs a warning to the standard

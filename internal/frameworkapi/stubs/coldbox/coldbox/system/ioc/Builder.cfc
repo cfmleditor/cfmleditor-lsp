@@ -34,6 +34,9 @@ component {
 	 * LogBox DSL Utility
 	 */
 	property name="logBoxDSL";
+	variables.coldboxDSL = new coldbox.system.ioc.dsl.ColdBoxDSL();
+	variables.cacheBoxDSL = new coldbox.system.ioc.dsl.CacheBoxDSL();
+	variables.logBoxDSL = new coldbox.system.ioc.dsl.LogBoxDSL();
 	/**
 	 * Constructor. If called without a configuration binder, then WireBox will instantiate the default configuration binder found coldbox.system.ioc.config.DefaultBinder
 	 *
@@ -216,7 +219,7 @@ component {
 	 * @targetObject The target object we are building the DSL dependency for. If empty, means we are just requesting building
 	 * @targetID     The target ID we are building this dependency for
 	 */
-	private any function getProviderDSL( required definition, targetObject, targetID ) {}
+	private coldbox.system.ioc.Provider function getProviderDSL( required definition, targetObject, targetID ) {}
 	/**
 	 * Get dependencies using the mapped type
 	 *

@@ -12,6 +12,7 @@
  * @see https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/time/Duration.html
  */
 component {
+	this.CHRONO_UNIT = new coldbox.system.async.time.DateTimeHelper();
 	/**
 	 * Initialize to zero
 	 */
@@ -21,7 +22,7 @@ component {
 	 *
 	 * @return java.time.Duration
 	 */
-	any function getNative() {}
+	coldbox.system.async.time.Duration function getNative() {}
 	/**
 	 * Returns a copy of this duration with a positive length.
 	 */

@@ -16,6 +16,9 @@ component extends="commandbox.system.util.Print" {
 	 * Result buffer
 	 */
 	property name="result";
+	variables.shell = new commandbox.system.Shell();
+	variables.job = new commandbox.system.util.InteractiveJob();
+	variables.SystemSettings = new commandbox.system.util.SystemSettings();
 	commandbox.system.util.PrintBuffer function init() {}
 	function toConsole() {}
 	function clear() {}

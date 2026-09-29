@@ -25,6 +25,7 @@ component extends="qb.models.Query.QueryBuilder" {
 	 * join comparison while the parent query owns the executable bindings.
 	 */
 	property name="lateralBindings" type="array";
+	variables.joiningQuery = new qb.models.Query.QueryBuilder();
 	/**
 	 * Creates a basic join clause.
 	 *

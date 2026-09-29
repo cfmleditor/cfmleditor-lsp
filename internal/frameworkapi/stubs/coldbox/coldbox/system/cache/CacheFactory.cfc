@@ -62,6 +62,9 @@ component {
 	 * @see coldbox.system.async.executors.ScheduledExecutor
 	 */
 	property name="taskScheduler";
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
+	variables.logBox = new coldbox.system.logging.LogBox();
 	/**
 	 * Constructor
 	 *

@@ -108,11 +108,14 @@ func TestAnInlineComponentIsDynamic(t *testing.T) {
 	}
 }
 
-// TestMocksAndUnstubbedJavaAreDynamic: a MockBox mock's methods are added at
-// runtime, and a Java object has nothing to be checked against without a
-// stub, so both are $any rather than untyped — every call on one was "no
-// component ref". A configured resolver still answers first, so a
-// javaStubsPath keeps typing Java objects.
+// TestMocksAndUnstubbedJavaAreDynamic: a Java object has nothing to be
+// checked against without a stub, so it is $any rather than untyped — every
+// call on one was "no component ref". A mock of a named class is that class,
+// marked as a mock (MockPrefix): its methods are checked where the class
+// resolves, and MockBox's own are accepted on it. A mock of nothing named,
+// and one chained on getMockBox(), whose arguments that path does not see,
+// stay $any. A configured resolver still answers first, so a javaStubsPath
+// keeps typing Java objects.
 func TestMocksAndUnstubbedJavaAreDynamic(t *testing.T) {
 	src := `component {
 	function f() {
@@ -129,7 +132,7 @@ func TestMocksAndUnstubbedJavaAreDynamic(t *testing.T) {
 	refs := pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End)
 
 	for name, want := range map[string]string{
-		"a": "$any", "b": "$any", "c": "$any", "d": "$any", "e": "$any",
+		"a": MockPrefix + "models.User", "b": "$any", "c": "$any", "d": "$any", "e": "$any",
 		"g": "models.User", "h": "",
 	} {
 		got := ""

@@ -18,6 +18,13 @@ component {
 	property name="SystemSettings";
 	property name="job";
 	property name="exitCode";
+	variables.formatterUtil = new commandbox.system.util.Formatter();
+	variables.fileSystemUtil = new commandbox.system.util.FileSystem();
+	variables.shell = new commandbox.system.Shell();
+	variables.print = new commandbox.system.util.PrintBuffer();
+	variables.configService = new commandbox.system.services.ConfigService();
+	variables.SystemSettings = new commandbox.system.util.SystemSettings();
+	variables.job = new commandbox.system.util.InteractiveJob();
 	/**
 	 * Constructor
 	 */

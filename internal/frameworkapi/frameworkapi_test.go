@@ -33,6 +33,14 @@ func TestEveryPresetHasItsStubs(t *testing.T) {
 				continue
 			}
 
+			if pkg, ok := strings.CutSuffix(c, ".*"); ok {
+				if !slices.ContainsFunc(set.Packages(), func(p string) bool { return strings.EqualFold(p, pkg) }) {
+					t.Errorf("%s: no stubs in %s", fw, pkg)
+				}
+
+				continue
+			}
+
 			if set.Path(c) == "" {
 				t.Errorf("%s: no stub for %s", fw, c)
 			}
@@ -102,7 +110,7 @@ func TestStubsParseAndTheirBasesResolve(t *testing.T) {
 		}
 
 		pr := parser.Parse("file:///stub.cfc", string(data))
-		if len(pr.Funcs) == 0 {
+		if len(pr.Funcs) == 0 && !constantsOnly[p] {
 			t.Errorf("%s: no functions", p)
 		}
 
@@ -118,6 +126,53 @@ func TestStubsParseAndTheirBasesResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestAnIDPackageHasItsStubs: CommandBox's WireBox maps its services and
+// util packages by file name, so a module's `inject="FileSystem"` is
+// commandbox.system.util.FileSystem, found through the set's IDPackages.
+func TestAnIDPackageHasItsStubs(t *testing.T) {
+	cb := For([]string{"commandbox"})
+
+	for _, c := range []string{"commandbox.system.util.FileSystem", "commandbox.system.services.ServerService", "commandbox.system.util.ForgeBox"} {
+		if cb.Path(c) == "" {
+			t.Errorf("no stub for %s", c)
+		}
+	}
+
+	if got := cb.IDPackages(); !slices.Equal(got, []string{"commandbox.system.services", "commandbox.system.util"}) {
+		t.Errorf("IDPackages = %v", got)
+	}
+}
+
+// TestAStubKeepsWhatItsVariablesHold: TestBox's BaseSpec sets `$assert` in
+// its constructor, whose body a stub drops; every spec calls $assert, and
+// without the assignment the stub gave it no type.
+func TestAStubKeepsWhatItsVariablesHold(t *testing.T) {
+	text, ok := StubText(For([]string{"testbox"}).Path("testbox.system.BaseSpec"))
+	if !ok {
+		t.Fatal("no BaseSpec stub")
+	}
+
+	pr := parser.Parse("file:///BaseSpec.cfc", text)
+
+	found := map[bool]bool{}
+
+	for i := range pr.ComponentRefs {
+		if ref := &pr.ComponentRefs[i]; ref.Variable == "$assert" && ref.Component == "testbox.system.Assertion" {
+			found[ref.This] = true
+		}
+	}
+
+	if !found[true] || !found[false] {
+		t.Errorf("$assert in this and variables scope: %v", found)
+	}
+}
+
+// constantsOnly are the stubs of classes that hold constants and no
+// methods, reached because a framework variable holds one.
+var constantsOnly = map[string]bool{
+	"stubs/coldbox/coldbox/system/ioc/Types.cfc": true, // this.CFC = "cfc" and the like
 }
 
 // TestPathIsCaseInsensitiveAndOnlyForTheSet: a dot-path's case is the

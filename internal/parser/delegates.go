@@ -104,9 +104,20 @@ func (pr *ParseResult) collectDelegates() {
 		return
 	}
 
-	for _, item := range splitList(componentDelegatesAttr(pr.Content)) {
+	for _, item := range splitList(componentAttr(pr.Content, "delegates")) {
 		pr.Delegates = append(pr.Delegates, parseDelegateItem(item))
 	}
+}
+
+// EntityName is the ORM entity name the component declares with
+// `entityname="cbAuthor"`, or "" when it names none — in which case the
+// entity is called after the file. entityNew( "cbAuthor" ) names it.
+func (pr *ParseResult) EntityName() string {
+	if u := string(pr.URI); len(u) < 4 || !strings.EqualFold(u[len(u)-4:], ".cfc") {
+		return ""
+	}
+
+	return strings.TrimSpace(componentAttr(pr.Content, "entityname"))
 }
 
 // flagOrName is a delegatePrefix or delegateSuffix: its value, the property's
@@ -156,12 +167,12 @@ func parseDelegateItem(item string) Delegate {
 	return d
 }
 
-// componentDelegatesAttr is the value of the component's `delegates`
-// attribute, script or tag, or "". It is read from the declaration alone —
+// componentAttr is the value of one of the component's attributes,
+// `delegates` or `entityname`, script or tag, or "". It is read from the declaration alone —
 // everything before a script component's opening brace, or its <cfcomponent>
 // tag, found past its quoted values since `delegates=">Memory"` holds a `>` —
 // so a parse pays for the few lines of the declaration, not the file.
-func componentDelegatesAttr(content string) string {
+func componentAttr(content, attr string) string {
 	end := strings.IndexByte(content, '{')
 
 	scope := content
@@ -183,12 +194,12 @@ func componentDelegatesAttr(content string) string {
 
 	head := content[:end]
 
-	i := indexFold(head, "delegates")
+	i := indexFold(head, attr)
 	if i < 0 {
 		return ""
 	}
 
-	rest := strings.TrimLeft(head[i+len("delegates"):], " \t\r\n")
+	rest := strings.TrimLeft(head[i+len(attr):], " \t\r\n")
 	if !strings.HasPrefix(rest, "=") {
 		return ""
 	}

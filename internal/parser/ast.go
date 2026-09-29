@@ -26,7 +26,11 @@ type FunctionDef struct {
 	Arguments       []Argument
 	ReturnType      string // declared return type (e.g. "query", "models.User")
 	ReturnComponent string // inferred component from return statements (e.g. "services.Foo")
-	returnVar       string // unexported: variable name from "return varName" for deferred resolution
+	// DocReturn is the dotted component the doc comment's @return names —
+	// ColdBox documents most return types and declares few. It is a claim,
+	// not a declaration: the resolver takes it only where it names a file.
+	DocReturn string
+	returnVar string // unexported: variable name from "return varName" for deferred resolution
 }
 
 // Scope represents the CFML variable scope.

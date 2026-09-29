@@ -33,3 +33,31 @@ func TestDelegatesAreForgottenWithTheExtends(t *testing.T) {
 		t.Error("after RemoveFile: still held")
 	}
 }
+
+// TestAFileWithNoFunctionsIsFoundInItsOwnCase: the file-name search
+// recovered a file's real path from one of its definitions, and a component
+// with none — Lucee's `component extends="…TestCase" {}` — came back
+// lowercased, a path a case-sensitive filesystem does not have. The extends
+// walk then stopped there, and 80 of Lucee's $assert calls lost their type.
+func TestAFileWithNoFunctionsIsFoundInItsOwnCase(t *testing.T) {
+	idx := New()
+	u := uri.URI("file:///w/Org/LuceeTestCase.cfc")
+
+	idx.IndexFile(u, `component extends="testbox.system.compat.framework.TestCase" {}`)
+
+	if got := idx.FindFilesByBasename("LuceeTestCase"); len(got) != 1 || got[0] != "/w/Org/LuceeTestCase.cfc" {
+		t.Errorf("IndexFile: %v", got)
+	}
+
+	idx.IndexFileFromResult(u, nil, nil)
+
+	if got := idx.FindFilesByBasename("org/luceetestcase"); len(got) != 1 || got[0] != "/w/Org/LuceeTestCase.cfc" {
+		t.Errorf("IndexFileFromResult: %v", got)
+	}
+
+	idx.RemoveFile(u)
+
+	if got := idx.FindFilesByBasename("LuceeTestCase"); len(got) != 0 {
+		t.Errorf("after RemoveFile: %v", got)
+	}
+}

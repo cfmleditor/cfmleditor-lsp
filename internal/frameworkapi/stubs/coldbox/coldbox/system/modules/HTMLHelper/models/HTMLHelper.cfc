@@ -13,6 +13,8 @@ component {
 	property name="settings" inject="coldbox:moduleSettings:htmlhelper";
 	property name="controller" inject="coldbox";
 	property name="requestService" inject="coldbox:requestService";
+	variables.controller = new coldbox.system.web.Controller();
+	variables.requestService = new coldbox.system.web.services.RequestService();
 	/**
 	 * Constructor
 	 */

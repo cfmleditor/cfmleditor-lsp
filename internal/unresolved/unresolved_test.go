@@ -109,7 +109,7 @@ func TestIsBuiltin(t *testing.T) {
 func TestAMissingBaseIsOneEntryPerFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "Spec.cfc")
-	src := "/** a spec */\ncomponent extends=\"testbox.system.BaseSpec\" {\n" +
+	src := "/** a spec */\ncomponent extends=\"vendor.missing.BaseSpec\" {\n" +
 		"\tfunction run( svc ) {\n\t\tdescribe( \"x\", function() {\n\t\t\texpect( 1 ).toBe( 1 );\n\t\t\tit( \"y\", function() {} );\n" +
 		"\t\t\tsvc.missing();\n\t\t\tprint.line( \"z\" );\n\t\t} );\n\t}\n}\n"
 
@@ -127,7 +127,7 @@ func TestAMissingBaseIsOneEntryPerFile(t *testing.T) {
 	}
 
 	want := []string{
-		"2: testbox.system.BaseSpec (base component does not resolve; 5 inherited calls not checked)",
+		"2: vendor.missing.BaseSpec (base component does not resolve; 5 inherited calls not checked)",
 		"7: svc.missing (variable 'svc' has no component ref)",
 	}
 
@@ -135,7 +135,7 @@ func TestAMissingBaseIsOneEntryPerFile(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	if bases := MissingBases(rep.Calls); len(bases) != 1 || bases[0] != (MissingBase{Component: "testbox.system.BaseSpec", Files: 1, Calls: 5}) {
+	if bases := MissingBases(rep.Calls); len(bases) != 1 || bases[0] != (MissingBase{Component: "vendor.missing.BaseSpec", Files: 1, Calls: 5}) {
 		t.Errorf("MissingBases: got %+v", bases)
 	}
 }
@@ -148,8 +148,8 @@ func TestCallsOnAComponentWithAMissingBaseAreOneEntry(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, src := range map[string]string{
-		"Service.cfc": "component extends=\"cborm.models.VirtualEntityService\" {}\n",
-		"Handler.cfc": "component extends=\"coldbox.system.EventHandler\" {\n" +
+		"Service.cfc": "component extends=\"vendor.orm.VirtualEntityService\" {}\n",
+		"Handler.cfc": "component extends=\"vendor.missing.EventHandler\" {\n" +
 			"\tproperty name=\"svc\" inject=\"Service@app\";\n" +
 			"\tfunction index( event ) {\n\t\tsvc.findWhere();\n\t\tsvc.save();\n\t\tsetNextEvent();\n\t}\n}\n",
 	} {
@@ -169,8 +169,8 @@ func TestCallsOnAComponentWithAMissingBaseAreOneEntry(t *testing.T) {
 	}
 
 	want := []string{
-		"1: coldbox.system.EventHandler (base component does not resolve; 1 inherited call not checked)",
-		"4: cborm.models.VirtualEntityService (calls a component whose chain breaks at cborm.models.VirtualEntityService, which does not resolve; 2 calls not checked)",
+		"1: vendor.missing.EventHandler (base component does not resolve; 1 inherited call not checked)",
+		"4: vendor.orm.VirtualEntityService (calls a component whose chain breaks at vendor.orm.VirtualEntityService, which does not resolve; 2 calls not checked)",
 	}
 
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

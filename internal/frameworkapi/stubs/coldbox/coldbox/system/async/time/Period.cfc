@@ -15,6 +15,7 @@
  * @see https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/time/Period.html
  */
 component {
+	this.CHRONO_UNIT = new coldbox.system.async.time.DateTimeHelper();
 	/**
 	 * Initialize to zero date base period
 	 *
@@ -28,7 +29,7 @@ component {
 	 *
 	 * @return java.time.Period
 	 */
-	any function getNative() {}
+	coldbox.system.async.time.Period function getNative() {}
 	/**
 	 * Checks if the period is negative, excluding zero
 	 */

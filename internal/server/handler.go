@@ -788,6 +788,10 @@ func (s *Server) reindexFromParseResult(docURI uri.URI, pr *parser.ParseResult) 
 		filePath := docURI.Path()
 		if s.isOrmPath(filePath) {
 			s.index.SetEntity(cfpath.CfcNameFromURI(string(docURI)), docURI)
+
+			if name := pr.EntityName(); name != "" {
+				s.index.SetEntity(name, docURI)
+			}
 		}
 	}
 }

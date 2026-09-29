@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -50,6 +51,7 @@ type Resolver struct {
 	exprKeys      []string                   // ExpressionMappings' keys in the order they apply
 	implicitCache map[string]string          // path → ImplicitExtends(path)
 	helpers       *helperSet                 // application helper templates, per set of config files
+	wb            *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
 	startupCache  map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
@@ -79,6 +81,8 @@ func (r *Resolver) ComponentPath(component, baseDir string) string {
 			}
 		}
 	}
+
+	component = strings.TrimPrefix(component, parser.MockPrefix)
 
 	key := component + "\t" + baseDir
 
@@ -167,13 +171,10 @@ func (r *Resolver) dirs() *cfpath.DirCache {
 	return r.dirCache
 }
 
-// fs is the resolver's filesystem, with the framework stubs mounted when it
-// has any.
+// fs is the resolver's filesystem, with the framework stubs mounted: a
+// preset's, and the ones a fully namespaced path reaches without one
+// (frameworkapi.Namespaced).
 func (r *Resolver) fs() vfs.FS {
-	if r.Stubs == nil {
-		return r.FS
-	}
-
 	r.mu.RLock()
 	f := r.stubFS
 	r.mu.RUnlock()
@@ -201,6 +202,13 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	// A WireBox id with its module: `Name@module`.
+	if strings.Contains(component, "@") {
+		p, _ := r.wireboxID(component, baseDir)
+
+		return p
+	}
+
 	mappings := r.effectiveMappings(baseDir)
 	dirs := r.dirs()
 
@@ -224,6 +232,12 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		return p
 	}
 
+	// A module's cfmapping is an application mapping ColdBox registers when
+	// it loads the module.
+	if p := r.inModuleMapping(component); p != "" {
+		return p
+	}
+
 	if root, rest := r.slugRoot(component, baseDir); root != "" {
 		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
 			return p
@@ -237,6 +251,27 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		return p
 	}
 
+	// A path in a framework's own namespace names that framework whether or
+	// not a preset does: `extends="testbox.system.compat.framework.TestCase"`
+	// is TestBox, and Lucee's test suite extends it in 1,885 files with no
+	// preset named.
+	if p := frameworkapi.Namespaced(component); p != "" {
+		return p
+	}
+
+	// An id a WireBox binder maps, `map( "Mailer" ).to( … )`: asked only
+	// once no path answered, since reading the binders lists the index.
+	if p, ok := r.wireboxID(component, baseDir); ok && p != "" {
+		return p
+	}
+
+	return r.lastResortPath(component, baseDir)
+}
+
+// lastResortPath is componentPathUncached once no path has answered: an
+// engine component, a file of the name nearest baseDir, an ORM entity, a
+// bean, or a class a framework's WireBox maps by file name.
+func (r *Resolver) lastResortPath(component, baseDir string) string {
 	// A component the engine ships is the engine's, not whatever file of that
 	// name the workspace happens to hold, so the file-name search below never
 	// answers for one.
@@ -280,6 +315,33 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 
 			if best != "" {
 				return best
+			}
+		}
+	}
+
+	// An ORM entity by its entityname: entityNew( "cbAuthor" ) is the
+	// Author.cfc that declares that name.
+	if !strings.ContainsAny(component, "./") && r.Index != nil {
+		if u := r.Index.LookupEntity(component); u != "" {
+			return cfpath.FromURI(string(u))
+		}
+	}
+
+	// A bean by name: DI/1's getBean( "userService" ) and the beanPaths a
+	// configuration names, aliases included (cfpath.BuildBeanMap).
+	if !strings.ContainsAny(component, "./") && r.Index != nil {
+		if p := r.Index.LookupBean(component); p != "" && filepath.IsAbs(p) {
+			return p
+		}
+	}
+
+	// A bare id a framework's WireBox maps by file name: a CommandBox
+	// module's `inject="FileSystem"` is commandbox.system.util.FileSystem.
+	// After the workspace's own files, so a project's FileSystem.cfc wins.
+	if !strings.ContainsAny(component, "./") {
+		for _, pkg := range r.Stubs.IDPackages() {
+			if p := r.ComponentPath(pkg+"."+component, baseDir); p != "" {
+				return p
 			}
 		}
 	}
@@ -509,6 +571,15 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		cfcPath = r.ComponentPath(ext, baseDir)
 	}
 
+	// A template a component includes declares its functions into the
+	// component: Wheels' Global.cfc is little but includes of global/*.cfm,
+	// and application.wo.$simpleLock() is one of theirs.
+	for _, p := range chain {
+		if d := r.includedFunc(p, funcName); d != nil {
+			return d
+		}
+	}
+
 	// A delegated method never replaces one the object has (Injector.cfc
 	// processDelegation skips a name the target already holds), so the whole
 	// chain is searched first.
@@ -516,6 +587,63 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		if d := r.delegatedFunc(r.delegatesOf(p), filepath.Dir(p), funcName, depth); d != nil {
 			return d
 		}
+	}
+
+	// A Wheels association's methods: `hasMany( "comments" )` in config()
+	// gives the model comments(), commentCount(), newComment() and the rest.
+	if len(chain) > 0 && r.isWheelsModel(chain[0]) {
+		if d := r.associationFunc(chain[0], funcName); d != nil {
+			return d
+		}
+	}
+
+	if d := r.mementoFunc(chain, funcName); d != nil {
+		return d
+	}
+
+	return nil
+}
+
+// maxIncludeDepth bounds how far includedFunc follows templates that
+// include templates.
+const maxIncludeDepth = 4
+
+// includedFunc is funcName as declared by a template cfcPath includes, or by
+// one those include, maxIncludeDepth deep. Only a component's own include
+// statements are read, from the index, rather than the workspace's include
+// graph: that graph is rebuilt whenever an include is indexed, which a lazy
+// lookup during a scan would do once per component.
+func (r *Resolver) includedFunc(cfcPath, funcName string) *parser.FunctionDef {
+	seen := map[string]bool{pathKey(cfcPath): true}
+	queue := []string{cfcPath}
+
+	for depth := 0; depth < maxIncludeDepth && len(queue) > 0; depth++ {
+		var next []string
+
+		for _, from := range queue {
+			if !r.Index.HasFile(cfpath.ToURI(from)) {
+				r.EnsureIndexed(from)
+			}
+
+			for _, raw := range r.Index.IncludesForFile(cfpath.ToURI(from)) {
+				target := r.IncludePath(raw, from)
+				if target == "" || seen[pathKey(target)] {
+					continue
+				}
+
+				seen[pathKey(target)] = true
+
+				for _, d := range r.EnsureIndexed(target) {
+					if strings.EqualFold(d.Name, funcName) {
+						return d
+					}
+				}
+
+				next = append(next, target)
+			}
+		}
+
+		queue = next
 	}
 
 	return nil
@@ -1004,43 +1132,88 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	// kpg's own component; call.Chain lists "generateKeyPair", "getPublic", each
 	// needing its own declared return type applied before checking funcName below).
 	if comp != "" && comp != "$any" && !strings.HasPrefix(comp, "$builtin.") {
-		for _, hop := range call.Chain {
-			// A hop that returned "$any" makes the rest of the chain dynamic.
-			// Walking on asked "$any" for the next method, which it can never
-			// define: getSandBox("x").getAttendanceObj().getLog() was reported
-			// as getAttendanceObj missing from $any. The accept below, after
-			// the walk, is the answer for a dynamic receiver.
-			if comp == "$any" {
-				tr.addf("chain hop %q is on a dynamic ($any) value — the rest of the chain is dynamic", hop)
+		var (
+			reason string
+			done   bool
+		)
 
-				break
-			}
-
-			fd := r.ResolveFunc(comp, hop, baseDir)
-			if fd == nil {
-				return r.missingChainHop(comp, softComp, hop, funcName, pr, baseDir, tr)
-			}
-
-			ret, noFollow, soft := r.chainHopReturn(comp, hop, fd, tr)
-			if soft {
-				softComp = ret
-			}
-
-			if noFollow && ret != "" {
-				tr.hit(TargetDynamic, ret, nil)
-
-				return ""
-			}
-
-			if ret == "" {
-				return "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')"
-			}
-
-			comp = ret
+		if comp, softComp, reason, done = r.walkHops(comp, softComp, call, pr, baseDir, tr); done {
+			return reason
 		}
 	}
 
 	return r.checkMethodOn(comp, softComp, call, pr, baseDir, tr)
+}
+
+// walkHops follows call.Chain from comp through each hop's return type. It
+// reports the component the chain reaches, or done with the answer when a hop
+// settles the call itself.
+func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) (reached, soft, reason string, done bool) {
+	funcName := call.FuncName
+
+	for _, hop := range call.Chain {
+		// A mock of a class is the class, or dynamic where it names none.
+		if cls, ok := strings.CutPrefix(comp, parser.MockPrefix); ok {
+			comp = cls
+			if r.ComponentPath(cls, baseDir) == "" {
+				comp = "$any"
+			}
+		}
+
+		// A hop that returned "$any" makes the rest of the chain dynamic.
+		// Walking on asked "$any" for the next method, which it can never
+		// define: getSandBox("x").getAttendanceObj().getLog() was reported
+		// as getAttendanceObj missing from $any. The accept after the walk
+		// is the answer for a dynamic receiver.
+		if comp == "$any" {
+			tr.addf("chain hop %q is on a dynamic ($any) value — the rest of the chain is dynamic", hop)
+
+			break
+		}
+
+		fd := r.ResolveFunc(comp, hop, baseDir)
+		if fd == nil {
+			return comp, softComp, r.missingChainHop(comp, softComp, hop, funcName, pr, baseDir, tr), true
+		}
+
+		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
+		if soft {
+			softComp = ret
+		}
+
+		if noFollow && ret != "" {
+			tr.hit(TargetDynamic, ret, nil)
+
+			return comp, softComp, "", true
+		}
+
+		if ret == "" {
+			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
+		}
+
+		comp = ret
+	}
+
+	return comp, softComp, "", false
+}
+
+// hopReturn is chainHopReturn, and failing that what the receiver binds the
+// method to: a cborm service's entity, a Wheels model's own type.
+func (r *Resolver) hopReturn(comp, hop string, fd *parser.FunctionDef, baseDir string, tr *callTrace) (ret string, noFollow, soft bool) {
+	ret, noFollow, soft = r.chainHopReturn(comp, hop, fd, tr)
+	if sub := r.selfTyped(comp, baseDir, fd, ret); sub != "" {
+		tr.addf("chain hop %q returns the class declaring it, and is called on its subclass %q", hop, sub)
+		ret = sub
+	}
+
+	if ret == "" {
+		if e := r.receiverReturn(r.ComponentPath(comp, baseDir), hop); e != "" {
+			tr.addf("chain hop %q returns what it is called on binds it to: %q", hop, e)
+			ret = e
+		}
+	}
+
+	return ret, noFollow, soft
 }
 
 // resolveBareCall is canResolveCall for an unqualified call: this file, a
@@ -1121,6 +1294,20 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 		return ""
 	}
 
+	if module, ok := r.moduleHelper(pr, funcName, baseDir); ok {
+		tr.addf("%q is a helper the %s module mixes into ColdBox components", funcName, module)
+		tr.hit(TargetDynamic, "", nil)
+
+		return ""
+	}
+
+	if r.thisCallAnswered(call, pr, baseDir) {
+		tr.addf("%q is called through this., and the component answers a missing method with onMissingMethod", funcName)
+		tr.hit(TargetDynamic, "", nil)
+
+		return ""
+	}
+
 	if r.fileExtends(pr) != "" {
 		if base, implied := r.fileMissingBase(pr, baseDir); base != "" {
 			if implied {
@@ -1167,10 +1354,28 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 			}
 		}
 
+		// A built-in function returns a value, not a component:
+		// getPageContext().getRequest() and now().format() are calls on what
+		// the engine hands back, which the method lists here only partly
+		// know. The file's own function of that name was looked for first.
+		if docs.IsBuiltinFunction(first) {
+			tr.addf("%q is a built-in function — the chain on what it returns is dynamic", first)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		return "chained on '" + first + "', which is not found (calling '" + call.FuncName + "')"
 	}
 
 	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
+	if ret == "" {
+		if e := r.receiverReturn(cfpath.FromURI(string(pr.URI)), first); e != "" {
+			tr.addf("%q on this component returns what it binds it to: %q", first, e)
+			ret = e
+		}
+	}
+
 	if noFollow && ret != "" {
 		tr.hit(TargetDynamic, ret, nil)
 
@@ -1466,6 +1671,13 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 			return ""
 		}
 
+		if r.uninstalledModule(comp) {
+			tr.addf("%q is a module's model and no such module is in the workspace — the rest of the chain is dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
 		if _, ok := engineComponent(comp); ok {
 			tr.addf("%q is a component the engine provides and its source is not in the workspace — the rest of the chain is dynamic", comp)
 			tr.hit(TargetDynamic, comp, nil)
@@ -1488,6 +1700,13 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 	// Query build their setters this way: new Http().setUrl(u).send().
 	if r.ResolveFunc(comp, "onMissingMethod", baseDir) != nil {
 		tr.addf("%q defines onMissingMethod — chain hop %q accepted, the rest of the chain is dynamic", comp, hop)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
+	if r.isInterface(r.ComponentPath(comp, baseDir)) {
+		tr.addf("%q is an interface, and what implements it may have %q — the rest of the chain is dynamic", comp, hop)
 		tr.hit(TargetDynamic, comp, nil)
 
 		return ""
@@ -1586,20 +1805,84 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // `returntype="pkg.tassui"` is a contract the engine enforces. Any other
 // inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
-	if fd.ReturnComponent != "" && fd.ReturnComponent != "$any" {
+	switch {
+	case fd.ReturnComponent != "" && fd.ReturnComponent != "$any":
+		// `return new Expectation( … )` names the component beside the
+		// declaring file, as a bare return type does; read from the caller's
+		// directory it named nothing, and every expect( x ).toBe() in a
+		// spec extending the Wheels test BaseSpec was a missing component.
+		if p := r.besideDeclaring(fd, fd.ReturnComponent); p != "" {
+			return p
+		}
+
+		return fd.ReturnComponent
+	case strings.Contains(fd.ReturnType, "."):
+		// A relative path is the declaring file's too: ColdBox's AsyncManager
+		// returns `new tasks.Future()`, which is system/async/tasks/Future.cfc
+		// and nothing from the caller's directory.
+		if p := r.besideDeclaring(fd, fd.ReturnType); p != "" {
+			return p
+		}
+
+		return fd.ReturnType
+	}
+
+	if p := r.bareReturnComponent(fd); p != "" {
+		return p
+	}
+
+	// An inferred $any, with nothing declared, is still the answer; a doc
+	// comment is not a contract, so it does not outrank one.
+	if fd.ReturnComponent != "" {
 		return fd.ReturnComponent
 	}
 
-	declared := fd.ReturnType
-	if !strings.Contains(declared, ".") {
-		declared = r.bareReturnComponent(fd)
+	return r.docReturnComponent(fd)
+}
+
+// docReturnComponent is the component fd's doc comment says it returns, when
+// its declaration says nothing more — no type, `any` or `component` — and
+// only where the documented path names a file. ColdBox documents most return
+// types and declares few, and some of its documented paths are wrong
+// (execute()'s names coldbox.system.context.RequestContext): taken on trust,
+// one of those would be reported as a component that does not exist. The
+// bundled stubs read the same comments (cmd/cfstubgen docReturn).
+func (r *Resolver) docReturnComponent(fd *parser.FunctionDef) string {
+	switch strings.ToLower(fd.ReturnType) {
+	case "", "any", "component":
+	default:
+		return ""
 	}
 
-	if declared == "" {
-		return fd.ReturnComponent
+	if fd.DocReturn == "" {
+		return ""
 	}
 
-	return declared
+	p := r.besideDeclaring(fd, fd.DocReturn)
+
+	if p == "" {
+		file := cfpath.FromURI(string(fd.URI))
+		if file == "" {
+			return ""
+		}
+
+		p = r.ComponentPath(fd.DocReturn, filepath.Dir(file))
+	}
+
+	return p
+}
+
+var interfaceRe = regexp.MustCompile(`(?im)^\s*interface\b|<cfinterface\b`)
+
+// isInterface reports whether the file at path declares an interface.
+func (r *Resolver) isInterface(path string) bool {
+	if path == "" {
+		return false
+	}
+
+	data, err := r.fs().ReadFile(path)
+
+	return err == nil && interfaceRe.Match(data)
 }
 
 // FuncLookup is the parser's hook for what a method of a component returns,
@@ -1612,7 +1895,15 @@ func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) s
 			return ""
 		}
 
-		return r.ReturnComponentOf(fd)
+		if ret := r.ReturnComponentOf(fd); ret != "" {
+			if sub := r.selfTyped(component, baseDir, fd, ret); sub != "" {
+				return sub
+			}
+
+			return ret
+		}
+
+		return r.receiverReturn(r.ComponentPath(component, baseDir), funcName)
 	}
 }
 
@@ -1636,7 +1927,18 @@ var cfmlTypes = map[string]bool{
 // as a method returning `this` is typed.
 func (r *Resolver) bareReturnComponent(fd *parser.FunctionDef) string {
 	t := strings.TrimSpace(fd.ReturnType)
-	if t == "" || r.FS == nil || strings.ContainsAny(t, "./\\[]<> ") || cfmlTypes[strings.ToLower(t)] {
+	if cfmlTypes[strings.ToLower(t)] {
+		return ""
+	}
+
+	return r.besideDeclaring(fd, t)
+}
+
+// besideDeclaring is the file a bare component name t names beside the file
+// that declares fd, or "".
+func (r *Resolver) besideDeclaring(fd *parser.FunctionDef, t string) string {
+	t = strings.TrimSpace(t)
+	if t == "" || r.FS == nil || strings.ContainsAny(t, "/\\[]<> $#:") || filepath.IsAbs(t) {
 		return ""
 	}
 
@@ -1667,6 +1969,21 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		}
 
 		return "variable '" + variable + "' has no component ref"
+	}
+
+	// A MockBox mock of a class: the class's methods, where the class
+	// resolves, and dynamic where it does not — mocking a class of a module
+	// the workspace lacks is not a finding.
+	if cls, ok := strings.CutPrefix(comp, parser.MockPrefix); ok {
+		if r.ComponentPath(cls, baseDir) == "" {
+			tr.addf("a mock of %q, which does not resolve — accepted as dynamic", cls)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
+		tr.addf("a mock of %q — checking the class", cls)
+		comp = cls
 	}
 
 	// Dynamic return type — method called on a result of a function returning "any".
@@ -1719,6 +2036,17 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		return ""
 	}
 
+	// An interface declares less than the object behind it: ColdBox types
+	// its cache providers as ICacheProvider and calls getOrSet() on them,
+	// which every provider has and the interface does not declare. A method
+	// the interface does declare was found above.
+	if r.isInterface(r.ComponentPath(comp, baseDir)) {
+		tr.addf("%q is an interface, and what implements it may have %q — accepted as dynamic", comp, funcName)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
 	// The ref-derived component didn't have the method. Try the variable-name resolver
 	// as a fallback — a pendingCall propagation may have assigned the wrong component
 	// (e.g. var objFile = _parent.getFile() inherits _parent's component, but the
@@ -1751,6 +2079,15 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		// missing. A component named any other way is still reported.
 		if softMissing(comp, softComp, pr) {
 			tr.addf("%q names no file and came from a dynamicIfMissing resolver — accepted as dynamic", comp)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
+		// Nor a model of a module the workspace does not have: that is the
+		// module not being installed.
+		if r.uninstalledModule(comp) {
+			tr.addf("%q is a module's model and no such module is in the workspace — accepted as dynamic", comp)
 			tr.hit(TargetDynamic, comp, nil)
 
 			return ""

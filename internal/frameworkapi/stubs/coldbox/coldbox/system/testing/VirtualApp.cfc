@@ -7,6 +7,7 @@
  * The Virtual applications follow the convention of loading into the application scope.
  */
 component {
+	variables.cbController = new coldbox.system.testing.mock.web.MockController();
 	/**
 	 * Constructor
 	 *

@@ -114,6 +114,14 @@ component {
 	 * The object builder for this injector
 	 */
 	property name="objectBuilder";
+	this.SCOPES = new coldbox.system.ioc.Scopes();
+	this.TYPES = new coldbox.system.ioc.Types();
+	variables.utility = new coldbox.system.core.util.Util();
+	variables.scopeStorage = new coldbox.system.core.collections.ScopeStorage();
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.objectBuilder = new coldbox.system.ioc.Builder();
+	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
 	/**
 	 * WireBox can be constructed with no parameters and it will use the default binder: `coldbox.system.ioc.config.DefaultBinder` for configuration
 	 * and place the instance in `application.wirebox` scope for easy access.
@@ -210,7 +218,7 @@ component {
 	 * @mapping.doc_generic coldbox.system.ioc.config.Mapping
 	 * @initArguments       The constructor structure of arguments to passthrough when initializing the instance
 	 */
-	coldbox.system.ioc.Builder function buildInstance( required mapping, struct initArguments ) {}
+	function buildInstance( required mapping, struct initArguments ) {}
 	/**
 	 * Register a new requested mapping object instance thread safely and returns the mapping configured for this instance
 	 *
@@ -429,5 +437,5 @@ component {
 	 * @binder     The data CFC configuration instance, instantiation path or programmatic binder object to configure this injector with
 	 * @properties A map of binding properties to passthrough to the Configuration CFC
 	 */
-	private any function buildBinder( required binder, required properties ) {}
+	private coldbox.system.ioc.config.Binder function buildBinder( required binder, required properties ) {}
 }

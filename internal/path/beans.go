@@ -84,7 +84,32 @@ func BuildBeanMap(beanPaths map[string]string, fsys vfs.FS) map[string]string {
 		}
 	}
 
+	// DI/1 also registers each bean under its name and its folder's
+	// singular — services/user.cfc is userService as well as user
+	// (framework/ioc.cfc) — which is the name FW/1 code autowires by:
+	// `property userService;`. A name some bean already has keeps it.
+	for _, b := range all {
+		dir := filepath.Base(filepath.Dir(b.absPath))
+		if dir == "" || dir == "." {
+			continue
+		}
+
+		alias := strings.ToLower(b.name + di1Singular(dir))
+		if _, taken := beans[alias]; !taken {
+			beans[alias] = b.absPath
+		}
+	}
+
 	return beans
+}
+
+// di1Singular is DI/1's singular of a folder name: a trailing s dropped.
+func di1Singular(plural string) string {
+	if strings.HasSuffix(strings.ToLower(plural), "s") {
+		return plural[:len(plural)-1]
+	}
+
+	return plural
 }
 
 // BeanPathsFor is the bean namespaces a workspace declares: those in each

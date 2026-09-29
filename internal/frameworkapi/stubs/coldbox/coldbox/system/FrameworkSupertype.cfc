@@ -20,6 +20,17 @@ component {
 	property name="env" inject="env@coreDelegates";
 	property name="jsonUtil" inject="JsonUtil@coreDelegates";
 	property name="flow" inject="Flow@coreDelegates";
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.cbDateTimeHelper = new coldbox.system.async.time.DateTimeHelper();
+	variables.controller = new coldbox.system.web.Controller();
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.flash = new coldbox.system.web.flash.AbstractFlashScope();
+	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.wirebox = new coldbox.system.ioc.Injector();
+	variables.env = new coldbox.system.core.delegates.Env();
+	variables.jsonUtil = new coldbox.system.core.delegates.JsonUtil();
+	variables.flow = new coldbox.system.core.delegates.Flow();
 	/**
 	 * Constructor
 	 */
@@ -198,7 +209,7 @@ component {
 	 *
 	 * @return FrameworkSuperType
 	 */
-	any function setSetting( required name, required value ) {}
+	coldbox.system.FrameworkSupertype function setSetting( required name, required value ) {}
 	/**
 	 * Get a module's settings structure or a specific setting if the setting key is passed
 	 *
@@ -352,7 +363,7 @@ component {
 	 *
 	 * @return coldbox.system.async.AsyncManager
 	 */
-	any function async() {}
+	coldbox.system.async.AsyncManager function async() {}
 	/**
 	 * This function evaluates the target boolean expression and if `true` it will execute the `success` closure
 	 * else, if the `failure` closure is passed, it will execute it.
@@ -457,7 +468,7 @@ component {
 	 *
 	 * @throws UDFLibraryNotFoundException - When the requested library cannot be found
 	 */
-	any function includeUDF( required udflibrary ) {}
+	coldbox.system.FrameworkSupertype function includeUDF( required udflibrary ) {}
 	/**
 	 * Load the global application helper libraries defined in the applicationHelper Setting of your application.
 	 * This is called by the framework ONLY! Use at your own risk
@@ -466,5 +477,5 @@ component {
 	 *
 	 * @return FrameworkSuperType
 	 */
-	any function loadApplicationHelpers( boolean force ) {}
+	coldbox.system.FrameworkSupertype function loadApplicationHelpers( boolean force ) {}
 }

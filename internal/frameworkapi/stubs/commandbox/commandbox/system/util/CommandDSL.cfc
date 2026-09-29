@@ -26,6 +26,10 @@ component {
 	property name='shell' inject='shell';
 	property name="job" inject='interactiveJob';
 	property name='ConsolePainter' inject='ConsolePainter';
+	variables.parser = new commandbox.system.util.Parser();
+	variables.shell = new commandbox.system.Shell();
+	variables.job = new commandbox.system.util.InteractiveJob();
+	variables.ConsolePainter = new commandbox.system.util.ConsolePainter();
 	/**
 	 * Create a new, executable command
 	 *

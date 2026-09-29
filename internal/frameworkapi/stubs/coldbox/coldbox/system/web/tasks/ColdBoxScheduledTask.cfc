@@ -29,6 +29,10 @@ component extends="coldbox.system.async.tasks.ScheduledTask" {
 	 * period to ensure it persists until the next scheduled run. Default fallback is 60 minutes.
 	 */
 	property name="serverLockTimeout" type="numeric";
+	variables.controller = new coldbox.system.web.Controller();
+	variables.wirebox = new coldbox.system.ioc.Injector();
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.log = new coldbox.system.logging.Logger();
 	/**
 	 * Constructor
 	 *
@@ -105,7 +109,7 @@ component extends="coldbox.system.async.tasks.ScheduledTask" {
 	 *
 	 * @return The next aligned execution time as a Java LocalDateTime, or null if calculation fails
 	 */
-	private coldbox.system.async.time.DateTimeHelper function calculateNextAlignedRun( required scheduleStart, required numeric period, required string timeUnit ) {}
+	private function calculateNextAlignedRun( required scheduleStart, required numeric period, required string timeUnit ) {}
 	/**
 	 * Adjusts the task's initial delay to align with the target execution time.
 	 *
@@ -119,7 +123,7 @@ component extends="coldbox.system.async.tasks.ScheduledTask" {
 	 *
 	 * @return The Java ChronoUnit constant
 	 */
-	private coldbox.system.async.time.DateTimeHelper function getChronoUnit( required string timeUnit ) {}
+	private function getChronoUnit( required string timeUnit ) {}
 	/**
 	 * Determine the next real-world occurrence of this task's date-based scheduling constraint, if any.
 	 *

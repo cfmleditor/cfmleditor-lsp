@@ -76,15 +76,17 @@ func returnResolver(component string, names ...string) []Resolver {
 }
 
 // idResolver types what a factory call returns by the id it is handed:
-// `getInstance( "UserService@users" )` is the component UserService, found by
-// path and, failing that, by file name — nearest the calling file first —
-// as an injected property's id is (parser.injectedComponent). The id is a
+// `getInstance( "UserService@users" )` is UserService as the users module
+// registers it, and a bare id the component found by path and, failing that,
+// by file name — nearest the calling file first — as an injected property's id
+// is (parser.injectedComponent, resolve.wireboxID). The id is a
 // literal, optionally named and optionally followed by further arguments;
 // a computed one is left alone, and so is a call chained on the result,
-// since the match is the whole remainder.
+// since the match runs to the end. It may start after a dot rather than at
+// the prefix, which is found first inside getBeanFactory().getBean( "x" ).
 func idResolver(fn string) Resolver {
 	return Resolver{
-		Match:            `(?i)^` + fn + `\(\s*(?:\w+\s*=\s*)?["'](?:id:|model:)?([A-Za-z_][\w.]*)(?:@[\w.-]*)?["']\s*(?:,[^()]*)?\)$`,
+		Match:            `(?i)(?:^|\.)` + fn + `\(\s*(?:\w+\s*=\s*)?["'](?:id:|model:)?([A-Za-z_][\w.]*(?:@[\w.-]+)?)@?["']\s*(?:,[^()]*)?\)$`,
 		Resolve:          "$1",
 		Prefix:           fn,
 		DynamicIfMissing: true,
@@ -280,6 +282,10 @@ var frameworkPresets = map[string]frameworkPreset{
 		resolvers: []Resolver{
 			variableResolver("framework.one", "fw", "framework"),
 			variableResolver("framework.ioc", "beanFactory"),
+			// DI/1's getBean( "userService" ): a bean by the name it
+			// registers, file name or file name and folder
+			// (resolve.componentPathUncached, cfpath.BuildBeanMap).
+			idResolver("getBean"),
 		},
 		bases: []implicitBase{
 			{dir: "views", ext: ".cfm", component: "framework.one"},

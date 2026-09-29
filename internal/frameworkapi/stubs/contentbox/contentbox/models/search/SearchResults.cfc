@@ -23,7 +23,7 @@ component {
 	 *
 	 * @return SearchResults
 	 */
-	any function populate( required struct memento ) {}
+	contentbox.models.search.SearchResults function populate( required struct memento ) {}
 	/**
 	 * Get the search memento
 	 *

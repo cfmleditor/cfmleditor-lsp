@@ -1448,6 +1448,18 @@ project could have written by hand. Three rules hold them together, each with a 
   `relationshipMethods`) are generated beside a property's accessors. Wheels mixes the
   application's `global/functions.cfm` and what it includes into controllers, models and
   views (`wheelsGlobals`, through the wheels preset's `helperDirs`).
+- **A path in a framework's own namespace needs no preset** (`frameworkapi.Namespaced`):
+  `coldbox.system.`, `testbox.system.`, `commandbox.system.`, `qb.models.` and
+  `contentbox.models.` can only mean that framework, so the resolver answers them from the
+  stubs after everything on disk, whatever the config names. Lucee's test suite extends
+  `testbox.system.compat.framework.TestCase` with no preset and was 1,885 broken chains.
+  `framework.` (FW/1) and `wheels.` are left to their presets, since a project may have a
+  folder of that name. `r.fs()` therefore always mounts the stubs. Tests that need a base
+  that does not resolve use a made-up one (`vendor.missing.BaseSpec`), not a framework's.
+- **A stub keeps what the framework's variables hold** (`writeTypedVariables`): a
+  `variables.`/`this.` variable the source assigns a framework component becomes a
+  statement in the stub's pseudo-constructor, so `$assert` (BaseSpec's constructor sets it)
+  is still an Assertion with the body gone.
 - **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
   (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
   project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong
@@ -1455,6 +1467,62 @@ project could have written by hand. Three rules hold them together, each with a 
   from it. **Every config-to-parser conversion is `config.Resolver.Parser()`** — there were
   ten struct literals, and a field one of them forgot is a setting that parses and does
   nothing; `TestParserCarriesEveryResolverField` sets every field and fails on one dropped.
+
+**What each framework says about its own components is applied without a preset**, each
+rule in its own file with a test that fails without it. `resolve/wirebox.go`: a
+`Name@namespace` id is the Name in the module whose `this.modelNamespace` (default: its
+directory) is that namespace, a `binder.map( id ).to( path )` in any `ModuleConfig.cfc` or
+`config/WireBox.cfc` is exact, a module's `this.cfmapping` maps its directory, and an id of a
+module the workspace lacks is dynamic (`uninstalledModule`). **`injectedComponent` keeps the
+`@module`** so this can run; the stubs' `IDPackages` answer a bare CommandBox id.
+`resolve/orm.go`: `entityname` is indexed (`ParseResult.EntityName`) and looked up last in
+`lastResortPath`; a cborm `VirtualEntityService` bound by `super.init( entityName = … )`
+returns its entity from `new`/`get`/`getOrFail`/`findWhere`. `resolve/wheels.go`: a Wheels
+model's finders return the receiver, and `hasMany`/`belongsTo`/`hasOne` generate typed
+methods. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
+and cbi18n/cbfs/HTMLHelper helpers on a component whose chain reaches `coldbox.system.` —
+the lists are read from each module's source at the commit named there.
+`resolve/missing_method.go`: `this.x()` on a component with `onMissingMethod` is dynamic (an
+unscoped call is not — CFML never routes it there, and the parser records both alike, so the
+line is read); a method declared to return its own class, called on a subclass, returns the
+subclass (`selfTyped`, which only widens what is accepted). A call on an interface that lacks
+the method is dynamic, since an implementation has more. DI/1 (`path/beans.go`,
+`ParseAppBeanPaths`): default folders `model,controllers`, aliases name+singular(folder).
+MockBox: `createMock( "cls" )` is `parser.MockPrefix`+cls, checked against cls. The parser
+side: a `@return` doc is kept (`FunctionDef.DocReturn`, used only where it names a file);
+generated setters return their component and getters what the property holds;
+**`return x.m()` is not `return x`** (`returnsCallOn`: it is `$any` when x is, nothing
+otherwise — it used to declare CommandBox's `getCWD()` a `Shell`); and an unqualified call to
+an inherited method types what it is assigned to through `FuncLookup`. cborm's stubs are
+pinned to 4.12.1, the version ContentBox's stubs use: 5.x dropped `getBeanPopulator`.
+`RESOLUTION-GAPS.md` lists what `unresolved` still reports over the corpus, the cause of
+each large group and where its fix goes, with the corpus setup to measure a change against.
+
+**`Application.cfc` mappings are evaluated, not just matched** (`parser.evaluatedMappings`).
+The literal-only regex read 20 of the corpus's 110 `this.mappings` assignments; the rest are
+built from the file's own directory and from variables set a line above —
+`local.projectRoot = expandPath( "../../../" ); this.mappings[ "/cli" ] = local.projectRoot & "cli/";`.
+`evalPathExpr` handles `&`, string literals, `expandPath()`,
+`getDirectoryFromPath( getCurrentTemplatePath() )`, a variable assigned earlier in the file
+and an earlier mapping, and declines anything else whole. **A mapping name may have several
+segments** (`/modules/wheels` beside `/modules`): `resolveNestedMapping` tries those, longest
+first, before the first-segment lookup, which could never see them. Together they were 1,700
+corpus entries, most of cfwheels' CLI specs.
+
+**A component has the functions of the templates it includes** (`includedFunc`): Wheels'
+`Global.cfc` is little but includes of `global/*.cfm`, and a qualified call
+(`application.wo.$simpleLock()`) looked only at the component's own functions. It reads the
+component's own include statements from the index (`Index.IncludesForFile`) rather than the
+workspace include graph, which is rebuilt whenever an include is indexed.
+
+**A chain headed by a built-in function is dynamic** (`resolveBareChain`):
+`getPageContext().getRequest()` is a call on what the engine returns, and the file's own
+function of that name is looked for first. **A bare inferred return is beside the declaring
+file** (`ReturnComponentOf` → `besideDeclaring`), as a bare return type already was:
+`return new Expectation()` in a base class read from the caller's directory named nothing.
+**`Index.FindFilesByBasename` returns a file's real case** from `fileURIs`: a component with no
+functions had only its lowercased key, which names nothing on a case-sensitive filesystem, and
+the extends walk stopped at Lucee's empty `LuceeTestCase.cfc`.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

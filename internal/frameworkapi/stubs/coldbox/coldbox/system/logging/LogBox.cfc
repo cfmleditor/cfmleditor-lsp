@@ -55,6 +55,8 @@ component {
 	 * @see coldbox.system.async.executors.ScheduledExecutor
 	 */
 	property name="taskScheduler";
+	this.logLevels = new coldbox.system.logging.LogLevels();
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
 	/**
 	 * Constructor
 	 *

@@ -11,6 +11,7 @@ component {
 	 * The native future we model: java.util.concurrent.Future
 	 */
 	property name="native";
+	this.$timeUnit = new coldbox.system.async.time.TimeUnit();
 	/**
 	 * Build the ColdBox Future with the Java native class
 	 *

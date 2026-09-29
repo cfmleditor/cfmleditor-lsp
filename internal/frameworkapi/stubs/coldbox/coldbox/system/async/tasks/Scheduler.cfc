@@ -49,6 +49,7 @@ component {
 	 * Utility Object
 	 */
 	property name="util";
+	variables.util = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
 	 *

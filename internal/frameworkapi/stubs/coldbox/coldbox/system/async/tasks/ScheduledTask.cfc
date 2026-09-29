@@ -148,6 +148,9 @@ component {
 	 * The task failure closure
 	 */
 	property name="onTaskFailure" type="any";
+	variables.util = new coldbox.system.core.util.Util();
+	variables.dateTimeHelper = new coldbox.system.async.time.DateTimeHelper();
+	variables.timeUnitHelper = new coldbox.system.async.time.TimeUnit();
 	/**
 	 * Constructor
 	 *

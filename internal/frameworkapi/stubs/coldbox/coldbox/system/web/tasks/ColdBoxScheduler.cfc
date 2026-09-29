@@ -25,6 +25,10 @@ component extends="coldbox.system.async.tasks.Scheduler" {
 	 * The bit that can be used to set all tasks created by this scheduler to always run on one server
 	 */
 	property name="serverFixation" type="boolean";
+	variables.controller = new coldbox.system.web.Controller();
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.wirebox = new coldbox.system.ioc.Injector();
 	/**
 	 * Constructor
 	 *

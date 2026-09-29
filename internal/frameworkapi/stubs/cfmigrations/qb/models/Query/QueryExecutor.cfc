@@ -47,5 +47,5 @@ component {
 	private any function applyReturnFormat( required QueryBuilder builder, required any value ) {}
 	private void function copyQueryState( required QueryBuilder source, required QueryBuilder target ) {}
 	public qb.models.Query.JoinClause function cloneJoinClause( required QueryBuilder source, required JoinClause join, required QueryBuilder joiningQuery ) {}
-	private any function cloneQueryStateValue( required QueryBuilder source, any value ) {}
+	private qb.models.Query.Expression function cloneQueryStateValue( required QueryBuilder source, any value ) {}
 }

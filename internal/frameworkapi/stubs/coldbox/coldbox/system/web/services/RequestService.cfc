@@ -28,7 +28,7 @@ component extends="coldbox.system.web.services.BaseService" {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	any function requestCapture( event, boolean proxyCall ) {}
+	coldbox.system.web.context.RequestContext function requestCapture( event, boolean proxyCall ) {}
 	/**
 	 * Tests if the incoming context is an event cache
 	 *

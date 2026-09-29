@@ -50,7 +50,7 @@ component extends="coldbox.system.FrameworkSupertype" {
 	 *
 	 * @return Interceptor instance
 	 */
-	any function setProperty( required property, required value ) {}
+	coldbox.system.Interceptor function setProperty( required property, required value ) {}
 	/**
 	 * Verify an interceptor property exists
 	 *

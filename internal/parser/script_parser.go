@@ -2,6 +2,7 @@ package parser
 
 import (
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -116,7 +117,9 @@ func dynamicCall(expr string) string {
 
 	var buf foldScratch
 	switch string(buf.lowerFold(name)) {
-	case "createmock", "createemptymock", "preparemock", "createstub":
+	case "createmock", "createemptymock":
+		return mockOf(mockClassArg(args))
+	case "preparemock", "createstub":
 		return "$any"
 	case "createobject":
 		if args = strings.TrimLeft(args, " \t"); args != "" && (args[0] == '"' || args[0] == '\'') &&
@@ -127,6 +130,73 @@ func dynamicCall(expr string) string {
 
 	return ""
 }
+
+// docReturn is the dotted component a doc comment's @return names, or "".
+// A bare word is far more often a type than a component, and is left out.
+func docReturn(comment string) string {
+	_, after, ok := strings.Cut(comment, "@return")
+	if !ok {
+		return ""
+	}
+
+	rest := after
+	if strings.HasPrefix(rest, "s ") || strings.HasPrefix(rest, "s\t") {
+		rest = rest[1:] // @returns
+	}
+
+	if rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return ""
+	}
+
+	rest = strings.TrimLeft(rest, " \t")
+
+	end := 0
+	for end < len(rest) && (isIdentPart(rest[end]) || rest[end] == '.') {
+		end++
+	}
+
+	word := strings.Trim(rest[:end], ".")
+	if !strings.Contains(word, ".") {
+		return ""
+	}
+
+	return word
+}
+
+// MockPrefix marks a component a MockBox mock was made from:
+// `$mock:models.User`. The resolver checks calls against the class when it
+// resolves and takes them as dynamic when it does not — a spec mocking a
+// class of a module the workspace lacks is not a finding — and the methods
+// MockBox adds are accepted on any component.
+const MockPrefix = "$mock:"
+
+// mockOf is the component a mock of class is, or $any without one.
+func mockOf(class string) string {
+	if class == "" || strings.ContainsAny(class, "#$ ") {
+		return "$any"
+	}
+
+	return MockPrefix + class
+}
+
+// mockClassArg is the class a createMock or createEmptyMock argument list
+// names: its first argument when that is a string, or className="…".
+func mockClassArg(args string) string {
+	args = strings.TrimSpace(args)
+	if len(args) > 1 && (args[0] == '"' || args[0] == '\'') {
+		if end := strings.IndexByte(args[1:], args[0]); end > 0 {
+			return args[1 : 1+end]
+		}
+	}
+
+	if m := mockClassNameRe.FindStringSubmatch(args); m != nil {
+		return m[1]
+	}
+
+	return ""
+}
+
+var mockClassNameRe = regexp.MustCompile(`(?i)\bclassName\s*[=:]\s*["']([^"'#]+)["']`)
 
 // finalCall is the name of the last call in expr and the text after its
 // `(`: `getMockBox().createEmptyMock("x")` gives createEmptyMock and `"x")`.
@@ -1269,6 +1339,7 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 		Line:       conv.Uint32(funcLine),
 		Arguments:  args,
 		ReturnType: returnType,
+		DocReturn:  docReturn(docComment),
 	})
 
 	// Process body: set inFunc scope, parse assignments, then clear
@@ -2055,10 +2126,12 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 
 	// Look up returnVar in this function's refs, then in componentRefs
 	// (for variables./this. scoped).
+	name, called := returnedVar(p.returnVar)
+
 	for _, refs := range [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs} {
 		for i := range refs {
-			if strings.EqualFold(refs[i].Variable, p.returnVar) && !chainPending(&refs[i]) {
-				f.ReturnComponent = refs[i].Component
+			if strings.EqualFold(refs[i].Variable, name) && !chainPending(&refs[i]) {
+				f.ReturnComponent = returnedComponent(refs[i].Component, called)
 
 				break
 			}
@@ -2192,10 +2265,16 @@ func (p *scriptParser) checkReturnComponent() {
 	default:
 		bareThis := identEq(peek.Value, "this") && p.returnsBareThis()
 
-		p.returnCall(peek)
-
-		// return varName — track for resolution after body parse
+		// return varName — track for resolution after body parse. Only the
+		// name alone is what the variable holds: `return shell.pwd()`
+		// returns what pwd() does, and read as `return shell` it declared the
+		// function a Shell. A call on a dynamic value is dynamic, though,
+		// which returnsCallOn keeps.
 		p.returnVar = peek.Value
+		if !p.returnCall(peek) {
+			p.returnVar = returnsCallOn + peek.Value
+		}
+
 		if bareThis {
 			p.returnVar = returnsThis
 		}
@@ -2236,10 +2315,12 @@ func (p *scriptParser) returnsBareThis() bool {
 // itself: a return holds an expression, and `return x == 1` read as a
 // statement is the assignment `x = …`. tok is the peeked first token after
 // `return`; a keyword other than a scope is left for the caller's loop.
-func (p *scriptParser) returnCall(tok Token) {
+// It reports whether the name stood alone, the case in which the function
+// returns what that variable holds.
+func (p *scriptParser) returnCall(tok Token) (bare bool) {
 	_, _, isScope := scopeReceiver(tok.Value)
 	if !isScope && isKeyword(tok.Value) {
-		return
+		return true
 	}
 
 	p.sc.NextSkipComments()
@@ -2264,7 +2345,10 @@ func (p *scriptParser) returnCall(tok Token) {
 	case next.Kind == TokDoubleColon:
 		p.parseStaticCall(tok)
 	default:
+		return true
 	}
+
+	return false
 }
 
 // readNewComponent reads the component path after "new" keyword.
@@ -3745,9 +3829,57 @@ func (p *scriptParser) tryResolveCall(callExpr string) string {
 	}
 
 	p.sc.NextSkipComments() // consume (
+
+	// createMock( "models.User" ) and createEmptyMock( className = … ) name
+	// the class; the argument list is read to its end either way.
+	class := ""
+	if name := callExpr[strings.LastIndexByte(callExpr, '.')+1:]; strings.EqualFold(name, "createMock") || strings.EqualFold(name, "createEmptyMock") {
+		class = p.peekMockClass()
+	}
+
 	p.skipParenBody()
 
+	if class != "" {
+		return mockOf(class)
+	}
+
 	return "$any"
+}
+
+// peekMockClass is the class the argument list the scanner is inside names,
+// without moving it: a leading string, or className = "…".
+func (p *scriptParser) peekMockClass() string {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	tok := p.sc.NextSkipComments()
+	if tok.Kind == TokString {
+		return unquote(tok.Value)
+	}
+
+	for depth := 0; tok.Kind != TokEOF; tok = p.sc.NextSkipComments() {
+		switch tok.Kind {
+		case TokLParen:
+			depth++
+		case TokRParen:
+			if depth == 0 {
+				return ""
+			}
+
+			depth--
+		case TokIdent:
+			if depth == 0 && identEq(tok.Value, "className") {
+				if eq := p.sc.NextSkipComments(); eq.Kind == TokEquals || eq.Kind == TokColon {
+					if v := p.sc.NextSkipComments(); v.Kind == TokString {
+						return unquote(v.Value)
+					}
+				}
+			}
+		default:
+		}
+	}
+
+	return ""
 }
 
 // tryConfiguredResolvers is tryResolveCall against the componentResolvers.

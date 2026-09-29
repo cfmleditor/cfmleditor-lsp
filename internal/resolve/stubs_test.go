@@ -53,9 +53,12 @@ func TestFrameworkStubsAnswerWhenTheSourceIsAbsent(t *testing.T) {
 		"notAFrameworkMethod": "not found in extends chain",
 	})
 
+	// Without the preset's stubs, event is still RequestContext and a
+	// coldbox.system path is ColdBox's (frameworkapi.Namespaced), so it is
+	// checked; a base the preset would have implied is the framework's absence.
 	without := &Resolver{Resolvers: []parser.Resolver{eventResolver()}, ImplicitExtends: handlerBase}
 	expectReasons(t, reasonsWith(t, without, dir, "handlers/Main.cfc"), map[string]string{
-		"event.notAMethod":    "",
+		"event.notAMethod":    "method 'notAMethod' not found in coldbox.system.web.context.RequestContext",
 		"notAFrameworkMethod": "",
 	})
 }
@@ -105,10 +108,10 @@ func TestAChainBreakingBeyondTheStubsIsTheFrameworksAbsence(t *testing.T) {
 }
 
 // TestAnInjectedFrameworkObjectIsCheckedAgainstTheStubs: `inject="coldbox:
-// requestService"` types the property as ColdBox's own class. With the
-// stubs a call on it is checked; without ColdBox or its stubs it is dynamic,
-// as a preset's resolvers are — in a subclass too, where the property the call
-// is made on was declared by the base.
+// requestService"` types the property as ColdBox's own class, and a call on it
+// is checked against the stubs — in a subclass too, where the property the call
+// is made on was declared by the base. A coldbox.system path can only be
+// ColdBox, so that holds with no preset named (frameworkapi.Namespaced).
 func TestAnInjectedFrameworkObjectIsCheckedAgainstTheStubs(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
@@ -133,7 +136,35 @@ func TestAnInjectedFrameworkObjectIsCheckedAgainstTheStubs(t *testing.T) {
 	})
 
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "models/Child.cfc"), map[string]string{
-		"variables.requestService.notAMethod": "",
+		"variables.requestService.getContext": "",
+		"variables.requestService.notAMethod": "method 'notAMethod' not found in coldbox.system.web.services.RequestService",
 		"log.info":                            "",
 	})
+}
+
+// TestANamespacedFrameworkPathNeedsNoPreset: `extends="testbox.system.
+// compat.framework.TestCase"` can only be TestBox, and Lucee's test suite
+// extends it, through LuceeTestCase, with no preset named — 1,885 entries
+// reporting a chain that breaks there. A prefix a project could use for a
+// folder of its own, framework.* or wheels.*, still waits for its preset.
+func TestANamespacedFrameworkPathNeedsNoPreset(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"tests/LuceeTestCase.cfc": `component extends="testbox.system.compat.framework.TestCase" {}`,
+		"tests/MySpec.cfc": `component extends="LuceeTestCase" {
+	function testIt() {
+		assertEquals( 1, 1 );
+		notATestBoxMethod();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "tests/MySpec.cfc"), map[string]string{
+		"assertEquals":      "",
+		"notATestBoxMethod": "not found in extends chain",
+	})
+
+	if frameworkapi.Namespaced("wheels.Controller") != "" || frameworkapi.Namespaced("framework.one") != "" {
+		t.Error("an ambiguous prefix answered without its preset")
+	}
 }

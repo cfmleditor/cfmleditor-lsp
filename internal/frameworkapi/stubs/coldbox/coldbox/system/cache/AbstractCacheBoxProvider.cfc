@@ -53,6 +53,7 @@ component {
 	 * A Java utility to generate UUIDs
 	 */
 	property name="uuidHelper";
+	variables.utility = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
 	 */

@@ -31,6 +31,9 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 * The test case metadata
 	 */
 	property name="metadata" type="struct";
+	variables.coldBoxVirtualApp = new coldbox.system.testing.VirtualApp();
+	variables.cbUtil = new coldbox.system.core.util.Util();
+	variables.env = new coldbox.system.core.delegates.Env();
 	/**
 	 * Inspect test case for ColdBox loading annotations and autowiring
 	 *
