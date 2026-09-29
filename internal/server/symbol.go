@@ -5,6 +5,8 @@ import (
 	"encoding/json/v2"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"
 )
@@ -74,6 +76,12 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 	symbols := make([]protocol.SymbolInformation, 0, len(defs))
 
 	for _, d := range defs {
+		// A framework's bundled API is looked up, not browsed: it is in the
+		// index only because a call reached it, and it has nowhere to open.
+		if frameworkapi.IsStubURI(string(d.URI)) {
+			continue
+		}
+
 		symbols = append(symbols, protocol.SymbolInformation{
 			Name: d.Name,
 			Kind: protocol.SymbolKindFunction,

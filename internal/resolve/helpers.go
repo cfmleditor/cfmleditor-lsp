@@ -127,7 +127,7 @@ func (r *Resolver) applicationHelpers() []string {
 // helpersIn reads the templates the setting re matches in configFile names,
 // each relative to base.
 func (r *Resolver) helpersIn(configFile string, re *regexp.Regexp, base string) []string {
-	data, err := r.FS.ReadFile(configFile)
+	data, err := r.fs().ReadFile(configFile)
 	if err != nil {
 		return nil
 	}
@@ -162,7 +162,7 @@ func (r *Resolver) helpersIn(configFile string, re *regexp.Regexp, base string) 
 // offered to handlers as well: over-accepting a call there costs a finding
 // rather than inventing one.
 func (r *Resolver) includedUDFs(moduleConfig string) []string {
-	data, err := r.FS.ReadFile(moduleConfig)
+	data, err := r.fs().ReadFile(moduleConfig)
 	if err != nil {
 		return nil
 	}
@@ -185,7 +185,7 @@ func (r *Resolver) includedUDFs(moduleConfig string) []string {
 
 // existing is p when it names a file.
 func (r *Resolver) existing(p string) string {
-	if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+	if info, err := r.fs().Stat(p); err == nil && !info.IsDir() {
 		return p
 	}
 

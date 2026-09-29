@@ -301,6 +301,39 @@ func HelperScope(frameworks []string) func(path string) bool {
 	}
 }
 
+// PresetComponents lists the components a preset names — what its
+// resolvers resolve to and the bases it implies — each once, in the order
+// written. The stub generator (cmd/cfstubgen) starts from these, so a
+// framework whose source is not in the workspace can still be checked.
+func PresetComponents(name string) []string {
+	p, ok := frameworkPresets[strings.ToLower(name)]
+	if !ok {
+		return nil
+	}
+
+	var out []string
+
+	seen := map[string]bool{}
+	add := func(list string) {
+		for c := range strings.SplitSeq(list, "|") {
+			if c != "" && !seen[strings.ToLower(c)] {
+				seen[strings.ToLower(c)] = true
+				out = append(out, c)
+			}
+		}
+	}
+
+	for i := range p.resolvers {
+		add(p.resolvers[i].Resolve)
+	}
+
+	for _, b := range p.bases {
+		add(b.component)
+	}
+
+	return out
+}
+
 // ImplicitExtends returns the rule the named frameworks set for a file that
 // extends nothing: the component it behaves as if it extended, or "". It is
 // nil when no framework sets one, so a resolver without presets pays nothing.

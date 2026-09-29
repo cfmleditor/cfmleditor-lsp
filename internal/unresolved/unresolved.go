@@ -15,6 +15,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -52,6 +53,7 @@ type Options struct {
 	WorkspaceFolders         []string
 	ImplicitExtends          func(path string) string // frameworks' implicit bases; see config.ImplicitExtends
 	HelperScope              func(path string) bool   // files frameworks mix helpers into; see config.HelperScope
+	Stubs                    *frameworkapi.Set        // frameworks' API when their source is absent; see internal/frameworkapi
 	InterpolateAll           bool                     // features.outputContextInterpolation off
 	GlobalDefs               bool                     // accept a bare call any indexed file defines
 	Verbose                  io.Writer
@@ -80,6 +82,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		WorkspaceFolders:   opt.WorkspaceFolders,
 		ImplicitExtends:    opt.ImplicitExtends,
 		HelperScope:        opt.HelperScope,
+		Stubs:              opt.Stubs,
 	}
 
 	started := time.Now()

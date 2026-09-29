@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -615,6 +617,20 @@ func (res *FileGraph) addCalls(opts *Options, cfg *FileConfig, pr *parser.ParseR
 		}
 
 		switch {
+		case target.Kind.Definite() && frameworkapi.IsStubURI(string(target.URI)):
+			// A framework's bundled API is checked against but is not part of
+			// the codebase: the call resolved, and the map has no file for it,
+			// as it had none when the framework was simply missing.
+			res.Stats.Resolved++
+
+			if opts.IncludeUnresolved {
+				to := ExternalID(externalLabel(target.Component, call))
+				res.Provisional = append(res.Provisional, Node{
+					ID: to, Kind: KindExternal, Name: externalLabel(target.Component, call),
+				})
+				res.addCallEdge(from, to, false)
+			}
+
 		case target.Kind.Definite() && target.URI != "":
 			res.Stats.Resolved++
 			res.addCallEdge(from, funcNodeFor(root, target), false)
@@ -682,7 +698,7 @@ func (res *FileGraph) targetFile(cfg *FileConfig, component, baseDir, root strin
 	}
 
 	resolved := cfg.Resolver.ComponentPath(component, baseDir)
-	if resolved == "" {
+	if resolved == "" || frameworkapi.IsStub(resolved) {
 		return "", false
 	}
 

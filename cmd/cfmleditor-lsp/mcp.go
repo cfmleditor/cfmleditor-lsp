@@ -13,6 +13,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -158,6 +159,7 @@ type explainConfig struct {
 	resolvers                []parser.Resolver
 	implicitExtends          func(string) string
 	helperScope              func(string) bool
+	stubs                    *frameworkapi.Set
 	expressionMappings       map[string]string
 	servicePropertyResolvers map[string]string
 	interpolateAll           bool
@@ -185,6 +187,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		cfg.expressionMappings = c.ExpressionMappings()
 		cfg.implicitExtends = config.ImplicitExtends(c.Frameworks())
 		cfg.helperScope = config.HelperScope(c.Frameworks())
+		cfg.stubs = frameworkapi.For(c.Frameworks())
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
 		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
@@ -208,6 +211,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    cfg.implicitExtends,
 		HelperScope:        cfg.helperScope,
+		Stubs:              cfg.stubs,
 	}
 
 	for _, f := range collectCFMLFiles(fsys, scanRoots) {

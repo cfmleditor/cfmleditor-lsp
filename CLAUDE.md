@@ -16,6 +16,8 @@ make link           # build + symlink onto PATH for local editor use (LINK_DIR=<
 make unlink         # remove that symlink
 make link-status    # show the link, the build, and what PATH resolves cfmleditor-lsp to
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
+make framework-stubs # regenerate internal/frameworkapi/stubs from each pinned framework
+                    # source (needs git + network; the stubs are committed)
 make update-d3      # rebuild the code-map viewer's D3 bundle from assets/vendor/entry.js
                     # (needs Node; the bundle is committed so `go build` does not)
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
@@ -152,6 +154,7 @@ Editor document change
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
+| `internal/frameworkapi` | The presets' frameworks' API, bundled: generated stubs (`stubs/`, from `cmd/cfstubgen`), the overlay filesystem that serves them under the virtual `Root`, and their doc comments (`DocAt`). See "Framework presets" |
 | `internal/route` | Convention-based framework routing: the `routes` config grammar, the source scanner, and resolution to a controller method or a view |
 | `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
@@ -1126,7 +1129,7 @@ the user-facing view and all `formatting` defaults.
 | `startupFiles` | Templates whose shared-scope assignments (`REQUEST.`, `SESSION.`, `APPLICATION.`, `SERVER.`) type a variable for the whole workspace; a leading `/` is a template path resolved like a `cfinclude`. The same lookup reads the templates the governing `Application.cfc` includes with no config (`internal/resolve/startup.go`), and is the last step in `receiverComponent`. It types the RHS itself rather than re-entering `canResolveCall`, so its recursion has its own visited set and its answer is deterministic under the parallel scan |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
-| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, and an implicit base for a file that names no `extends`. See "Framework presets" below |
+| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, an implicit base for a file that names no `extends`, and its bundled API for when the source is absent. See "Framework presets" below |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
 | `servicePropertyResolvers` | `@serviceproperty <var> <kind>\|<name>` doc-comment kind → `${name}` dot-path template, for generically-typed dependencies |
 | `beanPaths` | namespace → directory; `.cfc`s registered as `name@namespace`, plus a bare `name` when unique across all namespaces |
@@ -1383,6 +1386,26 @@ project could have written by hand. Three rules hold them together, each with a 
 - **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
   `task()` return different things, so CommandBox's preset leaves `task()` alone.
   `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.
+- **Without the framework's source, its API comes from stubs** (`internal/frameworkapi`).
+  `cmd/cfstubgen` generates one script component per class a preset names — plus the
+  `Extra` bases projects extend by name, their extends chains, and the components their
+  methods return — holding every signature and doc comment with an empty body, from each
+  `Sources` entry at its pinned commit (`make framework-stubs`, reproducible byte for
+  byte). Wheels' `$integrateComponents` mixins and included templates are folded in. The
+  resolver's `Stubs` answers a dot-path **last**, after every mapping, directory and
+  folder, so a checkout of the framework always wins (`TestTheFrameworksOwnSourceOutranksItsStubs`);
+  the stubs are served from a virtual directory, `frameworkapi.Root`, through `r.fs()` and
+  a wrapped `cfpath.DefaultFS`. Checked against the real thing: ContentBox reports the same
+  3,776 entries with the ColdBox stubs as with ColdBox mapped in, and cfwheels fewer with
+  its stubs than with its source. Three rules, each with a test: **a stub is never a
+  location** — `handleDefinition`/`handleTypeDefinition` filter them (`withoutStubLocations`)
+  and workspace symbols skip them; **a stub is documented** — hover, signature help and
+  member completion append `frameworkapi.DocAt`, which reads ColdBox's `@name text`
+  argument docs as well as `@param`; and **a chain breaking beyond a stub is dynamic**
+  (`chainBreak` marks a stub link implied), since that is the framework's absence. The
+  code map keeps stubs out as it kept the missing framework out: a stub call is an
+  external node only with unresolved calls shown. Every `Resolver` construction site sets
+  `Stubs` beside `ImplicitExtends`.
 - **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
   (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
   project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong

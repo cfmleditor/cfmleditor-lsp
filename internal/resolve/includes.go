@@ -69,7 +69,7 @@ func (r *Resolver) IncludePath(raw, fromFile string) string {
 	candidates = append(candidates, cfpath.InFolderNamed(r.WorkspaceFolders, trimmed)...)
 
 	for _, c := range candidates {
-		if info, err := r.FS.Stat(c); err == nil && !info.IsDir() {
+		if info, err := r.fs().Stat(c); err == nil && !info.IsDir() {
 			return c
 		}
 	}

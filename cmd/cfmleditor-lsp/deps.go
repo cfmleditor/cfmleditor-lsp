@@ -11,6 +11,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -137,11 +138,13 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 	var (
 		implicitExtends func(string) string
 		helperScope     func(string) bool
+		stubs           *frameworkapi.Set
 	)
 
 	if cfg, _ := daemon.FindConfig(searchDir); cfg != nil {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		helperScope = config.HelperScope(cfg.Frameworks())
+		stubs = frameworkapi.For(cfg.Frameworks())
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
@@ -190,6 +193,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,
 		HelperScope:        helperScope,
+		Stubs:              stubs,
 	}, idx
 }
 

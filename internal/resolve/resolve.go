@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -33,7 +34,13 @@ type Resolver struct {
 	// HelperScope reports whether a framework mixes its helper templates into
 	// the file at path: a ColdBox handler, view, layout or interceptor. Nil for
 	// none. See helpers.go and config.HelperScope.
-	HelperScope   func(path string) bool
+	HelperScope func(path string) bool
+	// Stubs is the API of the frameworks the configuration names, answering
+	// a framework component nothing on disk does: calls on it are checked,
+	// and completion and hover see its methods. Nil for none. See
+	// internal/frameworkapi.
+	Stubs         *frameworkapi.Set
+	stubFS        vfs.FS
 	mu            sync.RWMutex
 	appRootCache  map[string]string          // dir → Application.cfc root
 	slugCache     map[string]string          // dir → its box.json slug, "" for none
@@ -160,11 +167,36 @@ func (r *Resolver) dirs() *cfpath.DirCache {
 	return r.dirCache
 }
 
+// fs is the resolver's filesystem, with the framework stubs mounted when it
+// has any.
+func (r *Resolver) fs() vfs.FS {
+	if r.Stubs == nil {
+		return r.FS
+	}
+
+	r.mu.RLock()
+	f := r.stubFS
+	r.mu.RUnlock()
+
+	if f != nil {
+		return f
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.stubFS == nil {
+		r.stubFS = frameworkapi.Wrap(r.FS)
+	}
+
+	return r.stubFS
+}
+
 func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	// A component already named by its file: what a function returning
 	// `this` returns.
 	if filepath.IsAbs(component) && strings.HasSuffix(strings.ToLower(component), ".cfc") {
-		if info, err := r.FS.Stat(component); err == nil && !info.IsDir() {
+		if info, err := r.fs().Stat(component); err == nil && !info.IsDir() {
 			return component
 		}
 	}
@@ -196,6 +228,13 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
 			return p
 		}
+	}
+
+	// A framework component nothing on disk answers: its API, from the stubs.
+	// Last of the dot-path lookups, so a workspace with the framework checked
+	// out resolves to the real file exactly as it did.
+	if p := r.Stubs.Path(component); p != "" {
+		return p
 	}
 
 	// A component the engine ships is the engine's, not whatever file of that
@@ -289,7 +328,7 @@ func (r *Resolver) boxSlug(dir string) string {
 		return slug
 	}
 
-	if data, err := r.FS.ReadFile(filepath.Join(dir, "box.json")); err == nil {
+	if data, err := r.fs().ReadFile(filepath.Join(dir, "box.json")); err == nil {
 		var box struct {
 			Slug string `json:"slug"`
 		}
@@ -422,7 +461,7 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 	cfcURI := cfpath.ToURI(cfcPath)
 
 	if !r.Index.HasFile(cfcURI) {
-		data, err := r.FS.ReadFile(cfcPath)
+		data, err := r.fs().ReadFile(cfcPath)
 		if err != nil {
 			return nil
 		}
@@ -572,7 +611,7 @@ func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bo
 		return ext, true
 	}
 
-	data, err := r.FS.ReadFile(cfcPath)
+	data, err := r.fs().ReadFile(cfcPath)
 	if err != nil {
 		return "", false
 	}
@@ -659,7 +698,7 @@ func (r *Resolver) findApplicationRootUncached(dir string) string {
 
 	for {
 		for _, name := range []string{"Application.cfc", "Application.cfm"} {
-			if _, err := r.FS.Stat(filepath.Join(d, name)); err == nil {
+			if _, err := r.fs().Stat(filepath.Join(d, name)); err == nil {
 				return d
 			}
 		}
@@ -1291,6 +1330,11 @@ func (r *Resolver) chainBreak(extends, baseDir string, implied bool) (string, bo
 		}
 
 		seen[p] = true
+
+		// A chain that reaches a framework's stubs and breaks beyond them is
+		// the framework's source not being here — BaseTestCase's TestBox base
+		// in a workspace naming ColdBox but not TestBox — not a finding.
+		implied = implied || frameworkapi.IsStub(p)
 
 		declared, ok := r.declaredExtendsOf(p, cfpath.ToURI(p))
 		if !ok {
@@ -1944,7 +1988,7 @@ func (r *Resolver) walkExtendsRefs(extends, baseDir, name string, visit func(ref
 		}
 
 		// Walk up the extends chain
-		data, err := r.FS.ReadFile(cfcPath)
+		data, err := r.fs().ReadFile(cfcPath)
 		if err != nil {
 			return
 		}
@@ -1971,7 +2015,7 @@ func (r *Resolver) componentExists(component, baseDir string) bool {
 			return true
 		case filepath.IsAbs(alt):
 			for _, p := range []string{alt, alt + ".cfc"} {
-				if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+				if info, err := r.fs().Stat(p); err == nil && !info.IsDir() {
 					return true
 				}
 			}

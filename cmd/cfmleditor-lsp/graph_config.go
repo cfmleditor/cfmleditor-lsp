@@ -13,6 +13,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
@@ -112,6 +113,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		WorkspaceFolders:   found.WorkspaceFolders(),
 		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),
 		HelperScope:        config.HelperScope(found.Frameworks()),
+		Stubs:              frameworkapi.For(found.Frameworks()),
 	}
 
 	cfg = codemap.FileConfig{

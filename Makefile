@@ -13,7 +13,7 @@ GOBIN_DIR := $(shell go env GOPATH)/bin
 LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 
-.PHONY: build build-wasm test conformance conformance-summary corpus gapcheck shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test conformance framework-stubs conformance-summary corpus gapcheck shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -108,6 +108,13 @@ update-grammar: generate
 # requirement and every generated report free of a network fetch. Run it after
 # adding a D3 function to VENDOR/entry.js, or the call is undefined at runtime.
 VENDOR := internal/codemap/assets/vendor
+
+# Regenerates the framework API stubs (internal/frameworkapi/stubs) from each
+# frameworkapi.Sources entry at its pinned commit. Needs the network and git;
+# the stubs are committed, so nothing else does. Review the diff: it is the
+# change in what an editor without the framework checked out can see.
+framework-stubs:
+	go run ./cmd/cfstubgen -fetch target/framework-src -out internal/frameworkapi/stubs
 
 .PHONY: update-d3
 update-d3:

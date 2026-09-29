@@ -502,17 +502,27 @@ The other presets, named alongside it as a project uses them:
 | `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found |
 
 With a framework's source in the workspace (a mapping, or a checkout of it),
-calls are checked against its real methods. Without it they are accepted as
-dynamic, rather than reported against components that are not on disk — and
-so are calls a file inherits through a base the preset implies, however far up
-the chain it breaks. Everything a preset adds can be overridden: your own
+calls are checked against its real methods and go-to-definition opens them.
+Without it, the LSP uses the framework's API bundled into the binary: stubs
+generated from each framework's own source, with every method's signature and
+doc comment. So `event.` still completes, `event.getValue(` still shows its
+signature, hover shows ColdBox's documentation for it, and `event.getValu()` is
+reported as not found in `RequestContext` — but go-to-definition answers
+nothing, since there is no file to open. The bundled API is for one version of
+each framework (pinned in `internal/frameworkapi/sources.go`); a checkout of
+the framework, whatever its version, always wins. A chain that runs beyond what
+is bundled is accepted as dynamic, as is anything a preset implies when neither
+the source nor its stub has it. Everything a preset adds can be overridden: your own
 `componentResolvers` come first, and a file that names its `extends` keeps it.
 A child config's `frameworks` adds to its parent's, and an unknown name is
 warned about. When the `box.json` beside the config depends on a framework
 with a preset the config does not name (`coldbox`, `testbox`,
 `commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
 and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
-it uses, the `unresolved` report goes from 23,560 entries to 14,083.
+it uses, the `unresolved` report goes from 23,560 entries to 14,665. That is more
+than the 14,083 it was before the bundled API, and the difference is checking:
+ContentBox, which uses ColdBox without its source, reports the same 3,776
+entries with the stubs as with ColdBox checked out beside it.
 
 A preset's variable resolvers are `nameOnly` (below), so in tag syntax
 `<cfset x = event.getValue( "a" )>` does not make `x` a request context.
