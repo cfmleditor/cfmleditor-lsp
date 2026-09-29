@@ -180,14 +180,14 @@ func TestParseOrmLocations_Empty(t *testing.T) {
 // folder under it when a string is appended.
 func TestParseApplicationMappings_DirectoryOfTheTemplate(t *testing.T) {
 	content := `component {
-		this.mappings["/contentscmf"] = getDirectoryFromPath( getCurrentTemplatePath() );
+		this.mappings["/myapp"] = getDirectoryFromPath( getCurrentTemplatePath() );
 		this.mappings["/lib"] = getDirectoryFromPath(getCurrentTemplatePath()) & "shared/lib";
 	}`
 	appDir := "/project"
 	got := ParseApplicationMappings(content, appDir)
 
-	if got["contentscmf"] != appDir {
-		t.Errorf("contentscmf = %q, want %q", got["contentscmf"], appDir)
+	if got["myapp"] != appDir {
+		t.Errorf("myapp = %q, want %q", got["myapp"], appDir)
 	}
 
 	if want := filepath.Join(appDir, "shared", "lib"); got["lib"] != want {
