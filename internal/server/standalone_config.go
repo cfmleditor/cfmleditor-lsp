@@ -97,6 +97,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 	s.ComponentResolvers = nil
 	s.PropertyResolvers = nil
 	s.BeanPaths = nil
+	s.Frameworks = nil
 
 	s.applyConfig(config.Resolve(merged, dir))
 	s.restoreUnmentionedBlocks(merged, &prev)
@@ -297,6 +298,10 @@ func (s *Server) applyConfig(r *config.Resolved) {
 
 	if len(r.BeanPaths) > 0 && len(s.BeanPaths) == 0 {
 		s.BeanPaths = r.BeanPaths
+	}
+
+	if len(r.Frameworks) > 0 && len(s.Frameworks) == 0 {
+		s.Frameworks = r.Frameworks
 	}
 
 	s.Features = r.Features

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
@@ -87,10 +87,14 @@ func cmdExplain(args []string) {
 		servicePropertyResolvers map[string]string
 		interpolateAll           bool
 		workspaceFolders         []string
+		implicitExtends          func(string) string
+		helperScope              func(string) bool
 	)
 
 	cfg, _ := daemon.FindConfig(searchDir)
 	if cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		helperScope = config.HelperScope(cfg.Frameworks())
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		startupFiles = cfg.StartupFiles()
@@ -99,7 +103,7 @@ func cmdExplain(args []string) {
 		interpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+			cfResolvers = append(cfResolvers, r.Parser())
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
@@ -117,6 +121,8 @@ func cmdExplain(args []string) {
 		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
+		HelperScope:        helperScope,
 	}
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))
@@ -144,22 +150,7 @@ func cmdExplain(args []string) {
 	fileURI := uri.URI("file://" + file)
 	baseDir := filepath.Dir(file)
 
-	funcLookup := func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
 		Resolvers:                cfResolvers,

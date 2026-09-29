@@ -475,6 +475,28 @@ the *formatter*, not the parser.
   named declaration**: after an arrow function's parameters comes an
   expression, and consuming an identifier there takes the receiver off a call —
   `TestArrowFunctionBodyKeepsItsReceiver` fails if it moves into `parseBody`.
+- **`this.` and `variables.` are separate stores, and a ref says which it was
+  assigned through** (`ComponentRef.This`). The lookup had stripped every scope, so
+  ColdBox's Injector — `this.SCOPES = new Scopes()` beside a struct `variables.scopes`
+  — checked `variables.scopes[ k ].getFromScope()` against `Scopes`, typed
+  `getInstance()` as returning one, and so every call on an instance WireBox built,
+  29 over the corpus. A receiver qualified with either scope reads its own scope's
+  refs, in the resolver (`funcScopedRef`, `fileLevelRef`) and in `baseVarComponent`;
+  an unqualified one still reads both, since CFML's own lookup is not what decides
+  that here and a narrower rule was not measured. Two things came with it, each with
+  a test that fails without it: `x = a[ k ].f()` no longer takes `a` as its base
+  (the element is not the variable — a Lucee date had been typed as its entity), and
+  `variables.x = this.x = rhs` records a ref in each scope, which TestBox's `$assert`
+  relies on.
+- **`a = b = rhs` gives both names what `rhs` holds, in either syntax** (`chained.go`).
+  Only the scoped script form used to, and `request.calc = calc = new Calculator()` typed
+  neither. Each parser handles the inner assignment as the statement it is
+  (`chainedAssign`, `tagParser.chainedSet` through `setAssign`), then re-adds what it made
+  for the outer name through `addRef` under the outer assignment's own state, so
+  `var a = b = new X()` makes a local `a` and a variables-scope `b`. `a = b == c` is a
+  comparison and chains nothing. The script check runs on every assignment, so it
+  decides from the cached peek and `Scanner.bytesAfterPeek` rather than a save and
+  restore, which drops the peek and cost 4.5% of a script parse.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
@@ -1104,6 +1126,7 @@ the user-facing view and all `formatting` defaults.
 | `startupFiles` | Templates whose shared-scope assignments (`REQUEST.`, `SESSION.`, `APPLICATION.`, `SERVER.`) type a variable for the whole workspace; a leading `/` is a template path resolved like a `cfinclude`. The same lookup reads the templates the governing `Application.cfc` includes with no config (`internal/resolve/startup.go`), and is the last step in `receiverComponent`. It types the RHS itself rather than re-entering `canResolveCall`, so its recursion has its own visited set and its answer is deterministic under the parallel scan |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
+| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, and an implicit base for a file that names no `extends`. See "Framework presets" below |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
 | `servicePropertyResolvers` | `@serviceproperty <var> <kind>\|<name>` doc-comment kind → `${name}` dot-path template, for generically-typed dependencies |
 | `beanPaths` | namespace → directory; `.cfc`s registered as `name@namespace`, plus a bare `name` when unique across all namespaces |
@@ -1234,14 +1257,19 @@ qualified call `x.method()`, the receiver's component is looked up in this order
 the first hit — (1) `call.Component`, if already set at parse time (e.g. a chained
 `new`/`createObject`, or a bare-call site where the tag/script parser resolved the receiver
 inline via `lookupComponentRef`); (2) a function-scoped `ComponentRef` for `x`; (3) a file-level
-(global/`VARIABLES.`/`this.`) `ComponentRef`; (4) a `ComponentRef` on
+(global/`VARIABLES.`/`this.`) `ComponentRef` — for (2) and (3) a receiver written `this.x`
+reads only refs assigned through `this.` and one written `variables.x` only the rest
+(`parser.ReceiverRefScope`); (4) a `ComponentRef` on
 `Application.cfc`/`Application.cfm`; (5) for `ARGUMENTS.x`, the `<cfargument type>` if it's a
 dotted path; (6) walking the `extends` chain's own `ComponentRef`s; (7) a `componentResolver`
 matched against the variable name text; (8) a `componentResolver` matched against the full line
 text (handles chains like `x.method().prop.func()`). If the call is itself chained
-(`call.Chain`), each hop repeats a scaled-down version of this: the hop function's declared
-`ReturnComponent`/dotted `ReturnType`, falling back to a `componentResolver` matched against
-`hop()`. Because steps (7)/(8) and the per-hop fallback all go through the same substring-prefix
+(`call.Chain`), each hop repeats a scaled-down version of this: what the hop function returns
+(`Resolver.ReturnComponentOf` — its inferred `ReturnComponent`, a dotted `ReturnType`, or a
+bare-word `ReturnType` naming a component beside the declaring file, never a CFML type name),
+falling back to a `componentResolver` matched against `hop()`. `ReturnComponentOf` is also
+behind `Resolver.FuncLookup`, the parser hook every scan passes, so a hop and a variable
+assigned from the same call cannot disagree; it replaced five copies of the rule. Because steps (7)/(8) and the per-hop fallback all go through the same substring-prefix
 matching described below, a broad catch-all resolver (e.g. `get$1()`) can win at *any* of these
 steps, not just the ones that look like factory-method calls.
 
@@ -1311,7 +1339,9 @@ resolver types a call, `dynamicCall` makes a MockBox mock and an unstubbed Java 
 from both `resolveCall`s, `tryResolveCall` and `resolvePendingCalls` — the chained
 `getMockBox().createEmptyMock()` reaches only the last. A component the parse names by file
 path (a function returning `this`) is reported by `displayComponent` under its file name,
-since reasons land in committed known-issues files. An engine component — bare `Query`, `http`, `dbinfo` and the
+since reasons land in committed known-issues files. The methods MockBox's `decorateMock` adds
+(`$`, `$results`, `$never`, … — `mockDecorations`) are accepted on any component, as a last
+call or a chain hop, since a test mocks a real component in place. An engine component — bare `Query`, `http`, `dbinfo` and the
 other script-tag names, or `org.lucee.cfml.*`/`com.adobe.coldfusion.*` — is `engineComponent`:
 once nothing configured resolves it, `engineSource` looks for an indexed file ending in its
 path (a Lucee checkout's `org/lucee/cfml/`), and without one `canResolveCall` accepts calls
@@ -1319,6 +1349,47 @@ on it as dynamic. It never falls to the file-name search, which answered `new db
 whatever `dbinfo.cfc` the workspace held. Lucee functions its docs omit (hidden ones, like
 `struct()`) are `docs.undocumentedFunctions`, behind `docs.IsBuiltinFunction` — the one
 builtin test `unresolved` and the code map share.
+
+**Framework presets** (`frameworks`, `internal/config/frameworks.go`) are data, not code
+paths: a list of resolvers and implicit bases per framework, so a preset can only say what a
+project could have written by hand. Three rules hold them together, each with a test:
+- **Every preset resolver is `dynamicIfMissing`**, and a chain that breaks after passing
+  through an implied link is dynamic too, so an app without the framework checked out gets
+  nothing reported against components that are not on disk, while one with it is checked
+  for real. `chainBreak` is the one walk behind it: it names the first link that does not
+  resolve and whether any link up to it was implied — the file's own base, a base class that
+  names none (`handlers/Base.cfc`), or the base of a component a call is made on
+  (`componentMissingBase`). A chain every file wrote is still reported where it breaks. An
+  implied base may be a list of alternatives (a Wheels view is its controller and every
+  mixin); `MissingBase` answers nothing for a list, so `chainBreak` checks each alternative
+  of an implied one. The bare-chain walk carries a `dynamicIfMissing` return type's flag
+  too (`resolveBareChain`), which it used to drop.
+- **Variables match whole names**, anchored and escaped (`variableResolver`): unanchored,
+  prefix `event` finds itself inside `oEvent`. Return types are unanchored on purpose
+  (`returnResolver`), so `x = variables.controller.getRequestContext()` types `x`; the match
+  is still the whole remainder, so a further hop is not claimed.
+- **The implicit base is the resolver's, not the parse's.** `Resolver.ImplicitExtends` is a
+  hook `config.ImplicitExtends` builds, because `resolve` must not import `config` (which
+  pulls in tree-sitter). Every read of a file's extends in `resolve.go` goes through
+  `fileExtends`/`extendsFor`, memoised per path; the deepest matching directory wins. Each of
+  the seven places that builds a `Resolver` sets the hook from its config.
+- **Helpers a framework mixes in are found like includes.** `Resolver.HelperScope` (from a
+  preset's `helperDirs`) says which files receive them; `internal/resolve/helpers.go` finds
+  them — every `ModuleConfig.cfc`'s `this.applicationHelper` and
+  `includeUDF( "#moduleMapping#/…" )`, each `config/ColdBox.cfc`'s `applicationHelper`, and a
+  view's `<view>Helper.cfm`/`<folder>Helper.cfm` — and `findThroughIncludes` tries them last.
+  Application helpers are workspace-wide, cached per set of config files. With ColdBox mapped
+  into ContentBox it resolves all 40 of the admin module's helper calls.
+- **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
+  `task()` return different things, so CommandBox's preset leaves `task()` alone.
+  `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.
+- **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
+  (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
+  project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong
+  for `event.getValue()`. `NameOnly` keeps the alias `x = event` and drops anything derived
+  from it. **Every config-to-parser conversion is `config.Resolver.Parser()`** — there were
+  ten struct literals, and a field one of them forgot is a setting that parses and does
+  nothing; `TestParserCarriesEveryResolverField` sets every field and fails on one dropped.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a
@@ -1756,6 +1827,15 @@ rule, and without the second half every route path short-circuits and the test
 passes whatever the code does. And a window test needs both documents to present
 a **full** window, or it compares a five-line window against a fifty-line one and
 fails for that instead.
+
+**A close tag reaches the walk as `</`, not `<c`.** The `</cffunction>` check sat in
+`handleCFTag`, which the walk calls only for a tag whose second byte is `c`, so a tag
+function's scope ran on until the next `<cffunction>`. Every top-level `<cfset>` after one
+was the function's: its pending calls typed a variable of the function, its unscoped names
+were read against the function's `var`'d locals, and a qualified call the tag parser
+records itself named the function as its caller — Lucee's admin pages, which declare
+`addZero()` first, credited it with every call on the page. `closeTag` handles it now;
+`TestTagFunctionScopeEndsAtItsCloseTag` fails on each of the three if it goes.
 
 **Where a tag holds an expression, hand it to the script parser.** The tag
 parser matches tags and pulls attributes out with string searches; it has no

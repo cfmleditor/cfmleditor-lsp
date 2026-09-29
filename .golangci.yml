@@ -69,6 +69,11 @@ linters:
     - wastedassign
     - wsl_v5
   settings:
+    misspell:
+      # CommandBox, the CFML CLI a framework preset is named for; misspell
+      # reads the lowercase name as a misspelling of "commando".
+      ignore-rules:
+        - commandbox
     # Stage 4 (LINT-PLAN.md). New code stays under these; each function over
     # one today carries a //nolint naming the stage, and nolintlint fails on a
     # marker the function no longer needs, so that list only shrinks.

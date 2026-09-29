@@ -158,6 +158,13 @@ type ComponentRef struct {
 	URI       uri.URI
 	Line      uint32
 
+	// This is set when the assignment was made through `this.`: this scope
+	// and variables scope are separate stores, and `this.SCOPES = new
+	// Scopes()` says nothing about `variables.scopes`. A receiver written
+	// with either qualifier is looked up among its own scope's refs only; an
+	// unqualified one still sees both.
+	This bool
+
 	// ChainBase and ChainMethod record the receiver.method() shape that produced
 	// this ref (e.g. "var x = jss.getInstance()" → ChainBase "jss", ChainMethod
 	// "getInstance"). Empty unless Component came from a receiver.method(...) call.
@@ -256,9 +263,16 @@ type Resolver struct {
 	// broad pattern — `get$1()` → `app.$1` — that is right for the factories it
 	// was written for and invents a path for every other getter.
 	DynamicIfMissing bool
-	re               *regexp.Regexp // compiled regex, lazily initialized
-	simple           bool           // true if pattern is a plain string (no regex, no $N)
-	reOnce           sync.Once
+	// NameOnly types a variable by its name and says nothing about what a
+	// call on it returns. The tag parser's bare-name fallback types
+	// `<cfset style = document.loadStylesheet()>` as document's component,
+	// which a project whose one stub answers every call relies on; a framework
+	// preset's `event` resolver must not make event.getValue() a request
+	// context too.
+	NameOnly bool
+	re       *regexp.Regexp // compiled regex, lazily initialized
+	simple   bool           // true if pattern is a plain string (no regex, no $N)
+	reOnce   sync.Once
 	// Precomputed for simple matches
 	simplePrefix   string // part before $1
 	simpleSuffix   string // part after $1

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
 )
 
@@ -76,6 +77,11 @@ type JSON struct {
 	// diagnostics, so they appear in an editor's problems panel. See
 	// KnownIssuesConfig, and internal/knownissues for the format.
 	KnownIssues *KnownIssuesConfig `json:"knownIssues"`
+
+	// Frameworks names the framework presets the project uses — "coldbox"
+	// — each adding the resolvers and implicit base components that framework
+	// implies. See frameworks.go.
+	Frameworks []string `json:"frameworks"`
 
 	ComponentResolvers []Resolver        `json:"componentResolvers"`
 	PropertyResolvers  []PropResolver    `json:"propertyResolvers"`
@@ -301,6 +307,19 @@ type Resolver struct {
 	// file as dynamic rather than reporting it missing. For a broad catch-all
 	// such as get$1(): see parser.Resolver.
 	DynamicIfMissing bool `json:"dynamicIfMissing"`
+	// NameOnly says what a variable of that name holds, and nothing about
+	// what a call on it returns: see parser.Resolver.
+	NameOnly bool `json:"nameOnly"`
+}
+
+// Parser is the resolver as the parser and resolver use it. Every
+// config-to-parser conversion goes through here, so a field added to one
+// reaches the other everywhere at once.
+func (r *Resolver) Parser() parser.Resolver {
+	return parser.Resolver{
+		Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
+		NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing, NameOnly: r.NameOnly,
+	}
 }
 
 // PropResolver maps a property attribute to a component path.
@@ -595,6 +614,7 @@ type Resolved struct {
 	ComponentResolvers       []Resolver
 	PropertyResolvers        []PropResolver
 	BeanPaths                map[string]string
+	Frameworks               []string
 	Formatting               ResolvedFormatting
 	Features                 ResolvedFeatures
 	Linting                  bool
@@ -667,6 +687,9 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	if jr := JavaStubResolver(cfg.JavaStubsPath); jr.Match != "" {
 		r.ComponentResolvers = append(r.ComponentResolvers, jr)
 	}
+
+	r.Frameworks = cfg.Frameworks
+	r.ComponentResolvers = append(r.ComponentResolvers, FrameworkResolvers(cfg.Frameworks)...)
 
 	for _, pr := range cfg.PropertyResolvers {
 		if pr.Match != "" && pr.Resolve != "" && pr.Attribute != "" {
@@ -836,6 +859,9 @@ func Merge(base, over *JSON) *JSON {
 	// Resolvers from both sides stay active. Order is priority — the first
 	// match wins at lookup time — so over's entries lead.
 	out.ComponentResolvers = slices.Concat(over.ComponentResolvers, base.ComponentResolvers)
+
+	// A child names the frameworks it adds; its parent's still apply.
+	out.Frameworks = mergeFrameworks(base.Frameworks, over.Frameworks)
 	out.PropertyResolvers = slices.Concat(over.PropertyResolvers, base.PropertyResolvers)
 
 	out.Formatting = mergeFormatting(base.Formatting, over.Formatting)
@@ -1023,6 +1049,19 @@ func mergeStringMap(base, over map[string]string) map[string]string {
 	maps.Copy(out, base)
 
 	maps.Copy(out, over)
+
+	return out
+}
+
+// mergeFrameworks unions two frameworks lists, over's first, each name once.
+func mergeFrameworks(base, over []string) []string {
+	var out []string
+
+	for _, f := range slices.Concat(over, base) {
+		if !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, f) }) {
+			out = append(out, f)
+		}
+	}
 
 	return out
 }

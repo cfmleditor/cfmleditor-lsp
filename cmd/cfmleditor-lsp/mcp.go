@@ -9,6 +9,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
@@ -155,6 +156,8 @@ func newExplainer(root string) mcp.Explainer {
 
 type explainConfig struct {
 	resolvers                []parser.Resolver
+	implicitExtends          func(string) string
+	helperScope              func(string) bool
 	expressionMappings       map[string]string
 	servicePropertyResolvers map[string]string
 	interpolateAll           bool
@@ -180,14 +183,13 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		mappings = c.Mappings()
 		startupFiles = c.StartupFiles()
 		cfg.expressionMappings = c.ExpressionMappings()
+		cfg.implicitExtends = config.ImplicitExtends(c.Frameworks())
+		cfg.helperScope = config.HelperScope(c.Frameworks())
 		cfg.servicePropertyResolvers = c.ServicePropertyResolvers()
 		cfg.interpolateAll = !c.ResolvedFeatures().OutputContextInterpolation
 
 		for _, r := range c.ComponentResolvers() {
-			cfg.resolvers = append(cfg.resolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			cfg.resolvers = append(cfg.resolvers, r.Parser())
 		}
 	}
 
@@ -204,6 +206,8 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 		StartupFiles:       startupFiles,
 		ExpressionMappings: cfg.expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    cfg.implicitExtends,
+		HelperScope:        cfg.helperScope,
 	}
 
 	for _, f := range collectCFMLFiles(fsys, scanRoots) {
@@ -236,22 +240,7 @@ func explainAt(resolver *resolve.Resolver, cfg explainConfig, file string, line 
 	content := string(data)
 	baseDir := filepath.Dir(abs)
 
-	funcLookup := func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(cfpath.ToURI(abs), content, &parser.ParseOptions{
 		Resolvers:                cfg.resolvers,

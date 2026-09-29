@@ -887,7 +887,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 
 		ref := ComponentRef{
 			Variable: c.varName, Component: comp, ChainRest: c.rest,
-			URI: pr.URI, Line: c.line,
+			URI: pr.URI, Line: c.line, This: c.refThis,
 			VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 		}
 		if c.funcKey == "" {
@@ -987,12 +987,12 @@ func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
 func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	var comp string
 
-	if ref := firstRefNamed(pr.ComponentRefs, c.baseVar); ref != nil {
+	if ref := firstRefIn(pr.ComponentRefs, c.baseVar, c.baseScope); ref != nil {
 		comp = pr.settledComponent(ref)
 	}
 
 	if comp == "" && c.funcKey != "" {
-		if ref := firstRefNamed(pr.funcRefsMap[c.funcKey], c.baseVar); ref != nil {
+		if ref := firstRefIn(pr.funcRefsMap[c.funcKey], c.baseVar, c.baseScope); ref != nil {
 			comp = pr.settledComponent(ref)
 		}
 	}
@@ -1010,6 +1010,17 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	}
 
 	return comp
+}
+
+// firstRefIn is firstRefNamed among the refs scope admits.
+func firstRefIn(refs []ComponentRef, name string, scope RefScope) *ComponentRef {
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) {
+			return &refs[i]
+		}
+	}
+
+	return nil
 }
 
 // firstRefNamed is the first ref in refs for the variable name, compared

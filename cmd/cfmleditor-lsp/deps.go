@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
@@ -133,7 +134,14 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		searchDir = filepath.Dir(args[0])
 	}
 
+	var (
+		implicitExtends func(string) string
+		helperScope     func(string) bool
+	)
+
 	if cfg, _ := daemon.FindConfig(searchDir); cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		helperScope = config.HelperScope(cfg.Frameworks())
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
@@ -141,10 +149,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		expressionMappings = cfg.ExpressionMappings()
 
 		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			cfResolvers = append(cfResolvers, r.Parser())
 		}
 	} else {
 		for _, a := range args {
@@ -183,6 +188,8 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
+		HelperScope:        helperScope,
 	}, idx
 }
 

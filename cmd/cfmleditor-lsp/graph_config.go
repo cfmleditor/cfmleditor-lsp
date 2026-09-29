@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -98,10 +99,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 
 	var resolvers []parser.Resolver
 	for _, r := range found.ComponentResolvers() {
-		resolvers = append(resolvers, parser.Resolver{
-			Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-			NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-		})
+		resolvers = append(resolvers, r.Parser())
 	}
 
 	resolver := &resolve.Resolver{
@@ -112,6 +110,8 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		StartupFiles:       found.StartupFiles(),
 		ExpressionMappings: found.ExpressionMappings(),
 		WorkspaceFolders:   found.WorkspaceFolders(),
+		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),
+		HelperScope:        config.HelperScope(found.Frameworks()),
 	}
 
 	cfg = codemap.FileConfig{

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -131,6 +131,10 @@ func cmdUnresolved(args []string) {
 		}
 	}
 
+	if hint := presetHint(cfg, searchDir); hint != "" {
+		fmt.Fprintf(os.Stderr, "\n%s\n", hint)
+	}
+
 	fmt.Fprintf(os.Stderr, "\nBenchmark:\n")
 	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", rep.IndexTime, rep.Indexed)
 	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", rep.ScanTime, rep.Scanned)
@@ -153,10 +157,17 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		opt.ServicePropertyResolvers = cfg.ServicePropertyResolvers()
 		opt.BeanPaths = cfg.BeanPaths()
 		opt.PropertyResolvers = configPropertyResolvers(cfg)
+		opt.ImplicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		opt.HelperScope = config.HelperScope(cfg.Frameworks())
 		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
+		if unknown := config.UnknownFrameworks(cfg.Frameworks()); len(unknown) > 0 {
+			fmt.Fprintf(os.Stderr, "frameworks: no preset named %s (known: %s)\n",
+				strings.Join(unknown, ", "), strings.Join(config.KnownFrameworks(), ", "))
+		}
+
 		for _, r := range cfg.ComponentResolvers() {
-			opt.Resolvers = append(opt.Resolvers, parser.Resolver{Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix, NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing})
+			opt.Resolvers = append(opt.Resolvers, r.Parser())
 		}
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
@@ -302,4 +313,35 @@ func skipDir(name string) bool {
 	default:
 		return false
 	}
+}
+
+// presetHint suggests the framework presets the project's box.json implies
+// and its config does not name — how a project finds out a preset exists.
+// It reads box.json beside the config, or in the scanned directory without one.
+func presetHint(cfg *daemon.Config, searchDir string) string {
+	dir, have := searchDir, []string(nil)
+	if cfg != nil {
+		dir, have = filepath.Dir(cfg.Path), cfg.Frameworks()
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "box.json"))
+	if err != nil {
+		return ""
+	}
+
+	suggest := config.SuggestFrameworks(data, have)
+	if len(suggest) == 0 {
+		return ""
+	}
+
+	all := slices.Concat(have, suggest)
+
+	where := "a .cfmleditor.json"
+	if cfg != nil {
+		where = cfg.Path
+	}
+
+	return fmt.Sprintf("box.json names %s, which have framework presets: add `\"frameworks\": [\"%s\"]` to %s\n"+
+		"so the values those frameworks hand your code are typed rather than reported.",
+		strings.Join(suggest, ", "), strings.Join(all, `", "`), where)
 }

@@ -464,6 +464,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `mappings` | No | Component path mappings. Keys are the first segment of a dot-path, values are directory paths (absolute or relative to config). A workspace folder already implies a mapping of its own name; see [Mappings](#mappings). |
 | `startupFiles` | No | Templates that set up shared-scope variables for the whole workspace. See [Startup files](#startup-files). |
 | `componentResolvers` | No | Custom patterns for resolving method calls to component paths. See below. |
+| `frameworks` | No | Framework presets the project uses, e.g. `["coldbox"]`. Each adds the resolvers and implicit base components that framework implies. See [Frameworks](#frameworks). |
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
@@ -475,6 +476,46 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 Mappings let you resolve component dot-paths that use a virtual root. For example, with `"models": "./src/models"`, the dot-path `models.User` resolves to `./src/models/User.cfc`.
 
 A workspace folder also stands for a mapping of its own name, so a root that is just a folder's name needs no entry. With `"workspacePaths": ["../tassweb"]`, the dot-path `tassweb.packages.core.Kernel` resolves to `../tassweb/packages/core/Kernel.cfc`, and the include `/tassweb/includes/header.cfm` to the matching file. This is tried last, after every mapping, every `Application.cfc` mapping and every relative lookup, so it never changes a path those already resolve. Mappings are still what you need for any root that is not a workspace folder's name: a virtual root such as `models` above, a directory outside `workspacePaths`, or a name that should point somewhere other than the folder it matches. An explicit mapping for a folder's own name is harmless; it wins, and says the same thing.
+
+### Frameworks
+
+A framework hands every file values it never declares, and lets a file inherit
+without saying so. `"frameworks": ["coldbox"]` teaches the LSP both:
+
+| In a ColdBox app | Treated as |
+|---|---|
+| `event`, `html`, `controller`/`cbController`/`coldbox`, `log`, `logbox`, `wirebox`/`injector`, `binder`, `cachebox`, `flash` (bare, `variables.` or `arguments.`) | The ColdBox component each one is: `RequestContext`, `HTMLHelper`, `Controller`, … |
+| `getRequestContext()`, `getController()`, `getRequestService()`, `getResponse()` and the other framework getters, however they are reached | Their ColdBox return types, so a chain on them is checked |
+| A `.cfc` under `handlers/` or `interceptors/`, `config/Router.cfc`, `config/Scheduler.cfc` that names no `extends` | An `EventHandler`, `Interceptor`, `Router` or `ColdBoxScheduler`, so a bare `getInstance()` or `route()` is found on the base |
+| A `.cfm` under `views/` or `layouts/` | Rendered by the `Renderer`, so a bare `view()` or `announce()` is found there |
+| A helper ColdBox mixes in: a module's `this.applicationHelper` or `includeUDF( "#moduleMapping#/…" )`, the app's `applicationHelper` setting, a view's `<view>Helper.cfm` and `<folder>Helper.cfm` | Found from any handler, view, layout or interceptor, so `cbMessageBox()` resolves where its module is installed |
+
+The other presets, named alongside it as a project uses them:
+
+| Preset | Adds |
+|---|---|
+| `testbox` | `$assert`/`assert`, `mockbox`, `testbox`, a reporter's `results`; what `getMockBox()`, `expect()` and `expectAll()` return |
+| `commandbox` | `print` (the print buffer); what `command()` returns; a `.cfc` under `commands/` is a `BaseCommand`, and `task.cfc` or a `.cfc` under `build/` a `BaseTask` |
+| `cfmigrations` | a migration's `schema`, `qb`/`query`, and the `table` a schema callback is handed, as qb's builders. Common names, so name it only where cfmigrations is used |
+| `contentbox` | the `cb` helper; `prc.oCurrentAuthor`, `prc.oCurrentSite`, and `prc.oContent` as any kind of content. Use with `coldbox` |
+| `wheels` | `application.wo`; a view or layout runs inside its controller, with every view and controller mixin Wheels integrates, so `linkTo()` and `startFormTag()` are found |
+| `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found |
+
+With a framework's source in the workspace (a mapping, or a checkout of it),
+calls are checked against its real methods. Without it they are accepted as
+dynamic, rather than reported against components that are not on disk — and
+so are calls a file inherits through a base the preset implies, however far up
+the chain it breaks. Everything a preset adds can be overridden: your own
+`componentResolvers` come first, and a file that names its `extends` keeps it.
+A child config's `frameworks` adds to its parent's, and an unknown name is
+warned about. When the `box.json` beside the config depends on a framework
+with a preset the config does not name (`coldbox`, `testbox`,
+`commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
+and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
+it uses, the `unresolved` report goes from 23,560 entries to 14,083.
+
+A preset's variable resolvers are `nameOnly` (below), so in tag syntax
+`<cfset x = event.getValue( "a" )>` does not make `x` a request context.
 
 ### Startup files
 
@@ -564,6 +605,16 @@ It is per resolver, and only that resolver's output is affected. A missing compo
 other way — a `getService("$1")` resolver's, a literal `createObject("component", ...)` — is
 still reported, which is the point: those are findings. So is a missing method on a component
 the catch-all got right, since that component exists.
+
+#### `nameOnly`
+
+In tag syntax, `<cfset style = document.loadStylesheet()>` types `style` as whatever a
+resolver says `document` is: an assignment from a call on a variable that a resolver
+matches by name takes that variable's component. A project whose one stub answers every
+call on a family of objects relies on that. A resolver that says what a variable *holds*,
+and nothing about what calls on it return, sets `"nameOnly": true`: `x = document` is still
+typed, `x = document.load()` and `x = document[ "k" ]` are not. The framework presets' variable
+resolvers are all `nameOnly`.
 
 ### Formatting
 
@@ -868,6 +919,8 @@ overrides:
 | `new Query()`, `new http()`, `new dbinfo()` and the engine's other script-tag components; `org.lucee.cfml.*`, `com.adobe.coldfusion.*` | The engine's own component, never another file of that name. Checked against its source when the workspace holds it by that path (a Lucee checkout's `org/lucee/cfml/`), otherwise dynamic |
 | `struct()`, `sessionTouch()` and Lucee's other functions its published docs leave out | A builtin |
 | A call chained on a method `onMissingMethod` answers | Accepted, and the rest of the chain is dynamic, as it already was for a last call |
+| `$()`, `$results()`, `$never()` and the other methods MockBox adds to a mock | Accepted on any component, since a test mocks a real component in place |
+| A bare-word return type, `Task function task()`, naming a component beside the declaring one | That component, as CFML finds it; a CFML type name (`query`, `struct`, …) stays the type |
 
 `beanPaths` and `propertyResolvers` apply to the report and the code map as
 they do in the editor.

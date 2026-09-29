@@ -51,6 +51,7 @@ type scriptParser struct {
 	afterLT      bool // previous token was '<' — see looksLikeTagAttrs
 	forceGlobal  bool // when true, addRef routes to componentRefs
 	inClosure    bool // scanning a closure's body as statements — see scanClosureBody
+	refThis      bool // the assignment being parsed is through `this.` — see ComponentRef.This
 }
 
 // pendingCall records an unresolved assignment from a function call.
@@ -59,8 +60,14 @@ type pendingCall struct {
 	funcName string
 	baseVar  string // for x = baseVar.method() — resolve x to same component as baseVar
 	line     uint32
-	funcKey  string   // scope key, empty if global
-	rest     []string // calls chained after funcName, carried to the ref as ChainRest
+
+	// refThis is carried to the ref as ComponentRef.This; baseScope says which
+	// scope's refs baseVar may be read from. Beside line, in its padding.
+	refThis   bool
+	baseScope RefScope
+
+	funcKey string   // scope key, empty if global
+	rest    []string // calls chained after funcName, carried to the ref as ChainRest
 
 	// The closure the assignment was made in, carried to the ref; see
 	// ComponentRef.VisibleFrom.
@@ -160,6 +167,8 @@ func finalCall(expr string) (name, args string) {
 }
 
 func (p *scriptParser) addRef(ref *ComponentRef) {
+	ref.This = p.refThis
+
 	if p.inFunc == "" || p.forceGlobal {
 		p.componentRefs = append(p.componentRefs, *ref)
 	} else {
@@ -591,6 +600,10 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 		Line: conv.Uint32(p.baseLine + tok.Line),
 	})
 
+	if p.chainedAssign(nameTok.Value) {
+		return
+	}
+
 	// Check RHS for component refs
 	p.skipLiteralGroup()
 
@@ -838,6 +851,15 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 
 	if !isLocal {
 		p.forceGlobal = true
+	}
+
+	p.refThis = scope == ScopeThis
+	defer func() { p.refThis = false }()
+
+	if p.chainedAssign(nameTok.Value) {
+		p.forceGlobal = false
+
+		return
 	}
 
 	// Check RHS for component refs
@@ -2420,6 +2442,10 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 		Line: conv.Uint32(p.baseLine + varTok.Line),
 	})
 
+	if p.chainedAssign(nameTok.Value) {
+		return
+	}
+
 	// Check RHS for component refs
 	p.skipLiteralGroup()
 
@@ -2489,6 +2515,15 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		p.localVarSet[strings.ToLower(nameTok.Value)] = true
 	} else {
 		p.forceGlobal = true
+	}
+
+	p.refThis = scope == ScopeThis
+	defer func() { p.refThis = false }()
+
+	if p.chainedAssign(nameTok.Value) {
+		p.forceGlobal = false
+
+		return
 	}
 
 	// Check RHS for component refs
@@ -2817,6 +2852,12 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 		p.forceGlobal = true
 	}
 
+	if p.chainedAssign(tok.Value) {
+		p.forceGlobal = false
+
+		return
+	}
+
 	if p.parseFunctionValue(tok.Value, tok) {
 		p.forceGlobal = false
 
@@ -2866,16 +2907,115 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	p.forceGlobal = false
 }
 
+// chainedAssign handles a right-hand side that is itself an assignment:
+// `outer = b = rhs`, `outer = this.b = rhs` or `outer = variables.b = rhs`.
+// TestBox keeps `$assert` in both scopes that way. The inner assignment is
+// parsed as the statement it is, and every ref and pending call it makes is
+// made again for outer under the state the outer assignment set up, so
+// `var a = b = new X()` makes a local a and a variables-scope b. Reports
+// whether the right-hand side was one; the scanner has not moved if not.
+func (p *scriptParser) chainedAssign(outer string) bool {
+	// Decided from the peek and the bytes after it, which leave the peek
+	// cached for the caller: saving and restoring on every assignment was
+	// 4.5% of a script parse, because a restore drops it.
+	peek := p.sc.PeekSkipComments()
+	if peek.Kind != TokIdent {
+		return false
+	}
+
+	switch first, second := p.sc.bytesAfterPeek(); {
+	case first == '=' && second != '=':
+		if isKeyword(peek.Value) {
+			return false
+		}
+	case first == '.' && (identEq(peek.Value, "this") || identEq(peek.Value, "variables")):
+	default:
+		return false
+	}
+
+	st := p.sc.Save()
+	tok := p.sc.NextSkipComments()
+
+	scope, ok := p.assignmentAhead(tok)
+	if !ok {
+		p.sc.Restore(st)
+
+		return false
+	}
+
+	forceGlobal, refThis := p.forceGlobal, p.refThis
+	nGlobal, nLocal, nPending := len(p.componentRefs), len(p.funcRefs[p.inFunc]), len(p.pendingCalls)
+
+	switch {
+	case scope == ScopeLocal:
+		p.checkAssignRef(tok)
+	case p.inFunc != "":
+		p.parseBodyScopedVar(tok, scope)
+	default:
+		p.parseScopedVar(tok, scope)
+	}
+
+	made := refsMadeFor(p.componentRefs, nGlobal, p.funcRefs[p.inFunc], nLocal, outer)
+	p.forceGlobal, p.refThis = forceGlobal, refThis
+
+	for i := range made {
+		p.addRef(&made[i])
+	}
+
+	p.pendingCalls = appendPendingFor(p.pendingCalls, nPending, outer, refThis)
+
+	return true
+}
+
+// assignmentAhead reports whether tok, just read, starts an assignment:
+// `tok =`, or `this.name =` / `variables.name =`, and not `==`, which is two
+// `=` tokens. An unscoped target is reported as ScopeLocal, meaning "no
+// scope written"; the scanner does not move.
+func (p *scriptParser) assignmentAhead(tok Token) (Scope, bool) {
+	st := p.sc.Save()
+	defer p.sc.Restore(st)
+
+	scope := ScopeLocal
+
+	switch {
+	case identEq(tok.Value, "this"):
+		scope = ScopeThis
+	case identEq(tok.Value, "variables"):
+		scope = ScopeVariables
+	}
+
+	if scope != ScopeLocal {
+		if p.sc.NextSkipComments().Kind != TokDot || p.sc.NextSkipComments().Kind != TokIdent {
+			return 0, false
+		}
+	}
+
+	if p.sc.NextSkipComments().Kind != TokEquals || p.sc.PeekSkipComments().Kind == TokEquals {
+		return 0, false
+	}
+
+	return scope, true
+}
+
 // addPendingCall records `varName = …prevIdent.lastIdent(…)` for
 // resolvePendingCalls, which types varName once every function's return type
 // is known, carrying on along whatever the chain calls after lastIdent.
 func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain string, line int) {
+	// A receiver ending in an index is an element of prevIdent, not
+	// prevIdent: `scopes[ k ].get()` says nothing about what scopes holds.
+	recv := receiverOf(chain)
+	if strings.HasSuffix(recv, "[]") {
+		prevIdent = ""
+	}
+
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:  varName,
-		funcName: lastIdent,
-		baseVar:  prevIdent,
-		line:     conv.Uint32(p.baseLine + line),
-		funcKey:  p.inFunc,
+		varName:   varName,
+		funcName:  lastIdent,
+		baseVar:   prevIdent,
+		line:      conv.Uint32(p.baseLine + line),
+		funcKey:   p.inFunc,
+		refThis:   p.refThis,
+		baseScope: ReceiverRefScope(recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
 }

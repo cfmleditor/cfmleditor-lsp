@@ -877,6 +877,49 @@ func FindFuncScopeAt(line int, scopes []FuncScope) FuncScope {
 	return findFuncScope(line, scopes)
 }
 
+// RefScope is the store a receiver names, when it names one: `this.x` is
+// read from this scope and `variables.x` from variables scope, which are
+// separate. Anything else — a bare `x`, a deeper path — is RefAny, and sees
+// refs made either way.
+type RefScope uint8
+
+// The scopes a receiver can name.
+const (
+	RefAny RefScope = iota
+	RefThis
+	RefVariables
+)
+
+// ReceiverRefScope is the scope a receiver written as `this.x` or
+// `variables.x` is read from.
+func ReceiverRefScope(recv string) RefScope {
+	scope, name, ok := strings.Cut(recv, ".")
+	if !ok || name == "" || strings.ContainsAny(name, ".[") {
+		return RefAny
+	}
+
+	switch {
+	case strings.EqualFold(scope, "this"):
+		return RefThis
+	case strings.EqualFold(scope, "variables"):
+		return RefVariables
+	default:
+		return RefAny
+	}
+}
+
+// Admits reports whether ref can answer a receiver read from s.
+func (s RefScope) Admits(ref *ComponentRef) bool {
+	switch s {
+	case RefThis:
+		return ref.This
+	case RefVariables:
+		return !ref.This
+	default:
+		return true
+	}
+}
+
 // StripReceiverScope strips a receiver expression down to the text after its last
 // top-level "." (e.g. "VARIABLES.donorObj" -> "donorObj"), matching how a ComponentRef
 // is stored without its scope prefix. "Top-level" skips any "." inside a "[...]"

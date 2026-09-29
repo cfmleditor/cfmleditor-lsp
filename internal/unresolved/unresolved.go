@@ -50,8 +50,10 @@ type Options struct {
 	PropertyResolvers        []parser.PropertyResolver
 	BeanPaths                map[string]string // configured beanPaths; Application.cfc's are added
 	WorkspaceFolders         []string
-	InterpolateAll           bool // features.outputContextInterpolation off
-	GlobalDefs               bool // accept a bare call any indexed file defines
+	ImplicitExtends          func(path string) string // frameworks' implicit bases; see config.ImplicitExtends
+	HelperScope              func(path string) bool   // files frameworks mix helpers into; see config.HelperScope
+	InterpolateAll           bool                     // features.outputContextInterpolation off
+	GlobalDefs               bool                     // accept a bare call any indexed file defines
 	Verbose                  io.Writer
 }
 
@@ -76,6 +78,8 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		StartupFiles:       opt.StartupFiles,
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
+		ImplicitExtends:    opt.ImplicitExtends,
+		HelperScope:        opt.HelperScope,
 	}
 
 	started := time.Now()
@@ -176,22 +180,7 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 	fileURI := uri.URI("file://" + file)
 	baseDir := filepath.Dir(file)
 
-	funcLookup := func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
 		Resolvers:                opt.Resolvers,

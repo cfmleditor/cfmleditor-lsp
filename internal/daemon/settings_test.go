@@ -19,6 +19,7 @@ const fullConfig = `{
 	"componentResolvers": [{"match": "getService(\"$1\")", "resolve": "svc.$1", "prefix": "getService"}],
 	"propertyResolvers": [{"match": "$1", "resolve": "beans.$1", "attribute": "name"}],
 	"beanPaths": {"svc": "./services"},
+	"frameworks": ["coldbox"],
 	"formatting": {"enabled": true},
 	"linting": {"enabled": true, "minSeverity": "WARNING"},
 	"references": {"enabled": true},

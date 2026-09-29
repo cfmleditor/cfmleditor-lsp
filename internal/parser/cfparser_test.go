@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"go.lsp.dev/uri"
 )
 
@@ -3192,22 +3191,95 @@ func TestTagParser_BareCallAssignment_ExtractCalls(t *testing.T) {
 func TestScriptParser_ChainedAssignment_NoSpuriousRef(t *testing.T) {
 	// variables.$assert = this.$assert = new testbox.system.Assertion()
 	// The `this.$assert` in the middle is an assignment TO this, not a source;
-	// only the final `new testbox.system.Assertion()` should produce a ref.
+	// only the final `new testbox.system.Assertion()` is — and it is assigned
+	// to both scopes, which are separate stores, so there is one ref in each.
 	content := `component {
 	variables.$assert = this.$assert = new testbox.system.Assertion();
 }`
 	pr := Parse(testURI, content)
 
-	var got []string
+	got := map[bool]string{}
 
 	for _, r := range pr.ComponentRefs {
 		if strings.EqualFold(r.Variable, "$assert") {
-			got = append(got, r.Component)
+			if prev, dup := got[r.This]; dup {
+				t.Errorf("two $assert refs with This=%v: %q and %q", r.This, prev, r.Component)
+			}
+
+			got[r.This] = r.Component
 		}
 	}
 
-	if len(got) != 1 || got[0] != "testbox.system.Assertion" {
-		t.Errorf("expected exactly one $assert ref → testbox.system.Assertion, got %v", got)
+	if got[true] != "testbox.system.Assertion" || got[false] != "testbox.system.Assertion" || len(got) != 2 {
+		t.Errorf("expected one $assert ref → testbox.system.Assertion in each scope, got %v", got)
+	}
+}
+
+// TestThisAndVariablesAreSeparateStores: `this.SCOPES = new Scopes()` says
+// nothing about `variables.scopes`, which ColdBox's Injector keeps as a
+// struct of scope objects beside it. Folding the two made `variables.scopes[
+// k ].getFromScope()` a Scopes, and getInstance() with it, so every call on
+// an instance WireBox built was checked against Scopes. A ref records which
+// scope it was assigned through; an unqualified receiver still sees both, and
+// an index into a variable is not the variable.
+func TestThisAndVariablesAreSeparateStores(t *testing.T) {
+	content := `component {
+	function init() {
+		this.SCOPES = new Scopes();
+		variables.scopes = {};
+	}
+	function viaVariables( k ) {
+		var a = variables.scopes.getFromScope( k );
+		return a;
+	}
+	function viaThis() {
+		var b = this.scopes.getFromScope();
+		return b;
+	}
+	function viaIndex( k ) {
+		var c = scopes[ k ].getFromScope();
+		return c;
+	}
+	function unscoped() {
+		var d = scopes.getFromScope();
+		return d;
+	}
+}`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+
+	for name, want := range map[string]string{
+		"viaVariables": "",
+		"viaThis":      "Scopes",
+		"viaIndex":     "",
+		"unscoped":     "Scopes",
+	} {
+		for i := range pr.Funcs {
+			if pr.Funcs[i].Name == name && pr.Funcs[i].ReturnComponent != want {
+				t.Errorf("%s returns %q, want %q", name, pr.Funcs[i].ReturnComponent, want)
+			}
+		}
+	}
+}
+
+func TestReceiverRefScope(t *testing.T) {
+	this, vars := &ComponentRef{This: true}, &ComponentRef{}
+
+	for recv, want := range map[string][2]bool{
+		"this.x":          {true, false},
+		"THIS.x":          {true, false},
+		"variables.x":     {false, true},
+		"x":               {true, true},
+		"this.x.y":        {true, true},
+		"variables.x[k]":  {true, true},
+		"request.x":       {true, true},
+		"this.":           {true, true},
+		"arguments.x":     {true, true},
+		"Variables.$mock": {false, true},
+	} {
+		s := ReceiverRefScope(recv)
+		if got := [2]bool{s.Admits(this), s.Admits(vars)}; got != want {
+			t.Errorf("%s admits this/variables refs %v, want %v", recv, got, want)
+		}
 	}
 }
 
@@ -3392,36 +3464,6 @@ func TestTagParser_ConcatenatedAssignment_NoSpuriousCall(t *testing.T) {
 		if strings.EqualFold(call.FuncName, "temp") {
 			t.Errorf("expected no CallSite for bare variable 'temp', got %+v", call)
 		}
-	}
-}
-
-// TestTagParser_JavaStubResolver_ResolvesCreateObjectJava is the parser-level
-// integration test for config.JavaStubResolver: confirms the synthesized
-// resolver actually resolves through the parser's own regex/simple-match
-// heuristics and $1 substitution, not just via a raw regexp.MatchString check.
-func TestTagParser_JavaStubResolver_ResolvesCreateObjectJava(t *testing.T) {
-	cr := config.JavaStubResolver("tassweb.packages.tass.javastubs")
-	resolvers := []Resolver{{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix}}
-
-	content := `<cfcomponent>
-<cffunction name="work">
-	<cfset variables.jss = createObject('java', 'java.security.Signature') />
-</cffunction>
-</cfcomponent>`
-
-	pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: resolvers})
-
-	found := ""
-
-	for _, ref := range pr.ComponentRefs {
-		if ref.Variable == "jss" {
-			found = ref.Component
-		}
-	}
-
-	want := "tassweb.packages.tass.javastubs.java.security.Signature"
-	if found != want {
-		t.Errorf("expected jss -> %s, got %q", want, found)
 	}
 }
 
@@ -4320,5 +4362,128 @@ func TestArrowFunctionBodyKeepsItsReceiver(t *testing.T) {
 		if c.FuncName == "get" && c.Variable != "svc" {
 			t.Errorf("get() recorded with receiver %q, want svc", c.Variable)
 		}
+	}
+}
+
+// TestNameOnlyResolverDoesNotTypeWhatACallOnItReturns: the tag parser's
+// bare-name fallback types `<cfset style = document.loadStylesheet()>` as
+// document's component, which a project whose one stub answers every call
+// relies on. A NameOnly resolver — a framework preset's `event` — says what
+// the variable holds and nothing about what a call on it returns, so
+// `<cfset e = event.getValue( "x" )>` is not a request context. An alias of
+// the variable itself still is.
+func TestNameOnlyResolverDoesNotTypeWhatACallOnItReturns(t *testing.T) {
+	content := `<cfset e = event.getValue( "x" )>
+<cfset alias = event>
+<cfset i = event[ "k" ]>`
+
+	for _, nameOnly := range []bool{false, true} {
+		rs := []Resolver{{Match: `^(?:variables\.)?event$`, Resolve: "fw.Ctx", Prefix: "event", Anchored: true, NameOnly: nameOnly}}
+		pr := ParseWithOptions(testURI, content, &ParseOptions{Resolvers: rs})
+
+		got := map[string]string{}
+		for _, ref := range pr.ComponentRefs {
+			got[ref.Variable] = ref.Component
+		}
+
+		want := map[string]string{"e": "fw.Ctx", "alias": "fw.Ctx", "i": "fw.Ctx"}
+		if nameOnly {
+			want = map[string]string{"alias": "fw.Ctx"}
+		}
+
+		for v, w := range want {
+			if got[v] != w {
+				t.Errorf("nameOnly=%v: %s = %q, want %q (all: %v)", nameOnly, v, got[v], w, got)
+			}
+		}
+
+		if nameOnly && (got["e"] != "" || got["i"] != "") {
+			t.Errorf("nameOnly: a call or index on event was typed: %v", got)
+		}
+	}
+}
+
+// TestTagAssignmentThroughThisIsMarked: the tag parser records which scope
+// a `<cfset>` assigned through, directly and through a pending call.
+func TestTagAssignmentThroughThisIsMarked(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="make" returntype="models.Svc"><cfreturn createObject("component", "models.Svc")></cffunction>
+<cfset this.a = createObject("component", "Svc")>
+<cfset variables.b = createObject("component", "Svc")>
+<cfset this.c = make()>
+</cfcomponent>`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+
+	got := map[string]bool{}
+	for _, r := range pr.ComponentRefs {
+		got[r.Variable] = r.This
+	}
+
+	for _, sc := range pr.Scopes {
+		refs, _ := pr.FuncRefs(sc.Start, sc.End)
+		for _, r := range refs {
+			got[r.Variable] = r.This
+		}
+	}
+
+	for name, want := range map[string]bool{"a": true, "b": false, "c": true} {
+		if this, ok := got[name]; !ok || this != want {
+			t.Errorf("%s: recorded %v, This %v; want This %v (all: %v)", name, ok, this, want, got)
+		}
+	}
+}
+
+// TestTagFunctionScopeEndsAtItsCloseTag: the walk reached the </cffunction>
+// check only for a tag whose second byte is 'c', which a close tag's '/'
+// never is, so a tag function's scope ran on to the next <cffunction>. Every
+// top-level <cfset> after one was the function's: a pending call typed a
+// variable of the function, an unscoped name was read against the function's
+// var'd locals, and a qualified call named the function as its caller —
+// Lucee's admin pages, which declare addZero() first, credited it with every
+// call on the page.
+func TestTagFunctionScopeEndsAtItsCloseTag(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="make" returntype="a.B">
+	<cfset var svc = 1>
+	<cfreturn createObject("component", "a.B")>
+</cffunction>
+<cfset d = make()>
+<cfset svc = createObject("component", "a.Svc")>
+<cfset svc.afterFunction()>
+</cfcomponent>`
+	pr := ParseWithOptions(testURI, content, &ParseOptions{ExtractCalls: true})
+
+	global := map[string]string{}
+	for _, r := range pr.ComponentRefs {
+		global[r.Variable] = r.Component
+	}
+
+	if global["d"] != "a.B" || global["svc"] != "a.Svc" {
+		t.Errorf("top-level refs after the function: %v, want d -> a.B and svc -> a.Svc", global)
+	}
+
+	for _, s := range pr.Scopes {
+		refs, _ := pr.FuncRefs(s.Start, s.End)
+		for _, r := range refs {
+			if r.Variable == "d" || strings.EqualFold(r.Component, "a.Svc") {
+				t.Errorf("%s holds a ref from after its close tag: %+v", s.Name, r)
+			}
+		}
+	}
+
+	found := false
+
+	for _, c := range pr.AllCalls() {
+		if c.FuncName == "afterFunction" {
+			found = true
+
+			if c.Caller != "" {
+				t.Errorf("svc.afterFunction() is top-level code, but its caller is %q", c.Caller)
+			}
+		}
+	}
+
+	if !found {
+		t.Error("svc.afterFunction() was not recorded")
 	}
 }

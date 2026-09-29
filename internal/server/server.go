@@ -79,6 +79,7 @@ type Server struct {
 	cachedResolvers          []parser.Resolver         // cached parser.Resolver slice
 	cachedResolverSet        *parser.ResolverSet       // pre-grouped for fast matching
 	BeanPaths                map[string]string         // namespace → abs directory path for bean scanning
+	Frameworks               []string                  // framework presets (config.FrameworkResolvers adds their resolvers)
 	Formatting               config.ResolvedFormatting // formatting settings
 	Features                 config.ResolvedFeatures   // per-capability off switches (all default on)
 	Linting                  bool                      // enable cflint diagnostics
@@ -435,6 +436,13 @@ func (s *Server) getResolver() *resolve.Resolver {
 	defer s.resolverMu.Unlock()
 
 	if s.resolver == nil {
+		if unknown := config.UnknownFrameworks(s.Frameworks); len(unknown) > 0 {
+			s.log.Warn("frameworks names presets that do not exist",
+				cflog.Strings("unknown", unknown), cflog.Strings("known", config.KnownFrameworks()))
+		}
+
+		s.logPresetSuggestion()
+
 		s.resolver = &resolve.Resolver{
 			FS:                 s.FS,
 			WorkspaceFolders:   s.searchRoots(),
@@ -443,10 +451,32 @@ func (s *Server) getResolver() *resolve.Resolver {
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
 			Resolvers:          s.buildResolvers(),
+			ImplicitExtends:    config.ImplicitExtends(s.Frameworks),
+			HelperScope:        config.HelperScope(s.Frameworks),
 		}
 	}
 
 	return s.resolver
+}
+
+// logPresetSuggestion logs the framework presets the box.json beside the
+// config implies and the config does not name, as `unresolved` suggests them.
+// A log line rather than a message: it is advice, and it would otherwise
+// interrupt every start of a project that has decided against a preset.
+func (s *Server) logPresetSuggestion() {
+	if s.ConfigPath == "" || s.FS == nil {
+		return
+	}
+
+	data, err := s.FS.ReadFile(filepath.Join(filepath.Dir(s.ConfigPath), "box.json"))
+	if err != nil {
+		return
+	}
+
+	if suggest := config.SuggestFrameworks(data, s.Frameworks); len(suggest) > 0 {
+		s.log.Info("box.json names frameworks with presets the config does not use; add them to \"frameworks\" to type what they provide",
+			cflog.Strings("suggest", suggest))
+	}
 }
 
 // invalidateResolver drops the resolver and both cached resolver forms, so the
@@ -743,7 +773,7 @@ func (s *Server) buildResolvers() []parser.Resolver {
 
 	r := make([]parser.Resolver, len(s.ComponentResolvers))
 	for i, cr := range s.ComponentResolvers {
-		r[i] = parser.Resolver{Match: cr.Match, Resolve: cr.Resolve, Prefix: cr.Prefix, NoFollow: cr.NoFollow, Anchored: cr.Anchored, DynamicIfMissing: cr.DynamicIfMissing}
+		r[i] = cr.Parser()
 	}
 
 	s.cachedResolverSet = parser.BuildResolverSet(r)
@@ -790,24 +820,9 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 // funcLookup resolves a method's declared return-type component across files
 // (e.g. a Java stub's getInstance() modeling its own return type), so the parser
 // can prefer a verified cross-file answer over a componentResolver's guess on
-// the call-site text. Shared shape with cmd/cfmleditor-lsp/unresolved.go.
+// the call-site text. It is resolve.Resolver.FuncLookup, which every scan shares.
 func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, funcName string) string {
-	return func(component, funcName string) string {
-		fd := resolver.ResolveFunc(component, funcName, baseDir)
-		if fd == nil {
-			return ""
-		}
-
-		if fd.ReturnComponent != "" {
-			return fd.ReturnComponent
-		}
-
-		if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-			return fd.ReturnType
-		}
-
-		return ""
-	}
+	return resolver.FuncLookup(baseDir)
 }
 
 // parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).

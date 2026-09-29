@@ -26,14 +26,24 @@ type Resolver struct {
 	ExpressionMappings map[string]string
 	Index              *index.Index
 	Resolvers          []parser.Resolver
-	mu                 sync.RWMutex
-	appRootCache       map[string]string          // dir → Application.cfc root
-	slugCache          map[string]string          // dir → its box.json slug, "" for none
-	resolveCache       map[string]string          // component+"\t"+baseDir → file path
-	dirCache           *cfpath.DirCache           // directory listings behind those resolutions
-	incGraph           *includeGraph              // the index's cfincludes, rebuilt when they change
-	exprKeys           []string                   // ExpressionMappings' keys in the order they apply
-	startupCache       map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	// ImplicitExtends names the component a file extends when it names none,
+	// from its path: a framework preset's rule that a ColdBox handler is an
+	// EventHandler without saying so. Nil for none. See config.ImplicitExtends.
+	ImplicitExtends func(path string) string
+	// HelperScope reports whether a framework mixes its helper templates into
+	// the file at path: a ColdBox handler, view, layout or interceptor. Nil for
+	// none. See helpers.go and config.HelperScope.
+	HelperScope   func(path string) bool
+	mu            sync.RWMutex
+	appRootCache  map[string]string          // dir → Application.cfc root
+	slugCache     map[string]string          // dir → its box.json slug, "" for none
+	resolveCache  map[string]string          // component+"\t"+baseDir → file path
+	dirCache      *cfpath.DirCache           // directory listings behind those resolutions
+	incGraph      *includeGraph              // the index's cfincludes, rebuilt when they change
+	exprKeys      []string                   // ExpressionMappings' keys in the order they apply
+	implicitCache map[string]string          // path → ImplicitExtends(path)
+	helpers       *helperSet                 // application helper templates, per set of config files
+	startupCache  map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -449,6 +459,84 @@ func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.Funct
 	return nil
 }
 
+// mockDecorations are the methods MockBox's decorateMock adds to an object it
+// mocks (TestBox system/MockBox.cfc). A test mocks a real component in place —
+// prepareMock( event ), getMockRequestContext() — and then calls these on it,
+// so a component that is otherwise known is the wrong place to look for
+// them: event.$( "getValue" ) was "method '$' not found in RequestContext".
+// Every one starts with $, which no component's own method conventionally does.
+var mockDecorations = map[string]bool{
+	"$": true, "$spy": true, "$property": true, "$getproperty": true,
+	"$results": true, "$throws": true, "$callback": true, "$args": true,
+	"$calllog": true, "$count": true, "$times": true, "$never": true,
+	"$verifycallcount": true, "$atleast": true, "$once": true, "$atmost": true,
+	"$debug": true, "$reset": true,
+}
+
+func mockDecoration(name string) bool {
+	return strings.HasPrefix(name, "$") && mockDecorations[strings.ToLower(name)]
+}
+
+// fileMissingBase is MissingBase for the file's own extends chain, and
+// whether a framework preset implied a link of it — the file's own base or
+// one further up. A break reached through an implied link is the framework's
+// source not being in the workspace, which callers accept as dynamic.
+func (r *Resolver) fileMissingBase(pr *parser.ParseResult, baseDir string) (base string, implied bool) {
+	ext := r.fileExtends(pr)
+
+	return r.chainBreak(ext, baseDir, ext != "" && impliedBase(pr))
+}
+
+// impliedBase reports whether the file's extends chain is one a framework
+// preset implied rather than one the file wrote. A preset's resolvers answer
+// a component missing from the workspace as dynamic — the framework's source
+// is simply not checked out — and a base it implies does the same, so a view
+// in a ColdBox app without ColdBox on disk is not a list of findings its own
+// code never caused. A base the file names is still reported when it breaks.
+func impliedBase(pr *parser.ParseResult) bool {
+	return pr.Extends == ""
+}
+
+// fileExtends is what the parsed file extends: its own extends attribute, or
+// the component a framework preset says a file at its path extends. Every
+// reader of the extends chain goes through it, so a handler with no extends
+// resolves a bare getInstance() exactly as one declaring EventHandler does.
+func (r *Resolver) fileExtends(pr *parser.ParseResult) string {
+	if pr.Extends != "" || r.ImplicitExtends == nil {
+		return pr.Extends
+	}
+
+	return r.extendsFor("", cfpath.FromURI(string(pr.URI)))
+}
+
+// extendsFor is declared, or ImplicitExtends' answer for path when declared is
+// empty. Remembered per path: bare-call resolution asks once per call site.
+func (r *Resolver) extendsFor(declared, path string) string {
+	if declared != "" || r.ImplicitExtends == nil || path == "" {
+		return declared
+	}
+
+	r.mu.RLock()
+	ext, ok := r.implicitCache[path]
+	r.mu.RUnlock()
+
+	if ok {
+		return ext
+	}
+
+	ext = r.ImplicitExtends(path)
+
+	r.mu.Lock()
+	if r.implicitCache == nil {
+		r.implicitCache = make(map[string]string)
+	}
+
+	r.implicitCache[path] = ext
+	r.mu.Unlock()
+
+	return ext
+}
+
 // extendsOf reports what cfcPath extends, reading and parsing the file only if
 // the index cannot say.
 //
@@ -468,6 +556,18 @@ func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.Funct
 // removeFileEntries drops it, so any re-index forgets it and the next call
 // re-establishes it from the file as it then stands.
 func (r *Resolver) extendsOf(cfcPath string, cfcURI uri.URI) (string, bool) {
+	ext, ok := r.declaredExtendsOf(cfcPath, cfcURI)
+	if !ok {
+		return "", false
+	}
+
+	return r.extendsFor(ext, cfcPath), true
+}
+
+// declaredExtendsOf is what cfcPath's own extends attribute says, before a
+// framework preset's implied base: extendsOf's lookup, for the walk that has
+// to know which links a file wrote.
+func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bool) {
 	if ext, ok := r.Index.ExtendsForFile(cfcURI); ok {
 		return ext, true
 	}
@@ -871,11 +971,11 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 	}
 
 	// Check extends chain
-	if pr.Extends != "" {
-		tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
+	if r.fileExtends(pr) != "" {
+		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-			tr.hit(TargetExtends, pr.Extends, def)
+		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+			tr.hit(TargetExtends, r.fileExtends(pr), def)
 			tr.addf("found %q in extends chain", funcName)
 
 			return ""
@@ -903,8 +1003,15 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 		return ""
 	}
 
-	if pr.Extends != "" {
-		if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+	if r.fileExtends(pr) != "" {
+		if base, implied := r.fileMissingBase(pr, baseDir); base != "" {
+			if implied {
+				tr.addf("the framework base %s implies does not resolve (%s) — accepted as dynamic", r.fileExtends(pr), base)
+				tr.hit(TargetDynamic, "", nil)
+
+				return ""
+			}
+
 			return MissingBaseReason(base)
 		}
 
@@ -929,8 +1036,15 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 
 	def := r.bareFunc(first, pr, baseDir)
 	if def == nil {
-		if pr.Extends != "" {
-			if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+		if r.fileExtends(pr) != "" {
+			if base, implied := r.fileMissingBase(pr, baseDir); base != "" {
+				if implied {
+					tr.addf("the framework base %s implies does not resolve (%s) — the chain is dynamic", r.fileExtends(pr), base)
+					tr.hit(TargetDynamic, "", nil)
+
+					return ""
+				}
+
 				return MissingBaseReason(base)
 			}
 		}
@@ -938,8 +1052,18 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 		return "chained on '" + first + "', which is not found (calling '" + call.FuncName + "')"
 	}
 
-	ret, noFollow, _ := r.chainHopReturn("this component", first, def, tr)
+	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
 	if noFollow && ret != "" {
+		tr.hit(TargetDynamic, ret, nil)
+
+		return ""
+	}
+
+	// A dynamicIfMissing resolver's answer that names no file is dynamic here
+	// as on every other path; recursing lost the flag, and the next hop
+	// reported the component as one that does not exist.
+	if soft && ret != "" && !r.componentExists(ret, baseDir) {
+		tr.addf("%q names no file and came from a dynamicIfMissing resolver — the rest of the chain is dynamic", ret)
 		tr.hit(TargetDynamic, ret, nil)
 
 		return ""
@@ -966,8 +1090,8 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 		}
 	}
 
-	if pr.Extends != "" {
-		if def := r.ResolveFunc(pr.Extends, name, baseDir); def != nil {
+	if r.fileExtends(pr) != "" {
+		if def := r.ResolveFunc(r.fileExtends(pr), name, baseDir); def != nil {
 			return def
 		}
 	}
@@ -989,11 +1113,11 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 		}
 	}
 
-	if pr.Extends != "" {
-		tr.addf("not in this file — checking extends chain (%s)", pr.Extends)
+	if r.fileExtends(pr) != "" {
+		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-			tr.hit(TargetExtends, pr.Extends, def)
+		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+			tr.hit(TargetExtends, r.fileExtends(pr), def)
 
 			return ""
 		}
@@ -1006,8 +1130,15 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 		return ""
 	}
 
-	if pr.Extends != "" {
-		if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+	if r.fileExtends(pr) != "" {
+		if base, implied := r.fileMissingBase(pr, baseDir); base != "" {
+			if implied {
+				tr.addf("the framework base %s implies does not resolve (%s) — accepted as dynamic", r.fileExtends(pr), base)
+				tr.hit(TargetDynamic, "", nil)
+
+				return ""
+			}
+
 			return MissingBaseReason(base)
 		}
 	}
@@ -1017,19 +1148,26 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 
 // resolveSuperCall is canResolveCall for `super.name()`.
 func (r *Resolver) resolveSuperCall(funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
-	if pr.Extends == "" {
+	if r.fileExtends(pr) == "" {
 		return "super used but no extends"
 	}
 
-	tr.addf("'super' qualifier — checking extends chain (%s)", pr.Extends)
+	tr.addf("'super' qualifier — checking extends chain (%s)", r.fileExtends(pr))
 
-	if def := r.ResolveFunc(pr.Extends, funcName, baseDir); def != nil {
-		tr.hit(TargetExtends, pr.Extends, def)
+	if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+		tr.hit(TargetExtends, r.fileExtends(pr), def)
 
 		return ""
 	}
 
-	if base := r.MissingBase(pr.Extends, baseDir); base != "" {
+	if base, implied := r.fileMissingBase(pr, baseDir); base != "" {
+		if implied {
+			tr.addf("the framework base %s implies does not resolve (%s) — accepted as dynamic", r.fileExtends(pr), base)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		return MissingBaseReason(base)
 	}
 
@@ -1068,20 +1206,20 @@ func MissingBaseOf(reason string) (string, bool) {
 // base's, injected or declared there, and with the base missing they are as
 // unchecked as its methods. A name in any other scope, or one the file
 // declares, is not the base's to explain.
-func (r *Resolver) inheritedFromMissingBase(variable string, line uint32, pr *parser.ParseResult, baseDir string) string {
-	if pr.Extends == "" || variable == "" || strings.ContainsAny(variable, "[(") {
-		return ""
+func (r *Resolver) inheritedFromMissingBase(variable string, line uint32, pr *parser.ParseResult, baseDir string) (base string, implied bool) {
+	if r.fileExtends(pr) == "" || variable == "" || strings.ContainsAny(variable, "[(") {
+		return "", false
 	}
 
 	root, rest, _ := strings.Cut(variable, ".")
 	if strings.EqualFold(root, "variables") || strings.EqualFold(root, "this") {
 		root, _, _ = strings.Cut(rest, ".")
 	} else if isScopeName(root) {
-		return ""
+		return "", false
 	}
 
 	if root == "" || pr.Declares(root) {
-		return ""
+		return "", false
 	}
 
 	// A closure's locals and parameters and a catch variable are the
@@ -1090,12 +1228,12 @@ func (r *Resolver) inheritedFromMissingBase(variable string, line uint32, pr *pa
 	if scope := parser.FindFuncScopeAt(int(line), pr.Scopes); scope.Start != -1 {
 		for _, v := range pr.FuncVars(scope.Start, scope.End) {
 			if strings.EqualFold(v, root) {
-				return ""
+				return "", false
 			}
 		}
 	}
 
-	return r.MissingBase(pr.Extends, baseDir)
+	return r.fileMissingBase(pr, baseDir)
 }
 
 // isScopeName reports whether name is a CFML scope other than variables and
@@ -1114,29 +1252,59 @@ func isScopeName(name string) bool {
 // extends, from a file in baseDir, that does not resolve to a file; "" when
 // every link resolves, or the chain loops.
 func (r *Resolver) MissingBase(extends, baseDir string) string {
+	base, _ := r.chainBreak(extends, baseDir, false)
+
+	return base
+}
+
+// chainBreak walks the extends chain from extends and names the first link
+// that does not resolve, and whether any link up to it was one a framework
+// preset implied rather than one a file wrote — implied says so of the first.
+// A list of alternatives is a component a file cannot declare, so it answers
+// nothing, unless it was implied: a Wheels view's base is its controller and
+// every mixin, and any of them missing is the framework's source missing.
+func (r *Resolver) chainBreak(extends, baseDir string, implied bool) (string, bool) {
 	seen := make(map[string]bool)
 
-	for extends != "" && !strings.Contains(extends, "|") {
+	for extends != "" {
+		if strings.Contains(extends, "|") {
+			if !implied {
+				return "", false
+			}
+
+			for alt := range strings.SplitSeq(extends, "|") {
+				if base, _ := r.chainBreak(alt, baseDir, true); base != "" {
+					return base, true
+				}
+			}
+
+			return "", false
+		}
+
 		p := r.ComponentPath(extends, baseDir)
 		if p == "" {
-			return extends
+			return extends, implied
 		}
 
 		if seen[p] {
-			return ""
+			return "", false
 		}
 
 		seen[p] = true
 
-		ext, ok := r.extendsOf(p, cfpath.ToURI(p))
+		declared, ok := r.declaredExtendsOf(p, cfpath.ToURI(p))
 		if !ok {
-			return ""
+			return "", false
 		}
 
-		extends, baseDir = ext, filepath.Dir(p)
+		extends, baseDir = declared, filepath.Dir(p)
+		if declared == "" {
+			extends = r.extendsFor("", p)
+			implied = implied || extends != ""
+		}
 	}
 
-	return ""
+	return "", false
 }
 
 // matchResolver tries the componentResolvers against text. It reports the
@@ -1174,6 +1342,13 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 		return "component '" + displayComponent(comp) + "' does not exist (chain hop '" + hop + "' to '" + funcName + "')"
 	}
 
+	if mockDecoration(hop) {
+		tr.addf("%q is a method MockBox adds to a mock — chain hop accepted, the rest of the chain is dynamic", hop)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
 	// A hop onMissingMethod answers is as valid as a last call it answers, and
 	// what it returns is whatever the dispatcher decides. Lucee's own Http and
 	// Query build their setters this way: new Http().setUrl(u).send().
@@ -1184,7 +1359,14 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 		return ""
 	}
 
-	if base := r.componentMissingBase(comp, baseDir); base != "" {
+	if base, implied := r.componentMissingBase(comp, baseDir); base != "" {
+		if implied {
+			tr.addf("%q's framework base does not resolve (%s) — chain hop %q accepted, the rest of the chain is dynamic", comp, base, hop)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
 		return MissingBaseReason(base)
 	}
 
@@ -1196,9 +1378,9 @@ func (r *Resolver) missingChainHop(comp, softComp, hop, funcName string, pr *par
 // names no file the method was never looked for. ContentBox's services extend
 // cborm's VirtualEntityService, and without cborm on disk every findWhere,
 // save and list was "not found in" the service.
-func (r *Resolver) componentMissingBase(comp, baseDir string) string {
+func (r *Resolver) componentMissingBase(comp, baseDir string) (base string, implied bool) {
 	if strings.Contains(comp, "|") {
-		return ""
+		return "", false
 	}
 
 	p := comp
@@ -1207,15 +1389,20 @@ func (r *Resolver) componentMissingBase(comp, baseDir string) string {
 	}
 
 	if p == "" {
-		return ""
+		return "", false
 	}
 
-	ext, ok := r.extendsOf(p, cfpath.ToURI(p))
-	if !ok || ext == "" {
-		return ""
+	declared, ok := r.declaredExtendsOf(p, cfpath.ToURI(p))
+	if !ok {
+		return "", false
 	}
 
-	return r.MissingBase(ext, filepath.Dir(p))
+	ext := declared
+	if ext == "" {
+		ext = r.extendsFor("", p)
+	}
+
+	return r.chainBreak(ext, filepath.Dir(p), declared == "" && ext != "")
 }
 
 // chainHopReturn is the component a chain hop's method returns: its declared
@@ -1223,13 +1410,9 @@ func (r *Resolver) componentMissingBase(comp, baseDir string) string {
 // init(), or a componentResolver matching the hop. It reports the resolver's
 // noFollow and whether the resolver is dynamicIfMissing, for the last.
 func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *callTrace) (ret string, noFollow, soft bool) {
-	ret = fd.ReturnComponent
+	ret = r.ReturnComponentOf(fd)
 	if ret != "" {
-		tr.addf("chain hop %q on %q: declared/inferred ReturnComponent %q", hop, comp, ret)
-	} else if fd.ReturnType != "" && strings.Contains(fd.ReturnType, ".") {
-		ret = fd.ReturnType
-
-		tr.addf("chain hop %q on %q: using dotted ReturnType %q", hop, comp, ret)
+		tr.addf("chain hop %q on %q: returns %q (declared %q)", hop, comp, ret, fd.ReturnType)
 	}
 
 	// An init() that declares nothing returns the object it was called
@@ -1256,6 +1439,68 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 	})
 }
 
+// ReturnComponentOf is the component fd returns: the one the parse inferred
+// from its return statements, a dotted return type, or a bare-word return type
+// naming a component beside the declaring one. Every question about what a
+// function returns asks this, so a chain hop and a variable assigned from the
+// same call cannot disagree.
+func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
+	switch {
+	case fd.ReturnComponent != "":
+		return fd.ReturnComponent
+	case strings.Contains(fd.ReturnType, "."):
+		return fd.ReturnType
+	}
+
+	return r.bareReturnComponent(fd)
+}
+
+// FuncLookup is the parser's hook for what a method of a component returns,
+// resolved from baseDir: ParseOptions.FuncLookup, which types a variable
+// assigned from a call on another component.
+func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) string {
+	return func(component, funcName string) string {
+		fd := r.ResolveFunc(component, funcName, baseDir)
+		if fd == nil {
+			return ""
+		}
+
+		return r.ReturnComponentOf(fd)
+	}
+}
+
+// cfmlTypes are the return types CFML itself defines. A component of one of
+// these names beside the declaring file does not make returntype="query" a
+// component: the engine's type wins, as it does at runtime.
+var cfmlTypes = map[string]bool{
+	"any": true, "array": true, "binary": true, "boolean": true, "component": true,
+	"date": true, "datetime": true, "email": true, "function": true, "closure": true,
+	"guid": true, "numeric": true, "integer": true, "number": true, "query": true,
+	"string": true, "struct": true, "uuid": true, "variablename": true, "void": true,
+	"xml": true, "object": true, "regex": true, "url": true, "double": true,
+}
+
+// bareReturnComponent is the component a bare-word return type names:
+// ColdBox declares `ColdBoxScheduledTask function task( name )`, and CFML
+// finds that component beside the declaring one. Only there — the resolver's
+// wider search would take any file of the name anywhere in the workspace, and
+// a bare word is far more often a type than a component, which is why a
+// dotted return type was the only one taken. The answer is the file's path,
+// as a method returning `this` is typed.
+func (r *Resolver) bareReturnComponent(fd *parser.FunctionDef) string {
+	t := strings.TrimSpace(fd.ReturnType)
+	if t == "" || r.FS == nil || strings.ContainsAny(t, "./\\[]<> ") || cfmlTypes[strings.ToLower(t)] {
+		return ""
+	}
+
+	file := cfpath.FromURI(string(fd.URI))
+	if file == "" {
+		return ""
+	}
+
+	return cfpath.ResolvePathCached(t, filepath.Dir(file), nil, r.dirs())
+}
+
 // checkMethodOn is canResolveCall's last step: whether the component the
 // receiver resolved to defines the method, with the dynamic, builtin,
 // member-method, onMissingMethod and altComp fallbacks.
@@ -1263,7 +1508,14 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 	funcName, variable := call.FuncName, call.Variable
 
 	if comp == "" {
-		if base := r.inheritedFromMissingBase(variable, call.Line, pr, baseDir); base != "" {
+		if base, implied := r.inheritedFromMissingBase(variable, call.Line, pr, baseDir); base != "" {
+			if implied {
+				tr.addf("%q is the framework base's, which does not resolve (%s) — accepted as dynamic", variable, base)
+				tr.hit(TargetDynamic, "", nil)
+
+				return ""
+			}
+
 			return MissingBaseReason(base)
 		}
 
@@ -1294,6 +1546,13 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 
 	if def := r.ResolveFunc(comp, funcName, baseDir); def != nil {
 		tr.hit(TargetComponent, comp, def)
+
+		return ""
+	}
+
+	if mockDecoration(funcName) {
+		tr.addf("%q is a method MockBox adds to a mock of %q — accepted", funcName, comp)
+		tr.hit(TargetDynamic, comp, nil)
 
 		return ""
 	}
@@ -1362,7 +1621,14 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		return "component '" + displayComponent(comp) + "' does not exist (calling '" + funcName + "')"
 	}
 
-	if base := r.componentMissingBase(comp, baseDir); base != "" {
+	if base, implied := r.componentMissingBase(comp, baseDir); base != "" {
+		if implied {
+			tr.addf("%q's framework base does not resolve (%s) — accepted as dynamic", comp, base)
+			tr.hit(TargetDynamic, comp, nil)
+
+			return ""
+		}
+
 		return MissingBaseReason(base)
 	}
 
@@ -1422,19 +1688,20 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 	// scope prefix and must not be stripped there.
 	lookupVar := parser.StripReceiverScope(variable)
+	scope := parser.ReceiverRefScope(variable)
 
 	// Each lookup below is tried while comp is still empty. A matching ref
 	// with no component is logged and passed over, as it always was.
 
 	// Try function-scoped refs first
-	if ref := funcScopedRef(pr, line, lookupVar); ref != nil {
+	if ref := funcScopedRef(pr, line, lookupVar, scope); ref != nil {
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
 	}
 
 	if comp == "" {
-		if best := fileLevelRef(pr, line, lookupVar); best != nil {
+		if best := fileLevelRef(pr, line, lookupVar, scope); best != nil {
 			comp = best.Component
 
 			tr.addf("resolved %q to %q via file-level ComponentRef (nearest preceding assignment at line %d)", variable, comp, best.Line+1)
@@ -1478,10 +1745,10 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	}
 
 	// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
-	if comp == "" && pr.Extends != "" {
-		tr.addf("no ref found in this file — checking extends chain (%s) for a ComponentRef", pr.Extends)
+	if comp == "" && r.fileExtends(pr) != "" {
+		tr.addf("no ref found in this file — checking extends chain (%s) for a ComponentRef", r.fileExtends(pr))
 
-		r.walkExtendsRefs(pr.Extends, baseDir, lookupVar, func(ref *parser.ComponentRef, parent string) bool {
+		r.walkExtendsRefs(r.fileExtends(pr), baseDir, lookupVar, func(ref *parser.ComponentRef, parent string) bool {
 			comp = ref.Component
 
 			tr.addf("resolved %q to %q via ComponentRef in parent %s", variable, comp, parent)
@@ -1499,8 +1766,9 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	return comp, false
 }
 
-// funcScopedRef is the first ref for name inside the function enclosing line.
-func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+// funcScopedRef is the first ref for name inside the function enclosing line,
+// among those scope admits.
+func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.RefScope) *parser.ComponentRef {
 	for _, scope := range pr.Scopes {
 		if int(line) < scope.Start || int(line) > scope.End {
 			continue
@@ -1515,7 +1783,7 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.Com
 
 		for i := range refs {
 			ref := &refs[i]
-			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) {
+			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) {
 				continue
 			}
 
@@ -1549,12 +1817,12 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string) *parser.Com
 // with the highest line number at or before the call site (the assignment
 // that's actually in scope there); only fall back to file order for a genuine
 // forward reference, where no preceding ref exists.
-func fileLevelRef(pr *parser.ParseResult, line uint32, name string) *parser.ComponentRef {
+func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser.RefScope) *parser.ComponentRef {
 	var best *parser.ComponentRef
 
 	for i := range pr.ComponentRefs {
 		ref := &pr.ComponentRefs[i]
-		if !strings.EqualFold(ref.Variable, name) || ref.Line > line {
+		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) {
 			continue
 		}
 
@@ -1568,7 +1836,7 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string) *parser.Comp
 	}
 
 	for i := range pr.ComponentRefs {
-		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) {
+		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) && scope.Admits(&pr.ComponentRefs[i]) {
 			return &pr.ComponentRefs[i]
 		}
 	}
@@ -1681,7 +1949,7 @@ func (r *Resolver) walkExtendsRefs(extends, baseDir, name string, visit func(ref
 			return
 		}
 
-		extends = parser.Parse(parentURI, string(data)).Extends
+		extends = r.extendsFor(parser.Parse(parentURI, string(data)).Extends, cfcPath)
 	}
 }
 

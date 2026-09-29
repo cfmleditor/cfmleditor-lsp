@@ -480,10 +480,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		beanPaths = cfg.BeanPaths()
 
 		for _, r := range cfg.ComponentResolvers() {
-			resolvers = append(resolvers, parser.Resolver{
-				Match: r.Match, Resolve: r.Resolve, Prefix: r.Prefix,
-				NoFollow: r.NoFollow, Anchored: r.Anchored, DynamicIfMissing: r.DynamicIfMissing,
-			})
+			resolvers = append(resolvers, r.Parser())
 		}
 
 		settings = cfg.CodeMap()
@@ -507,6 +504,15 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	// a property of the workspace, not of whose resolvers you read them under.
 	shared = index.New()
 
+	var (
+		implicitExtends func(string) string
+		helperScope     func(string) bool
+	)
+	if cfg != nil {
+		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
+		helperScope = config.HelperScope(cfg.Frameworks())
+	}
+
 	resolver := &resolve.Resolver{
 		FS:                 fsys,
 		Index:              shared,
@@ -515,6 +521,8 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		StartupFiles:       startupFiles,
 		ExpressionMappings: expressionMappings,
 		WorkspaceFolders:   workspaceFolders,
+		ImplicitExtends:    implicitExtends,
+		HelperScope:        helperScope,
 	}
 
 	// The bean map is the root config's, with each scanned root's
