@@ -33,11 +33,10 @@ const maxStartupTemplates = 64
 var sharedScopes = []string{"request", "session", "application", "server"}
 
 var (
-	tagSharedAssign    = regexp.MustCompile(`(?i)<cfset\s+(request|session|application|server)\.([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*/?>`)
-	scriptSharedAssign = regexp.MustCompile(`(?i)^\s*(request|session|application|server)\.([A-Za-z_$][\w$]*)\s*=\s*([^;]+?)\s*;`)
+	tagSharedAssign    = regexp.MustCompile(`(?i)<cfset\s+(request|session|application|server)\.([A-Za-z_$][\w$]*)\s*=`)
+	scriptSharedAssign = regexp.MustCompile(`(?im)^[ \t]*(request|session|application|server)\.([A-Za-z_$][\w$]*)[ \t]*=`)
 	createdComponent   = regexp.MustCompile(`(?i)^createObject\s*\(\s*["']component["']\s*,\s*["']([^"']+)["']`)
 	newComponent       = regexp.MustCompile(`(?i)^new\s+(?:cfml:)?([A-Za-z_$#][\w$.#]*)\s*\(`)
-	chainExpr          = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*(?:\([^()]*\))?)+$`)
 )
 
 // startupAssign is one shared-scope assignment a startup template makes.
@@ -166,29 +165,86 @@ func (r *Resolver) configuredStartupFiles() []string {
 	return out
 }
 
+// maxAssignLen bounds how far one assignment's right-hand side is followed.
+const maxAssignLen = 4096
+
 // sharedAssignments finds `SCOPE.name = rhs` in content, in tag and in script
-// syntax, one assignment per line.
+// syntax. The right-hand side may span lines: a call with named arguments is
+// written one to a line, and `REQUEST.tassui = REQUEST.kernel.getPageTools()
+// .getTassUI( companyCode = …, … )` is the assignment tassweb's pages depend
+// on. It ends at the tag's `>` or the statement's `;`, outside quotes and
+// parentheses.
 func sharedAssignments(content, dir string) []startupAssign {
 	var out []startupAssign
 
-	for line := range strings.SplitSeq(content, "\n") {
-		m := tagSharedAssign.FindStringSubmatch(line)
-		if m == nil {
-			m = scriptSharedAssign.FindStringSubmatch(line)
-		}
+	for _, m := range tagSharedAssign.FindAllStringSubmatchIndex(content, -1) {
+		out = appendAssign(out, content, m, '>', dir)
+	}
 
-		if m == nil {
-			continue
-		}
-
-		out = append(out, startupAssign{
-			key: strings.ToLower(m[1]) + "." + strings.ToLower(m[2]),
-			rhs: strings.TrimSpace(m[3]),
-			dir: dir,
-		})
+	for _, m := range scriptSharedAssign.FindAllStringSubmatchIndex(content, -1) {
+		out = appendAssign(out, content, m, ';', dir)
 	}
 
 	return out
+}
+
+// appendAssign adds the assignment whose match is m, reading its right-hand
+// side up to end. An `==` is a comparison, and an unterminated one is dropped.
+func appendAssign(out []startupAssign, content string, m []int, end byte, dir string) []startupAssign {
+	rest := content[m[1]:]
+	if strings.HasPrefix(rest, "=") {
+		return out
+	}
+
+	n := assignEnd(rest, end)
+	if n < 0 {
+		return out
+	}
+
+	rhs := strings.TrimSpace(rest[:n])
+	if end == '>' {
+		rhs = strings.TrimSpace(strings.TrimSuffix(rhs, "/"))
+	}
+
+	if rhs == "" {
+		return out
+	}
+
+	return append(out, startupAssign{
+		key: strings.ToLower(content[m[2]:m[3]]) + "." + strings.ToLower(content[m[4]:m[5]]),
+		rhs: rhs,
+		dir: dir,
+	})
+}
+
+// assignEnd is the index of the first end byte in s outside a quoted string
+// and outside parentheses, or -1. A quote is escaped by doubling it, which
+// leaves the string closed and opened again, so it needs no case of its own.
+func assignEnd(s string, end byte) int {
+	var quote byte
+
+	depth := 0
+
+	for i := 0; i < len(s) && i < maxAssignLen; i++ {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case c == end && depth <= 0:
+			return i
+		}
+	}
+
+	return -1
 }
 
 // startupComponent is the component a shared-scope variable holds according
@@ -250,7 +306,7 @@ func (r *Resolver) typeOfExpr(rhs, dir string, assigns []startupAssign, visiting
 		return r.staticPath(m[1])
 	}
 
-	if !chainExpr.MatchString(rhs) {
+	if !isCallChain(rhs) {
 		return ""
 	}
 
@@ -307,7 +363,7 @@ func (r *Resolver) typeOfExpr(rhs, dir string, assigns []startupAssign, visiting
 }
 
 // stripCallArgs empties every argument list in a chain, so it splits on dots:
-// a.b(x.y).c() is a.b().c(). chainExpr has already refused nested parens.
+// a.b(x.y).c() is a.b().c(). isCallChain has already checked the parentheses balance.
 func stripCallArgs(s string) string {
 	var b strings.Builder
 
@@ -351,4 +407,81 @@ func (r *Resolver) staticPath(p string) string {
 	}
 
 	return p
+}
+
+// isCallChain reports whether s is `a.b.c(args).d(args)`: identifiers joined
+// by dots, each optionally followed by one balanced argument list. The list
+// may hold anything, calls and named arguments included, because
+// stripCallArgs empties it before the chain is split.
+func isCallChain(s string) bool {
+	i, hops := 0, 0
+
+	for i < len(s) {
+		j := i
+		for j < len(s) && isIdentByte(s[j], j == i) {
+			j++
+		}
+
+		if j == i {
+			return false
+		}
+
+		hops++
+		i = j
+
+		if i < len(s) && s[i] == '(' {
+			end := argsEnd(s, i)
+			if end < 0 {
+				return false
+			}
+
+			i = end
+		}
+
+		if i == len(s) {
+			return hops > 1
+		}
+
+		if s[i] != '.' {
+			return false
+		}
+
+		i++
+	}
+
+	return false
+}
+
+func isIdentByte(c byte, first bool) bool {
+	return c == '_' || c == '$' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (!first && c >= '0' && c <= '9')
+}
+
+// argsEnd is the index just past the parenthesis closing the one at s[open],
+// skipping quoted strings, or -1 when it never closes.
+func argsEnd(s string, open int) int {
+	var quote byte
+
+	depth := 0
+
+	for i := open; i < len(s); i++ {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+
+	return -1
 }
