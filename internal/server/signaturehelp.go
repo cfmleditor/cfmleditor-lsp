@@ -83,6 +83,8 @@ func (s *Server) handleSignatureHelp(_ context.Context, rawParams []byte) (any, 
 }
 
 func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
+	doc := stubDoc(def)
+
 	var label strings.Builder
 	label.WriteString(def.Name)
 	label.WriteByte('(')
@@ -105,12 +107,26 @@ func buildUserSignature(def *parser.FunctionDef) protocol.SignatureInformation {
 
 		paramLabel += arg.Name
 		label.WriteString(paramLabel)
-		paramInfos = append(paramInfos, protocol.ParameterInformation{Label: protocol.String(paramLabel)})
+
+		info := protocol.ParameterInformation{Label: protocol.String(paramLabel)}
+
+		if d := doc; d != nil {
+			if text := d.Param(arg.Name); text != "" {
+				info.Documentation = tooltip(text)
+			}
+		}
+
+		paramInfos = append(paramInfos, info)
 	}
 
 	label.WriteString(")")
 
-	return protocol.SignatureInformation{Label: label.String(), Parameters: paramInfos}
+	sig := protocol.SignatureInformation{Label: label.String(), Parameters: paramInfos}
+	if doc != nil {
+		sig.Documentation = &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: doc.Markdown()}
+	}
+
+	return sig
 }
 
 func buildBuiltinSignature(e *docs.Entry) protocol.SignatureInformation {

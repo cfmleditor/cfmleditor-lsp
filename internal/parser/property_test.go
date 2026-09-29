@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"go.lsp.dev/uri"
@@ -342,25 +343,39 @@ func TestNormalizeBeanKey(t *testing.T) {
 
 // TestAnInjectionNamesItsComponent: with no beanPaths or propertyResolvers to
 // say otherwise, a WireBox id names the component whose file carries it, so
-// `property name="html" inject="HTMLHelper@coldbox"` types html. Over the
-// six-project corpus that was 3,600 calls reported as "no component ref".
-// The rest of the injection DSL names something that is not a component
-// file, and must not be read as one.
+// `property name="svc" inject="id:settingService@contentbox"` types svc. Over
+// the six-project corpus that was 3,600 calls reported as "no component ref".
+// A provider stands in for what it provides. The DSL's namespaces name the
+// frameworks' own objects, by their ColdBox paths, and so do the models
+// ColdBox registers as `Name@coldbox` — a file-name search for Renderer would
+// find whatever the workspace calls that. Everything else in the DSL is not a
+// component, and must not be read as one.
 func TestAnInjectionNamesItsComponent(t *testing.T) {
+	const cb = "coldbox.system."
+
 	for inject, want := range map[string]string{
-		"HTMLHelper@coldbox":             "HTMLHelper",
 		"id:settingService@contentbox":   "settingService",
 		"model:UserService":              "UserService",
 		"MODEL:UserService@users":        "UserService",
 		"models.UserService":             "models.UserService",
 		"PrintBuffer":                    "PrintBuffer",
+		"provider:UserService":           "UserService",
+		"provider:settingService@cb":     "settingService",
+		"HTMLHelper@coldbox":             cb + "modules.HTMLHelper.models.HTMLHelper",
+		"Provider:Renderer@coldbox":      cb + "web.Renderer",
+		"Renderer@myModule":              "Renderer",
+		"Coldbox":                        cb + "web.Controller",
+		"coldbox:requestService":         cb + "web.services.RequestService",
+		"wirebox":                        cb + "ioc.Injector",
+		"wirebox:populator":              cb + "core.dynamic.ObjectPopulator",
+		"logbox:logger:{this}":           cb + "logging.Logger",
+		"cachebox:template":              cb + "cache.providers.CacheBoxColdBoxProvider",
+		"provider:cachebox":              cb + "cache.CacheFactory",
 		"coldbox:setting:appName":        "",
-		"logbox:logger:{this}":           "",
-		"provider:UserService":           "",
-		"wirebox":                        "",
-		"cachebox:default":               "",
-		"Coldbox":                        "",
-		"":                               "",
+		"coldbox:moduleSettings:cborm":   "",
+		"coldbox:interceptor:x@global":   "",
+		"wirebox:child:mychild":          "",
+		"":                               "dep", // WireBox reads an empty inject as the model named by the property
 		"id:":                            "",
 		"#application.settings.service#": "",
 	} {
@@ -375,5 +390,46 @@ func TestAnInjectionNamesItsComponent(t *testing.T) {
 		if got != want {
 			t.Errorf("inject=%q: got %q, want %q", inject, got, want)
 		}
+
+		// The framework's own objects are not a finding when absent; a
+		// project's component is.
+		if soft := pr.IsSoftComponent(got); got != "" && soft != strings.HasPrefix(want, cb) {
+			t.Errorf("inject=%q: IsSoftComponent(%q) = %v", inject, got, soft)
+		}
+	}
+}
+
+// TestAnInjectedFrameworkObjectDoesNotTypeWhatItReturns: `x = base.m()` gives x
+// base's component when nothing else says, a guess for a project's fluent
+// components. An injector typed by `inject="wirebox"` returns what it builds,
+// so the guess would make every getInstance() result an injector — and a
+// function returning one would declare it returns an injector, outranking the
+// SearchResults it says it returns.
+func TestAnInjectedFrameworkObjectDoesNotTypeWhatItReturns(t *testing.T) {
+	src := `component {
+	property name="wirebox" inject="wirebox";
+	property name="svc" inject="id:Builder";
+	SearchResults function search() {
+		var results = variables.wirebox.getInstance( "SearchResults@contentbox" );
+		var built = variables.svc.withName( "x" );
+		return results;
+	}
+}`
+	pr := Parse(uri.URI("file:///x/DBSearch.cfc"), src)
+
+	for i := range pr.Funcs {
+		if f := &pr.Funcs[i]; f.Name == "search" && f.ReturnComponent != "" {
+			t.Errorf("search: ReturnComponent = %q, want none", f.ReturnComponent)
+		}
+	}
+
+	refs := pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End)
+	if ref := refNamed(refs, "results"); ref != nil {
+		t.Errorf("results typed as %q", ref.Component)
+	}
+
+	// A project's own component still types what its methods return.
+	if ref := refNamed(refs, "built"); ref == nil || ref.Component != "Builder" {
+		t.Errorf("built = %+v, want Builder", ref)
 	}
 }

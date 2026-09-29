@@ -1180,13 +1180,18 @@ func (s *Server) componentMemberItems(component string, docURI uri.URI) []protoc
 	}
 
 	for _, d := range defs {
-		items = append(items, protocol.CompletionItem{
+		item := protocol.CompletionItem{
 			Label:  d.Name,
 			Kind:   protocol.CompletionItemKindMethod,
 			Detail: optStr(signatureDetail(d.Name, d.Arguments)),
 
 			SortText: optStr(SortUserFunctions + d.Name),
-		})
+		}
+		if doc := stubDocMarkup(d); doc != nil {
+			item.Documentation = doc
+		}
+
+		items = append(items, item)
 	}
 
 	return items
@@ -1315,7 +1320,8 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 		detail.WriteString(")")
 
 		insertText.WriteString(")")
-		items = append(items, protocol.CompletionItem{
+
+		item := protocol.CompletionItem{
 			Label:  d.Name,
 			Kind:   protocol.CompletionItemKindMethod,
 			Detail: optStr(detail.String()),
@@ -1324,7 +1330,12 @@ func (s *Server) methodCompletionItems(cfcPath string) []protocol.CompletionItem
 
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
 			SortText:         optStr(SortUserFunctions + d.Name),
-		})
+		}
+		if doc := stubDocMarkup(d); doc != nil {
+			item.Documentation = doc
+		}
+
+		items = append(items, item)
 	}
 
 	return items

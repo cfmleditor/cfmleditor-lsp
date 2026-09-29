@@ -108,7 +108,7 @@ func (r *Resolver) startupAssigns(baseDir string) []startupAssign {
 
 		seen[pathKey(file)] = true
 
-		data, err := r.FS.ReadFile(file)
+		data, err := r.fs().ReadFile(file)
 		if err != nil {
 			continue
 		}
@@ -145,7 +145,7 @@ func (r *Resolver) configuredStartupFiles() []string {
 	out := make([]string, 0, len(r.StartupFiles))
 
 	for _, p := range r.StartupFiles {
-		if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+		if info, err := r.fs().Stat(p); err == nil && !info.IsDir() {
 			out = append(out, p)
 
 			continue

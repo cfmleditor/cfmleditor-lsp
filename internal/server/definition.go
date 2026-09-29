@@ -17,7 +17,16 @@ import (
 	"go.lsp.dev/uri"
 )
 
-func (s *Server) handleDefinition(_ context.Context, rawParams []byte) (any, error) {
+// handleDefinition answers go-to-definition. A framework's bundled API is
+// resolved like its source but is nowhere the editor can open, so a stub is
+// never the answer (see stubs.go).
+func (s *Server) handleDefinition(ctx context.Context, rawParams []byte) (any, error) {
+	v, err := s.definitionAnswer(ctx, rawParams)
+
+	return withoutStubLocations(v), err
+}
+
+func (s *Server) definitionAnswer(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DefinitionParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err

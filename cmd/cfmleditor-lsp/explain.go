@@ -9,6 +9,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -89,12 +90,14 @@ func cmdExplain(args []string) {
 		workspaceFolders         []string
 		implicitExtends          func(string) string
 		helperScope              func(string) bool
+		stubs                    *frameworkapi.Set
 	)
 
 	cfg, _ := daemon.FindConfig(searchDir)
 	if cfg != nil {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		helperScope = config.HelperScope(cfg.Frameworks())
+		stubs = frameworkapi.For(cfg.Frameworks())
 		workspaceFolders = cfg.WorkspaceFolders()
 		mappings = cfg.Mappings()
 		startupFiles = cfg.StartupFiles()
@@ -123,6 +126,7 @@ func cmdExplain(args []string) {
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,
 		HelperScope:        helperScope,
+		Stubs:              stubs,
 	}
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))

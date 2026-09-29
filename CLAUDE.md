@@ -16,6 +16,8 @@ make link           # build + symlink onto PATH for local editor use (LINK_DIR=<
 make unlink         # remove that symlink
 make link-status    # show the link, the build, and what PATH resolves cfmleditor-lsp to
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
+make framework-stubs # regenerate internal/frameworkapi/stubs from each pinned framework
+                    # source (needs git + network; the stubs are committed)
 make update-d3      # rebuild the code-map viewer's D3 bundle from assets/vendor/entry.js
                     # (needs Node; the bundle is committed so `go build` does not)
 make cfparse        # build + run the parser-benchmark CLI (cmd/cfparse)
@@ -152,6 +154,7 @@ Editor document change
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
 | `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
+| `internal/frameworkapi` | The presets' frameworks' API, bundled: generated stubs (`stubs/`, from `cmd/cfstubgen`), the overlay filesystem that serves them under the virtual `Root`, and their doc comments (`DocAt`). See "Framework presets" |
 | `internal/route` | Convention-based framework routing: the `routes` config grammar, the source scanner, and resolution to a controller method or a view |
 | `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
@@ -1126,7 +1129,7 @@ the user-facing view and all `formatting` defaults.
 | `startupFiles` | Templates whose shared-scope assignments (`REQUEST.`, `SESSION.`, `APPLICATION.`, `SERVER.`) type a variable for the whole workspace; a leading `/` is a template path resolved like a `cfinclude`. The same lookup reads the templates the governing `Application.cfc` includes with no config (`internal/resolve/startup.go`), and is the last step in `receiverComponent`. It types the RHS itself rather than re-entering `canResolveCall`, so its recursion has its own visited set and its answer is deterministic under the parallel scan |
 | `expressionMappings` | Runtime `#...#` expression → static substring (see below) |
 | `componentResolvers` | Call expression → component dot-path (see below) |
-| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, and an implicit base for a file that names no `extends`. See "Framework presets" below |
+| `frameworks` | Framework presets (`internal/config/frameworks.go`): each adds `dynamicIfMissing` componentResolvers after the config's own, an implicit base for a file that names no `extends`, and its bundled API for when the source is absent. See "Framework presets" below |
 | `propertyResolvers` | `<cfproperty>` attribute → component dot-path (`match`/`resolve`/`attribute`) |
 | `servicePropertyResolvers` | `@serviceproperty <var> <kind>\|<name>` doc-comment kind → `${name}` dot-path template, for generically-typed dependencies |
 | `beanPaths` | namespace → directory; `.cfc`s registered as `name@namespace`, plus a bare `name` when unique across all namespaces |
@@ -1383,6 +1386,68 @@ project could have written by hand. Three rules hold them together, each with a 
 - **Two presets can claim one name.** CommandBox's `task()` and a ColdBox scheduler's
   `task()` return different things, so CommandBox's preset leaves `task()` alone.
   `TestEveryPresetResolverMatchesItsOwnNames` lists such a case beside each preset's own.
+- **Without the framework's source, its API comes from stubs** (`internal/frameworkapi`).
+  `cmd/cfstubgen` generates one script component per class a preset names — plus the
+  `Extra` bases projects extend by name, their extends chains, and the components their
+  methods return — holding every signature and doc comment with an empty body, from each
+  `Sources` entry at its pinned commit (`make framework-stubs`, reproducible byte for
+  byte). Wheels' `$integrateComponents` mixins and included templates are folded in. The
+  resolver's `Stubs` answers a dot-path **last**, after every mapping, directory and
+  folder, so a checkout of the framework always wins (`TestTheFrameworksOwnSourceOutranksItsStubs`);
+  the stubs are served from a virtual directory, `frameworkapi.Root`, through `r.fs()` and
+  a wrapped `cfpath.DefaultFS`. Checked against the real thing: ContentBox reports the same
+  3,776 entries with the ColdBox stubs as with ColdBox mapped in, and cfwheels fewer with
+  its stubs than with its source. Three rules, each with a test: **a stub is never a
+  location** — `handleDefinition`/`handleTypeDefinition` filter them (`withoutStubLocations`)
+  and workspace symbols skip them; **a stub is documented** — hover, signature help and
+  member completion append `frameworkapi.DocAt`, which reads ColdBox's `@name text`
+  argument docs as well as `@param`; and **a chain breaking beyond a stub is dynamic**
+  (`chainBreak` marks a stub link implied), since that is the framework's absence. The
+  code map keeps stubs out as it kept the missing framework out: a stub call is an
+  external node only with unresolved calls shown. Every `Resolver` construction site sets
+  `Stubs` beside `ImplicitExtends`.
+- **What a factory builds is typed by the id it is handed** (`idResolver`): ColdBox's
+  `getInstance( "X@module" )` and Wheels' `model( "X" )` are the component `X`, by path and
+  then by file name nearest the caller, as an injected property's id is. The match is the
+  whole remainder, so `getInstance( "X" ).init()` is not claimed, and a computed id is left
+  alone. `getInstance( "logbox" )` is **not** a component called logbox: the WireBox DSL a
+  getInstance() may be handed is `dslResolvers`, built from `parser.InjectionDSL` and listed
+  *before* `idResolver`. `TestEveryPresetResolverMatchesItsOwnNames` has each shape.
+- **The injection DSL names ColdBox's classes, not files** (`parser.injectedComponent`,
+  `injectionDSL`, `coldboxModels`): `inject="coldbox:requestService"`, `wirebox:populator`,
+  `logbox:logger:{this}`, `cachebox:template`, `provider:cachebox`, `Renderer@coldbox`.
+  Each is a `coldbox.system.*` path, and **every such class is soft** in
+  `ParseResult.IsSoftComponent` whatever file is asking: the property is usually declared
+  by a base class, so a record kept on the declaring file's parse never reached the
+  subclass making the call, and 45 calls in ContentBox without ColdBox came back as
+  "does not exist". A cache is `CacheBoxColdBoxProvider`, not the `ICacheProvider`
+  interface, which has no `getOrSet()`. `TestEveryInjectionHasItsStub` fails on a DSL
+  target the stubs lack. **`x = base.m()` does not take base's type when base is one of
+  these** (`baseVarComponent`): an injector's `getInstance()` is not an injector, and the
+  guess made every WireBox-built local an Injector and then a function returning one
+  declare it returned an Injector, outranking its declared `SearchResults`.
+- **A stub's return type may come from its doc comment** (`cmd/cfstubgen`, `docReturn`).
+  ColdBox declares few return types and documents most, so `@return <dotted.path>` becomes
+  the stub's declared type when the source declares none: `execute()` returns a
+  `RequestContext`. A documented path that does not exist (execute's says
+  `coldbox.system.context.RequestContext`) is found by file name when exactly one file in
+  the framework has it; an **interface is left out** (`isInterface`), since it declares less
+  than what the call hands back. This is deliberately *not* done for a real checkout of the
+  framework: without the generator's check that the path exists, a wrong doc path would be
+  reported as a component that does not exist. `TestAStubReturnsWhatItsDocSays`.
+- **Methods a framework adds at run time are found where its docs say they come from.**
+  WireBox delegates (`parser/delegates.go`): `property name="m" inject delegate
+  delegatePrefix;` and `component delegates=">Memory, Worker=vacation"` give the host the
+  target's methods as prefix + name + suffix. Both parsers record a valueless property flag
+  (`propertyFlags`) as an attribute with an empty value — they used to drop it — and a bare
+  or empty `inject` is the model named by the property, WireBox's default DSL. The index
+  keeps a file's delegates beside its extends and drops them with it (`removeFileEntries`),
+  and `lookupFunc` searches the whole extends chain before any delegate, since a delegated
+  method never replaces one the object has; `maxDelegateDepth` stops two components
+  delegating to each other. CFML's ORM relationship methods (`has`/`add`/`remove`, per
+  `relationshipMethods`) are generated beside a property's accessors. Wheels mixes the
+  application's `global/functions.cfm` and what it includes into controllers, models and
+  views (`wheelsGlobals`, through the wheels preset's `helperDirs`).
 - **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
   (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
   project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong
@@ -1555,12 +1620,12 @@ fallback resolver, and the altComp fallback resolver.
 |---|---|---|
 | `extends chain breaks at 'X', which does not resolve` / `X (base component does not resolve; N inherited calls not checked)` | A component in the file's extends chain names no file, so an inherited call — bare, `this.`, `super.`, or on a receiver the file never declares (`print`, `$assert`) — was never checked. `unresolved` reports it once per file, on the `extends` line, and totals the bases after the list | Add the `mappings` entry or `workspacePaths` directory that makes `X` resolve. `resolve.MissingBase` finds the link; `inheritedFromMissingBase` decides a receiver is the base's when neither the file nor the enclosing function's `FuncVars` declares it — closure locals and parameters included. A call on a component whose *own* chain breaks gets the same reason (`componentMissingBase`), and `unresolved` groups those per file and base, on the first call |
 | `chained on 'f', which is not found` / `method 'f' has no component return type (chain to 'g')` | `f().g()`: the call is on what `f` returns (`resolveBareChain`), and `f` is not found as a bare call, or declares no component return type | Declare `f`'s return type; a `return this;` body is typed by itself (`returnsThis`) |
-| `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name. An injected property is typed by its id without one (`injectedComponent`: `inject="X@module"`, `id:X`, `model:X` → `X`, found by path then file name); add a `beanPaths` entry when the id is not the file's name |
+| `variable 'x' has no component ref` | Parser never established what component `x` is | Add a `componentResolver` covering the RHS of the assignment or the variable name. An injected property is typed by its id without one (`injectedComponent`: `inject="X@module"`, `id:X`, `model:X`, `provider:X` → `X`, found by path then file name; the DSL's `coldbox:…`, `wirebox:…`, `logbox:…`, `cachebox:…` → ColdBox's class); add a `beanPaths` entry when the id is not the file's name |
 | `method 'f' not found in pkg.path` | Component is known but the method is missing | Add the method to the stub CFC at that path, or `"noFollow": true` on the resolver |
 | `method 'f' not found in persist` | `persist` resolves correctly but the method is absent | Genuinely missing from the real CFC — implement it |
 | Dynamic keys: `x[y].f`, `arr[i].f` | Type can't be tracked through runtime keys | Not fixable with resolvers; suppress with `noFollow` on the resolver that produces `x` |
 | `ARGUMENTS.x` with `type="any"` | Argument has no type annotation | Add `type="pkg.path"` to `<cfargument>`, add an `ARGUMENTS.x` exact-match resolver, or document it with a `@serviceproperty` comment if `servicePropertyResolvers` is configured |
-| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | `CanResolveCall`'s file-level fallback picks the `ComponentRef` with the highest line number *at or before* the call site (`internal/resolve/resolve.go`), falling back to file order only for a genuine forward reference — so a scratch variable reassigned per `<cfcase>`/`<cfif>` branch is read against the assignment actually in scope. A large single-component cluster is therefore real, unless the reassignments sit inside a construct the parser doesn't line-order the way the runtime does; confirm with `explain`, which prints the line of the ref it chose. |
+| One component, many unrelated-looking missing methods (e.g. 50+ hits all "not found in studadmin") | `CanResolveCall`'s file-level fallback (`fileLevelRef`) and its function-scoped lookup (`funcScopedRef`, which took the first until `var x` redeclared per `<cfcase>` was checked against the first branch's component) both pick the `ComponentRef` with the highest line number *at or before* the call site (`internal/resolve/resolve.go`), falling back to file order only for a genuine forward reference — so a scratch variable reassigned per `<cfcase>`/`<cfif>` branch is read against the assignment actually in scope. A large single-component cluster is therefore real, unless the reassignments sit inside a construct the parser doesn't line-order the way the runtime does; confirm with `explain`, which prints the line of the ref it chose. |
 | A resolver with `"resolve": "nocheck", "noFollow": true` doesn't suppress the check | The resolver's `match` includes `(...)` (a call expression) rather than a bare variable name | `noFollow` only survives when the resolver re-runs live inside `CanResolveCall` (bare-word `ResolveFromCallFull(variable, ...)` lookups). A call-expression match fires once at parse time and is baked into `ComponentRef.Component`, which has no `NoFollow` field. Use `"resolve": "$any"` instead (checked unconditionally) for any resolver whose `match` contains parens. |
 
 ## Java stubs

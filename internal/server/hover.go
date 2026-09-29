@@ -40,10 +40,15 @@ func (s *Server) handleHover(_ context.Context, rawParams []byte) (any, error) {
 	docURI := params.TextDocument.URI
 	if qualifier := parser.QualifierBeforeWord(content, line, char); qualifier != "" {
 		if def := s.resolveUserFunc(qualifier, word, docURI, conv.Uint32(line)); def != nil {
+			value := def.FormatHover()
+			if d := stubDoc(def); d != nil {
+				value += "\n\n" + d.Markdown()
+			}
+
 			return &protocol.Hover{
 				Contents: &protocol.MarkupContent{
 					Kind:  protocol.MarkupKindMarkdown,
-					Value: def.FormatHover(),
+					Value: value,
 				},
 			}, nil
 		}

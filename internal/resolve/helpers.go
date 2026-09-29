@@ -74,7 +74,55 @@ func (r *Resolver) helperTemplates(file string) []string {
 		}
 	}
 
+	out = append(out, r.wheelsGlobals(file)...)
+
 	return append(out, r.applicationHelpers()...)
+}
+
+// wheelsGlobals are the templates Wheels mixes into every controller, model
+// and view: the application's global/functions.cfm and what it includes
+// (Wheels' own lifecycle includes /app/global/functions.cfm into Global, and
+// the starter app's includes auth.cfm, logging.cfm and the rest). The
+// application is the nearest directory above file holding one; a file with
+// none above it gets nothing.
+func (r *Resolver) wheelsGlobals(file string) []string {
+	for dir := filepath.Dir(file); ; {
+		if p := r.existing(filepath.Join(dir, "global", "functions.cfm")); p != "" {
+			return r.withIncludes(p, 3)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+
+		dir = parent
+	}
+}
+
+// withIncludes is p and the templates it includes beside it, depth deep.
+func (r *Resolver) withIncludes(p string, depth int) []string {
+	out := []string{p}
+	if depth == 0 {
+		return out
+	}
+
+	data, err := r.fs().ReadFile(p)
+	if err != nil {
+		return out
+	}
+
+	for _, inc := range parser.ExtractIncludes(string(data)) {
+		if strings.HasPrefix(inc, "/") {
+			continue
+		}
+
+		if q := r.existing(filepath.Join(filepath.Dir(p), filepath.FromSlash(inc))); q != "" && q != p {
+			out = append(out, r.withIncludes(q, depth-1)...)
+		}
+	}
+
+	return out
 }
 
 // applicationHelpers reads every ModuleConfig.cfc and config/ColdBox.cfc the
@@ -127,7 +175,7 @@ func (r *Resolver) applicationHelpers() []string {
 // helpersIn reads the templates the setting re matches in configFile names,
 // each relative to base.
 func (r *Resolver) helpersIn(configFile string, re *regexp.Regexp, base string) []string {
-	data, err := r.FS.ReadFile(configFile)
+	data, err := r.fs().ReadFile(configFile)
 	if err != nil {
 		return nil
 	}
@@ -162,7 +210,7 @@ func (r *Resolver) helpersIn(configFile string, re *regexp.Regexp, base string) 
 // offered to handlers as well: over-accepting a call there costs a finding
 // rather than inventing one.
 func (r *Resolver) includedUDFs(moduleConfig string) []string {
-	data, err := r.FS.ReadFile(moduleConfig)
+	data, err := r.fs().ReadFile(moduleConfig)
 	if err != nil {
 		return nil
 	}
@@ -185,7 +233,7 @@ func (r *Resolver) includedUDFs(moduleConfig string) []string {
 
 // existing is p when it names a file.
 func (r *Resolver) existing(p string) string {
-	if info, err := r.FS.Stat(p); err == nil && !info.IsDir() {
+	if info, err := r.fs().Stat(p); err == nil && !info.IsDir() {
 		return p
 	}
 

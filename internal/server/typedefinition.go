@@ -22,7 +22,14 @@ import (
 // extension stands down while this server runs. What a variable holds comes
 // from resolve.ComponentOf, the lookup call resolution already makes, so
 // go-to-type-definition and `unresolved` cannot disagree about a receiver.
-func (s *Server) handleTypeDefinition(_ context.Context, rawParams []byte) (any, error) {
+// A framework's bundled API is never the answer (see stubs.go).
+func (s *Server) handleTypeDefinition(ctx context.Context, rawParams []byte) (any, error) {
+	v, err := s.typeDefinitionAnswer(ctx, rawParams)
+
+	return withoutStubLocations(v), err
+}
+
+func (s *Server) typeDefinitionAnswer(_ context.Context, rawParams []byte) (any, error) {
 	if !s.Features.TypeDefinition {
 		return nil, nil
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -453,6 +454,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			Resolvers:          s.buildResolvers(),
 			ImplicitExtends:    config.ImplicitExtends(s.Frameworks),
 			HelperScope:        config.HelperScope(s.Frameworks),
+			Stubs:              frameworkapi.For(s.Frameworks),
 		}
 	}
 

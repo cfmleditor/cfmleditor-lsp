@@ -14,6 +14,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
@@ -507,10 +508,12 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 	var (
 		implicitExtends func(string) string
 		helperScope     func(string) bool
+		stubs           *frameworkapi.Set
 	)
 	if cfg != nil {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		helperScope = config.HelperScope(cfg.Frameworks())
+		stubs = frameworkapi.For(cfg.Frameworks())
 	}
 
 	resolver := &resolve.Resolver{
@@ -523,6 +526,7 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		WorkspaceFolders:   workspaceFolders,
 		ImplicitExtends:    implicitExtends,
 		HelperScope:        helperScope,
+		Stubs:              stubs,
 	}
 
 	// The bean map is the root config's, with each scanned root's

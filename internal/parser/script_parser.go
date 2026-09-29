@@ -1070,12 +1070,30 @@ func (p *scriptParser) parseProperty(startTok Token) {
 	}
 
 	// Check for attribute-style: property name="x" type="y" inject="z";
+	// A flag WireBox reads by its presence (`inject delegate`) is recorded
+	// with an empty value, and taken out of the positional form below.
+	flags := 0
+
 	for i, tok := range tokens {
-		if tok.Kind == TokIdent && i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+		if tok.Kind != TokIdent {
+			continue
+		}
+
+		if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
 			if i+2 < len(tokens) && tokens[i+2].Kind == TokString {
 				val := unquote(tokens[i+2].Value)
 				attrs[strings.ToLower(tok.Value)] = val
 			}
+
+			continue
+		}
+
+		if key := strings.ToLower(tok.Value); propertyFlags[key] && (i > 0 || len(tokens) > 1) {
+			if _, set := attrs[key]; !set {
+				attrs[key] = ""
+			}
+
+			flags++
 		}
 	}
 
@@ -1090,6 +1108,10 @@ func (p *scriptParser) parseProperty(startTok Token) {
 			if tok.Kind == TokIdent {
 				// Stop if this ident is followed by = (it's an attribute, not positional)
 				if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
+					break
+				}
+
+				if flags > 0 && propertyFlags[strings.ToLower(tok.Value)] {
 					break
 				}
 

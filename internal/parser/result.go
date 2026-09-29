@@ -31,6 +31,7 @@ type ParseResult struct {
 	Extends             string                                  // dot-path of parent component (from extends attribute)
 	Persistent          bool                                    // true if component has persistent="true" (ORM entity)
 	Properties          []propertyDef                           // parsed property declarations
+	Delegates           []Delegate                              // WireBox delegations the component declares
 	Links               []DocumentLink                          // file path references extracted during shallow scan
 	Calls               []CallSite                              // function call sites (when FindCalls is set)
 	log                 Logger                                  // optional logger for timing and errors
@@ -145,8 +146,12 @@ func (pr *ParseResult) classifyRegions() ([]Region, []int32) {
 
 // IsSoftComponent reports whether comp came, in this parse, from a resolver
 // marked dynamicIfMissing: a component whose absence is not a finding.
+//
+// A framework object an injection names counts too, whichever file declared
+// the property — a base class usually does: without the framework's source
+// or its stubs, a call on one is not a finding.
 func (pr *ParseResult) IsSoftComponent(comp string) bool {
-	return pr != nil && pr.resolverSet.isSoft(comp)
+	return pr != nil && pr.resolverSet.isSoft(comp) || isInjectedFrameworkComponent(comp)
 }
 
 // outputGate returns the output-context ranges and cfimport prefixes of the
@@ -297,6 +302,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.applyExpressionMappings()
 		pr.applyServiceProperties()
 		pr.generatePropertyAccessors()
+		pr.collectDelegates()
 		pr.appendResolverRefs()
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
@@ -1009,6 +1015,14 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 		return "$any"
 	}
 
+	// A framework object an injection typed hands back other things: an
+	// injector's getInstance() is not an injector. The guess is for a
+	// project's own fluent components, as a preset's name-only resolvers keep
+	// it from the objects they type.
+	if isInjectedFrameworkComponent(comp) {
+		return ""
+	}
+
 	return comp
 }
 
@@ -1138,6 +1152,14 @@ func (pr *ParseResult) generatePropertyAccessors() {
 				Arguments: []Argument{{Name: prop.name, Type: prop.typeName}},
 			})
 		}
+
+		for _, m := range relationshipMethods(&prop) {
+			if !existing[strings.ToLower(m)] {
+				existing[strings.ToLower(m)] = true
+
+				pr.Funcs = append(pr.Funcs, FunctionDef{Name: m, URI: u, Line: prop.line})
+			}
+		}
 		// Resolve component path: try property resolvers first, then type, then bean map
 		comp := ""
 		if len(pr.PropertyResolvers) > 0 && len(prop.attrs) > 0 {
@@ -1163,7 +1185,14 @@ func (pr *ParseResult) generatePropertyAccessors() {
 		}
 
 		if comp == "" {
-			comp = injectedComponent(prop.attrs["inject"])
+			inject, ok := prop.attrs["inject"]
+			if ok && inject == "" {
+				// A bare `inject` is WireBox's default DSL, the model whose id
+				// is the property's name.
+				inject = prop.name
+			}
+
+			comp = injectedComponent(inject)
 		}
 
 		if comp != "" {
@@ -1175,19 +1204,38 @@ func (pr *ParseResult) generatePropertyAccessors() {
 }
 
 // injectedComponent is the component a WireBox injection names, when no
-// beanPaths entry or propertyResolver said: `inject="HTMLHelper@coldbox"`,
-// `inject="id:settingService@contentbox"` and `inject="model:UserService"`
-// name the component UserService, which the resolver then finds by path and,
-// failing that, by file name — WireBox's own convention is that a model's id
-// is its file's. A dotted id is a path already.
+// beanPaths entry or propertyResolver said.
 //
-// Everything else in the injection DSL names something that is not a
-// component file, and resolving it by name would find an unrelated one:
-// `coldbox:setting:x` is a setting, `logbox:logger:{this}` a logger,
-// `provider:x` a provider, and the bare `wirebox`, `coldbox`, `cachebox` and
-// `logbox` are the frameworks' own objects, each under another file name.
+// `inject="id:settingService@contentbox"`, `inject="model:UserService"` and
+// `inject="provider:UserService"` name the component UserService, which the
+// resolver then finds by path and, failing that, by file name — WireBox's own
+// convention is that a model's id is its file's. A provider stands in for the
+// object it provides, so its methods are that object's. A dotted id is a path
+// already.
+//
+// The DSL's namespaces name the frameworks' own objects, and are answered by
+// their ColdBox dot-paths: `coldbox` the controller, `coldbox:requestService`
+// a service, `wirebox:populator` the object populator, `logbox:logger:{this}`
+// a logger, `cachebox:template` a cache — the provider ColdBox configures its
+// caches with, since the interface they share declares less than each has. So
+// are the models ColdBox registers as `Name@coldbox`, which a file-name search
+// would find whatever the workspace calls. Without ColdBox's source or its
+// stubs, a call on any of them is dynamic, not a component that is missing
+// (IsSoftComponent). Whatever else the DSL names is not a component — `coldbox:setting:x`
+// is a setting, `coldbox:moduleSettings:x` a struct — and resolving it by
+// name would find an unrelated file.
 func injectedComponent(inject string) string {
 	id := strings.TrimSpace(inject)
+
+	// A provider stands in for what it provides, DSL included:
+	// `provider:cachebox` is the CacheFactory.
+	if p := "provider:"; len(id) > len(p) && strings.EqualFold(id[:len(p)], p) {
+		id = id[len(p):]
+	}
+
+	if c := dslComponent(id); c != "" {
+		return c
+	}
 
 	for _, prefix := range []string{"id:", "model:"} {
 		if len(id) > len(prefix) && strings.EqualFold(id[:len(prefix)], prefix) {
@@ -1197,8 +1245,12 @@ func injectedComponent(inject string) string {
 		}
 	}
 
-	if at := strings.IndexByte(id, '@'); at >= 0 {
-		id = id[:at]
+	if name, module, ok := strings.Cut(id, "@"); ok {
+		if c, found := coldboxModels[strings.ToLower(name)]; found && strings.EqualFold(module, "coldbox") {
+			return coldboxSystem + c
+		}
+
+		id = name
 	}
 
 	if id == "" || strings.ContainsAny(id, ":{}$#/\\ ") {
@@ -1207,11 +1259,120 @@ func injectedComponent(inject string) string {
 
 	var buf foldScratch
 	switch string(buf.lowerFold(id)) {
-	case "wirebox", "coldbox", "cachebox", "logbox", "box", "executor", "java", "entityservice":
+	case "box", "executor", "java", "entityservice":
 		return ""
 	}
 
 	return id
+}
+
+const coldboxSystem = "coldbox.system."
+
+// injectionDSL maps a WireBox DSL string, lowercased, to the class it
+// injects, under coldbox.system. Measured over the corpus: the namespaces a
+// property uses and that hold a component.
+var injectionDSL = map[string]string{
+	"coldbox":                    "web.Controller",
+	"coldbox:flash":              "web.flash.AbstractFlashScope",
+	"coldbox:renderer":           "web.Renderer",
+	"coldbox:requestcontext":     "web.context.RequestContext",
+	"coldbox:router":             "web.routing.Router",
+	"coldbox:requestservice":     "web.services.RequestService",
+	"coldbox:interceptorservice": "web.services.InterceptorService",
+	"coldbox:moduleservice":      "web.services.ModuleService",
+	"coldbox:routingservice":     "web.services.RoutingService",
+	"coldbox:handlerservice":     "web.services.HandlerService",
+	"coldbox:loaderservice":      "web.services.LoaderService",
+	"coldbox:schedulerservice":   "web.services.SchedulerService",
+	"coldbox:asyncmanager":       "async.AsyncManager",
+	"wirebox":                    "ioc.Injector",
+	"wirebox:root":               "ioc.Injector",
+	"wirebox:binder":             "ioc.config.Binder",
+	"wirebox:populator":          "core.dynamic.ObjectPopulator",
+	"wirebox:asyncmanager":       "async.AsyncManager",
+	"cachebox":                   "cache.CacheFactory",
+	"logbox":                     "logging.LogBox",
+	"logbox:root":                "logging.Logger",
+}
+
+// coldboxModels are the models ColdBox registers under its own module, as
+// `Name@coldbox`: a file-name search for them would find whatever the
+// workspace holds by that name.
+var coldboxModels = map[string]string{
+	"htmlhelper":     "modules.HTMLHelper.models.HTMLHelper",
+	"renderer":       "web.Renderer",
+	"datamarshaller": "core.conversion.DataMarshaller",
+	"xmlconverter":   "core.conversion.XMLConverter",
+}
+
+// isInjectedFrameworkComponent reports whether comp is one of
+// InjectedFrameworkComponents.
+func isInjectedFrameworkComponent(comp string) bool {
+	if len(comp) <= len(coldboxSystem) || !strings.EqualFold(comp[:len(coldboxSystem)], coldboxSystem) {
+		return false
+	}
+
+	injectedOnce.Do(func() {
+		injected = map[string]bool{}
+		for _, c := range InjectedFrameworkComponents() {
+			injected[strings.ToLower(c)] = true
+		}
+	})
+
+	return injected[strings.ToLower(comp)]
+}
+
+var (
+	injectedOnce sync.Once
+	injected     map[string]bool
+)
+
+// InjectedFrameworkComponents lists every framework class an injection can
+// name, sorted: the bundled framework API must hold each of them.
+func InjectedFrameworkComponents() []string {
+	out := make([]string, 0, 2+len(injectionDSL)+len(coldboxModels))
+
+	out = append(out, coldboxSystem+"logging.Logger", coldboxSystem+"cache.providers.CacheBoxColdBoxProvider")
+	for _, c := range injectionDSL {
+		out = append(out, coldboxSystem+c)
+	}
+
+	for _, c := range coldboxModels {
+		out = append(out, coldboxSystem+c)
+	}
+
+	slices.Sort(out)
+
+	return slices.Compact(out)
+}
+
+// InjectionDSL maps each WireBox DSL string that names one of ColdBox's
+// classes, lowercased, to that class: what `getInstance( "logbox:root" )`
+// returns as much as what `inject="logbox:root"` injects.
+func InjectionDSL() map[string]string {
+	out := make(map[string]string, len(injectionDSL))
+	for k, c := range injectionDSL {
+		out[k] = coldboxSystem + c
+	}
+
+	return out
+}
+
+// dslComponent is the framework class a DSL injection names, or "".
+func dslComponent(id string) string {
+	lower := strings.ToLower(id)
+	if c, ok := injectionDSL[lower]; ok {
+		return coldboxSystem + c
+	}
+
+	switch {
+	case strings.HasPrefix(lower, "logbox:logger:"):
+		return coldboxSystem + "logging.Logger"
+	case strings.HasPrefix(lower, "cachebox:") && !strings.ContainsAny(lower[len("cachebox:"):], ":{}#"):
+		return coldboxSystem + "cache.providers.CacheBoxColdBoxProvider"
+	}
+
+	return ""
 }
 
 // GlobalVars returns this.x and variables.x names declared outside any function.

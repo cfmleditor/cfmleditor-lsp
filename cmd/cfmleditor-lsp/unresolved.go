@@ -10,6 +10,7 @@ import (
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
@@ -159,6 +160,7 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 		opt.PropertyResolvers = configPropertyResolvers(cfg)
 		opt.ImplicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		opt.HelperScope = config.HelperScope(cfg.Frameworks())
+		opt.Stubs = frameworkapi.For(cfg.Frameworks())
 		opt.InterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
 
 		if unknown := config.UnknownFrameworks(cfg.Frameworks()); len(unknown) > 0 {
