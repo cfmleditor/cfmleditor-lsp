@@ -31,6 +31,7 @@ type ParseResult struct {
 	Extends             string                                  // dot-path of parent component (from extends attribute)
 	Persistent          bool                                    // true if component has persistent="true" (ORM entity)
 	Properties          []propertyDef                           // parsed property declarations
+	Delegates           []Delegate                              // WireBox delegations the component declares
 	Links               []DocumentLink                          // file path references extracted during shallow scan
 	Calls               []CallSite                              // function call sites (when FindCalls is set)
 	log                 Logger                                  // optional logger for timing and errors
@@ -301,6 +302,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.applyExpressionMappings()
 		pr.applyServiceProperties()
 		pr.generatePropertyAccessors()
+		pr.collectDelegates()
 		pr.appendResolverRefs()
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
@@ -1150,6 +1152,14 @@ func (pr *ParseResult) generatePropertyAccessors() {
 				Arguments: []Argument{{Name: prop.name, Type: prop.typeName}},
 			})
 		}
+
+		for _, m := range relationshipMethods(&prop) {
+			if !existing[strings.ToLower(m)] {
+				existing[strings.ToLower(m)] = true
+
+				pr.Funcs = append(pr.Funcs, FunctionDef{Name: m, URI: u, Line: prop.line})
+			}
+		}
 		// Resolve component path: try property resolvers first, then type, then bean map
 		comp := ""
 		if len(pr.PropertyResolvers) > 0 && len(prop.attrs) > 0 {
@@ -1175,7 +1185,14 @@ func (pr *ParseResult) generatePropertyAccessors() {
 		}
 
 		if comp == "" {
-			comp = injectedComponent(prop.attrs["inject"])
+			inject, ok := prop.attrs["inject"]
+			if ok && inject == "" {
+				// A bare `inject` is WireBox's default DSL, the model whose id
+				// is the property's name.
+				inject = prop.name
+			}
+
+			comp = injectedComponent(inject)
 		}
 
 		if comp != "" {

@@ -1435,6 +1435,19 @@ project could have written by hand. Three rules hold them together, each with a 
   than what the call hands back. This is deliberately *not* done for a real checkout of the
   framework: without the generator's check that the path exists, a wrong doc path would be
   reported as a component that does not exist. `TestAStubReturnsWhatItsDocSays`.
+- **Methods a framework adds at run time are found where its docs say they come from.**
+  WireBox delegates (`parser/delegates.go`): `property name="m" inject delegate
+  delegatePrefix;` and `component delegates=">Memory, Worker=vacation"` give the host the
+  target's methods as prefix + name + suffix. Both parsers record a valueless property flag
+  (`propertyFlags`) as an attribute with an empty value — they used to drop it — and a bare
+  or empty `inject` is the model named by the property, WireBox's default DSL. The index
+  keeps a file's delegates beside its extends and drops them with it (`removeFileEntries`),
+  and `lookupFunc` searches the whole extends chain before any delegate, since a delegated
+  method never replaces one the object has; `maxDelegateDepth` stops two components
+  delegating to each other. CFML's ORM relationship methods (`has`/`add`/`remove`, per
+  `relationshipMethods`) are generated beside a property's accessors. Wheels mixes the
+  application's `global/functions.cfm` and what it includes into controllers, models and
+  views (`wheelsGlobals`, through the wheels preset's `helperDirs`).
 - **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
   (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
   project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong

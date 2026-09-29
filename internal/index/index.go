@@ -23,6 +23,7 @@ type Index struct {
 	thisVars  map[string][]string                          // lowercase URI -> this-scoped var names
 	scopeRefs map[string]map[string][]*parser.ComponentRef // lowercase URI -> function scope key -> refs
 	extends   map[string]string                            // lowercase URI -> that component's extends, "" for none
+	delegates map[string][]parser.Delegate                 // lowercase URI -> the WireBox delegations it declares; kept and dropped with extends
 	beans     map[string]string                            // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                           // lowercase entity name -> file URI
 	includes  map[string]fileIncludes                      // lowercase URI -> the paths that file cfincludes
@@ -48,6 +49,7 @@ func New() *Index {
 		thisVars:  make(map[string][]string),
 		scopeRefs: make(map[string]map[string][]*parser.ComponentRef),
 		extends:   make(map[string]string),
+		delegates: make(map[string][]parser.Delegate),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
 		includes:  make(map[string]fileIncludes),
@@ -476,6 +478,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	fk := uriKey(fileURI)
 	idx.thisVars[fk] = thisVars
 	idx.extends[fk] = strings.Clone(pr.Extends)
+	idx.delegates[fk] = cloneDelegates(pr.Delegates)
 	idx.setIncludesLocked(fileURI, parser.ExtractIncludes(content))
 
 	fileDefs := make([]*parser.FunctionDef, 0, len(funcs))
@@ -686,6 +689,7 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	// self-invalidating: a re-index of any kind forgets it, and the next
 	// lookup re-establishes it from the file as it now stands.
 	delete(idx.extends, key)
+	delete(idx.delegates, key)
 
 	// Grouped by bucket, not pooled into one set of everything this file
 	// declares. Both spellings visit the same bucket entries; the difference is
@@ -1053,6 +1057,47 @@ func (idx *Index) SetExtends(fileURI uri.URI, extends string) {
 	defer idx.mu.Unlock()
 
 	idx.extends[uriKey(fileURI)] = strings.Clone(extends)
+}
+
+// DelegatesForFile returns the WireBox delegations a file declares, and
+// whether they are known. They are recorded with its extends and forgotten
+// with it, by the same rule: a re-index of any kind drops them, and the next
+// reader re-establishes them from the file.
+func (idx *Index) DelegatesForFile(fileURI uri.URI) ([]parser.Delegate, bool) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	d, ok := idx.delegates[uriKey(fileURI)]
+
+	return d, ok
+}
+
+// SetDelegates records a file's delegations, for a reader that had to work
+// them out. The strings are cloned: see IndexFile.
+func (idx *Index) SetDelegates(fileURI uri.URI, delegates []parser.Delegate) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.delegates[uriKey(fileURI)] = cloneDelegates(delegates)
+}
+
+// cloneDelegates copies delegations off the source they were parsed from;
+// nil stays nil, which DelegatesForFile's callers read as "none".
+func cloneDelegates(ds []parser.Delegate) []parser.Delegate {
+	if len(ds) == 0 {
+		return nil
+	}
+
+	out := make([]parser.Delegate, len(ds))
+	for i := range ds {
+		d := &ds[i]
+		out[i] = parser.Delegate{
+			Target: strings.Clone(d.Target), Prefix: strings.Clone(d.Prefix), Suffix: strings.Clone(d.Suffix),
+			Includes: cloneStrings(d.Includes), Excludes: cloneStrings(d.Excludes), Line: d.Line,
+		}
+	}
+
+	return out
 }
 
 // SetIncludes records the paths a file cfincludes, as parser.ExtractIncludes

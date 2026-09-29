@@ -472,11 +472,25 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 	return r.Index.FunctionsForFile(cfcURI)
 }
 
-// LookupFuncWithExtends searches for a function in cfcPath, walking the extends chain.
+// LookupFuncWithExtends searches for a function in cfcPath, walking the
+// extends chain, and then the methods WireBox delegates into any component of
+// the chain.
 func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.FunctionDef {
+	return r.lookupFunc(cfcPath, funcName, 0)
+}
+
+// maxDelegateDepth bounds a delegate's own delegates: two components that
+// delegate to each other must not recurse forever.
+const maxDelegateDepth = 3
+
+func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.FunctionDef {
 	seen := make(map[string]bool)
+
+	var chain []string
+
 	for cfcPath != "" && !seen[cfcPath] {
 		seen[cfcPath] = true
+		chain = append(chain, cfcPath)
 		cfcURI := cfpath.ToURI(cfcPath)
 
 		defs := r.EnsureIndexed(cfcPath)
@@ -495,7 +509,65 @@ func (r *Resolver) LookupFuncWithExtends(cfcPath, funcName string) *parser.Funct
 		cfcPath = r.ComponentPath(ext, baseDir)
 	}
 
+	// A delegated method never replaces one the object has (Injector.cfc
+	// processDelegation skips a name the target already holds), so the whole
+	// chain is searched first.
+	for _, p := range chain {
+		if d := r.delegatedFunc(r.delegatesOf(p), filepath.Dir(p), funcName, depth); d != nil {
+			return d
+		}
+	}
+
 	return nil
+}
+
+// delegatedFunc is the method one of delegates gives the component under
+// name: the delegate target's own method, found with its extends chain and
+// its own delegates. dir is the declaring file's, for the target's id.
+func (r *Resolver) delegatedFunc(delegates []parser.Delegate, dir, name string, depth int) *parser.FunctionDef {
+	if depth >= maxDelegateDepth {
+		return nil
+	}
+
+	for i := range delegates {
+		d := &delegates[i]
+
+		inner := d.DelegatedMethod(name)
+		if inner == "" {
+			continue
+		}
+
+		target := r.ComponentPath(parser.DelegateTarget(d.Target), dir)
+		if target == "" {
+			continue
+		}
+
+		if def := r.lookupFunc(target, inner, depth+1); def != nil {
+			return def
+		}
+	}
+
+	return nil
+}
+
+// delegatesOf is the WireBox delegations cfcPath declares, from the index or,
+// failing that, the file itself — recorded with its extends, as
+// declaredExtendsOf does.
+func (r *Resolver) delegatesOf(cfcPath string) []parser.Delegate {
+	cfcURI := cfpath.ToURI(cfcPath)
+	if ds, ok := r.Index.DelegatesForFile(cfcURI); ok {
+		return ds
+	}
+
+	data, err := r.fs().ReadFile(cfcPath)
+	if err != nil {
+		return nil
+	}
+
+	pr := parser.Parse(cfcURI, string(data))
+	r.Index.SetDelegates(cfcURI, pr.Delegates)
+
+	return pr.Delegates
 }
 
 // mockDecorations are the methods MockBox's decorateMock adds to an object it
@@ -1021,6 +1093,13 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 		}
 	}
 
+	if def := r.delegatedFunc(pr.Delegates, baseDir, funcName, 0); def != nil {
+		tr.hit(TargetExtends, "", def)
+		tr.addf("found %q among the methods a WireBox delegate gives this component", funcName)
+
+		return ""
+	}
+
 	if def, via := r.findThroughIncludes(pr, funcName); def != nil {
 		tr.hit(TargetInclude, "", def)
 		tr.addf("found %q through cfinclude, in %s", funcName, via)
@@ -1135,6 +1214,10 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 		}
 	}
 
+	if def := r.delegatedFunc(pr.Delegates, baseDir, name, 0); def != nil {
+		return def
+	}
+
 	def, _ := r.findThroughIncludes(pr, name)
 
 	return def
@@ -1160,6 +1243,13 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 
 			return ""
 		}
+	}
+
+	if def := r.delegatedFunc(pr.Delegates, baseDir, funcName, 0); def != nil {
+		tr.hit(TargetExtends, "", def)
+		tr.addf("found %q among the methods a WireBox delegate gives this component", funcName)
+
+		return ""
 	}
 
 	if def, via := r.findThroughIncludes(pr, funcName); def != nil {

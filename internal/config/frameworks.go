@@ -269,6 +269,9 @@ var frameworkPresets = map[string]frameworkPreset{
 			{dir: "views", ext: ".cfm", component: wheelsView},
 			{dir: "layouts", ext: ".cfm", component: wheelsView},
 		},
+		// The application's global/functions.cfm reaches every controller,
+		// model and view (resolve.wheelsGlobals).
+		helperDirs: []string{"controllers", "models", "views", "layouts"},
 	},
 
 	// FW/1: the framework object controllers are handed, its bean factory, and

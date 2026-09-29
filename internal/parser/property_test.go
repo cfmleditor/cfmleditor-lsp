@@ -375,7 +375,7 @@ func TestAnInjectionNamesItsComponent(t *testing.T) {
 		"coldbox:moduleSettings:cborm":   "",
 		"coldbox:interceptor:x@global":   "",
 		"wirebox:child:mychild":          "",
-		"":                               "",
+		"":                               "dep", // WireBox reads an empty inject as the model named by the property
 		"id:":                            "",
 		"#application.settings.service#": "",
 	} {

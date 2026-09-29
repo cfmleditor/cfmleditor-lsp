@@ -1052,7 +1052,73 @@ func (p *tagParser) parseCFProperty(tag string, line int) {
 
 	typeName := getAttr(tag, "type")
 	attrs := extractAllAttrs(tag)
+	addBareFlags(tag, attrs)
 	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: conv.Uint32(line), attrs: attrs})
+}
+
+// addBareFlags records the propertyFlags a tag writes without a value —
+// `<cfproperty name="m" inject delegate>` — as attributes whose value is "",
+// as the script parser does. extractAllAttrs skips a valueless attribute.
+func addBareFlags(tag string, attrs map[string]string) {
+	i := strings.IndexAny(tag, " \t\r\n")
+	if i < 0 {
+		return
+	}
+
+	for i < len(tag) {
+		for i < len(tag) && isWhitespace(tag[i]) {
+			i++
+		}
+
+		start := i
+		for i < len(tag) && !isWhitespace(tag[i]) && tag[i] != '=' && tag[i] != '>' && tag[i] != '/' {
+			i++
+		}
+
+		key := strings.ToLower(tag[start:i])
+
+		j := i
+		for j < len(tag) && isWhitespace(tag[j]) {
+			j++
+		}
+
+		if j < len(tag) && tag[j] == '=' {
+			i = skipAttrValue(tag, j+1)
+
+			continue
+		}
+
+		if propertyFlags[key] {
+			if _, set := attrs[key]; !set {
+				attrs[key] = ""
+			}
+		}
+
+		if i == start {
+			i++
+		}
+	}
+}
+
+// skipAttrValue returns the index past the attribute value starting at i.
+func skipAttrValue(tag string, i int) int {
+	for i < len(tag) && isWhitespace(tag[i]) {
+		i++
+	}
+
+	if i < len(tag) && (tag[i] == '"' || tag[i] == '\'') {
+		if end := strings.IndexByte(tag[i+1:], tag[i]); end >= 0 {
+			return i + end + 2
+		}
+
+		return len(tag)
+	}
+
+	for i < len(tag) && !isWhitespace(tag[i]) && tag[i] != '>' {
+		i++
+	}
+
+	return i
 }
 
 func (p *tagParser) checkSetRHS(rest, varName string, line int) {

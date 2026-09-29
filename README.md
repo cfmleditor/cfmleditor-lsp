@@ -936,6 +936,16 @@ ColdBox being absent rather than a finding. The rest of the DSL
 (`coldbox:setting:x`, `coldbox:moduleSettings:x`, `wirebox:child:x`) names
 something that is not a component and is left alone.
 
+**Methods a framework adds at run time are found.** A WireBox delegate —
+`property name="memory" inject delegate delegatePrefix;` or
+`component delegates=">Memory, Worker=vacation"` — gives the component the
+delegate's methods under the names WireBox gives them (`memoryRead()`), and a
+bare `inject` injects the model named by the property. CFML's ORM generates
+`hasX()`, `addX()` and `removeX()` for a relationship property, and those are
+declared too. With the `wheels` preset, the application's
+`global/functions.cfm`, and what it includes, reaches every controller, model
+and view.
+
 **Some values are typed without configuration.** Each rule below is a default
 that a `mappings` entry, `componentResolvers` rule or `javaStubsPath` still
 overrides:
