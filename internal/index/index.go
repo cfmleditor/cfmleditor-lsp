@@ -24,6 +24,7 @@ type Index struct {
 	scopeRefs map[string]map[string][]*parser.ComponentRef // lowercase URI -> function scope key -> refs
 	extends   map[string]string                            // lowercase URI -> that component's extends, "" for none
 	delegates map[string][]parser.Delegate                 // lowercase URI -> the WireBox delegations it declares; kept and dropped with extends
+	fileURIs  map[string]uri.URI                           // lowercase URI -> the file's URI as indexed, in its real case; kept with fileFuncs
 	beans     map[string]string                            // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                           // lowercase entity name -> file URI
 	includes  map[string]fileIncludes                      // lowercase URI -> the paths that file cfincludes
@@ -50,6 +51,7 @@ func New() *Index {
 		scopeRefs: make(map[string]map[string][]*parser.ComponentRef),
 		extends:   make(map[string]string),
 		delegates: make(map[string][]parser.Delegate),
+		fileURIs:  make(map[string]uri.URI),
 		beans:     make(map[string]string),
 		entities:  make(map[string]uri.URI),
 		includes:  make(map[string]fileIncludes),
@@ -491,6 +493,7 @@ func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	}
 
 	idx.fileFuncs[fk] = fileDefs
+	idx.fileURIs[fk] = uri.URI(strings.Clone(string(fileURI)))
 
 	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 
@@ -539,6 +542,7 @@ func (idx *Index) IndexFileFromResult(fileURI uri.URI, funcs []parser.FunctionDe
 	}
 
 	idx.fileFuncs[fk] = fileDefs
+	idx.fileURIs[fk] = uri.URI(strings.Clone(string(fileURI)))
 
 	fileRefsList := make([]*parser.ComponentRef, 0, len(refs))
 
@@ -626,6 +630,7 @@ func (idx *Index) RemoveFilesUnder(prefix string) {
 	for key := range idx.fileFuncs {
 		if strings.HasPrefix(key, fileKey) {
 			delete(idx.fileFuncs, key)
+			delete(idx.fileURIs, key)
 			delete(idx.fileRefs, key)
 			delete(idx.thisVars, key)
 			delete(idx.scopeRefs, key)
@@ -709,6 +714,7 @@ func (idx *Index) removeFileEntries(fileURI uri.URI) {
 	}
 
 	delete(idx.fileFuncs, key)
+	delete(idx.fileURIs, key)
 
 	for name, group := range groupRefsByVariable(idx.fileRefs[key]) {
 		if filtered := dropEntries(idx.comprefs[name], group); len(filtered) == 0 {
@@ -1009,6 +1015,19 @@ func (idx *Index) FindFilesByBasename(name string) []string {
 			continue
 		}
 
+		// The file's own URI, in the case it was indexed under. A file with no
+		// functions has no definition to recover it from, and its lowercased
+		// key names nothing on a case-sensitive filesystem: Lucee's empty
+		// LuceeTestCase.cfc came back as luceetestcase.cfc, which the extends
+		// walk could not read.
+		if u, ok := idx.fileURIs[key]; ok {
+			if p := strings.TrimPrefix(string(u), "file://"); p != "" {
+				paths = append(paths, p)
+
+				continue
+			}
+		}
+
 		// Recover the real (correctly-cased) path from a stored definition's URI.
 		if len(defs) > 0 {
 			if p := strings.TrimPrefix(string(defs[0].URI), "file://"); p != "" {
@@ -1146,6 +1165,15 @@ func (idx *Index) IncludeGeneration() uint64 {
 	defer idx.mu.RUnlock()
 
 	return idx.includeGen
+}
+
+// IncludesForFile returns the cfinclude paths one file writes, as
+// parser.ExtractIncludes returns them.
+func (idx *Index) IncludesForFile(fileURI uri.URI) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	return snapshot(idx.includes[uriKey(fileURI)].paths)
 }
 
 // ForEachInclude calls fn with every file that cfincludes something and the

@@ -323,6 +323,8 @@ func (g *generator) emit(abs string) error {
 		b.WriteString(p)
 	}
 
+	g.writeTypedVariables(&b, src)
+
 	seen := map[string]bool{}
 	g.writeFuncs(&b, src, seen)
 
@@ -475,6 +477,46 @@ func (g *generator) writeFuncs(b *strings.Builder, src *source, seen map[string]
 	}
 }
 
+// writeTypedVariables keeps what the framework's own code says its
+// variables hold, which an empty function body would lose: TestBox's
+// BaseSpec sets `variables.$assert = this.$assert = new Assertion()` in its
+// constructor, and every spec calls $assert. Each variables- or this-scoped
+// variable assigned a component the framework's source holds becomes one
+// statement in the stub's pseudo-constructor, which the parser reads as the
+// assignment it is. A stub is never run.
+func (g *generator) writeTypedVariables(b *strings.Builder, src *source) {
+	dir := filepath.Dir(src.path)
+	seen := map[string]bool{}
+
+	for i := range src.pr.ComponentRefs {
+		ref := &src.pr.ComponentRefs[i]
+		if !identRe.MatchString(ref.Variable) {
+			continue
+		}
+
+		scope := "variables"
+		if ref.This {
+			scope = "this"
+		}
+
+		key := scope + "." + strings.ToLower(ref.Variable)
+		if seen[key] {
+			continue
+		}
+
+		abs, q := g.resolve(ref.Component, dir)
+		if abs == "" || q == "" || isInterface(abs) {
+			continue
+		}
+
+		seen[key] = true
+
+		g.todo = append(g.todo, abs)
+
+		fmt.Fprintf(b, "\t%s.%s = new %s();\n", scope, ref.Variable, q)
+	}
+}
+
 // declares reports whether def is written in the file, rather than an
 // accessor the parser made for a property — those come back from the
 // property itself.
@@ -489,6 +531,9 @@ func declares(src *source, def *parser.FunctionDef) bool {
 }
 
 var validTypeRe = regexp.MustCompile(`^[A-Za-z_][\w.]*(\[\])?$`)
+
+// identRe is a variable name as CFML spells one, `$assert` included.
+var identRe = regexp.MustCompile(`^[A-Za-z_$][\w$]*$`)
 
 func validType(t string) bool { return t != "" && validTypeRe.MatchString(t) }
 

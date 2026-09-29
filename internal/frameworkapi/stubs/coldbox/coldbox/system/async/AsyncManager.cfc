@@ -26,6 +26,7 @@ component {
 	 * This scheduler can be linked to a ColdBox context
 	 */
 	property name="coldbox";
+	this.$executors = new coldbox.system.async.executors.ExecutorBuilder();
 	/**
 	 * Constructor
 	 *

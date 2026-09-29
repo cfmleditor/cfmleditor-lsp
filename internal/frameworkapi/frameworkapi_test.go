@@ -102,7 +102,7 @@ func TestStubsParseAndTheirBasesResolve(t *testing.T) {
 		}
 
 		pr := parser.Parse("file:///stub.cfc", string(data))
-		if len(pr.Funcs) == 0 {
+		if len(pr.Funcs) == 0 && !constantsOnly[p] {
 			t.Errorf("%s: no functions", p)
 		}
 
@@ -118,6 +118,36 @@ func TestStubsParseAndTheirBasesResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestAStubKeepsWhatItsVariablesHold: TestBox's BaseSpec sets `$assert` in
+// its constructor, whose body a stub drops; every spec calls $assert, and
+// without the assignment the stub gave it no type.
+func TestAStubKeepsWhatItsVariablesHold(t *testing.T) {
+	text, ok := StubText(For([]string{"testbox"}).Path("testbox.system.BaseSpec"))
+	if !ok {
+		t.Fatal("no BaseSpec stub")
+	}
+
+	pr := parser.Parse("file:///BaseSpec.cfc", text)
+
+	found := map[bool]bool{}
+
+	for i := range pr.ComponentRefs {
+		if ref := &pr.ComponentRefs[i]; ref.Variable == "$assert" && ref.Component == "testbox.system.Assertion" {
+			found[ref.This] = true
+		}
+	}
+
+	if !found[true] || !found[false] {
+		t.Errorf("$assert in this and variables scope: %v", found)
+	}
+}
+
+// constantsOnly are the stubs of classes that hold constants and no
+// methods, reached because a framework variable holds one.
+var constantsOnly = map[string]bool{
+	"stubs/coldbox/coldbox/system/ioc/Types.cfc": true, // this.CFC = "cfc" and the like
 }
 
 // TestPathIsCaseInsensitiveAndOnlyForTheSet: a dot-path's case is the

@@ -9,6 +9,9 @@ component {
 	property name="xmlConverter" inject="provider:XMLConverter@coldbox";
 	property name="requestService" inject="coldbox:requestService";
 	property name="coldbox" inject="coldbox";
+	variables.xmlConverter = new coldbox.system.core.conversion.XMLConverter();
+	variables.requestService = new coldbox.system.web.services.RequestService();
+	variables.coldbox = new coldbox.system.web.Controller();
 	/**
 	 * Constructor
 	 */

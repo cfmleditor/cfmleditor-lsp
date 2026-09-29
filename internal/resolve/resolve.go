@@ -167,13 +167,10 @@ func (r *Resolver) dirs() *cfpath.DirCache {
 	return r.dirCache
 }
 
-// fs is the resolver's filesystem, with the framework stubs mounted when it
-// has any.
+// fs is the resolver's filesystem, with the framework stubs mounted: a
+// preset's, and the ones a fully namespaced path reaches without one
+// (frameworkapi.Namespaced).
 func (r *Resolver) fs() vfs.FS {
-	if r.Stubs == nil {
-		return r.FS
-	}
-
 	r.mu.RLock()
 	f := r.stubFS
 	r.mu.RUnlock()
@@ -234,6 +231,14 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	// Last of the dot-path lookups, so a workspace with the framework checked
 	// out resolves to the real file exactly as it did.
 	if p := r.Stubs.Path(component); p != "" {
+		return p
+	}
+
+	// A path in a framework's own namespace names that framework whether or
+	// not a preset does: `extends="testbox.system.compat.framework.TestCase"`
+	// is TestBox, and Lucee's test suite extends it in 1,885 files with no
+	// preset named.
+	if p := frameworkapi.Namespaced(component); p != "" {
 		return p
 	}
 
@@ -509,6 +514,15 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		cfcPath = r.ComponentPath(ext, baseDir)
 	}
 
+	// A template a component includes declares its functions into the
+	// component: Wheels' Global.cfc is little but includes of global/*.cfm,
+	// and application.wo.$simpleLock() is one of theirs.
+	for _, p := range chain {
+		if d := r.includedFunc(p, funcName); d != nil {
+			return d
+		}
+	}
+
 	// A delegated method never replaces one the object has (Injector.cfc
 	// processDelegation skips a name the target already holds), so the whole
 	// chain is searched first.
@@ -516,6 +530,51 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		if d := r.delegatedFunc(r.delegatesOf(p), filepath.Dir(p), funcName, depth); d != nil {
 			return d
 		}
+	}
+
+	return nil
+}
+
+// maxIncludeDepth bounds how far includedFunc follows templates that
+// include templates.
+const maxIncludeDepth = 4
+
+// includedFunc is funcName as declared by a template cfcPath includes, or by
+// one those include, maxIncludeDepth deep. Only a component's own include
+// statements are read, from the index, rather than the workspace's include
+// graph: that graph is rebuilt whenever an include is indexed, which a lazy
+// lookup during a scan would do once per component.
+func (r *Resolver) includedFunc(cfcPath, funcName string) *parser.FunctionDef {
+	seen := map[string]bool{pathKey(cfcPath): true}
+	queue := []string{cfcPath}
+
+	for depth := 0; depth < maxIncludeDepth && len(queue) > 0; depth++ {
+		var next []string
+
+		for _, from := range queue {
+			if !r.Index.HasFile(cfpath.ToURI(from)) {
+				r.EnsureIndexed(from)
+			}
+
+			for _, raw := range r.Index.IncludesForFile(cfpath.ToURI(from)) {
+				target := r.IncludePath(raw, from)
+				if target == "" || seen[pathKey(target)] {
+					continue
+				}
+
+				seen[pathKey(target)] = true
+
+				for _, d := range r.EnsureIndexed(target) {
+					if strings.EqualFold(d.Name, funcName) {
+						return d
+					}
+				}
+
+				next = append(next, target)
+			}
+		}
+
+		queue = next
 	}
 
 	return nil
@@ -1167,6 +1226,17 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 			}
 		}
 
+		// A built-in function returns a value, not a component:
+		// getPageContext().getRequest() and now().format() are calls on what
+		// the engine hands back, which the method lists here only partly
+		// know. The file's own function of that name was looked for first.
+		if docs.IsBuiltinFunction(first) {
+			tr.addf("%q is a built-in function — the chain on what it returns is dynamic", first)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		return "chained on '" + first + "', which is not found (calling '" + call.FuncName + "')"
 	}
 
@@ -1581,6 +1651,14 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
 	switch {
 	case fd.ReturnComponent != "":
+		// `return new Expectation( … )` names the component beside the
+		// declaring file, as a bare return type does; read from the caller's
+		// directory it named nothing, and every expect( x ).toBe() in a
+		// spec extending the Wheels test BaseSpec was a missing component.
+		if p := r.besideDeclaring(fd, fd.ReturnComponent); p != "" {
+			return p
+		}
+
 		return fd.ReturnComponent
 	case strings.Contains(fd.ReturnType, "."):
 		return fd.ReturnType
@@ -1623,7 +1701,18 @@ var cfmlTypes = map[string]bool{
 // as a method returning `this` is typed.
 func (r *Resolver) bareReturnComponent(fd *parser.FunctionDef) string {
 	t := strings.TrimSpace(fd.ReturnType)
-	if t == "" || r.FS == nil || strings.ContainsAny(t, "./\\[]<> ") || cfmlTypes[strings.ToLower(t)] {
+	if cfmlTypes[strings.ToLower(t)] {
+		return ""
+	}
+
+	return r.besideDeclaring(fd, t)
+}
+
+// besideDeclaring is the file a bare component name t names beside the file
+// that declares fd, or "".
+func (r *Resolver) besideDeclaring(fd *parser.FunctionDef, t string) string {
+	t = strings.TrimSpace(t)
+	if t == "" || r.FS == nil || strings.ContainsAny(t, "./\\[]<> $#:") {
 		return ""
 	}
 

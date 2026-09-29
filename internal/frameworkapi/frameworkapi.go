@@ -129,6 +129,30 @@ func (s *Set) Path(dotted string) string {
 	return ""
 }
 
+// namespaces are the dot-path prefixes that can only mean one framework,
+// with the framework whose stubs hold them. framework.* (FW/1) and wheels.*
+// are left to their presets: a project may well have a folder of that name.
+var namespaces = []struct{ prefix, framework string }{
+	{"coldbox.system.", "coldbox"},
+	{"testbox.system.", "testbox"},
+	{"commandbox.system.", "commandbox"},
+	{"qb.models.", "cfmigrations"},
+	{"contentbox.models.", "contentbox"},
+}
+
+// Namespaced is the stub for a dot-path in one of namespaces, whatever the
+// configuration names, or "". The resolver asks it after the preset's own
+// set, and after everything on disk.
+func Namespaced(dotted string) string {
+	for _, n := range namespaces {
+		if len(dotted) > len(n.prefix) && strings.EqualFold(dotted[:len(n.prefix)], n.prefix) {
+			return (&Set{frameworks: []string{n.framework}}).Path(dotted)
+		}
+	}
+
+	return ""
+}
+
 // IsStub reports whether a path is one of the stubs.
 func IsStub(p string) bool {
 	return p == Root || strings.HasPrefix(p, Root+string(filepath.Separator))

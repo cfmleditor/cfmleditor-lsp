@@ -8,6 +8,7 @@
 component {
 	property name="mockGenerator";
 	property name="generationPath";
+	variables.mockGenerator = new testbox.system.mockutils.MockGenerator();
 	/**
 	 * Create an instance of MockBox
 	 *

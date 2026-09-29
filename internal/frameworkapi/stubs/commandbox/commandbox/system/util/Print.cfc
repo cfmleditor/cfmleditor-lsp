@@ -36,6 +36,8 @@ component {
 	property name='formatterUtil' inject='formatter';
 	property name='JSONService' inject='JSONService';
 	property name='tablePrinter' inject='provider:TablePrinter';
+	variables.formatterUtil = new commandbox.system.util.Formatter();
+	variables.tablePrinter = new commandbox.system.util.TablePrinter();
 	/**
 	 * Removes ANSI attributes from string
 	 * @string.hint string to remove ANSI from

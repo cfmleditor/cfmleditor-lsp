@@ -11,6 +11,7 @@ component {
 	property name="shell" inject="shell";
 	property name="print" inject="print";
 	property name="JSONPrettyPrint" inject="provider:JSONPrettyPrint";
+	variables.print = new commandbox.system.util.Print();
 	/**
 	 * Constructor
 	 */

@@ -67,6 +67,12 @@ component {
 	 * Fluent route construct for with routing
 	 */
 	property name="withClosure" type="struct";
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.controller = new coldbox.system.web.Controller();
+	variables.flash = new coldbox.system.web.flash.AbstractFlashScope();
+	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.wirebox = new coldbox.system.ioc.Injector();
 	/**
 	 * Constructor
 	 */

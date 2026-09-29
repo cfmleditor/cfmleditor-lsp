@@ -936,6 +936,20 @@ ColdBox being absent rather than a finding. The rest of the DSL
 (`coldbox:setting:x`, `coldbox:moduleSettings:x`, `wirebox:child:x`) names
 something that is not a component and is left alone.
 
+**Mappings in `Application.cfc` are read as the engine builds them.** A
+mapping is often built from the file's own directory or a variable set just
+above it — `this.mappings[ "/cli" ] = local.projectRoot & "cli/"` after
+`local.projectRoot = expandPath( "../../../" )` — and those are evaluated, as
+are `getDirectoryFromPath( getCurrentTemplatePath() )` and earlier mappings.
+A mapping whose name has several segments (`/modules/wheels`) is used for
+paths under it, the longest match first.
+
+**A framework's own namespace needs no preset.** `coldbox.system.*`,
+`testbox.system.*`, `commandbox.system.*`, `qb.models.*` and
+`contentbox.models.*` resolve to the bundled framework API when nothing on
+disk does, so a component extending `testbox.system.BaseSpec` is checked
+without naming the `testbox` preset.
+
 **Methods a framework adds at run time are found.** A WireBox delegate —
 `property name="memory" inject delegate delegatePrefix;` or
 `component delegates=">Memory, Worker=vacation"` — gives the component the

@@ -28,6 +28,8 @@ component {
 	property name="securityService" inject="securityService@contentbox";
 	property name="markdown" inject="Processor@cbmarkdown";
 	property name="requestStorage" inject="requestStorage@cbstorages";
+	variables.settingService = new contentbox.models.system.SettingService();
+	variables.siteService = new contentbox.models.system.SiteService();
 	/**
 	 * Constructor
 	 */

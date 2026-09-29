@@ -30,6 +30,8 @@ component {
 	 * Flag to allow serializing complex objects in `extraInfo`.
 	 */
 	property name ="serializeExtraInfo" type ="boolean" default="true";
+	this.logLevels = new coldbox.system.logging.LogLevels();
+	variables.util = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
 	 *

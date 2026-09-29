@@ -198,6 +198,7 @@ component extends="qb.models.Query.JsonQueryBuilderSupport" {
 	 * @default []
 	 */
 	property name="updates" type="struct";
+	variables.predicateClause = new qb.models.Query.PredicateClause();
 	/**
 	 * Creates an empty query builder.
 	 *

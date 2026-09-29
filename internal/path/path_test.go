@@ -177,3 +177,34 @@ func TestCfcNameFromURI_PlainPath(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// TestResolvePath_AMappingNameWithSeveralSegments: `/modules/wheels` beside
+// `/modules` is how cfwheels' CLI tests map its module, and the lookup by a
+// path's first segment could only ever find `/modules`. The longest mapping
+// that prefixes the path wins, as the engine's does, and a path under the
+// shorter one alone still resolves through it.
+func TestResolvePath_AMappingNameWithSeveralSegments(t *testing.T) {
+	dir := t.TempDir()
+
+	for p, src := range map[string]string{
+		"lucli/services/Scaffold.cfc": "component {}",
+		"tests/_modules/Base.cfc":     "component {}",
+	} {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		_ = os.WriteFile(full, []byte(src), 0o644)
+	}
+
+	mappings := map[string]string{
+		"modules":         filepath.Join(dir, "tests", "_modules"),
+		"/modules/wheels": filepath.Join(dir, "lucli"),
+	}
+
+	if got, want := ResolvePath("modules.wheels.services.Scaffold", t.TempDir(), mappings), filepath.Join(dir, "lucli", "services", "Scaffold.cfc"); got != want {
+		t.Errorf("nested: got %q, want %q", got, want)
+	}
+
+	if got, want := ResolvePath("modules.Base", t.TempDir(), mappings), filepath.Join(dir, "tests", "_modules", "Base.cfc"); got != want {
+		t.Errorf("single: got %q, want %q", got, want)
+	}
+}

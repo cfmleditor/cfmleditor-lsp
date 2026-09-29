@@ -29,6 +29,10 @@ component extends="coldbox.system.async.tasks.ScheduledTask" {
 	 * period to ensure it persists until the next scheduled run. Default fallback is 60 minutes.
 	 */
 	property name="serverLockTimeout" type="numeric";
+	variables.controller = new coldbox.system.web.Controller();
+	variables.wirebox = new coldbox.system.ioc.Injector();
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.log = new coldbox.system.logging.Logger();
 	/**
 	 * Constructor
 	 *

@@ -84,6 +84,12 @@ component extends="contentbox.models.BaseEntityMethods" {
 	 * --------------------------------------------------------------------------
 	 */
 	property name="numberOfComments" formula="select count(*) from cb_comment comment where comment.FK_contentID=contentID" default="0";
+	variables.categoryService = new contentbox.models.content.CategoryService();
+	variables.contentService = new contentbox.models.content.ContentService();
+	variables.contentVersionService = new contentbox.models.content.ContentVersionService();
+	variables.contentTemplateService = new contentbox.models.content.ContentTemplateService();
+	variables.customFieldService = new contentbox.models.content.CustomFieldService();
+	variables.statsService = new contentbox.models.content.StatsService();
 	/**
 	 * Base constructor
 	 */

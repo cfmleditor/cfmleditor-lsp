@@ -8,6 +8,7 @@
 component {
 	property name="mockGenerator";
 	property name="generationPath";
+	variables.mockGenerator = new wheels.wheelstest.system.mockutils.MockGenerator();
 	/**
 	 * Create an instance of MockBox
 	 *

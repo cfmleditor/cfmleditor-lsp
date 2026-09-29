@@ -6,6 +6,12 @@
  * This is a base spec object that is used to test XUnit and BDD style specification methods
  */
 component {
+	this.$assert = new testbox.system.Assertion();
+	variables.$assert = new testbox.system.Assertion();
+	variables.$utility = new testbox.system.util.Util();
+	variables.$env = new testbox.system.util.Env();
+	this.$mockbox = new testbox.system.MockBox();
+	variables.$mockbox = new testbox.system.MockBox();
 	/**
 	 * Constructor
 	 */

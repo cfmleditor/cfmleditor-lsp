@@ -70,6 +70,11 @@ component {
 	 * The Application's AsyncManager
 	 */
 	property name="asyncManager";
+	variables.util = new coldbox.system.core.util.Util();
+	variables.CFMLEngine = new coldbox.system.core.util.CFMLEngine();
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.cacheBox = new coldbox.system.cache.CacheFactory();
+	variables.wireBox = new coldbox.system.ioc.Injector();
 	/**
 	 * Constructor
 	 *

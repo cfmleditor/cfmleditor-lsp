@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -163,6 +164,10 @@ func ResolvePathCached(dotPath string, baseDir string, mappings map[string]strin
 		dotPath = strings.ReplaceAll(dotPath, "/", ".")
 	}
 
+	if abs := resolveNestedMapping(dotPath, mappings, cache); abs != "" {
+		return abs
+	}
+
 	parts := strings.SplitN(dotPath, ".", 2)
 	if mappings != nil {
 		if mapped, ok := lookupFold(mappings, parts[0]); ok {
@@ -216,6 +221,54 @@ func InFolderNamed(roots []string, rel string) []string {
 
 // lookupFold returns the value for the first key in m that matches key
 // case-insensitively, and whether one was found.
+// resolveNestedMapping resolves dotPath through a mapping whose name has more
+// than one segment — `this.mappings[ "/modules/wheels" ]` beside
+// `this.mappings[ "/modules" ]` — which the first-segment lookup below cannot
+// see. The engine takes the longest mapping that prefixes the path, so the
+// candidates are tried longest first; a path none of them holds falls through
+// to the single-segment lookup.
+func resolveNestedMapping(dotPath string, mappings map[string]string, cache *DirCache) string {
+	var keys []string
+
+	for k := range mappings {
+		if norm := nestedMappingKey(k); norm != "" && len(dotPath) > len(norm) &&
+			dotPath[len(norm)] == '.' && strings.EqualFold(dotPath[:len(norm)], norm) {
+			keys = append(keys, k)
+		}
+	}
+
+	slices.SortFunc(keys, func(a, b string) int {
+		if d := len(nestedMappingKey(b)) - len(nestedMappingKey(a)); d != 0 {
+			return d
+		}
+
+		return strings.Compare(a, b)
+	})
+
+	for _, k := range keys {
+		segments := strings.Split(dotPath[len(nestedMappingKey(k))+1:], ".")
+		segments[len(segments)-1] += ".cfc"
+
+		if abs := resolveSegmentsCached(mappings[k], segments, cache); abs != "" {
+			return abs
+		}
+	}
+
+	return ""
+}
+
+// nestedMappingKey is a mapping name with more than one segment spelled as a
+// dot-path prefix (`modules/wheels` → `modules.wheels`), or "" for a
+// single-segment one, which the first-segment lookup already answers.
+func nestedMappingKey(k string) string {
+	k = strings.ReplaceAll(strings.Trim(k, "/"), "/", ".")
+	if !strings.Contains(k, ".") {
+		return ""
+	}
+
+	return k
+}
+
 func lookupFold(m map[string]string, key string) (string, bool) {
 	if v, ok := m[key]; ok {
 		return v, true

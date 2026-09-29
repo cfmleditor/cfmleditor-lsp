@@ -11,6 +11,8 @@ component {
 	property name="util" inject="coldbox.system.core.util.Util";
 	property name="ormEntityMap";
 	property name="entityMetadataMap";
+	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
+	variables.util = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
 	 */

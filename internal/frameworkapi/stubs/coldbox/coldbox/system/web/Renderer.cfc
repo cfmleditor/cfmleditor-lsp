@@ -24,6 +24,7 @@ component extends="coldbox.system.FrameworkSupertype" {
 	property name="expandPathCache";
 	property name="locateViewCache";
 	property name="locateLayoutCache";
+	variables.templateCache = new coldbox.system.cache.providers.CacheBoxColdBoxProvider();
 	/**
 	 * Constructor
 	 */

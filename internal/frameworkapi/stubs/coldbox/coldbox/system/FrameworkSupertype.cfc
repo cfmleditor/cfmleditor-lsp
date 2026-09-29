@@ -20,6 +20,12 @@ component {
 	property name="env" inject="env@coreDelegates";
 	property name="jsonUtil" inject="JsonUtil@coreDelegates";
 	property name="flow" inject="Flow@coreDelegates";
+	variables.controller = new coldbox.system.web.Controller();
+	variables.cachebox = new coldbox.system.cache.CacheFactory();
+	variables.flash = new coldbox.system.web.flash.AbstractFlashScope();
+	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.wirebox = new coldbox.system.ioc.Injector();
 	/**
 	 * Constructor
 	 */

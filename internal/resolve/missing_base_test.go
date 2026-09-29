@@ -88,7 +88,9 @@ func TestAnInheritedCallIntoAMissingBaseBlamesTheBase(t *testing.T) {
 func TestAReceiverTheFileNeverDeclaresIsTheMissingBases(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "Spec.cfc")
-	src := `component extends="testbox.system.BaseSpec" {
+	// A base no path answers; testbox.system.BaseSpec itself now resolves to
+	// the bundled TestBox API (frameworkapi.Namespaced).
+	src := `component extends="vendor.missing.BaseSpec" {
 	function run( arg ) {
 		print.line( "x" );
 		variables.$assert.isTrue( true );

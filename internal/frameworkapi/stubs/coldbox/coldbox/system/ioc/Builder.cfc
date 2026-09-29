@@ -34,6 +34,9 @@ component {
 	 * LogBox DSL Utility
 	 */
 	property name="logBoxDSL";
+	variables.coldboxDSL = new coldbox.system.ioc.dsl.ColdBoxDSL();
+	variables.cacheBoxDSL = new coldbox.system.ioc.dsl.CacheBoxDSL();
+	variables.logBoxDSL = new coldbox.system.ioc.dsl.LogBoxDSL();
 	/**
 	 * Constructor. If called without a configuration binder, then WireBox will instantiate the default configuration binder found coldbox.system.ioc.config.DefaultBinder
 	 *

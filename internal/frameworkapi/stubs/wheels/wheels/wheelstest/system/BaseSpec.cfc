@@ -6,6 +6,12 @@
  * This is a base spec object that is used to test XUnit and BDD style specification methods
  */
 component {
+	this.$assert = new wheels.wheelstest.system.Assertion();
+	variables.$assert = new wheels.wheelstest.system.Assertion();
+	variables.$utility = new wheels.wheelstest.system.util.Util();
+	variables.$env = new wheels.wheelstest.system.util.Env();
+	this.$mockbox = new wheels.wheelstest.system.MockBox();
+	variables.$mockbox = new wheels.wheelstest.system.MockBox();
 	/**
 	 * Constructor
 	 */

@@ -34,6 +34,7 @@ component extends="contentbox.models.BaseEntity" {
 	property name="permissionGroups" singularName="permissionGroup" fieldtype="many-to-many" type="array" lazy="true" inverse="true" cfc="contentbox.models.security.PermissionGroup" cascade="all" fkcolumn="FK_authorID" linktable="cb_authorPermissionGroups" inversejoincolumn="FK_permissionGroupID" orderby="name";
 	property name="loggedIn" persistent="false" default="false" type="boolean";
 	property name="permissionList" persistent="false";
+	variables.authorService = new contentbox.models.security.AuthorService();
 	/**
 	 * Constructor
 	 */

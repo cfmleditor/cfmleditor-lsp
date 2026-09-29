@@ -114,6 +114,14 @@ component {
 	 * The object builder for this injector
 	 */
 	property name="objectBuilder";
+	this.SCOPES = new coldbox.system.ioc.Scopes();
+	this.TYPES = new coldbox.system.ioc.Types();
+	variables.utility = new coldbox.system.core.util.Util();
+	variables.scopeStorage = new coldbox.system.core.collections.ScopeStorage();
+	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.objectBuilder = new coldbox.system.ioc.Builder();
+	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
 	/**
 	 * WireBox can be constructed with no parameters and it will use the default binder: `coldbox.system.ioc.config.DefaultBinder` for configuration
 	 * and place the instance in `application.wirebox` scope for easy access.

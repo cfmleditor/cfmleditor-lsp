@@ -9,6 +9,7 @@
  * @author Luis Majano
  */
 component extends="coldbox.system.cache.providers.CacheBoxProvider" {
+	variables.eventURLFacade = new coldbox.system.cache.util.EventURLFacade();
 	/**
 	 * Constructor
 	 */

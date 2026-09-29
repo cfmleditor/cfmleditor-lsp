@@ -1448,6 +1448,18 @@ project could have written by hand. Three rules hold them together, each with a 
   `relationshipMethods`) are generated beside a property's accessors. Wheels mixes the
   application's `global/functions.cfm` and what it includes into controllers, models and
   views (`wheelsGlobals`, through the wheels preset's `helperDirs`).
+- **A path in a framework's own namespace needs no preset** (`frameworkapi.Namespaced`):
+  `coldbox.system.`, `testbox.system.`, `commandbox.system.`, `qb.models.` and
+  `contentbox.models.` can only mean that framework, so the resolver answers them from the
+  stubs after everything on disk, whatever the config names. Lucee's test suite extends
+  `testbox.system.compat.framework.TestCase` with no preset and was 1,885 broken chains.
+  `framework.` (FW/1) and `wheels.` are left to their presets, since a project may have a
+  folder of that name. `r.fs()` therefore always mounts the stubs. Tests that need a base
+  that does not resolve use a made-up one (`vendor.missing.BaseSpec`), not a framework's.
+- **A stub keeps what the framework's variables hold** (`writeTypedVariables`): a
+  `variables.`/`this.` variable the source assigns a framework component becomes a
+  statement in the stub's pseudo-constructor, so `$assert` (BaseSpec's constructor sets it)
+  is still an Assertion with the body gone.
 - **A preset's variable resolvers are `nameOnly`.** The tag parser's bare-name fallback
   (`resolveRHS`) types `<cfset x = svc.load()>` as `svc`'s component, which is deliberate for a
   project's own resolvers (`TestResolverMatch_PipeDelimitedPrefix_BareNameFallback`) and wrong
@@ -1455,6 +1467,32 @@ project could have written by hand. Three rules hold them together, each with a 
   from it. **Every config-to-parser conversion is `config.Resolver.Parser()`** — there were
   ten struct literals, and a field one of them forgot is a setting that parses and does
   nothing; `TestParserCarriesEveryResolverField` sets every field and fails on one dropped.
+
+**`Application.cfc` mappings are evaluated, not just matched** (`parser.evaluatedMappings`).
+The literal-only regex read 20 of the corpus's 110 `this.mappings` assignments; the rest are
+built from the file's own directory and from variables set a line above —
+`local.projectRoot = expandPath( "../../../" ); this.mappings[ "/cli" ] = local.projectRoot & "cli/";`.
+`evalPathExpr` handles `&`, string literals, `expandPath()`,
+`getDirectoryFromPath( getCurrentTemplatePath() )`, a variable assigned earlier in the file
+and an earlier mapping, and declines anything else whole. **A mapping name may have several
+segments** (`/modules/wheels` beside `/modules`): `resolveNestedMapping` tries those, longest
+first, before the first-segment lookup, which could never see them. Together they were 1,700
+corpus entries, most of cfwheels' CLI specs.
+
+**A component has the functions of the templates it includes** (`includedFunc`): Wheels'
+`Global.cfc` is little but includes of `global/*.cfm`, and a qualified call
+(`application.wo.$simpleLock()`) looked only at the component's own functions. It reads the
+component's own include statements from the index (`Index.IncludesForFile`) rather than the
+workspace include graph, which is rebuilt whenever an include is indexed.
+
+**A chain headed by a built-in function is dynamic** (`resolveBareChain`):
+`getPageContext().getRequest()` is a call on what the engine returns, and the file's own
+function of that name is looked for first. **A bare inferred return is beside the declaring
+file** (`ReturnComponentOf` → `besideDeclaring`), as a bare return type already was:
+`return new Expectation()` in a base class read from the caller's directory named nothing.
+**`Index.FindFilesByBasename` returns a file's real case** from `fileURIs`: a component with no
+functions had only its lowercased key, which names nothing on a case-sensitive filesystem, and
+the extends walk stopped at Lucee's empty `LuceeTestCase.cfc`.
 
 **Case-insensitive path resolution** (`internal/path/path.go`): `match`/`prefix` matching
 (`indexFold`, `EqualFold`, `(?i)`-compiled regexes) has always been case-insensitive. Turning a

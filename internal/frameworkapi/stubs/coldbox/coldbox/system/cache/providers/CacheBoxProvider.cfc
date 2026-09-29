@@ -135,6 +135,8 @@ component extends="coldbox.system.cache.AbstractCacheBoxProvider" {
 	 * @doc.type coldbox.system.cache.util.CacheStats
 	 */
 	property name="stats";
+	variables.elementCleaner = new coldbox.system.cache.util.ElementCleaner();
+	variables.stats = new coldbox.system.cache.util.CacheStats();
 	/**
 	 * Constructor
 	 */
