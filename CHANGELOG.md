@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.9]
+
 ### Added
 
 - **A shared-scope variable is typed from the templates that set the request up.** `REQUEST.context.getUser()`, in a file that never assigns `REQUEST.context`, used to need a `componentResolvers` entry matching the name. The server now reads the `SCOPE.name = value` assignments in the templates the governing `Application.cfc` includes, transitively, and in the new `startupFiles` config key, which applies to every file, including those under no `Application.cfc`. A `startupFiles` entry may be a template path such as `/tassweb/packages/tass/core/bootstrap.cfm`, resolved like a `cfinclude`. A value that creates a component, or a chain of calls on another shared variable or on a resolver-named receiver, is typed through each call's return type, so tassweb's `REQUEST.context = REQUEST.kernel.getContextObject()` types `REQUEST.context`. It is tried after every assignment the calling file, its `Application.cfc` and its extends chain make, and the answer is still method-checked. In tassweb, with the full config, the unresolved calls are identical. Without the `context` resolver, 6,013 shared-scope calls depended on it. The automatic lookup leaves 692, the calls under no `Application.cfc`, and `startupFiles` leaves none. Six public projects give identical results.
