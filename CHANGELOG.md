@@ -5,6 +5,7 @@
 ### Fixed
 
 - **A shared-scope variable set by a multi-line startup assignment is typed.** `REQUEST.tassui = REQUEST.kernel.getPageTools().getTassUI( companyCode = …, currencySymbol = REQUEST.kernel.getObjInit().getCurrencySymbol() )` was never read: the startup scan took one line at a time and never reached the closing `>`, and the chain check refused a call inside an argument list. A right-hand side now runs to the tag's `>` or the statement's `;`, outside quotes and parentheses.
+- **An `Application.cfc` mapping written `getDirectoryFromPath(getCurrentTemplatePath())` is read.** `this.mappings["/contentscmf"] = getDirectoryFromPath(getCurrentTemplatePath())`, the usual way to say "this folder", was ignored: only `expandPath("…")` and a plain string were understood. It maps to the `Application.cfc`'s folder, or to a folder under it with `& "sub/dir"` appended.
 - **A declared component return type, dotted or a bare word, outranks an inferred `$any`.** `getTassUI` declares `returntype="…customobjects.tassui"` but builds its result through `createObject("component", "customobjects.#type#")`, so the body inferred `$any` and that beat the declaration. The engine enforces a declared type; an inferred `$any` only says the path is computed. Any other inferred component is still kept over the declared one.
 
 ## [0.4.0]

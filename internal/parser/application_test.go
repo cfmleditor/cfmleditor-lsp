@@ -174,3 +174,23 @@ func TestParseOrmLocations_Empty(t *testing.T) {
 		t.Errorf("expected nil, got %v", got)
 	}
 }
+
+// getDirectoryFromPath(getCurrentTemplatePath()) is the idiom for "the folder
+// this Application.cfc is in", so a mapping written with it names appDir, or a
+// folder under it when a string is appended.
+func TestParseApplicationMappings_DirectoryOfTheTemplate(t *testing.T) {
+	content := `component {
+		this.mappings["/contentscmf"] = getDirectoryFromPath( getCurrentTemplatePath() );
+		this.mappings["/lib"] = getDirectoryFromPath(getCurrentTemplatePath()) & "shared/lib";
+	}`
+	appDir := "/project"
+	got := ParseApplicationMappings(content, appDir)
+
+	if got["contentscmf"] != appDir {
+		t.Errorf("contentscmf = %q, want %q", got["contentscmf"], appDir)
+	}
+
+	if want := filepath.Join(appDir, "shared", "lib"); got["lib"] != want {
+		t.Errorf("lib = %q, want %q", got["lib"], want)
+	}
+}
