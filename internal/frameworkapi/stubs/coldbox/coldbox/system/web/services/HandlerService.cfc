@@ -74,7 +74,7 @@ component extends="coldbox.system.web.services.BaseService" {
 	 *
 	 * @return coldbox.system.web.context.EventHandlerBean
 	 */
-	function getHandlerBean( required string event ) {}
+	coldbox.system.web.context.EventHandlerBean function getHandlerBean( required string event ) {}
 	/**
 	 * Do a default action checks on the incoming event string. This method matches it against
 	 * the internal handlers list.  If found, then we append the default action to the event.

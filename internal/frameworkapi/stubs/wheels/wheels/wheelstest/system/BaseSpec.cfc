@@ -500,13 +500,13 @@ component {
 	 *
 	 * @return wheels.wheelstest.system.util.Util
 	 */
-	function getUtility() {}
+	wheels.wheelstest.system.util.Util function getUtility() {}
 	/**
 	 * Get the TestBox Env  object
 	 *
 	 * @return wheels.wheelstest.system.util.Env
 	 */
-	function getEnv() {}
+	wheels.wheelstest.system.util.Env function getEnv() {}
 	/**
 	 * Get a reference to the MockBox Engine
 	 *
@@ -514,7 +514,7 @@ component {
 	 *
 	 * @return wheels.wheelstest.system.MockBox
 	 */
-	function getMockBox( string generationPath ) {}
+	wheels.wheelstest.system.MockBox function getMockBox( string generationPath ) {}
 	/**
 	 * Create an empty mock
 	 *

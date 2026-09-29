@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
 // A framework preset is what naming a framework in `frameworks` adds to a
@@ -68,6 +70,42 @@ func returnResolver(component string, names ...string) []Resolver {
 	out := make([]Resolver, 0, len(names))
 	for _, n := range names {
 		out = append(out, Resolver{Match: n + "()", Resolve: component, Prefix: n, DynamicIfMissing: true})
+	}
+
+	return out
+}
+
+// idResolver types what a factory call returns by the id it is handed:
+// `getInstance( "UserService@users" )` is the component UserService, found by
+// path and, failing that, by file name — nearest the calling file first —
+// as an injected property's id is (parser.injectedComponent). The id is a
+// literal, optionally named and optionally followed by further arguments;
+// a computed one is left alone, and so is a call chained on the result,
+// since the match is the whole remainder.
+func idResolver(fn string) Resolver {
+	return Resolver{
+		Match:            `(?i)^` + fn + `\(\s*(?:\w+\s*=\s*)?["'](?:id:|model:)?([A-Za-z_][\w.]*)(?:@[\w.-]*)?["']\s*(?:,[^()]*)?\)$`,
+		Resolve:          "$1",
+		Prefix:           fn,
+		DynamicIfMissing: true,
+	}
+}
+
+// dslResolvers type `getInstance( "wirebox:populator" )` and the rest of the
+// WireBox DSL a getInstance() may be handed in place of an id, as an
+// injection is (parser.InjectionDSL). They go before idResolver, which would
+// read `getInstance( "logbox" )` as a component called logbox.
+func dslResolvers() []Resolver {
+	dsl := parser.InjectionDSL()
+	out := make([]Resolver, 0, len(dsl))
+
+	for _, k := range slices.Sorted(maps.Keys(dsl)) {
+		out = append(out, Resolver{
+			Match:            `(?i)^getInstance\(\s*(?:\w+\s*=\s*)?["']` + regexp.QuoteMeta(k) + `["']\s*\)$`,
+			Resolve:          dsl[k],
+			Prefix:           "getInstance",
+			DynamicIfMissing: true,
+		})
 	}
 
 	return out
@@ -137,6 +175,10 @@ var frameworkPresets = map[string]frameworkPreset{
 			// Declared, but as a bare word, which the resolver does not take
 			// for a component: ColdBoxScheduledTask function task( name ).
 			returnResolver(coldboxSystem+"web.tasks.ColdBoxScheduledTask", "task"),
+			// WireBox builds what an id names, from a handler, a model, a
+			// test or the injector itself.
+			dslResolvers(),
+			[]Resolver{idResolver("getInstance")},
 		),
 		bases: []implicitBase{
 			{dir: "handlers", ext: ".cfc", component: coldboxSystem + "EventHandler"},
@@ -218,6 +260,10 @@ var frameworkPresets = map[string]frameworkPreset{
 	"wheels": {
 		resolvers: []Resolver{
 			variableResolver("wheels.Global", "application.wo"),
+			// model( "User" ) is the class in the application's models
+			// directory: by file name, nearest the calling file, which is how
+			// a test's own models are found before the application's.
+			idResolver("model"),
 		},
 		bases: []implicitBase{
 			{dir: "views", ext: ".cfm", component: wheelsView},
@@ -316,7 +362,7 @@ func PresetComponents(name string) []string {
 	seen := map[string]bool{}
 	add := func(list string) {
 		for c := range strings.SplitSeq(list, "|") {
-			if c != "" && !seen[strings.ToLower(c)] {
+			if c != "" && !strings.Contains(c, "$") && !seen[strings.ToLower(c)] {
 				seen[strings.ToLower(c)] = true
 				out = append(out, c)
 			}

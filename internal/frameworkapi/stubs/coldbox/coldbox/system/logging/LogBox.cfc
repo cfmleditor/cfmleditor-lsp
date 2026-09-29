@@ -90,7 +90,7 @@ component {
 	 *
 	 * @return coldbox.system.logging.Logger
 	 */
-	function getLogger( required category ) {}
+	coldbox.system.logging.Logger function getLogger( required category ) {}
 	/**
 	 * Get the list of currently instantiated loggers.
 	 */

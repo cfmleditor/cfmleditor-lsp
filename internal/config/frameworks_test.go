@@ -132,6 +132,19 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"contentbox", "prcXoCurrentAuthor", ""},
 		{"wheels", "application.wo", "wheels.Global"},
 		{"fw1", "variables.fw", "framework.one"},
+		// What WireBox builds is the component its id names; a DSL string
+		// is ColdBox's own class; a computed id, or a call chained on the
+		// result, is left alone.
+		{"coldbox", `getInstance( "UserService@users" )`, "UserService"},
+		{"coldbox", `wirebox.getInstance( name = "id:models.UserService" )`, "models.UserService"},
+		{"coldbox", `getInstance( "UserService", { a = 1 } )`, "UserService"},
+		{"coldbox", `getInstance( "wirebox:populator" )`, "coldbox.system.core.dynamic.ObjectPopulator"},
+		{"coldbox", `getInstance( "logbox" )`, "coldbox.system.logging.LogBox"},
+		{"coldbox", `getInstance( "#svc#Service" )`, ""},
+		{"coldbox", `getInstance( "UserService" ).init()`, ""},
+		{"coldbox", `Calendar.getInstance()`, ""},
+		{"wheels", `model( "User" )`, "User"},
+		{"wheels", `model( "User" ).findAll()`, ""},
 	} {
 		var rs []parser.Resolver
 		for _, r := range FrameworkResolvers([]string{tc.framework}) {

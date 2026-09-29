@@ -534,13 +534,13 @@ component {
 	 *
 	 * @return testbox.system.util.Util
 	 */
-	function getUtility() {}
+	testbox.system.util.Util function getUtility() {}
 	/**
 	 * Get the TestBox Env  object
 	 *
 	 * @return testbox.system.util.Env
 	 */
-	function getEnv() {}
+	testbox.system.util.Env function getEnv() {}
 	/**
 	 * Get a reference to the MockBox Engine
 	 *
@@ -548,7 +548,7 @@ component {
 	 *
 	 * @return testbox.system.MockBox
 	 */
-	function getMockBox( string generationPath ) {}
+	testbox.system.MockBox function getMockBox( string generationPath ) {}
 	/**
 	 * Create an empty mock
 	 *

@@ -104,7 +104,7 @@ component {
 	 *
 	 * @return coldbox.system.core.dynamic.MixerUtil
 	 */
-	function getMixerUtil() {}
+	coldbox.system.core.dynamic.MixerUtil function getMixerUtil() {}
 	/**
 	 * Checks if an object is of the passed in family type
 	 *

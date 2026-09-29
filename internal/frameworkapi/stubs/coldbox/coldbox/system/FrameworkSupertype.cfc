@@ -78,7 +78,7 @@ component {
 	 *
 	 * @return coldbox.system.web.Renderer
 	 */
-	function getRenderer() {}
+	coldbox.system.web.Renderer function getRenderer() {}
 	/**
 	 * Render out a view
 	 *
@@ -439,7 +439,7 @@ component {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function getRequestContext() {}
+	coldbox.system.web.context.RequestContext function getRequestContext() {}
 	/**
 	 * Get the RC or PRC collection reference
 	 *

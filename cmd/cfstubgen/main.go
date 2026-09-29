@@ -21,6 +21,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,6 +133,8 @@ type generator struct {
 	out  string // <out>/<framework>/<prefix>
 	done map[string]bool
 	todo []string
+	// names indexes the source's components by file name, for byName.
+	names map[string][]string
 }
 
 func generate(src *frameworkapi.Source, repo, out string) error {
@@ -508,7 +511,6 @@ func (g *generator) returnType(src *source, def *parser.FunctionDef) string {
 
 	switch rc := def.ReturnComponent; {
 	case rc == "":
-		return ""
 	case rc == src.path || strings.EqualFold(filepath.Clean(rc), filepath.Clean(src.path)):
 		return g.qualify(src.path)
 	default:
@@ -521,6 +523,71 @@ func (g *generator) returnType(src *source, def *parser.FunctionDef) string {
 		if validType(rc) && strings.Contains(rc, ".") {
 			return rc
 		}
+	}
+
+	return g.docReturn(src, def)
+}
+
+var docReturnRe = regexp.MustCompile(`(?im)^@returns?\s+([A-Za-z_]\w*(?:\.\w+)+)\b`)
+
+// docReturn is the component def's doc comment says it returns, when its
+// declaration says nothing: ColdBox writes `function execute(...)` and
+// documents `@return coldbox.system.context.RequestContext`. Only a dotted
+// name counts — a bare word is `struct` far more often than a component — and
+// only one the framework's source holds: by its path, or, for a path the doc
+// spells wrong (that one: the class lives in web.context), by its file name
+// when exactly one file in the source has it.
+func (g *generator) docReturn(src *source, def *parser.FunctionDef) string {
+	m := docReturnRe.FindStringSubmatch(funcDoc(src, def))
+	if m == nil {
+		return ""
+	}
+
+	abs, q := g.resolve(m[1], filepath.Dir(src.path))
+	if abs == "" {
+		abs = g.byName(m[1][strings.LastIndexByte(m[1], '.')+1:])
+		q = g.qualify(abs)
+	}
+
+	if abs == "" || q == "" || isInterface(abs) {
+		return ""
+	}
+
+	g.todo = append(g.todo, abs)
+
+	return q
+}
+
+var interfaceRe = regexp.MustCompile(`(?im)^\s*interface\b|<cfinterface\b`)
+
+// isInterface reports whether the file declares an interface. A doc comment
+// naming one says less than the call returns: CacheFactory's getCache() is
+// documented as an ICacheProvider, and every provider it hands back has
+// getOrSet(), which the interface does not declare. Typing the call by it
+// would report that as missing.
+func isInterface(abs string) bool {
+	data, err := os.ReadFile(abs)
+
+	return err == nil && interfaceRe.Match(data)
+}
+
+// byName is the one file in the framework's source named name.cfc, or "".
+func (g *generator) byName(name string) string {
+	if g.names == nil {
+		g.names = map[string][]string{}
+
+		_ = filepath.WalkDir(g.root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".cfc") {
+				k := strings.ToLower(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))
+				g.names[k] = append(g.names[k], p)
+			}
+
+			return nil
+		})
+	}
+
+	if hits := g.names[strings.ToLower(name)]; len(hits) == 1 {
+		return hits[0]
 	}
 
 	return ""

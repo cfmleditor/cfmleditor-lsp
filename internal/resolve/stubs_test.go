@@ -103,3 +103,37 @@ func TestAChainBreakingBeyondTheStubsIsTheFrameworksAbsence(t *testing.T) {
 		"expect": "",
 	})
 }
+
+// TestAnInjectedFrameworkObjectIsCheckedAgainstTheStubs: `inject="coldbox:
+// requestService"` types the property as ColdBox's own class. With the
+// stubs a call on it is checked; without ColdBox or its stubs it is dynamic,
+// as a preset's resolvers are — in a subclass too, where the property the call
+// is made on was declared by the base.
+func TestAnInjectedFrameworkObjectIsCheckedAgainstTheStubs(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"models/Base.cfc": `component {
+	property name="requestService" inject="coldbox:requestService";
+	property name="log" inject="logbox:logger:{this}";
+}`,
+		"models/Child.cfc": `component extends="Base" {
+	function f() {
+		variables.requestService.getContext();
+		variables.requestService.notAMethod();
+		log.info( "x" );
+	}
+}`,
+	})
+
+	with := &Resolver{Stubs: frameworkapi.For([]string{"coldbox"})}
+	expectReasons(t, reasonsWith(t, with, dir, "models/Child.cfc"), map[string]string{
+		"variables.requestService.getContext": "",
+		"variables.requestService.notAMethod": "method 'notAMethod' not found in coldbox.system.web.services.RequestService",
+		"log.info":                            "",
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "models/Child.cfc"), map[string]string{
+		"variables.requestService.notAMethod": "",
+		"log.info":                            "",
+	})
+}

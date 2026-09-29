@@ -74,7 +74,7 @@ component {
 	 *
 	 * @return testbox.system.util.Env
 	 */
-	function getEnv() {}
+	testbox.system.util.Env function getEnv() {}
 	/**
 	 * Register a directory to test
 	 *

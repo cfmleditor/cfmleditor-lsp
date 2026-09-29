@@ -1822,7 +1822,10 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.R
 
 		// A closure holding line may declare the name itself, which shadows
 		// the function's: the innermost closure's latest declaration at or
-		// before line wins. Failing that, the function's own.
+		// before line wins. Failing that, the function's own, and of those the
+		// latest at or before line, as fileLevelRef chooses: `var exporter` in
+		// one <cfcase> and again in the next is two variables in practice.
+		// Only a forward reference takes the first.
 		var closure, wide *parser.ComponentRef
 
 		for i := range refs {
@@ -1833,7 +1836,7 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.R
 
 			switch {
 			case ref.VisibleTo == 0:
-				if wide == nil {
+				if wide == nil || ref.Line <= line && (wide.Line > line || ref.Line > wide.Line) {
 					wide = ref
 				}
 			case ref.Line <= line && (closure == nil || ref.VisibleFrom > closure.VisibleFrom ||

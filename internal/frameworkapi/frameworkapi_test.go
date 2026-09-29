@@ -40,6 +40,51 @@ func TestEveryPresetHasItsStubs(t *testing.T) {
 	}
 }
 
+// TestEveryInjectionHasItsStub: a property injected with the WireBox DSL is
+// typed as one of ColdBox's own classes, and without ColdBox in the workspace
+// that class comes from the stubs, or the property's methods are unchecked.
+func TestEveryInjectionHasItsStub(t *testing.T) {
+	cb := For([]string{"coldbox"})
+
+	for _, c := range parser.InjectedFrameworkComponents() {
+		if cb.Path(c) == "" {
+			t.Errorf("no stub for %s", c)
+		}
+	}
+}
+
+// TestAStubReturnsWhatItsDocSays: ColdBox declares few return types and
+// documents most, so the generator reads `@return` — and a test's
+// `var event = execute( "main.index" )` is a RequestContext. The doc's path is
+// sometimes wrong (execute's names coldbox.system.context.RequestContext) and
+// the class is found by its file name then; an interface is left out, since a
+// cache typed as ICacheProvider would have no getOrSet().
+func TestAStubReturnsWhatItsDocSays(t *testing.T) {
+	cb := For([]string{"coldbox"})
+
+	for _, tc := range []struct{ component, method, want string }{
+		{"coldbox.system.testing.BaseTestCase", "execute", "coldbox.system.web.context.RequestContext"},
+		{"coldbox.system.testing.BaseTestCase", "getMockController", "coldbox.system.testing.mock.web.MockController"},
+		{"coldbox.system.cache.CacheFactory", "getCache", ""},
+	} {
+		text, ok := StubText(cb.Path(tc.component))
+		if !ok {
+			t.Fatalf("no stub for %s", tc.component)
+		}
+
+		pr := parser.Parse("file:///stub.cfc", text)
+
+		i := slices.IndexFunc(pr.Funcs, func(f parser.FunctionDef) bool { return strings.EqualFold(f.Name, tc.method) })
+		if i < 0 {
+			t.Fatalf("%s has no %s", tc.component, tc.method)
+		}
+
+		if got := pr.Funcs[i].ReturnType; got != tc.want {
+			t.Errorf("%s.%s returns %q, want %q", tc.component, tc.method, got, tc.want)
+		}
+	}
+}
+
 // TestStubsParseAndTheirBasesResolve: every stub parses into functions or
 // properties, and a base named with the framework's own prefix is a stub
 // too, so an inherited method is found through the chain.

@@ -611,7 +611,7 @@ component {
 	 *
 	 * @return coldbox.system.web.context.Response
 	 */
-	function getResponse() {}
+	coldbox.system.web.context.Response function getResponse() {}
 	/**
 	 * Stream a Server-Sent Events response. BoxLang only.
 	 *

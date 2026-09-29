@@ -44,13 +44,13 @@ component extends="coldbox.system.web.services.BaseService" {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function getContext( string classPath ) {}
+	coldbox.system.web.context.RequestContext function getContext( string classPath ) {}
 	/**
 	 * Get the Request context from request scope or return null if not exists
 	 *
 	 * @return coldbox.system.web.context.RequestContext or null if not found
 	 */
-	private function getContextFromScope() {}
+	private coldbox.system.web.context.RequestContext function getContextFromScope() {}
 	/**
 	 * Set the request context into the request scope
 	 *
@@ -82,5 +82,5 @@ component extends="coldbox.system.web.services.BaseService" {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function createContext( string classPath ) {}
+	coldbox.system.web.context.RequestContext function createContext( string classPath ) {}
 }

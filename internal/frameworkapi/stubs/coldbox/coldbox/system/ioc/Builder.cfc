@@ -46,19 +46,19 @@ component {
 	 *
 	 * @return coldbox.system.ioc.dsl.ColdBoxDSL
 	 */
-	function getColdBoxDSL() {}
+	coldbox.system.ioc.dsl.ColdBoxDSL function getColdBoxDSL() {}
 	/**
 	 * Lazy load getter
 	 *
 	 * @return coldbox.system.ioc.dsl.CacheBoxDSL
 	 */
-	function getCacheBoxDSL() {}
+	coldbox.system.ioc.dsl.CacheBoxDSL function getCacheBoxDSL() {}
 	/**
 	 * Lazy load getter
 	 *
 	 * @return coldbox.system.ioc.dsl.LogBoxDSL
 	 */
-	function getLogBoxDSL() {}
+	coldbox.system.ioc.dsl.LogBoxDSL function getLogBoxDSL() {}
 	/**
 	 * Register custom DSL builders with this main wirebox builder
 	 */

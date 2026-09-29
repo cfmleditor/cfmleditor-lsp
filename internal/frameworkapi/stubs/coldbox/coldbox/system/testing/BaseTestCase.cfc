@@ -75,7 +75,7 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.testing.mock.web.MockController
 	 */
-	function getMockController() {}
+	coldbox.system.testing.mock.web.MockController function getMockController() {}
 	/**
 	 * Builds an empty functioning request context mocked with methods via MockBox.  You can also optionally wipe all methods on it
 	 *
@@ -84,7 +84,7 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function getMockRequestContext( boolean clearMethods, decorator ) {}
+	coldbox.system.web.context.RequestContext function getMockRequestContext( boolean clearMethods, decorator ) {}
 	/**
 	 * ColdBox must be loaded for this to work. Get a mock model object by convention. You can optional clear all the methods on the model object if you wanted to. The object is created but not initiated, that would be your job.
 	 *
@@ -97,13 +97,13 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.ioc.Injector
 	 */
-	function getWireBox() {}
+	coldbox.system.ioc.Injector function getWireBox() {}
 	/**
 	 * Get the CacheBox reference from the running application
 	 *
 	 * @return coldbox.system.cache.CacheFactory
 	 */
-	function getCacheBox() {}
+	coldbox.system.cache.CacheFactory function getCacheBox() {}
 	/**
 	 * Get the CacheBox reference from the running application
 	 *
@@ -117,19 +117,19 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.logging.LogBox
 	 */
-	function getLogBox() {}
+	coldbox.system.logging.LogBox function getLogBox() {}
 	/**
 	 * Get the RequestContext reference from the running application
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function getRequestContext() {}
+	coldbox.system.web.context.RequestContext function getRequestContext() {}
 	/**
 	 * Get the RequestContext reference from the running application
 	 *
 	 * @return coldbox.system.web.Flash.AbstractFlashScope
 	 */
-	function getFlashScope() {}
+	coldbox.system.web.flash.AbstractFlashScope function getFlashScope() {}
 	/**
 	 * Setup an initial request capture.  I basically look at the FORM/URL scopes and create the request collection out of them.
 	 *
@@ -153,7 +153,7 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.context.RequestContext
 	 */
-	function execute( string event, string route, string queryString, boolean private, boolean prePostExempt, struct eventArguments, boolean renderResults, boolean withExceptionHandling, string domain ) {}
+	coldbox.system.web.context.RequestContext function execute( string event, string route, string queryString, boolean private, boolean prePostExempt, struct eventArguments, boolean renderResults, boolean withExceptionHandling, string domain ) {}
 	/**
 	 * Shortcut method to making a request through the framework.
 	 *
@@ -297,13 +297,13 @@ component extends="testbox.system.compat.framework.TestCase" {
 	 *
 	 * @return coldbox.system.core.util.Util
 	 */
-	function getUtil() {}
+	coldbox.system.core.util.Util function getUtil() {}
 	/**
 	 * Get the ColdBox Env Class
 	 *
 	 * @return coldbox.system.core.delegates.Env
 	 */
-	function getEnv() {}
+	coldbox.system.core.delegates.Env function getEnv() {}
 	/**
 	 * Separate a route into two parts: the base route, and a query string collection
 	 *

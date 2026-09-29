@@ -427,7 +427,7 @@ component {
 	 *
 	 * @return contentbox.models.search.SearchResults
 	 */
-	function getSearchResults() {}
+	contentbox.models.search.SearchResults function getSearchResults() {}
 	/**
 	 * get the curent search results HTML content
 	 */

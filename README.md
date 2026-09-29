@@ -488,6 +488,7 @@ without saying so. `"frameworks": ["coldbox"]` teaches the LSP both:
 | `getRequestContext()`, `getController()`, `getRequestService()`, `getResponse()` and the other framework getters, however they are reached | Their ColdBox return types, so a chain on them is checked |
 | A `.cfc` under `handlers/` or `interceptors/`, `config/Router.cfc`, `config/Scheduler.cfc` that names no `extends` | An `EventHandler`, `Interceptor`, `Router` or `ColdBoxScheduler`, so a bare `getInstance()` or `route()` is found on the base |
 | A `.cfm` under `views/` or `layouts/` | Rendered by the `Renderer`, so a bare `view()` or `announce()` is found there |
+| `getInstance( "UserService@users" )`, `getInstance( name = "id:models.UserService" )`, however it is reached | The component the id names, found as an injected property's is (below). A WireBox DSL string, `getInstance( "logbox:root" )`, is ColdBox's own class. An id with no file behind it is dynamic, and a computed one is left alone |
 | A helper ColdBox mixes in: a module's `this.applicationHelper` or `includeUDF( "#moduleMapping#/…" )`, the app's `applicationHelper` setting, a view's `<view>Helper.cfm` and `<folder>Helper.cfm` | Found from any handler, view, layout or interceptor, so `cbMessageBox()` resolves where its module is installed |
 
 The other presets, named alongside it as a project uses them:
@@ -498,7 +499,7 @@ The other presets, named alongside it as a project uses them:
 | `commandbox` | `print` (the print buffer); what `command()` returns; a `.cfc` under `commands/` is a `BaseCommand`, and `task.cfc` or a `.cfc` under `build/` a `BaseTask` |
 | `cfmigrations` | a migration's `schema`, `qb`/`query`, and the `table` a schema callback is handed, as qb's builders. Common names, so name it only where cfmigrations is used |
 | `contentbox` | the `cb` helper; `prc.oCurrentAuthor`, `prc.oCurrentSite`, and `prc.oContent` as any kind of content. Use with `coldbox` |
-| `wheels` | `application.wo`; a view or layout runs inside its controller, with every view and controller mixin Wheels integrates, so `linkTo()` and `startFormTag()` are found |
+| `wheels` | `application.wo`; `model( "User" )` is the `User` model, found by file name nearest the calling file, so a test's own models come before the application's; a view or layout runs inside its controller, with every view and controller mixin Wheels integrates, so `linkTo()` and `startFormTag()` are found |
 | `fw1` | `fw`/`framework`, `beanFactory`; views and layouts run inside `framework.one`, so `buildURL()` is found |
 
 With a framework's source in the workspace (a mapping, or a checkout of it),
@@ -519,10 +520,21 @@ warned about. When the `box.json` beside the config depends on a framework
 with a preset the config does not name (`coldbox`, `testbox`,
 `commandbox-migrations`, `wheels-core`, …), `unresolved` ends by suggesting it,
 and the server logs the same suggestion; nothing is turned on for you. Over the six-project corpus, each project naming the frameworks
-it uses, the `unresolved` report goes from 23,560 entries to 14,665. That is more
-than the 14,083 it was before the bundled API, and the difference is checking:
-ContentBox, which uses ColdBox without its source, reports the same 3,776
-entries with the stubs as with ColdBox checked out beside it.
+it uses, the `unresolved` report goes from 22,933 entries to 14,027. The
+bundled API raised that figure when it came, from 14,083 to 14,665, because
+calls it had accepted unchecked were now checked: ContentBox, which uses
+ColdBox without its source, reports the same entries with the stubs as with
+ColdBox checked out beside it. Typing what `getInstance()` builds and what the
+injection DSL injects then took it to 14,027.
+
+The bundled API reads more than ColdBox declares. Most of ColdBox's methods
+declare no return type and document one, so a method whose doc comment says
+`@return coldbox.system.web.context.RequestContext` returns that in the
+bundled API: `var event = execute( event = "main.index" )` in a test is a
+request context, and `getMockController()` a mock controller. A documented
+path that does not exist is looked up by file name within the framework, and
+an interface is left out: `getCache()` is documented as an `ICacheProvider`,
+which declares less than every cache it hands back.
 
 A preset's variable resolvers are `nameOnly` (below), so in tag syntax
 `<cfset x = event.getValue( "a" )>` does not make `x` a request context.
@@ -901,18 +913,28 @@ configuration, 59,600 of 89,000 entries were calls into 67 such bases, and a
 dozen of them held 57,000. With these and the defaults below the report is 22,300 entries.
 
 **An injected property is typed by its id.** With no `beanPaths` entry or
-`propertyResolvers` rule to say otherwise, `property name="html"
-inject="HTMLHelper@coldbox"` holds the component `HTMLHelper`, and so do
-`inject="id:HTMLHelper@coldbox"` and `inject="model:HTMLHelper"` — WireBox's
-convention is that a model's id is its file's name. The component is found by
-path, then by file name, nearest first; one that is not on disk is reported as
-not existing, which names the missing dependency. The rest of the injection DSL
-(`coldbox:setting:x`, `logbox:logger:{this}`, `provider:x`, the bare `wirebox`,
-`coldbox`, `cachebox` and `logbox`) names something that is not a component
-file and is left alone. A file of the same name in the wrong place is still
-found: with ColdBox not checked out, `HTMLHelper@coldbox` finds ContentBox's own
-module config called `HTMLHelper.cfc`, and a `mappings` entry for `coldbox` is
-the fix.
+`propertyResolvers` rule to say otherwise, `property name="svc"
+inject="UserService@users"` holds the component `UserService`, and so do
+`inject="id:UserService@users"`, `inject="model:UserService"` and
+`inject="provider:UserService"` — WireBox's convention is that a model's id is
+its file's name, and a provider stands in for what it provides. The component
+is found by path, then by file name, nearest first; one that is not on disk is
+reported as not existing, which names the missing dependency.
+
+The injection DSL's namespaces name ColdBox's own objects, and each is typed
+as the class it injects: `coldbox` the `Controller`, `coldbox:requestService`
+and the other services, `coldbox:renderer`, `coldbox:flash`,
+`coldbox:asyncManager`, `wirebox` the `Injector`, `wirebox:populator` the
+`ObjectPopulator`, `cachebox` the `CacheFactory`, `cachebox:<name>` a cache,
+`logbox` the `LogBox` and `logbox:logger:{this}` a `Logger`. So are the models
+ColdBox registers under its own name, `HTMLHelper@coldbox`,
+`Renderer@coldbox`, `DataMarshaller@coldbox` and `XMLConverter@coldbox` — a
+file-name search for those would find whatever the workspace calls
+`Renderer.cfc`. With ColdBox checked out, or the `coldbox` preset's bundled
+API, calls on them are checked; with neither they are dynamic, since that is
+ColdBox being absent rather than a finding. The rest of the DSL
+(`coldbox:setting:x`, `coldbox:moduleSettings:x`, `wirebox:child:x`) names
+something that is not a component and is left alone.
 
 **Some values are typed without configuration.** Each rule below is a default
 that a `mappings` entry, `componentResolvers` rule or `javaStubsPath` still

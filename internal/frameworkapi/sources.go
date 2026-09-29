@@ -30,6 +30,12 @@ var Sources = []Source{
 		"coldbox.system.testing.BaseTestCase",
 		"coldbox.system.testing.BaseModelTest",
 		"coldbox.system.testing.BaseInterceptorTest",
+		// What `inject="wirebox:populator"`, `inject="cachebox:template"` and
+		// `inject="XMLConverter@coldbox"` hand a property
+		// (parser.InjectedFrameworkComponents).
+		"coldbox.system.core.dynamic.ObjectPopulator",
+		"coldbox.system.cache.providers.CacheBoxColdBoxProvider",
+		"coldbox.system.core.conversion.XMLConverter",
 	}},
 	{"testbox", "https://github.com/Ortus-Solutions/TestBox", "af36cddb7b6882deab7bebb5af7f4b4d89ef66a4", "testbox", "", []string{
 		"testbox.system.BaseSpec",

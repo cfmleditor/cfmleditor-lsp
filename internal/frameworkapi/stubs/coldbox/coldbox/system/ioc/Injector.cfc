@@ -277,7 +277,7 @@ component {
 	 *
 	 * @return coldbox.system.core.dynamic.ObjectPopulator
 	 */
-	function getObjectPopulator() {}
+	coldbox.system.core.dynamic.ObjectPopulator function getObjectPopulator() {}
 	/**
 	 * Checks if Coldbox application context is linked
 	 *

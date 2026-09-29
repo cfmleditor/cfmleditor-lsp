@@ -86,7 +86,7 @@ component {
 	 *
 	 * @return coldbox.system.web.Renderer
 	 */
-	function getRenderer() {}
+	coldbox.system.web.Renderer function getRenderer() {}
 	/**
 	 * Get the system data marshaller, you can also retrieve it from wirebox via dataMarshaller@coldbox
 	 *
