@@ -6,8 +6,14 @@ import (
 	"strings"
 )
 
-// mappingRe matches: this.mappings["/key"] = expandPath("./path") or this.mappings["/key"] = "path".
-var mappingRe = regexp.MustCompile(`(?i)this\.mappings\[\s*["']([^"']+)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["'])`)
+// mappingRe matches this.mappings["/key"] = <value>, where the value is one of
+// expandPath("./path"), a plain "path", or getDirectoryFromPath(
+// getCurrentTemplatePath()) — the idiom for the folder this Application.cfc is
+// in — optionally followed by & "sub/dir".
+//
+// Groups: 1 key, 2 expandPath argument, 3 plain string, 4 the
+// getDirectoryFromPath form, 5 its optional suffix.
+var mappingRe = regexp.MustCompile(`(?i)this\.mappings\[\s*["']([^"']+)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["']|(getDirectoryFromPath\(\s*getCurrentTemplatePath\(\s*\)\s*\))(?:\s*&\s*["']([^"']*)["'])?)`)
 
 // beanPathRe matches: this.beanPaths["namespace"] = expandPath("./path") or this.beanPaths["namespace"] = "path".
 var beanPathRe = regexp.MustCompile(`(?i)this\.beanPaths\[\s*["']([^"']*)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["'])`)
@@ -44,6 +50,10 @@ func ParseApplicationMappings(content string, appDir string) map[string]string {
 		val := m[2]
 		if val == "" {
 			val = m[3]
+		}
+
+		if m[4] != "" {
+			val = m[5]
 		}
 
 		if !filepath.IsAbs(val) {

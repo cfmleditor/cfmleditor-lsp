@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A shared-scope variable set by a multi-line startup assignment is typed.** `REQUEST.tassui = REQUEST.kernel.getPageTools().getTassUI( companyCode = …, currencySymbol = REQUEST.kernel.getObjInit().getCurrencySymbol() )` was never read: the startup scan took one line at a time and never reached the closing `>`, and the chain check refused a call inside an argument list. A right-hand side now runs to the tag's `>` or the statement's `;`, outside quotes and parentheses.
+- **The folder holding `.cfmleditor.json` maps under its own name.** A config in a folder called `myapp` now resolves `myapp.models.User` to `<config dir>/models/User.cfc` even when `workspacePaths` names only other folders. It was implied only for folders listed there. A mapping of the same name in the config wins.
+- **An `Application.cfc` mapping written `getDirectoryFromPath(getCurrentTemplatePath())` is read.** `this.mappings["/myapp"] = getDirectoryFromPath(getCurrentTemplatePath())`, the usual way to say "this folder", was ignored: only `expandPath("…")` and a plain string were understood. It maps to the `Application.cfc`'s folder, or to a folder under it with `& "sub/dir"` appended.
+- **A declared component return type, dotted or a bare word, outranks an inferred `$any`.** `getTassUI` declares `returntype="…customobjects.tassui"` but builds its result through `createObject("component", "customobjects.#type#")`, so the body inferred `$any` and that beat the declaration. The engine enforces a declared type; an inferred `$any` only says the path is computed. Any other inferred component is still kept over the declared one.
+
+## [0.4.0]
+
+### Fixed
+
+- **`unresolved <dir>` reported the whole workspace, not the directory.** With workspace folders in the config, only a *file* argument narrowed the report; a directory was used just to find `.cfmleditor.json`, so `unresolved packages/tass/core` listed calls from every application in the workspace. The index still covers the whole workspace, because resolving a call reads every other component, but the report now holds the files and directories named.
+
+### Documentation
+
+- **How to run `unresolved` on macOS, Linux and Windows.** The README gains a section with the PowerShell and `cmd.exe` forms, why no glob is needed, and the UTF-16 default of a plain `>` in Windows PowerShell 5.1.
+
+## [0.3.9]
+
 ### Added
 
 - **A shared-scope variable is typed from the templates that set the request up.** `REQUEST.context.getUser()`, in a file that never assigns `REQUEST.context`, used to need a `componentResolvers` entry matching the name. The server now reads the `SCOPE.name = value` assignments in the templates the governing `Application.cfc` includes, transitively, and in the new `startupFiles` config key, which applies to every file, including those under no `Application.cfc`. A `startupFiles` entry may be a template path such as `/tassweb/packages/tass/core/bootstrap.cfm`, resolved like a `cfinclude`. A value that creates a component, or a chain of calls on another shared variable or on a resolver-named receiver, is typed through each call's return type, so tassweb's `REQUEST.context = REQUEST.kernel.getContextObject()` types `REQUEST.context`. It is tried after every assignment the calling file, its `Application.cfc` and its extends chain make, and the answer is still method-checked. In tassweb, with the full config, the unresolved calls are identical. Without the `context` resolver, 6,013 shared-scope calls depended on it. The automatic lookup leaves 692, the calls under no `Application.cfc`, and `startupFiles` leaves none. Six public projects give identical results.

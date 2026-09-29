@@ -1797,9 +1797,16 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // naming a component beside the declaring one. Every question about what a
 // function returns asks this, so a chain hop and a variable assigned from the
 // same call cannot disagree.
+//
+// An inferred `$any` does not outrank a declared component, dotted or a bare
+// word naming one beside the declaring file. It means the body
+// builds its result from a runtime expression (`getCustomObject(type="tassui")`
+// goes through `createObject("component", "customobjects.#type#")`), while
+// `returntype="pkg.tassui"` is a contract the engine enforces. Any other
+// inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
 	switch {
-	case fd.ReturnComponent != "":
+	case fd.ReturnComponent != "" && fd.ReturnComponent != "$any":
 		// `return new Expectation( … )` names the component beside the
 		// declaring file, as a bare return type does; read from the caller's
 		// directory it named nothing, and every expect( x ).toBe() in a
@@ -1822,6 +1829,12 @@ func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
 
 	if p := r.bareReturnComponent(fd); p != "" {
 		return p
+	}
+
+	// An inferred $any, with nothing declared, is still the answer; a doc
+	// comment is not a contract, so it does not outrank one.
+	if fd.ReturnComponent != "" {
+		return fd.ReturnComponent
 	}
 
 	return r.docReturnComponent(fd)

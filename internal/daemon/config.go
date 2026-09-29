@@ -103,14 +103,39 @@ func (c *Config) WorkspaceFolders() []string {
 	return out
 }
 
-// Mappings returns component path mappings with values resolved to absolute paths.
+// Mappings returns component path mappings with values resolved to absolute
+// paths, plus one the config implies: the folder holding .cfmleditor.json maps
+// under its own name, so `myapp.models.User` finds
+// <config dir>/models/User.cfc from a config in a folder called myapp,
+// whether or not workspacePaths lists that folder. An explicit mapping of the
+// same name (in any case) wins.
 func (c *Config) Mappings() map[string]string {
 	raw := c.raw()
-	if raw == nil || len(raw.Mappings) == 0 {
+	if raw == nil {
 		return nil
 	}
 
-	return cfpath.ResolveMappings(raw.Mappings, filepath.Dir(c.Path))
+	dir := filepath.Dir(c.Path)
+	out := cfpath.ResolveMappings(raw.Mappings, dir)
+
+	name := filepath.Base(dir)
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return out
+	}
+
+	for k := range out {
+		if strings.EqualFold(k, name) {
+			return out
+		}
+	}
+
+	if out == nil {
+		out = make(map[string]string, 1)
+	}
+
+	out[name] = dir
+
+	return out
 }
 
 // StartupFiles returns the configured startup templates as absolute paths.

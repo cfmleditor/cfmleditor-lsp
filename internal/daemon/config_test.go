@@ -273,3 +273,39 @@ func TestAbsoluteWorkspacePathIsKept(t *testing.T) {
 		t.Fatalf("IndexGlobs() = %v, want %v", globs, want)
 	}
 }
+
+// The folder holding .cfmleditor.json maps under its own name, whether or not
+// workspacePaths lists it, and a mapping the config wrote for that name wins.
+func TestMappingsImplyTheConfigFolder(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "myapp")
+
+	writeConfig(t, root, `{"workspaceName":"c","workspacePaths":["../other"],"mappings":{"lib":"./lib"}}`)
+
+	cfg, err := FindConfig(root)
+	if err != nil || cfg == nil {
+		t.Fatalf("FindConfig: %v, %v", cfg, err)
+	}
+
+	got := cfg.Mappings()
+	if got["myapp"] != root {
+		t.Errorf("myapp = %q, want %q", got["myapp"], root)
+	}
+
+	if got["lib"] != filepath.Join(root, "lib") {
+		t.Errorf("explicit mapping lost: lib = %q", got["lib"])
+	}
+
+	explicit := filepath.Join(t.TempDir(), "MyApp")
+
+	writeConfig(t, explicit, `{"workspaceName":"c","mappings":{"myapp":"./elsewhere"}}`)
+
+	cfg, err = FindConfig(explicit)
+	if err != nil || cfg == nil {
+		t.Fatalf("FindConfig: %v, %v", cfg, err)
+	}
+
+	m := cfg.Mappings()
+	if len(m) != 1 || m["myapp"] != filepath.Join(explicit, "elsewhere") {
+		t.Errorf("an explicit mapping of the folder's name must win, got %v", m)
+	}
+}

@@ -32,7 +32,7 @@ func (r *Resolver) thisCallAnswered(call *parser.CallSite, pr *parser.ParseResul
 		at := off + i
 		rest := strings.TrimLeft(line[at+len(needle):], " \t")
 
-		if strings.HasPrefix(rest, "(") && (at == 0 || !isIdentByte(line[at-1])) {
+		if strings.HasPrefix(rest, "(") && (at == 0 || !isNameOrDotByte(line[at-1])) {
 			return true
 		}
 
@@ -70,7 +70,7 @@ func lineAt(content string, n int) string {
 	return content
 }
 
-func isIdentByte(b byte) bool {
+func isNameOrDotByte(b byte) bool {
 	return b == '_' || b == '$' || b == '.' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
