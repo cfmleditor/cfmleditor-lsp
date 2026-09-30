@@ -55,6 +55,7 @@ type Resolver struct {
 	helpers        *helperSet                 // application helper templates, per set of config files
 	wb             *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
 	beanPathsCache map[string]string          // merged application/configured bean roots
+	fw1Scopes      map[string]fw1Scope        // nearest application's source-defined injection scope
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 

@@ -628,12 +628,19 @@ For a CFC under configured or application-declared `beanPaths`, a public
 type, including literal aliases. Whole `arguments.Name` assignments carry it
 into fields, and generated getters return that component. Script, tag, and mixed
 syntax share the inference. Declared and documented types retain priority;
-private setters, multiple arguments, and methods outside managed bean roots do
+private setters, multiple arguments, and methods outside managed scopes do
 not acquire a dependency by name. The declared signature stays unchanged in
 completion and signature help. Arguments shadow same-named component fields.
 Managed files receive the same types during editor indexing and CLI scans, and
-bean-map caches refresh when the resolver is invalidated. FW/1 controllers wired
-outside these roots need a separate scope rule.
+bean-map caches refresh when the resolver is invalidated. FW/1 controller/service
+directories outside bean roots also qualify when the nearest Application extends
+the framework's source and explicitly calls `setBeanFactory` during setup. The
+framework must actually call `autowire` from its component/controller loader.
+Direct conventional directories and older explicit subsystem layouts are modeled;
+views, models and nested applications do not acquire injection. Custom directory
+layouts, struct-form framework settings and separate subsystem factories remain
+unsupported. A runtime base override uses only a known literal default. See
+[RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the measured Masa case and boundaries.
 
 ### Component resolvers
 

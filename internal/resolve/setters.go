@@ -9,7 +9,8 @@ import (
 )
 
 // SetterLookup supplies dependency types only for components inside configured
-// bean roots. Merely naming a parameter after a CFC does not imply injection.
+// bean roots or source-proven FW/1 controller/service scopes. Merely naming a
+// parameter after a CFC does not imply injection.
 func (r *Resolver) SetterLookup(file string) func(string) string {
 	if !cfpath.IsCFCFile(file) {
 		return nil
@@ -27,7 +28,7 @@ func (r *Resolver) SetterLookup(file string) func(string) string {
 		}
 	}
 
-	if !managed {
+	if !managed && !r.fw1SetterManaged(file) {
 		return nil
 	}
 

@@ -584,8 +584,46 @@ stale entries. Regressions fail with setter inference disabled and cover missing
 methods, parameter shadowing, alias lookup, scope boundaries, declared signatures,
 closed-file indexing, configuration refresh, and script/tag/mixed syntax.
 
-FW/1's admin controllers remain outside the supplied bean roots: admin/Application.cfc
+FW/1's admin controllers sit outside the supplied bean roots: admin/Application.cfc
 sets its bean factory at 197, and admin/framework.cfc autowires controllers/services
-at 1249–1270 and 1401. Model that managed scope separately before inferring their
-setters. Struct members, shared-service loops, wrapper returns and runtime factory
-values remain subsequent work.
+at 1249–1270 and 1401. The following batch models that managed scope separately.
+Struct members, shared-service loops, wrapper returns and runtime factory values
+remain subsequent work.
+
+## Masa CMS: source-backed FW/1 controller wiring
+
+The next batch recognizes the nearest Application.cfc extending a real FW/1
+implementation, with an explicit setBeanFactory call in setupApplication or global
+scope. The framework source must declare its factory/controller/autowire methods
+and call autowire from getCachedComponent (older controllers/services) or
+getCachedController (newer controllers). Preset stubs and a matching extends
+basename alone do not establish injection. The application scope is cached with
+the resolver and shared by editor, closed-file indexing and CLI parsing.
+
+Only direct controller/service files at the application's conventional base are
+managed; older explicit usingSubsystems=true permits one subsystem directory.
+Models, views, templates, deeper directories and nested applications are excluded.
+Conflicting literals, computed subsystem flags, struct-form settings, relocated
+bases, custom directories, subsystem factories and overridden setBeanFactory
+methods remain unsupported. A literal base default can be followed by a runtime
+expression, as in Masa's setFrameWorkBaseDir; only the static default is modeled.
+FW/1 4's subsystem-directory convention and automatic DI configuration remain
+separate work. Dependency identities still come from the configured workspace
+bean map and alias rules; runtime factory overrides are not modeled.
+
+With unchanged configuration and the same **897 indexed/scanned files**, Masa
+changes **16,557 → 16,355**: **223 removed, 21 added**, net **202**. The full PR
+changes **18,539 → 16,355**: **2,433 removed, 249 added**, net **2,184**. Removed
+calls include controller dependencies on permUtility, settingsManager,
+contentManager, contentUtility and utility. Every addition is a later untyped
+return-chain diagnostic: twenty on settingsManager.getSite(), one on
+trashManager.getTrashItem(). Real missing methods remain checked. All fourteen
+existing corpus comparisons, including both Wheels vendor scans, are unchanged
+per entry with matching indexed/scanned coverage.
+
+Scope, lazy-indexed getter, editor/closed-file and CLI regressions fail with the
+FW/1 scope hook disabled. Source inspection identifies the next dependencies:
+settingsManager.getSite() returns variables.sites[key], populated through a
+separate builder struct in setSites(); rc.contentBean assignments chain through
+contentBean.loadBy() and contentManager.read(). These need collection/struct
+member types and verified wrapper returns rather than a global rc component type.

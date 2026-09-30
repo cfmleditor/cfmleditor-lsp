@@ -372,3 +372,57 @@ func TestReportUsesManagedSetterDependencies(t *testing.T) {
 		}
 	}
 }
+
+func TestReportUsesFW1ControllerSetters(t *testing.T) {
+	dir := t.TempDir()
+	sources := map[string]string{
+		"admin/Application.cfc": `component extends="framework" {
+   variables.framework.usingSubsystems=true;
+   function setupApplication() { setBeanFactory(application.factory); }
+  }`,
+		"admin/framework.cfc": `component {
+   function setBeanFactory(factory) {} function getBeanFactory() {} function getController() {} function getService() {}
+   function autowire(cfc, factory) {} function getCachedComponent() { autowire(cfc, getBeanFactory()); }
+  }`,
+		"beans/Service.cfc": `component { function run() {} }`,
+		"admin/core/controllers/Consumer.cfc": `component accessors=true {
+   property name="dependency";
+   function setService(service) { variables.dependency=arguments.service; }
+   function use() { variables.dependency.run(); variables.dependency.missing(); }
+  }`,
+		"admin/core/models/Manual.cfc": `component {
+   function setService(service) { variables.dependency=arguments.service; }
+   function use() { variables.dependency.run(); }
+  }`,
+		"page.cfm": `<cfscript>
+   controller=new admin.core.controllers.Consumer();
+   dependency=controller.getDependency();
+   dependency.run();
+  </cfscript>`,
+	}
+	files := []string{}
+
+	for name, source := range sources {
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, file)
+	}
+
+	rep := Scan(vfs.OS{}, files, nil, &Options{BeanPaths: map[string]string{"": filepath.Join(dir, "beans")}, WorkspaceFolders: []string{dir}})
+	if len(rep.Calls) != 2 {
+		t.Fatalf("want missing method and unmanaged model, got %+v", rep.Calls)
+	}
+
+	for _, call := range rep.Calls {
+		if call.Function == "missing" && !strings.Contains(call.Reason, "not found in Service") {
+			t.Errorf("missing method was not checked: %+v", call)
+		}
+	}
+}

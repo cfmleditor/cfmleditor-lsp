@@ -190,6 +190,52 @@ func TestStartupBeanRulesRefreshWithResolver(t *testing.T) {
 	}
 }
 
+func TestEditorUsesFW1ControllerSetters(t *testing.T) {
+	dir := t.TempDir()
+
+	files := map[string]string{
+		"Application.cfc": `component extends="framework" { function setupApplication() { setBeanFactory(factory); } }`,
+		"framework.cfc": `component {
+ function setBeanFactory(factory) {} function getBeanFactory() {} function getController() {} function getService() {}
+ function autowire(cfc, factory) {} function getCachedComponent() { autowire(cfc, getBeanFactory()); }
+}`,
+		"beans/Service.cfc": `component { function run() {} }`,
+	}
+	for name, source := range files {
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.BeanPaths = map[string]string{"": filepath.Join(dir, "beans")}
+	source := `component accessors=true {
+ property name="dependency";
+ function setService(service) { variables.dependency=arguments.service; }
+}`
+
+	file := cfpath.ToURI(filepath.Join(dir, "controllers", "Consumer.cfc"))
+	for _, pr := range []*parser.ParseResult{s.parseContentForIndex(file, source), s.parseContent(file, source)} {
+		found := false
+
+		for _, fn := range pr.Funcs {
+			if fn.Name == "getDependency" {
+				found = fn.ReturnComponent == filepath.Join(dir, "beans", "Service.cfc")
+			}
+		}
+
+		if !found {
+			t.Fatal("editor/index getter lost FW/1 injection")
+		}
+	}
+}
+
 func TestEditorUsesManagedSetterDependencies(t *testing.T) {
 	dir := t.TempDir()
 
