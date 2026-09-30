@@ -42,8 +42,8 @@ component {
 	 * @serializeExtraInfo Flag to allow serializing complex objects in `extraInfo`. Default is true.
 	 */
 	coldbox.system.logging.LogEvent function init( required message, required severity, extraInfo, category, boolean serializeExtraInfo ) {}
-	function getXmlConverter() {}
-	function getUtil() {}
+	coldbox.system.core.conversion.XMLConverter function getXmlConverter() {}
+	coldbox.system.core.util.Util function getUtil() {}
 	/**
 	 * Get the extra info as a string representation
 	 */

@@ -385,3 +385,34 @@ func TestReturnOfACallOnAVariableIsNotTheVariable(t *testing.T) {
 		}
 	}
 }
+
+// A bare call returned whole is typed as it is on an assignment's right-hand
+// side: CommandBox's BaseCommand.command() is
+// `return getInstance( name='CommandDSL', … )`, and a componentResolver for
+// getInstance says what that is. A hop or index after the call, or anything
+// else in the expression, returns something else, and is left untyped.
+func TestReturnOfAResolverMatchedCallIsTyped(t *testing.T) {
+	src := `component {
+	function command( name ) { return getInstance( name = "CommandDSL", initArguments = { name : name } ); }
+	function positional() { return getInstance( "Shell" ); }
+	function chained() { return getInstance( "Shell" ).init(); }
+	function indexed() { return getInstance( "Shell" )[ "x" ]; }
+	function added() { return getInstance( "Shell" ) & "x"; }
+	function other() { return somethingElse( "Shell" ); }
+	function statement() { getInstance( "Shell" ); return; }
+}`
+	pr := ParseWithOptions(testURI, src, &ParseOptions{Resolvers: []Resolver{{
+		Match: `(?i)(?:^|\.)getInstance\(\s*["']([\w.]+)["']\s*\)$`, Resolve: "models.$1", Prefix: "getInstance",
+	}}})
+	want := map[string]string{
+		"command": "models.CommandDSL", "positional": "models.Shell",
+		"chained": "", "indexed": "", "added": "", "other": "", "statement": "",
+	}
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		if got := f.ReturnComponent; got != want[f.Name] {
+			t.Errorf("%s returns %q, want %q", f.Name, got, want[f.Name])
+		}
+	}
+}

@@ -1366,7 +1366,7 @@ component {
 	 * config/app.cfm — services.cfm is loaded after the container is built).
 	 * Manual wiring keeps working; this helper is the convenience path.
 	 */
-	public any function enableSession( string sessionKey, any onLogin, any onLogout ) {}
+	public wheels.auth.SessionStrategy function enableSession( string sessionKey, any onLogin, any onLogout ) {}
 	/**
 	 * Returns the bundled jBCrypt Java class (org.mindrot.jbcrypt.BCrypt) when a
 	 * JVM is present and the class is resolvable via this.javaSettings.LoadPaths

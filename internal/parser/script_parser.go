@@ -63,8 +63,15 @@ type pendingCall struct {
 	line     uint32
 
 	// refThis is carried to the ref as ComponentRef.This; baseScope says which
-	// scope's refs baseVar may be read from. Beside line, in its padding.
+	// scope's refs baseVar may be read from. global files the ref at
+	// component level, as addRef does under forceGlobal: an unscoped
+	// assignment in a function is a variables-scope one, and the component
+	// the call returns is what every function — and every sibling closure —
+	// reads. funcKey is kept, since baseVar may still be a local. Beside line,
+	// in its padding.
 	refThis   bool
+	global    bool
+	memberSet bool // not a call: `varName.funcName = …`; see checkMemberSet
 	baseScope RefScope
 
 	funcKey string   // scope key, empty if global
@@ -169,6 +176,30 @@ func docReturn(comment string) string {
 // class of a module the workspace lacks is not a finding — and the methods
 // MockBox adds are accepted on any component.
 const MockPrefix = "$mock:"
+
+// mockDecorations are the methods MockBox's decorateMock adds to an object it
+// mocks (TestBox system/MockBox.cfc). Each returns the mock it is called on,
+// except the ones that report on it ($count, $callLog, …), whose result no
+// chain goes on from. Every one starts with $, which no component's own
+// method conventionally does.
+var mockDecorations = map[string]bool{
+	"$": true, "$spy": true, "$property": true, "$getproperty": true,
+	"$results": true, "$throws": true, "$callback": true, "$args": true,
+	"$calllog": true, "$count": true, "$times": true, "$never": true,
+	"$verifycallcount": true, "$atleast": true, "$once": true, "$atmost": true,
+	"$debug": true, "$reset": true,
+}
+
+// IsMockDecoration reports whether name is a method MockBox adds to a mock.
+func IsMockDecoration(name string) bool {
+	if !strings.HasPrefix(name, "$") {
+		return false
+	}
+
+	var buf foldScratch
+
+	return mockDecorations[string(buf.lowerFold(name))]
+}
 
 // mockOf is the component a mock of class is, or $any without one.
 func mockOf(class string) string {
@@ -285,7 +316,10 @@ func (p *scriptParser) asCFScript() *scriptParser {
 }
 
 // recordBareCallAndChain handles funcName(...) optionally followed by .method(...) chains.
-func (p *scriptParser) recordBareCallAndChain(tok Token) {
+// When the call stands alone — no hop or index follows it — alone is the
+// expression the componentResolvers are offered for it, so a `return` can be
+// typed as an assignment's right-hand side is; it is "" otherwise.
+func (p *scriptParser) recordBareCallAndChain(tok Token) (alone string) {
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
@@ -306,10 +340,14 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 
 	firstArg, positional, ok := p.scanParenArgs()
 	if !ok {
-		return
+		return ""
 	}
 
 	callExpr := resolverCallExpr(tok.Value, firstArg, positional)
+
+	if next := p.sc.PeekSkipComments().Kind; next != TokDot && next != TokLBracket {
+		alone = callExpr
+	}
 
 	// comp is this bare call's resolved return component (if any); it's the
 	// base receiver for every subsequent chained hop below. Hops beyond the
@@ -342,7 +380,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 			// at risk of misattribution here (the base is a call return, not
 			// a bare variable), so no poisoning is needed, just continuity.
 			if !p.skipBracketIndex() {
-				return
+				return ""
 			}
 
 			continue
@@ -394,12 +432,14 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 			p.sc.NextSkipComments() // consume (
 
 			if _, ok := p.scanParenBody(); !ok {
-				return
+				return ""
 			}
 		} else {
 			break
 		}
 	}
+
+	return alone
 }
 
 // scopeReceiver says how a call made directly on a scope is recorded, for the
@@ -425,6 +465,20 @@ func scopeReceiver(word string) (variable, component string, ok bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// onScope gives c the receiver scopeReceiver says a call made directly on
+// the scope word has, when word is one, and records whether it was `this.`:
+// the parser records `this.f()` and `f()` alike, and only the first reaches
+// onMissingMethod.
+func (c *CallSite) onScope(word string) {
+	v, comp, ok := scopeReceiver(word)
+	if !ok {
+		return
+	}
+
+	c.Variable, c.Component, c.Resolved = v, comp, comp != ""
+	c.This = identEq(word, "this")
 }
 
 // recordCallFromChain records a call site when a dot chain ending in ( is detected.
@@ -454,9 +508,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		Caller:   caller,
 	}
 
-	if v, comp, ok := scopeReceiver(recv); ok {
-		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
-	}
+	call.onScope(recv)
 
 	p.addCall(&call)
 }
@@ -793,9 +845,7 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	// the enum once recorded request., session. and application. calls as calls
 	// to functions of that name in this file, when they were dispatched as
 	// ScopeVariables.
-	if v, comp, ok := scopeReceiver(scopeTok.Value); ok {
-		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
-	}
+	call.onScope(scopeTok.Value)
 
 	p.addCall(&call)
 
@@ -2124,13 +2174,19 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 		return
 	}
 
-	// Look up returnVar in this function's refs, then in componentRefs
-	// (for variables./this. scoped).
-	name, called := returnedVar(p.returnVar)
+	// Look up returnVar in this function's refs, then in componentRefs. A
+	// name read through variables. or this. is the component's alone, and
+	// only a ref made through that scope holds it.
+	name, called, scope := returnedVar(p.returnVar)
 
-	for _, refs := range [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs} {
+	lookIn := [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs}
+	if scope != RefAny {
+		lookIn = lookIn[1:]
+	}
+
+	for _, refs := range lookIn {
 		for i := range refs {
-			if strings.EqualFold(refs[i].Variable, name) && !chainPending(&refs[i]) {
+			if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) && !chainPending(&refs[i]) {
 				f.ReturnComponent = returnedComponent(refs[i].Component, called)
 
 				break
@@ -2184,7 +2240,7 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 			// function's: its call is recorded, its type is not the
 			// function's return type.
 			if peek := p.sc.PeekSkipComments(); peek.Kind == TokIdent {
-				p.returnCall(peek)
+				_, _ = p.returnCall(peek)
 			}
 
 			return
@@ -2264,6 +2320,7 @@ func (p *scriptParser) checkReturnComponent() {
 		p.scanChainedCalls(comp, peek.Line)
 	default:
 		bareThis := identEq(peek.Value, "this") && p.returnsBareThis()
+		scopedVar, scope := p.returnedScopedVar()
 
 		// return varName — track for resolution after body parse. Only the
 		// name alone is what the variable holds: `return shell.pwd()`
@@ -2271,12 +2328,26 @@ func (p *scriptParser) checkReturnComponent() {
 		// function a Shell. A call on a dynamic value is dynamic, though,
 		// which returnsCallOn keeps.
 		p.returnVar = peek.Value
-		if !p.returnCall(peek) {
+
+		bare, call := p.returnCall(peek)
+		if !bare {
 			p.returnVar = returnsCallOn + peek.Value
 		}
 
-		if bareThis {
+		// A bare call standing alone is typed as it would be on an
+		// assignment's right-hand side: `return getInstance( "X" )` returns
+		// what a componentResolver says getInstance( "X" ) is.
+		if call != "" && p.atStatementEnd() {
+			if comp := p.resolveCall(call); comp != "" && len(p.funcs) > 0 {
+				p.funcs[len(p.funcs)-1].ReturnComponent = comp
+			}
+		}
+
+		switch {
+		case bareThis:
 			p.returnVar = returnsThis
+		case scopedVar != "":
+			p.returnVar = scopedReturnVar(scope, scopedVar)
 		}
 
 		return
@@ -2285,6 +2356,49 @@ func (p *scriptParser) checkReturnComponent() {
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
 	}
+}
+
+// atStatementEnd reports whether the next token ends a statement.
+func (p *scriptParser) atStatementEnd() bool {
+	switch p.sc.PeekSkipComments().Kind {
+	case TokSemicolon, TokRBrace, TokEOF:
+		return true
+	default:
+		return false
+	}
+}
+
+// returnedScopedVar is the name a return reads through variables. or this.
+// when that is the whole returned expression — `return variables.print;` —
+// and the scope it names, without moving the scanner. It is "" for anything
+// else, `return variables.print.line()` and `return this;` included.
+func (p *scriptParser) returnedScopedVar() (string, RefScope) {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	scopeTok := p.sc.NextSkipComments()
+
+	scope := RefVariables
+	if identEq(scopeTok.Value, "this") {
+		scope = RefThis
+	} else if !identEq(scopeTok.Value, "variables") {
+		return "", RefAny
+	}
+
+	if p.sc.NextSkipComments().Kind != TokDot {
+		return "", RefAny
+	}
+
+	name := p.sc.NextSkipComments()
+	if name.Kind != TokIdent {
+		return "", RefAny
+	}
+
+	if !p.atStatementEnd() {
+		return "", RefAny
+	}
+
+	return name.Value, scope
 }
 
 // returnsBareThis reports whether the `this` the scanner is on is the whole
@@ -2296,12 +2410,7 @@ func (p *scriptParser) returnsBareThis() bool {
 
 	p.sc.NextSkipComments() // this
 
-	switch p.sc.PeekSkipComments().Kind {
-	case TokSemicolon, TokRBrace, TokEOF:
-		return true
-	default:
-		return false
-	}
+	return p.atStatementEnd()
 }
 
 // returnCall records the call a `return` statement makes, through the same
@@ -2316,11 +2425,12 @@ func (p *scriptParser) returnsBareThis() bool {
 // statement is the assignment `x = …`. tok is the peeked first token after
 // `return`; a keyword other than a scope is left for the caller's loop.
 // It reports whether the name stood alone, the case in which the function
-// returns what that variable holds.
-func (p *scriptParser) returnCall(tok Token) (bare bool) {
+// returns what that variable holds, and for a bare call standing alone the
+// expression the componentResolvers are offered for it.
+func (p *scriptParser) returnCall(tok Token) (bare bool, call string) {
 	_, _, isScope := scopeReceiver(tok.Value)
 	if !isScope && isKeyword(tok.Value) {
-		return true
+		return true, ""
 	}
 
 	p.sc.NextSkipComments()
@@ -2333,22 +2443,22 @@ func (p *scriptParser) returnCall(tok Token) (bare bool) {
 
 		nameTok := p.sc.PeekSkipComments()
 		if nameTok.Kind != TokIdent {
-			return
+			return false, ""
 		}
 
 		p.sc.NextSkipComments()
 		p.scopedCall(tok, nameTok)
 	case next.Kind == TokLParen:
-		p.recordBareCallAndChain(tok)
+		call = p.recordBareCallAndChain(tok)
 	case next.Kind == TokDot || next.Kind == TokLBracket:
 		p.checkBareCall(tok)
 	case next.Kind == TokDoubleColon:
 		p.parseStaticCall(tok)
 	default:
-		return true
+		return true, ""
 	}
 
-	return false
+	return false, call
 }
 
 // readNewComponent reads the component path after "new" keyword.
@@ -2482,34 +2592,71 @@ func (p *scriptParser) readCreateObjectComponent() string {
 
 	arg1Val := unquote(arg1.Value)
 
+	if p.sc.NextSkipComments().Kind != TokComma {
+		return ""
+	}
+
+	arg2 := p.sc.NextSkipComments()
+	if arg2.Kind == TokRParen || arg2.Kind == TokEOF {
+		return ""
+	}
+
+	// A path computed at run time — createObject( "component",
+	// drivernames[ type ] ), "pkg." & name — names whichever component the
+	// program picks, as an unmapped #...# in a literal path does, and is
+	// dynamic for the same reason. Nothing was recorded for it, so every call
+	// on the variable was "no component ref", and the scan stopped inside the
+	// argument.
+	if arg2.Kind != TokString || !p.atArgEnd() {
+		p.skipComputedArg(arg2)
+
+		return "$any"
+	}
+
 	if identEq(arg1Val, "component") {
-		if p.sc.NextSkipComments().Kind != TokComma {
-			return ""
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return ""
-		}
-
 		return unquote(arg2.Value)
 	}
 
-	// Non-component createObject (e.g. java) — consume comma+arg2 and try resolvers
-	if p.sc.PeekSkipComments().Kind != TokComma {
-		return ""
-	}
-
-	p.sc.NextSkipComments() // consume ,
-
-	arg2 := p.sc.NextSkipComments()
-	if arg2.Kind != TokString {
-		return ""
-	}
-
+	// Non-component createObject (e.g. java) — try resolvers
 	expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
 
 	return p.resolveCall(expr)
+}
+
+// atArgEnd reports whether the next token ends an argument.
+func (p *scriptParser) atArgEnd() bool {
+	k := p.sc.PeekSkipComments().Kind
+
+	return k == TokRParen || k == TokComma
+}
+
+// skipComputedArg consumes the rest of an argument whose first token, first,
+// is already consumed, recording the calls it makes, and stops before the ,
+// or ) that ends it.
+func (p *scriptParser) skipComputedArg(first Token) {
+	depth := 0
+
+	for tok := first; ; tok = p.sc.NextSkipComments() {
+		switch tok.Kind {
+		case TokLParen, TokLBracket, TokLBrace:
+			depth++
+		case TokRParen, TokRBracket, TokRBrace:
+			depth--
+
+			p.handleLiteralToken(tok)
+		case TokIdent:
+			p.scanNestedCall(tok)
+		case TokString:
+			p.handleLiteralToken(tok)
+		case TokEOF:
+			return
+		default:
+		}
+
+		if next := p.sc.PeekSkipComments().Kind; next == TokEOF || (depth <= 0 && (next == TokRParen || next == TokComma)) {
+			return
+		}
+	}
 }
 
 // readEntityNewComponent reads the entity name from entityNew("Name").
@@ -2823,7 +2970,7 @@ func (p *scriptParser) scopeToClosure(refsBefore, pendingBefore, from, to int) {
 	}
 
 	for i := pendingBefore; i < len(p.pendingCalls); i++ {
-		if c := &p.pendingCalls[i]; c.visibleTo == 0 {
+		if c := &p.pendingCalls[i]; c.visibleTo == 0 && !c.global {
 			c.visibleFrom, c.visibleTo = conv.Uint32(from), conv.Uint32(to)
 		}
 	}
@@ -3121,6 +3268,7 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 		line:      conv.Uint32(p.baseLine + line),
 		funcKey:   p.inFunc,
 		refThis:   p.refThis,
+		global:    p.forceGlobal,
 		baseScope: ReceiverRefScope(recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
@@ -3260,6 +3408,35 @@ func (p *scriptParser) walkChain(c *chainBuilder, first string, staticTok Token)
 	}
 }
 
+// checkMemberSet records `a.m = …`, a value stored on a member of a variable,
+// when the scanner is at the `=`. fw1's tests give a bean a method at run
+// time — `a.getVariables = getVariables;` — and then call it (see
+// ParseResult.AssignsMember). `a.m == x` is a comparison, and
+// `a[ k ].m = …` is on an element, not on a.
+//
+// It travels as a pendingCall marked memberSet, which is already keyed by
+// function, rekeyed and merged per region, and resolvePendingCalls files it
+// in ParseResult.memberSets. A slice of its own put scriptParser in a larger
+// size class, and a ref for `a.m` reached every other file through the index.
+func (p *scriptParser) checkMemberSet(identChain []string, line int) {
+	if len(identChain) < 2 || strings.HasSuffix(identChain[len(identChain)-2], "[]") ||
+		p.sc.PeekSkipComments().Kind != TokEquals {
+		return
+	}
+
+	if first, _ := p.sc.bytesAfterPeek(); first == '=' {
+		return
+	}
+
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName:   strings.Join(identChain[:len(identChain)-1], "."),
+		funcName:  identChain[len(identChain)-1],
+		line:      conv.Uint32(p.baseLine + line),
+		funcKey:   p.inFunc,
+		memberSet: true,
+	})
+}
+
 // checkBareCall handles obj.method() calls (not in assignment context),
 // including further .method() calls chained off the return value of a previous
 // call in the same chain (e.g. "kpg.generateKeyPair().getPublic().getParams()").
@@ -3306,6 +3483,8 @@ chainWalk:
 
 	// Must end with ( to be a call
 	if p.sc.PeekSkipComments().Kind != TokLParen {
+		p.checkMemberSet(identChain, tok.Line)
+
 		return
 	}
 
@@ -3333,9 +3512,7 @@ chainWalk:
 	// A call made directly on a scope, reached here from an argument list —
 	// `f( server.getTestService() )` — is the call the statement
 	// `server.getTestService()` is.
-	if v, sc, ok := scopeReceiver(varName); ok {
-		call.Variable, call.Component, call.Resolved = v, sc, sc != ""
-	}
+	call.onScope(varName)
 
 	p.addCall(&call)
 
@@ -3372,71 +3549,19 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 }
 
 func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
-	lp := p.sc.NextSkipComments()
-	if lp.Kind != TokLParen {
-		return
+	comp := p.readCreateObjectComponent()
+
+	// Consume closing ) and handle any chained .method() calls
+	if p.sc.PeekSkipComments().Kind == TokRParen {
+		p.sc.NextSkipComments()
 	}
 
-	arg1 := p.sc.NextSkipComments()
-	if arg1.Kind != TokString {
-		return
-	}
-
-	arg1Val := unquote(arg1.Value)
-
-	if identEq(arg1Val, "component") {
-		comma := p.sc.NextSkipComments()
-		if comma.Kind != TokComma {
-			return
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return
-		}
-
-		comp := unquote(arg2.Value)
-
-		// Consume closing ) and handle any chained .method() calls
-		if p.sc.PeekSkipComments().Kind == TokRParen {
-			p.sc.NextSkipComments()
-		}
-
-		if comp != "" {
-			hops := p.scanChainedCalls(comp, line)
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
-	} else {
-		// Try resolvers for non-component createObject (e.g. java), which
-		// fall back to dynamicCall when none is configured
-		comma := p.sc.NextSkipComments()
-		if comma.Kind != TokComma {
-			return
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return
-		}
-
-		expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
-		comp := p.resolveCall(expr)
-
-		// Consume closing ) and handle any chained .method() calls
-		if p.sc.PeekSkipComments().Kind == TokRParen {
-			p.sc.NextSkipComments()
-		}
-
-		if comp != "" {
-			hops := p.scanChainedCalls(comp, line)
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
+	if comp != "" {
+		hops := p.scanChainedCalls(comp, line)
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp, ChainRest: hops,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+		})
 	}
 }
 

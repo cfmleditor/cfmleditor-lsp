@@ -534,7 +534,7 @@ component {
 	 *
 	 * @return testbox.system.modules.cbMockData.models.MockData
 	 */
-	function getCBMockData() {}
+	testbox.system.modules.cbMockData.models.MockData function getCBMockData() {}
 	/**
 	 * Get the TestBox utility object
 	 *

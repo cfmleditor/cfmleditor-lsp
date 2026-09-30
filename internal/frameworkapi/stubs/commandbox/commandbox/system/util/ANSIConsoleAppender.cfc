@@ -25,7 +25,7 @@ component extends="wirebox.system.logging.AbstractAppender" {
 	 */
 	commandbox.system.util.ANSIConsoleAppender function init( required name, properties, layout, levelMin, leveMax ) {}
 	function logMessage( required logEvent ) {}
-	function getShell() {}
-	function print() {}
-	function job() {}
+	commandbox.system.Shell function getShell() {}
+	commandbox.system.util.PrintBuffer function print() {}
+	commandbox.system.util.InteractiveJob function job() {}
 }

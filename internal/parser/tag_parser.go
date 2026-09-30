@@ -1035,11 +1035,40 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	case strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(inner), "/"), "this"):
 		f.returnVar = returnsThis
 	default:
-		// return varName — store for deferred resolution
+		// return varName — store for deferred resolution. A name read
+		// through variables. or this. is the component's, and is read from
+		// that scope's refs alone, as the script parser reads it.
+		if name, scope := scopedReturnExpr(inner); name != "" {
+			f.returnVar = scopedReturnVar(scope, name)
+
+			return
+		}
+
 		varName := extractIdent(inner)
 		if varName != "" && !strings.Contains(inner, "(") {
 			f.returnVar = varName
 		}
+	}
+}
+
+// scopedReturnExpr is the name a `<cfreturn>` expression reads through
+// variables. or this. when that is the whole expression, and the scope it
+// names; "" for anything else.
+func scopedReturnExpr(expr string) (string, RefScope) {
+	expr = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(expr), "/"))
+
+	scopeWord, name, ok := strings.Cut(expr, ".")
+	if !ok || name == "" || extractIdent(name) != name {
+		return "", RefAny
+	}
+
+	switch {
+	case strings.EqualFold(scopeWord, "variables"):
+		return name, RefVariables
+	case strings.EqualFold(scopeWord, "this"):
+		return name, RefThis
+	default:
+		return "", RefAny
 	}
 }
 
@@ -1312,6 +1341,7 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
 		refThis:  p.refThis,
+		global:   p.forceGlobal,
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
@@ -1356,6 +1386,7 @@ func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int)
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
 		refThis:  p.refThis,
+		global:   p.forceGlobal,
 	})
 }
 
@@ -1638,8 +1669,15 @@ func extractCreateObjectArg(s string) string {
 	}
 
 	rest = strings.TrimSpace(rest[ci+1:])
-	if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
+	if rest == "" || rest[0] == ')' {
 		return ""
+	}
+
+	// A path computed at run time — drivernames[ type ], "pkg." & name —
+	// names whichever component the program picks, and is dynamic, as the
+	// script parser reads it (readCreateObjectComponent).
+	if rest[0] != '"' && rest[0] != '\'' {
+		return "$any"
 	}
 
 	q2 := rest[0]
@@ -1647,6 +1685,10 @@ func extractCreateObjectArg(s string) string {
 	end2 := strings.IndexByte(rest[1:], q2)
 	if end2 < 0 {
 		return ""
+	}
+
+	if after := strings.TrimSpace(rest[2+end2:]); after != "" && after[0] != ')' && after[0] != ',' {
+		return "$any"
 	}
 
 	return rest[1 : 1+end2]

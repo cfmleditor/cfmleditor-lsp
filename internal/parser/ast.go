@@ -215,6 +215,7 @@ type CallSite struct {
 	Variable  string // the variable/qualifier before the dot (empty if bare call)
 	Line      uint32
 	Resolved  bool   // true if qualified (obj.func), false if bare call
+	This      bool   // written `this.f()`, which is recorded as the bare f(); see onScope
 	Caller    string // enclosing function name (empty if global)
 	Text      string // the trimmed line text
 

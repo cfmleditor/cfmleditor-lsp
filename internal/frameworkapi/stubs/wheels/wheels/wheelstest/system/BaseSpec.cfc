@@ -500,7 +500,7 @@ component {
 	 *
 	 * @return wheels.wheelstest.system.modules.cbMockData.models.MockData
 	 */
-	function getCBMockData() {}
+	wheels.wheelstest.system.modules.cbMockData.models.MockData function getCBMockData() {}
 	/**
 	 * Get the TestBox utility object
 	 *

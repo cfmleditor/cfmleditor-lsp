@@ -50,7 +50,12 @@ a, b = load(sys.argv[1]), load(sys.argv[2])
 print("added", sum((b - a).values()), "removed", sum((a - b).values()))
 ```
 
-At PR #184 the totals are **9,520** with presets and **18,618** without. Use
+At PR #184 the totals are **9,520** with presets and **18,618** without
+(18,623 when re-measured at the branch point of gap #3's fix, see "The batch
+scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
+and **18,028**; after gap #1, **9,225** and **17,645**; after gap #2, **9,115** and
+**17,532**; after gap #5, **9,020** and **17,439**; after gaps #6 and #7, **9,001**
+and **17,429**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -87,138 +92,170 @@ The gaps below explain the largest of these.
 
 ## Gaps with a known cause
 
-### 1. An assignment in one closure is invisible to its sibling closures
+### 1. An assignment in one closure is invisible to its sibling closures — fixed
 
-- **Evidence:** coldbox-platform `scheduler` (156 entries) and most of the
-  TestBox-spec variables across the corpus.
-- **Shape:**
+- **Was:** coldbox-platform `scheduler` (115 entries) and TestBox-spec
+  variables generally. In
+  `beforeEach( function(){ scheduler = asyncManager.newScheduler( "x" ); } )`
+  the assignment is unscoped, so CFML puts it in variables scope, where every
+  `it()` closure reads it.
+- **Cause:** not the closure's line range as first thought. An unscoped,
+  un-`var`'d assignment was already filed at component level
+  (`forceGlobal`) when its type was known at once (`x = new X()`), but one
+  typed later from a call (`x = a.b()`, a pending call) was filed with the
+  enclosing function, and given the closure's lines. That held in any
+  function, not only in closures.
+- **Fix:** a pending call carries `forceGlobal` (`pendingCall.global`) and
+  settles at component level, in both parsers. Two things came with it,
+  each with a test that fails without it:
+  - A `<cfscript>` block inside a `<cffunction>` is parsed as its own region
+    whose parser knew only the function's arguments as locals, so
+    `<cfset var conn>` above the block did not make `conn = …` inside it a
+    local. The locals of the function a region split are now carried across
+    it, both ways (`openLocals`). `conn = new X()` there had always been
+    filed for the whole component.
+  - `return x;` settled after the parse (`settleReturnVars`) looked only in
+    the function's refs, while the parse-time path also read the component's.
+    ColdBox's `getDateTimeHelper()` returns such a variable.
+- **Measured:** presets 9,476 → 9,225 (256 removed, 5 added); no presets
+  18,028 → 17,645 (389 removed, 6 added). Every addition is a call already
+  reported, now against its component: `variables.mixerUtil` is a
+  `MixerUtil`, whose `start()` returns its argument, and
+  `variables.binder.onShutdown()` is an optional hook the Injector checks
+  for with `structKeyExists`.
 
-  ```cfml
-  beforeEach( function(){ scheduler = asyncManager.newScheduler( "x" ); } );
-  it( "…", function(){ scheduler.task( "a" ); } );
-  ```
+### 2. A MockBox decoration chain loses the mock's type — fixed
 
-  The unscoped assignment in `beforeEach`'s closure lands in the component's
-  variables scope at run time, and every `it` closure reads it there.
-- **Cause:** a ref declared in a closure carries the closure's lines
-  (`ComponentRef.VisibleFrom/To`, see "A closure's body is read as statements"
-  in CLAUDE.md). That keeps it out of the enclosing function, but it also keeps
-  it out of every other closure.
-- **Fix direction:** an *unscoped* assignment in a closure (not `var`, not
-  `local.`) should be filed where CFML puts it: in variables scope, visible
-  file-wide from its line onward. `var` and `local.` refs keep the closure's
-  lines.
-- **Caveat:** measure the change on the corpus. A closure assigning an unscoped
-  name that shadows a real variable is the risk.
-
-### 2. A MockBox decoration chain loses the mock's type
-
-- **Evidence:** coldbox-platform `iservice` (105 entries), and assignments in
-  specs generally.
-- **Shape:**
-
-  ```cfml
-  variables.iService = model.init( mockController ).$( "getCache", mockCache ).$property( … );
-  ```
-
+- **Was:** coldbox-platform `iService` (105 entries):
+  `variables.iService = model.init( mockController ).$( "getCache", mockCache ).$property( … );`.
   `$()`, `$property()`, `$results()` and the rest return the mock itself.
-- **Cause:** `mockDecoration` hops are accepted as dynamic (`missingChainHop`,
-  `checkMethodOn`), which is right for a last call. An *assignment* through
-  them therefore records no component for the variable.
-- **Fix direction:** make a decoration hop return its receiver's component,
-  since it returns the mock. The same list is `mockDecorations` in
-  `internal/resolve`.
-  - In the resolver: `hopReturn`.
-  - In the parser: the pending-call path, which types `x = a.b().c()` through
-    `FuncLookup`. The hook would need to answer for decoration names, or the
-    parser would need to know the list.
+- **Cause, measured:** mostly not the decoration hops. `model` is assigned in
+  ColdBox's `BaseModelTest` (`createMock( annotations.model )`), not in the
+  spec, so nothing the spec's parse could read typed the base of the chain.
+  The hops did lose the type as well, as the doc said: a decoration made
+  the rest of a chain `$any` in the parser (`walkChainRest` asked
+  `FuncLookup` for `$`) and dynamic in the resolver (`missingChainHop`).
+- **Fix:** the decoration list is `parser.IsMockDecoration`, one list for
+  both packages. A decoration keeps its receiver's type, as `init()` does:
+  in a chain's rest (`walkChainRest`, `restTypes`), for `x = m.$( … )`
+  (`baseVarComponent`), and as a resolver hop (`walkHops`), so
+  `m.$( "a" ).missing()` is checked against the mocked class. A chain whose
+  type is otherwise unknown but decorates what it is made on is made on a
+  mock, and is `$any`. An untyped hop followed by a decoration is a mock
+  too, and dynamic: the stricter walk otherwise reported ColdBox's
+  `controller.….getRequestService().$( "getContext", … )`. Each rule has a
+  case in `internal/resolve/mock_chain_test.go` that fails without it.
+- **Measured:** presets 9,225 → 9,115, no presets 17,645 → 17,532 (5 of
+  those are the nondeterminism below), no entry added.
 
-### 3. `return variables.x;` does not type the function
+### 3. `return variables.x;` does not type the function — fixed
 
-- **Evidence:** cfwheels `DetailOutputService.getPrint()` is
-  `return variables.print;`, where `print` is `inject="PrintBuffer"`. About 60
-  no-preset entries chain on it.
-- **Cause:** `checkReturnComponent` (`internal/parser/script_parser.go`) records
-  the *first* identifier of the return expression. For `variables.print` that
-  is the scope word. `returnCall` walks it as a scoped call and reports "not
-  bare", so `returnVar` becomes `returnsCallOn + "variables"`, which matches no
-  ref. It was already untyped before #184, when `returnVar` was `"variables"`.
-- **Fix direction:** when the first token is a scope word (`scopeReceiver`), a
-  `.`, a name, and then the end of the statement, set `returnVar` to the name
-  and carry the scope (`this.` versus `variables.`, `parser.ReceiverRefScope`),
-  so the right ref is read. `settleReturnComponent` and `settleReturnVars` both
-  need it.
-- **Tag syntax:** the tag parser's `<cfreturn>` path (`tag_parser.go`, near
-  `f.returnVar = varName`) should get the same rule.
+- **Was:** `checkReturnComponent` recorded the *first* identifier of the
+  return expression, which for `return variables.print;` is the scope word,
+  so `returnVar` named no ref and cfwheels' `DetailOutputService.getPrint()`
+  (`print` is `inject="PrintBuffer"`) had no return type.
+- **Fix:** a return whose whole expression is `variables.<name>` or
+  `this.<name>` records the name with its scope (`returnsVariablesVar`,
+  `returnsThisVar` in `internal/parser/result.go`). Such a name is read only
+  from the component's refs, never the function's locals, and only from refs
+  made through that scope (`RefScope.Admits`), in `settleReturnComponent` and
+  `settleReturnVars` alike. The tag parser's `<cfreturn>` applies the same rule
+  (`scopedReturnExpr`). `internal/resolve/scoped_return_test.go` has the
+  `new`, `inject=`, tag-syntax, declared-before-assigned and wrong-scope cases.
+- **Measured:** presets 9,520 → 9,490 (31 removed, 1 added); no presets
+  18,623 → 18,518 (119 removed, 14 added). 69 of the removals are
+  `getPrint`. Five of the others (cfwheels `FileSystem`) were the
+  nondeterminism below, not this change. Every addition is a removed entry re-reported on the same call:
+  13 now name MockBox by its declared path (`getMockBox()` is
+  `return this.$mockbox`) and still stop at gap #2, and TestBox
+  `BaseSpec.cfc:1683` now reports that `cbMockData`, a `box.json` dependency
+  the checkout does not install, does not exist.
 
-### 4. A function returning a resolver-matched call is untyped
+### 4. A function returning a resolver-matched call is untyped — fixed
 
-- **Evidence:** CommandBox `BaseCommand.command()` is
-  `return getInstance( name='CommandDSL', … );`. That accounts for 49
-  no-preset cfwheels entries: `command( … ).run()` and `.params()`.
-- **Cause:** `checkReturnComponent` types a return only when it is a variable,
-  `new`, `createObject` or `entityNew`. A call that a `componentResolver` would
-  type in an assignment (`x = getInstance( "X" )`) is not typed in a
-  `return`.
-- **Fix direction:** in the default arm, when the return is a bare call,
-  capture the call text and run the same resolver match an assignment's
-  right-hand side gets. The stub generator then needs its resolver
-  (`getInstanceResolvers` in `cmd/cfstubgen`) widened to accept further
-  arguments (`(?:,[^()]*)?` before the closing parenthesis). That widening was
-  tried and changed no stub, because the parser half is missing.
-- **Scope:** this helps every project, not only the stubs.
+- **Was:** `checkReturnComponent` typed a return only when it was a variable,
+  `new`, `createObject` or `entityNew`, so CommandBox `BaseCommand.command()`
+  (`return getInstance( name='CommandDSL', … );`) had no return type.
+- **Fix:** a bare call returned whole — nothing after its argument list but
+  the end of the statement — is offered to the componentResolvers as an
+  assignment's right-hand side is (`recordBareCallAndChain` hands back the
+  expression it built, and `dynamicCall` still applies). The stub generator
+  types a returned bare WireBox id by file name, as it already did a variable
+  holding one (`componentReturn`), and the stubs are regenerated: `command()`,
+  `multiSelect()`, `watch()`, `globber()`, `propertyFile()`,
+  `createSubcriteria()` and Wheels' `enableSession()` are typed, each checked
+  against the source. The regex widening suggested here was not needed: a
+  named first argument is already offered as `getInstance("CommandDSL")`.
+- **Measured:** presets 9,490 → 9,476, no presets 18,518 → 18,028, with no
+  entry added. Most of the no-preset drop is coldbox-platform `event` (383):
+  its specs' `buildContext()` is `return prepareMock( new RequestContext(…) )`,
+  which is now `$any` as `x = prepareMock(…)` already was. 53 are cfwheels
+  `command()` chains.
+- **Limit:** the `unresolved` scan indexes files without the config's
+  resolvers (`index.IndexFile`), so a return typed by a *configured* resolver
+  reaches a caller in another file only through the stubs or the server's
+  index, which parses with them. Same-file calls always see it.
 
-### 5. Calls on Java objects are "no component ref" rather than dynamic
+### 5. A component path computed at run time — fixed, and re-diagnosed
 
-- **Evidence:** Lucee `field` (160), `driver` (97), and most of the rest of
-  Lucee's no-component-ref entries.
-- **Shape:**
+- **Was listed as:** calls on Java objects reported as "no component ref".
+  That shape already resolves: a chain from an unstubbed
+  `createObject( "java", … )` is `$any`, and so is the variable assigned
+  from it (`internal/resolve/computed_path_test.go` keeps a case).
+- **What the entries are:** Lucee's admin builds its drivers with
+  `createObject( "component", drivernames[ type ] )` or
+  `createObject( "component", "dbdriver." & type )`. The path is whichever
+  component the program picks, but only a literal path was read: a
+  non-string argument recorded nothing (`driver`, 97 entries with `field`
+  below), a concatenation was read as its first string
+  (`component 'dbdriver.' does not exist`), and the scan stopped inside the
+  argument, so a call in it lost its receiver — `arguments.mapping.getPath()`
+  in ColdBox's Builder was a bare `getPath()`.
+- **Fix:** a computed path is `$any`, as an unmapped `#…#` in a literal one
+  already was, in both parsers. The script parser reads the rest of the
+  argument for calls (`skipComputedArg`), and `parseCreateObjectRef` now
+  calls `readCreateObjectComponent` rather than repeating it.
+- **Measured:** presets 9,115 → 9,020 (99 removed, 4 added); no presets
+  17,532 → 17,439 (98 removed, 5 added). Every addition is a call in a
+  computed path now recorded against its real receiver, which is untyped.
+- **Left alone:** `field` (160) is `<cfloop array="#driver.getCustomFields()#"
+  index="field">`, and most `driver` refs in the other admin pages are
+  `drivers[ form.class ]`, a struct element picked by a key. Those are the
+  dynamic keys CLAUDE.md keeps as an honest "no component ref".
 
-  ```cfml
-  var field = createObject( "java", "…QueryImpl" ).getClass().getDeclaredField( "x" );
-  ```
+### 6. Methods assigned onto an object at run time — fixed
 
-- **Cause:** a chain that starts at an unstubbed Java object is dynamic when
-  called, but the variable it is *assigned* to gets no ref. A later
-  `field.setAccessible( true )` is then reported.
-- **Fix direction:** a pending call whose chain base is dynamic (`$any`,
-  including a Java `createObject` with no stub) should give the variable
-  `$any`.
-- **Where:** `resolvePendingCalls` / `baseVarComponent` in
-  `internal/parser/result.go`. `returnedComponent` (added in #184) already
-  applies this rule to returns.
-- **Caveat:** check it doesn't swallow calls that a `javaStubsPath` would type.
+- **Was:** fw1 `tests/CircularTest.cfc` (8 entries), and the same shape in
+  Lucee's LDEV1962 and ColdBox's specs:
+  `a.getVariables = getVariables; a.getVariables();`.
+- **Fix:** the script parser records `x.m = …` (`checkMemberSet`, reached
+  from `checkBareCall` where no `(` follows). A call `x.m()` with no chain is
+  dynamic when the same function assigned `x.m` on an earlier line
+  (`ParseResult.AssignsMember`, checked in `checkMethodOn`). `a.m == b` and
+  `a[ k ].m = …` are not recorded.
+- **How it is carried:** as a `pendingCall` marked `memberSet`, which is
+  already keyed by function, rekeyed and merged per region, and
+  `resolvePendingCalls` files it in `ParseResult.memberSets`. A slice of its
+  own on `scriptParser` failed `TestParserStructsKeepTheirSize` (368 → 392
+  bytes). Recording it as a `$any` ref for `a.m` was tried and dropped: refs
+  reach other files through the index, and ContentBox's `prc.author` came
+  out untyped in five places. The list is dropped when an edit moves lines,
+  since a call is only checked on a fresh parse.
+- **Not done:** tag syntax (`<cfset a.m = f>`). No corpus entry needs it.
+- **Measured:** presets 9,020 → 9,001, no presets 17,439 → 17,429, no entry
+  added.
 
-### 6. Methods assigned onto an object at run time
+### 7. `this.x()` detection reads the source line — fixed
 
-- **Evidence:** fw1 `tests/CircularTest.cfc`, 8 entries.
-- **Shape:**
-
-  ```cfml
-  a.getVariables = getVariables;
-  a.getVariables();
-  ```
-
-- **Fix direction:** a call `x.m()` where the same function assigns `x.m = …`
-  on an earlier line is dynamic. The parser would need to record member
-  assignments on locals, as `HasScopedAssignment` does for the variables scope.
-- **Priority:** small, and only common in tests.
-
-### 7. `this.x()` detection reads the source line
-
-`thisCallAnswered` (`internal/resolve/missing_method.go`) accepts `this.x()` on
-a component with `onMissingMethod`. Only a `this.`-qualified call reaches
-`onMissingMethod`, and the parser records `this.x()` and `x()` as the same
-bare call. So the resolver re-reads the line text, only on the failure path.
-
-- **Cleaner fix:** add a `This bool` to `parser.CallSite`, set where
-  `scopeReceiver` returns the `this` case.
-- **Size:** CallSite's small fields are grouped at the end, and a bool fits in
-  the existing padding. `TestParserStructsKeepTheirSize` will say if it
-  doesn't.
-- **What to check:** every path that records such a call goes through
-  `scopeReceiver` (see CLAUDE.md), so that is the one place to set it. Then
-  delete `lineAt` and the text scan.
+`thisCallAnswered` (`internal/resolve/missing_method.go`) accepts `this.x()`
+on a component with `onMissingMethod`, and the parser records `this.x()` and
+`x()` as the same bare call, so it searched the call's line for `this.x(`.
+`CallSite.This` now says which was written. It is set in `CallSite.onScope`,
+which the three paths that apply `scopeReceiver` to a call go through (a
+statement, an argument list, a `return`), and it fits in `CallSite`'s padding.
+`lineAt` and the text scan are gone. The line scan also accepted a bare `f()`
+on a line that held a `this.f()`; `TestThisCallsAreKnownWhereverTheyAreWritten`
+has that case and the tag-syntax ones. The corpus report is unchanged.
 
 ## Hand-maintained lists that could be generated
 
@@ -283,5 +320,23 @@ against the source:
   in one special case. They are private, so no application code calls them.
 - **`entityLoad`:** `entityNew( "name" )` is tested to find an entity by its
   `entityname`. `entityLoad` and `entityLoadByPK` were not checked.
+- **`<cfreturn x.y>` is read as `<cfreturn x>`:** the tag parser takes the
+  first identifier of a return expression that holds no `(`, so a function
+  returning a property of `x` is typed as `x`'s component. The script parser
+  types only a name that stands alone. Found while fixing gap #3; left as it
+  is until its effect on the corpus is measured.
+- **The batch scan is not deterministic:** the same binary reports 2,535 or
+  2,540 entries for cfwheels without presets from run to run; the five are
+  `fileSystemUtil.resolvePath()` in `cli/src/commands/wheels/cache/clear.cfc`
+  (`inject="FileSystem"`), reported as "component 'FileSystem' does not
+  exist" in some runs only. `explain` reports it every time. Six runs at the
+  PR #185 merge showed it, so it predates gaps #3 and #4; the parallel
+  scan's lazy indexing is the first suspect. Compare runs with that in mind.
+- **A stale stub:** regenerating the stubs at the PR #185 merge, with nothing
+  changed, rewrites `ArtifactService.getPackagePath()` to return
+  `commandbox.system.services.ConfigService`. It returns a string (`var path
+  = getArtifactsDirectory() & …`), so the committed stub, with no return
+  type, is kept. A reduced copy of the function does not reproduce it, so the
+  cause is elsewhere in the file.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.

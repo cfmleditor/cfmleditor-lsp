@@ -80,6 +80,9 @@ type ParseResult struct {
 	// which only look outside functions and inside init().
 	anyScopedVars map[Scope][]string
 
+	// memberSets are the `a.m = …` assignments met; see AssignsMember.
+	memberSets []pendingCall
+
 	// funcVars caches per-function variable lists keyed by "start:end".
 	funcVarsMu sync.Mutex
 	funcVars   map[string][]string
@@ -237,6 +240,10 @@ func (pr *ParseResult) extractSignatures() {
 		}
 	}
 
+	// The locals of a tag function a region split, carried to the regions
+	// after the split.
+	var open openLocals
+
 	for _, r := range pr.Regions {
 		// A RegionSkip is a literal <script> block, left out of the script
 		// regions so its JavaScript is never fed to the CFScript scanner. Its
@@ -256,9 +263,9 @@ func (pr *ParseResult) extractSignatures() {
 		}
 
 		if r.Kind == RegionScript {
-			allPendingCalls = append(allPendingCalls, pr.mergeScriptRegion(&r, tagScopes)...)
+			allPendingCalls = append(allPendingCalls, pr.mergeScriptRegion(&r, tagScopes, &open)...)
 		} else {
-			allPendingCalls = append(allPendingCalls, pr.mergeTagRegion(&r, tagScopes)...)
+			allPendingCalls = append(allPendingCalls, pr.mergeTagRegion(&r, tagScopes, &open)...)
 		}
 	}
 
@@ -313,9 +320,32 @@ func (pr *ParseResult) extractSignatures() {
 	}
 }
 
+// openLocals are the names declared local — `var`, `local.` — in the tag
+// function still open where a region ends, keyed by the function's file-level
+// funcKey. A <cfscript> block inside a <cffunction> splits the file into
+// regions, and the parser of each region starts with only the function's
+// arguments as its locals: `<cfset var conn = "">` above the block, and
+// `conn = uri.openConnection();` inside it read as an unscoped assignment,
+// which is a variables-scope one, so the variable was filed for the whole
+// component.
+type openLocals struct {
+	key   string
+	names []string
+}
+
+// namesFor is the names declared in the function keyed key, if they are the
+// ones held.
+func (o *openLocals) namesFor(key string) []string {
+	if o.key != key {
+		return nil
+	}
+
+	return o.names
+}
+
 // mergeScriptRegion parses a script region and merges what it found into pr,
 // returning its pending calls for resolvePendingCalls.
-func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open *openLocals) []pendingCall {
 	sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
 	sp.resolverSet = pr.resolverSet
 	sp.extractLinks = pr.extractLinks
@@ -335,9 +365,26 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pen
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
 			sp.localVarSet[strings.ToLower(arg.Name)] = true
 		}
+
+		for _, name := range open.namesFor(sp.inFunc) {
+			sp.localVarSet[strings.ToLower(name)] = true
+		}
 	}
 
+	key := sp.inFunc
+
 	sp.parse()
+
+	// What the block declared local stays local in the regions after it.
+	if key != "" {
+		names := slices.Clone(open.namesFor(key))
+		for name := range sp.localVarSet {
+			names = append(names, name)
+		}
+
+		*open = openLocals{key: key, names: names}
+	}
+
 	pr.Funcs = append(pr.Funcs, sp.funcs...)
 	pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
 	pr.Scopes = append(pr.Scopes, sp.scopes...)
@@ -374,7 +421,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pen
 // mergeTagRegion parses a tag region and merges what it found into pr, with
 // its lines and function keys moved from region-relative to file lines,
 // returning its pending calls for resolvePendingCalls.
-func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *openLocals) []pendingCall {
 	tp := newTagParser(r.Text, string(pr.URI))
 	tp.resolvers = pr.Resolvers
 	tp.resolverSet = pr.resolverSet
@@ -397,9 +444,18 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope) []pendin
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
 			tp.markVarLocal(arg.Name)
 		}
+
+		for _, name := range open.namesFor(funcKey(s.Start, s.End)) {
+			tp.markVarLocal(name)
+		}
 	}
 
 	tp.parse()
+
+	// The function still open where the region ends continues in the next.
+	if tp.inFunc != "" {
+		*open = openLocals{key: shiftFuncKey(tp.inFunc, r.StartLine), names: slices.Clone(tp.localVars)}
+	}
 
 	for i := range tp.funcs {
 		tp.funcs[i].Line += conv.Uint32(r.StartLine)
@@ -683,7 +739,8 @@ func (pr *ParseResult) walkChainRest(comp string, rest []string) string {
 			return comp
 		case strings.HasPrefix(comp, "$builtin."):
 			return "$any"
-		case strings.EqualFold(hop, "init"):
+		case strings.EqualFold(hop, "init"), IsMockDecoration(hop):
+			// A MockBox decoration returns the mock it is called on.
 			continue
 		}
 
@@ -709,9 +766,10 @@ func dynamicIfTyped(comp string, rest []string) string {
 }
 
 // restTypes reports whether a chain's rest can change the type it started
-// with: anything but init() calls.
+// with: anything but init() calls and MockBox decorations, which return what
+// they are called on.
 func restTypes(rest []string) bool {
-	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") })
+	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") && !IsMockDecoration(h) })
 }
 
 // settledComponent is ref's Component with any pending chain walked, for a
@@ -862,6 +920,12 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	for j := range calls {
 		c := &calls[j]
 
+		if c.memberSet {
+			pr.memberSets = append(pr.memberSets, *c)
+
+			continue
+		}
+
 		// Skip if this variable already has a ref (e.g. from appendResolverRefs)
 		if pr.hasRefFor(c) {
 			continue
@@ -895,6 +959,14 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			}
 		}
 
+		// A chain that decorates what it is made on is made on a mock, and
+		// a mock of a class nothing here names is dynamic:
+		// `variables.iService = model.init( c ).$( "getCache", x )`, where
+		// model is the base class's createMock( annotations.model ).
+		if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, IsMockDecoration)) {
+			comp, c.rest = "$any", nil
+		}
+
 		if comp == "" {
 			continue
 		}
@@ -904,7 +976,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			URI: pr.URI, Line: c.line, This: c.refThis,
 			VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 		}
-		if c.funcKey == "" {
+		if c.funcKey == "" || c.global {
 			pr.ComponentRefs = append(pr.ComponentRefs, ref)
 		} else {
 			pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
@@ -966,14 +1038,44 @@ const returnsThis = "$this"
 // variable name can.
 const returnsCallOn = "$call:"
 
-// returnedVar is the variable a returnVar names, and whether the function
-// returns a call made on it rather than the variable itself.
-func returnedVar(returnVar string) (name string, called bool) {
-	if name, ok := strings.CutPrefix(returnVar, returnsCallOn); ok {
-		return name, true
+// returnsVariablesVar and returnsThisVar prefix the returnVar of a function
+// returning a variable read through its scope — `return variables.print;`,
+// `return this.other;`. Such a variable is the component's, never a local of
+// the function, and `this.x` and `variables.x` are separate stores, so each
+// is read only from the component's refs made through its own scope. Like
+// returnsCallOn, each holds a colon, which no variable name can.
+const (
+	returnsVariablesVar = "$variables:"
+	returnsThisVar      = "$this:"
+)
+
+// scopedReturnVar is the returnVar of a function returning name read through
+// scope, which is RefThis or RefVariables.
+func scopedReturnVar(scope RefScope, name string) string {
+	if scope == RefThis {
+		return returnsThisVar + name
 	}
 
-	return returnVar, false
+	return returnsVariablesVar + name
+}
+
+// returnedVar is the variable a returnVar names, whether the function
+// returns a call made on it rather than the variable itself, and the scope
+// it was read through: RefAny for a bare name, which may be a local.
+func returnedVar(returnVar string) (name string, called bool, scope RefScope) {
+	if name, ok := strings.CutPrefix(returnVar, returnsCallOn); ok {
+		return name, true, RefAny
+	}
+
+	if name, ok := strings.CutPrefix(returnVar, returnsVariablesVar); ok {
+		return name, false, RefVariables
+	}
+
+	if name, ok := strings.CutPrefix(returnVar, returnsThisVar); ok {
+		return name, false, RefThis
+	}
+
+	return returnVar, false, RefAny
 }
 
 // returnedComponent is what a function returns, given the component its
@@ -996,10 +1098,28 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 			continue
 		}
 
-		name, called := returnedVar(rp.varName)
+		name, called, scope := returnedVar(rp.varName)
 
-		// A closure's local of the same name is not what the function returns.
-		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name); ref != nil {
+		// A scoped name is the component's variable, not a local of the
+		// function's.
+		if scope != RefAny {
+			if ref := firstRefIn(pr.ComponentRefs, name, scope); ref != nil {
+				pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
+			}
+
+			continue
+		}
+
+		// A closure's local of the same name is not what the function
+		// returns. An unscoped name the function never declared is a
+		// variables-scope one, as settleReturnComponent reads it: a pending
+		// call assigning it settles at component level.
+		ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name)
+		if ref == nil {
+			ref = firstRefNamed(pr.ComponentRefs, name)
+		}
+
+		if ref != nil {
 			pr.Funcs[rp.funcIdx].ReturnComponent = returnedComponent(pr.settledComponent(ref), called)
 		}
 	}
@@ -1045,6 +1165,11 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	// return type over the "same as baseVar" guess — it may differ from the
 	// receiver's type. If the method declares no component return type, don't
 	// propagate the base variable's component at all.
+	// `x = m.$( "get", 1 )`: a decoration returns the mock it is called on.
+	if comp != "" && IsMockDecoration(c.funcName) {
+		return comp
+	}
+
 	if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
 		if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
 			return ret
@@ -1514,6 +1639,26 @@ func (pr *ParseResult) FuncVars(funcStart, funcEnd int) []string {
 	pr.funcVarsMu.Unlock()
 
 	return vars
+}
+
+// AssignsMember reports whether the function holding line assigns
+// variable.member on a line before it: `a.getVariables = getVariables;` then
+// `a.getVariables()` calls what was stored there, which is no method of a's
+// component. Compared case-insensitively, as CFML names are.
+func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool {
+	key := ""
+	if s := findFuncScope(int(line), pr.Scopes); s.Start >= 0 {
+		key = funcKey(s.Start, s.End)
+	}
+
+	for i := range pr.memberSets {
+		m := &pr.memberSets[i]
+		if m.funcKey == key && m.line <= line && strings.EqualFold(m.funcName, member) && strings.EqualFold(m.varName, variable) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // HasScopedAssignment reports whether name was ever assigned in the given scope

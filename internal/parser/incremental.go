@@ -156,6 +156,10 @@ func (pr *ParseResult) shiftAfter(editLine, delta int) {
 		return
 	}
 
+	// Keyed by function and line, both of which just moved. They are read
+	// only when a call is checked, which works from a fresh parse.
+	pr.memberSets = nil
+
 	for i := range pr.Scopes {
 		if pr.Scopes[i].Start > editLine {
 			pr.Scopes[i].Start += delta
@@ -187,6 +191,7 @@ func (pr *ParseResult) reparseShallow() {
 	pr.Funcs = pr.Funcs[:0]
 	pr.ComponentRefs = pr.ComponentRefs[:0]
 	pr.Scopes = pr.Scopes[:0]
+	pr.memberSets = nil
 	pr.extractSignatures()
 	pr.resetGlobalCaches()
 	pr.resetFuncCaches()

@@ -13,7 +13,7 @@ component {
 	 *
 	 * @return MixerUtil
 	 */
-	function getMixerUtil() {}
+	testbox.system.util.MixerUtil function getMixerUtil() {}
 	/**
 	 * Convert an array to struct argument notation
 	 *
@@ -70,5 +70,5 @@ component {
 	/**
 	 * Get the appropriate engine mapping helper for the current engine
 	 */
-	private function getEngineMappingHelper() {}
+	private testbox.system.util.BoxLangMappingHelper function getEngineMappingHelper() {}
 }

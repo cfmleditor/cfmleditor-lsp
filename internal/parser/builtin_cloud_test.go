@@ -36,15 +36,13 @@ func TestGetCloudServiceBuiltin(t *testing.T) {
 		t.Error("expected global component ref for s3Service -> $builtin.getcloudservice")
 	}
 
-	// s3Bucket and s3Result should get function-scoped refs propagated from s3Service
-	for _, scope := range pr.Scopes {
-		refs, _ := pr.FuncRefs(scope.Start, scope.End)
-		for _, ref := range refs {
-			if ref.Variable == "s3Bucket" && ref.Component == "$builtin.getcloudservice" {
-				return // success
-			}
+	// s3Bucket gets s3Service's component. It is unscoped, as s3Service is,
+	// so it is a variables-scope variable and its ref is the component's.
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "s3Bucket" && ref.Component == "$builtin.getcloudservice" {
+			return // success
 		}
 	}
 
-	t.Error("expected function-scoped component ref for s3Bucket (propagated from s3Service)")
+	t.Error("expected component ref for s3Bucket (propagated from s3Service)")
 }

@@ -1,6 +1,16 @@
 package resolve
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+)
 
 // TestAThisCallReachesOnMissingMethod: cborm's services call their dynamic
 // finders through this — `this.findBySlug( slug )` — and BaseORMService
@@ -101,4 +111,86 @@ func TestGeneratedAccessorsReturnWhatTheyHold(t *testing.T) {
 		"r.getHelper.help":                    "",
 		"r.getHelper.nope":                    "method 'nope' not found in Helper",
 	})
+}
+
+// TestThisCallsAreKnownWhereverTheyAreWritten: the parser records whether a
+// call was written `this.f()` (CallSite.This), in every form a call is
+// recorded, where the resolver used to search the call's source line for
+// `this.f(` — which also accepted a bare f() on a line holding a this.f().
+func TestThisCallsAreKnownWhereverTheyAreWritten(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"orm/Base.cfc": `component { function onMissingMethod( name, args ) {} }`,
+		"Service.cfc": `component extends="orm.Base" {
+	function f() {
+		g( this.findA() );
+		this.findF( findF() );
+		return this.findB();
+	}
+}`,
+		"TagService.cfc": `<cfcomponent extends="orm.Base">
+	<cffunction name="f">
+		<cfset this.findC()>
+		<cfreturn this.findD()>
+	</cffunction>
+</cfcomponent>`,
+	})
+
+	got := reasonsWith(t, &Resolver{}, dir, "Service.cfc")
+	expectReasons(t, got, map[string]string{
+		"findA": "",
+		"findB": "",
+	})
+
+	// Two calls named findF: the this. one is answered, the bare one is not.
+	if n := countReasons(t, dir, "Service.cfc", "findF"); n != 1 {
+		t.Errorf("findF: %d unanswered calls, want 1 (the bare one)", n)
+	}
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "TagService.cfc"), map[string]string{
+		"findC": "",
+		"findD": "",
+	})
+}
+
+// countReasons is how many calls named name in page are reported, where
+// reasonsIn keeps one answer per name.
+func countReasons(t *testing.T, dir, page, name string) int {
+	t.Helper()
+
+	r := &Resolver{FS: vfs.OS{}, WorkspaceFolders: []string{dir}, Index: index.New()}
+	file := filepath.Join(dir, filepath.FromSlash(page))
+
+	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
+		if err != nil || !strings.HasSuffix(p, ".cfc") {
+			return err
+		}
+
+		data, err := os.ReadFile(p)
+		if err == nil {
+			r.Index.IndexFile(cfpath.ToURI(p), string(data))
+		}
+
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{ExtractCalls: true})
+	calls := pr.AllCalls()
+	n := 0
+
+	for i := range calls {
+		if c := &calls[i]; c.FuncName == name && r.CanResolveCall(c, pr, filepath.Dir(file)) != "" {
+			n++
+		}
+	}
+
+	return n
 }
