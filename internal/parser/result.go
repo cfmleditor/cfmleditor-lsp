@@ -966,14 +966,44 @@ const returnsThis = "$this"
 // variable name can.
 const returnsCallOn = "$call:"
 
-// returnedVar is the variable a returnVar names, and whether the function
-// returns a call made on it rather than the variable itself.
-func returnedVar(returnVar string) (name string, called bool) {
-	if name, ok := strings.CutPrefix(returnVar, returnsCallOn); ok {
-		return name, true
+// returnsVariablesVar and returnsThisVar prefix the returnVar of a function
+// returning a variable read through its scope — `return variables.print;`,
+// `return this.other;`. Such a variable is the component's, never a local of
+// the function, and `this.x` and `variables.x` are separate stores, so each
+// is read only from the component's refs made through its own scope. Like
+// returnsCallOn, each holds a colon, which no variable name can.
+const (
+	returnsVariablesVar = "$variables:"
+	returnsThisVar      = "$this:"
+)
+
+// scopedReturnVar is the returnVar of a function returning name read through
+// scope, which is RefThis or RefVariables.
+func scopedReturnVar(scope RefScope, name string) string {
+	if scope == RefThis {
+		return returnsThisVar + name
 	}
 
-	return returnVar, false
+	return returnsVariablesVar + name
+}
+
+// returnedVar is the variable a returnVar names, whether the function
+// returns a call made on it rather than the variable itself, and the scope
+// it was read through: RefAny for a bare name, which may be a local.
+func returnedVar(returnVar string) (name string, called bool, scope RefScope) {
+	if name, ok := strings.CutPrefix(returnVar, returnsCallOn); ok {
+		return name, true, RefAny
+	}
+
+	if name, ok := strings.CutPrefix(returnVar, returnsVariablesVar); ok {
+		return name, false, RefVariables
+	}
+
+	if name, ok := strings.CutPrefix(returnVar, returnsThisVar); ok {
+		return name, false, RefThis
+	}
+
+	return returnVar, false, RefAny
 }
 
 // returnedComponent is what a function returns, given the component its
@@ -996,7 +1026,17 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 			continue
 		}
 
-		name, called := returnedVar(rp.varName)
+		name, called, scope := returnedVar(rp.varName)
+
+		// A scoped name is the component's variable, not a local of the
+		// function's.
+		if scope != RefAny {
+			if ref := firstRefIn(pr.ComponentRefs, name, scope); ref != nil {
+				pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
+			}
+
+			continue
+		}
 
 		// A closure's local of the same name is not what the function returns.
 		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name); ref != nil {

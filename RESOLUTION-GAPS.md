@@ -50,7 +50,9 @@ a, b = load(sys.argv[1]), load(sys.argv[2])
 print("added", sum((b - a).values()), "removed", sum((a - b).values()))
 ```
 
-At PR #184 the totals are **9,520** with presets and **18,618** without. Use
+At PR #184 the totals are **9,520** with presets and **18,618** without
+(18,623 when re-measured at the branch point of gap #3's fix). After gap #3
+they are **9,490** and **18,518**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -133,23 +135,27 @@ The gaps below explain the largest of these.
     `FuncLookup`. The hook would need to answer for decoration names, or the
     parser would need to know the list.
 
-### 3. `return variables.x;` does not type the function
+### 3. `return variables.x;` does not type the function — fixed
 
-- **Evidence:** cfwheels `DetailOutputService.getPrint()` is
-  `return variables.print;`, where `print` is `inject="PrintBuffer"`. About 60
-  no-preset entries chain on it.
-- **Cause:** `checkReturnComponent` (`internal/parser/script_parser.go`) records
-  the *first* identifier of the return expression. For `variables.print` that
-  is the scope word. `returnCall` walks it as a scoped call and reports "not
-  bare", so `returnVar` becomes `returnsCallOn + "variables"`, which matches no
-  ref. It was already untyped before #184, when `returnVar` was `"variables"`.
-- **Fix direction:** when the first token is a scope word (`scopeReceiver`), a
-  `.`, a name, and then the end of the statement, set `returnVar` to the name
-  and carry the scope (`this.` versus `variables.`, `parser.ReceiverRefScope`),
-  so the right ref is read. `settleReturnComponent` and `settleReturnVars` both
-  need it.
-- **Tag syntax:** the tag parser's `<cfreturn>` path (`tag_parser.go`, near
-  `f.returnVar = varName`) should get the same rule.
+- **Was:** `checkReturnComponent` recorded the *first* identifier of the
+  return expression, which for `return variables.print;` is the scope word,
+  so `returnVar` named no ref and cfwheels' `DetailOutputService.getPrint()`
+  (`print` is `inject="PrintBuffer"`) had no return type.
+- **Fix:** a return whose whole expression is `variables.<name>` or
+  `this.<name>` records the name with its scope (`returnsVariablesVar`,
+  `returnsThisVar` in `internal/parser/result.go`). Such a name is read only
+  from the component's refs, never the function's locals, and only from refs
+  made through that scope (`RefScope.Admits`), in `settleReturnComponent` and
+  `settleReturnVars` alike. The tag parser's `<cfreturn>` applies the same rule
+  (`scopedReturnExpr`). `internal/resolve/scoped_return_test.go` has the
+  `new`, `inject=`, tag-syntax, declared-before-assigned and wrong-scope cases.
+- **Measured:** presets 9,520 → 9,490 (31 removed, 1 added); no presets
+  18,623 → 18,518 (119 removed, 14 added). 69 of the removals are
+  `getPrint`. Every addition is a removed entry re-reported on the same call:
+  13 now name MockBox by its declared path (`getMockBox()` is
+  `return this.$mockbox`) and still stop at gap #2, and TestBox
+  `BaseSpec.cfc:1683` now reports that `cbMockData`, a `box.json` dependency
+  the checkout does not install, does not exist.
 
 ### 4. A function returning a resolver-matched call is untyped
 
@@ -283,5 +289,10 @@ against the source:
   in one special case. They are private, so no application code calls them.
 - **`entityLoad`:** `entityNew( "name" )` is tested to find an entity by its
   `entityname`. `entityLoad` and `entityLoadByPK` were not checked.
+- **`<cfreturn x.y>` is read as `<cfreturn x>`:** the tag parser takes the
+  first identifier of a return expression that holds no `(`, so a function
+  returning a property of `x` is typed as `x`'s component. The script parser
+  types only a name that stands alone. Found while fixing gap #3; left as it
+  is until its effect on the corpus is measured.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.

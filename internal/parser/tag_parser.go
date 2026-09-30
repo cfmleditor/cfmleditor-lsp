@@ -1035,11 +1035,40 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	case strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(inner), "/"), "this"):
 		f.returnVar = returnsThis
 	default:
-		// return varName — store for deferred resolution
+		// return varName — store for deferred resolution. A name read
+		// through variables. or this. is the component's, and is read from
+		// that scope's refs alone, as the script parser reads it.
+		if name, scope := scopedReturnExpr(inner); name != "" {
+			f.returnVar = scopedReturnVar(scope, name)
+
+			return
+		}
+
 		varName := extractIdent(inner)
 		if varName != "" && !strings.Contains(inner, "(") {
 			f.returnVar = varName
 		}
+	}
+}
+
+// scopedReturnExpr is the name a `<cfreturn>` expression reads through
+// variables. or this. when that is the whole expression, and the scope it
+// names; "" for anything else.
+func scopedReturnExpr(expr string) (string, RefScope) {
+	expr = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(expr), "/"))
+
+	scopeWord, name, ok := strings.Cut(expr, ".")
+	if !ok || name == "" || extractIdent(name) != name {
+		return "", RefAny
+	}
+
+	switch {
+	case strings.EqualFold(scopeWord, "variables"):
+		return name, RefVariables
+	case strings.EqualFold(scopeWord, "this"):
+		return name, RefThis
+	default:
+		return "", RefAny
 	}
 }
 

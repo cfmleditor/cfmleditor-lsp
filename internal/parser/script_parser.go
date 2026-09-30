@@ -2124,13 +2124,19 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 		return
 	}
 
-	// Look up returnVar in this function's refs, then in componentRefs
-	// (for variables./this. scoped).
-	name, called := returnedVar(p.returnVar)
+	// Look up returnVar in this function's refs, then in componentRefs. A
+	// name read through variables. or this. is the component's alone, and
+	// only a ref made through that scope holds it.
+	name, called, scope := returnedVar(p.returnVar)
 
-	for _, refs := range [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs} {
+	lookIn := [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs}
+	if scope != RefAny {
+		lookIn = lookIn[1:]
+	}
+
+	for _, refs := range lookIn {
 		for i := range refs {
-			if strings.EqualFold(refs[i].Variable, name) && !chainPending(&refs[i]) {
+			if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) && !chainPending(&refs[i]) {
 				f.ReturnComponent = returnedComponent(refs[i].Component, called)
 
 				break
@@ -2264,6 +2270,7 @@ func (p *scriptParser) checkReturnComponent() {
 		p.scanChainedCalls(comp, peek.Line)
 	default:
 		bareThis := identEq(peek.Value, "this") && p.returnsBareThis()
+		scopedVar, scope := p.returnedScopedVar()
 
 		// return varName — track for resolution after body parse. Only the
 		// name alone is what the variable holds: `return shell.pwd()`
@@ -2275,8 +2282,11 @@ func (p *scriptParser) checkReturnComponent() {
 			p.returnVar = returnsCallOn + peek.Value
 		}
 
-		if bareThis {
+		switch {
+		case bareThis:
 			p.returnVar = returnsThis
+		case scopedVar != "":
+			p.returnVar = scopedReturnVar(scope, scopedVar)
 		}
 
 		return
@@ -2284,6 +2294,40 @@ func (p *scriptParser) checkReturnComponent() {
 
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// returnedScopedVar is the name a return reads through variables. or this.
+// when that is the whole returned expression — `return variables.print;` —
+// and the scope it names, without moving the scanner. It is "" for anything
+// else, `return variables.print.line()` and `return this;` included.
+func (p *scriptParser) returnedScopedVar() (string, RefScope) {
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	scopeTok := p.sc.NextSkipComments()
+
+	scope := RefVariables
+	if identEq(scopeTok.Value, "this") {
+		scope = RefThis
+	} else if !identEq(scopeTok.Value, "variables") {
+		return "", RefAny
+	}
+
+	if p.sc.NextSkipComments().Kind != TokDot {
+		return "", RefAny
+	}
+
+	name := p.sc.NextSkipComments()
+	if name.Kind != TokIdent {
+		return "", RefAny
+	}
+
+	switch p.sc.PeekSkipComments().Kind {
+	case TokSemicolon, TokRBrace, TokEOF:
+		return name.Value, scope
+	default:
+		return "", RefAny
 	}
 }
 
