@@ -237,21 +237,17 @@ The gaps below explain the largest of these.
   assignments on locals, as `HasScopedAssignment` does for the variables scope.
 - **Priority:** small, and only common in tests.
 
-### 7. `this.x()` detection reads the source line
+### 7. `this.x()` detection reads the source line — fixed
 
-`thisCallAnswered` (`internal/resolve/missing_method.go`) accepts `this.x()` on
-a component with `onMissingMethod`. Only a `this.`-qualified call reaches
-`onMissingMethod`, and the parser records `this.x()` and `x()` as the same
-bare call. So the resolver re-reads the line text, only on the failure path.
-
-- **Cleaner fix:** add a `This bool` to `parser.CallSite`, set where
-  `scopeReceiver` returns the `this` case.
-- **Size:** CallSite's small fields are grouped at the end, and a bool fits in
-  the existing padding. `TestParserStructsKeepTheirSize` will say if it
-  doesn't.
-- **What to check:** every path that records such a call goes through
-  `scopeReceiver` (see CLAUDE.md), so that is the one place to set it. Then
-  delete `lineAt` and the text scan.
+`thisCallAnswered` (`internal/resolve/missing_method.go`) accepts `this.x()`
+on a component with `onMissingMethod`, and the parser records `this.x()` and
+`x()` as the same bare call, so it searched the call's line for `this.x(`.
+`CallSite.This` now says which was written. It is set in `CallSite.onScope`,
+which the three paths that apply `scopeReceiver` to a call go through (a
+statement, an argument list, a `return`), and it fits in `CallSite`'s padding.
+`lineAt` and the text scan are gone. The line scan also accepted a bare `f()`
+on a line that held a `this.f()`; `TestThisCallsAreKnownWhereverTheyAreWritten`
+has that case and the tag-syntax ones. The corpus report is unchanged.
 
 ## Hand-maintained lists that could be generated
 

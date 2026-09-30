@@ -466,6 +466,20 @@ func scopeReceiver(word string) (variable, component string, ok bool) {
 	}
 }
 
+// onScope gives c the receiver scopeReceiver says a call made directly on
+// the scope word has, when word is one, and records whether it was `this.`:
+// the parser records `this.f()` and `f()` alike, and only the first reaches
+// onMissingMethod.
+func (c *CallSite) onScope(word string) {
+	v, comp, ok := scopeReceiver(word)
+	if !ok {
+		return
+	}
+
+	c.Variable, c.Component, c.Resolved = v, comp, comp != ""
+	c.This = identEq(word, "this")
+}
+
 // recordCallFromChain records a call site when a dot chain ending in ( is detected.
 // fullChain is e.g. "VARIABLES.service.GetData" or just "GetData", line is the source line.
 func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
@@ -493,9 +507,7 @@ func (p *scriptParser) recordCallFromChain(fullChain string, line int) {
 		Caller:   caller,
 	}
 
-	if v, comp, ok := scopeReceiver(recv); ok {
-		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
-	}
+	call.onScope(recv)
 
 	p.addCall(&call)
 }
@@ -832,9 +844,7 @@ func (p *scriptParser) recordScopedMemberCall(scopeTok, nameTok Token) {
 	// the enum once recorded request., session. and application. calls as calls
 	// to functions of that name in this file, when they were dispatched as
 	// ScopeVariables.
-	if v, comp, ok := scopeReceiver(scopeTok.Value); ok {
-		call.Variable, call.Component, call.Resolved = v, comp, comp != ""
-	}
+	call.onScope(scopeTok.Value)
 
 	p.addCall(&call)
 
@@ -3470,9 +3480,7 @@ chainWalk:
 	// A call made directly on a scope, reached here from an argument list —
 	// `f( server.getTestService() )` — is the call the statement
 	// `server.getTestService()` is.
-	if v, sc, ok := scopeReceiver(varName); ok {
-		call.Variable, call.Component, call.Resolved = v, sc, sc != ""
-	}
+	call.onScope(varName)
 
 	p.addCall(&call)
 
