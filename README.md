@@ -37,7 +37,8 @@ Use the setup command as your managed environment's setup hook. The default
 cache is gitignored under `target/dev-env`; `CFML_DEV_CACHE` can name a
 persistent cache directory instead, whose `env.sh` you then source.
 `make clean` removes the default cache. Existing Go cache variables are
-honored.
+honored, including `GOLANGCI_LINT_CACHE`. Setup also places the linter's
+analysis cache in the writable development cache by default.
 
 In a managed sandbox, a proxy connection failure may be specific to that
 execution context. Retry the check with approved network access before

@@ -112,12 +112,14 @@ PY
         export GOCACHE=${GOCACHE:-"$dev_cache/build-cache"}
         export GOPATH=${GOPATH:-"$dev_cache/go-path"}
         export GOMODCACHE=${GOMODCACHE:-"$GOPATH/pkg/mod"}
+        export GOLANGCI_LINT_CACHE=${GOLANGCI_LINT_CACHE:-"$dev_cache/lint-cache"}
         export GOTOOLCHAIN=local
         export CGO_ENABLED=1
-        mkdir -p "$GOCACHE" "$GOMODCACHE"
+        mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOLANGCI_LINT_CACHE"
         {
             printf 'export PATH=%q:"$PATH"\n' "$(dirname "$go_tool")"
             printf 'export GOCACHE=%q GOPATH=%q GOMODCACHE=%q\n' "$GOCACHE" "$GOPATH" "$GOMODCACHE"
+            printf 'export GOLANGCI_LINT_CACHE=%q\n' "$GOLANGCI_LINT_CACHE"
             printf 'export GOTOOLCHAIN=local CGO_ENABLED=1\n'
         } > "$dev_cache/env.sh"
         go mod download

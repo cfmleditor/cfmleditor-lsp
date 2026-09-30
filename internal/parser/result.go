@@ -304,6 +304,8 @@ func (pr *ParseResult) extractSignatures() {
 		pr.fillCallers()
 	}
 
+	pr.discardPrimitiveReturnComponents()
+
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
 	if !pr.shallow {
 		pr.applyExpressionMappings()
@@ -318,6 +320,32 @@ func (pr *ParseResult) extractSignatures() {
 		// first call of a longer chain is wrong, so such a ref is dynamic.
 		dropChainRest(pr, dynamicIfTyped)
 	}
+}
+
+// discardPrimitiveReturnComponents keeps an inference from overriding a
+// declared primitive return type. Without this, a string method's local
+// assigned from a receiver call can make the method and its callers return
+// the receiver's component. Generic any/component declarations still infer.
+func (pr *ParseResult) discardPrimitiveReturnComponents() {
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+		f.ReturnComponent = pr.componentReturnFor(f, f.ReturnComponent)
+	}
+}
+
+// componentReturnFor also guards returns settled after resolver refs become
+// available. A runtime-created component remains dynamic even when its method
+// declares struct; it must not acquire a concrete component type.
+func (pr *ParseResult) componentReturnFor(f *FunctionDef, comp string) string {
+	if f.ReturnType != "" && !strings.EqualFold(f.ReturnType, "any") && !looksLikeCFCType(f.ReturnType) {
+		if pr.replaceExpressions(comp) == "$any" {
+			return "$any"
+		}
+
+		return ""
+	}
+
+	return comp
 }
 
 // openLocals are the names declared local — `var`, `local.` — in the tag
@@ -1010,7 +1038,7 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 		// its file, named by path, which is how the resolver takes it.
 		if f.returnVar == returnsThis {
 			if path, ok := strings.CutPrefix(string(f.URI), "file://"); ok && path != "" {
-				f.ReturnComponent = path
+				f.ReturnComponent = pr.componentReturnFor(f, path)
 			}
 
 			continue
@@ -1104,7 +1132,7 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 		// function's.
 		if scope != RefAny {
 			if ref := firstRefIn(pr.ComponentRefs, name, scope); ref != nil {
-				pr.Funcs[rp.funcIdx].ReturnComponent = pr.settledComponent(ref)
+				pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], pr.settledComponent(ref))
 			}
 
 			continue
@@ -1120,7 +1148,7 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 		}
 
 		if ref != nil {
-			pr.Funcs[rp.funcIdx].ReturnComponent = returnedComponent(pr.settledComponent(ref), called)
+			pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], returnedComponent(pr.settledComponent(ref), called))
 		}
 	}
 }
