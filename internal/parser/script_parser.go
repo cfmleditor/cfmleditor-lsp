@@ -745,7 +745,7 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 	case "entitynew":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, tok.Line)
-	case "entityload":
+	case "entityload", "entityloadbypk":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, tok.Line)
 	default:
@@ -1003,7 +1003,7 @@ func (p *scriptParser) parseScopedVar(tok Token, scope Scope) {
 		case "entitynew":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, tok.Line)
-		case "entityload":
+		case "entityload", "entityloadbypk":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, tok.Line)
 		case "this":
@@ -2718,7 +2718,7 @@ func (p *scriptParser) parseBodyVarDecl(varTok Token) {
 	case "entitynew":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, varTok.Line)
-	case "entityload":
+	case "entityload", "entityloadbypk":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(nameTok.Value, varTok.Line)
 	default:
@@ -2795,7 +2795,7 @@ func (p *scriptParser) parseBodyScopedVar(scopeTok Token, scope Scope) {
 		case "entitynew":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
-		case "entityload":
+		case "entityload", "entityloadbypk":
 			p.sc.NextSkipComments()
 			p.parseEntityNewRef(nameTok.Value, scopeTok.Line)
 		case "this":
@@ -3137,7 +3137,7 @@ func (p *scriptParser) checkAssignRef(tok Token) {
 	case "entitynew":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(tok.Value, tok.Line)
-	case "entityload":
+	case "entityload", "entityloadbypk":
 		p.sc.NextSkipComments()
 		p.parseEntityNewRef(tok.Value, tok.Line)
 	default:

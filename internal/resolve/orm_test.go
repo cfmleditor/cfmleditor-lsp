@@ -31,6 +31,38 @@ func TestAnEntityIsFoundByItsEntityName(t *testing.T) {
 	})
 }
 
+func TestEntityLoadFunctionsFindAnEntityByItsEntityName(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"models/Author.cfc": `component persistent="true" entityname="cbAuthor" {
+	property name="name";
+}`,
+		"services/Page.cfc": `component {
+	function f() {
+		var loaded = entityLoad( "cbAuthor", 1, true );
+		loaded.getName();
+		var byPK = entityLoadByPK( "cbAuthor", 1 );
+		byPK.getName();
+	}
+}`,
+		"services/TagPage.cfc": `<cfcomponent>
+	<cffunction name="f">
+		<cfset loaded = entityLoad("cbAuthor", 1, true)>
+		<cfset loaded.getName()>
+		<cfset byPK = entityLoadByPK("cbAuthor", 1)>
+		<cfset byPK.getName()>
+	</cffunction>
+</cfcomponent>`,
+	})
+
+	for _, page := range []string{"services/Page.cfc", "services/TagPage.cfc"} {
+		expectReasons(t, reasonsWith(t, &Resolver{}, dir, page), map[string]string{
+			"loaded.getName": "",
+			"byPK.getName":   "",
+		})
+	}
+}
+
 // TestAVirtualEntityServiceReturnsItsEntity: ContentBox's services extend
 // cborm's VirtualEntityService and bind it with super.init( entityName ),
 // after which new(), get() and findWhere() return that entity — declared

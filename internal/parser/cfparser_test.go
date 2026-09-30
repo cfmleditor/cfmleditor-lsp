@@ -1489,6 +1489,20 @@ func TestTagParser_CfreturnVarResolution(t *testing.T) {
 	}
 }
 
+func TestTagParser_CfreturnMemberDoesNotReturnReceiver(t *testing.T) {
+	content := `<cfcomponent>
+<cffunction name="child">
+	<cfset var parent = CreateObject("component", "models.Parent")>
+	<cfreturn parent.child>
+</cffunction>
+</cfcomponent>`
+	pr := Parse(testURI, content)
+
+	if got := pr.Funcs[0].ReturnComponent; got != "" {
+		t.Errorf("member return typed as receiver component %q", got)
+	}
+}
+
 func TestTagParser_BareFunctionCallResolution(t *testing.T) {
 	// x = sameFileFunc() should resolve via ReturnComponent
 	content := `<cfcomponent>
