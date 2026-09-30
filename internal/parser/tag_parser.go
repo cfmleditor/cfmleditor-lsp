@@ -1050,6 +1050,7 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 		// component. Member types are not represented by the parser, so leave
 		// that expression untyped rather than inventing an answer.
 		expr := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(inner), "/"))
+
 		varName := extractIdent(expr)
 		if varName != "" && varName == expr {
 			f.returnVar = varName

@@ -123,6 +123,7 @@ func TestConfiguredResolverReturnCrossesFiles(t *testing.T) {
 		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 			t.Fatal(err)
 		}
+
 		paths = append(paths, path)
 	}
 
@@ -132,6 +133,7 @@ func TestConfiguredResolverReturnCrossesFiles(t *testing.T) {
 		}},
 		WorkspaceFolders: []string{dir},
 	}
+
 	page := filepath.Join(dir, "Page.cfc")
 	if rep := Scan(vfs.OS{}, paths, []string{page}, opt); len(rep.Calls) != 0 {
 		for i := range rep.Calls {
