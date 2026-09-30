@@ -1669,8 +1669,15 @@ func extractCreateObjectArg(s string) string {
 	}
 
 	rest = strings.TrimSpace(rest[ci+1:])
-	if rest == "" || (rest[0] != '"' && rest[0] != '\'') {
+	if rest == "" || rest[0] == ')' {
 		return ""
+	}
+
+	// A path computed at run time — drivernames[ type ], "pkg." & name —
+	// names whichever component the program picks, and is dynamic, as the
+	// script parser reads it (readCreateObjectComponent).
+	if rest[0] != '"' && rest[0] != '\'' {
+		return "$any"
 	}
 
 	q2 := rest[0]
@@ -1678,6 +1685,10 @@ func extractCreateObjectArg(s string) string {
 	end2 := strings.IndexByte(rest[1:], q2)
 	if end2 < 0 {
 		return ""
+	}
+
+	if after := strings.TrimSpace(rest[2+end2:]); after != "" && after[0] != ')' && after[0] != ',' {
+		return "$any"
 	}
 
 	return rest[1 : 1+end2]

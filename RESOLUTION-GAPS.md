@@ -54,7 +54,7 @@ At PR #184 the totals are **9,520** with presets and **18,618** without
 (18,623 when re-measured at the branch point of gap #3's fix, see "The batch
 scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
 and **18,028**; after gap #1, **9,225** and **17,645**; after gap #2, **9,115** and
-**17,532**. Use
+**17,532**; after gap #5, **9,020** and **17,439**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -195,26 +195,32 @@ The gaps below explain the largest of these.
   reaches a caller in another file only through the stubs or the server's
   index, which parses with them. Same-file calls always see it.
 
-### 5. Calls on Java objects are "no component ref" rather than dynamic
+### 5. A component path computed at run time — fixed, and re-diagnosed
 
-- **Evidence:** Lucee `field` (160), `driver` (97), and most of the rest of
-  Lucee's no-component-ref entries.
-- **Shape:**
-
-  ```cfml
-  var field = createObject( "java", "…QueryImpl" ).getClass().getDeclaredField( "x" );
-  ```
-
-- **Cause:** a chain that starts at an unstubbed Java object is dynamic when
-  called, but the variable it is *assigned* to gets no ref. A later
-  `field.setAccessible( true )` is then reported.
-- **Fix direction:** a pending call whose chain base is dynamic (`$any`,
-  including a Java `createObject` with no stub) should give the variable
-  `$any`.
-- **Where:** `resolvePendingCalls` / `baseVarComponent` in
-  `internal/parser/result.go`. `returnedComponent` (added in #184) already
-  applies this rule to returns.
-- **Caveat:** check it doesn't swallow calls that a `javaStubsPath` would type.
+- **Was listed as:** calls on Java objects reported as "no component ref".
+  That shape already resolves: a chain from an unstubbed
+  `createObject( "java", … )` is `$any`, and so is the variable assigned
+  from it (`internal/resolve/computed_path_test.go` keeps a case).
+- **What the entries are:** Lucee's admin builds its drivers with
+  `createObject( "component", drivernames[ type ] )` or
+  `createObject( "component", "dbdriver." & type )`. The path is whichever
+  component the program picks, but only a literal path was read: a
+  non-string argument recorded nothing (`driver`, 97 entries with `field`
+  below), a concatenation was read as its first string
+  (`component 'dbdriver.' does not exist`), and the scan stopped inside the
+  argument, so a call in it lost its receiver — `arguments.mapping.getPath()`
+  in ColdBox's Builder was a bare `getPath()`.
+- **Fix:** a computed path is `$any`, as an unmapped `#…#` in a literal one
+  already was, in both parsers. The script parser reads the rest of the
+  argument for calls (`skipComputedArg`), and `parseCreateObjectRef` now
+  calls `readCreateObjectComponent` rather than repeating it.
+- **Measured:** presets 9,115 → 9,020 (99 removed, 4 added); no presets
+  17,532 → 17,439 (98 removed, 5 added). Every addition is a call in a
+  computed path now recorded against its real receiver, which is untyped.
+- **Left alone:** `field` (160) is `<cfloop array="#driver.getCustomFields()#"
+  index="field">`, and most `driver` refs in the other admin pages are
+  `drivers[ form.class ]`, a struct element picked by a key. Those are the
+  dynamic keys CLAUDE.md keeps as an honest "no component ref".
 
 ### 6. Methods assigned onto an object at run time
 

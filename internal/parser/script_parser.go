@@ -2581,34 +2581,71 @@ func (p *scriptParser) readCreateObjectComponent() string {
 
 	arg1Val := unquote(arg1.Value)
 
+	if p.sc.NextSkipComments().Kind != TokComma {
+		return ""
+	}
+
+	arg2 := p.sc.NextSkipComments()
+	if arg2.Kind == TokRParen || arg2.Kind == TokEOF {
+		return ""
+	}
+
+	// A path computed at run time — createObject( "component",
+	// drivernames[ type ] ), "pkg." & name — names whichever component the
+	// program picks, as an unmapped #...# in a literal path does, and is
+	// dynamic for the same reason. Nothing was recorded for it, so every call
+	// on the variable was "no component ref", and the scan stopped inside the
+	// argument.
+	if arg2.Kind != TokString || !p.atArgEnd() {
+		p.skipComputedArg(arg2)
+
+		return "$any"
+	}
+
 	if identEq(arg1Val, "component") {
-		if p.sc.NextSkipComments().Kind != TokComma {
-			return ""
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return ""
-		}
-
 		return unquote(arg2.Value)
 	}
 
-	// Non-component createObject (e.g. java) — consume comma+arg2 and try resolvers
-	if p.sc.PeekSkipComments().Kind != TokComma {
-		return ""
-	}
-
-	p.sc.NextSkipComments() // consume ,
-
-	arg2 := p.sc.NextSkipComments()
-	if arg2.Kind != TokString {
-		return ""
-	}
-
+	// Non-component createObject (e.g. java) — try resolvers
 	expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
 
 	return p.resolveCall(expr)
+}
+
+// atArgEnd reports whether the next token ends an argument.
+func (p *scriptParser) atArgEnd() bool {
+	k := p.sc.PeekSkipComments().Kind
+
+	return k == TokRParen || k == TokComma
+}
+
+// skipComputedArg consumes the rest of an argument whose first token, first,
+// is already consumed, recording the calls it makes, and stops before the ,
+// or ) that ends it.
+func (p *scriptParser) skipComputedArg(first Token) {
+	depth := 0
+
+	for tok := first; ; tok = p.sc.NextSkipComments() {
+		switch tok.Kind {
+		case TokLParen, TokLBracket, TokLBrace:
+			depth++
+		case TokRParen, TokRBracket, TokRBrace:
+			depth--
+
+			p.handleLiteralToken(tok)
+		case TokIdent:
+			p.scanNestedCall(tok)
+		case TokString:
+			p.handleLiteralToken(tok)
+		case TokEOF:
+			return
+		default:
+		}
+
+		if next := p.sc.PeekSkipComments().Kind; next == TokEOF || (depth <= 0 && (next == TokRParen || next == TokComma)) {
+			return
+		}
+	}
 }
 
 // readEntityNewComponent reads the entity name from entityNew("Name").
@@ -3472,71 +3509,19 @@ func (p *scriptParser) parseNewRef(varName string, line int) {
 }
 
 func (p *scriptParser) parseCreateObjectRef(varName string, line int) {
-	lp := p.sc.NextSkipComments()
-	if lp.Kind != TokLParen {
-		return
+	comp := p.readCreateObjectComponent()
+
+	// Consume closing ) and handle any chained .method() calls
+	if p.sc.PeekSkipComments().Kind == TokRParen {
+		p.sc.NextSkipComments()
 	}
 
-	arg1 := p.sc.NextSkipComments()
-	if arg1.Kind != TokString {
-		return
-	}
-
-	arg1Val := unquote(arg1.Value)
-
-	if identEq(arg1Val, "component") {
-		comma := p.sc.NextSkipComments()
-		if comma.Kind != TokComma {
-			return
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return
-		}
-
-		comp := unquote(arg2.Value)
-
-		// Consume closing ) and handle any chained .method() calls
-		if p.sc.PeekSkipComments().Kind == TokRParen {
-			p.sc.NextSkipComments()
-		}
-
-		if comp != "" {
-			hops := p.scanChainedCalls(comp, line)
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
-	} else {
-		// Try resolvers for non-component createObject (e.g. java), which
-		// fall back to dynamicCall when none is configured
-		comma := p.sc.NextSkipComments()
-		if comma.Kind != TokComma {
-			return
-		}
-
-		arg2 := p.sc.NextSkipComments()
-		if arg2.Kind != TokString {
-			return
-		}
-
-		expr := "createObject(\"" + arg1Val + "\",\"" + unquote(arg2.Value) + "\")"
-		comp := p.resolveCall(expr)
-
-		// Consume closing ) and handle any chained .method() calls
-		if p.sc.PeekSkipComments().Kind == TokRParen {
-			p.sc.NextSkipComments()
-		}
-
-		if comp != "" {
-			hops := p.scanChainedCalls(comp, line)
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp, ChainRest: hops,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
+	if comp != "" {
+		hops := p.scanChainedCalls(comp, line)
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp, ChainRest: hops,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+		})
 	}
 }
 
