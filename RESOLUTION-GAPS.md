@@ -607,7 +607,7 @@ Conflicting literals, computed subsystem flags, struct-form settings, relocated
 bases, custom directories, subsystem factories and overridden setBeanFactory
 methods remain unsupported. A literal base default can be followed by a runtime
 expression, as in Masa's setFrameWorkBaseDir; only the static default is modeled.
-FW/1 4's subsystem-directory convention and automatic DI configuration remain
+FW/1 3.5+'s subsystem-directory convention and automatic DI configuration remain
 separate work. Dependency identities still come from the configured workspace
 bean map and alias rules; runtime factory overrides are not modeled.
 
@@ -627,3 +627,54 @@ settingsManager.getSite() returns variables.sites[key], populated through a
 separate builder struct in setSites(); rc.contentBean assignments chain through
 contentBean.loadBy() and contentManager.read(). These need collection/struct
 member types and verified wrapper returns rather than a global rc component type.
+
+## FW/1 documentation review and revised follow-up
+
+The official [Developing Applications guide](https://framework-one.github.io/documentation/4.3/developing-applications/),
+[DI/1 guide](https://framework-one.github.io/documentation/4.3/using-di-one/), and
+[Subsystems guide](https://framework-one.github.io/documentation/4.3/using-subsystems/)
+give a broader contract than the Masa-specific source pattern above. Masa's
+embedded admin/framework.cfc identifies itself as **FW/1 1.2** at line 1202;
+the separate pinned FW/1 corpus is **4.3.2**. Treat their factory and loader
+conventions separately.
+
+- Modern FW/1 creates DI/1 automatically by default (`diEngine="di1"`), scanning
+  `model` and `controllers` unless diLocations changes them. An application need
+  not call setBeanFactory. Manual factory management uses `diEngine="none"`;
+  custom/AOP/WireBox engines and diComponent have distinct contracts.
+- Struct-form variables.framework configuration is documented application syntax.
+  The framework can also be constructed and delegated to without Application.cfc
+  extending it. Custom base/controller directories are documented settings.
+- DI/1 resolves constructors, explicit setters and implicit property setters.
+  Constructors can receive singletons or transients, while setters and properties
+  receive **singletons only**. Typed/defaulted properties are omitted by default
+  in current DI/1, subject to omitTypedProperties/omitDefaultedProperties.
+  Explicit constructor overrides and configured constants can replace bean values.
+- Subsystems 2.0 arrived in **3.5**, alongside legacy top-level subsystems; it did
+  not replace them in 4.0. Default subsystem locations are subsystems/name, and
+  each automatically managed subsystem factory inherits from the top-level
+  factory. Subsystem-local beans are not visible in the parent. An explicitly
+  supplied subsystem factory inherits only if a parent is actually installed.
+
+The current bean-root setter lookup has no lifetime metadata. A minimal configured
+bean-root fixture containing model/beans/User.cfc and a Consumer.setUser(user)
+resolves variables.user.run(), even though DI/1 would skip that transient setter.
+This is a correctness gap, not a measured corpus reduction. Do not apply a blanket
+transient exclusion to Masa's FW/1 1.2 controller loader: its separate autowire
+loop checks containsBean, not isSingleton. Factory-owned injection and framework
+fallback injection need distinct policies.
+
+Revised order for further resolution work:
+
+1. Model factory identity, DI mode/configuration and bean lifetime; preserve
+   aliases, transient rules, constants and explicit overrides. Add regressions
+   for dependencies that must remain uninjected before broadening scope.
+2. Support documented literal struct configuration and automatic DI locations,
+   then constructor injection and implicit property eligibility under that policy.
+3. Resolve legacy/new subsystem layouts and local/parent factory precedence;
+   cover custom literal base/controller directories and delegated applications.
+4. Return to collection/struct members and wrapper returns, including getSite()
+   and rc.contentBean, with those dependency types established.
+
+Use versioned documentation, pinned framework source, and real applications as
+complementary evidence. Dynamic or conflicting configuration remains unknown.

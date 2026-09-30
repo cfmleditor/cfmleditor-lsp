@@ -165,8 +165,8 @@ func (r *Resolver) readFW1Scope(appDir string) fw1Scope {
 			}
 		}
 	}
-	// FW/1 4 moved subsystems beneath subsystemsFolder and no longer creates
-	// services. Only the older getCachedComponent layout is modeled here.
+	// FW/1 3.5 introduced subsystemsFolder alongside legacy top-level subsystems.
+	// Only the older getCachedComponent subsystem layout is modeled here.
 	if !services && len(settings["usingsubsystems"]) > 0 && settings["usingsubsystems"][0] == "true" {
 		return fw1Scope{}
 	}
