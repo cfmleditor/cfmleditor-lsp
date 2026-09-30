@@ -78,6 +78,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		Resolvers:          opt.Resolvers,
 		Mappings:           opt.Mappings,
 		StartupFiles:       opt.StartupFiles,
+		BeanPaths:          opt.BeanPaths,
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
 		ImplicitExtends:    opt.ImplicitExtends,
@@ -91,6 +92,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	// Discovery lazily indexes factory metadata with the original rules.
 	// The scan must index every return using the augmented rules.
 	resolver.Index = index.New()
+	loadBeans(resolver, opt)
 
 	for _, f := range files {
 		data, err := fsys.ReadFile(f)
@@ -109,10 +111,8 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 			continue
 		}
 
-		resolver.Index.IndexFileWithResolvers(fileURI, string(data), resolver.Resolvers)
+		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), BeanLookup: resolver.BeanLookup, PropertyResolvers: opt.PropertyResolvers})
 	}
-
-	loadBeans(resolver, opt)
 
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
 
@@ -195,7 +195,8 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
 		PropertyResolvers:        opt.PropertyResolvers,
-		BeanLookup:               resolver.Index.LookupBean,
+		BeanLookup:               resolver.BeanLookup,
+		SetterLookup:             resolver.SetterLookup(file),
 		InterpolateAllText:       opt.InterpolateAll,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,

@@ -621,8 +621,19 @@ followed, including names such as `$`. This works in script and `<cfset>` syntax
 Earlier explicit resolver rules retain priority, and `new Content()` still looks
 up a component rather than a bean alias. Computed arguments, missing targets,
 conflicting registrations, and cycles provide no inferred type. The include walk
-and alias depth are bounded at 64. Registering a runtime value with `addBean`,
-setter injection, and runtime factory overrides are not inferred by this step.
+and alias depth are bounded at 64. Runtime `addBean` values and factory overrides are not inferred by this step.
+
+For a CFC under configured or application-declared `beanPaths`, a public
+`setName(Name)` method with one generic argument learns the dependency's bean
+type, including literal aliases. Whole `arguments.Name` assignments carry it
+into fields, and generated getters return that component. Script, tag, and mixed
+syntax share the inference. Declared and documented types retain priority;
+private setters, multiple arguments, and methods outside managed bean roots do
+not acquire a dependency by name. The declared signature stays unchanged in
+completion and signature help. Arguments shadow same-named component fields.
+Managed files receive the same types during editor indexing and CLI scans, and
+bean-map caches refresh when the resolver is invalidated. FW/1 controllers wired
+outside these roots need a separate scope rule.
 
 ### Component resolvers
 

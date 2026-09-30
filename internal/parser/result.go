@@ -38,6 +38,7 @@ type ParseResult struct {
 	Resolvers           []Resolver                              // optional component resolvers for RHS matching
 	resolverSet         *ResolverSet                            // pre-grouped resolvers for fast matching
 	PropertyResolvers   []PropertyResolver                      // optional property-to-component resolvers
+	SetterLookup        func(string) string                     // managed bean setter dependency → component
 	BeanLookup          func(string) string                     // optional bean name → dot-path lookup
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
@@ -99,6 +100,7 @@ type ParseOptions struct {
 	Logger                   Logger
 	Resolvers                []Resolver
 	PropertyResolvers        []PropertyResolver
+	SetterLookup             func(name string) string                // optional, only for factory-managed components
 	BeanLookup               func(name string) string                // optional: resolve bean name → dot-path
 	BuiltinReturnLookup      func(name string) string                // optional: resolve builtin function → return component
 	FuncLookup               func(component, funcName string) string // optional: resolve method return type from external components
@@ -187,6 +189,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 		Resolvers:                opts.Resolvers,
 		PropertyResolvers:        opts.PropertyResolvers,
 		BeanLookup:               opts.BeanLookup,
+		SetterLookup:             opts.SetterLookup,
 		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
 		FuncLookup:               opts.FuncLookup,
 		expressionMappings:       opts.ExpressionMappings,
@@ -379,6 +382,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	sp.extractLinks = pr.extractLinks
 	sp.extractCalls = pr.extractCalls
 	sp.builtinReturnLookup = pr.BuiltinReturnLookup
+	sp.setterLookup = pr.SetterLookup
 
 	// If this <cfscript> region sits inside a tag <cffunction> body
 	// (nested script island — ClassifyRegions splits the file there),
@@ -386,8 +390,11 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	// scope instead of global. scriptParser bakes baseLine into its own
 	// keys, so the seed must be the function's absolute funcKey — unlike
 	// the tag-region continuation seed below, which stays region-relative.
-	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+	seed := -1
+
+	if s, ok := pr.regionTagScope(tagScopes, r.StartLine); ok {
 		sp.inFunc = funcKey(s.Start, s.End)
+		seed, sp.funcs = pr.seedRegionFunction(s.Start, s.Name)
 		sp.localVarSet = make(map[string]bool)
 
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
@@ -411,6 +418,11 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 		}
 
 		*open = openLocals{key: key, names: names}
+	}
+
+	if seed >= 0 {
+		pr.Funcs[seed] = sp.funcs[0]
+		sp.funcs = sp.funcs[1:]
 	}
 
 	pr.Funcs = append(pr.Funcs, sp.funcs...)
@@ -456,6 +468,7 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	tp.extractLinks = pr.extractLinks
 	tp.extractCalls = pr.extractCalls
 	tp.builtinReturnLookup = pr.BuiltinReturnLookup
+	tp.setterLookup = pr.SetterLookup
 	tp.baseLine = r.StartLine
 	tp.knownScopes = tagScopes
 	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
@@ -465,8 +478,11 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	// <cffunction> tag was in an earlier region (interrupted by a
 	// nested <cfscript> region split), seed inFunc/localVars so refs
 	// in this region still route to function scope instead of global.
-	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+	seed := -1
+
+	if s, ok := pr.regionTagScope(tagScopes, r.StartLine); ok {
 		tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
+		seed, tp.funcs = pr.seedRegionFunction(s.Start, s.Name)
 		tp.localVars = nil
 
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
@@ -479,6 +495,11 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	}
 
 	tp.parse()
+
+	if seed >= 0 {
+		pr.Funcs[seed] = tp.funcs[0]
+		tp.funcs = tp.funcs[1:]
+	}
 
 	// The function still open where the region ends continues in the next.
 	if tp.inFunc != "" {
@@ -2362,6 +2383,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
 		sp.resolverSet = pr.resolverSet
 		sp.extractLinks = true
+		sp.setterLookup = pr.SetterLookup
 		sp.parse()
 		refs = sp.componentRefs
 		links = sp.links
@@ -2378,6 +2400,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		tp.resolvers = pr.Resolvers
 		tp.resolverSet = pr.resolverSet
 		tp.extractLinks = true
+		tp.setterLookup = pr.SetterLookup
 		tp.parse()
 		refs = tp.componentRefs
 
@@ -3039,4 +3062,49 @@ func (pr *ParseResult) Declares(name string) bool {
 	}
 
 	return false
+}
+
+// A script island or tag continuation has no opening function declaration of
+// its own. Carry the enclosing typed arguments without publishing a duplicate
+// definition; whole-argument assignments must see the same signature throughout.
+func (pr *ParseResult) seedRegionFunction(start int, name string) (int, []FunctionDef) {
+	for i := range pr.Funcs {
+		fn := &pr.Funcs[i]
+		if int(fn.Line) != start || !strings.EqualFold(fn.Name, name) {
+			continue
+		}
+
+		for _, arg := range fn.Arguments {
+			if argumentComponentType(&arg) != "" {
+				return i, []FunctionDef{*fn}
+			}
+		}
+
+		break
+	}
+
+	return -1, nil
+}
+
+// An island can begin on the opening tag's own line. The declaration must
+// already have been parsed: a first tag region on that line is not a continuation.
+func (pr *ParseResult) regionTagScope(scopes []FuncScope, line int) (FuncScope, bool) {
+	if scope, ok := enclosingTagScope(scopes, line); ok {
+		return scope, true
+	}
+
+	for _, scope := range scopes {
+		if scope.Start != line {
+			continue
+		}
+
+		for i := range pr.Funcs {
+			fn := &pr.Funcs[i]
+			if int(fn.Line) == line && strings.EqualFold(fn.Name, scope.Name) {
+				return scope, true
+			}
+		}
+	}
+
+	return FuncScope{}, false
 }

@@ -25,7 +25,8 @@ type Resolver struct {
 	FS                 vfs.FS
 	WorkspaceFolders   []string
 	Mappings           map[string]string
-	StartupFiles       []string // configured startup templates, absolute; see startup.go
+	BeanPaths          map[string]string // configured factory-managed bean roots
+	StartupFiles       []string          // configured startup templates, absolute; see startup.go
 	ExpressionMappings map[string]string
 	Index              *index.Index
 	Resolvers          []parser.Resolver
@@ -41,19 +42,20 @@ type Resolver struct {
 	// a framework component nothing on disk does: calls on it are checked,
 	// and completion and hover see its methods. Nil for none. See
 	// internal/frameworkapi.
-	Stubs         *frameworkapi.Set
-	stubFS        vfs.FS
-	mu            sync.RWMutex
-	appRootCache  map[string]string          // dir → Application.cfc root
-	slugCache     map[string]string          // dir → its box.json slug, "" for none
-	resolveCache  map[string]string          // component+"\t"+baseDir → file path
-	dirCache      *cfpath.DirCache           // directory listings behind those resolutions
-	incGraph      *includeGraph              // the index's cfincludes, rebuilt when they change
-	exprKeys      []string                   // ExpressionMappings' keys in the order they apply
-	implicitCache map[string]string          // path → ImplicitExtends(path)
-	helpers       *helperSet                 // application helper templates, per set of config files
-	wb            *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
-	startupCache  map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	Stubs          *frameworkapi.Set
+	stubFS         vfs.FS
+	mu             sync.RWMutex
+	appRootCache   map[string]string          // dir → Application.cfc root
+	slugCache      map[string]string          // dir → its box.json slug, "" for none
+	resolveCache   map[string]string          // component+"\t"+baseDir → file path
+	dirCache       *cfpath.DirCache           // directory listings behind those resolutions
+	incGraph       *includeGraph              // the index's cfincludes, rebuilt when they change
+	exprKeys       []string                   // ExpressionMappings' keys in the order they apply
+	implicitCache  map[string]string          // path → ImplicitExtends(path)
+	helpers        *helperSet                 // application helper templates, per set of config files
+	wb             *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
+	beanPathsCache map[string]string          // merged application/configured bean roots
+	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -535,7 +537,7 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 			return nil
 		}
 
-		r.Index.IndexFile(cfcURI, string(data))
+		r.Index.IndexFileWithOptions(cfcURI, string(data), &parser.ParseOptions{Resolvers: r.Resolvers, SetterLookup: r.SetterLookup(cfcPath), BeanLookup: r.BeanLookup})
 	}
 
 	return r.Index.FunctionsForFile(cfcURI)
@@ -2213,6 +2215,31 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
+	}
+
+	// An argument shadows a same-named component field. In particular, an
+	// untyped parameter in a sibling method must not borrow an injected field.
+	argumentReceiver := !strings.Contains(variable, ".") || strings.HasPrefix(strings.ToLower(variable), "arguments.")
+	if comp == "" && argumentReceiver {
+		if arg := argumentOf(pr, caller, lookupVar); arg != nil {
+			if arg.Component != "" {
+				return arg.Component, false
+			}
+
+			if strings.Contains(arg.Type, ".") {
+				tr.addf("resolved %q via enclosing function argument", variable)
+
+				return arg.Type, false
+			}
+
+			if parser.IsMemberMethod(funcName) {
+				return "$any", true
+			}
+
+			tr.addf("argument %q shadows component fields", lookupVar)
+
+			return "", false
+		}
 	}
 
 	if comp == "" {

@@ -39,6 +39,7 @@ type scriptParser struct {
 	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
 	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
+	setterLookup        func(string) string
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
 	returnVar           string          // last "return varName" seen in current function
@@ -1364,6 +1365,10 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 		applyParameterDocs(docComment, args)
 	}
 
+	if p.inFunc == "" {
+		applySetterArgumentTypes(nameTok.Value, access, args, p.setterLookup)
+	}
+
 	funcLine := p.baseLine + startTok.Line
 
 	p.funcs = append(p.funcs, FunctionDef{
@@ -2053,13 +2058,13 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	for _, a := range args {
 		p.localVarSet[strings.ToLower(a.Name)] = true
 
-		if isComponentType(a.Type) {
+		if comp := argumentComponentType(&a); comp != "" {
 			if p.funcRefs == nil {
 				p.funcRefs = make(map[string][]ComponentRef)
 			}
 
 			p.funcRefs[tempKey] = append(p.funcRefs[tempKey], ComponentRef{
-				Variable: a.Name, Component: a.Type,
+				Variable: a.Name, Component: comp,
 				URI: uriFromString(p.fileURI), Line: conv.Uint32(funcLine),
 			})
 		}
@@ -3342,18 +3347,7 @@ func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIden
 // Copying it into variables scope preserves the constructor's dependency;
 // typing the parameter itself at component level instead leaked to siblings.
 func (p *scriptParser) argumentComponent(chain string) string {
-	scope, name, ok := strings.Cut(chain, ".")
-	if !ok || !identEq(scope, "arguments") || p.inFunc == "" || len(p.funcs) == 0 {
-		return ""
-	}
-
-	for _, a := range p.funcs[len(p.funcs)-1].Arguments {
-		if identEq(a.Name, name) && isComponentType(a.Type) {
-			return a.Type
-		}
-	}
-
-	return ""
+	return wholeArgumentComponent(chain, p.inFunc, p.funcs)
 }
 
 // assignNonCall handles a whole argument value or a configured non-call RHS.

@@ -92,7 +92,7 @@ type Server struct {
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
 	changeCount              map[uri.URI]int           // rapid change counter per file
 	changeWindowStart        map[uri.URI]time.Time     // start of current rapid-change window
-	beansLoaded              bool                      // whether bean map has been built
+	beansResolver            *resolve.Resolver         // resolver whose bean roots the index contains
 	index                    *index.Index
 	resolver                 *resolve.Resolver
 	linter                   *cflint.Runner
@@ -449,6 +449,7 @@ func (s *Server) getResolver() *resolve.Resolver {
 			WorkspaceFolders:   s.searchRoots(),
 			Mappings:           s.Mappings,
 			StartupFiles:       s.StartupFiles,
+			BeanPaths:          s.BeanPaths,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
 			Resolvers:          s.buildResolvers(),
@@ -503,9 +504,10 @@ func (s *Server) invalidateResolver() {
 
 // ensureBeansLoaded lazily builds the bean map on first access.
 func (s *Server) ensureBeansLoaded() {
+	resolver := s.getResolver()
 	s.mu.RLock()
 
-	if s.beansLoaded {
+	if s.beansResolver == resolver {
 		s.mu.RUnlock()
 
 		return
@@ -514,7 +516,7 @@ func (s *Server) ensureBeansLoaded() {
 	s.mu.RUnlock()
 
 	s.mu.Lock()
-	if s.beansLoaded {
+	if s.beansResolver == resolver {
 		s.mu.Unlock()
 
 		return
@@ -523,7 +525,7 @@ func (s *Server) ensureBeansLoaded() {
 	allBeanPaths := make(map[string]string)
 
 	for _, root := range s.searchRoots() {
-		appDir := s.getResolver().FindApplicationRoot(root)
+		appDir := resolver.FindApplicationRoot(root)
 		if appDir != "" {
 			for ns, dir := range cfpath.LoadAppBeanPaths(appDir) {
 				if _, exists := allBeanPaths[ns]; !exists {
@@ -535,13 +537,14 @@ func (s *Server) ensureBeansLoaded() {
 
 	maps.Copy(allBeanPaths, s.BeanPaths)
 
+	beans := buildBeanMap(allBeanPaths, s.FS)
+	s.index.SetBeans(beans)
+
 	if len(allBeanPaths) > 0 {
-		beans := buildBeanMap(allBeanPaths, s.FS)
-		s.index.SetBeans(beans)
 		s.log.Info("bean map built (lazy)", cflog.Int("beans", len(beans)))
 	}
 
-	s.beansLoaded = true
+	s.beansResolver = resolver
 	s.mu.Unlock()
 }
 
@@ -816,7 +819,8 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 		Logger:                   s.log,
 		Resolvers:                s.cfResolvers(),
 		PropertyResolvers:        s.cfPropertyResolvers(),
-		BeanLookup:               s.index.LookupBean,
+		BeanLookup:               resolver.BeanLookup,
+		SetterLookup:             resolver.SetterLookup(cfpath.FromURI(string(fileURI))),
 		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
 		FuncLookup:               funcLookup(resolver, baseDir),
 		ExpressionMappings:       s.ExpressionMappings,
@@ -835,7 +839,13 @@ func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, func
 	return resolver.FuncLookup(baseDir)
 }
 
-// parseContentForIndex parses CFC content for indexing (signatures only, no resolvers/links).
+// parseContentForIndex keeps the cheap signature pass for ordinary files,
+// but managed beans need injected fields and generated getters in the index.
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.ParseResult {
+	resolver := s.getResolver()
+	if resolver.SetterLookup(cfpath.FromURI(string(fileURI))) != nil {
+		return s.parseContent(fileURI, content)
+	}
+
 	return parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{Shallow: true})
 }

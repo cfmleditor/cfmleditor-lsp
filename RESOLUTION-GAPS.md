@@ -502,7 +502,7 @@ against the source:
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.
 
-## Masa CMS: literal startup bean registrations
+## Masa CMS: literal startup bean registrations (5d136ab)
 
 Additional application corpus: [MasaCMS/MasaCMS](https://github.com/MasaCMS/MasaCMS),
 commit `696383140578f8dea3ece26f80cd7bfb370ddf0f` (7.6.1). Copy
@@ -532,8 +532,60 @@ Tests preserve missing-method diagnostics and ordinary component basename lookup
 The existing six-project corpus and separate Wheels vendor scan are unchanged
 per entry, with matching file coverage, both with and without presets.
 
-Next bounded steps remain setter injection on managed components, struct member
-assignments such as rc.contentBean, and shared-service loops/wrapper return types.
+The follow-up below handles setter injection on managed components. Remaining
+steps include FW/1 controller wiring, struct member assignments such as
+rc.contentBean, and shared-service loops/wrapper return types.
 The earlier ColdBox fluent-return and scheduler cases remain separate regressions
 to investigate. These semantic gaps should be measured under the supplied mappings
 rather than counted together with missing runtime mapping configuration.
+
+
+## Masa CMS: managed setter arguments and field types
+
+With the same configuration and **897 indexed/scanned files**, the follow-up
+reduces **16,860 → 16,557** findings: **392 removed, 89 added**, a net reduction
+of **303**. Relative to the scan before either Masa batch, the combined change
+is **18,539 → 16,557** (2,210 removed, 228 added). No corpus configuration or
+source files were changed.
+
+A CFC inside beanPaths can obtain a dependency through a public, single-argument
+`setName(Name)` method. Generic arguments receive a separate inferred component;
+declared signatures remain unchanged, and primitive/documented/explicit component
+types keep priority. Whole argument assignments propagate into fields and generated
+getters. Script, tag, and mixed tag/script functions preserve that type throughout
+region boundaries. Private, multi-argument, mismatched-name and unmanaged setters,
+computed values and argument members do not acquire the dependency's type.
+
+Removed groups include 193 calls on variables.configBean, 59 on
+variables.settingsManager, and 42 on variables.contentManager. Source examples
+include core/mura/bean/beanExtendable.cfc's setConfigBean at 103 and tag setters in
+core/mura/extend/extendManager.cfc at 294 and core/mura/client/httpSession.cfc at 90.
+Bean aliases also govern property/getter lookup: the user alias names userBean,
+rather than the same-basename SOAP user CFC. Real missing methods remain reported.
+
+The added findings expose untyped return chains on getSite/getClassExtensionManager
+and untyped parameters that previously borrowed a component field's type. In
+particular, a function argument shadows a field even when its type is unknown.
+The six-project corpus adds three findings with presets and four without: Lucee's
+_Mail.cfc getMails(smtpServer), ColdBox's MethodInvocationTest invokeMethod and
+invokeMethod2(invocation), and without presets an InterceptorStateTest event
+parameter. Source confirms these are generic parameters, not the same-named fields.
+ContentBox, TestBox, FW/1 and both Wheels scans remain unchanged per entry.
+
+Whole PR relative to merged PR #189: presets **7,203 → 6,903** (309 removed,
+9 added); no presets **15,138 → 14,805** (371 removed, 38 added), with matching
+coverage. ColdBox is now 1,397 / 3,404 and Lucee 1,985 in both modes. The separate
+Wheels vendor report remains 6,901 / 13,262.
+
+Editor indexing gives closed managed files the same getter/field types as open
+files and the CLI; lazy dependency indexing carries the same lookup. Bean-map
+cache ownership follows the resolver, so changed or removed bean roots replace
+stale entries. Regressions fail with setter inference disabled and cover missing
+methods, parameter shadowing, alias lookup, scope boundaries, declared signatures,
+closed-file indexing, configuration refresh, and script/tag/mixed syntax.
+
+FW/1's admin controllers remain outside the supplied bean roots: admin/Application.cfc
+sets its bean factory at 197, and admin/framework.cfc autowires controllers/services
+at 1249–1270 and 1401. Model that managed scope separately before inferring their
+setters. Struct members, shared-service loops, wrapper returns and runtime factory
+values remain subsequent work.

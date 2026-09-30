@@ -476,6 +476,12 @@ func (idx *Index) IndexFileWithResolvers(fileURI uri.URI, content string, resolv
 	idx.indexParseResult(fileURI, content, pr)
 }
 
+// IndexFileWithOptions indexes with the same dependency typing as the editor.
+func (idx *Index) IndexFileWithOptions(fileURI uri.URI, content string, opts *parser.ParseOptions) {
+	pr := parser.ParseWithOptions(fileURI, content, opts)
+	idx.indexParseResult(fileURI, content, pr)
+}
+
 func (idx *Index) indexParseResult(fileURI uri.URI, content string, pr *parser.ParseResult) {
 	// Every string below is cloned, for the reason IndexFileFromResult
 	// documents at length: a parsed string is a slice of the file's source,

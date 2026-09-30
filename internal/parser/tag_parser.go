@@ -37,6 +37,7 @@ type tagParser struct {
 	importPrefixes      []string
 	srcOffset           int
 	builtinReturnLookup func(string) string
+	setterLookup        func(string) string
 	inFunc              string // current function scope key ("start:end"), empty if global
 	// localVars holds the var'd/local. names declared in the function being
 	// parsed. A slice scanned with EqualFold rather than a map of lowercased
@@ -663,6 +664,8 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 		applyParameterDocs(docComment, args)
 	}
 
+	applySetterArgumentTypes(name, getAttr(tag, "access"), args, p.setterLookup)
+
 	// Create component refs for arguments with component-like types.
 	// p.inFunc is not yet set at this call site — the main loop sets it after
 	// parseCFFunction returns. Using p.addRef would route refs to componentRefs
@@ -670,10 +673,10 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 	// entry already exists from resolver-derived refs in the same scope.
 	// Instead, compute the funcKey directly and write to funcRefs[key].
 	for _, a := range args {
-		if isComponentType(a.Type) {
+		if comp := argumentComponentType(&a); comp != "" {
 			ref := ComponentRef{
 				Variable:  a.Name,
-				Component: a.Type,
+				Component: comp,
 				URI:       uriFromString(p.fileURI),
 				Line:      conv.Uint32(line),
 			}
@@ -1169,6 +1172,15 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 	if chainedSetTarget(rhs) {
 		p.chainedSet(rhs, varName, line)
+
+		return
+	}
+
+	if comp := wholeArgumentComponent(rhs, p.inFunc, p.funcs); comp != "" {
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+		})
 
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -186,5 +187,80 @@ func TestStartupBeanRulesRefreshWithResolver(t *testing.T) {
 
 	if got := parser.ResolveFromCall(`getBean("alias")`, s.cfResolvers()); got != filepath.Join(dir, "Second.cfc") {
 		t.Fatalf("editor differs: %s", got)
+	}
+}
+
+func TestEditorUsesManagedSetterDependencies(t *testing.T) {
+	dir := t.TempDir()
+
+	beans := filepath.Join(dir, "beans")
+	if err := os.MkdirAll(beans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dep := filepath.Join(beans, "Service.cfc")
+	if err := os.WriteFile(dep, []byte(`component { function run() {} }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.BeanPaths = map[string]string{"": beans}
+
+	source := `component accessors=true {
+ property name="dependency";
+ function setService(service) { variables.dependency=arguments.service; }
+ }`
+	indexed := s.parseContentForIndex(cfpath.ToURI(filepath.Join(beans, "Consumer.cfc")), source)
+	found := false
+
+	for _, fn := range indexed.Funcs {
+		if fn.Name == "getDependency" {
+			found = fn.ReturnComponent == dep
+		}
+	}
+
+	if !found {
+		t.Fatal("closed-file index lost the injected getter")
+	}
+
+	for _, test := range []struct {
+		file    string
+		managed bool
+	}{{filepath.Join(beans, "Consumer.cfc"), true}, {filepath.Join(dir, "Manual.cfc"), false}} {
+		pr := s.parseContent(cfpath.ToURI(test.file), source)
+		for _, fn := range pr.Funcs {
+			if fn.Name == "getDependency" && (fn.ReturnComponent == dep) != test.managed {
+				t.Errorf("%s getter type %q", test.file, fn.ReturnComponent)
+			}
+		}
+	}
+
+	other := filepath.Join(dir, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := filepath.Join(other, "Service.cfc")
+	if err := os.WriteFile(replacement, []byte(`component { function save() {} }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s.BeanPaths = map[string]string{"": other}
+	s.invalidateResolveCache()
+
+	refreshed := s.parseContent(cfpath.ToURI(filepath.Join(other, "Consumer.cfc")), source)
+	for _, fn := range refreshed.Funcs {
+		if fn.Name == "getDependency" && fn.ReturnComponent != replacement {
+			t.Errorf("stale bean map after config change: %q", fn.ReturnComponent)
+		}
+	}
+
+	s.BeanPaths = nil
+	s.invalidateResolveCache()
+	s.parseContent(cfpath.ToURI(filepath.Join(dir, "Manual.cfc")), source)
+
+	if got := s.index.LookupBean("service"); got != "" {
+		t.Errorf("removed bean roots left stale type %q", got)
 	}
 }

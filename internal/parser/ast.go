@@ -12,10 +12,11 @@ import (
 
 // Argument represents a parameter of a user-defined function.
 type Argument struct {
-	Name     string
-	Type     string // empty if untyped
-	Hint     string // hint attribute value (used as supplemental type when Type is generic)
-	Required bool
+	Name      string
+	Type      string // empty if untyped
+	Hint      string // hint attribute value (used as supplemental type when Type is generic)
+	Component string // inferred setter dependency; separate from the declared CFML type
+	Required  bool
 }
 
 // FunctionDef represents a user-defined function found in a CFC file.

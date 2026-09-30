@@ -316,3 +316,59 @@ func TestReportUsesStartupBeanAliasesBeforeIndexing(t *testing.T) {
 		}
 	}
 }
+
+func TestReportUsesManagedSetterDependencies(t *testing.T) {
+	dir := t.TempDir()
+	sources := map[string]string{
+		"beans/Service.cfc": `component { function run() {} }`,
+		"beans/Consumer.cfc": `component accessors=true {
+   property name="dependency";
+   function setService(service) { variables.dependency = arguments.service; variables.service = arguments.service; }
+   function use() { variables.dependency.run(); variables.dependency.missing(); }
+   function unrelated(service) { service.run(); }
+  }`,
+		"beans/Properties.cfc": `component accessors=true { property name="service"; }`,
+		"Manual.cfc": `component {
+   function setService(service) { variables.service = arguments.service; }
+   function use() { variables.service.run(); }
+  }`,
+		"page.cfm": `<cfscript>
+   c = new beans.Consumer();
+   c.use();
+   value = c.getDependency();
+   value.run();
+   properties = new beans.Properties();
+   service = properties.getService();
+   service.run();
+  </cfscript>`,
+	}
+	files := []string{}
+
+	for name, source := range sources {
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, file)
+	}
+
+	rep := Scan(vfs.OS{}, files, nil, &Options{BeanPaths: map[string]string{"": filepath.Join(dir, "beans")}, WorkspaceFolders: []string{dir}})
+	if len(rep.Calls) != 3 {
+		t.Fatalf("want missing method, sibling parameter and unmanaged field errors, got %+v", rep.Calls)
+	}
+
+	for _, call := range rep.Calls {
+		if call.File == filepath.Join(dir, "page.cfm") {
+			t.Errorf("indexed getter lost its type: %+v", call)
+		}
+
+		if call.Function == "missing" && !strings.Contains(call.Reason, "not found in Service") {
+			t.Errorf("missing method was not verified: %+v", call)
+		}
+	}
+}
