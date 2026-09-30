@@ -87,6 +87,11 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 
 	started := time.Now()
 
+	resolver.Resolvers = resolver.BeanResolvers(opt.BeanPaths)
+	// Discovery lazily indexes factory metadata with the original rules.
+	// The scan must index every return using the augmented rules.
+	resolver.Index = index.New()
+
 	for _, f := range files {
 		data, err := fsys.ReadFile(f)
 		if err != nil || cfpath.IsBinary(data) {
@@ -104,7 +109,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 			continue
 		}
 
-		resolver.Index.IndexFileWithResolvers(fileURI, string(data), opt.Resolvers)
+		resolver.Index.IndexFileWithResolvers(fileURI, string(data), resolver.Resolvers)
 	}
 
 	loadBeans(resolver, opt)
@@ -186,7 +191,7 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
-		Resolvers:                opt.Resolvers,
+		Resolvers:                resolver.Resolvers,
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
 		PropertyResolvers:        opt.PropertyResolvers,

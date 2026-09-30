@@ -612,6 +612,18 @@ A `REQUEST`, `SESSION`, `APPLICATION` or `SERVER` variable is usually set up in 
 
 Only one-line assignments of the form `SCOPE.name = value` are read, in tag or script syntax. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
 
+A configured `getBean` resolver with `"resolve": "$1"` also learns literal
+`declareBean(beanName, dottedPath)` and `addAlias(aliasName, beanName)` registrations
+from explicitly configured startup files and their includes. The registration
+receiver must resolve to a component exposing those parameter names and `getBean`.
+Alias targets come from `beanPaths` or literal declarations; alias chains are
+followed, including names such as `$`. This works in script and `<cfset>` syntax.
+Earlier explicit resolver rules retain priority, and `new Content()` still looks
+up a component rather than a bean alias. Computed arguments, missing targets,
+conflicting registrations, and cycles provide no inferred type. The include walk
+and alias depth are bounded at 64. Registering a runtime value with `addBean`,
+setter injection, and runtime factory overrides are not inferred by this step.
+
 ### Component resolvers
 
 Component resolvers teach the LSP how to resolve custom factory patterns to specific CFCs. This enables goto-definition and dot-completion for variables assigned from those patterns.

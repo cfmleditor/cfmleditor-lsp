@@ -501,3 +501,39 @@ against the source:
     it does not reduce the measured unresolved-call counts.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.
+
+## Masa CMS: literal startup bean registrations
+
+Additional application corpus: [MasaCMS/MasaCMS](https://github.com/MasaCMS/MasaCMS),
+commit `696383140578f8dea3ece26f80cd7bfb370ddf0f` (7.6.1). Copy
+[`scripts/corpus/masacms.json`](scripts/corpus/masacms.json) to the checkout's
+`.cfmleditor.json`, then run `cfmleditor-lsp unresolved --json <checkout>`.
+Restore the checkout's original configuration afterward. The supplied mappings
+mirror applicationSettings.cfm; beanPaths and startupFiles expose the application's
+factory setup without adding hand-written alias rules. Development dependencies
+TestBox 2.3 and DocBox 2 are absent at this pin; this measurement adds no stubs.
+
+The default root scan indexes and scans **897 files**, excluding ten shipped CFML
+files under core/vendor. With identical configuration, literal registration
+inference reduces **18,539 → 16,860** findings: **1,820 removed, 141 added**.
+The additions mostly expose unknown return types further along MuraScope and bean
+call chains; they are retained rather than hidden by treating aliases as dynamic.
+The total equals the prior diagnostic experiment with 57 hand-written aliases.
+Its reason labels used dotted component names; automatically discovered absolute
+paths display component basenames, so 138 reason labels differ between those
+experiments despite identical unresolved call sites.
+
+Source examples at core/appcfc/onApplicationStart_include.cfm: `declareBean` at
+335, `content → contentBean`, `user → userBean`, `$ → MuraScope`, and chained
+bundle aliases at 337–389. The Adobe/Lucee-specific contentGateway registration
+has two distinct targets and remains untyped. Both the editor and CLI discover
+registrations before indexing return types, and refresh with resolver invalidation.
+Tests preserve missing-method diagnostics and ordinary component basename lookup.
+The existing six-project corpus and separate Wheels vendor scan are unchanged
+per entry, with matching file coverage, both with and without presets.
+
+Next bounded steps remain setter injection on managed components, struct member
+assignments such as rc.contentBean, and shared-service loops/wrapper return types.
+The earlier ColdBox fluent-return and scheduler cases remain separate regressions
+to investigate. These semantic gaps should be measured under the supplied mappings
+rather than counted together with missing runtime mapping configuration.

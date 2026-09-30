@@ -265,3 +265,54 @@ func TestTheReportReadsBeanPathsAndPropertyResolvers(t *testing.T) {
 		}
 	}
 }
+
+// Registration rules must be available while indexing returns, as well as
+// while parsing callers; otherwise another file's getter loses the alias type.
+func TestReportUsesStartupBeanAliasesBeforeIndexing(t *testing.T) {
+	dir := t.TempDir()
+	sources := map[string]string{
+		"Factory.cfc":           `component { function getBean(string beanName) {} function addAlias(string aliasName, string beanName) {} }`,
+		"Content.cfc":           `component { function unrelated() {} }`,
+		"beans/ContentBean.cfc": `component { function load() {} }`,
+		"startup.cfm":           `<cfscript>f = new Factory(); f.addAlias("content", "ContentBean");</cfscript>`,
+		"Provider.cfc":          `component { function getContent() { return getBean("content"); } }`,
+		"page.cfm": `<cfscript>
+   function getBean(string beanName) {}
+   content = getBean("content");
+   content.load();
+   content.missing();
+   p = new Provider();
+   value = p.getContent();
+   value.load();
+   ordinary = new Content();
+   ordinary.load();
+  </cfscript>`,
+	}
+	files := []string{}
+
+	for name, source := range sources {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, path)
+	}
+
+	opt := &Options{WorkspaceFolders: []string{dir}, BeanPaths: map[string]string{"": filepath.Join(dir, "beans")}, StartupFiles: []string{filepath.Join(dir, "startup.cfm")}, Resolvers: []parser.Resolver{{Match: `getBean("$1")`, Resolve: "$1", Prefix: "getBean"}}}
+
+	rep := Scan(vfs.OS{}, files, []string{filepath.Join(dir, "page.cfm")}, opt)
+	if len(rep.Calls) != 2 {
+		t.Fatalf("want only missing method and ordinary component error, got %+v", rep.Calls)
+	}
+
+	for _, call := range rep.Calls {
+		if call.Variable != "content" && call.Variable != "ordinary" {
+			t.Errorf("unexpected failure: %+v", call)
+		}
+	}
+}

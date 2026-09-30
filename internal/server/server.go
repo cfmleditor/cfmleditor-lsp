@@ -778,6 +778,14 @@ func (s *Server) buildResolvers() []parser.Resolver {
 		r[i] = cr.Parser()
 	}
 
+	// Discovery uses a private index: parsing startup files while holding
+	// resolverMu must not re-enter the server's shared index locks.
+	discovery := &resolve.Resolver{
+		FS: s.FS, Index: index.New(), WorkspaceFolders: s.searchRoots(),
+		Mappings: s.Mappings, StartupFiles: s.StartupFiles, Resolvers: r,
+	}
+	r = discovery.BeanResolvers(s.BeanPaths)
+
 	s.cachedResolverSet = parser.BuildResolverSet(r)
 	s.cachedResolvers = r
 

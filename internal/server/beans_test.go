@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
@@ -147,5 +150,41 @@ func TestBuildBeanMap_SameFileViaTwoNamespacesKeepsBareName(t *testing.T) {
 
 	if !strings.HasSuffix(beans["userdao"], "dao/UserDAO.cfc") {
 		t.Errorf("beans[userdao] = %q, want the single file it names", beans["userdao"])
+	}
+}
+
+func TestStartupBeanRulesRefreshWithResolver(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, source string) {
+		t.Helper()
+
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Factory.cfc", `component { function getBean(string beanName) {} function addAlias(string aliasName, string beanName) {} }`)
+	write("First.cfc", `component { function load() {} }`)
+	write("Second.cfc", `component { function save() {} }`)
+	write("startup.cfm", `<cfset f = new Factory()><cfset f.addAlias("alias", "First")>`)
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.BeanPaths = map[string]string{"": dir}
+	s.StartupFiles = []string{filepath.Join(dir, "startup.cfm")}
+
+	s.ComponentResolvers = []config.Resolver{{Match: `getBean("$1")`, Resolve: "$1", Prefix: "getBean"}}
+	if got := parser.ResolveFromCall(`getBean("alias")`, s.cfResolvers()); got != filepath.Join(dir, "First.cfc") {
+		t.Fatalf("initial alias: %s", got)
+	}
+
+	write("startup.cfm", `<cfset f = new Factory()><cfset f.addAlias("alias", "Second")>`)
+	s.invalidateResolveCache()
+
+	if got := parser.ResolveFromCall(`getBean("alias")`, s.getResolver().Resolvers); got != filepath.Join(dir, "Second.cfc") {
+		t.Fatalf("stale alias: %s", got)
+	}
+
+	if got := parser.ResolveFromCall(`getBean("alias")`, s.cfResolvers()); got != filepath.Join(dir, "Second.cfc") {
+		t.Fatalf("editor differs: %s", got)
 	}
 }
