@@ -4,6 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+Read `AGENTS.md` and run `bash scripts/dev-env.sh check` at the start of a
+fresh environment. `bash scripts/dev-env.sh setup` provisions the pinned
+Go toolchain, module cache, and linter; source the emitted `env.sh` afterward.
+For sandbox proxy failures, follow the execution-context retry guidance in
+`AGENTS.md` before diagnosing an outage.
+
 ```bash
 make build          # generate docs + build binary to target/release/cfmleditor-lsp
 make test           # go test ./...

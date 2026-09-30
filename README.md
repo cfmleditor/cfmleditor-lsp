@@ -19,6 +19,31 @@ go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
 The Go toolchain version is pinned in `go.mod`, and CGO is required (the
 tree-sitter grammar is C).
 
+### Set up a development environment
+
+Run `bash scripts/dev-env.sh check` to check the pinned Go compiler, a C
+compiler, and HTTPS access. To provision a fresh environment:
+
+```sh
+bash scripts/dev-env.sh setup
+source target/dev-env/env.sh
+```
+
+Setup reads the Go version from `go.mod`, verifies downloaded toolchains
+against Go's published SHA-256 checksum, caches module dependencies, and
+builds the pinned linter. It needs Bash, curl, Python 3.11 or newer, tar,
+make, and a C compiler. Downloads support Linux and macOS on amd64 and arm64.
+Use the setup command as your managed environment's setup hook. The default
+cache is gitignored under `target/dev-env`; `CFML_DEV_CACHE` can name a
+persistent cache directory instead, whose `env.sh` you then source.
+`make clean` removes the default cache. Existing Go cache variables are
+honored.
+
+In a managed sandbox, a proxy connection failure may be specific to that
+execution context. Retry the check with approved network access before
+concluding the proxy is unavailable; keep the inherited proxy and CA trust.
+See `AGENTS.md` for the agent startup and validation workflow.
+
 ### If you keep a `go.work`
 
 A `go.work` is the normal setup for anyone working on the grammar and the server
