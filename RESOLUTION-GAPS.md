@@ -35,6 +35,20 @@ runs can be diffed line by line. Then compare two runs **per entry**, keyed by
 file (relative to the corpus), line, function and reason. Comparing totals
 hides a change that fixes one entry and breaks another.
 
+Record the indexed and scanned file counts from stderr alongside each report.
+The CLI skips nested `vendor` directories. At the pinned cfwheels commit,
+the normal root scan covers 45 CFML files; the framework is under
+`vendor/wheels`. For a separate report covering it explicitly, run:
+
+```sh
+cfmleditor-lsp unresolved --json <cfwheels-root> <cfwheels-root>/vendor/wheels
+```
+
+This indexes and scans 1,195 files. Keep this report separate from the default
+root scan when comparing versions, and use the same root config for both.
+If `workspacePaths` is configured, include both roots there as well because
+it controls indexing independently of the scan arguments.
+
 ```python
 import json, sys, collections
 
@@ -316,10 +330,11 @@ against the source:
 
 ## Small loose ends
 
-- **FW/1 stub guess:** `framework.one`'s private `getCachedController` /
-  `getController` are stubbed from their first `return this;`. The stub
-  generator takes a function's first return, and these functions return `this`
-  in one special case. They are private, so no application code calls them.
+- **FW/1 stub guess — no longer present:** at the PR #188 merge, the committed
+  and freshly regenerated `framework.one` stubs declare the private
+  `getCachedController` / `getController` methods as `any`. Regeneration from
+  the pinned FW/1 source produces no diff. The earlier first-return claim
+  does not describe the current output.
 - **`entityLoad` — fixed:** `entityLoad( "name", … )` and
   `entityLoadByPK( "name", … )`, in script and tag assignments, are tested to
   find an entity by its `entityname`, as `entityNew` already was.
@@ -355,11 +370,22 @@ against the source:
     does not scan the CLI file named above. The deterministic regression
     reproduces the stub-loading cause directly; the repeated corpus scans
     alone do not reproduce the original five fluctuating entries.
-- **A stale stub:** regenerating the stubs at the PR #185 merge, with nothing
-  changed, rewrites `ArtifactService.getPackagePath()` to return
-  `commandbox.system.services.ConfigService`. It returns a string (`var path
-  = getArtifactsDirectory() & …`), so the committed stub, with no return
-  type, is kept. A reduced copy of the function does not reproduce it, so the
-  cause is elsewhere in the file.
+- **A stale stub — fixed:** regenerating CommandBox from its pinned source
+  incorrectly typed `ArtifactService.getPackagePath()` as
+  `commandbox.system.services.ConfigService`. Its `getArtifactsDirectory()`
+  dependency declares `string`, but a plain parse inferred ConfigService
+  from `var path = configService.getSetting(...)` and propagated that
+  component through the same-file call. Declared primitive return types now
+  discard concrete component guesses, including deferred variable returns
+  in both syntaxes. Runtime-created components keep their dynamic `$any`
+  marker; untyped and generic declarations still infer component types.
+  The parser and generator regressions fail without the fix. Regenerating
+  CommandBox and FW/1 now produces no changes to the committed stubs.
+  - **Measured against the PR #188 merge:** all twelve default corpus
+    reports are identical per entry (7,203 findings with presets, 15,138
+    without). The separate Wheels report including `vendor/wheels` is also
+    identical: 6,910 findings with presets and 13,262 without, over 1,195
+    scanned files. This fixes incorrect inference and regeneration drift;
+    it does not reduce the measured unresolved-call counts.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.
