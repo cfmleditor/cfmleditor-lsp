@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -284,6 +285,12 @@ func (r *Resolver) lastResortPath(component, baseDir string) string {
 	// directory or workspace root but is somewhere in the indexed workspace.
 	if !strings.Contains(component, ".") && !strings.Contains(component, "/") && r.Index != nil {
 		candidates := r.Index.FindFilesByBasename(component)
+		// Lazy indexing of a namespaced stub must not make its bare name
+		// visible to the workspace. Otherwise a parallel scan's answer depends
+		// on whether another file has already used that framework component.
+		// Preset ids still resolve through IDPackages below.
+		candidates = slices.DeleteFunc(candidates, frameworkapi.IsStub)
+
 		if len(candidates) == 1 {
 			return candidates[0]
 		}

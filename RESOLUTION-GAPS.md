@@ -334,6 +334,18 @@ against the source:
   exist" in some runs only. `explain` reports it every time. Six runs at the
   PR #185 merge showed it, so it predates gaps #3 and #4; the parallel
   scan's lazy indexing is the first suspect. Compare runs with that in mind.
+  - **Proposed fix, validation pending:** `EnsureIndexed` adds namespaced
+    framework stubs to the shared index. The bare-name fallback subsequently
+    finds those virtual files through `FindFilesByBasename`, so loading
+    `commandbox.system.util.FileSystem` in another file can make the bare
+    `FileSystem` id resolve without a CommandBox preset. The path cache then
+    preserves whichever answer was reached first. Exclude virtual stubs from
+    the workspace candidates before choosing the nearest file; configured
+    CommandBox ids still resolve through `IDPackages`.
+  - `TestBareComponentLookupDoesNotDependOnLoadedStubs` covers both lookup
+    orders, a fresh path cache after loading, explicit namespaced lookup,
+    configured ids, and precedence of workspace source over a loaded stub.
+    Go tests and the pinned six-project corpus comparison remain pending.
 - **A stale stub:** regenerating the stubs at the PR #185 merge, with nothing
   changed, rewrites `ArtifactService.getPackagePath()` to return
   `commandbox.system.services.ConfigService`. It returns a string (`var path
