@@ -47,6 +47,7 @@ type scriptParser struct {
 
 	// The flags sit together: spread between the wider fields above, each
 	// was padded to eight bytes, and the struct fell into a larger size class.
+	accessors    bool
 	persistent   bool
 	extractLinks bool // whether to extract document links
 	extractCalls bool // whether to extract all call sites
@@ -1196,8 +1197,8 @@ func (p *scriptParser) parseProperty(startTok Token) {
 		}
 
 		if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
-			if i+2 < len(tokens) && tokens[i+2].Kind == TokString {
-				val := unquote(tokens[i+2].Value)
+			if i+2 < len(tokens) && (tokens[i+2].Kind == TokString || tokens[i+2].Kind == TokIdent || tokens[i+2].Kind == TokNumber) {
+				val := propertyAttributeValue(tokens, i+2)
 				attrs[strings.ToLower(tok.Value)] = val
 			}
 
@@ -1250,6 +1251,10 @@ func (p *scriptParser) parseProperty(startTok Token) {
 		return
 	}
 
+	if typeName != "" {
+		attrs["type"] = typeName
+	}
+
 	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: line, attrs: attrs})
 }
 
@@ -1270,6 +1275,10 @@ func (p *scriptParser) parseComponentAttrs() {
 		case strings.EqualFold(tok.Value, "extends"):
 			if val, ok := p.attrValue(); ok && val.Kind == TokString {
 				p.extends = unquote(val.Value)
+			}
+		case strings.EqualFold(tok.Value, "accessors"):
+			if val, ok := p.attrValue(); ok {
+				p.accessors = isTruthy(unquote(val.Value))
 			}
 		case strings.EqualFold(tok.Value, "persistent"):
 			if val, ok := p.attrValue(); ok &&
@@ -4881,4 +4890,22 @@ func applyJSDocParams(comment string, args []Argument) {
 			}
 		}
 	}
+}
+
+// Unquoted attribute literals may be dotted component names. Keep the complete
+// path rather than interpreting its first segment as the property's type.
+func propertyAttributeValue(tokens []Token, start int) string {
+	if tokens[start].Kind != TokIdent {
+		return unquote(tokens[start].Value)
+	}
+
+	var value strings.Builder
+	value.WriteString(tokens[start].Value)
+
+	for i := start + 1; i+1 < len(tokens) && tokens[i].Kind == TokDot && tokens[i+1].Kind == TokIdent; i += 2 {
+		value.WriteByte('.')
+		value.WriteString(tokens[i+1].Value)
+	}
+
+	return value.String()
 }

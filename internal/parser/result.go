@@ -29,6 +29,7 @@ type ParseResult struct {
 	ComponentRefs       []ComponentRef
 	Scopes              []FuncScope
 	Extends             string                                  // dot-path of parent component (from extends attribute)
+	Accessors           bool                                    // component has accessors=true
 	Persistent          bool                                    // true if component has persistent="true" (ORM entity)
 	Properties          []propertyDef                           // parsed property declarations
 	Delegates           []Delegate                              // WireBox delegations the component declares
@@ -38,8 +39,10 @@ type ParseResult struct {
 	Resolvers           []Resolver                              // optional component resolvers for RHS matching
 	resolverSet         *ResolverSet                            // pre-grouped resolvers for fast matching
 	PropertyResolvers   []PropertyResolver                      // optional property-to-component resolvers
+	managedSetterLookup func(string) string                     // current property metadata applied to setter injection
 	SetterLookup        func(string) string                     // managed bean setter dependency → component
 	BeanLookup          func(string) string                     // optional bean name → dot-path lookup
+	PropertyBeanLookup  func(string, map[string]string) string  // optional factory property eligibility and identity
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
 	expressionMappings  map[string]string                       // runtime expression → static value substitutions
@@ -100,8 +103,9 @@ type ParseOptions struct {
 	Logger                   Logger
 	Resolvers                []Resolver
 	PropertyResolvers        []PropertyResolver
-	SetterLookup             func(name string) string                // optional, only for factory-managed components
-	BeanLookup               func(name string) string                // optional: resolve bean name → dot-path
+	SetterLookup             func(name string) string // optional, only for factory-managed components
+	BeanLookup               func(name string) string // optional: resolve bean name → dot-path
+	PropertyBeanLookup       func(name string, attrs map[string]string) string
 	BuiltinReturnLookup      func(name string) string                // optional: resolve builtin function → return component
 	FuncLookup               func(component, funcName string) string // optional: resolve method return type from external components
 	ExpressionMappings       map[string]string                       // runtime expression → static value substitutions
@@ -189,6 +193,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 		Resolvers:                opts.Resolvers,
 		PropertyResolvers:        opts.PropertyResolvers,
 		BeanLookup:               opts.BeanLookup,
+		PropertyBeanLookup:       opts.PropertyBeanLookup,
 		SetterLookup:             opts.SetterLookup,
 		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
 		FuncLookup:               opts.FuncLookup,
@@ -221,6 +226,8 @@ func (pr *ParseResult) extractSignatures() {
 			log.Recovered(pr.log, "parse panic in extractSignatures", r, "uri", string(pr.URI))
 		}
 	}()
+
+	pr.prepareManagedSetterLookup()
 
 	var allPendingCalls []pendingCall
 
@@ -382,7 +389,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	sp.extractLinks = pr.extractLinks
 	sp.extractCalls = pr.extractCalls
 	sp.builtinReturnLookup = pr.BuiltinReturnLookup
-	sp.setterLookup = pr.SetterLookup
+	sp.setterLookup = pr.managedSetterLookup
 
 	// If this <cfscript> region sits inside a tag <cffunction> body
 	// (nested script island — ClassifyRegions splits the file there),
@@ -451,6 +458,8 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 		pr.Extends = sp.extends
 	}
 
+	pr.Accessors = pr.Accessors || sp.accessors
+
 	if sp.persistent {
 		pr.Persistent = true
 	}
@@ -468,7 +477,7 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	tp.extractLinks = pr.extractLinks
 	tp.extractCalls = pr.extractCalls
 	tp.builtinReturnLookup = pr.BuiltinReturnLookup
-	tp.setterLookup = pr.SetterLookup
+	tp.setterLookup = pr.managedSetterLookup
 	tp.baseLine = r.StartLine
 	tp.knownScopes = tagScopes
 	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
@@ -589,6 +598,8 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	if tp.extends != "" {
 		pr.Extends = tp.extends
 	}
+
+	pr.Accessors = pr.Accessors || tp.accessors
 
 	if tp.persistent {
 		pr.Persistent = true
@@ -1397,29 +1408,8 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			comp = prop.documentedComponent()
 		}
 
-		if comp == "" && pr.BeanLookup != nil {
-			// Try inject attribute: full value (for namespace-qualified), then stripped name
-			if inject := prop.attrs["inject"]; inject != "" {
-				comp = pr.BeanLookup(normalizeBeanKey(inject))
-				if comp == "" {
-					comp = pr.BeanLookup(extractBeanName(inject))
-				}
-			}
-
-			if comp == "" {
-				comp = pr.BeanLookup(prop.name)
-			}
-		}
-
 		if comp == "" {
-			inject, ok := prop.attrs["inject"]
-			if ok && inject == "" {
-				// A bare `inject` is WireBox's default DSL, the model whose id
-				// is the property's name.
-				inject = prop.name
-			}
-
-			comp = injectedComponent(inject)
+			comp = pr.propertyBeanComponent(&prop)
 		}
 
 		if comp != "" {
@@ -2383,7 +2373,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
 		sp.resolverSet = pr.resolverSet
 		sp.extractLinks = true
-		sp.setterLookup = pr.SetterLookup
+		sp.setterLookup = pr.managedSetterLookup
 		sp.parse()
 		refs = sp.componentRefs
 		links = sp.links
@@ -2400,7 +2390,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		tp.resolvers = pr.Resolvers
 		tp.resolverSet = pr.resolverSet
 		tp.extractLinks = true
-		tp.setterLookup = pr.SetterLookup
+		tp.setterLookup = pr.managedSetterLookup
 		tp.parse()
 		refs = tp.componentRefs
 
@@ -3107,4 +3097,73 @@ func (pr *ParseResult) regionTagScope(scopes []FuncScope, line int) (FuncScope, 
 	}
 
 	return FuncScope{}, false
+}
+
+// prepareManagedSetterLookup reads properties before signatures so declaration
+// order cannot change DI/1 eligibility. The metadata parse has no injection
+// callbacks, and therefore does not recurse. Global edits rebuild this snapshot.
+func (pr *ParseResult) prepareManagedSetterLookup() {
+	pr.managedSetterLookup = pr.SetterLookup
+	if pr.SetterLookup == nil || pr.PropertyBeanLookup == nil {
+		return
+	}
+
+	metadata := ParseWithOptions(pr.URI, pr.Content, &ParseOptions{})
+
+	properties := make(map[string]map[string]string, len(metadata.Properties))
+	for _, prop := range metadata.Properties {
+		if !metadata.Accessors && !metadata.Persistent {
+			continue
+		}
+
+		properties[strings.ToLower(prop.name)] = prop.attrs
+	}
+
+	pr.managedSetterLookup = func(name string) string {
+		attrs, found := properties[strings.ToLower(name)]
+		// setter=false omits the implicit property setter, allowing an explicit one.
+		if found && !strings.EqualFold(attrs["setter"], "false") && pr.PropertyBeanLookup(name, attrs) == "" {
+			return ""
+		}
+
+		return pr.SetterLookup(name)
+	}
+}
+
+func (pr *ParseResult) propertyBeanComponent(prop *propertyDef) string {
+	if pr.PropertyBeanLookup != nil && !pr.Accessors && !pr.Persistent {
+		return ""
+	}
+
+	if pr.BeanLookup != nil {
+		lookup := pr.BeanLookup
+		if pr.PropertyBeanLookup != nil {
+			lookup = func(name string) string { return pr.PropertyBeanLookup(name, prop.attrs) }
+		}
+
+		if inject := prop.attrs["inject"]; inject != "" {
+			if comp := lookup(normalizeBeanKey(inject)); comp != "" {
+				return comp
+			}
+
+			if comp := lookup(extractBeanName(inject)); comp != "" {
+				return comp
+			}
+		}
+
+		if comp := lookup(prop.name); comp != "" {
+			return comp
+		}
+	}
+
+	if pr.PropertyBeanLookup != nil {
+		return ""
+	}
+
+	inject, ok := prop.attrs["inject"]
+	if ok && inject == "" {
+		inject = prop.name
+	}
+
+	return injectedComponent(inject)
 }

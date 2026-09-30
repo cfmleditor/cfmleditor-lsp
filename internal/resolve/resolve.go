@@ -45,17 +45,20 @@ type Resolver struct {
 	Stubs          *frameworkapi.Set
 	stubFS         vfs.FS
 	mu             sync.RWMutex
-	appRootCache   map[string]string          // dir → Application.cfc root
-	slugCache      map[string]string          // dir → its box.json slug, "" for none
-	resolveCache   map[string]string          // component+"\t"+baseDir → file path
-	dirCache       *cfpath.DirCache           // directory listings behind those resolutions
-	incGraph       *includeGraph              // the index's cfincludes, rebuilt when they change
-	exprKeys       []string                   // ExpressionMappings' keys in the order they apply
-	implicitCache  map[string]string          // path → ImplicitExtends(path)
-	helpers        *helperSet                 // application helper templates, per set of config files
-	wb             *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
-	beanPathsCache map[string]string          // merged application/configured bean roots
-	fw1Scopes      map[string]fw1Scope        // nearest application's source-defined injection scope
+	appRootCache   map[string]string   // dir → Application.cfc root
+	slugCache      map[string]string   // dir → its box.json slug, "" for none
+	resolveCache   map[string]string   // component+"\t"+baseDir → file path
+	dirCache       *cfpath.DirCache    // directory listings behind those resolutions
+	incGraph       *includeGraph       // the index's cfincludes, rebuilt when they change
+	exprKeys       []string            // ExpressionMappings' keys in the order they apply
+	implicitCache  map[string]string   // path → ImplicitExtends(path)
+	helpers        *helperSet          // application helper templates, per set of config files
+	wb             *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
+	beanPathsCache map[string]string   // merged application/configured bean roots
+	fw1Scopes      map[string]fw1Scope // nearest application's source-defined injection scope
+	diOnce         sync.Once
+	diPolicies     []diPolicy                 // source-backed DI/1 injection contracts
+	discoveringDI  bool                       // private policy discovery never re-enters injection lookup
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 }
 
@@ -538,7 +541,7 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 			return nil
 		}
 
-		r.Index.IndexFileWithOptions(cfcURI, string(data), &parser.ParseOptions{Resolvers: r.Resolvers, SetterLookup: r.SetterLookup(cfcPath), BeanLookup: r.BeanLookup})
+		r.Index.IndexFileWithOptions(cfcURI, string(data), &parser.ParseOptions{Resolvers: r.Resolvers, SetterLookup: r.SetterLookup(cfcPath), BeanLookup: r.InjectionBeanLookup(cfcPath), PropertyBeanLookup: r.InjectionPropertyLookup(cfcPath)})
 	}
 
 	return r.Index.FunctionsForFile(cfcURI)

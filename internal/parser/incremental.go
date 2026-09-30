@@ -188,6 +188,8 @@ func (pr *ParseResult) reparseShallow() {
 	start := time.Now()
 	pr.Regions, pr.contentLineIdx = pr.classifyRegions()
 	pr.outputScanned = false
+	pr.Accessors = false
+	pr.Persistent = false
 	pr.Funcs = pr.Funcs[:0]
 	pr.ComponentRefs = pr.ComponentRefs[:0]
 	pr.Scopes = pr.Scopes[:0]

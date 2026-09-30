@@ -12,7 +12,7 @@ import (
 // bean roots or source-proven FW/1 controller/service scopes. Merely naming a
 // parameter after a CFC does not imply injection.
 func (r *Resolver) SetterLookup(file string) func(string) string {
-	if !cfpath.IsCFCFile(file) {
+	if !cfpath.IsCFCFile(file) || r.discoveringDI {
 		return nil
 	}
 
@@ -32,7 +32,7 @@ func (r *Resolver) SetterLookup(file string) func(string) string {
 		return nil
 	}
 
-	return r.BeanLookup
+	return r.InjectionBeanLookup(file)
 }
 
 // BeanLookup honors literal aliases and explicit factory rules before bean

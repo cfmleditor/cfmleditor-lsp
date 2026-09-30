@@ -426,3 +426,51 @@ func TestReportUsesFW1ControllerSetters(t *testing.T) {
 		}
 	}
 }
+
+func TestReportUsesDI1LifetimeForInjectionOnly(t *testing.T) {
+	dir := t.TempDir()
+	sources := map[string]string{
+		"Application.cfc":             `component extends="framework.one" {}`,
+		"model/beans/User.cfc":        `component { function run() {} }`,
+		"model/services/Reporter.cfc": `component { function run() {} }`,
+		"model/services/Consumer.cfc": `component accessors=true {
+ property name="user";
+ property name="reporter";
+ function setUser(user) { variables.user=arguments.user; }
+ function setReporter(reporter) { variables.reporter=arguments.reporter; }
+ function use() { variables.user.run(); variables.reporter.run(); variables.reporter.missing(); }
+ }`,
+		"page.cfm": `<cfscript>
+ function getBean(name) {}
+ c=new model.services.Consumer();
+ c.getUser().run(); c.getReporter().run();
+ user=getBean("user"); user.run();
+ </cfscript>
+`,
+	}
+	files := []string{}
+
+	for name, source := range sources {
+		file := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, file)
+	}
+
+	rep := Scan(vfs.OS{}, files, nil, &Options{BeanPaths: map[string]string{"": filepath.Join(dir, "model")}, WorkspaceFolders: []string{dir}, Resolvers: []parser.Resolver{{Match: `getBean("$1")`, Resolve: "$1", Prefix: "getBean"}}})
+	if len(rep.Calls) != 3 {
+		t.Fatalf("want two unknown transient fields and one missing singleton method: %+v", rep.Calls)
+	}
+
+	for _, call := range rep.Calls {
+		if call.Function == "missing" && !strings.Contains(call.Reason, "not found in Reporter") {
+			t.Errorf("singleton method validation lost: %+v", call)
+		}
+	}
+}

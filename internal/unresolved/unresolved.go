@@ -111,7 +111,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 			continue
 		}
 
-		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), BeanLookup: resolver.BeanLookup, PropertyResolvers: opt.PropertyResolvers})
+		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
 	}
 
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
@@ -195,7 +195,8 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
 		PropertyResolvers:        opt.PropertyResolvers,
-		BeanLookup:               resolver.BeanLookup,
+		BeanLookup:               resolver.InjectionBeanLookup(file),
+		PropertyBeanLookup:       resolver.InjectionPropertyLookup(file),
 		SetterLookup:             resolver.SetterLookup(file),
 		InterpolateAllText:       opt.InterpolateAll,
 		ExtractCalls:             true,

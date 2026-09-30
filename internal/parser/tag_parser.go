@@ -22,6 +22,7 @@ type tagParser struct {
 	pendingCalls  []pendingCall
 	properties    []propertyDef
 	extends       string
+	accessors     bool
 	persistent    bool
 	lineIndex     []int32 // byte offset of each line start
 	resolvers     []Resolver
@@ -481,6 +482,8 @@ func (p *tagParser) dispatchCFTag(ch byte, tag string, idx, tagEnd, line int) {
 	case 'c':
 		if hasCFTagPrefix(tag, "<cfcomponent") {
 			p.extends = getAttr(tag, "extends")
+
+			p.accessors = isTruthy(getAttr(tag, "accessors"))
 			if isTruthy(getAttr(tag, "persistent")) {
 				p.persistent = true
 			}

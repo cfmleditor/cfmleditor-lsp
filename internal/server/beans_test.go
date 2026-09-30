@@ -310,3 +310,54 @@ func TestEditorUsesManagedSetterDependencies(t *testing.T) {
 		t.Errorf("removed bean roots left stale type %q", got)
 	}
 }
+
+func TestEditorUsesDI1LifetimeAndRefreshesFactoryConfig(t *testing.T) {
+	dir := t.TempDir()
+	for _, folder := range []string{"beans", "services"} {
+		if err := os.MkdirAll(filepath.Join(dir, "model", folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	app := filepath.Join(dir, "Application.cfc")
+	if err := os.WriteFile(app, []byte(`component extends="framework.one" {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, folder := range map[string]string{"User": "beans", "Reporter": "services"} {
+		if err := os.WriteFile(filepath.Join(dir, "model", folder, name+".cfc"), []byte(`component { function run() {} }`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.BeanPaths = map[string]string{"": filepath.Join(dir, "model")}
+	file := cfpath.ToURI(filepath.Join(dir, "model", "services", "Consumer.cfc"))
+
+	source := `component accessors=true {property name="user"; property name="reporter"; function setUser(user) {variables.user=arguments.user;} function setReporter(reporter) {variables.reporter=arguments.reporter;}}`
+	for _, pr := range []*parser.ParseResult{s.parseContentForIndex(file, source), s.parseContent(file, source)} {
+		for _, fn := range pr.Funcs {
+			if fn.Name == "getUser" && fn.ReturnComponent != "" {
+				t.Fatal("transient getter typed")
+			}
+
+			if fn.Name == "getReporter" && fn.ReturnComponent == "" {
+				t.Fatal("singleton getter not typed")
+			}
+		}
+	}
+
+	if err := os.WriteFile(app, []byte(`component extends="framework.one" {variables.framework={diConfig:{transients:["services"]}};}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s.invalidateResolveCache()
+
+	pr := s.parseContent(file, source)
+	for _, fn := range pr.Funcs {
+		if fn.Name == "getReporter" && fn.ReturnComponent != "" {
+			t.Fatal("stale factory lifetime after configuration refresh")
+		}
+	}
+}

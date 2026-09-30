@@ -642,6 +642,24 @@ layouts, struct-form framework settings and separate subsystem factories remain
 unsupported. A runtime base override uses only a known literal default. See
 [RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the measured Masa case and boundaries.
 
+Known DI/1 factories apply a separate injection policy. Literal `new` factory
+construction in startup files (including subclasses of DI/1), or a modern
+`Application.cfc extends="framework.one"` with literal framework configuration,
+establishes lifetime rules inside the factory's literal folders. Transient
+folders/patterns, singleton patterns, exclusions, singular mappings, aliases,
+constants and explicit registrations constrain setter/property types. Direct
+`getBean` retrieval still permits transients. DI/1 properties require accessors
+or persistence and honor setter, typed/defaulted-property flags; matching ignored
+properties also block explicit setters. Global document edits refresh metadata.
+Masa's older FW/1 fallback controller wiring retains its containsBean policy.
+
+This policy filters existing bean roots; automatic discovery of additional roots,
+constructor injection, delegated applications and subsystem factory inheritance
+remain follow-up work. Dynamic/conflicting lifetime configuration and unsupported
+regular expressions produce no injection type in a recognized factory. Runtime
+factory overrides, computed registrations and custom injection implementations
+remain outside this static model.
+
 ### Component resolvers
 
 Component resolvers teach the LSP how to resolve custom factory patterns to specific CFCs. This enables goto-definition and dot-completion for variables assigned from those patterns.

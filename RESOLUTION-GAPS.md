@@ -678,3 +678,58 @@ Revised order for further resolution work:
 
 Use versioned documentation, pinned framework source, and real applications as
 complementary evidence. Dynamic or conflicting configuration remains unknown.
+
+
+## DI/1 factory lifetime and property eligibility
+
+The next correctness batch separates direct bean retrieval from factory-owned
+setter/property injection. Startup files and bounded literal includes recognize
+literal `new` DI/1 construction through real implementation/parent method
+metadata. Modern `Application.cfc extends="framework.one"` supplies the documented
+default DI/1 mode or literal struct/direct configuration. Manual factory setup,
+other engines and custom diComponent settings do not imply automatic DI/1.
+Only supplied bean roots gain setter inference; this does not yet discover new
+automatic roots or inject constructors.
+
+Factory policies honor immediate `beans` folders, configured transient folders,
+transient/singleton patterns, singular mappings, omitted directory aliases,
+literal exclusions, recursion, constants, explicit declaration lifetimes,
+alias chains and whole typed-value addBean registrations. Exclusions are
+case-insensitive literal substrings, matching DI/1 source rather than regexes.
+Conflicting factory identities/configuration, cycles and unsupported regexes
+withhold injection types. Direct getBean identity remains separately available.
+The older FW/1 controller fallback retains its containsBean policy.
+
+Property inference requires accessors=true or persistent=true, excludes
+setter=false and the default typed/defaulted metadata omissions, and honors
+literal omission flags. An ignored implicit property blocks a matching explicit
+setter; setter=false permits the separate explicit setter. Property declaration
+order and full document replacement retain the same behavior. Explicit source
+and documented component types remain authoritative.
+
+With unchanged configuration and **897 indexed/scanned files**, Masa changes
+**16,355 → 16,385**, **0 removed / 30 added**. This intentionally removes
+unjustified type assumptions rather than reducing the count: 23 findings involve
+manually populated variables.$ in contentCalendarUtilityBean, three involve an
+email local that previously borrowed a defaulted property's bean identity, two
+are oauth user getter chains, one is manually populated variables.content, and
+one is fileBean.getSite(). The types of manually supplied setter values need
+separate argument/member flow. Whole PR versus the same base is now
+**18,539 → 16,385**, **2,405 removed / 251 added**, net **2,154**.
+
+Lifetime/configuration, registration/alias, property/index, declaration-order,
+editor/closed-file/configuration-refresh and CLI regressions fail with the policy
+disabled and pass restored. Unquoted script property names, booleans and dotted CFC types are now parsed
+as complete literals. The pinned FW/1 corpus's generated getters resolve
+**508 → 409** with presets and **794 → 695** without, **99 removed / 0 added**
+in each mode over the same **305 indexed/scanned files**. All removed findings
+are getters on UserOneLevel/UserTwoLevel/UserThreeLevel and their Contact/Address
+chains in frameworkPopulateTest. The other twelve comparisons, including Wheels
+vendor coverage, preserve every per-entry finding and indexed/scanned count.
+The default six-project totals become **6,804 / 14,706**; whole PR compared with
+the original base is **408 removed / 9 added** with presets and **470 removed /
+38 added** without. Runtime factory replacement,
+computed registrations, auto-exclusion defaults, inherited property metadata,
+liberal pluralization and custom factory behavior are not modeled. Constructor
+injection, automatic root discovery and subsystem parent/local precedence remain
+next, followed by verified struct/collection member and wrapper return types.

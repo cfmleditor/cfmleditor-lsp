@@ -62,7 +62,14 @@ func (r *Resolver) BeanResolvers(beanPaths map[string]string) []parser.Resolver 
 		content := string(data)
 
 		pr := parser.Parse(cfpath.ToURI(file), content, r.Resolvers)
-		for _, call := range beanCalls(content) {
+
+		calls := beanCalls(content)
+		for i := range calls {
+			call := &calls[i]
+			if call.method != "addalias" && call.method != "declarebean" {
+				continue
+			}
+
 			comp, _ := r.receiverComponent(call.receiver, call.line, "", call.method, pr, filepath.Dir(file), nil)
 
 			name, entry, valid := r.beanRegistration(comp, call, filepath.Dir(file))
@@ -181,6 +188,7 @@ func registeredBean(name string, registrations map[string][]beanRegistration, be
 
 type beanCall struct {
 	receiver, method string
+	component        string // literal new component, for factory policy discovery
 	line             uint32
 	args             [][]parser.Token
 }
@@ -222,7 +230,17 @@ func beanCalls(content string) []beanCall {
 			}
 
 			method := strings.ToLower(tok.Value)
-			if active && tok.Kind == parser.TokIdent && (method == "addalias" || method == "declarebean") && scanner.PeekSkipComments().Kind == parser.TokLParen {
+			if active && tok.Kind == parser.TokIdent && method == "new" && len(previous) > 0 && previous[len(previous)-1].Kind == parser.TokEquals {
+				if call, ok := beanConstruction(scanner, previous); ok {
+					calls = append(calls, call)
+				}
+
+				previous = nil
+
+				continue
+			}
+
+			if active && tok.Kind == parser.TokIdent && (method == "addalias" || method == "declarebean" || method == "addbean") && scanner.PeekSkipComments().Kind == parser.TokLParen {
 				receiver := beanReceiver(previous)
 
 				scanner.NextSkipComments()
@@ -340,7 +358,11 @@ func beanArgument(args [][]parser.Token, name string, position int) string {
 	return ""
 }
 
-func (r *Resolver) beanRegistration(comp string, call beanCall, dir string) (string, beanRegistration, bool) {
+func (r *Resolver) beanRegistration(comp string, call *beanCall, dir string) (string, beanRegistration, bool) {
+	if call.method != "addalias" && call.method != "declarebean" {
+		return "", beanRegistration{}, false
+	}
+
 	first, second := "aliasName", "beanName"
 	if call.method == "declarebean" {
 		first, second = "beanName", "dottedPath"
@@ -366,4 +388,40 @@ func (r *Resolver) beanRegistration(comp string, call beanCall, dir string) (str
 	}
 
 	return name, entry, true
+}
+
+func beanConstruction(scanner *parser.Scanner, previous []parser.Token) (beanCall, bool) {
+	receiver := beanReceiver(append(previous[:len(previous)-1:len(previous)-1], parser.Token{Kind: parser.TokDot}))
+	component := scanner.NextSkipComments()
+
+	name := component.Value
+	switch component.Kind {
+	case parser.TokString:
+		name = beanArgument([][]parser.Token{{component}}, "", 0)
+	case parser.TokIdent:
+		var suffix strings.Builder
+
+		for scanner.PeekSkipComments().Kind == parser.TokDot {
+			scanner.NextSkipComments()
+
+			part := scanner.NextSkipComments()
+			if part.Kind != parser.TokIdent {
+				return beanCall{}, false
+			}
+
+			suffix.WriteString("." + part.Value)
+		}
+
+		name += suffix.String()
+	default:
+		return beanCall{}, false
+	}
+
+	if receiver == "" || name == "" || scanner.PeekSkipComments().Kind != parser.TokLParen {
+		return beanCall{}, false
+	}
+
+	scanner.NextSkipComments()
+
+	return beanCall{receiver: receiver, method: "new", component: name, args: beanArguments(scanner)}, true
 }
