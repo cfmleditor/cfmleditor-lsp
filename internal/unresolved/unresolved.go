@@ -104,7 +104,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 			continue
 		}
 
-		resolver.Index.IndexFile(fileURI, string(data))
+		resolver.Index.IndexFileWithResolvers(fileURI, string(data), opt.Resolvers)
 	}
 
 	loadBeans(resolver, opt)

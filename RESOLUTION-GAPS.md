@@ -191,10 +191,12 @@ The gaps below explain the largest of these.
   its specs' `buildContext()` is `return prepareMock( new RequestContext(…) )`,
   which is now `$any` as `x = prepareMock(…)` already was. 53 are cfwheels
   `command()` chains.
-- **Limit:** the `unresolved` scan indexes files without the config's
-  resolvers (`index.IndexFile`), so a return typed by a *configured* resolver
-  reaches a caller in another file only through the stubs or the server's
-  index, which parses with them. Same-file calls always see it.
+- **Former limit, now fixed:** the `unresolved` scan used to index files
+  without the config's resolvers (`index.IndexFile`), so a return typed by a
+  *configured* resolver reached a caller in another file only through the
+  stubs or the server's index. Its indexing pass now uses
+  `IndexFileWithResolvers`, and a cross-file regression test covers the
+  configured-resolver return.
 
 ### 5. A component path computed at run time — fixed, and re-diagnosed
 
@@ -318,13 +320,13 @@ against the source:
   `getController` are stubbed from their first `return this;`. The stub
   generator takes a function's first return, and these functions return `this`
   in one special case. They are private, so no application code calls them.
-- **`entityLoad`:** `entityNew( "name" )` is tested to find an entity by its
-  `entityname`. `entityLoad` and `entityLoadByPK` were not checked.
-- **`<cfreturn x.y>` is read as `<cfreturn x>`:** the tag parser takes the
-  first identifier of a return expression that holds no `(`, so a function
-  returning a property of `x` is typed as `x`'s component. The script parser
-  types only a name that stands alone. Found while fixing gap #3; left as it
-  is until its effect on the corpus is measured.
+- **`entityLoad` — fixed:** `entityLoad( "name", … )` and
+  `entityLoadByPK( "name", … )`, in script and tag assignments, are tested to
+  find an entity by its `entityname`, as `entityNew` already was.
+- **`<cfreturn x.y>` is read as `<cfreturn x>` — fixed:** the tag parser now,
+  like the script parser, types only a name that stands alone. A member return
+  stays untyped because the current parser does not represent member types;
+  that is preferable to claiming it returns the receiver's component.
 - **The batch scan is not deterministic:** the same binary reports 2,535 or
   2,540 entries for cfwheels without presets from run to run; the five are
   `fileSystemUtil.resolvePath()` in `cli/src/commands/wheels/cache/clear.cfc`

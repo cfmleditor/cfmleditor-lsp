@@ -100,6 +100,46 @@ func TestIsBuiltin(t *testing.T) {
 	}
 }
 
+// TestConfiguredResolverReturnCrossesFiles covers the batch-indexing half of
+// resolver-backed returns. Factory.make() is parsed before Page calls it, so
+// its configured return must be stored in the index rather than existing only
+// in the same-file parse used during scanning.
+func TestConfiguredResolverReturnCrossesFiles(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"Model.cfc":   `component { function run() {} }`,
+		"Factory.cfc": `component { function make() { return locate("model"); } }`,
+		"Page.cfc": `component {
+	function check() {
+		var factory = new Factory();
+		factory.make().run();
+	}
+}`,
+	}
+
+	paths := make([]string, 0, len(files))
+	for name, src := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+
+	opt := &Options{
+		Resolvers: []parser.Resolver{{
+			Match: `locate\("model"\)`, Resolve: "Model", Prefix: "locate",
+		}},
+		WorkspaceFolders: []string{dir},
+	}
+	page := filepath.Join(dir, "Page.cfc")
+	if rep := Scan(vfs.OS{}, paths, []string{page}, opt); len(rep.Calls) != 0 {
+		for i := range rep.Calls {
+			t.Errorf("%s (%s)", rep.Calls[i].CallText(), rep.Calls[i].Reason)
+		}
+	}
+}
+
 // TestAMissingBaseIsOneEntryPerFile: every inherited call in a file whose
 // extends chain breaks is unchecked for the same reason, so the report holds
 // one entry for the file, on its extends line and counting the calls — `toBe`

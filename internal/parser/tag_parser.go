@@ -1044,8 +1044,14 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 			return
 		}
 
-		varName := extractIdent(inner)
-		if varName != "" && !strings.Contains(inner, "(") {
+		// As in script syntax, only a name standing alone names the returned
+		// value. `x.y` is a member of x, not x itself; claiming the function
+		// returns x's component makes later chains resolve against the wrong
+		// component. Member types are not represented by the parser, so leave
+		// that expression untyped rather than inventing an answer.
+		expr := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(inner), "/"))
+		varName := extractIdent(expr)
+		if varName != "" && varName == expr {
 			f.returnVar = varName
 		}
 	}
@@ -1209,6 +1215,14 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 	case hasPrefixFold(rhs, "entityload("):
 		comp := extractEntityNewArg(rhs[11:])
+		if comp != "" {
+			p.addRef(&ComponentRef{
+				Variable: varName, Component: comp,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+			})
+		}
+	case hasPrefixFold(rhs, "entityloadbypk("):
+		comp := extractEntityNewArg(rhs[15:])
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,

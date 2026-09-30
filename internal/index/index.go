@@ -463,6 +463,20 @@ func remap[T comparable](entries []T, reps []replacement[T]) {
 // IndexFile parses the given CFC content and updates the index for that file URI.
 func (idx *Index) IndexFile(fileURI uri.URI, content string) {
 	pr := parser.Parse(fileURI, content)
+	idx.indexParseResult(fileURI, content, pr)
+}
+
+// IndexFileWithResolvers parses and indexes a CFC using the component
+// resolvers that govern its workspace. Batch tools use this entry point so a
+// resolver-typed function return survives into callers parsed later; the
+// ordinary IndexFile remains the cheap/default path for callers with no
+// configured resolvers.
+func (idx *Index) IndexFileWithResolvers(fileURI uri.URI, content string, resolvers []parser.Resolver) {
+	pr := parser.Parse(fileURI, content, resolvers)
+	idx.indexParseResult(fileURI, content, pr)
+}
+
+func (idx *Index) indexParseResult(fileURI uri.URI, content string, pr *parser.ParseResult) {
 	// Every string below is cloned, for the reason IndexFileFromResult
 	// documents at length: a parsed string is a slice of the file's source,
 	// and one retained substring keeps the whole file alive. This door is the

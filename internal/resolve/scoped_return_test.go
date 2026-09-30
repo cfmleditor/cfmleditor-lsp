@@ -94,3 +94,30 @@ func TestAReturnedInjectedPropertyTypesTheFunction(t *testing.T) {
 		"t.getLater.missing":  "method 'missing' not found in PrintBuffer",
 	})
 }
+
+// TestATagMemberReturnIsNotTheReceiver checks the conservative answer for a
+// member whose own type is unavailable. The tag parser used to read
+// `<cfreturn parent.child>` as `<cfreturn parent>`, so `getChild().run()` was
+// incorrectly checked against Parent.
+func TestATagMemberReturnIsNotTheReceiver(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Parent.cfc": `component { function parentOnly() {} }`,
+		"Service.cfc": `<cfcomponent>
+	<cffunction name="getChild">
+		<cfset var parent = new Parent()>
+		<cfreturn parent.child>
+	</cffunction>
+</cfcomponent>`,
+		"Page.cfc": `component {
+	function f() {
+		var service = new Service();
+		service.getChild().run();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "Page.cfc"), map[string]string{
+		"service.getChild.run": "method 'getChild' in Service has no component return type (chain to 'run')",
+	})
+}
