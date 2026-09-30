@@ -334,7 +334,7 @@ against the source:
   exist" in some runs only. `explain` reports it every time. Six runs at the
   PR #185 merge showed it, so it predates gaps #3 and #4; the parallel
   scan's lazy indexing is the first suspect. Compare runs with that in mind.
-  - **Proposed fix, validation pending:** `EnsureIndexed` adds namespaced
+  - **Fix:** `EnsureIndexed` adds namespaced
     framework stubs to the shared index. The bare-name fallback subsequently
     finds those virtual files through `FindFilesByBasename`, so loading
     `commandbox.system.util.FileSystem` in another file can make the bare
@@ -345,7 +345,16 @@ against the source:
   - `TestBareComponentLookupDoesNotDependOnLoadedStubs` covers both lookup
     orders, a fresh path cache after loading, explicit namespaced lookup,
     configured ids, and precedence of workspace source over a loaded stub.
-    Go tests and the pinned six-project corpus comparison remain pending.
+    Confirmed to fail against the pre-fix code.
+  - **Measured on the pinned commits with the current CLI:** presets
+    7,203 before and after; no presets 15,138 before and after, with no
+    entries added or removed in either configuration. Six cfwheels scans
+    without presets produced identical findings (61 each). These counts
+    differ from the earlier handoff measurements: the current CLI skips
+    `vendor`, where this cfwheels checkout keeps its framework source, and
+    does not scan the CLI file named above. The deterministic regression
+    reproduces the stub-loading cause directly; the repeated corpus scans
+    alone do not reproduce the original five fluctuating entries.
 - **A stale stub:** regenerating the stubs at the PR #185 merge, with nothing
   changed, rewrites `ArtifactService.getPackagePath()` to return
   `commandbox.system.services.ConfigService`. It returns a string (`var path

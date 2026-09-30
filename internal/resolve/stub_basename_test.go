@@ -21,24 +21,26 @@ func TestBareComponentLookupDoesNotDependOnLoadedStubs(t *testing.T) {
 		workspace bool
 		loadFirst bool
 	}{
-		{name: "no preset, bare first"},
-		{name: "no preset, stub first", loadFirst: true},
-		{name: "preset, bare first", preset: true},
-		{name: "preset, stub first", preset: true, loadFirst: true},
-		{name: "workspace, bare first", workspace: true},
-		{name: "workspace, stub first", workspace: true, loadFirst: true},
-		{name: "workspace and preset, bare first", workspace: true, preset: true},
-		{name: "workspace and preset, stub first", workspace: true, preset: true, loadFirst: true},
+		{name: "no preset bare first"},
+		{name: "no preset stub first", loadFirst: true},
+		{name: "preset bare first", preset: true},
+		{name: "preset stub first", preset: true, loadFirst: true},
+		{name: "workspace bare first", workspace: true},
+		{name: "workspace stub first", workspace: true, loadFirst: true},
+		{name: "workspace and preset bare first", workspace: true, preset: true},
+		{name: "workspace and preset stub first", workspace: true, preset: true, loadFirst: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			r := &Resolver{FS: vfs.OS{}, Index: index.New()}
+
 			stub := frameworkapi.Namespaced("commandbox.system.util.FileSystem")
 			if stub == "" {
 				t.Fatal("FileSystem stub is missing")
 			}
 
 			var want string
+
 			if tc.preset {
 				r.Stubs = frameworkapi.For([]string{"commandbox"})
 				want = stub
