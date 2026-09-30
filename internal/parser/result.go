@@ -237,6 +237,10 @@ func (pr *ParseResult) extractSignatures() {
 		}
 	}
 
+	// The locals of a tag function a region split, carried to the regions
+	// after the split.
+	var open openLocals
+
 	for _, r := range pr.Regions {
 		// A RegionSkip is a literal <script> block, left out of the script
 		// regions so its JavaScript is never fed to the CFScript scanner. Its
@@ -256,9 +260,9 @@ func (pr *ParseResult) extractSignatures() {
 		}
 
 		if r.Kind == RegionScript {
-			allPendingCalls = append(allPendingCalls, pr.mergeScriptRegion(&r, tagScopes)...)
+			allPendingCalls = append(allPendingCalls, pr.mergeScriptRegion(&r, tagScopes, &open)...)
 		} else {
-			allPendingCalls = append(allPendingCalls, pr.mergeTagRegion(&r, tagScopes)...)
+			allPendingCalls = append(allPendingCalls, pr.mergeTagRegion(&r, tagScopes, &open)...)
 		}
 	}
 
@@ -313,9 +317,32 @@ func (pr *ParseResult) extractSignatures() {
 	}
 }
 
+// openLocals are the names declared local — `var`, `local.` — in the tag
+// function still open where a region ends, keyed by the function's file-level
+// funcKey. A <cfscript> block inside a <cffunction> splits the file into
+// regions, and the parser of each region starts with only the function's
+// arguments as its locals: `<cfset var conn = "">` above the block, and
+// `conn = uri.openConnection();` inside it read as an unscoped assignment,
+// which is a variables-scope one, so the variable was filed for the whole
+// component.
+type openLocals struct {
+	key   string
+	names []string
+}
+
+// namesFor is the names declared in the function keyed key, if they are the
+// ones held.
+func (o *openLocals) namesFor(key string) []string {
+	if o.key != key {
+		return nil
+	}
+
+	return o.names
+}
+
 // mergeScriptRegion parses a script region and merges what it found into pr,
 // returning its pending calls for resolvePendingCalls.
-func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open *openLocals) []pendingCall {
 	sp := newScriptParser(r.Text, string(pr.URI), r.StartLine, pr.Resolvers).asCFScript()
 	sp.resolverSet = pr.resolverSet
 	sp.extractLinks = pr.extractLinks
@@ -335,9 +362,26 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pen
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
 			sp.localVarSet[strings.ToLower(arg.Name)] = true
 		}
+
+		for _, name := range open.namesFor(sp.inFunc) {
+			sp.localVarSet[strings.ToLower(name)] = true
+		}
 	}
 
+	key := sp.inFunc
+
 	sp.parse()
+
+	// What the block declared local stays local in the regions after it.
+	if key != "" {
+		names := slices.Clone(open.namesFor(key))
+		for name := range sp.localVarSet {
+			names = append(names, name)
+		}
+
+		*open = openLocals{key: key, names: names}
+	}
+
 	pr.Funcs = append(pr.Funcs, sp.funcs...)
 	pr.ComponentRefs = append(pr.ComponentRefs, sp.componentRefs...)
 	pr.Scopes = append(pr.Scopes, sp.scopes...)
@@ -374,7 +418,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope) []pen
 // mergeTagRegion parses a tag region and merges what it found into pr, with
 // its lines and function keys moved from region-relative to file lines,
 // returning its pending calls for resolvePendingCalls.
-func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope) []pendingCall {
+func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *openLocals) []pendingCall {
 	tp := newTagParser(r.Text, string(pr.URI))
 	tp.resolvers = pr.Resolvers
 	tp.resolverSet = pr.resolverSet
@@ -397,9 +441,18 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope) []pendin
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
 			tp.markVarLocal(arg.Name)
 		}
+
+		for _, name := range open.namesFor(funcKey(s.Start, s.End)) {
+			tp.markVarLocal(name)
+		}
 	}
 
 	tp.parse()
+
+	// The function still open where the region ends continues in the next.
+	if tp.inFunc != "" {
+		*open = openLocals{key: shiftFuncKey(tp.inFunc, r.StartLine), names: slices.Clone(tp.localVars)}
+	}
 
 	for i := range tp.funcs {
 		tp.funcs[i].Line += conv.Uint32(r.StartLine)
@@ -904,7 +957,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			URI: pr.URI, Line: c.line, This: c.refThis,
 			VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 		}
-		if c.funcKey == "" {
+		if c.funcKey == "" || c.global {
 			pr.ComponentRefs = append(pr.ComponentRefs, ref)
 		} else {
 			pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
@@ -1038,8 +1091,16 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 			continue
 		}
 
-		// A closure's local of the same name is not what the function returns.
-		if ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name); ref != nil {
+		// A closure's local of the same name is not what the function
+		// returns. An unscoped name the function never declared is a
+		// variables-scope one, as settleReturnComponent reads it: a pending
+		// call assigning it settles at component level.
+		ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name)
+		if ref == nil {
+			ref = firstRefNamed(pr.ComponentRefs, name)
+		}
+
+		if ref != nil {
 			pr.Funcs[rp.funcIdx].ReturnComponent = returnedComponent(pr.settledComponent(ref), called)
 		}
 	}

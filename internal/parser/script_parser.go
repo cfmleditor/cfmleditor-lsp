@@ -63,8 +63,14 @@ type pendingCall struct {
 	line     uint32
 
 	// refThis is carried to the ref as ComponentRef.This; baseScope says which
-	// scope's refs baseVar may be read from. Beside line, in its padding.
+	// scope's refs baseVar may be read from. global files the ref at
+	// component level, as addRef does under forceGlobal: an unscoped
+	// assignment in a function is a variables-scope one, and the component
+	// the call returns is what every function — and every sibling closure —
+	// reads. funcKey is kept, since baseVar may still be a local. Beside line,
+	// in its padding.
 	refThis   bool
+	global    bool
 	baseScope RefScope
 
 	funcKey string   // scope key, empty if global
@@ -2892,7 +2898,7 @@ func (p *scriptParser) scopeToClosure(refsBefore, pendingBefore, from, to int) {
 	}
 
 	for i := pendingBefore; i < len(p.pendingCalls); i++ {
-		if c := &p.pendingCalls[i]; c.visibleTo == 0 {
+		if c := &p.pendingCalls[i]; c.visibleTo == 0 && !c.global {
 			c.visibleFrom, c.visibleTo = conv.Uint32(from), conv.Uint32(to)
 		}
 	}
@@ -3190,6 +3196,7 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 		line:      conv.Uint32(p.baseLine + line),
 		funcKey:   p.inFunc,
 		refThis:   p.refThis,
+		global:    p.forceGlobal,
 		baseScope: ReceiverRefScope(recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)

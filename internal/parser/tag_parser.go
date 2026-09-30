@@ -1341,6 +1341,7 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
 		refThis:  p.refThis,
+		global:   p.forceGlobal,
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
@@ -1385,6 +1386,7 @@ func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int)
 		funcKey:  p.inFunc,
 		rest:     trailingCalls(rhs),
 		refThis:  p.refThis,
+		global:   p.forceGlobal,
 	})
 }
 

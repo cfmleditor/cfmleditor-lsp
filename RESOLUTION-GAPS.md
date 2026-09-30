@@ -53,7 +53,7 @@ print("added", sum((b - a).values()), "removed", sum((a - b).values()))
 At PR #184 the totals are **9,520** with presets and **18,618** without
 (18,623 when re-measured at the branch point of gap #3's fix, see "The batch
 scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
-and **18,028**. Use
+and **18,028**; after gap #1, **9,225** and **17,645**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -90,29 +90,37 @@ The gaps below explain the largest of these.
 
 ## Gaps with a known cause
 
-### 1. An assignment in one closure is invisible to its sibling closures
+### 1. An assignment in one closure is invisible to its sibling closures — fixed
 
-- **Evidence:** coldbox-platform `scheduler` (156 entries) and most of the
-  TestBox-spec variables across the corpus.
-- **Shape:**
-
-  ```cfml
-  beforeEach( function(){ scheduler = asyncManager.newScheduler( "x" ); } );
-  it( "…", function(){ scheduler.task( "a" ); } );
-  ```
-
-  The unscoped assignment in `beforeEach`'s closure lands in the component's
-  variables scope at run time, and every `it` closure reads it there.
-- **Cause:** a ref declared in a closure carries the closure's lines
-  (`ComponentRef.VisibleFrom/To`, see "A closure's body is read as statements"
-  in CLAUDE.md). That keeps it out of the enclosing function, but it also keeps
-  it out of every other closure.
-- **Fix direction:** an *unscoped* assignment in a closure (not `var`, not
-  `local.`) should be filed where CFML puts it: in variables scope, visible
-  file-wide from its line onward. `var` and `local.` refs keep the closure's
-  lines.
-- **Caveat:** measure the change on the corpus. A closure assigning an unscoped
-  name that shadows a real variable is the risk.
+- **Was:** coldbox-platform `scheduler` (115 entries) and TestBox-spec
+  variables generally. In
+  `beforeEach( function(){ scheduler = asyncManager.newScheduler( "x" ); } )`
+  the assignment is unscoped, so CFML puts it in variables scope, where every
+  `it()` closure reads it.
+- **Cause:** not the closure's line range as first thought. An unscoped,
+  un-`var`'d assignment was already filed at component level
+  (`forceGlobal`) when its type was known at once (`x = new X()`), but one
+  typed later from a call (`x = a.b()`, a pending call) was filed with the
+  enclosing function, and given the closure's lines. That held in any
+  function, not only in closures.
+- **Fix:** a pending call carries `forceGlobal` (`pendingCall.global`) and
+  settles at component level, in both parsers. Two things came with it,
+  each with a test that fails without it:
+  - A `<cfscript>` block inside a `<cffunction>` is parsed as its own region
+    whose parser knew only the function's arguments as locals, so
+    `<cfset var conn>` above the block did not make `conn = …` inside it a
+    local. The locals of the function a region split are now carried across
+    it, both ways (`openLocals`). `conn = new X()` there had always been
+    filed for the whole component.
+  - `return x;` settled after the parse (`settleReturnVars`) looked only in
+    the function's refs, while the parse-time path also read the component's.
+    ColdBox's `getDateTimeHelper()` returns such a variable.
+- **Measured:** presets 9,476 → 9,225 (256 removed, 5 added); no presets
+  18,028 → 17,645 (389 removed, 6 added). Every addition is a call already
+  reported, now against its component: `variables.mixerUtil` is a
+  `MixerUtil`, whose `start()` returns its argument, and
+  `variables.binder.onShutdown()` is an optional hook the Injector checks
+  for with `structKeyExists`.
 
 ### 2. A MockBox decoration chain loses the mock's type
 
