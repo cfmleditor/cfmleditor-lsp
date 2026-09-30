@@ -71,6 +71,7 @@ type pendingCall struct {
 	// in its padding.
 	refThis   bool
 	global    bool
+	memberSet bool // not a call: `varName.funcName = …`; see checkMemberSet
 	baseScope RefScope
 
 	funcKey string   // scope key, empty if global
@@ -3407,6 +3408,35 @@ func (p *scriptParser) walkChain(c *chainBuilder, first string, staticTok Token)
 	}
 }
 
+// checkMemberSet records `a.m = …`, a value stored on a member of a variable,
+// when the scanner is at the `=`. fw1's tests give a bean a method at run
+// time — `a.getVariables = getVariables;` — and then call it (see
+// ParseResult.AssignsMember). `a.m == x` is a comparison, and
+// `a[ k ].m = …` is on an element, not on a.
+//
+// It travels as a pendingCall marked memberSet, which is already keyed by
+// function, rekeyed and merged per region, and resolvePendingCalls files it
+// in ParseResult.memberSets. A slice of its own put scriptParser in a larger
+// size class, and a ref for `a.m` reached every other file through the index.
+func (p *scriptParser) checkMemberSet(identChain []string, line int) {
+	if len(identChain) < 2 || strings.HasSuffix(identChain[len(identChain)-2], "[]") ||
+		p.sc.PeekSkipComments().Kind != TokEquals {
+		return
+	}
+
+	if first, _ := p.sc.bytesAfterPeek(); first == '=' {
+		return
+	}
+
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName:   strings.Join(identChain[:len(identChain)-1], "."),
+		funcName:  identChain[len(identChain)-1],
+		line:      conv.Uint32(p.baseLine + line),
+		funcKey:   p.inFunc,
+		memberSet: true,
+	})
+}
+
 // checkBareCall handles obj.method() calls (not in assignment context),
 // including further .method() calls chained off the return value of a previous
 // call in the same chain (e.g. "kpg.generateKeyPair().getPublic().getParams()").
@@ -3453,6 +3483,8 @@ chainWalk:
 
 	// Must end with ( to be a call
 	if p.sc.PeekSkipComments().Kind != TokLParen {
+		p.checkMemberSet(identChain, tok.Line)
+
 		return
 	}
 

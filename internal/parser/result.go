@@ -80,6 +80,9 @@ type ParseResult struct {
 	// which only look outside functions and inside init().
 	anyScopedVars map[Scope][]string
 
+	// memberSets are the `a.m = …` assignments met; see AssignsMember.
+	memberSets []pendingCall
+
 	// funcVars caches per-function variable lists keyed by "start:end".
 	funcVarsMu sync.Mutex
 	funcVars   map[string][]string
@@ -917,6 +920,12 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	for j := range calls {
 		c := &calls[j]
 
+		if c.memberSet {
+			pr.memberSets = append(pr.memberSets, *c)
+
+			continue
+		}
+
 		// Skip if this variable already has a ref (e.g. from appendResolverRefs)
 		if pr.hasRefFor(c) {
 			continue
@@ -1630,6 +1639,26 @@ func (pr *ParseResult) FuncVars(funcStart, funcEnd int) []string {
 	pr.funcVarsMu.Unlock()
 
 	return vars
+}
+
+// AssignsMember reports whether the function holding line assigns
+// variable.member on a line before it: `a.getVariables = getVariables;` then
+// `a.getVariables()` calls what was stored there, which is no method of a's
+// component. Compared case-insensitively, as CFML names are.
+func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool {
+	key := ""
+	if s := findFuncScope(int(line), pr.Scopes); s.Start >= 0 {
+		key = funcKey(s.Start, s.End)
+	}
+
+	for i := range pr.memberSets {
+		m := &pr.memberSets[i]
+		if m.funcKey == key && m.line <= line && strings.EqualFold(m.funcName, member) && strings.EqualFold(m.varName, variable) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // HasScopedAssignment reports whether name was ever assigned in the given scope

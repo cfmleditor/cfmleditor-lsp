@@ -54,7 +54,8 @@ At PR #184 the totals are **9,520** with presets and **18,618** without
 (18,623 when re-measured at the branch point of gap #3's fix, see "The batch
 scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
 and **18,028**; after gap #1, **9,225** and **17,645**; after gap #2, **9,115** and
-**17,532**; after gap #5, **9,020** and **17,439**. Use
+**17,532**; after gap #5, **9,020** and **17,439**; after gaps #6 and #7, **9,001**
+and **17,429**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -222,20 +223,27 @@ The gaps below explain the largest of these.
   `drivers[ form.class ]`, a struct element picked by a key. Those are the
   dynamic keys CLAUDE.md keeps as an honest "no component ref".
 
-### 6. Methods assigned onto an object at run time
+### 6. Methods assigned onto an object at run time — fixed
 
-- **Evidence:** fw1 `tests/CircularTest.cfc`, 8 entries.
-- **Shape:**
-
-  ```cfml
-  a.getVariables = getVariables;
-  a.getVariables();
-  ```
-
-- **Fix direction:** a call `x.m()` where the same function assigns `x.m = …`
-  on an earlier line is dynamic. The parser would need to record member
-  assignments on locals, as `HasScopedAssignment` does for the variables scope.
-- **Priority:** small, and only common in tests.
+- **Was:** fw1 `tests/CircularTest.cfc` (8 entries), and the same shape in
+  Lucee's LDEV1962 and ColdBox's specs:
+  `a.getVariables = getVariables; a.getVariables();`.
+- **Fix:** the script parser records `x.m = …` (`checkMemberSet`, reached
+  from `checkBareCall` where no `(` follows). A call `x.m()` with no chain is
+  dynamic when the same function assigned `x.m` on an earlier line
+  (`ParseResult.AssignsMember`, checked in `checkMethodOn`). `a.m == b` and
+  `a[ k ].m = …` are not recorded.
+- **How it is carried:** as a `pendingCall` marked `memberSet`, which is
+  already keyed by function, rekeyed and merged per region, and
+  `resolvePendingCalls` files it in `ParseResult.memberSets`. A slice of its
+  own on `scriptParser` failed `TestParserStructsKeepTheirSize` (368 → 392
+  bytes). Recording it as a `$any` ref for `a.m` was tried and dropped: refs
+  reach other files through the index, and ContentBox's `prc.author` came
+  out untyped in five places. The list is dropped when an edit moves lines,
+  since a call is only checked on a fresh parse.
+- **Not done:** tag syntax (`<cfset a.m = f>`). No corpus entry needs it.
+- **Measured:** presets 9,020 → 9,001, no presets 17,439 → 17,429, no entry
+  added.
 
 ### 7. `this.x()` detection reads the source line — fixed
 

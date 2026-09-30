@@ -2036,6 +2036,15 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		return ""
 	}
 
+	// `a.m = f;` earlier in the function stored something on a, and this
+	// calls it: the method is the program's, not the component's.
+	if variable != "" && len(call.Chain) == 0 && pr.AssignsMember(variable, funcName, call.Line) {
+		tr.addf("%q is assigned onto %q earlier in the function — accepted as dynamic", funcName, variable)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
 	if parser.IsMemberMethod(funcName) {
 		tr.addf("%q is a known member/Java-interop method — accepted without finding it in %q", funcName, comp)
 		tr.hit(TargetMember, comp, nil)
