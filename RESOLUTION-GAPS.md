@@ -51,8 +51,9 @@ print("added", sum((b - a).values()), "removed", sum((a - b).values()))
 ```
 
 At PR #184 the totals are **9,520** with presets and **18,618** without
-(18,623 when re-measured at the branch point of gap #3's fix). After gap #3
-they are **9,490** and **18,518**. Use
+(18,623 when re-measured at the branch point of gap #3's fix, see "The batch
+scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
+and **18,028**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -151,28 +152,37 @@ The gaps below explain the largest of these.
   `new`, `inject=`, tag-syntax, declared-before-assigned and wrong-scope cases.
 - **Measured:** presets 9,520 → 9,490 (31 removed, 1 added); no presets
   18,623 → 18,518 (119 removed, 14 added). 69 of the removals are
-  `getPrint`. Every addition is a removed entry re-reported on the same call:
+  `getPrint`. Five of the others (cfwheels `FileSystem`) were the
+  nondeterminism below, not this change. Every addition is a removed entry re-reported on the same call:
   13 now name MockBox by its declared path (`getMockBox()` is
   `return this.$mockbox`) and still stop at gap #2, and TestBox
   `BaseSpec.cfc:1683` now reports that `cbMockData`, a `box.json` dependency
   the checkout does not install, does not exist.
 
-### 4. A function returning a resolver-matched call is untyped
+### 4. A function returning a resolver-matched call is untyped — fixed
 
-- **Evidence:** CommandBox `BaseCommand.command()` is
-  `return getInstance( name='CommandDSL', … );`. That accounts for 49
-  no-preset cfwheels entries: `command( … ).run()` and `.params()`.
-- **Cause:** `checkReturnComponent` types a return only when it is a variable,
-  `new`, `createObject` or `entityNew`. A call that a `componentResolver` would
-  type in an assignment (`x = getInstance( "X" )`) is not typed in a
-  `return`.
-- **Fix direction:** in the default arm, when the return is a bare call,
-  capture the call text and run the same resolver match an assignment's
-  right-hand side gets. The stub generator then needs its resolver
-  (`getInstanceResolvers` in `cmd/cfstubgen`) widened to accept further
-  arguments (`(?:,[^()]*)?` before the closing parenthesis). That widening was
-  tried and changed no stub, because the parser half is missing.
-- **Scope:** this helps every project, not only the stubs.
+- **Was:** `checkReturnComponent` typed a return only when it was a variable,
+  `new`, `createObject` or `entityNew`, so CommandBox `BaseCommand.command()`
+  (`return getInstance( name='CommandDSL', … );`) had no return type.
+- **Fix:** a bare call returned whole — nothing after its argument list but
+  the end of the statement — is offered to the componentResolvers as an
+  assignment's right-hand side is (`recordBareCallAndChain` hands back the
+  expression it built, and `dynamicCall` still applies). The stub generator
+  types a returned bare WireBox id by file name, as it already did a variable
+  holding one (`componentReturn`), and the stubs are regenerated: `command()`,
+  `multiSelect()`, `watch()`, `globber()`, `propertyFile()`,
+  `createSubcriteria()` and Wheels' `enableSession()` are typed, each checked
+  against the source. The regex widening suggested here was not needed: a
+  named first argument is already offered as `getInstance("CommandDSL")`.
+- **Measured:** presets 9,490 → 9,476, no presets 18,518 → 18,028, with no
+  entry added. Most of the no-preset drop is coldbox-platform `event` (383):
+  its specs' `buildContext()` is `return prepareMock( new RequestContext(…) )`,
+  which is now `$any` as `x = prepareMock(…)` already was. 53 are cfwheels
+  `command()` chains.
+- **Limit:** the `unresolved` scan indexes files without the config's
+  resolvers (`index.IndexFile`), so a return typed by a *configured* resolver
+  reaches a caller in another file only through the stubs or the server's
+  index, which parses with them. Same-file calls always see it.
 
 ### 5. Calls on Java objects are "no component ref" rather than dynamic
 
@@ -294,5 +304,18 @@ against the source:
   returning a property of `x` is typed as `x`'s component. The script parser
   types only a name that stands alone. Found while fixing gap #3; left as it
   is until its effect on the corpus is measured.
+- **The batch scan is not deterministic:** the same binary reports 2,535 or
+  2,540 entries for cfwheels without presets from run to run; the five are
+  `fileSystemUtil.resolvePath()` in `cli/src/commands/wheels/cache/clear.cfc`
+  (`inject="FileSystem"`), reported as "component 'FileSystem' does not
+  exist" in some runs only. `explain` reports it every time. Six runs at the
+  PR #185 merge showed it, so it predates gaps #3 and #4; the parallel
+  scan's lazy indexing is the first suspect. Compare runs with that in mind.
+- **A stale stub:** regenerating the stubs at the PR #185 merge, with nothing
+  changed, rewrites `ArtifactService.getPackagePath()` to return
+  `commandbox.system.services.ConfigService`. It returns a string (`var path
+  = getArtifactsDirectory() & …`), so the committed stub, with no return
+  type, is kept. A reduced copy of the function does not reproduce it, so the
+  cause is elsewhere in the file.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.

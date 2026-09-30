@@ -254,7 +254,7 @@ component {
 	/**
 	 * Get the ColdBox Utility object
 	 */
-	private function getUtil() {}
+	private coldbox.system.core.util.Util function getUtil() {}
 	/**
 	 * Facade to internal ColdFusion logging facilities, just in case.
 	 *

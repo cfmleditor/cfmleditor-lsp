@@ -285,7 +285,10 @@ func (p *scriptParser) asCFScript() *scriptParser {
 }
 
 // recordBareCallAndChain handles funcName(...) optionally followed by .method(...) chains.
-func (p *scriptParser) recordBareCallAndChain(tok Token) {
+// When the call stands alone — no hop or index follows it — alone is the
+// expression the componentResolvers are offered for it, so a `return` can be
+// typed as an assignment's right-hand side is; it is "" otherwise.
+func (p *scriptParser) recordBareCallAndChain(tok Token) (alone string) {
 	caller := ""
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		caller = p.funcs[len(p.funcs)-1].Name
@@ -306,10 +309,14 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 
 	firstArg, positional, ok := p.scanParenArgs()
 	if !ok {
-		return
+		return ""
 	}
 
 	callExpr := resolverCallExpr(tok.Value, firstArg, positional)
+
+	if next := p.sc.PeekSkipComments().Kind; next != TokDot && next != TokLBracket {
+		alone = callExpr
+	}
 
 	// comp is this bare call's resolved return component (if any); it's the
 	// base receiver for every subsequent chained hop below. Hops beyond the
@@ -342,7 +349,7 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 			// at risk of misattribution here (the base is a call return, not
 			// a bare variable), so no poisoning is needed, just continuity.
 			if !p.skipBracketIndex() {
-				return
+				return ""
 			}
 
 			continue
@@ -394,12 +401,14 @@ func (p *scriptParser) recordBareCallAndChain(tok Token) {
 			p.sc.NextSkipComments() // consume (
 
 			if _, ok := p.scanParenBody(); !ok {
-				return
+				return ""
 			}
 		} else {
 			break
 		}
 	}
+
+	return alone
 }
 
 // scopeReceiver says how a call made directly on a scope is recorded, for the
@@ -2190,7 +2199,7 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 			// function's: its call is recorded, its type is not the
 			// function's return type.
 			if peek := p.sc.PeekSkipComments(); peek.Kind == TokIdent {
-				p.returnCall(peek)
+				_, _ = p.returnCall(peek)
 			}
 
 			return
@@ -2278,8 +2287,19 @@ func (p *scriptParser) checkReturnComponent() {
 		// function a Shell. A call on a dynamic value is dynamic, though,
 		// which returnsCallOn keeps.
 		p.returnVar = peek.Value
-		if !p.returnCall(peek) {
+
+		bare, call := p.returnCall(peek)
+		if !bare {
 			p.returnVar = returnsCallOn + peek.Value
+		}
+
+		// A bare call standing alone is typed as it would be on an
+		// assignment's right-hand side: `return getInstance( "X" )` returns
+		// what a componentResolver says getInstance( "X" ) is.
+		if call != "" && p.atStatementEnd() {
+			if comp := p.resolveCall(call); comp != "" && len(p.funcs) > 0 {
+				p.funcs[len(p.funcs)-1].ReturnComponent = comp
+			}
 		}
 
 		switch {
@@ -2294,6 +2314,16 @@ func (p *scriptParser) checkReturnComponent() {
 
 	if comp != "" && len(p.funcs) > 0 {
 		p.funcs[len(p.funcs)-1].ReturnComponent = comp
+	}
+}
+
+// atStatementEnd reports whether the next token ends a statement.
+func (p *scriptParser) atStatementEnd() bool {
+	switch p.sc.PeekSkipComments().Kind {
+	case TokSemicolon, TokRBrace, TokEOF:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2323,12 +2353,11 @@ func (p *scriptParser) returnedScopedVar() (string, RefScope) {
 		return "", RefAny
 	}
 
-	switch p.sc.PeekSkipComments().Kind {
-	case TokSemicolon, TokRBrace, TokEOF:
-		return name.Value, scope
-	default:
+	if !p.atStatementEnd() {
 		return "", RefAny
 	}
+
+	return name.Value, scope
 }
 
 // returnsBareThis reports whether the `this` the scanner is on is the whole
@@ -2340,12 +2369,7 @@ func (p *scriptParser) returnsBareThis() bool {
 
 	p.sc.NextSkipComments() // this
 
-	switch p.sc.PeekSkipComments().Kind {
-	case TokSemicolon, TokRBrace, TokEOF:
-		return true
-	default:
-		return false
-	}
+	return p.atStatementEnd()
 }
 
 // returnCall records the call a `return` statement makes, through the same
@@ -2360,11 +2384,12 @@ func (p *scriptParser) returnsBareThis() bool {
 // statement is the assignment `x = …`. tok is the peeked first token after
 // `return`; a keyword other than a scope is left for the caller's loop.
 // It reports whether the name stood alone, the case in which the function
-// returns what that variable holds.
-func (p *scriptParser) returnCall(tok Token) (bare bool) {
+// returns what that variable holds, and for a bare call standing alone the
+// expression the componentResolvers are offered for it.
+func (p *scriptParser) returnCall(tok Token) (bare bool, call string) {
 	_, _, isScope := scopeReceiver(tok.Value)
 	if !isScope && isKeyword(tok.Value) {
-		return true
+		return true, ""
 	}
 
 	p.sc.NextSkipComments()
@@ -2377,22 +2402,22 @@ func (p *scriptParser) returnCall(tok Token) (bare bool) {
 
 		nameTok := p.sc.PeekSkipComments()
 		if nameTok.Kind != TokIdent {
-			return
+			return false, ""
 		}
 
 		p.sc.NextSkipComments()
 		p.scopedCall(tok, nameTok)
 	case next.Kind == TokLParen:
-		p.recordBareCallAndChain(tok)
+		call = p.recordBareCallAndChain(tok)
 	case next.Kind == TokDot || next.Kind == TokLBracket:
 		p.checkBareCall(tok)
 	case next.Kind == TokDoubleColon:
 		p.parseStaticCall(tok)
 	default:
-		return true
+		return true, ""
 	}
 
-	return false
+	return false, call
 }
 
 // readNewComponent reads the component path after "new" keyword.

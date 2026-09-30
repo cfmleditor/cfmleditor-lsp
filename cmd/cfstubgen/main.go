@@ -732,6 +732,19 @@ func (g *generator) componentReturn(src *source, def *parser.FunctionDef) string
 			return q
 		}
 
+		// A bare getInstance() id is the framework's file of that name, as
+		// it is for a variable (writeTypedVariables): BaseCommand's
+		// command() is `return getInstance( name='CommandDSL', … )`.
+		if name, _, _ := strings.Cut(rc, "@"); !strings.Contains(name, ".") {
+			if abs := g.byName(name); abs != "" && !isInterface(abs) {
+				if q := g.qualify(abs); q != "" {
+					g.todo = append(g.todo, abs)
+
+					return q
+				}
+			}
+		}
+
 		if validType(rc) && strings.Contains(rc, ".") {
 			return rc
 		}

@@ -45,7 +45,7 @@ component extends="cborm.models.criterion.BaseBuilder" {
 	 *
 	 * @return DetachedCriteriaBuilder
 	 */
-	any function createSubcriteria( required string entityName, string alias ) {}
+	cborm.models.criterion.DetachedCriteriaBuilder function createSubcriteria( required string entityName, string alias ) {}
 	/**
 	 * Enable caching of this query result, provided query caching is enabled for the underlying session factory.
 	 *

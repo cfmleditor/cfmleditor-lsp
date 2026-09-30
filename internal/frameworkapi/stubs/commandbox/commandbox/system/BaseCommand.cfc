@@ -31,7 +31,7 @@ component {
 	commandbox.system.BaseCommand function init() {}
 	function run() {}
 	function async() {}
-	function getPrinter() {}
+	commandbox.system.util.PrintBuffer function getPrinter() {}
 	function getInstance( name, dsl, initArguments, targetObject ) {}
 	function getExitCode() {}
 	function setExitCode( required numeric exitCode ) {}
@@ -61,7 +61,7 @@ component {
 	 * Let a user choose between several options. Can be set to multiselect, which returns array of selections
 	 * multiSelect().setQuestion( 'Please Choose: ' ).setOptions( 'one,two,three' ).ask()
 	 */
-	function multiSelect( string question ) {}
+	commandbox.system.util.MultiSelect function multiSelect( string question ) {}
 	/**
 	 * Run another command by name.
 	 * This is deprecated in favor of command(), which escapes parameters for you.
@@ -72,11 +72,11 @@ component {
 	 * Run another command by DSL.
 	 * @name The name of the command to run.
 	 */
-	function command( required name ) {}
+	commandbox.system.util.CommandDSL function command( required name ) {}
 	/**
 	 * Create a directory watcher.  Call its DSL to configure it.
 	 */
-	function watch() {}
+	commandbox.system.util.Watcher function watch() {}
 	/**
 	 * This resolves an absolute or relative path using the rules of the operating system and CLI.
 	 * It doesn't follow CF mappings and will also always return a trailing slash if pointing to
@@ -90,11 +90,11 @@ component {
 	/**
 	 * Return a new globber
 	 */
-	function globber( pattern ) {}
+	commandbox.system.modules.globber.models.Globber function globber( pattern ) {}
 	/**
 	 * Return a new PropertyFile instance
 	 */
-	function propertyFile( propertyFilePath ) {}
+	commandbox.system.modules.propertyFile.models.PropertyFile function propertyFile( propertyFilePath ) {}
 	/**
 	 * Use if your command wants to give controlled feedback to the user without raising
 	 * an actual exception which comes with a messy stack trace.
