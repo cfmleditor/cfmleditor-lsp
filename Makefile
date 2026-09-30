@@ -234,6 +234,10 @@ fmt: $(GOLANGCI_BIN)
 lint: $(GOLANGCI_BIN)
 	$(GOLANGCI_BIN) run ./...
 
+# Cache the pinned developer tool without running analysis or fetching docs.
+.PHONY: dev-tools
+dev-tools: $(GOLANGCI_BIN)
+
 # GOWORK=off so the scan resolves dependencies from go.mod rather than from a
 # developer's go.work. A workspace can substitute a local checkout (e.g.
 # ../tree-sitter-cfml) for a pinned module, which would report on source that
