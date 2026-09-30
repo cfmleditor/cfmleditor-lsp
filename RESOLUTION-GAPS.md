@@ -326,6 +326,65 @@ runtime-mixin gaps exposed by correctly typed receivers. Wheels' 12 no-preset
 additions are the same undocumented TestBox arguments in its bundled runner.
 These remain visible rather than being suppressed to reduce the totals.
 
+### 10. Generated getters ignore constructor field types — fixed
+
+A property without a declared type may still hold a known component:
+`variables.stats = new coldbox.system.cache.util.CacheStats()` types the field,
+but the generated `getStats()` previously returned nothing known. Getters now
+use existing variables-scope field refs when no property metadata types them.
+Local variables and `this.name` do not type the getter; explicit getter methods
+and primitive property types retain their declarations. Conflicting field
+types and unresolved call chains stay dynamic. Field types are collected once
+rather than scanning every ref for every property.
+
+Properties also recognize `doc_generic="models.Component"` for untyped,
+`any` and `struct` declarations, in both script and tag syntax. Array element
+annotations and prose are ignored, and explicit types win. This metadata
+types both the field and its generated getter; it alone changes no entries
+in the pinned corpus.
+
+ColdBox and TestBox stubs were regenerated from the same pinned commits.
+Generation now follows dotted argument component types as well as returns,
+so scoping argument refs correctly does not drop their dependencies, such as
+LogEvent. Interfaces retain an `interface` declaration and bodyless methods:
+emitting ICacheProvider as a concrete component falsely rejected provider
+methods such as `getOrSet` that its implementations add.
+
+Regression tests cover workspace and bundled getter chains, valid and missing
+methods, field scope, conflicting types, primitive declarations, explicit
+getters, property metadata and script/tag interfaces. Property/getter tests
+fail against the PR #189 merge. Generator tests fail without its changes with
+the corrected parser in place. Regenerating the 95 ColdBox/TestBox stubs again
+produces identical files and coverage. Build, vet, full short tests, full short
+race tests, pinned lint and diff checks pass.
+
+**Incremental comparison against PR #190's first commit (`f784d26`):**
+
+| Configuration | Before | After | Removed | Added | Net reduction |
+|---|---:|---:|---:|---:|---:|
+| Presets | 6,969 | 6,900 | 70 | 1 | 69 |
+| No presets | 14,872 | 14,801 | 76 | 5 | 71 |
+
+ContentBox improves 2,719 → 2,709 with presets and 7,862 → 7,849 without;
+ColdBox 1,444 → 1,395 and 3,458 → 3,401; TestBox 298 → 288 and 713 → 712.
+Lucee, FW/1 and the default Wheels root are unchanged per entry. The separate
+Wheels vendor scan improves 6,908 → 6,901 with presets (seven removed), and
+stays at 13,262 without (one removed, one added). Indexed/scanned file counts
+match in every comparison.
+
+The added preset finding reaches Injector's untyped `registerNewInstance`
+return. Five no-preset additions reach Controller's service getters,
+Injector's `getInstance`, and LogBox's `getConfig`, whose return components
+remain unknown. The Wheels no-preset addition now types `oMockGenerator` from
+its getter and exposes a component path that does not resolve in that corpus.
+CacheFactory's `getTaskScheduler` remains untyped; this change does not infer
+types from its `@see` links or conditional factory assignments.
+
+**Whole PR #190 against the PR #189 merge:** presets 7,203 → 6,900
+(309 removed, six added); no presets 15,138 → 14,801 (371 removed, 34 added).
+The separate Wheels vendor reports are 6,910 → 6,901 with presets (nine
+removed), and 13,262 → 13,262 without (13 removed, 13 added).
+
 ## Hand-maintained lists that could be generated
 
 - **`moduleHelpers`** (`internal/resolve/modules.go`): the cbi18n, cbfs and
@@ -365,7 +424,7 @@ These appear in the added-entries diff of #184 and were left as they are:
 | `getBeanPopulator()` has no return type (16 entries, ContentBox) | cborm 4.12 declares none and documents none. A fix belongs in the stub generator (infer from its body) or nowhere. |
 | cborm's `getWireBox()` has no return type (13, no presets) | The property is assigned `application.wirebox`, which nothing types. |
 | `DetailOutputService.error()` has no return type (13, cfwheels) | `error()` returns nothing, so `.output()` chained on it is a genuine error in wheels-cli. |
-| `getStats()`, `getRootLogger()`, `site()` and similar have no return type | They declare and document no type. |
+| `getRootLogger()`, `site()` and similar have no return type | They declare and document no type. Constructor-backed property getters such as `getStats()` are now inferred (gap #10). |
 
 ## Genuine findings the new rules exposed
 

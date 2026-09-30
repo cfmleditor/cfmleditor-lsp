@@ -53,6 +53,7 @@ component {
 	 * A Java utility to generate UUIDs
 	 */
 	property name="uuidHelper";
+	variables.cacheFactory = new coldbox.system.cache.CacheFactory();
 	variables.utility = new coldbox.system.core.util.Util();
 	/**
 	 * Constructor
@@ -114,7 +115,7 @@ component {
 	 *
 	 * @return ICacheProvider
 	 */
-	coldbox.system.cache.AbstractCacheBoxProvider function setCacheFactory( required cacheFactory ) {}
+	coldbox.system.cache.AbstractCacheBoxProvider function setCacheFactory( required coldbox.system.cache.CacheFactory cacheFactory ) {}
 	/**
 	 * Get this cache managers event listener manager
 	 */

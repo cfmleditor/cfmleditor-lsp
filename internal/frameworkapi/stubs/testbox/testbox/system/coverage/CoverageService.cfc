@@ -25,8 +25,8 @@ component {
 	 * The CoverageGenerator object reference
 	 */
 	property name="coverageGenerator" type="any";
-	variables.results = new testbox.system.TestResult();
-	variables.testbox = new testbox.system.TestBox();
+	variables.coverageGenerator = new testbox.system.coverage.data.CoverageGenerator();
+	variables.coverageReporter = new testbox.system.coverage.CoverageReporter();
 	/**
 	 * Bootstrap the Code Coverage service and decide if we'll be enabled or not
 	 *

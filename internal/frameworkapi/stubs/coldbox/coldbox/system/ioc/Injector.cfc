@@ -118,10 +118,14 @@ component {
 	this.TYPES = new coldbox.system.ioc.Types();
 	variables.utility = new coldbox.system.core.util.Util();
 	variables.scopeStorage = new coldbox.system.core.collections.ScopeStorage();
+	variables.coldbox = new coldbox.system.web.Controller();
 	variables.asyncManager = new coldbox.system.async.AsyncManager();
 	variables.objectBuilder = new coldbox.system.ioc.Builder();
+	variables.parent = new coldbox.system.ioc.Injector();
 	variables.logBox = new coldbox.system.logging.LogBox();
 	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
+	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
+	variables.binder = new coldbox.system.ioc.config.Binder();
 	/**
 	 * WireBox can be constructed with no parameters and it will use the default binder: `coldbox.system.ioc.config.DefaultBinder` for configuration
 	 * and place the instance in `application.wirebox` scope for easy access.
@@ -137,7 +141,7 @@ component {
 	 * @coldbox.doc_generic coldbox.system.web.Controller
 	 * @name                The internal name of the injector, defaults to 'root' if not passed
 	 */
-	coldbox.system.ioc.Injector function init( binder, struct properties, coldbox, name ) {}
+	coldbox.system.ioc.Injector function init( binder, struct properties, coldbox.system.web.Controller coldbox, name ) {}
 	/**
 	 * Verify if a child injector has been registered by name
 	 *
@@ -218,7 +222,7 @@ component {
 	 * @mapping.doc_generic coldbox.system.ioc.config.Mapping
 	 * @initArguments       The constructor structure of arguments to passthrough when initializing the instance
 	 */
-	function buildInstance( required mapping, struct initArguments ) {}
+	function buildInstance( required coldbox.system.ioc.config.Mapping mapping, struct initArguments ) {}
 	/**
 	 * Register a new requested mapping object instance thread safely and returns the mapping configured for this instance
 	 *
@@ -256,7 +260,7 @@ component {
 	 * @targetID            A unique identifier for this target to wire up. Usually a class path or file path should do. If none is passed we will get the id from the passed target via introspection but it will slow down the wiring
 	 * @annotationCheck     This value determines if we check if the target contains an autowire annotation in the cfcomponent tag: autowire=true|false, it will only autowire if that metadata attribute is set to true. The default is false, which will autowire anything automatically.
 	 */
-	function autowire( required target, mapping, targetID, boolean annotationCheck ) {}
+	function autowire( required target, coldbox.system.ioc.config.Mapping mapping, targetID, boolean annotationCheck ) {}
 	/**
 	 * Link a parent Injector with this injector
 	 *
@@ -265,7 +269,7 @@ component {
 	 *
 	 * @return Injector
 	 */
-	coldbox.system.ioc.Injector function setParent( required injector ) {}
+	coldbox.system.ioc.Injector function setParent( required coldbox.system.ioc.Injector injector ) {}
 	/**
 	 * Has a parent injector
 	 */
@@ -279,7 +283,7 @@ component {
 	 *
 	 * @doc.type coldbox.system.ioc.Injector
 	 */
-	function getParent() {}
+	coldbox.system.ioc.Injector function getParent() {}
 	/**
 	 * Get an object populator useful for populating objects from JSON,XML, etc.
 	 *

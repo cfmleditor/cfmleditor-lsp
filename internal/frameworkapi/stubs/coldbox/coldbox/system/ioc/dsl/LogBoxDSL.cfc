@@ -18,6 +18,8 @@ component {
 	 * Log Reference
 	 */
 	property name="log";
+	variables.injector = new coldbox.system.ioc.Injector();
+	variables.logBox = new coldbox.system.logging.LogBox();
 	/**
 	 * Configure the DSL Builder for operation and returns itself
 	 *
@@ -26,7 +28,7 @@ component {
 	 *
 	 * @return coldbox.system.ioc.dsl.IDSLBuilder
 	 */
-	coldbox.system.ioc.dsl.LogBoxDSL function init( required injector ) {}
+	coldbox.system.ioc.dsl.LogBoxDSL function init( required coldbox.system.ioc.Injector injector ) {}
 	/**
 	 * Process an incoming DSL definition and produce an object with it
 	 *

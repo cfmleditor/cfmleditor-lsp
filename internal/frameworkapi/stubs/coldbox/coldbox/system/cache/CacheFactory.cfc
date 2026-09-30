@@ -65,6 +65,7 @@ component {
 	variables.asyncManager = new coldbox.system.async.AsyncManager();
 	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
 	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.wirebox = new coldbox.system.ioc.Injector();
 	/**
 	 * Constructor
 	 *
@@ -75,7 +76,7 @@ component {
 	 * @factoryID           A unique ID or name for this factory. If not passed I will make one up for you.
 	 * @wirebox             A configured wirebox instance to get logbox, asyncManager, and EventManager from.  If not passed, I will create new ones.
 	 */
-	coldbox.system.cache.CacheFactory function init( config, coldbox, factoryId, wirebox ) {}
+	coldbox.system.cache.CacheFactory function init( coldbox.system.cache.config.CacheBoxConfig config, coldbox.system.web.Controller coldbox, factoryId, wirebox ) {}
 	/**
 	 * Configure the cache factory for operation, called by the init().
 	 * You can also re-configure CacheBox programmatically.
@@ -105,7 +106,7 @@ component {
 	 * @cache             The cache to register
 	 * @cache.doc_generic coldbox.system.cache.providers.ICacheProvider
 	 */
-	coldbox.system.cache.CacheFactory function addCache( required cache ) {}
+	coldbox.system.cache.CacheFactory function addCache( required coldbox.system.cache.providers.ICacheProvider cache ) {}
 	/**
 	 * Add a default named cache to our registry, create it, config it, register it and return it of type: coldbox.system.cache.providers.ICacheProvider
 	 *
@@ -155,7 +156,7 @@ component {
 	 * @decoratedCache             The decorated cache manager instance to replace with of type coldbox.system.cache.providers.ICacheProvider
 	 * @decoratedCache.doc_generic coldbox.system.cache.providers.ICacheProvider
 	 */
-	coldbox.system.cache.CacheFactory function replaceCache( required cache, required decoratedCache ) {}
+	coldbox.system.cache.CacheFactory function replaceCache( required coldbox.system.cache.providers.ICacheProvider cache, required coldbox.system.cache.providers.ICacheProvider decoratedCache ) {}
 	/**
 	 * Clears all the elements in all the registered caches without de-registrations
 	 */
@@ -204,5 +205,5 @@ component {
 	 *
 	 * @throws CacheFactory.CacheExistsException
 	 */
-	private coldbox.system.cache.CacheFactory function registerCache( required cache ) {}
+	private coldbox.system.cache.CacheFactory function registerCache( required coldbox.system.cache.providers.ICacheProvider cache ) {}
 }

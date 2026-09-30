@@ -35,6 +35,44 @@ func TestDocGenericArgumentType(t *testing.T) {
 	}
 }
 
+func TestDocGenericPropertyType(t *testing.T) {
+	for _, tc := range []struct{ annotation, declared, want string }{
+		{"models.User", "", "models.User"},
+		{"models.User", "any", "models.User"},
+		{"models.User", "struct", "models.User"},
+		{"models.User", "models.Other", "models.Other"},
+		{"models.User", "Other", "Other"},
+		{"models.User", "array", ""},
+		{"models.User", "string", ""},
+		{"models.User[]", "any", ""},
+		{"A prose description.", "any", ""},
+	} {
+		for _, tag := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%s/tag=%t", tc.annotation, tc.declared, tag), func(t *testing.T) {
+				content := fmt.Sprintf(`component { property name="employee" type="%s" doc_generic="%s"; }`, tc.declared, tc.annotation)
+				if tag {
+					content = fmt.Sprintf(`<cfcomponent><cfproperty name="employee" type="%s" doc_generic="%s"></cfcomponent>`, tc.declared, tc.annotation)
+				}
+
+				pr := Parse(testURI, content)
+				if len(pr.Funcs) != 2 {
+					t.Fatalf("expected two property accessors, got %v", pr.Funcs)
+				}
+
+				for _, f := range pr.Funcs {
+					if f.Name == "getEmployee" && f.ReturnComponent != tc.want {
+						t.Errorf("getter component = %q, want %q", f.ReturnComponent, tc.want)
+					}
+				}
+
+				if tc.want == "" && len(pr.ComponentRefs) != 0 {
+					t.Errorf("unexpected property refs: %v", pr.ComponentRefs)
+				}
+			})
+		}
+	}
+}
+
 func TestTypedArgumentDoesNotLeakToOtherFunction(t *testing.T) {
 	for _, declaration := range []string{"required models.User employee", "any employee"} {
 		content := fmt.Sprintf(`component {

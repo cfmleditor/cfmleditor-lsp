@@ -1326,6 +1326,8 @@ func (pr *ParseResult) generatePropertyAccessors() {
 	// Adobe's alike — so it is typed as `return this;` is: by the file's path.
 	self, _ := strings.CutPrefix(string(u), "file://")
 
+	fieldComponents := pr.propertyFieldComponents()
+
 	for _, prop := range pr.Properties {
 		capName := ucFirst(prop.name)
 
@@ -1338,6 +1340,7 @@ func (pr *ParseResult) generatePropertyAccessors() {
 
 			pr.Funcs = append(pr.Funcs, FunctionDef{
 				Name: "get" + capName, URI: u, Line: prop.line,
+				ReturnType: prop.typeName,
 			})
 		}
 
@@ -1367,6 +1370,10 @@ func (pr *ParseResult) generatePropertyAccessors() {
 
 		if comp == "" && prop.typeName != "" && looksLikeCFCType(prop.typeName) {
 			comp = prop.typeName
+		}
+
+		if comp == "" {
+			comp = prop.documentedComponent()
 		}
 
 		if comp == "" && pr.BeanLookup != nil {
@@ -1404,8 +1411,53 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			if getterIdx >= 0 {
 				pr.Funcs[getterIdx].ReturnComponent = comp
 			}
+		} else if getterIdx >= 0 && (prop.typeName == "" || strings.EqualFold(prop.typeName, "any")) {
+			pr.Funcs[getterIdx].ReturnComponent = fieldComponents[strings.ToLower(prop.name)]
 		}
 	}
+}
+
+// CFML's doc_generic property metadata names the value's component, just as
+// argument.doc_generic does for a generic argument. Preserve explicit types
+// and do not treat an array's element type as its receiver.
+func (prop *propertyDef) documentedComponent() string {
+	if prop.typeName != "" && !strings.EqualFold(prop.typeName, "any") && !strings.EqualFold(prop.typeName, "struct") {
+		return ""
+	}
+
+	if documented := prop.attrs["doc_generic"]; isComponentType(documented) {
+		return documented
+	}
+
+	return ""
+}
+
+// A generated getter reads variables.name. Constructor assignments
+// already type that field, even when the property has no metadata.
+// Locals and this.name are separate stores; unresolved call chains
+// cannot supply a getter type. Conflicting field types stay dynamic.
+func (pr *ParseResult) propertyFieldComponents() map[string]string {
+	fieldComponents := make(map[string]string, len(pr.ComponentRefs))
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+		if ref.This {
+			continue
+		}
+
+		candidate := ref.Component
+		if candidate == "" || ref.ChainBase != "" || chainPending(ref) {
+			candidate = "$any"
+		}
+
+		key := strings.ToLower(ref.Variable)
+		if previous := fieldComponents[key]; previous != "" && !strings.EqualFold(previous, candidate) {
+			candidate = "$any"
+		}
+
+		fieldComponents[key] = candidate
+	}
+
+	return fieldComponents
 }
 
 // injectedComponent is the component a WireBox injection names, when no

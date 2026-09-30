@@ -34,16 +34,20 @@ component {
 	 * LogBox DSL Utility
 	 */
 	property name="logBoxDSL";
+	variables.injector = new coldbox.system.ioc.Injector();
 	variables.coldboxDSL = new coldbox.system.ioc.dsl.ColdBoxDSL();
 	variables.cacheBoxDSL = new coldbox.system.ioc.dsl.CacheBoxDSL();
 	variables.logBoxDSL = new coldbox.system.ioc.dsl.LogBoxDSL();
+	variables.utility = new coldbox.system.core.util.Util();
+	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
+	variables.logBox = new coldbox.system.logging.LogBox();
 	/**
 	 * Constructor. If called without a configuration binder, then WireBox will instantiate the default configuration binder found coldbox.system.ioc.config.DefaultBinder
 	 *
 	 * @injector             The linked WireBox injector
 	 * @injector.doc_generic coldbox.system.ioc.Injector
 	 */
-	coldbox.system.ioc.Builder function init( required injector ) {}
+	coldbox.system.ioc.Builder function init( required coldbox.system.ioc.Injector injector ) {}
 	/**
 	 * Lazy load getter
 	 *
@@ -94,7 +98,7 @@ component {
 	 * @initArguments             The constructor structure of arguments to passthrough when initializing the instance
 	 * @initArguments.doc_generic struct
 	 */
-	function buildCFC( required mapping, initArguments ) {}
+	function buildCFC( required coldbox.system.ioc.config.Mapping mapping, initArguments ) {}
 	/**
 	 * Build an object using a factory method
 	 *
@@ -103,14 +107,14 @@ component {
 	 * @initArguments             The constructor structure of arguments to passthrough when initializing the instance
 	 * @initArguments.doc_generic struct
 	 */
-	function buildFactoryMethod( required mapping, initArguments ) {}
+	function buildFactoryMethod( required coldbox.system.ioc.config.Mapping mapping, initArguments ) {}
 	/**
 	 * Build a Java class via mappings
 	 *
 	 * @mapping             The mapping to construct
 	 * @mapping.doc_generic coldbox.system.ioc.config.Mapping
 	 */
-	function buildJavaClass( required mapping ) {}
+	function buildJavaClass( required coldbox.system.ioc.config.Mapping mapping ) {}
 	/**
 	 * Build arguments for a mapping and return the structure representation
 	 *
@@ -121,7 +125,7 @@ component {
 	 *
 	 * @return A structure argument collection to initialize an object with
 	 */
-	function buildArgumentCollection( required mapping, required argumentArray, required targetObject ) {}
+	function buildArgumentCollection( required coldbox.system.ioc.config.Mapping mapping, required argumentArray, required targetObject ) {}
 	/**
 	 * Build a webservice object
 	 *
@@ -130,14 +134,14 @@ component {
 	 * @initArguments             The constructor structure of arguments to passthrough when initializing the instance
 	 * @initArguments.doc_generic struct
 	 */
-	function buildWebservice( required mapping, initArguments ) {}
+	function buildWebservice( required coldbox.system.ioc.config.Mapping mapping, initArguments ) {}
 	/**
 	 * Build an rss feed the WireBox way
 	 *
 	 * @mapping             The mapping to construct
 	 * @mapping.doc_generic coldbox.system.ioc.config.Mapping
 	 */
-	function buildFeed( required mapping ) {}
+	function buildFeed( required coldbox.system.ioc.config.Mapping mapping ) {}
 	/**
 	 * Build a DSL Dependency using a simple dsl string
 	 *
