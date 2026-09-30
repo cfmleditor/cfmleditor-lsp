@@ -176,6 +176,30 @@ func docReturn(comment string) string {
 // MockBox adds are accepted on any component.
 const MockPrefix = "$mock:"
 
+// mockDecorations are the methods MockBox's decorateMock adds to an object it
+// mocks (TestBox system/MockBox.cfc). Each returns the mock it is called on,
+// except the ones that report on it ($count, $callLog, …), whose result no
+// chain goes on from. Every one starts with $, which no component's own
+// method conventionally does.
+var mockDecorations = map[string]bool{
+	"$": true, "$spy": true, "$property": true, "$getproperty": true,
+	"$results": true, "$throws": true, "$callback": true, "$args": true,
+	"$calllog": true, "$count": true, "$times": true, "$never": true,
+	"$verifycallcount": true, "$atleast": true, "$once": true, "$atmost": true,
+	"$debug": true, "$reset": true,
+}
+
+// IsMockDecoration reports whether name is a method MockBox adds to a mock.
+func IsMockDecoration(name string) bool {
+	if !strings.HasPrefix(name, "$") {
+		return false
+	}
+
+	var buf foldScratch
+
+	return mockDecorations[string(buf.lowerFold(name))]
+}
+
 // mockOf is the component a mock of class is, or $any without one.
 func mockOf(class string) string {
 	if class == "" || strings.ContainsAny(class, "#$ ") {

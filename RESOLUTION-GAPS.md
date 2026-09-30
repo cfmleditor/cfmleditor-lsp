@@ -53,7 +53,8 @@ print("added", sum((b - a).values()), "removed", sum((a - b).values()))
 At PR #184 the totals are **9,520** with presets and **18,618** without
 (18,623 when re-measured at the branch point of gap #3's fix, see "The batch
 scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
-and **18,028**; after gap #1, **9,225** and **17,645**. Use
+and **18,028**; after gap #1, **9,225** and **17,645**; after gap #2, **9,115** and
+**17,532**. Use
 `cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
@@ -122,27 +123,29 @@ The gaps below explain the largest of these.
   `variables.binder.onShutdown()` is an optional hook the Injector checks
   for with `structKeyExists`.
 
-### 2. A MockBox decoration chain loses the mock's type
+### 2. A MockBox decoration chain loses the mock's type — fixed
 
-- **Evidence:** coldbox-platform `iservice` (105 entries), and assignments in
-  specs generally.
-- **Shape:**
-
-  ```cfml
-  variables.iService = model.init( mockController ).$( "getCache", mockCache ).$property( … );
-  ```
-
+- **Was:** coldbox-platform `iService` (105 entries):
+  `variables.iService = model.init( mockController ).$( "getCache", mockCache ).$property( … );`.
   `$()`, `$property()`, `$results()` and the rest return the mock itself.
-- **Cause:** `mockDecoration` hops are accepted as dynamic (`missingChainHop`,
-  `checkMethodOn`), which is right for a last call. An *assignment* through
-  them therefore records no component for the variable.
-- **Fix direction:** make a decoration hop return its receiver's component,
-  since it returns the mock. The same list is `mockDecorations` in
-  `internal/resolve`.
-  - In the resolver: `hopReturn`.
-  - In the parser: the pending-call path, which types `x = a.b().c()` through
-    `FuncLookup`. The hook would need to answer for decoration names, or the
-    parser would need to know the list.
+- **Cause, measured:** mostly not the decoration hops. `model` is assigned in
+  ColdBox's `BaseModelTest` (`createMock( annotations.model )`), not in the
+  spec, so nothing the spec's parse could read typed the base of the chain.
+  The hops did lose the type as well, as the doc said: a decoration made
+  the rest of a chain `$any` in the parser (`walkChainRest` asked
+  `FuncLookup` for `$`) and dynamic in the resolver (`missingChainHop`).
+- **Fix:** the decoration list is `parser.IsMockDecoration`, one list for
+  both packages. A decoration keeps its receiver's type, as `init()` does:
+  in a chain's rest (`walkChainRest`, `restTypes`), for `x = m.$( … )`
+  (`baseVarComponent`), and as a resolver hop (`walkHops`), so
+  `m.$( "a" ).missing()` is checked against the mocked class. A chain whose
+  type is otherwise unknown but decorates what it is made on is made on a
+  mock, and is `$any`. An untyped hop followed by a decoration is a mock
+  too, and dynamic: the stricter walk otherwise reported ColdBox's
+  `controller.….getRequestService().$( "getContext", … )`. Each rule has a
+  case in `internal/resolve/mock_chain_test.go` that fails without it.
+- **Measured:** presets 9,225 → 9,115, no presets 17,645 → 17,532 (5 of
+  those are the nondeterminism below), no entry added.
 
 ### 3. `return variables.x;` does not type the function — fixed
 

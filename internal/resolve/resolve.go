@@ -698,22 +698,13 @@ func (r *Resolver) delegatesOf(cfcPath string) []parser.Delegate {
 	return pr.Delegates
 }
 
-// mockDecorations are the methods MockBox's decorateMock adds to an object it
-// mocks (TestBox system/MockBox.cfc). A test mocks a real component in place —
+// mockDecoration reports whether name is a method MockBox adds to a mock
+// (parser.IsMockDecoration). A test mocks a real component in place —
 // prepareMock( event ), getMockRequestContext() — and then calls these on it,
 // so a component that is otherwise known is the wrong place to look for
 // them: event.$( "getValue" ) was "method '$' not found in RequestContext".
-// Every one starts with $, which no component's own method conventionally does.
-var mockDecorations = map[string]bool{
-	"$": true, "$spy": true, "$property": true, "$getproperty": true,
-	"$results": true, "$throws": true, "$callback": true, "$args": true,
-	"$calllog": true, "$count": true, "$times": true, "$never": true,
-	"$verifycallcount": true, "$atleast": true, "$once": true, "$atmost": true,
-	"$debug": true, "$reset": true,
-}
-
 func mockDecoration(name string) bool {
-	return strings.HasPrefix(name, "$") && mockDecorations[strings.ToLower(name)]
+	return parser.IsMockDecoration(name)
 }
 
 // fileMissingBase is MissingBase for the file's own extends chain, and
@@ -1151,7 +1142,7 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) (reached, soft, reason string, done bool) {
 	funcName := call.FuncName
 
-	for _, hop := range call.Chain {
+	for i, hop := range call.Chain {
 		// A mock of a class is the class, or dynamic where it names none.
 		if cls, ok := strings.CutPrefix(comp, parser.MockPrefix); ok {
 			comp = cls
@@ -1172,6 +1163,16 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		fd := r.ResolveFunc(comp, hop, baseDir)
+
+		// A decoration returns the mock it is called on, so the chain goes on
+		// from the same component: model.$( "getCache", c ).getFoo() is
+		// checked against model's class.
+		if fd == nil && mockDecoration(hop) {
+			tr.addf("chain hop %q is a method MockBox adds to a mock, and returns the mock — %q", hop, comp)
+
+			continue
+		}
+
 		if fd == nil {
 			return comp, softComp, r.missingChainHop(comp, softComp, hop, funcName, pr, baseDir, tr), true
 		}
@@ -1188,6 +1189,20 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if ret == "" {
+			// What an untyped hop returns is a mock when the next call on it
+			// is one MockBox adds: `c.getRequestService().$( "getContext", x )`.
+			next := funcName
+			if i+1 < len(call.Chain) {
+				next = call.Chain[i+1]
+			}
+
+			if mockDecoration(next) {
+				tr.addf("chain hop %q declares no component, and %q is called on what it returns — a mock, so the rest of the chain is dynamic", hop, next)
+				tr.hit(TargetDynamic, "", nil)
+
+				return comp, softComp, "", true
+			}
+
 			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
 		}
 

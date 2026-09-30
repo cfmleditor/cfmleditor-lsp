@@ -736,7 +736,8 @@ func (pr *ParseResult) walkChainRest(comp string, rest []string) string {
 			return comp
 		case strings.HasPrefix(comp, "$builtin."):
 			return "$any"
-		case strings.EqualFold(hop, "init"):
+		case strings.EqualFold(hop, "init"), IsMockDecoration(hop):
+			// A MockBox decoration returns the mock it is called on.
 			continue
 		}
 
@@ -762,9 +763,10 @@ func dynamicIfTyped(comp string, rest []string) string {
 }
 
 // restTypes reports whether a chain's rest can change the type it started
-// with: anything but init() calls.
+// with: anything but init() calls and MockBox decorations, which return what
+// they are called on.
 func restTypes(rest []string) bool {
-	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") })
+	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") && !IsMockDecoration(h) })
 }
 
 // settledComponent is ref's Component with any pending chain walked, for a
@@ -946,6 +948,14 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			if comp = dynamicCall(last + "()"); comp != "" {
 				c.rest = nil // the chain ends in the mock; nothing to walk
 			}
+		}
+
+		// A chain that decorates what it is made on is made on a mock, and
+		// a mock of a class nothing here names is dynamic:
+		// `variables.iService = model.init( c ).$( "getCache", x )`, where
+		// model is the base class's createMock( annotations.model ).
+		if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, IsMockDecoration)) {
+			comp, c.rest = "$any", nil
 		}
 
 		if comp == "" {
@@ -1146,6 +1156,11 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	// return type over the "same as baseVar" guess — it may differ from the
 	// receiver's type. If the method declares no component return type, don't
 	// propagate the base variable's component at all.
+	// `x = m.$( "get", 1 )`: a decoration returns the mock it is called on.
+	if comp != "" && IsMockDecoration(c.funcName) {
+		return comp
+	}
+
 	if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
 		if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
 			return ret
