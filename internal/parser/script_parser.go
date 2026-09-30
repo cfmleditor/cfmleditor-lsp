@@ -799,13 +799,8 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 		} else {
 			p.addPendingCall(varName, prevIdent, lastIdent, fullChain.String(), line)
 		}
-	} else if len(p.resolvers) > 0 {
-		if comp := p.resolveCall(fullChain.String()); comp != "" {
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
+	} else {
+		p.assignNonCall(varName, fullChain.String(), line)
 	}
 }
 
@@ -1366,22 +1361,10 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 
 	// Apply JSDoc @param {type} annotations to arguments
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
 	}
 
 	funcLine := p.baseLine + startTok.Line
-
-	// Create component refs for arguments with component-like types
-	for _, a := range args {
-		if isComponentType(a.Type) {
-			p.componentRefs = append(p.componentRefs, ComponentRef{
-				Variable:  a.Name,
-				Component: a.Type,
-				URI:       uriFromString(p.fileURI),
-				Line:      conv.Uint32(funcLine),
-			})
-		}
-	}
 
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:       nameTok.Value,
@@ -1454,7 +1437,7 @@ func (p *scriptParser) parseFunctionValue(name string, startTok Token) bool {
 
 	args := p.parseArgList()
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
 	}
 
 	if rhs.Kind == TokLParen {
@@ -1524,17 +1507,6 @@ func (p *scriptParser) skipParensQuiet() bool {
 // parseFunction does for a declared method.
 func (p *scriptParser) recordFunctionValue(name string, startTok Token, args []Argument) {
 	funcLine := p.baseLine + startTok.Line
-
-	for _, a := range args {
-		if isComponentType(a.Type) {
-			p.componentRefs = append(p.componentRefs, ComponentRef{
-				Variable:  a.Name,
-				Component: a.Type,
-				URI:       uriFromString(p.fileURI),
-				Line:      conv.Uint32(funcLine),
-			})
-		}
-	}
 
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      name,
@@ -2080,6 +2052,17 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.localVarSet = make(map[string]bool)
 	for _, a := range args {
 		p.localVarSet[strings.ToLower(a.Name)] = true
+
+		if isComponentType(a.Type) {
+			if p.funcRefs == nil {
+				p.funcRefs = make(map[string][]ComponentRef)
+			}
+
+			p.funcRefs[tempKey] = append(p.funcRefs[tempKey], ComponentRef{
+				Variable: a.Name, Component: a.Type,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(funcLine),
+			})
+		}
 	}
 
 	depth := 1
@@ -3331,18 +3314,10 @@ func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
 
 // assignFromChain types varName from the chain on the right of its `=`: a
 // call's resolved component, else a pending call for resolvePendingCalls; a
-// chain that is not a call only through a componentResolver.
+// whole argument value or configured expression when it is not a call.
 func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIdent, lastIdent string, line int) {
 	if p.sc.PeekSkipComments().Kind != TokLParen {
-		if len(p.resolvers) > 0 {
-			// Try generic resolver match on non-call RHS (e.g. "_parent")
-			if comp := p.resolveCall(c.String()); comp != "" {
-				p.addRef(&ComponentRef{
-					Variable: varName, Component: comp,
-					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-				})
-			}
-		}
+		p.assignNonCall(varName, c.String(), line)
 
 		return
 	}
@@ -3361,6 +3336,43 @@ func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIden
 	}
 
 	p.addPendingCall(varName, prevIdent, lastIdent, c.String(), line)
+}
+
+// argumentComponent is the declared type of a whole arguments.name value.
+// Copying it into variables scope preserves the constructor's dependency;
+// typing the parameter itself at component level instead leaked to siblings.
+func (p *scriptParser) argumentComponent(chain string) string {
+	scope, name, ok := strings.Cut(chain, ".")
+	if !ok || !identEq(scope, "arguments") || p.inFunc == "" || len(p.funcs) == 0 {
+		return ""
+	}
+
+	for _, a := range p.funcs[len(p.funcs)-1].Arguments {
+		if identEq(a.Name, name) && isComponentType(a.Type) {
+			return a.Type
+		}
+	}
+
+	return ""
+}
+
+// assignNonCall handles a whole argument value or a configured non-call RHS.
+func (p *scriptParser) assignNonCall(varName, chain string, line int) {
+	comp := ""
+	if p.atStatementEnd() {
+		comp = p.argumentComponent(chain)
+	}
+
+	if comp == "" && len(p.resolvers) > 0 {
+		comp = p.resolveCall(chain)
+	}
+
+	if comp != "" {
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+		})
+	}
 }
 
 // walkChain walks the `.name` hops after the identifier first, already
@@ -4042,8 +4054,8 @@ func (p *scriptParser) tryConfiguredResolvers(callExpr string) string {
 		named := p.sc.Save()
 		p.sc.NextSkipComments() // name
 
-		if p.sc.PeekSkipComments().Kind == TokEquals {
-			p.sc.NextSkipComments() // =
+		if kind := p.sc.PeekSkipComments().Kind; kind == TokEquals || kind == TokColon {
+			p.sc.NextSkipComments() // = or :
 
 			if p.sc.PeekSkipComments().Kind == TokString {
 				arg = p.sc.PeekSkipComments()
@@ -4057,6 +4069,12 @@ func (p *scriptParser) tryConfiguredResolvers(callExpr string) string {
 
 	if arg.Kind == TokString {
 		p.sc.NextSkipComments()
+
+		if kind := p.sc.PeekSkipComments().Kind; kind != TokComma && kind != TokRParen {
+			p.sc.Restore(saved)
+
+			return ""
+		}
 
 		// Build arg list: read comma-separated string args
 		var args strings.Builder

@@ -137,6 +137,8 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		// result, is left alone.
 		{"coldbox", `getInstance( "UserService@users" )`, "UserService@users"},
 		{"coldbox", `wirebox.getInstance( name = "id:models.UserService" )`, "models.UserService"},
+		{"coldbox", `wirebox.getInstance( name: "id:models.UserService" )`, "models.UserService"},
+		{"coldbox", `getInstance( name: "wirebox:populator" )`, "coldbox.system.core.dynamic.ObjectPopulator"},
 		{"coldbox", `getInstance( "UserService", { a = 1 } )`, "UserService"},
 		{"coldbox", `getInstance( "wirebox:populator" )`, "coldbox.system.core.dynamic.ObjectPopulator"},
 		{"coldbox", `getInstance( "logbox" )`, "coldbox.system.logging.LogBox"},

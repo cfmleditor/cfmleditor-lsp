@@ -2982,14 +2982,14 @@ func TestScriptParser_ArgumentTypes(t *testing.T) {
 	// Component-type argument should create a ref
 	var found bool
 
-	for _, ref := range pr.ComponentRefs {
+	for _, ref := range pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End) {
 		if ref.Variable == "user" && ref.Component == "models.User" {
 			found = true
 		}
 	}
 
 	if !found {
-		t.Errorf("expected argument ref user → models.User, got %v", pr.ComponentRefs)
+		t.Errorf("expected argument ref user → models.User, got %v", pr.FuncComponentRefs(pr.Scopes[0].Start, pr.Scopes[0].End))
 	}
 }
 

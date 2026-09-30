@@ -660,7 +660,7 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 
 	// Apply JSDoc @param {type} annotations
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
 	}
 
 	// Create component refs for arguments with component-like types.

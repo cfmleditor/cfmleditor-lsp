@@ -273,6 +273,59 @@ statement, an argument list, a `return`), and it fits in `CallSite`'s padding.
 on a line that held a `this.f()`; `TestThisCallsAreKnownWhereverTheyAreWritten`
 has that case and the tag-syntax ones. The corpus report is unchanged.
 
+### 8. Colon-named factory arguments lose their assigned type — fixed
+
+`getInstance(name: "coldbox.system.web.tasks.ColdBoxScheduler", ...)`
+was untyped in an assignment even though `name = "..."` worked. The
+assignment resolver's argument reader now accepts both separators, as do
+the framework id and DSL patterns. It also rejects a computed first argument
+whose string literal is only a prefix of the expression. ColdBox's scheduler
+and task specs alone lose 113 findings with presets from this change.
+`TestColonNamedArgumentTypesResolverAssignment` covers local, variables,
+this and dotted factory assignments; the computed-id regression keeps a
+concatenation from acquiring its prefix's component type.
+
+### 9. CFML argument type annotations are ignored — fixed
+
+ColdBox's `@mapping.doc_generic coldbox.system.ioc.config.Mapping` says what
+an otherwise untyped argument holds. Both parsers now recognize this form
+alongside JSDoc `@param`. Only a dotted component type is promoted, and only
+for an untyped, `any` or `struct` argument. Explicit component and array
+declarations stay intact; prose and array-element annotations are ignored.
+This types mapping, invocation, injector and cache-provider arguments from
+their source documentation rather than their variable names.
+
+Script argument refs are now stored with their function, as tag arguments
+already were. Previously a typed parameter leaked into every other method
+using the same name. A whole `arguments.name` assignment now preserves its
+declared component when a constructor stores it in a field or local variable;
+member reads and concatenations are not treated as the argument itself.
+The parser and resolver regressions verify valid methods, missing methods,
+explicit-type precedence, scope isolation and stored dependencies. They fail
+against the PR #189 merge without these fixes.
+
+**Measured against the PR #189 merge**, with the same pinned projects and
+default CLI roots used above:
+
+| Configuration | Before | After | Removed | Added | Net reduction |
+|---|---:|---:|---:|---:|---:|
+| Presets | 7,203 | 6,969 | 239 | 5 | 234 |
+| No presets | 15,138 | 14,872 | 309 | 43 | 266 |
+
+ColdBox accounts for most of the improvement: 1,673 → 1,444 with presets,
+3,737 → 3,458 without. ContentBox loses five findings in either mode. The
+separate Wheels scan including `vendor/wheels` changes 6,910 → 6,908 with
+presets (two removed), and stays at 13,262 without (12 removed, 12 added).
+Every comparison is per entry, including reason changes.
+
+The five preset additions now reach CacheFactory's untyped `getTaskScheduler`
+getter instead of accepting the receiver as dynamic. Without presets, 18
+TestBox additions are undocumented `testResults` arguments that previously
+borrowed a sibling method's type; the other 25 are ColdBox return-type and
+runtime-mixin gaps exposed by correctly typed receivers. Wheels' 12 no-preset
+additions are the same undocumented TestBox arguments in its bundled runner.
+These remain visible rather than being suppressed to reduce the totals.
+
 ## Hand-maintained lists that could be generated
 
 - **`moduleHelpers`** (`internal/resolve/modules.go`): the cbi18n, cbfs and

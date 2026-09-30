@@ -86,7 +86,7 @@ func returnResolver(component string, names ...string) []Resolver {
 // the prefix, which is found first inside getBeanFactory().getBean( "x" ).
 func idResolver(fn string) Resolver {
 	return Resolver{
-		Match:            `(?i)(?:^|\.)` + fn + `\(\s*(?:\w+\s*=\s*)?["'](?:id:|model:)?([A-Za-z_][\w.]*(?:@[\w.-]+)?)@?["']\s*(?:,[^()]*)?\)$`,
+		Match:            `(?i)(?:^|\.)` + fn + `\(\s*(?:\w+\s*[=:]\s*)?["'](?:id:|model:)?([A-Za-z_][\w.]*(?:@[\w.-]+)?)@?["']\s*(?:,[^()]*)?\)$`,
 		Resolve:          "$1",
 		Prefix:           fn,
 		DynamicIfMissing: true,
@@ -103,7 +103,7 @@ func dslResolvers() []Resolver {
 
 	for _, k := range slices.Sorted(maps.Keys(dsl)) {
 		out = append(out, Resolver{
-			Match:            `(?i)^getInstance\(\s*(?:\w+\s*=\s*)?["']` + regexp.QuoteMeta(k) + `["']\s*\)$`,
+			Match:            `(?i)^getInstance\(\s*(?:\w+\s*[=:]\s*)?["']` + regexp.QuoteMeta(k) + `["']\s*\)$`,
 			Resolve:          dsl[k],
 			Prefix:           "getInstance",
 			DynamicIfMissing: true,
