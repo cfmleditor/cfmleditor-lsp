@@ -1021,3 +1021,42 @@ still uses its own nearest Application; selecting a runtime caller for that
 standalone scan requires evidence rather than blanket parent inheritance.
 Unknown record/argument contracts and polymorphic return values remain the
 largest follow-up groups.
+
+### CLI roots when workspacePaths is omitted
+
+A config containing only presets/mappings previously left CLI resolvers with
+no WorkspaceFolders, even though the commands indexed the requested directories.
+The scan could read vendor/wheels while wheels.Mapper failed to resolve. Default
+workspace roots now follow the requested directories for unresolved, dependencies,
+graph/routes (including per-file config views), explain and MCP explanations.
+Explicit workspacePaths keep priority. File targets supply their parent for
+lookup without expanding the indexed/scanned set. Configured explain now indexes
+its requested root rather than an empty list.
+
+At the pinned Wheels commit, explicitly including vendor/wheels retains **1,195
+indexed/scanned files**. With presets, unresolved entries change **6,915 → 4,319**,
+**3,038 removed / 442 added**, net **2,596**; accepted calls **42,032 → 44,982**.
+Without presets, entries change **13,264 → 9,912**, **4,976 removed / 1,624 added**,
+net **3,352**; accepted calls **5,410 → 38,479**. The much larger accepted increase
+reflects previously unchecked grouped inheritance failures, not extra files.
+
+Every addition has source context and a comparison with prior findings. Preset
+additions comprise 294 runtime Mapper mixin lookups, 109 unqualified lookups,
+25 mapper return chains and 14 adapter/property/injected/Java/mixin findings.
+Without presets the groups are 641 untyped _controller receivers, 380 unqualified
+lookups, 294 Mapper mixins, 224 model factories, 25 mapper chains and 60 other
+runtime object/adapter/factory/property cases. These reveal deeper resolver
+limitations after actual framework components are found. They are not claims
+of missing runtime methods: Mapper.init copies methods from wheels.mapper CFCs,
+and init().adapter property flow remains unsupported.
+
+All fourteen corpus comparisons retain index/scan coverage. Default Lucee changes
+**1,985 → 1,976** in both modes; TestBox **291 → 286 / 715 → 710**; default Wheels
+**18 → 17 / 63 → 62**; FW/1 without presets **692 → 687**. These comparisons have
+no additions. ContentBox, ColdBox and FW/1 with presets are unchanged per entry.
+Default six-project totals become **6,797 / 14,691**. Masa remains unchanged:
+configured **12,288 unresolved / 24,227 accepted**, automatic mappings **13,450 /
+19,674**, over the same 897 files. Actual CLI raw-call captures preserve every
+record per entry: **60,921** for Masa, **67,931** for Wheels with presets and
+**67,484** without. Filtered totals remain distinct from raw coverage. Regression proofs cover omitted/explicit configuration, package roots,
+missing methods, command agreement and single-file scan coverage.

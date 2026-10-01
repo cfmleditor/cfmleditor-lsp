@@ -501,6 +501,8 @@ func routeWorkspace(fsys vfs.FS, root string, f *graphFlags) (scanRoots []string
 		scanRoots = f.paths
 	}
 
+	workspaceFolders = cliWorkspaceFolders(fsys, cfg, scanRoots)
+
 	// One index for the whole scan, shared by every config: function signatures are
 	// a property of the workspace, not of whose resolvers you read them under.
 	shared = index.New()

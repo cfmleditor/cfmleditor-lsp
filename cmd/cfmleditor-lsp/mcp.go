@@ -181,7 +181,7 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 	)
 
 	if c, _ := daemon.FindConfig(abs); c != nil {
-		workspaceFolders = c.WorkspaceFolders()
+		workspaceFolders = cliWorkspaceFolders(fsys, c, []string{abs})
 		mappings = c.Mappings()
 		startupFiles = c.StartupFiles()
 		cfg.expressionMappings = c.ExpressionMappings()
@@ -199,6 +199,10 @@ func buildExplainResolver(root string) (*resolve.Resolver, explainConfig) {
 	scanRoots := workspaceFolders
 	if len(scanRoots) == 0 {
 		scanRoots = []string{abs}
+	}
+
+	if len(workspaceFolders) == 0 {
+		workspaceFolders = cliWorkspaceFolders(fsys, nil, scanRoots)
 	}
 
 	resolver := &resolve.Resolver{

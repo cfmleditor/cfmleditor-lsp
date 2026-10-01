@@ -114,6 +114,8 @@ For a fatal Go error, such as a stack overflow, the one-line reason (`fatal erro
 
 The whole workspace is always *indexed* (every folder in `workspacePaths`), because resolving a call reads every other component. The *report* holds only what you name: a directory or file argument narrows it, so `unresolved packages/tass/core` lists calls in that directory alone.
 
+When `workspacePaths` is omitted, the requested directories also supply the resolver's workspace roots. A config containing only presets or mappings keeps that default. A file target uses its parent directory for lookup while indexing and reporting only that file. `explain --root`, dependency scans and code maps use the same default; explicit `workspacePaths` retain priority. To inspect a vendor package that the normal directory walk skips, name it explicitly, for example `unresolved myapp myapp/vendor/wheels`.
+
 macOS and Linux:
 
 ```sh

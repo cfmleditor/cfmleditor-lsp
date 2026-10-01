@@ -146,7 +146,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 		helperScope = config.HelperScope(cfg.Frameworks())
 		stubs = frameworkapi.For(cfg.Frameworks())
 		depsInterpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
-		workspaceFolders = cfg.WorkspaceFolders()
+		workspaceFolders = cliWorkspaceFolders(fsys, cfg, args)
 		mappings = cfg.Mappings()
 		startupFiles = cfg.StartupFiles()
 		expressionMappings = cfg.ExpressionMappings()
@@ -155,12 +155,7 @@ func depsResolver(fsys vfs.FS, args, files []string) (*resolve.Resolver, *index.
 			cfResolvers = append(cfResolvers, r.Parser())
 		}
 	} else {
-		for _, a := range args {
-			if info, err := os.Stat(a); err == nil && info.IsDir() {
-				abs, _ := filepath.Abs(a)
-				workspaceFolders = append(workspaceFolders, abs)
-			}
-		}
+		workspaceFolders = cliWorkspaceFolders(fsys, nil, args)
 	}
 
 	idx := index.New()
