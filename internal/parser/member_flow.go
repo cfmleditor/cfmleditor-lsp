@@ -34,7 +34,7 @@ func (pr *ParseResult) memberDependencySource(expression string) (string, []stri
 
 	before, _, _ := strings.Cut(root, "(")
 
-	receiver, method, ok := strings.CutLast(strings.TrimSpace(before), ".")
+	receiver, _, ok := strings.CutLast(strings.TrimSpace(before), ".")
 	if !ok {
 		return "", nil
 	}
@@ -43,7 +43,7 @@ func (pr *ParseResult) memberDependencySource(expression string) (string, []stri
 		return "", nil
 	}
 
-	return receiver, append([]string{method}, methods...)
+	return receiver, append([]string{CallHop(root[len(receiver)+1:])}, methods...)
 }
 
 // A concrete write grounds a dependency cycle. Every producer and method

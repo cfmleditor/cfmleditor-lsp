@@ -1249,7 +1249,7 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 
 		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
 		if ret == "" && !callHop {
-			ret = r.absentArgumentComponent(fd, factoryCallExpression(pr.Content, hop, int(call.Line)), baseDir, comp)
+			ret = r.expressionReturn(fd, factoryCallExpression(pr.Content, hop, int(call.Line)), baseDir, comp)
 		}
 
 		if ret == "" && callHop {
@@ -1917,6 +1917,18 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 	if fd.ReturnComponent == "" || fd.ReturnComponent == "$any" {
 		if ret := r.wheelsFixedMapperReturn(fd); ret != "" {
 			return ret
+		}
+	}
+
+	if fd.URI.IsFile() && (fd.ReturnType == "" || strings.EqualFold(fd.ReturnType, "any") || strings.EqualFold(fd.ReturnType, "component") || strings.EqualFold(fd.ReturnType, "object")) {
+		method := r.wheelsSource(fd.URI.Path()).producers[strings.ToLower(fd.Name)]
+		if method != nil && (producerNeedsSpecialization(method, fd) || (fd.ReturnComponent == "" || fd.ReturnComponent == "$any") && len(fd.ReturnSources) == 0 && fd.DocReturn == "") {
+			eval := producerEvaluation{resolver: r, fd: fd, baseDir: filepath.Dir(fd.URI.Path()), depth: depth, budget: budget}
+
+			ret := eval.call(fd, "", nil, false).component()
+			if ret != "" || producerNeedsSpecialization(method, fd) {
+				return ret
+			}
 		}
 	}
 

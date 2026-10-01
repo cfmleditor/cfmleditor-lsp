@@ -58,7 +58,8 @@ func loadServerMappings(appDir string) map[string]string {
 				}
 
 				key = strings.ToLower(strings.Trim(key, "/"))
-				if key == "" || !staticConfigPath(physical) {
+
+				if !staticConfigPath(physical) {
 					continue
 				}
 

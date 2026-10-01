@@ -198,14 +198,19 @@ type wheelsMethod struct {
 }
 
 type wheelsSource struct {
-	content string
-	methods map[string]wheelsMethod
+	content   string
+	methods   map[string]wheelsMethod
+	producers map[string]*producerMethod
 }
 
 // Cache lexical work, not definitions or directory listings. Re-read bytes on
 // lookup so a changed loader/access modifier is not accepted by an old policy;
 // EnsureIndexed supplies the current definition from the shared index.
 func (r *Resolver) wheelsSource(path string) wheelsSource {
+	if r.indexer != nil {
+		return r.indexer.wheelsSource(path)
+	}
+
 	data, err := r.fs().ReadFile(path)
 	if err != nil {
 		return wheelsSource{}
@@ -221,7 +226,7 @@ func (r *Resolver) wheelsSource(path string) wheelsSource {
 		return cached
 	}
 
-	result := wheelsSource{content: content, methods: wheelsMethods(content)}
+	result := wheelsSource{content: content, methods: wheelsMethods(content), producers: producerMethods(content)}
 
 	r.mu.Lock()
 	if r.wheelsSources == nil {

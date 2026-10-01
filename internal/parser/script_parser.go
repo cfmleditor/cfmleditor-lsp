@@ -643,7 +643,7 @@ func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []strin
 
 		first = false
 		funcName = methTok.Value
-		consumed = append(consumed, funcName)
+		consumed = append(consumed, CallHop(callExpressionAt(p.sc, funcName)))
 
 		if !p.skipParens() {
 			return consumed

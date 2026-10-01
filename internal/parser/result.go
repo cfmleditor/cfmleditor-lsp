@@ -807,17 +807,22 @@ func (pr *ParseResult) applyChainedReturnLookup() {
 // models.
 func (pr *ParseResult) walkChainRest(comp string, rest []string) string {
 	for _, hop := range rest {
+		name := callHopName(hop)
 		switch {
 		case comp == "" || comp == "$any":
 			return comp
 		case strings.HasPrefix(comp, "$builtin."):
 			return "$any"
-		case strings.EqualFold(hop, "init"), IsMockDecoration(hop):
+		case strings.EqualFold(name, "init"), IsMockDecoration(name):
 			// A MockBox decoration returns the mock it is called on.
 			continue
 		}
 
 		ret := pr.FuncLookup(comp, hop)
+		if ret == "" && name != hop {
+			ret = pr.FuncLookup(comp, name)
+		}
+
 		if ret == "" {
 			return "$any"
 		}
@@ -842,7 +847,9 @@ func dynamicIfTyped(comp string, rest []string) string {
 // with: anything but init() calls and MockBox decorations, which return what
 // they are called on.
 func restTypes(rest []string) bool {
-	return slices.ContainsFunc(rest, func(h string) bool { return !strings.EqualFold(h, "init") && !IsMockDecoration(h) })
+	return slices.ContainsFunc(rest, func(h string) bool {
+		return !strings.EqualFold(callHopName(h), "init") && !IsMockDecoration(callHopName(h))
+	})
 }
 
 // settledComponent is ref's Component with any pending chain walked, for a
@@ -1040,7 +1047,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		if comp == "" {
 			last := c.funcName
 			if len(c.rest) > 0 {
-				last = c.rest[len(c.rest)-1]
+				last = callHopName(c.rest[len(c.rest)-1])
 			}
 
 			if comp = dynamicCall(last + "()"); comp != "" {
@@ -1052,7 +1059,7 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		// a mock of a class nothing here names is dynamic:
 		// `variables.iService = model.init( c ).$( "getCache", x )`, where
 		// model is the base class's createMock( annotations.model ).
-		if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, IsMockDecoration)) {
+		if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, func(hop string) bool { return IsMockDecoration(callHopName(hop)) })) {
 			comp, c.rest = "$any", nil
 		}
 
@@ -3236,4 +3243,15 @@ func (pr *ParseResult) argumentTypeLookup() func(string, string, []Argument) {
 	}
 
 	return pr.applyManagedArgumentTypes
+}
+
+func callHopName(hop string) string {
+	if expression, ok := CallExpression(hop); ok {
+		name, _, _ := strings.Cut(expression, "(")
+		_, name, _ = strings.CutLast("."+name, ".")
+
+		return strings.TrimSpace(name)
+	}
+
+	return hop
 }

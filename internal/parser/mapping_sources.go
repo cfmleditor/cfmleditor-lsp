@@ -210,10 +210,13 @@ func (s *mappingSourceState) assignment(target, key, expr, dir string) {
 		// Evaluate the whole RHS against the old struct, before replacing it.
 		// Iteration order cannot make a sibling literal key visible prematurely.
 		values := map[string]string{}
+		unknownRoot := false
 
 		for k, expression := range entries {
-			if value, ok := evalPathExpr(expression, s.env, dir); ok {
+			if value, ok := evalPathExpr(expression, s.env, dir); ok && k != "" {
 				values[strings.ToLower(strings.Trim(k, "/"))] = value
+			} else if k == "/" {
+				unknownRoot = true
 			}
 		}
 
@@ -226,10 +229,12 @@ func (s *mappingSourceState) assignment(target, key, expr, dir string) {
 		s.mappings = map[string]string{}
 
 		for name, value := range values {
-			if name != "" {
-				s.mappings[name] = cleanMappingPath(value, dir)
-				s.env["mapping:"+name] = value
-			}
+			s.mappings[name] = cleanMappingPath(value, dir)
+			s.env["mapping:"+name] = value
+		}
+
+		if unknownRoot {
+			s.mappings[""] = ""
 		}
 
 		return
@@ -260,14 +265,20 @@ func (s *mappingSourceState) assignment(target, key, expr, dir string) {
 }
 
 func (s *mappingSourceState) mapping(key, expr, dir string) {
-	key = strings.ToLower(strings.Trim(key, "/"))
 	if key == "" {
 		return
 	}
 
+	key = strings.ToLower(strings.Trim(key, "/"))
+
 	value, ok := evalPathExpr(expr, s.env, dir)
 	if !ok {
 		delete(s.mappings, key)
+
+		if key == "" {
+			s.mappings[key] = ""
+		}
+
 		delete(s.env, "mapping:"+strings.ToLower(key))
 
 		return

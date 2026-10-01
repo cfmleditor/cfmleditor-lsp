@@ -1237,3 +1237,90 @@ primitive contracts, source refresh, side effects and separate applications.
 This does not supply a blanket contentBean/loadBy contract: manager/DAO producers
 can return caller-supplied objects and runtime-dependent values. Callback/event
 slots, cross-request flow and those polymorphic producers remain open.
+
+### Argument-sensitive producers and root mappings (follow-up to merged PR #192)
+
+Producer flow now specializes supported method bodies with the actual call's
+arguments. Defaults and literal object constructors, supplied `this`, finite
+argument forwarding, exact object/presence guards, supported branches and literal
+length dispatch retain identity only when all normal return paths agree. Script,
+tag and mixed tag/cfscript bodies use bounded source plans; unknown mutations,
+query output rebinding, scope escapes, conflicting/missing returns, unsupported
+controls and recursive exhaustion withhold a concrete receiver. Computed tag
+defaults are present even when their value is unknown.
+
+Scalar locals assigned from calls no longer inherit the closed parser's receiver
+class guess. Existing builtin and Java dynamic contracts remain intact. Declared
+component contracts retain priority. Call arguments survive tag, member and
+collection chains, including owned empty arrays; mixed or externally supplied
+collections remain untyped. Literal createObject component roots resolve beside
+the declaring source, while caller-supplied constructors resolve beside the
+caller. Lexical plans refresh against source bytes, and inferred caller types
+are not cached in them.
+
+Literal `/` mappings now serve as root fallbacks from CFConfig and Application
+source. Named mappings and caller-relative files retain precedence, Application
+source overrides server defaults, and unknown root writes suppress stale defaults
+for both per-key assignments and struct replacement.
+
+| Scan | Files | Previous unresolved | Current unresolved | Accepted now | Batch removed / added |
+|---|---:|---:|---:|---:|---:|
+| Masa configured | 897 | 11,842 | 11,701 | 24,868 | 208 / 67 |
+| Masa automatic | 897 | 13,020 | 12,886 | 20,270 | 201 / 67 |
+| Wheels presets, vendor included | 1,195 | 3,263 | 3,263 | 46,162 | 0 / 0 |
+| Wheels no-presets, vendor included | 1,195 | 8,929 | 8,929 | 39,574 | 0 / 0 |
+
+Against merged PR #190, Masa configured has **660 removed / 73 added** findings, net **587 fewer**.
+
+Against merged PR #190, Masa automatic has **651 removed / 87 added** findings, net **564 fewer**.
+
+Fourteen other comparisons, each against the second batch:
+
+| Project | Mode / coverage | Before → after | Removed / added | Accepted |
+|---|---|---:|---:|---:|
+| ContentBox | presets / default | 2,705 → 2,704 | 1 / 0 | 14,370 |
+| ContentBox | no-presets / default | 7,845 → 7,844 | 1 / 0 | 8,893 |
+| Lucee | presets / default | 1,976 → 1,976 | 0 / 0 | 37,134 |
+| Lucee | no-presets / default | 1,976 → 1,976 | 0 / 0 | 37,134 |
+| TestBox | presets / default | 286 → 286 | 0 / 0 | 3,853 |
+| TestBox | no-presets / default | 710 → 710 | 0 / 0 | 3,405 |
+| cfwheels | presets / default | 17 → 17 | 0 / 0 | 95 |
+| cfwheels | presets / vendor-included | 3,263 → 3,263 | 0 / 0 | 46,162 |
+| cfwheels | no-presets / default | 62 → 62 | 0 / 0 | 37 |
+| cfwheels | no-presets / vendor-included | 8,929 → 8,929 | 0 / 0 | 39,574 |
+| coldbox-platform | presets / default | 1,403 → 1,403 | 55 / 55 | 19,972 |
+| coldbox-platform | no-presets / default | 3,410 → 3,372 | 43 / 5 | 17,691 |
+| fw1 | presets / default | 409 → 409 | 0 / 0 | 1,643 |
+| fw1 | no-presets / default | 687 → 687 | 0 / 0 | 1,357 |
+
+Per-entry additions include deeper missing methods and cases where a prior
+receiver guess is withheld; they are not established runtime defects. Lazy
+shared caches and unproven supplied-variable identities remain follow-up work.
+Do not describe a lower net count as proof that every formerly accepted call
+was correct, or that every new finding is an application defect.
+
+Configured Masa preserves **60,921 raw call records identically per entry**.
+Wheels preserves **67,931 / 67,484** with / without presets. The isolated probe
+reports match ordinary final-source reports, and all instrumented source is
+restored. These raw records are distinct from filtered accepted/report totals.
+
+All nine targeted regressions fail behaviorally with their respective fix
+disabled and pass restored. Full build, vet, short tests, short race tests, pinned
+lint and diff checks pass. Short/race checks use GOMAXPROCS=2 and -p 1, with corpus
+scans run separately, because existing performance assertions are timing-sensitive.
+No timing thresholds or route code were changed. Exact published-head CI is
+reported in the PR separately. Session reports, per-entry diffs, added-source
+audits, raw captures and test logs are under `/workspace/producer-validation`.
+
+See the wrap-up section of [RESOLUTION-GAPS-PLAN.md](RESOLUTION-GAPS-PLAN.md)
+for the remaining categories, concrete lazy-cache fixtures, unsupported inference
+boundaries and performance/environment follow-up. This batch closes specific
+producer shapes; cross-request flow, callbacks, automatic DI ownership and
+arbitrary runtime values remain open.
+
+ColdBox's preset net total is unchanged despite 55 replacement findings: optional
+MockBox decorator branches and the `execute()` wrapper still lack producer proof.
+The five no-preset additions are lazy WireBox renderer chains. These are explicit
+coverage loose ends, alongside Masa's lazy caches, rather than demonstrated
+missing application methods. See the final wrap-up section for concrete sources
+and proposed contracts.
