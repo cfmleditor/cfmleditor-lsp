@@ -855,10 +855,18 @@ func (pr *ParseResult) settledComponent(ref *ComponentRef) string {
 	}
 
 	if pr.FuncLookup == nil {
-		return dynamicIfTyped(ref.Component, ref.ChainRest)
+		return strictChainComponent(ref, dynamicIfTyped(ref.Component, ref.ChainRest))
 	}
 
-	return pr.walkChainRest(ref.Component, ref.ChainRest)
+	return strictChainComponent(ref, pr.walkChainRest(ref.Component, ref.ChainRest))
+}
+
+func strictChainComponent(ref *ComponentRef, component string) string {
+	if ref.strictChain && strings.HasPrefix(component, "$") {
+		return ""
+	}
+
+	return component
 }
 
 // chainPending reports whether ref's Component is not yet its answer: it was
@@ -879,7 +887,7 @@ func dropChainRest(pr *ParseResult, typ func(comp string, rest []string) string)
 				continue
 			}
 
-			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
+			refs[i].Component = strictChainComponent(&refs[i], typ(refs[i].Component, refs[i].ChainRest))
 			refs[i].ChainRest = nil
 		}
 	}
@@ -2480,7 +2488,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 
 	for i := range refs {
 		if len(refs[i].ChainRest) > 0 {
-			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
+			refs[i].Component = strictChainComponent(&refs[i], typ(refs[i].Component, refs[i].ChainRest))
 			refs[i].ChainRest = nil
 		}
 	}

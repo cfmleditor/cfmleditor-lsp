@@ -352,3 +352,19 @@ logs and scan script) and `/workspace/pr-review-validation` (fourteen archived
 corpus reports, coverage.json and prior validation). These workspace artifacts
 are not portable repository dependencies. The tables and source paths above
 retain the planning evidence in this document.
+
+## First implementation batch (PR #192)
+
+The tables above remain the merged PR #190 baseline. The first fixes now follow
+configured tag factory chains to concrete final types and propagate exact record
+member producer/self-return contracts. Configured Masa is **11,881 unresolved /
+24,669 accepted** (net 407 fewer findings); automatic mappings are **13,051 /
+20,099** (net 399 fewer), with 897 indexed/scanned files in each mode. Wheels
+vendor/presets improves by twelve findings to 3,263; thirteen other comparisons
+remain identical. Configured Masa preserves 60,921 raw calls per entry.
+
+Categories 3 and 4 gain these specific source shapes. Request/event propagation,
+untyped callbacks and polymorphic producers remain unresolved; this is not a
+blanket MuraScope or contentBean contract. See the final batch in
+[RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for boundaries and evidence. Session
+validation is in `/workspace/receiver-validation`.

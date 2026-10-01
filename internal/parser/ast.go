@@ -177,6 +177,9 @@ type ComponentRef struct {
 	// with either qualifier is looked up among its own scope's refs only; an
 	// unqualified one still sees both.
 	This bool
+	// New factory chains require a concrete result, not dynamic acceptance
+	// when a suffix method has an unknown return.
+	strictChain bool
 
 	// ChainBase and ChainMethod record the receiver.method() shape that produced
 	// this ref (e.g. "var x = jss.getInstance()" → ChainBase "jss", ChainMethod
