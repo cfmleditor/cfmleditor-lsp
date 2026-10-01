@@ -16,6 +16,15 @@ import (
 // still mean Content.cfc), or overrides an earlier explicit resolver rule.
 // Call before publishing the resolver or indexing application files.
 func (r *Resolver) BeanResolvers(beanPaths map[string]string) []parser.Resolver {
+	// Registration validation can traverse methods before the caller installs
+	// the augmented rules. Discard those provisional context views so subsequent
+	// calls use the finalized resolver configuration.
+	defer func() {
+		r.mu.Lock()
+		r.contextViews = nil
+		r.mu.Unlock()
+	}()
+
 	insertion := -1
 
 	for i := range r.Resolvers {

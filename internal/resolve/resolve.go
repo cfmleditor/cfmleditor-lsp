@@ -22,6 +22,10 @@ import (
 
 // Resolver resolves component dot-paths to files and functions.
 type Resolver struct {
+	// Context views keep runtime mappings while traversing physical library files.
+	callerMappings     map[string]string
+	contextViews       map[string]*Resolver
+	indexer            *Resolver
 	FS                 vfs.FS
 	WorkspaceFolders   []string
 	Mappings           map[string]string
@@ -533,6 +537,10 @@ func (r *Resolver) inFolderNamed(component string, dirs *cfpath.DirCache) string
 // asking the second question re-read and re-parsed every such file on every
 // single lookup, since re-indexing it produced the same empty result.
 func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
+	if r.indexer != nil {
+		return r.indexer.EnsureIndexed(cfcPath)
+	}
+
 	cfcURI := cfpath.ToURI(cfcPath)
 
 	if !r.Index.HasFile(cfcURI) {
@@ -829,6 +837,10 @@ func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bo
 // ResolveFunc finds a function definition by component path and function name,
 // handling pipe-separated alternatives, absolute paths, and the extends chain.
 func (r *Resolver) ResolveFunc(component, funcName, baseDir string) *parser.FunctionDef {
+	if context := r.forCaller(baseDir); context != r {
+		return context.ResolveFunc(component, funcName, baseDir)
+	}
+
 	alternatives := []string{component}
 	if strings.Contains(component, "|") {
 		alternatives = strings.Split(component, "|")
@@ -922,6 +934,10 @@ func (r *Resolver) EffectiveMappings(baseDir string) map[string]string {
 }
 
 func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
+	if r.indexer != nil {
+		return r.callerMappings
+	}
+
 	appDir := r.FindApplicationRoot(baseDir)
 	if appDir == "" {
 		appDir = baseDir
@@ -960,7 +976,7 @@ func (r *Resolver) ResolveFromCall(expr string) string {
 // CanResolveCall determines whether a function call can be resolved given the
 // parse result context. Returns empty string if resolved, or a reason if not.
 func (r *Resolver) CanResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) string {
-	return r.canResolveCall(call, pr, baseDir, nil)
+	return r.forCaller(baseDir).canResolveCall(call, pr, baseDir, nil)
 }
 
 // ExplainCall runs the same resolution logic as CanResolveCall but also returns a
@@ -970,7 +986,7 @@ func (r *Resolver) CanResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 // for the `explain` CLI command; not used on the hot lint path.
 func (r *Resolver) ExplainCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
 	tr := &callTrace{}
-	reason := r.canResolveCall(call, pr, baseDir, tr)
+	reason := r.forCaller(baseDir).canResolveCall(call, pr, baseDir, tr)
 
 	return reason, tr.steps
 }
@@ -1953,6 +1969,8 @@ func (r *Resolver) isInterface(path string) bool {
 // resolved from baseDir: ParseOptions.FuncLookup, which types a variable
 // assigned from a call on another component.
 func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) string {
+	r = r.forCaller(baseDir)
+
 	return func(component, funcName string) string {
 		fd := r.ResolveFunc(component, funcName, baseDir)
 		if fd == nil {

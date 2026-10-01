@@ -22,6 +22,10 @@ func TestStartupServiceLoopResolvesVerifiedBeans(t *testing.T) {
  application.factory=variables.factory;
  variables.services="reporter,missing";
  for(variables.i in listToArray(variables.services)){application["#variables.i#"]=application.factory.getBean("#variables.i#");}`, true},
+		{"registered alias after bootstrap", `variables.factory=new framework.ioc('model');
+ variables.factory.addAlias("reporterAlias","Reporter");
+ for(i in listToArray("reporterAlias")){application["#i#"]=variables.factory.getBean("#i#");}
+ application.reporter=application.reporterAlias;`, true},
 		{"custom factory", `variables.factory=new model.services.Reporter();for(i in listToArray("reporter")){application["#i#"]=variables.factory.getBean("#i#");}`, false},
 		{"unknown factory", `variables.factory=arguments.factory;for(i in listToArray("reporter")){application["#i#"]=variables.factory.getBean("#i#");}`, false},
 		{"factory overwrite", `variables.factory=new framework.ioc('model');variables.factory=arguments.value;for(i in listToArray("reporter")){application["#i#"]=variables.factory.getBean("#i#");}`, false},

@@ -980,3 +980,44 @@ loop inference, member settlement or preserved record identity is disabled,
 then pass restored. Build, vet, full short/race suites, pinned lint, formatting,
 diff and parser performance checks pass. CI must be checked on the published
 commit, as for earlier batches.
+
+
+### Caller mappings across library traversal
+
+Method lookup, inherited methods, documented returns and deferred collection
+return sources now retain the calling application's mappings as traversal enters
+physical library directories. A nearby request-blocking Application.cfc does not
+replace the caller's mappings. Relative component paths and source injection
+policy still use the declaring file. Cached views are isolated per application;
+shared source indexing remains caller-independent. Bootstrap registration
+validation discards provisional views before the finalized bean rules are used.
+Resolver recreation after configuration/source invalidation refreshes the views.
+
+Tests use two applications mapping the same namespace to different components,
+in both lookup orders, and check missing methods, call targets, explanations,
+nested application boundaries, direct library lookup, explicit mapping precedence
+and mapping refresh with a shared source index. Both the caller-context and
+bootstrap-cache regressions fail behaviorally with their fixes disabled.
+
+With manual mappings removed, pinned Masa now changes **13,484 → 13,450**,
+**44 removed / 10 added**, net **34**, over the same **897 indexed/scanned files**.
+Successfully checked calls increase **19,584 → 19,674**. Thirty-four removed
+entries are grouped broken inheritance findings and ten are rc.comment receiver
+findings. All ten additions reach deeper unknown return chains: five
+getCurrentUser/getValue/setValue calls, and five polymorphic loadBy chains.
+They remain unknown because request/session values and argument-sensitive
+query/iterator/self results are not a single component contract. The explicitly
+configured Masa report remains **12,288 unresolved / 24,227 accepted**, unchanged
+per entry. Raw extraction remains **60,921 identical call records**.
+
+All fourteen other corpus comparisons preserve indexed/scanned coverage. FW/1
+without presets changes **695 → 692**, three grouped broken-base findings removed
+and no additions; **60 more calls** are checked. All other comparisons are
+unchanged per entry. Six-project default totals are **6,812 / 14,711**; explicit
+Wheels vendor coverage remains **6,915 / 13,264**.
+
+This fixes traversal when a caller is known. Scanning a library file directly
+still uses its own nearest Application; selecting a runtime caller for that
+standalone scan requires evidence rather than blanket parent inheritance.
+Unknown record/argument contracts and polymorphic return values remain the
+largest follow-up groups.
