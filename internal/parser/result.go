@@ -327,6 +327,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.collectDelegates()
 		pr.appendResolverRefs()
 		pr.applyFactoryReturnCalls(allPendingCalls)
+		pr.applyCollectionReturns(allPendingCalls)
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
 	} else {

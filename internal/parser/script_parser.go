@@ -2287,7 +2287,7 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 
 // checkReturnComponent checks if a return statement returns a component expression or variable.
 func (p *scriptParser) checkReturnComponent() {
-	if len(p.resolvers) > 0 && p.inFunc != "" {
+	if p.inFunc != "" {
 		p.pendingCalls = append(p.pendingCalls, pendingCall{
 			varName: scriptReturnExpression(p.sc), funcKey: p.inFunc, returnExpr: true,
 		})

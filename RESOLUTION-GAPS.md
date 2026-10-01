@@ -832,3 +832,66 @@ version). The CLI resolved-plus-reported sum is a filtered statistic and falls
 by three; builtin filtering and missing-base grouping prevent treating that sum
 as call coverage. Full build, vet, short/race suites, pinned lint (zero issues),
 formatting and diff checks pass.
+
+
+## Uniform struct-element return contracts
+
+Getters returning an indexed struct value now retain a component contract when
+all observed element writes agree. Static dot keys and bracket keys contribute
+values; whole aliases share writes while element copies form directed
+dependencies. An empty
+struct initializer plus a typed write can ground a copy cycle, while an empty or
+uninitialized source cannot borrow a type from its reader. Whole-struct getters
+keep their existing contract and never acquire the element's CFC type.
+
+Element sources come from explicit constructors, configured factories or the
+actual return contracts of methods on known receivers. No framework or Masa
+component names are hardcoded. Unknown writes, conflicting component/primitive
+values, whole replacement, recognized mutators and tag output bindings prevent
+inference. Local/argument names cannot borrow component fields, and variables
+and this remain separate. Computed writes into a scope and parent replacement
+invalidate affected collections. Every explicit return must be an indexed value
+with the same final component; declared return types retain priority.
+
+Closed-file indexing retains compact component/method source contracts rather
+than guessing the method receiver's identity. Resolver lookup follows current
+indexed definitions, so a producer edit changes an existing getter immediately.
+Compaction detaches strings and nested method slices from parse storage. Source
+unions are limited to sixteen distinct contracts; deferred lookup is bounded to
+eight recursive levels and a shared budget of 128 source/method steps. Cycles,
+unknown dependencies and exceeded limits withhold a concrete type.
+
+This models observed static writes, not arbitrary reflective/runtime mutations
+or mutations through escaped structs. Closure bindings are not yet modeled by
+this collection analysis: files containing script closures withhold its new
+inference. Arrays, object-guarded lazy members, argument-sensitive polymorphic
+returns and arbitrary wrapper chains without FuncLookup remain open. Masa's
+getClassExtensionManager() is not safe to infer from isObject alone: configBean
+also permits computed instance-field replacement through setValue().
+
+At the same Masa commit and unchanged **897 indexed/scanned files**, this batch
+changes **14,147 → 13,749**, **451 removed / 53 added**, net **398**. Removed
+findings include settingsManager.getSite() and resource-bundle lookups. All 53
+additions are downstream settingsBean contracts now reached through getSite:
+getRBFactory (22), getContentRenderer (21), getApi (6), getCacheFactory (4).
+The first two involve lazy/externally supplied object members; getApi constructs
+computed component names, and cacheFactories is nested under a replaceable
+instance struct. These remain unknown rather than assuming receiver identity.
+
+Whole PR against the original base is now **18,539 → 13,749**,
+**5,101 removed / 311 added**, net **4,790**. All fourteen other corpus
+comparisons remain unchanged per entry, with matching indexed/scanned coverage.
+Six-project presets/no-presets totals stay **6,804 / 14,706**, Wheels vendor
+**6,901 / 13,262**. Raw Masa parser call extraction is identical per entry:
+**60,546 records** in each version. The CLI resolved-plus-reported statistic is
+filtered and is not raw call coverage.
+
+Parser cases cover script, tag and mixed functions, agreeing/conflicting writes
+and returns, grounded/ungrounded copies, shadowing, dynamic scope and parent
+writes, operators, closures, mutators, tag output bindings and declared types.
+Resolver integration covers closed indexing, canonical agreement, conflicting
+and primitive producer returns, recursive getters, dependency replacement and
+real missing methods on the final CFC. Regressions fail with collection
+settlement disabled; the closed-file regression separately fails with deferred
+lookup disabled. Restored checks, build, vet, full short/race suites, pinned lint,
+formatting and diff checks pass.

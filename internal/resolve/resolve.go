@@ -1833,6 +1833,34 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // `returntype="pkg.tassui"` is a contract the engine enforces. Any other
 // inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
+	budget := 128
+
+	return r.returnComponentOf(fd, 0, &budget)
+}
+
+func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *int) string {
+	if depth > 8 {
+		return ""
+	}
+
+	if len(fd.ReturnSources) > 0 {
+		switch strings.ToLower(fd.ReturnType) {
+		case "", "any", "component", "object":
+		default:
+			if strings.Contains(fd.ReturnType, ".") {
+				if p := r.besideDeclaring(fd, fd.ReturnType); p != "" {
+					return p
+				}
+
+				return fd.ReturnType
+			}
+
+			return r.bareReturnComponent(fd)
+		}
+
+		return r.collectionReturnOf(fd, depth, budget)
+	}
+
 	switch {
 	case fd.ReturnComponent != "" && fd.ReturnComponent != "$any":
 		// `return new Expectation( … )` names the component beside the
