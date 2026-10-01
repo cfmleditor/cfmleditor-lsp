@@ -1018,7 +1018,18 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	// svc.value()>` used to record nothing.
 	p.scanExpressionCalls(inner, line)
 
-	if p.inFunc == "" || len(p.funcs) == 0 {
+	if p.inFunc == "" {
+		return
+	}
+
+	if len(p.resolvers) > 0 {
+		p.pendingCalls = append(p.pendingCalls, pendingCall{
+			varName: strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(inner), "/")),
+			funcKey: p.inFunc, returnExpr: true,
+		})
+	}
+
+	if len(p.funcs) == 0 {
 		return
 	}
 

@@ -326,6 +326,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.generatePropertyAccessors()
 		pr.collectDelegates()
 		pr.appendResolverRefs()
+		pr.applyFactoryReturnCalls(allPendingCalls)
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
 	} else {
@@ -982,6 +983,10 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 
 	for j := range calls {
 		c := &calls[j]
+
+		if c.returnExpr {
+			continue
+		}
 
 		if c.memberSet {
 			pr.memberSets = append(pr.memberSets, *c)

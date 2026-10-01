@@ -71,10 +71,11 @@ type pendingCall struct {
 	// the call returns is what every function — and every sibling closure —
 	// reads. funcKey is kept, since baseVar may still be a local. Beside line,
 	// in its padding.
-	refThis   bool
-	global    bool
-	memberSet bool // not a call: `varName.funcName = …`; see checkMemberSet
-	baseScope RefScope
+	refThis    bool
+	global     bool
+	returnExpr bool // a return expression, grouped by function for factory-chain inference
+	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
+	baseScope  RefScope
 
 	funcKey string   // scope key, empty if global
 	rest    []string // calls chained after funcName, carried to the ref as ChainRest
@@ -1070,6 +1071,11 @@ func (p *scriptParser) parse() {
 			// assignment falls through to the bare-call path and its RHS
 			// component type is silently dropped.
 			p.parseScopedVar(tok, sharedScopeOf(tok))
+		case "return":
+			// A script island can be inside a tag function whose scope was seeded.
+			if p.inFunc != "" {
+				p.checkReturnComponent()
+			}
 		case "import":
 			p.parseImport()
 		case "new":
@@ -2281,6 +2287,12 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 
 // checkReturnComponent checks if a return statement returns a component expression or variable.
 func (p *scriptParser) checkReturnComponent() {
+	if len(p.resolvers) > 0 && p.inFunc != "" {
+		p.pendingCalls = append(p.pendingCalls, pendingCall{
+			varName: scriptReturnExpression(p.sc), funcKey: p.inFunc, returnExpr: true,
+		})
+	}
+
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokIdent {
 		return

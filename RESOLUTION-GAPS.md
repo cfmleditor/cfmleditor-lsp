@@ -782,3 +782,53 @@ transient setter exclusion, sibling-parameter scope and real missing methods.
 Build, vet, full short/race suites, pinned lint (zero issues), formatting and
 diff checks pass. Collection/struct members and verified wrapper
 returns, automatic root discovery and subsystem factory precedence remain next.
+
+
+## Factory-backed wrapper return chains
+
+A whole returned factory call followed by method calls now follows the actual
+method return types, instead of stopping at the factory result. For example,
+`return getBean('Builder').configure().build()` returns Product when build's
+return contract names Product. This works in script, tag and mixed functions,
+including script islands inside tag functions without typed arguments. Known
+factory roots come from the configured resolver rules; this does not add
+framework or Masa-specific component names.
+
+Every recorded return expression must resolve to the same component. Unknown
+methods, conflicting components, primitive/unknown branches, indexed results,
+member reads and larger expressions with operators prevent concrete inference.
+Declared return contracts retain priority. Closure returns do not contribute to
+the enclosing function; full document replacement refreshes the inference.
+Without method lookup, only whole factory results and constructor/init chains
+can retain their identity. Existing shallow/lazy indexing without FuncLookup
+cannot verify arbitrary method chains; this batch does not change that boundary.
+Collection member flow and argument-sensitive polymorphic returns remain open.
+
+At the pinned Masa commit and unchanged **897 indexed/scanned files**, this
+batch changes **14,179 → 14,147**, **83 removed / 51 added**, net **32**. Removed
+findings cover factory-backed comment, user, iterator and plugin-setting wrappers.
+All 51 additions concern beanORM.loadBy(): the actual implementation at 918–924
+returns a query, a beanIterator or this according to returnFormat. Its last
+`return this` previously overrode the other paths. A concrete bean return is
+therefore withheld; specializing by a literal/default call argument is future
+work. Counts are not reduced by retaining the incorrect assumption.
+
+Whole PR against the same original base is now **18,539 → 14,147**,
+**4,927 removed / 535 added**, net **4,392**. All fourteen other corpus comparisons
+are unchanged per entry with matching indexed/scanned coverage; default six
+project totals remain **6,804 / 14,706**, Wheels vendor **6,901 / 13,262**.
+
+Parser regressions cover all three syntaxes, nested/multiline arguments, same
+and conflicting returns in either order, primitive and component contracts,
+unknown methods, indexing/operators, closures and full replacement. A resolver
+integration checks the actual final component and preserves a missing method
+that belongs only to the original builder. These tests fail with the new return
+settlement disabled and pass restored. The parser's pinned struct sizes remain
+unchanged; return observations reuse pending-call storage, and files without
+configured resolvers skip this inference.
+
+Raw parser call extraction is unchanged per entry (60,546 records in each
+version). The CLI resolved-plus-reported sum is a filtered statistic and falls
+by three; builtin filtering and missing-base grouping prevent treating that sum
+as call coverage. Full build, vet, short/race suites, pinned lint (zero issues),
+formatting and diff checks pass.
