@@ -64,6 +64,7 @@ type Resolver struct {
 	diPolicies     []diPolicy                 // source-backed DI/1 injection contracts
 	discoveringDI  bool                       // private policy discovery never re-enters injection lookup
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -575,6 +576,12 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		seen[cfcPath] = true
 		chain = append(chain, cfcPath)
 		cfcURI := cfpath.ToURI(cfcPath)
+
+		// Mapper copies its package methods over existing members. An ambiguous
+		// copy must not fall back to the definition it may have overwritten.
+		if d, copied := r.wheelsMapperFunc(cfcPath, funcName); copied {
+			return d
+		}
 
 		defs := r.EnsureIndexed(cfcPath)
 		for _, d := range defs {

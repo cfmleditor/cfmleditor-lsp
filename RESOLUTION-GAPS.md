@@ -1060,3 +1060,47 @@ configured **12,288 unresolved / 24,227 accepted**, automatic mappings **13,450 
 record per entry: **60,921** for Masa, **67,931** for Wheels with presets and
 **67,484** without. Filtered totals remain distinct from raw coverage. Regression proofs cover omitted/explicit configuration, package roots,
 missing methods, command agreement and single-file scan coverage.
+
+### Wheels Mapper runtime component integration
+
+Mapper.init copies public methods from `wheels.mapper` CFCs into both `variables`
+and `this`. The resolver now recognizes the literal initializer and cached-plan
+consumer from source, checks Global's plan producer and the copier's public
+filter, and reads the nonrecursive mapper directory. Namespace lookup honors
+mappings even when the framework's physical directory has another name. The
+method's original source location and required arguments remain available.
+Private, package and remote methods are excluded, including script `access`
+attributes. Unused, conditional, closure, computed and no-op loaders do not
+provide this policy. Global helper overrides and cyclic inheritance are checked
+without recursively re-entering Mapper loader discovery.
+
+Copied methods replace Mapper's own members, matching the loader's assignments.
+Competing package definitions have no stable directory order and are withheld,
+including fallback to an overwritten own method. Source bytes and directory
+contents are rechecked; only lexical work is cached. Bound definitions are
+copies, so another lookup on the original source holder keeps its own return
+contract. Fluent returns follow `this` and self-method return chains, including
+recursive `$match` branches, with an actual self-return anchor and bounded
+recursion. Mixed values, foreign receivers and unanchored cycles stay unknown.
+
+Pinned Wheels with explicit vendor coverage changes **4,319 → 4,023** unresolved
+with presets and **9,912 → 9,616** without: **296 removed, zero added** in each
+mode. The removals are 294 `$draw` calls/chains and two `end` calls. Successfully
+checked calls increase **44,982 → 45,292** and **38,479 → 38,789**, respectively.
+All 1,195 indexed/scanned files and all raw call records are preserved per entry:
+**67,931** with presets and **67,484** without. Filtered accepted/report counts
+remain distinct from raw extraction coverage.
+
+All twelve default corpus comparisons are unchanged per entry; totals remain
+**6,797 / 14,691**. Masa configured remains **12,288 unresolved / 24,227 accepted**;
+automatic mappings remain **13,450 / 19,674**, over 897 indexed/scanned files.
+Configured Masa preserves **60,921 identical raw call records**. Independent
+regression proofs fail when either method integration or return binding is
+disabled, and pass with both restored.
+
+This covers the source shape of the pinned Mapper's cached-plan loader, not
+arbitrary runtime function copying or every Wheels release. Directory discovery
+is bounded to 128 entries; fluent proof to depth eight and 64 method expansions.
+Global's separately copied API, Controller's view/controller integration and
+`super` aliases, Model factory context, plugin/package overrides and terminal
+`init().adapter` property flow remain follow-up work.
