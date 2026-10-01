@@ -40,6 +40,7 @@ type ParseResult struct {
 	resolverSet         *ResolverSet                            // pre-grouped resolvers for fast matching
 	PropertyResolvers   []PropertyResolver                      // optional property-to-component resolvers
 	managedSetterLookup func(string) string                     // current property metadata applied to setter injection
+	ConstructorLookup   func(string) string                     // known factory constructor dependency identity
 	SetterLookup        func(string) string                     // managed bean setter dependency → component
 	BeanLookup          func(string) string                     // optional bean name → dot-path lookup
 	PropertyBeanLookup  func(string, map[string]string) string  // optional factory property eligibility and identity
@@ -103,6 +104,7 @@ type ParseOptions struct {
 	Logger                   Logger
 	Resolvers                []Resolver
 	PropertyResolvers        []PropertyResolver
+	ConstructorLookup        func(name string) string // optional, only for known factory construction
 	SetterLookup             func(name string) string // optional, only for factory-managed components
 	BeanLookup               func(name string) string // optional: resolve bean name → dot-path
 	PropertyBeanLookup       func(name string, attrs map[string]string) string
@@ -195,6 +197,7 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 		BeanLookup:               opts.BeanLookup,
 		PropertyBeanLookup:       opts.PropertyBeanLookup,
 		SetterLookup:             opts.SetterLookup,
+		ConstructorLookup:        opts.ConstructorLookup,
 		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
 		FuncLookup:               opts.FuncLookup,
 		expressionMappings:       opts.ExpressionMappings,
@@ -389,7 +392,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	sp.extractLinks = pr.extractLinks
 	sp.extractCalls = pr.extractCalls
 	sp.builtinReturnLookup = pr.BuiltinReturnLookup
-	sp.setterLookup = pr.managedSetterLookup
+	sp.argumentTypes = pr.argumentTypeLookup()
 
 	// If this <cfscript> region sits inside a tag <cffunction> body
 	// (nested script island — ClassifyRegions splits the file there),
@@ -477,7 +480,7 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	tp.extractLinks = pr.extractLinks
 	tp.extractCalls = pr.extractCalls
 	tp.builtinReturnLookup = pr.BuiltinReturnLookup
-	tp.setterLookup = pr.managedSetterLookup
+	tp.argumentTypes = pr.argumentTypeLookup()
 	tp.baseLine = r.StartLine
 	tp.knownScopes = tagScopes
 	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
@@ -2373,7 +2376,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
 		sp.resolverSet = pr.resolverSet
 		sp.extractLinks = true
-		sp.setterLookup = pr.managedSetterLookup
+		sp.argumentTypes = pr.argumentTypeLookup()
 		sp.parse()
 		refs = sp.componentRefs
 		links = sp.links
@@ -2390,7 +2393,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		tp.resolvers = pr.Resolvers
 		tp.resolverSet = pr.resolverSet
 		tp.extractLinks = true
-		tp.setterLookup = pr.managedSetterLookup
+		tp.argumentTypes = pr.argumentTypeLookup()
 		tp.parse()
 		refs = tp.componentRefs
 
@@ -3166,4 +3169,17 @@ func (pr *ParseResult) propertyBeanComponent(prop *propertyDef) string {
 	}
 
 	return injectedComponent(inject)
+}
+
+func (pr *ParseResult) applyManagedArgumentTypes(name, access string, args []Argument) {
+	applySetterArgumentTypes(name, access, args, pr.managedSetterLookup)
+	applyConstructorArgumentTypes(name, access, args, pr.ConstructorLookup)
+}
+
+func (pr *ParseResult) argumentTypeLookup() func(string, string, []Argument) {
+	if pr.SetterLookup == nil && pr.ConstructorLookup == nil {
+		return nil
+	}
+
+	return pr.applyManagedArgumentTypes
 }

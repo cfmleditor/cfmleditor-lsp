@@ -733,3 +733,52 @@ computed registrations, auto-exclusion defaults, inherited property metadata,
 liberal pluralization and custom factory behavior are not modeled. Constructor
 injection, automatic root discovery and subsystem parent/local precedence remain
 next, followed by verified struct/collection member and wrapper return types.
+
+
+## DI/1 default constructor dependencies
+
+Known DI/1 factories now supply generic argument types to public `init` methods,
+including required/optional arguments and transient dependencies. This follows
+Masa's pinned IOC cleanMetadata constructor selection at 421–441 and its
+required/optional containsBean construction at 845–879. Inferred components stay
+separate from declared argument signatures, and declared/documented types remain
+authoritative. Whole arguments.name assignments type fields and generated
+getters using the existing scope-aware field flow. Script, tag and mixed syntax
+share the hook, including lazy indexing, editor parsing and CLI scans. The parser
+reuses its managed-argument callback slot, keeping its pinned struct size, and
+ordinary files do not allocate the factory callback.
+
+Only recognized factory roots supply constructor inference; generic bean roots,
+older FW/1 controller fallback scope, private init methods and custom construction
+implementations do not. Literal declaration overrides and getBean constructorArgs
+observed on the known factory receiver in configured startup sources suppress
+matching argument/property/setter types. Unknown override bags withhold those
+types; empty bags preserve the default. Registered instances/constants bypass
+factory construction and setter injection. Their known component identities can
+still serve as dependencies of other beans. Runtime calls outside startup
+sources, fluent override builders and inherited constructor metadata remain
+outside this static default-construction model.
+
+With unchanged configuration and **897 indexed/scanned files**, Masa changes
+**16,385 → 14,179**, **2,445 removed / 239 added**, net **2,206**. Removed findings
+include configBean, settingsManager and pluginManager constructor fields and
+subsequent values obtained through those dependencies. All additions were
+reviewed: **221** are settingsManager.getSite() return chains, **15** are
+configBean.getClassExtensionManager() chains, two are contentBean wrapper-return
+chains, and one is a newly checked missing emailGateway.getSessionSearch() call
+in dashboardManager. The actual method exists on sessionTrackingGateway, not on
+the indexed emailGateway. Real missing-method checking remains enabled.
+
+Whole PR against the same original base is now **18,539 → 14,179**,
+**4,850 removed / 490 added**, net **4,360**. All fourteen other corpus comparisons
+are unchanged per entry, with matching indexed/scanned coverage; six-project
+presets/no-presets totals remain **6,804 / 14,706**, Wheels vendor **6,901 / 13,262**.
+
+New constructor, lazy getter, editor/closed-file/engine-refresh and CLI
+regressions fail with the constructor lookup disabled. Separate override and
+registered-value regressions fail with the override gate disabled. Restored
+checks pass and preserve declared contracts, private/unmanaged boundaries,
+transient setter exclusion, sibling-parameter scope and real missing methods.
+Build, vet, full short/race suites, pinned lint (zero issues), formatting and
+diff checks pass. Collection/struct members and verified wrapper
+returns, automatic root discovery and subsystem factory precedence remain next.

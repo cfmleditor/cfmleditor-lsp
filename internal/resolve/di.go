@@ -14,6 +14,7 @@ import (
 type diEntry struct {
 	target, component string
 	singleton         bool
+	external          bool
 }
 type diPolicy struct {
 	roots                              []string
@@ -24,6 +25,8 @@ type diPolicy struct {
 	exclude                            []string
 	blocked, omitAliases, shallow      bool
 	omitTyped, omitDefaulted           bool
+	overrides                          map[string]map[string]bool
+	unknownOverrides                   map[string]bool
 }
 
 // InjectionBeanLookup is deliberately separate from getBean identity lookup:
@@ -34,6 +37,25 @@ func (r *Resolver) InjectionBeanLookup(file string) func(string) string {
 		return r.BeanLookup
 	}
 
+	lookup := r.factoryDependencyLookup(file, true)
+	if lookup == nil {
+		return r.BeanLookup
+	}
+
+	return lookup
+}
+
+// ConstructorLookup is available only inside a recognized DI/1 factory. Generic
+// bean roots and the older framework autowire fallback do not establish it.
+func (r *Resolver) ConstructorLookup(file string) func(string) string {
+	if r.discoveringDI || !cfpath.IsCFCFile(file) {
+		return nil
+	}
+
+	return r.factoryDependencyLookup(file, false)
+}
+
+func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func(string) string {
 	r.diOnce.Do(r.buildDIPolicies)
 
 	var policies []*diPolicy
@@ -46,7 +68,7 @@ func (r *Resolver) InjectionBeanLookup(file string) func(string) string {
 	}
 
 	if len(policies) == 0 {
-		return r.BeanLookup
+		return nil
 	}
 
 	return func(name string) string {
@@ -54,11 +76,11 @@ func (r *Resolver) InjectionBeanLookup(file string) func(string) string {
 		result := ""
 
 		for _, p := range policies {
-			if !p.discovers(file) {
+			if !p.discovers(file) || p.unknownOverrides[pathKey(file)] || p.overrides[pathKey(file)][strings.ToLower(name)] {
 				return ""
 			}
 
-			candidate := p.injected(strings.ToLower(name), comp, r, map[string]bool{})
+			candidate := p.dependency(strings.ToLower(name), comp, r, map[string]bool{}, singletonOnly)
 			if candidate == "" || result != "" && !cfpath.SamePath(result, candidate) {
 				return ""
 			}
@@ -109,7 +131,7 @@ func (p *diPolicy) contains(file string) bool {
 	return false
 }
 
-func (p *diPolicy) injected(name, comp string, r *Resolver, seen map[string]bool) string {
+func (p *diPolicy) dependency(name, comp string, r *Resolver, seen map[string]bool, singletonOnly bool) string {
 	if p.blocked || seen[name] || len(seen) >= maxStartupTemplates {
 		return ""
 	}
@@ -123,8 +145,8 @@ func (p *diPolicy) injected(name, comp string, r *Resolver, seen map[string]bool
 		for _, entry := range entries {
 			candidate := entry.component
 			if entry.target != "" {
-				candidate = p.injected(entry.target, r.BeanLookup(entry.target), r, seen)
-			} else if !entry.singleton {
+				candidate = p.dependency(entry.target, r.BeanLookup(entry.target), r, seen, singletonOnly)
+			} else if singletonOnly && !entry.singleton {
 				return ""
 			}
 
@@ -154,7 +176,7 @@ func (p *diPolicy) injected(name, comp string, r *Resolver, seen map[string]bool
 		singular = custom
 	}
 
-	if singular == "bean" || p.transients[dir] || p.transientPattern != nil && p.transientPattern.MatchString(base) || p.singletonPattern != nil && !p.singletonPattern.MatchString(base) {
+	if singletonOnly && (singular == "bean" || p.transients[dir] || p.transientPattern != nil && p.transientPattern.MatchString(base) || p.singletonPattern != nil && !p.singletonPattern.MatchString(base)) {
 		return ""
 	}
 
@@ -222,6 +244,10 @@ func (r *Resolver) buildDIPolicies() {
 	}
 
 	r.diRegistrations(d, sources, factories)
+
+	for i := range r.diPolicies {
+		r.diPolicies[i].recordExternalValues(r)
+	}
 }
 
 func (r *Resolver) diSources(d *Resolver) []diSource {
@@ -324,6 +350,12 @@ func (r *Resolver) diRegistrations(d *Resolver, sources []diSource, factories ma
 				continue
 			}
 
+			if call.method == "getbean" {
+				r.diCallOverrides(call, ids)
+
+				continue
+			}
+
 			name := beanArgument(call.args, "beanName", 0)
 			entry := diEntry{}
 
@@ -337,6 +369,7 @@ func (r *Resolver) diRegistrations(d *Resolver, sources []diSource, factories ma
 				entry.singleton = len(lifetime) == 0 || len(lifetime) == 1 && strings.EqualFold(lifetime[0].Value, "true")
 			case "addbean":
 				entry.singleton = true
+				entry.external = true
 
 				value := diArgument(call.args, "beanValue", 1)
 				if len(value) > 0 {
@@ -357,7 +390,8 @@ func (r *Resolver) diRegistrations(d *Resolver, sources []diSource, factories ma
 			if name != "" {
 				for _, i := range ids {
 					p := &r.diPolicies[i]
-					p.entries[strings.ToLower(name)] = append(p.entries[strings.ToLower(name)], entry)
+
+					p.register(name, entry, call)
 				}
 			}
 		}
@@ -390,7 +424,7 @@ func (r *Resolver) isDI1(component, dir string) bool {
 			return true
 		}
 		// An override of the lifetime/injection implementation makes its policy unknown.
-		if methods["beanistransient"] || methods["findsetters"] || methods["issingleton"] {
+		if methods["beanistransient"] || methods["findsetters"] || methods["issingleton"] || methods["construct"] || methods["cleanmetadata"] || methods["resolvebeancreate"] || methods["resolvebean"] || methods["getbean"] {
 			return false
 		}
 
@@ -543,7 +577,7 @@ func diStruct(tokens []parser.Token) (map[string][]parser.Token, bool) {
 }
 
 func diConfig(tokens []parser.Token) diPolicy {
-	p := diPolicy{entries: map[string][]diEntry{}, transients: map[string]bool{}, singulars: map[string]string{}, omitTyped: true, omitDefaulted: true}
+	p := diPolicy{entries: map[string][]diEntry{}, transients: map[string]bool{}, singulars: map[string]string{}, omitTyped: true, omitDefaulted: true, overrides: map[string]map[string]bool{}, unknownOverrides: map[string]bool{}}
 	if len(tokens) == 0 {
 		return p
 	}
@@ -681,7 +715,7 @@ func (p *diPolicy) configure(key string, value []parser.Token) {
 		}
 
 		for name := range constants {
-			p.entries[name] = []diEntry{{singleton: true}}
+			p.entries[name] = []diEntry{{singleton: true, external: true}}
 		}
 	case "omitdirectoryaliases", "recurse", "liberal", "omittypedproperties", "omitdefaultedproperties":
 		if len(value) != 1 || !strings.EqualFold(value[0].Value, "true") && !strings.EqualFold(value[0].Value, "false") {
@@ -736,5 +770,87 @@ func diDepth(kind parser.TokenKind) int {
 		return -1
 	default:
 		return 0
+	}
+}
+
+// A registration's overrides can supply primitives or runtime values instead of
+// named beans. Withhold those argument/field types rather than borrowing a bean.
+func (p *diPolicy) recordOverrides(component string, tokens []parser.Token) {
+	if component == "" || len(tokens) == 0 {
+		return
+	}
+
+	key := pathKey(component)
+
+	values, ok := diStruct(tokens)
+	if !ok {
+		p.unknownOverrides[key] = true
+
+		return
+	}
+
+	if p.overrides[key] == nil {
+		p.overrides[key] = map[string]bool{}
+	}
+
+	for name := range values {
+		p.overrides[key][name] = true
+	}
+}
+
+func (r *Resolver) diCallOverrides(call *beanCall, ids []int) {
+	tokens := diArgument(call.args, "constructorArgs", 1)
+	if len(tokens) == 0 {
+		return
+	}
+
+	values, valid := diStruct(tokens)
+	if valid && len(values) == 0 {
+		return
+	}
+
+	name := beanArgument(call.args, "beanName", 0)
+
+	for _, id := range ids {
+		p := &r.diPolicies[id]
+
+		component := p.dependency(strings.ToLower(name), r.BeanLookup(name), r, map[string]bool{}, false)
+		if name == "" || component == "" {
+			p.blocked = true
+
+			continue
+		}
+
+		p.recordOverrides(component, tokens)
+	}
+}
+
+func (p *diPolicy) register(name string, entry diEntry, call *beanCall) {
+	key := strings.ToLower(name)
+
+	p.entries[key] = append(p.entries[key], entry)
+	if call.method == "declarebean" {
+		p.recordOverrides(entry.component, diArgument(call.args, "overrides", 3))
+	}
+}
+
+// Registered instances/constants bypass DI/1 construction and setter injection.
+// Their identity may still be used as a dependency of a different managed bean.
+func (p *diPolicy) recordExternalValues(r *Resolver) {
+	for name, entries := range p.entries {
+		for _, entry := range entries {
+			if !entry.external {
+				continue
+			}
+
+			component := entry.component
+			if component == "" {
+				component = r.BeanLookup(name)
+			}
+
+			if component != "" {
+				p.unknownOverrides[pathKey(component)] = true
+			}
+		}
 	}
 }

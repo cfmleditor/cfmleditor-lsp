@@ -240,7 +240,7 @@ func beanCalls(content string) []beanCall {
 				continue
 			}
 
-			if active && tok.Kind == parser.TokIdent && (method == "addalias" || method == "declarebean" || method == "addbean") && scanner.PeekSkipComments().Kind == parser.TokLParen {
+			if active && tok.Kind == parser.TokIdent && (method == "addalias" || method == "declarebean" || method == "addbean" || method == "getbean") && scanner.PeekSkipComments().Kind == parser.TokLParen {
 				receiver := beanReceiver(previous)
 
 				scanner.NextSkipComments()

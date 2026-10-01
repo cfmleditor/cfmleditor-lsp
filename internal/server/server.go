@@ -822,6 +822,7 @@ func (s *Server) parseContent(fileURI uri.URI, content string) *parser.ParseResu
 		BeanLookup:               resolver.InjectionBeanLookup(cfpath.FromURI(string(fileURI))),
 		PropertyBeanLookup:       resolver.InjectionPropertyLookup(cfpath.FromURI(string(fileURI))),
 		SetterLookup:             resolver.SetterLookup(cfpath.FromURI(string(fileURI))),
+		ConstructorLookup:        resolver.ConstructorLookup(cfpath.FromURI(string(fileURI))),
 		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
 		FuncLookup:               funcLookup(resolver, baseDir),
 		ExpressionMappings:       s.ExpressionMappings,
@@ -844,7 +845,7 @@ func funcLookup(resolver *resolve.Resolver, baseDir string) func(component, func
 // but managed beans need injected fields and generated getters in the index.
 func (s *Server) parseContentForIndex(fileURI uri.URI, content string) *parser.ParseResult {
 	resolver := s.getResolver()
-	if resolver.SetterLookup(cfpath.FromURI(string(fileURI))) != nil {
+	if resolver.SetterLookup(cfpath.FromURI(string(fileURI))) != nil || resolver.ConstructorLookup(cfpath.FromURI(string(fileURI))) != nil {
 		return s.parseContent(fileURI, content)
 	}
 

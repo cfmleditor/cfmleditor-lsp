@@ -474,3 +474,44 @@ func TestReportUsesDI1LifetimeForInjectionOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestReportUsesDI1ConstructorDependencies(t *testing.T) {
+	dir := t.TempDir()
+	sources := map[string]string{
+		"Application.cfc":             `component extends="framework.one" {}`,
+		"model/beans/User.cfc":        `component {function run() {}}`,
+		"model/services/Reporter.cfc": `component {function run() {}}`,
+		"model/services/Consumer.cfc": `component accessors=true {
+ property name="dependency";
+ function init(user,reporter) {variables.dependency=arguments.user;variables.reporter=arguments.reporter;return this;}
+ function use() {variables.dependency.run();variables.reporter.missing();}
+ function sibling(user) {user.run();}
+ }`,
+		"page.cfm": `<cfscript>c=new model.services.Consumer();c.getDependency().run();</cfscript>`,
+	}
+	files := []string{}
+
+	for name, source := range sources {
+		file := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		files = append(files, file)
+	}
+
+	rep := Scan(vfs.OS{}, files, nil, &Options{BeanPaths: map[string]string{"": filepath.Join(dir, "model")}, WorkspaceFolders: []string{dir}})
+	if len(rep.Calls) != 2 {
+		t.Fatalf("want missing method and sibling argument only: %+v", rep.Calls)
+	}
+
+	for _, call := range rep.Calls {
+		if call.Function == "missing" && !strings.Contains(call.Reason, "not found in Reporter") {
+			t.Errorf("real missing method lost: %+v", call)
+		}
+	}
+}

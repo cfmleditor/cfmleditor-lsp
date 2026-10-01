@@ -38,7 +38,7 @@ type tagParser struct {
 	importPrefixes      []string
 	srcOffset           int
 	builtinReturnLookup func(string) string
-	setterLookup        func(string) string
+	argumentTypes       func(string, string, []Argument)
 	inFunc              string // current function scope key ("start:end"), empty if global
 	// localVars holds the var'd/local. names declared in the function being
 	// parsed. A slice scanned with EqualFold rather than a map of lowercased
@@ -667,7 +667,9 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 		applyParameterDocs(docComment, args)
 	}
 
-	applySetterArgumentTypes(name, getAttr(tag, "access"), args, p.setterLookup)
+	if p.argumentTypes != nil {
+		p.argumentTypes(name, getAttr(tag, "access"), args)
+	}
 
 	// Create component refs for arguments with component-like types.
 	// p.inFunc is not yet set at this call site — the main loop sets it after

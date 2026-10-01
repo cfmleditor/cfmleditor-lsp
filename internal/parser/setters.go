@@ -56,3 +56,24 @@ func argumentComponentType(arg *Argument) string {
 
 	return ""
 }
+
+// DI/1 injects every known init argument by name, including transients. Keep
+// declared/documented contracts and leave missing or overridden values unknown.
+func applyConstructorArgumentTypes(name, access string, args []Argument, lookup func(string) string) {
+	if lookup == nil || !strings.EqualFold(name, "init") || access != "" && !strings.EqualFold(access, "public") {
+		return
+	}
+
+	for i := range args {
+		arg := &args[i]
+		if arg.Component != "" {
+			continue
+		}
+
+		if arg.Type != "" && !strings.EqualFold(arg.Type, "any") && !strings.EqualFold(arg.Type, "component") && !strings.EqualFold(arg.Type, "object") {
+			continue
+		}
+
+		arg.Component = lookup(arg.Name)
+	}
+}

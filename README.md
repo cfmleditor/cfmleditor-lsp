@@ -638,8 +638,8 @@ the framework's source and explicitly calls `setBeanFactory` during setup. The
 framework must actually call `autowire` from its component/controller loader.
 Direct conventional directories and older explicit subsystem layouts are modeled;
 views, models and nested applications do not acquire injection. Custom directory
-layouts, struct-form framework settings and separate subsystem factories remain
-unsupported. A runtime base override uses only a known literal default. See
+layouts, struct-form settings for legacy fallback wiring and separate subsystem
+factories remain unsupported. A runtime base override uses only a known literal default. See
 [RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the measured Masa case and boundaries.
 
 Known DI/1 factories apply a separate injection policy. Literal `new` factory
@@ -653,12 +653,21 @@ or persistence and honor setter, typed/defaulted-property flags; matching ignore
 properties also block explicit setters. Global document edits refresh metadata.
 Masa's older FW/1 fallback controller wiring retains its containsBean policy.
 
-This policy filters existing bean roots; automatic discovery of additional roots,
-constructor injection, delegated applications and subsystem factory inheritance
-remain follow-up work. Dynamic/conflicting lifetime configuration and unsupported
+Factory-managed public `init` methods now infer generic constructor arguments
+by bean name, including transient dependencies. Whole argument assignments carry
+those types into fields and generated getters. Declared/documented types remain
+unchanged. Literal declaration overrides and observed startup getBean argument
+overrides withhold matching dependency types; dynamic overrides and registered
+instances/constants do not imply factory construction. Unmanaged/private init
+methods and custom construction implementations receive no constructor inference.
+
+This policy uses existing static bean identities; automatic discovery of
+additional bean roots,
+delegated applications and subsystem factory inheritance remain follow-up work.
+Dynamic/conflicting lifetime configuration and unsupported
 regular expressions produce no injection type in a recognized factory. Runtime
-factory overrides, computed registrations and custom injection implementations
-remain outside this static model.
+argument overrides outside configured startup sources, computed registrations
+and custom injection implementations remain outside this static model.
 
 ### Component resolvers
 

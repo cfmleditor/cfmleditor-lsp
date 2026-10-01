@@ -361,3 +361,102 @@ func TestEditorUsesDI1LifetimeAndRefreshesFactoryConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorUsesDI1ConstructorDependenciesAndRefreshesDIEngine(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "model", "beans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "model", "services"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app := filepath.Join(dir, "Application.cfc")
+	if err := os.WriteFile(app, []byte(`component extends="framework.one" {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	user := filepath.Join(dir, "model", "beans", "User.cfc")
+	if err := os.WriteFile(user, []byte(`component {function run() {}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.BeanPaths = map[string]string{"": filepath.Join(dir, "model")}
+	file := cfpath.ToURI(filepath.Join(dir, "model", "services", "Consumer.cfc"))
+
+	source := `component accessors=true {property name="dependency";function init(user) {variables.dependency=arguments.user;return this;}}`
+	for _, pr := range []*parser.ParseResult{s.parseContentForIndex(file, source), s.parseContent(file, source)} {
+		found := false
+
+		for _, fn := range pr.Funcs {
+			if fn.Name == "getDependency" {
+				found = true
+
+				if fn.ReturnComponent != user {
+					t.Fatalf("constructor getter lost: %+v", fn)
+				}
+			}
+		}
+
+		if !found {
+			t.Fatal("missing constructor-backed getter")
+		}
+	}
+
+	if err := os.WriteFile(app, []byte(`component extends="framework.one" {variables.framework={diEngine:"none"};}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s.invalidateResolveCache()
+
+	pr := s.parseContent(file, source)
+	for _, fn := range pr.Funcs {
+		if fn.Name == "getDependency" && fn.ReturnComponent != "" {
+			t.Fatal("stale constructor type after DI engine change")
+		}
+	}
+}
+
+func TestEditorIndexesDI1ConstructorWithoutGenericBeanRoots(t *testing.T) {
+	dir := t.TempDir()
+	for _, folder := range []string{"framework", "model"} {
+		if err := os.MkdirAll(filepath.Join(dir, folder), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sources := map[string]string{
+		"framework/ioc.cfc": `component {function init(folders,config={}) {} function getBean(beanName) {} function isSingleton(beanName) {} function findSetters(cfc,iocMeta) {} function beanIsTransient(singleDir,dir,beanName) {} function declareBean(beanName,dottedPath,isSingleton=true,overrides={}) {}}`,
+		"model/User.cfc":    `component {function run() {}}`,
+		"startup.cfm":       `<cfscript>f=new framework.ioc("/model");f.declareBean("user","model.User");</cfscript>`,
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := NewServer(nil, cflog.NewLogger(false))
+	s.WorkspaceFolders = []string{dir}
+	s.StartupFiles = []string{filepath.Join(dir, "startup.cfm")}
+	source := `component accessors=true {property name="dependency";function init(user) {variables.dependency=arguments.user;return this;}}`
+	pr := s.parseContentForIndex(cfpath.ToURI(filepath.Join(dir, "model", "Consumer.cfc")), source)
+	found := false
+
+	for _, fn := range pr.Funcs {
+		if fn.Name == "getDependency" {
+			found = true
+
+			if fn.ReturnComponent != filepath.Join(dir, "model", "User.cfc") {
+				t.Fatalf("closed constructor getter lost: %+v", fn)
+			}
+		}
+	}
+
+	if !found {
+		t.Fatal("constructor-only file received a shallow index")
+	}
+}

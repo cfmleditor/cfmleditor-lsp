@@ -39,7 +39,7 @@ type scriptParser struct {
 	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
 	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
-	setterLookup        func(string) string
+	argumentTypes       func(string, string, []Argument)
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
 	returnVar           string          // last "return varName" seen in current function
@@ -1375,7 +1375,9 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 	}
 
 	if p.inFunc == "" {
-		applySetterArgumentTypes(nameTok.Value, access, args, p.setterLookup)
+		if p.argumentTypes != nil {
+			p.argumentTypes(nameTok.Value, access, args)
+		}
 	}
 
 	funcLine := p.baseLine + startTok.Line
