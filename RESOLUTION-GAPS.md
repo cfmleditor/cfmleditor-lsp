@@ -1,5 +1,9 @@
 # Resolution gaps
 
+For the current post-PR #190 baseline, measured failure groups, coverage and
+prioritized proposed fixes, see [Remaining resolver gaps](RESOLUTION-GAPS-PLAN.md).
+The sections below retain the investigation and implementation history.
+
 What `unresolved` still reports over the six-project corpus after PR #184, what
 is behind each large group, and where a fix would go. Each item says how it was
 found, so it can be re-checked rather than taken on trust. Items are ordered by
