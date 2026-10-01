@@ -114,6 +114,8 @@ For a fatal Go error, such as a stack overflow, the one-line reason (`fatal erro
 
 The whole workspace is always *indexed* (every folder in `workspacePaths`), because resolving a call reads every other component. The *report* holds only what you name: a directory or file argument narrows it, so `unresolved packages/tass/core` lists calls in that directory alone.
 
+When `workspacePaths` is omitted, the requested directories also supply the resolver's workspace roots. A config containing only presets or mappings keeps that default. A file target uses its parent directory for lookup while indexing and reporting only that file. `explain --root`, dependency scans and code maps use the same default; explicit `workspacePaths` retain priority. To inspect a vendor package that the normal directory walk skips, name it explicitly, for example `unresolved myapp myapp/vendor/wheels`.
+
 macOS and Linux:
 
 ```sh
@@ -610,7 +612,72 @@ A `REQUEST`, `SESSION`, `APPLICATION` or `SERVER` variable is usually set up in 
 
   An entry is a file path, relative to the config or absolute, or a template path starting with `/`, resolved as a `cfinclude` of it would be: through `mappings`, the workspace folders and a folder named by its first segment.
 
-Only one-line assignments of the form `SCOPE.name = value` are read, in tag or script syntax. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
+Assignments of the form `SCOPE.name = value` are read in tag or script syntax, including multiline expressions. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
+
+A bounded script loop over a literal `listToArray` service list can also type
+`application["#name#"] = factory.getBean("#name#")`. The key and bean ID must use
+the same unchanged iterator. The factory must expose the actual `getBean` and
+`declareBean` argument contracts; bean identities still come from registered or
+configured beans. Unknown factories, dynamic lists, missing beans and conflicting
+or unknown service replacements remain unresolved.
+
+
+A configured `getBean` resolver with `"resolve": "$1"` also learns literal
+`declareBean(beanName, dottedPath)` and `addAlias(aliasName, beanName)` registrations
+from explicitly configured startup files and their includes. The registration
+receiver must resolve to a component exposing those parameter names and `getBean`.
+Alias targets come from `beanPaths` or literal declarations; alias chains are
+followed, including names such as `$`. This works in script and `<cfset>` syntax.
+Earlier explicit resolver rules retain priority, and `new Content()` still looks
+up a component rather than a bean alias. Computed arguments, missing targets,
+conflicting registrations, and cycles provide no inferred type. The include walk
+and alias depth are bounded at 64. Runtime `addBean` values and factory overrides are not inferred by this step.
+
+For a CFC under configured or application-declared `beanPaths`, a public
+`setName(Name)` method with one generic argument learns the dependency's bean
+type, including literal aliases. Whole `arguments.Name` assignments carry it
+into fields, and generated getters return that component. Script, tag, and mixed
+syntax share the inference. Declared and documented types retain priority;
+private setters, multiple arguments, and methods outside managed scopes do
+not acquire a dependency by name. The declared signature stays unchanged in
+completion and signature help. Arguments shadow same-named component fields.
+Managed files receive the same types during editor indexing and CLI scans, and
+bean-map caches refresh when the resolver is invalidated. FW/1 controller/service
+directories outside bean roots also qualify when the nearest Application extends
+the framework's source and explicitly calls `setBeanFactory` during setup. The
+framework must actually call `autowire` from its component/controller loader.
+Direct conventional directories and older explicit subsystem layouts are modeled;
+views, models and nested applications do not acquire injection. Custom directory
+layouts, struct-form settings for legacy fallback wiring and separate subsystem
+factories remain unsupported. A runtime base override uses only a known literal default. See
+[RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the measured Masa case and boundaries.
+
+Known DI/1 factories apply a separate injection policy. Literal `new` factory
+construction in startup files (including subclasses of DI/1), or a modern
+`Application.cfc extends="framework.one"` with literal framework configuration,
+establishes lifetime rules inside the factory's literal folders. Transient
+folders/patterns, singleton patterns, exclusions, singular mappings, aliases,
+constants and explicit registrations constrain setter/property types. Direct
+`getBean` retrieval still permits transients. DI/1 properties require accessors
+or persistence and honor setter, typed/defaulted-property flags; matching ignored
+properties also block explicit setters. Global document edits refresh metadata.
+Masa's older FW/1 fallback controller wiring retains its containsBean policy.
+
+Factory-managed public `init` methods now infer generic constructor arguments
+by bean name, including transient dependencies. Whole argument assignments carry
+those types into fields and generated getters. Declared/documented types remain
+unchanged. Literal declaration overrides and observed startup getBean argument
+overrides withhold matching dependency types; dynamic overrides and registered
+instances/constants do not imply factory construction. Unmanaged/private init
+methods and custom construction implementations receive no constructor inference.
+
+This policy uses existing static bean identities; automatic discovery of
+additional bean roots,
+delegated applications and subsystem factory inheritance remain follow-up work.
+Dynamic/conflicting lifetime configuration and unsupported
+regular expressions produce no injection type in a recognized factory. Runtime
+argument overrides outside configured startup sources, computed registrations
+and custom injection implementations remain outside this static model.
 
 ### Component resolvers
 
@@ -1001,6 +1068,20 @@ above it — `this.mappings[ "/cli" ] = local.projectRoot & "cli/"` after
 are `getDirectoryFromPath( getCurrentTemplatePath() )` and earlier mappings.
 A mapping whose name has several segments (`/modules/wheels`) is used for
 paths under it, the longest match first.
+Literal includes and relative parent constructors are read with the declaring
+template's path context, bounded to 64 source files and 16 levels. Bracket/dot
+assignments, whole mapping literals and static `left`/`right` path slicing are
+supported. Runtime expressions are not executed.
+
+Physical non-root mappings in `.cfconfig.json`, or a static `server.json`
+`cfconfig.file` selection, supply defaults. Application mappings override those
+and explicit editor mappings override application values, case-insensitively.
+Relative CFConfig paths are based on that config file; environment placeholders
+and archive-primary entries are not guessed. Watched CFML/JSON edits refresh
+mapping and resolver caches. Nested applications keep their own mapping context;
+caller mapping context for library definitions behind a different Application
+remains a limitation, so explicit workspace mappings can still be needed.
+
 
 **A framework's own namespace needs no preset.** `coldbox.system.*`,
 `testbox.system.*`, `commandbox.system.*`, `qb.models.*`,

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -280,5 +282,37 @@ func TestClientWatchesFiles(t *testing.T) {
 				t.Errorf("clientWatchesFiles = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWatchedMappingIncludesAndSelectedCFConfigRefresh(t *testing.T) {
+	dir := t.TempDir()
+
+	files := map[string]string{"Application.cfc": `component {include "paths.cfm";}`, "paths.cfm": `<cfset this.mappings["/app"]="./old">`, "server.json": `{"cfconfig":{"file":"selected.json"}}`, "selected.json": `{"mappings":{"/server":"old"}}`}
+	for name, content := range files {
+		writeCFC(t, filepath.Join(dir, name), content)
+	}
+
+	srv := newTestServer()
+	srv.WorkspaceFolders = []string{dir}
+
+	cfpath.InvalidateAppMappingsCache()
+
+	before := srv.getResolver()
+	if got := before.EffectiveMappings(dir); got["app"] != filepath.Join(dir, "old") || got["server"] != filepath.Join(dir, "old") {
+		t.Fatalf("initial mappings=%v", got)
+	}
+
+	writeCFC(t, filepath.Join(dir, "paths.cfm"), `<cfset this.mappings["/app"]="./changed">`)
+	writeCFC(t, filepath.Join(dir, "selected.json"), `{"mappings":{"/server":"changed"}}`)
+	srv.applyWatchedFileChanges([]protocol.FileEvent{fileEvent(filepath.Join(dir, "paths.cfm"), protocol.FileChangeTypeChanged), fileEvent(filepath.Join(dir, "selected.json"), protocol.FileChangeTypeChanged)})
+
+	after := srv.getResolver()
+	if before == after {
+		t.Fatal("resolver not refreshed")
+	}
+
+	if got := after.EffectiveMappings(dir); got["app"] != filepath.Join(dir, "changed") || got["server"] != filepath.Join(dir, "changed") {
+		t.Fatalf("stale mappings=%v", got)
 	}
 }

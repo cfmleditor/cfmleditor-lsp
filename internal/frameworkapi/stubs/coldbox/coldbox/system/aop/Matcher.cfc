@@ -46,6 +46,8 @@ component {
 	 * OR operator
 	 */
 	property name="or";
+	variables.and = new coldbox.system.aop.Matcher();
+	variables.or = new coldbox.system.aop.Matcher();
 	/**
 	 * Constructor
 	 */
@@ -67,7 +69,7 @@ component {
 	 *
 	 * @return boolean
 	 */
-	boolean function matchClass( required target, required mapping ) {}
+	boolean function matchClass( required target, required coldbox.system.ioc.config.Mapping mapping ) {}
 	/**
 	 * Matches a method to this matcher according to its criteria
 	 *
@@ -93,7 +95,7 @@ component {
 	 *
 	 * @return boolean
 	 */
-	private boolean function matchClassRules( required target, required mapping ) {}
+	private boolean function matchClassRules( required target, required coldbox.system.ioc.config.Mapping mapping ) {}
 	/**
 	 * Match against any method name or class path
 	 *
@@ -157,7 +159,7 @@ component {
 	 *
 	 * @return This matcher instance
 	 */
-	coldbox.system.aop.Matcher function andMatch( required matcher ) {}
+	coldbox.system.aop.Matcher function andMatch( required coldbox.system.aop.Matcher matcher ) {}
 	/**
 	 * OR this matcher with another matcher
 	 *
@@ -166,5 +168,5 @@ component {
 	 *
 	 * @return This matcher instance
 	 */
-	coldbox.system.aop.Matcher function orMatch( required matcher ) {}
+	coldbox.system.aop.Matcher function orMatch( required coldbox.system.aop.Matcher matcher ) {}
 }

@@ -30,12 +30,29 @@ func CompactDefs(defs []FunctionDef) []FunctionDef {
 		d.Name = strings.Clone(d.Name)
 		d.ReturnType = strings.Clone(d.ReturnType)
 		d.ReturnComponent = strings.Clone(d.ReturnComponent)
+
 		d.DocReturn = strings.Clone(d.DocReturn)
+		if len(d.ReturnSources) > 0 {
+			sources := make([]ReturnSource, len(d.ReturnSources))
+			for j, source := range d.ReturnSources {
+				sources[j].Component = strings.Clone(source.Component)
+
+				sources[j].Methods = make([]string, len(source.Methods))
+				for k, method := range source.Methods {
+					sources[j].Methods[k] = strings.Clone(method)
+				}
+			}
+
+			d.ReturnSources = sources
+		} else {
+			d.ReturnSources = nil
+		}
+
 		d.returnVar = strings.Clone(d.returnVar)
 
 		// An empty argument list is dropped rather than kept: the script
 		// parser allocates room for four arguments up front, so a function
-		// that takes none arrived here holding an empty slice with 224 bytes
+		// that takes none arrived here holding an empty slice with 288 bytes
 		// behind it, and copying d kept that array. On a 5,632-component
 		// corpus that was 1.9MB, a sixth of the whole index.
 		if len(d.Arguments) == 0 {
@@ -47,6 +64,7 @@ func CompactDefs(defs []FunctionDef) []FunctionDef {
 				a := d.Arguments[j]
 				a.Name = strings.Clone(a.Name)
 				a.Type = strings.Clone(a.Type)
+				a.Component = strings.Clone(a.Component)
 				a.Hint = strings.Clone(a.Hint)
 				args[j] = a
 			}

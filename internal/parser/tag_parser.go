@@ -22,6 +22,7 @@ type tagParser struct {
 	pendingCalls  []pendingCall
 	properties    []propertyDef
 	extends       string
+	accessors     bool
 	persistent    bool
 	lineIndex     []int32 // byte offset of each line start
 	resolvers     []Resolver
@@ -37,6 +38,7 @@ type tagParser struct {
 	importPrefixes      []string
 	srcOffset           int
 	builtinReturnLookup func(string) string
+	argumentTypes       func(string, string, []Argument)
 	inFunc              string // current function scope key ("start:end"), empty if global
 	// localVars holds the var'd/local. names declared in the function being
 	// parsed. A slice scanned with EqualFold rather than a map of lowercased
@@ -480,6 +482,8 @@ func (p *tagParser) dispatchCFTag(ch byte, tag string, idx, tagEnd, line int) {
 	case 'c':
 		if hasCFTagPrefix(tag, "<cfcomponent") {
 			p.extends = getAttr(tag, "extends")
+
+			p.accessors = isTruthy(getAttr(tag, "accessors"))
 			if isTruthy(getAttr(tag, "persistent")) {
 				p.persistent = true
 			}
@@ -660,7 +664,11 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 
 	// Apply JSDoc @param {type} annotations
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
+	}
+
+	if p.argumentTypes != nil {
+		p.argumentTypes(name, getAttr(tag, "access"), args)
 	}
 
 	// Create component refs for arguments with component-like types.
@@ -670,10 +678,10 @@ func (p *tagParser) parseCFFunction(tag string, idx, tagEnd, line int) {
 	// entry already exists from resolver-derived refs in the same scope.
 	// Instead, compute the funcKey directly and write to funcRefs[key].
 	for _, a := range args {
-		if isComponentType(a.Type) {
+		if comp := argumentComponentType(&a); comp != "" {
 			ref := ComponentRef{
 				Variable:  a.Name,
-				Component: a.Type,
+				Component: comp,
 				URI:       uriFromString(p.fileURI),
 				Line:      conv.Uint32(line),
 			}
@@ -1010,7 +1018,16 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	// svc.value()>` used to record nothing.
 	p.scanExpressionCalls(inner, line)
 
-	if p.inFunc == "" || len(p.funcs) == 0 {
+	if p.inFunc == "" {
+		return
+	}
+
+	p.pendingCalls = append(p.pendingCalls, pendingCall{
+		varName: strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(inner), "/")),
+		funcKey: p.inFunc, returnExpr: true,
+	})
+
+	if len(p.funcs) == 0 {
 		return
 	}
 
@@ -1169,6 +1186,15 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 
 	if chainedSetTarget(rhs) {
 		p.chainedSet(rhs, varName, line)
+
+		return
+	}
+
+	if comp := wholeArgumentComponent(rhs, p.inFunc, p.funcs); comp != "" {
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+		})
 
 		return
 	}
@@ -1395,13 +1421,14 @@ func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int)
 	}
 
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:  varName,
-		funcName: funcName,
-		line:     conv.Uint32(line),
-		funcKey:  p.inFunc,
-		rest:     trailingCalls(rhs),
-		refThis:  p.refThis,
-		global:   p.forceGlobal,
+		varName:    varName,
+		funcName:   funcName,
+		expression: callExpressionAt(NewScanner(rhs[paren:]), funcName),
+		line:       conv.Uint32(line),
+		funcKey:    p.inFunc,
+		rest:       trailingCalls(rhs),
+		refThis:    p.refThis,
+		global:     p.forceGlobal,
 	})
 }
 
@@ -2127,8 +2154,16 @@ func trailingCalls(expr string) []string {
 		name := expr[start:j]
 
 		j = skipSpace(expr, j)
-		if name == "" || j >= len(expr) || expr[j] != '(' {
+
+		if name == "" {
 			break
+		}
+
+		if j >= len(expr) || expr[j] != '(' {
+			hops = append(hops, PropertyHop(name))
+			i = j
+
+			continue
 		}
 
 		hops = append(hops, name)

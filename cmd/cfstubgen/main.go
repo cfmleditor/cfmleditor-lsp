@@ -441,7 +441,11 @@ func (g *generator) emit(abs string) error {
 		b.WriteString(docBlock(doc, ""))
 	}
 
-	b.WriteString("component")
+	if interfaceRe.MatchString(src.text) {
+		b.WriteString("interface")
+	} else {
+		b.WriteString("component")
+	}
 
 	if ext := src.pr.Extends; ext != "" {
 		if base, q := g.resolve(ext, filepath.Dir(abs)); base != "" {
@@ -557,6 +561,7 @@ func (g *generator) integrated(src *source) []*source {
 }
 
 func (g *generator) writeFuncs(b *strings.Builder, src *source, seen map[string]bool) {
+	iface := interfaceRe.MatchString(src.text)
 	for i := range src.pr.Funcs {
 		def := &src.pr.Funcs[i]
 		if seen[strings.ToLower(def.Name)] || !declares(src, def) {
@@ -598,7 +603,13 @@ func (g *generator) writeFuncs(b *strings.Builder, src *source, seen map[string]
 			}
 
 			if validType(a.Type) {
-				b.WriteString(a.Type + " ")
+				typeName := a.Type
+				if abs, qualified := g.resolve(typeName, filepath.Dir(src.path)); abs != "" && strings.Contains(typeName, ".") {
+					g.todo = append(g.todo, abs)
+					typeName = qualified
+				}
+
+				b.WriteString(typeName + " ")
 			}
 
 			b.WriteString(a.Name)
@@ -608,7 +619,11 @@ func (g *generator) writeFuncs(b *strings.Builder, src *source, seen map[string]
 			b.WriteString(" ")
 		}
 
-		b.WriteString(") {}\n")
+		if iface {
+			b.WriteString(");\n")
+		} else {
+			b.WriteString(") {}\n")
+		}
 	}
 }
 

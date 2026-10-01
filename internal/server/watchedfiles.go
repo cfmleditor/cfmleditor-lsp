@@ -27,7 +27,7 @@ const watchedFilesRegistrationID = "cfmleditor-watched-files"
 // `.cfc`, because Application.cfm carries mappings, beans and ORM locations
 // that cfpath caches; a change to one has to invalidate that cache the same way
 // saving it in the editor does.
-var watchedGlobs = []string{"**/*.cfc", "**/*.cfm"}
+var watchedGlobs = []string{"**/*.cfc", "**/*.cfm", "**/*.json"}
 
 // registerFileWatchers asks the client to watch the workspace for CFML files
 // changing outside the editor.
@@ -119,7 +119,9 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		return
 	}
 
-	var indexed, removed, skipped, appChanged int
+	var indexed, removed, skipped, appChanged, mappingChanged int
+
+	discoveryChanged := false
 
 	reload := map[string]bool{}
 
@@ -130,11 +132,21 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 			continue
 		}
 
+		if strings.EqualFold(filepath.Ext(cfpath.FromURI(string(ev.URI))), ".json") {
+			if s.isMappingJSON(cfpath.FromURI(string(ev.URI))) {
+				mappingChanged++
+			}
+
+			continue
+		}
+
 		switch s.applyWatchedFileChange(ev) {
 		case watchedIndexed:
 			indexed++
+			discoveryChanged = discoveryChanged || isApplicationFile(cfpath.FromURI(string(ev.URI))) || s.getResolver().DiscoveryAffected(cfpath.FromURI(string(ev.URI)))
 		case watchedRemoved:
 			removed++
+			discoveryChanged = discoveryChanged || isApplicationFile(cfpath.FromURI(string(ev.URI))) || s.getResolver().DiscoveryAffected(cfpath.FromURI(string(ev.URI)))
 		case watchedSkipped:
 			skipped++
 		}
@@ -148,7 +160,7 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		s.loadKnownIssuesFile(context.Background(), file)
 	}
 
-	if indexed == 0 && removed == 0 {
+	if indexed == 0 && removed == 0 && mappingChanged == 0 {
 		s.log.Debug("watched files: nothing to apply", cflog.Int("skipped", skipped))
 
 		return
@@ -156,11 +168,15 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 
 	// Both caches are keyed on answers the index just stopped agreeing with.
 	// This mirrors what didSave does for an edit made in the editor.
-	s.invalidateResolveCache()
 
-	if appChanged > 0 {
-		cfpath.InvalidateAppMappingsCache()
+	if discoveryChanged || mappingChanged > 0 {
+		s.invalidateResolver()
+	} else {
+		s.getResolver().InvalidatePaths()
+		s.invalidateRoutes()
 	}
+
+	cfpath.InvalidateAppMappingsCache()
 
 	s.log.Info("watched files applied",
 		cflog.Int("indexed", indexed),

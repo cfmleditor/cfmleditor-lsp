@@ -10,6 +10,7 @@
  */
 component extends="coldbox.system.cache.providers.CacheBoxProvider" {
 	variables.eventURLFacade = new coldbox.system.cache.util.EventURLFacade();
+	variables.coldbox = new coldbox.system.web.Controller();
 	/**
 	 * Constructor
 	 */
@@ -36,7 +37,7 @@ component extends="coldbox.system.cache.providers.CacheBoxProvider" {
 	 *
 	 * @return IColdboxApplicationCache
 	 */
-	coldbox.system.cache.providers.CacheBoxColdBoxProvider function setColdBox( required coldbox ) {}
+	coldbox.system.cache.providers.CacheBoxColdBoxProvider function setColdBox( required coldbox.system.web.Controller coldbox ) {}
 	/**
 	 * Get the event caching URL facade utility that determines event caching
 	 *

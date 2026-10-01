@@ -390,7 +390,8 @@ func TestReturnOfACallOnAVariableIsNotTheVariable(t *testing.T) {
 // side: CommandBox's BaseCommand.command() is
 // `return getInstance( name='CommandDSL', … )`, and a componentResolver for
 // getInstance says what that is. A hop or index after the call, or anything
-// else in the expression, returns something else, and is left untyped.
+// else in the expression, returns something else. Constructor init preserves
+// the component; other methods require return lookup.
 func TestReturnOfAResolverMatchedCallIsTyped(t *testing.T) {
 	src := `component {
 	function command( name ) { return getInstance( name = "CommandDSL", initArguments = { name : name } ); }
@@ -406,7 +407,7 @@ func TestReturnOfAResolverMatchedCallIsTyped(t *testing.T) {
 	}}})
 	want := map[string]string{
 		"command": "models.CommandDSL", "positional": "models.Shell",
-		"chained": "", "indexed": "", "added": "", "other": "", "statement": "",
+		"chained": "models.Shell", "indexed": "", "added": "", "other": "", "statement": "",
 	}
 
 	for i := range pr.Funcs {

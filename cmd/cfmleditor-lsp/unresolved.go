@@ -99,13 +99,15 @@ func cmdUnresolved(args []string) {
 
 	// Collect files from workspace folders or args
 	scanRoots := args
-	if len(opt.WorkspaceFolders) > 0 {
+
+	configuredRoots := cfg != nil && len(cfg.WorkspaceFolders()) > 0
+	if configuredRoots {
 		scanRoots = opt.WorkspaceFolders
 	}
 
 	files := collectCFMLFiles(fsys, scanRoots)
 
-	scanFiles := scanTargets(fsys, args, len(opt.WorkspaceFolders) > 0)
+	scanFiles := scanTargets(fsys, args, configuredRoots)
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
 
@@ -137,13 +139,12 @@ func cmdUnresolved(args []string) {
 // unresolvedOptions builds the scan's options from the config, or from the
 // paths given when there is none.
 func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *unresolved.Options {
-	opt := &unresolved.Options{GlobalDefs: fl.globalDefs}
+	opt := &unresolved.Options{GlobalDefs: fl.globalDefs, WorkspaceFolders: cliWorkspaceFolders(vfs.OS{}, cfg, args)}
 	if fl.verbose {
 		opt.Verbose = os.Stderr
 	}
 
 	if cfg != nil {
-		opt.WorkspaceFolders = cfg.WorkspaceFolders()
 		opt.Mappings = cfg.Mappings()
 		opt.StartupFiles = cfg.StartupFiles()
 		opt.ExpressionMappings = cfg.ExpressionMappings()
@@ -172,14 +173,6 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 	if fl.write {
 		fmt.Fprintf(os.Stderr, "--write needs a .cfmleditor.json to say where the report goes\n")
 		os.Exit(1)
-	}
-
-	// Fallback: use args as workspace folders
-	for _, a := range args {
-		if info, err := os.Stat(a); err == nil && info.IsDir() {
-			abs, _ := filepath.Abs(a)
-			opt.WorkspaceFolders = append(opt.WorkspaceFolders, abs)
-		}
 	}
 
 	return opt

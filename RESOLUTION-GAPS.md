@@ -273,6 +273,118 @@ statement, an argument list, a `return`), and it fits in `CallSite`'s padding.
 on a line that held a `this.f()`; `TestThisCallsAreKnownWhereverTheyAreWritten`
 has that case and the tag-syntax ones. The corpus report is unchanged.
 
+### 8. Colon-named factory arguments lose their assigned type — fixed
+
+`getInstance(name: "coldbox.system.web.tasks.ColdBoxScheduler", ...)`
+was untyped in an assignment even though `name = "..."` worked. The
+assignment resolver's argument reader now accepts both separators, as do
+the framework id and DSL patterns. It also rejects a computed first argument
+whose string literal is only a prefix of the expression. ColdBox's scheduler
+and task specs alone lose 113 findings with presets from this change.
+`TestColonNamedArgumentTypesResolverAssignment` covers local, variables,
+this and dotted factory assignments; the computed-id regression keeps a
+concatenation from acquiring its prefix's component type.
+
+### 9. CFML argument type annotations are ignored — fixed
+
+ColdBox's `@mapping.doc_generic coldbox.system.ioc.config.Mapping` says what
+an otherwise untyped argument holds. Both parsers now recognize this form
+alongside JSDoc `@param`. Only a dotted component type is promoted, and only
+for an untyped, `any` or `struct` argument. Explicit component and array
+declarations stay intact; prose and array-element annotations are ignored.
+This types mapping, invocation, injector and cache-provider arguments from
+their source documentation rather than their variable names.
+
+Script argument refs are now stored with their function, as tag arguments
+already were. Previously a typed parameter leaked into every other method
+using the same name. A whole `arguments.name` assignment now preserves its
+declared component when a constructor stores it in a field or local variable;
+member reads and concatenations are not treated as the argument itself.
+The parser and resolver regressions verify valid methods, missing methods,
+explicit-type precedence, scope isolation and stored dependencies. They fail
+against the PR #189 merge without these fixes.
+
+**Measured against the PR #189 merge**, with the same pinned projects and
+default CLI roots used above:
+
+| Configuration | Before | After | Removed | Added | Net reduction |
+|---|---:|---:|---:|---:|---:|
+| Presets | 7,203 | 6,969 | 239 | 5 | 234 |
+| No presets | 15,138 | 14,872 | 309 | 43 | 266 |
+
+ColdBox accounts for most of the improvement: 1,673 → 1,444 with presets,
+3,737 → 3,458 without. ContentBox loses five findings in either mode. The
+separate Wheels scan including `vendor/wheels` changes 6,910 → 6,908 with
+presets (two removed), and stays at 13,262 without (12 removed, 12 added).
+Every comparison is per entry, including reason changes.
+
+The five preset additions now reach CacheFactory's untyped `getTaskScheduler`
+getter instead of accepting the receiver as dynamic. Without presets, 18
+TestBox additions are undocumented `testResults` arguments that previously
+borrowed a sibling method's type; the other 25 are ColdBox return-type and
+runtime-mixin gaps exposed by correctly typed receivers. Wheels' 12 no-preset
+additions are the same undocumented TestBox arguments in its bundled runner.
+These remain visible rather than being suppressed to reduce the totals.
+
+### 10. Generated getters ignore constructor field types — fixed
+
+A property without a declared type may still hold a known component:
+`variables.stats = new coldbox.system.cache.util.CacheStats()` types the field,
+but the generated `getStats()` previously returned nothing known. Getters now
+use existing variables-scope field refs when no property metadata types them.
+Local variables and `this.name` do not type the getter; explicit getter methods
+and primitive property types retain their declarations. Conflicting field
+types and unresolved call chains stay dynamic. Field types are collected once
+rather than scanning every ref for every property.
+
+Properties also recognize `doc_generic="models.Component"` for untyped,
+`any` and `struct` declarations, in both script and tag syntax. Array element
+annotations and prose are ignored, and explicit types win. This metadata
+types both the field and its generated getter; it alone changes no entries
+in the pinned corpus.
+
+ColdBox and TestBox stubs were regenerated from the same pinned commits.
+Generation now follows dotted argument component types as well as returns,
+so scoping argument refs correctly does not drop their dependencies, such as
+LogEvent. Interfaces retain an `interface` declaration and bodyless methods:
+emitting ICacheProvider as a concrete component falsely rejected provider
+methods such as `getOrSet` that its implementations add.
+
+Regression tests cover workspace and bundled getter chains, valid and missing
+methods, field scope, conflicting types, primitive declarations, explicit
+getters, property metadata and script/tag interfaces. Property/getter tests
+fail against the PR #189 merge. Generator tests fail without its changes with
+the corrected parser in place. Regenerating the 95 ColdBox/TestBox stubs again
+produces identical files and coverage. Build, vet, full short tests, full short
+race tests, pinned lint and diff checks pass.
+
+**Incremental comparison against PR #190's first commit (`f784d26`):**
+
+| Configuration | Before | After | Removed | Added | Net reduction |
+|---|---:|---:|---:|---:|---:|
+| Presets | 6,969 | 6,900 | 70 | 1 | 69 |
+| No presets | 14,872 | 14,801 | 76 | 5 | 71 |
+
+ContentBox improves 2,719 → 2,709 with presets and 7,862 → 7,849 without;
+ColdBox 1,444 → 1,395 and 3,458 → 3,401; TestBox 298 → 288 and 713 → 712.
+Lucee, FW/1 and the default Wheels root are unchanged per entry. The separate
+Wheels vendor scan improves 6,908 → 6,901 with presets (seven removed), and
+stays at 13,262 without (one removed, one added). Indexed/scanned file counts
+match in every comparison.
+
+The added preset finding reaches Injector's untyped `registerNewInstance`
+return. Five no-preset additions reach Controller's service getters,
+Injector's `getInstance`, and LogBox's `getConfig`, whose return components
+remain unknown. The Wheels no-preset addition now types `oMockGenerator` from
+its getter and exposes a component path that does not resolve in that corpus.
+CacheFactory's `getTaskScheduler` remains untyped; this change does not infer
+types from its `@see` links or conditional factory assignments.
+
+**Whole PR #190 against the PR #189 merge:** presets 7,203 → 6,900
+(309 removed, six added); no presets 15,138 → 14,801 (371 removed, 34 added).
+The separate Wheels vendor reports are 6,910 → 6,901 with presets (nine
+removed), and 13,262 → 13,262 without (13 removed, 13 added).
+
 ## Hand-maintained lists that could be generated
 
 - **`moduleHelpers`** (`internal/resolve/modules.go`): the cbi18n, cbfs and
@@ -312,7 +424,7 @@ These appear in the added-entries diff of #184 and were left as they are:
 | `getBeanPopulator()` has no return type (16 entries, ContentBox) | cborm 4.12 declares none and documents none. A fix belongs in the stub generator (infer from its body) or nowhere. |
 | cborm's `getWireBox()` has no return type (13, no presets) | The property is assigned `application.wirebox`, which nothing types. |
 | `DetailOutputService.error()` has no return type (13, cfwheels) | `error()` returns nothing, so `.output()` chained on it is a genuine error in wheels-cli. |
-| `getStats()`, `getRootLogger()`, `site()` and similar have no return type | They declare and document no type. |
+| `getRootLogger()`, `site()` and similar have no return type | They declare and document no type. Constructor-backed property getters such as `getStats()` are now inferred (gap #10). |
 
 ## Genuine findings the new rules exposed
 
@@ -389,3 +501,645 @@ against the source:
     it does not reduce the measured unresolved-call counts.
 - **Merge commit attribution:** the merge commit of `origin/main` on this
   branch lacks the attribution lines. Fixing it would need a force-push.
+
+## Masa CMS: literal startup bean registrations (5d136ab)
+
+Additional application corpus: [MasaCMS/MasaCMS](https://github.com/MasaCMS/MasaCMS),
+commit `696383140578f8dea3ece26f80cd7bfb370ddf0f` (7.6.1). Copy
+[`scripts/corpus/masacms.json`](scripts/corpus/masacms.json) to the checkout's
+`.cfmleditor.json`, then run `cfmleditor-lsp unresolved --json <checkout>`.
+Restore the checkout's original configuration afterward. The supplied mappings
+mirror applicationSettings.cfm; beanPaths and startupFiles expose the application's
+factory setup without adding hand-written alias rules. Development dependencies
+TestBox 2.3 and DocBox 2 are absent at this pin; this measurement adds no stubs.
+
+The default root scan indexes and scans **897 files**, excluding ten shipped CFML
+files under core/vendor. With identical configuration, literal registration
+inference reduces **18,539 → 16,860** findings: **1,820 removed, 141 added**.
+The additions mostly expose unknown return types further along MuraScope and bean
+call chains; they are retained rather than hidden by treating aliases as dynamic.
+The total equals the prior diagnostic experiment with 57 hand-written aliases.
+Its reason labels used dotted component names; automatically discovered absolute
+paths display component basenames, so 138 reason labels differ between those
+experiments despite identical unresolved call sites.
+
+Source examples at core/appcfc/onApplicationStart_include.cfm: `declareBean` at
+335, `content → contentBean`, `user → userBean`, `$ → MuraScope`, and chained
+bundle aliases at 337–389. The Adobe/Lucee-specific contentGateway registration
+has two distinct targets and remains untyped. Both the editor and CLI discover
+registrations before indexing return types, and refresh with resolver invalidation.
+Tests preserve missing-method diagnostics and ordinary component basename lookup.
+The existing six-project corpus and separate Wheels vendor scan are unchanged
+per entry, with matching file coverage, both with and without presets.
+
+The follow-up below handles setter injection on managed components. Remaining
+steps include FW/1 controller wiring, struct member assignments such as
+rc.contentBean, and shared-service loops/wrapper return types.
+The earlier ColdBox fluent-return and scheduler cases remain separate regressions
+to investigate. These semantic gaps should be measured under the supplied mappings
+rather than counted together with missing runtime mapping configuration.
+
+
+## Masa CMS: managed setter arguments and field types
+
+With the same configuration and **897 indexed/scanned files**, the follow-up
+reduces **16,860 → 16,557** findings: **392 removed, 89 added**, a net reduction
+of **303**. Relative to the scan before either Masa batch, the combined change
+is **18,539 → 16,557** (2,210 removed, 228 added). No corpus configuration or
+source files were changed.
+
+A CFC inside beanPaths can obtain a dependency through a public, single-argument
+`setName(Name)` method. Generic arguments receive a separate inferred component;
+declared signatures remain unchanged, and primitive/documented/explicit component
+types keep priority. Whole argument assignments propagate into fields and generated
+getters. Script, tag, and mixed tag/script functions preserve that type throughout
+region boundaries. Private, multi-argument, mismatched-name and unmanaged setters,
+computed values and argument members do not acquire the dependency's type.
+
+Removed groups include 193 calls on variables.configBean, 59 on
+variables.settingsManager, and 42 on variables.contentManager. Source examples
+include core/mura/bean/beanExtendable.cfc's setConfigBean at 103 and tag setters in
+core/mura/extend/extendManager.cfc at 294 and core/mura/client/httpSession.cfc at 90.
+Bean aliases also govern property/getter lookup: the user alias names userBean,
+rather than the same-basename SOAP user CFC. Real missing methods remain reported.
+
+The added findings expose untyped return chains on getSite/getClassExtensionManager
+and untyped parameters that previously borrowed a component field's type. In
+particular, a function argument shadows a field even when its type is unknown.
+The six-project corpus adds three findings with presets and four without: Lucee's
+_Mail.cfc getMails(smtpServer), ColdBox's MethodInvocationTest invokeMethod and
+invokeMethod2(invocation), and without presets an InterceptorStateTest event
+parameter. Source confirms these are generic parameters, not the same-named fields.
+ContentBox, TestBox, FW/1 and both Wheels scans remain unchanged per entry.
+
+Whole PR relative to merged PR #189: presets **7,203 → 6,903** (309 removed,
+9 added); no presets **15,138 → 14,805** (371 removed, 38 added), with matching
+coverage. ColdBox is now 1,397 / 3,404 and Lucee 1,985 in both modes. The separate
+Wheels vendor report remains 6,901 / 13,262.
+
+Editor indexing gives closed managed files the same getter/field types as open
+files and the CLI; lazy dependency indexing carries the same lookup. Bean-map
+cache ownership follows the resolver, so changed or removed bean roots replace
+stale entries. Regressions fail with setter inference disabled and cover missing
+methods, parameter shadowing, alias lookup, scope boundaries, declared signatures,
+closed-file indexing, configuration refresh, and script/tag/mixed syntax.
+
+FW/1's admin controllers sit outside the supplied bean roots: admin/Application.cfc
+sets its bean factory at 197, and admin/framework.cfc autowires controllers/services
+at 1249–1270 and 1401. The following batch models that managed scope separately.
+Struct members, shared-service loops, wrapper returns and runtime factory values
+remain subsequent work.
+
+## Masa CMS: source-backed FW/1 controller wiring
+
+The next batch recognizes the nearest Application.cfc extending a real FW/1
+implementation, with an explicit setBeanFactory call in setupApplication or global
+scope. The framework source must declare its factory/controller/autowire methods
+and call autowire from getCachedComponent (older controllers/services) or
+getCachedController (newer controllers). Preset stubs and a matching extends
+basename alone do not establish injection. The application scope is cached with
+the resolver and shared by editor, closed-file indexing and CLI parsing.
+
+Only direct controller/service files at the application's conventional base are
+managed; older explicit usingSubsystems=true permits one subsystem directory.
+Models, views, templates, deeper directories and nested applications are excluded.
+Conflicting literals, computed subsystem flags, struct-form settings, relocated
+bases, custom directories, subsystem factories and overridden setBeanFactory
+methods remain unsupported. A literal base default can be followed by a runtime
+expression, as in Masa's setFrameWorkBaseDir; only the static default is modeled.
+FW/1 3.5+'s subsystem-directory convention and automatic DI configuration remain
+separate work. Dependency identities still come from the configured workspace
+bean map and alias rules; runtime factory overrides are not modeled.
+
+With unchanged configuration and the same **897 indexed/scanned files**, Masa
+changes **16,557 → 16,355**: **223 removed, 21 added**, net **202**. The full PR
+changes **18,539 → 16,355**: **2,433 removed, 249 added**, net **2,184**. Removed
+calls include controller dependencies on permUtility, settingsManager,
+contentManager, contentUtility and utility. Every addition is a later untyped
+return-chain diagnostic: twenty on settingsManager.getSite(), one on
+trashManager.getTrashItem(). Real missing methods remain checked. All fourteen
+existing corpus comparisons, including both Wheels vendor scans, are unchanged
+per entry with matching indexed/scanned coverage.
+
+Scope, lazy-indexed getter, editor/closed-file and CLI regressions fail with the
+FW/1 scope hook disabled. Source inspection identifies the next dependencies:
+settingsManager.getSite() returns variables.sites[key], populated through a
+separate builder struct in setSites(); rc.contentBean assignments chain through
+contentBean.loadBy() and contentManager.read(). These need collection/struct
+member types and verified wrapper returns rather than a global rc component type.
+
+## FW/1 documentation review and revised follow-up
+
+The official [Developing Applications guide](https://framework-one.github.io/documentation/4.3/developing-applications/),
+[DI/1 guide](https://framework-one.github.io/documentation/4.3/using-di-one/), and
+[Subsystems guide](https://framework-one.github.io/documentation/4.3/using-subsystems/)
+give a broader contract than the Masa-specific source pattern above. Masa's
+embedded admin/framework.cfc identifies itself as **FW/1 1.2** at line 1202;
+the separate pinned FW/1 corpus is **4.3.2**. Treat their factory and loader
+conventions separately.
+
+- Modern FW/1 creates DI/1 automatically by default (`diEngine="di1"`), scanning
+  `model` and `controllers` unless diLocations changes them. An application need
+  not call setBeanFactory. Manual factory management uses `diEngine="none"`;
+  custom/AOP/WireBox engines and diComponent have distinct contracts.
+- Struct-form variables.framework configuration is documented application syntax.
+  The framework can also be constructed and delegated to without Application.cfc
+  extending it. Custom base/controller directories are documented settings.
+- DI/1 resolves constructors, explicit setters and implicit property setters.
+  Constructors can receive singletons or transients, while setters and properties
+  receive **singletons only**. Typed/defaulted properties are omitted by default
+  in current DI/1, subject to omitTypedProperties/omitDefaultedProperties.
+  Explicit constructor overrides and configured constants can replace bean values.
+- Subsystems 2.0 arrived in **3.5**, alongside legacy top-level subsystems; it did
+  not replace them in 4.0. Default subsystem locations are subsystems/name, and
+  each automatically managed subsystem factory inherits from the top-level
+  factory. Subsystem-local beans are not visible in the parent. An explicitly
+  supplied subsystem factory inherits only if a parent is actually installed.
+
+The current bean-root setter lookup has no lifetime metadata. A minimal configured
+bean-root fixture containing model/beans/User.cfc and a Consumer.setUser(user)
+resolves variables.user.run(), even though DI/1 would skip that transient setter.
+This is a correctness gap, not a measured corpus reduction. Do not apply a blanket
+transient exclusion to Masa's FW/1 1.2 controller loader: its separate autowire
+loop checks containsBean, not isSingleton. Factory-owned injection and framework
+fallback injection need distinct policies.
+
+Revised order for further resolution work:
+
+1. Model factory identity, DI mode/configuration and bean lifetime; preserve
+   aliases, transient rules, constants and explicit overrides. Add regressions
+   for dependencies that must remain uninjected before broadening scope.
+2. Support documented literal struct configuration and automatic DI locations,
+   then constructor injection and implicit property eligibility under that policy.
+3. Resolve legacy/new subsystem layouts and local/parent factory precedence;
+   cover custom literal base/controller directories and delegated applications.
+4. Return to collection/struct members and wrapper returns, including getSite()
+   and rc.contentBean, with those dependency types established.
+
+Use versioned documentation, pinned framework source, and real applications as
+complementary evidence. Dynamic or conflicting configuration remains unknown.
+
+
+## DI/1 factory lifetime and property eligibility
+
+The next correctness batch separates direct bean retrieval from factory-owned
+setter/property injection. Startup files and bounded literal includes recognize
+literal `new` DI/1 construction through real implementation/parent method
+metadata. Modern `Application.cfc extends="framework.one"` supplies the documented
+default DI/1 mode or literal struct/direct configuration. Manual factory setup,
+other engines and custom diComponent settings do not imply automatic DI/1.
+Only supplied bean roots gain setter inference; this does not yet discover new
+automatic roots or inject constructors.
+
+Factory policies honor immediate `beans` folders, configured transient folders,
+transient/singleton patterns, singular mappings, omitted directory aliases,
+literal exclusions, recursion, constants, explicit declaration lifetimes,
+alias chains and whole typed-value addBean registrations. Exclusions are
+case-insensitive literal substrings, matching DI/1 source rather than regexes.
+Conflicting factory identities/configuration, cycles and unsupported regexes
+withhold injection types. Direct getBean identity remains separately available.
+The older FW/1 controller fallback retains its containsBean policy.
+
+Property inference requires accessors=true or persistent=true, excludes
+setter=false and the default typed/defaulted metadata omissions, and honors
+literal omission flags. An ignored implicit property blocks a matching explicit
+setter; setter=false permits the separate explicit setter. Property declaration
+order and full document replacement retain the same behavior. Explicit source
+and documented component types remain authoritative.
+
+With unchanged configuration and **897 indexed/scanned files**, Masa changes
+**16,355 → 16,385**, **0 removed / 30 added**. This intentionally removes
+unjustified type assumptions rather than reducing the count: 23 findings involve
+manually populated variables.$ in contentCalendarUtilityBean, three involve an
+email local that previously borrowed a defaulted property's bean identity, two
+are oauth user getter chains, one is manually populated variables.content, and
+one is fileBean.getSite(). The types of manually supplied setter values need
+separate argument/member flow. Whole PR versus the same base is now
+**18,539 → 16,385**, **2,405 removed / 251 added**, net **2,154**.
+
+Lifetime/configuration, registration/alias, property/index, declaration-order,
+editor/closed-file/configuration-refresh and CLI regressions fail with the policy
+disabled and pass restored. Unquoted script property names, booleans and dotted CFC types are now parsed
+as complete literals. The pinned FW/1 corpus's generated getters resolve
+**508 → 409** with presets and **794 → 695** without, **99 removed / 0 added**
+in each mode over the same **305 indexed/scanned files**. All removed findings
+are getters on UserOneLevel/UserTwoLevel/UserThreeLevel and their Contact/Address
+chains in frameworkPopulateTest. The other twelve comparisons, including Wheels
+vendor coverage, preserve every per-entry finding and indexed/scanned count.
+The default six-project totals become **6,804 / 14,706**; whole PR compared with
+the original base is **408 removed / 9 added** with presets and **470 removed /
+38 added** without. Runtime factory replacement,
+computed registrations, auto-exclusion defaults, inherited property metadata,
+liberal pluralization and custom factory behavior are not modeled. Constructor
+injection, automatic root discovery and subsystem parent/local precedence remain
+next, followed by verified struct/collection member and wrapper return types.
+
+
+## DI/1 default constructor dependencies
+
+Known DI/1 factories now supply generic argument types to public `init` methods,
+including required/optional arguments and transient dependencies. This follows
+Masa's pinned IOC cleanMetadata constructor selection at 421–441 and its
+required/optional containsBean construction at 845–879. Inferred components stay
+separate from declared argument signatures, and declared/documented types remain
+authoritative. Whole arguments.name assignments type fields and generated
+getters using the existing scope-aware field flow. Script, tag and mixed syntax
+share the hook, including lazy indexing, editor parsing and CLI scans. The parser
+reuses its managed-argument callback slot, keeping its pinned struct size, and
+ordinary files do not allocate the factory callback.
+
+Only recognized factory roots supply constructor inference; generic bean roots,
+older FW/1 controller fallback scope, private init methods and custom construction
+implementations do not. Literal declaration overrides and getBean constructorArgs
+observed on the known factory receiver in configured startup sources suppress
+matching argument/property/setter types. Unknown override bags withhold those
+types; empty bags preserve the default. Registered instances/constants bypass
+factory construction and setter injection. Their known component identities can
+still serve as dependencies of other beans. Runtime calls outside startup
+sources, fluent override builders and inherited constructor metadata remain
+outside this static default-construction model.
+
+With unchanged configuration and **897 indexed/scanned files**, Masa changes
+**16,385 → 14,179**, **2,445 removed / 239 added**, net **2,206**. Removed findings
+include configBean, settingsManager and pluginManager constructor fields and
+subsequent values obtained through those dependencies. All additions were
+reviewed: **221** are settingsManager.getSite() return chains, **15** are
+configBean.getClassExtensionManager() chains, two are contentBean wrapper-return
+chains, and one is a newly checked missing emailGateway.getSessionSearch() call
+in dashboardManager. The actual method exists on sessionTrackingGateway, not on
+the indexed emailGateway. Real missing-method checking remains enabled.
+
+Whole PR against the same original base is now **18,539 → 14,179**,
+**4,850 removed / 490 added**, net **4,360**. All fourteen other corpus comparisons
+are unchanged per entry, with matching indexed/scanned coverage; six-project
+presets/no-presets totals remain **6,804 / 14,706**, Wheels vendor **6,901 / 13,262**.
+
+New constructor, lazy getter, editor/closed-file/engine-refresh and CLI
+regressions fail with the constructor lookup disabled. Separate override and
+registered-value regressions fail with the override gate disabled. Restored
+checks pass and preserve declared contracts, private/unmanaged boundaries,
+transient setter exclusion, sibling-parameter scope and real missing methods.
+Build, vet, full short/race suites, pinned lint (zero issues), formatting and
+diff checks pass. Collection/struct members and verified wrapper
+returns, automatic root discovery and subsystem factory precedence remain next.
+
+
+## Factory-backed wrapper return chains
+
+A whole returned factory call followed by method calls now follows the actual
+method return types, instead of stopping at the factory result. For example,
+`return getBean('Builder').configure().build()` returns Product when build's
+return contract names Product. This works in script, tag and mixed functions,
+including script islands inside tag functions without typed arguments. Known
+factory roots come from the configured resolver rules; this does not add
+framework or Masa-specific component names.
+
+Every recorded return expression must resolve to the same component. Unknown
+methods, conflicting components, primitive/unknown branches, indexed results,
+member reads and larger expressions with operators prevent concrete inference.
+Declared return contracts retain priority. Closure returns do not contribute to
+the enclosing function; full document replacement refreshes the inference.
+Without method lookup, only whole factory results and constructor/init chains
+can retain their identity. Existing shallow/lazy indexing without FuncLookup
+cannot verify arbitrary method chains; this batch does not change that boundary.
+Collection member flow and argument-sensitive polymorphic returns remain open.
+
+At the pinned Masa commit and unchanged **897 indexed/scanned files**, this
+batch changes **14,179 → 14,147**, **83 removed / 51 added**, net **32**. Removed
+findings cover factory-backed comment, user, iterator and plugin-setting wrappers.
+All 51 additions concern beanORM.loadBy(): the actual implementation at 918–924
+returns a query, a beanIterator or this according to returnFormat. Its last
+`return this` previously overrode the other paths. A concrete bean return is
+therefore withheld; specializing by a literal/default call argument is future
+work. Counts are not reduced by retaining the incorrect assumption.
+
+Whole PR against the same original base is now **18,539 → 14,147**,
+**4,927 removed / 535 added**, net **4,392**. All fourteen other corpus comparisons
+are unchanged per entry with matching indexed/scanned coverage; default six
+project totals remain **6,804 / 14,706**, Wheels vendor **6,901 / 13,262**.
+
+Parser regressions cover all three syntaxes, nested/multiline arguments, same
+and conflicting returns in either order, primitive and component contracts,
+unknown methods, indexing/operators, closures and full replacement. A resolver
+integration checks the actual final component and preserves a missing method
+that belongs only to the original builder. These tests fail with the new return
+settlement disabled and pass restored. The parser's pinned struct sizes remain
+unchanged; return observations reuse pending-call storage, and files without
+configured resolvers skip this inference.
+
+Raw parser call extraction is unchanged per entry (60,546 records in each
+version). The CLI resolved-plus-reported sum is a filtered statistic and falls
+by three; builtin filtering and missing-base grouping prevent treating that sum
+as call coverage. Full build, vet, short/race suites, pinned lint (zero issues),
+formatting and diff checks pass.
+
+
+## Uniform struct-element return contracts
+
+Getters returning an indexed struct value now retain a component contract when
+all observed element writes agree. Static dot keys and bracket keys contribute
+values; whole aliases share writes while element copies form directed
+dependencies. An empty
+struct initializer plus a typed write can ground a copy cycle, while an empty or
+uninitialized source cannot borrow a type from its reader. Whole-struct getters
+keep their existing contract and never acquire the element's CFC type.
+
+Element sources come from explicit constructors, configured factories or the
+actual return contracts of methods on known receivers. No framework or Masa
+component names are hardcoded. Unknown writes, conflicting component/primitive
+values, whole replacement, recognized mutators and tag output bindings prevent
+inference. Local/argument names cannot borrow component fields, and variables
+and this remain separate. Computed writes into a scope and parent replacement
+invalidate affected collections. Every explicit return must be an indexed value
+with the same final component; declared return types retain priority.
+
+Closed-file indexing retains compact component/method source contracts rather
+than guessing the method receiver's identity. Resolver lookup follows current
+indexed definitions, so a producer edit changes an existing getter immediately.
+Compaction detaches strings and nested method slices from parse storage. Source
+unions are limited to sixteen distinct contracts; deferred lookup is bounded to
+eight recursive levels and a shared budget of 128 source/method steps. Cycles,
+unknown dependencies and exceeded limits withhold a concrete type.
+
+This models observed static writes, not arbitrary reflective/runtime mutations
+or mutations through escaped structs. Closure bindings are not yet modeled by
+this collection analysis: files containing script closures withhold its new
+inference. Arrays, object-guarded lazy members, argument-sensitive polymorphic
+returns and arbitrary wrapper chains without FuncLookup remain open. Masa's
+getClassExtensionManager() is not safe to infer from isObject alone: configBean
+also permits computed instance-field replacement through setValue().
+
+At the same Masa commit and unchanged **897 indexed/scanned files**, this batch
+changes **14,147 → 13,749**, **451 removed / 53 added**, net **398**. Removed
+findings include settingsManager.getSite() and resource-bundle lookups. All 53
+additions are downstream settingsBean contracts now reached through getSite:
+getRBFactory (22), getContentRenderer (21), getApi (6), getCacheFactory (4).
+The first two involve lazy/externally supplied object members; getApi constructs
+computed component names, and cacheFactories is nested under a replaceable
+instance struct. These remain unknown rather than assuming receiver identity.
+
+Whole PR against the original base is now **18,539 → 13,749**,
+**5,101 removed / 311 added**, net **4,790**. All fourteen other corpus
+comparisons remain unchanged per entry, with matching indexed/scanned coverage.
+Six-project presets/no-presets totals stay **6,804 / 14,706**, Wheels vendor
+**6,901 / 13,262**. Raw Masa parser call extraction is identical per entry:
+**60,546 records** in each version. The CLI resolved-plus-reported statistic is
+filtered and is not raw call coverage.
+
+Parser cases cover script, tag and mixed functions, agreeing/conflicting writes
+and returns, grounded/ungrounded copies, shadowing, dynamic scope and parent
+writes, operators, closures, mutators, tag output bindings and declared types.
+Resolver integration covers closed indexing, canonical agreement, conflicting
+and primitive producer returns, recursive getters, dependency replacement and
+real missing methods on the final CFC. Regressions fail with collection
+settlement disabled; the closed-file regression separately fails with deferred
+lookup disabled. Restored checks, build, vet, full short/race suites, pinned lint,
+formatting and diff checks pass.
+
+
+## Automatic mappings, literal bootstrap services and explicit record members
+
+Mapping discovery now reads the governing Application's literal includes and
+relative parent constructors, including dot assignments and whole mapping
+structs. Known path variables, current/base template paths and literal
+left/right length arithmetic preserve the declaring template's context. Whole
+struct RHS expressions read the previous struct before replacement, so map
+iteration order cannot create a false dependency. Comments, computed paths and
+cyclic/deep include traversal do not execute CFML; traversal is bounded to 64
+files and 16 levels. Repeated includes and mapped parent aliases are not yet
+modeled as distinct execution contexts.
+
+Physical non-root CFConfig mappings are defaults, loaded from the nearest
+.cfconfig.json or a static server.json cfconfig.file selection (up to 32 ancestor
+directories). Relative physical paths are based on the selected config file.
+Archive-primary entries and environment/runtime placeholders remain unknown.
+Application declarations override defaults and explicit editor configuration
+wins case-insensitively. Watched includes, parent CFCs and JSON changes invalidate
+mapping and resolver caches; the known-issues reload path retains priority.
+
+Finite script listToArray loops now model shared-scope service installation.
+The list must be literal (at most 64 simple IDs), key and bean interpolation must
+use the same iterator, and nested loops, closures and iterator mutations are
+excluded. The actual factory must expose getBean(beanName) and
+declareBean(beanName,dottedPath); configured/registered bean identities supply
+the component, never a service-name guess. Scalar variables-scope factory writes
+and shared aliases are followed with bounded recursion. Unknown factory
+replacements, absent beans and conflicting/unknown service writes withhold the
+new loop inference.
+
+Explicit static record writes such as rc.$=getBean('$') or
+variables.instance.gateway=new Gateway() type that exact member without typing
+the container. Constructors, configured factories and verified return contracts
+supply identities. Unknown/conflicting writes, dynamic keys, parent replacement,
+recognized mutators, escaping container aliases and closure-containing source
+withhold new inference. Record paths retain their full identity: arguments.data.$
+cannot borrow an unrelated $. Local/argument roots shadow component record fields,
+and variables/this remain distinct. Body edits invalidate ref/link caches and
+recompute member bindings from current content. Struct-literal members, arbitrary
+record aliases, object property contracts and generic keyed event values remain
+open; getValue('MuraScope') is not typed from its key alone because externally
+supplied data and arguments can replace that slot.
+
+At the pinned Masa commit, with the existing configuration and the same **897
+indexed/scanned files**, this batch changes **13,749 → 12,288**, **1,490 removed /
+29 added**, net **1,461**. The removed groups include 673 application.settingsManager,
+133 application.serviceFactory, 122 application.contentManager, 106
+application.permUtility and 95 application.pluginManager findings. All 29
+additions were reviewed: fifteen arguments.data record findings, five rc.$,
+one arguments.rc.userBean, six newly reached return-chain gaps, and two checked
+missing methods (emailDAO.getSubject and userManager.readByEmail). Whole PR
+against the original base is **18,539 → 12,288**, **6,576 removed / 325 added**,
+net **6,251**.
+
+Removing only the manual mappings, while retaining bean/startup/resolver config,
+changes **17,488 → 13,484**, **4,189 removed / 185 added**, net **4,004** over the
+same 897 files. All eleven root mappings are discovered from source. This is
+not identical to the configured run: nested access-restriction Applications
+under core/mura and other directories do not declare those mappings. Library
+analysis needs the calling application's mapping context to bridge that gap;
+blindly inheriting parent mappings would break application isolation.
+
+All fourteen other corpus comparisons retain indexed/scanned coverage.
+ContentBox changes 2,709→2,705 / 7,849→7,845 (five removed, one added per mode).
+TestBox changes 288→291 / 712→715 (three thread-attribute findings per mode).
+Default Wheels changes 16→18 / 61→63 (two argument-record findings per mode).
+ColdBox changes 1,397→1,404 / 3,404→3,411 (seven record findings per mode).
+Lucee and FW/1 are unchanged per entry. Six-project totals are **6,812 / 14,714**.
+Wheels vendor coverage changes **6,901→6,915** (five removed, nineteen added)
+and **13,262→13,264** (three removed, five added). New findings involve thread
+attributes, struct literals, returned records, dynamic object properties and
+mock members previously accepted by the incorrect last-segment fallback.
+Every new entry has a source review; reductions are not obtained by losing files.
+
+A fresh raw-call capture immediately after AllCalls in the actual CLI scan
+preserves all **60,921 records per entry** in both versions. The earlier 60,546
+capture used a different probe path; it is not directly comparable. Filtered
+resolved-plus-reported totals remain unsuitable as raw coverage measurements.
+Regressions fail independently when source walking, CFConfig loading, startup
+loop inference, member settlement or preserved record identity is disabled,
+then pass restored. Build, vet, full short/race suites, pinned lint, formatting,
+diff and parser performance checks pass. CI must be checked on the published
+commit, as for earlier batches.
+
+
+### Caller mappings across library traversal
+
+Method lookup, inherited methods, documented returns and deferred collection
+return sources now retain the calling application's mappings as traversal enters
+physical library directories. A nearby request-blocking Application.cfc does not
+replace the caller's mappings. Relative component paths and source injection
+policy still use the declaring file. Cached views are isolated per application;
+shared source indexing remains caller-independent. Bootstrap registration
+validation discards provisional views before the finalized bean rules are used.
+Resolver recreation after configuration/source invalidation refreshes the views.
+
+Tests use two applications mapping the same namespace to different components,
+in both lookup orders, and check missing methods, call targets, explanations,
+nested application boundaries, direct library lookup, explicit mapping precedence
+and mapping refresh with a shared source index. Both the caller-context and
+bootstrap-cache regressions fail behaviorally with their fixes disabled.
+
+With manual mappings removed, pinned Masa now changes **13,484 → 13,450**,
+**44 removed / 10 added**, net **34**, over the same **897 indexed/scanned files**.
+Successfully checked calls increase **19,584 → 19,674**. Thirty-four removed
+entries are grouped broken inheritance findings and ten are rc.comment receiver
+findings. All ten additions reach deeper unknown return chains: five
+getCurrentUser/getValue/setValue calls, and five polymorphic loadBy chains.
+They remain unknown because request/session values and argument-sensitive
+query/iterator/self results are not a single component contract. The explicitly
+configured Masa report remains **12,288 unresolved / 24,227 accepted**, unchanged
+per entry. Raw extraction remains **60,921 identical call records**.
+
+All fourteen other corpus comparisons preserve indexed/scanned coverage. FW/1
+without presets changes **695 → 692**, three grouped broken-base findings removed
+and no additions; **60 more calls** are checked. All other comparisons are
+unchanged per entry. Six-project default totals are **6,812 / 14,711**; explicit
+Wheels vendor coverage remains **6,915 / 13,264**.
+
+This fixes traversal when a caller is known. Scanning a library file directly
+still uses its own nearest Application; selecting a runtime caller for that
+standalone scan requires evidence rather than blanket parent inheritance.
+Unknown record/argument contracts and polymorphic return values remain the
+largest follow-up groups.
+
+### CLI roots when workspacePaths is omitted
+
+A config containing only presets/mappings previously left CLI resolvers with
+no WorkspaceFolders, even though the commands indexed the requested directories.
+The scan could read vendor/wheels while wheels.Mapper failed to resolve. Default
+workspace roots now follow the requested directories for unresolved, dependencies,
+graph/routes (including per-file config views), explain and MCP explanations.
+Explicit workspacePaths keep priority. File targets supply their parent for
+lookup without expanding the indexed/scanned set. Configured explain now indexes
+its requested root rather than an empty list.
+
+At the pinned Wheels commit, explicitly including vendor/wheels retains **1,195
+indexed/scanned files**. With presets, unresolved entries change **6,915 → 4,319**,
+**3,038 removed / 442 added**, net **2,596**; accepted calls **42,032 → 44,982**.
+Without presets, entries change **13,264 → 9,912**, **4,976 removed / 1,624 added**,
+net **3,352**; accepted calls **5,410 → 38,479**. The much larger accepted increase
+reflects previously unchecked grouped inheritance failures, not extra files.
+
+Every addition has source context and a comparison with prior findings. Preset
+additions comprise 294 runtime Mapper mixin lookups, 109 unqualified lookups,
+25 mapper return chains and 14 adapter/property/injected/Java/mixin findings.
+Without presets the groups are 641 untyped _controller receivers, 380 unqualified
+lookups, 294 Mapper mixins, 224 model factories, 25 mapper chains and 60 other
+runtime object/adapter/factory/property cases. These reveal deeper resolver
+limitations after actual framework components are found. They are not claims
+of missing runtime methods: Mapper.init copies methods from wheels.mapper CFCs,
+and init().adapter property flow remains unsupported.
+
+All fourteen corpus comparisons retain index/scan coverage. Default Lucee changes
+**1,985 → 1,976** in both modes; TestBox **291 → 286 / 715 → 710**; default Wheels
+**18 → 17 / 63 → 62**; FW/1 without presets **692 → 687**. These comparisons have
+no additions. ContentBox, ColdBox and FW/1 with presets are unchanged per entry.
+Default six-project totals become **6,797 / 14,691**. Masa remains unchanged:
+configured **12,288 unresolved / 24,227 accepted**, automatic mappings **13,450 /
+19,674**, over the same 897 files. Actual CLI raw-call captures preserve every
+record per entry: **60,921** for Masa, **67,931** for Wheels with presets and
+**67,484** without. Filtered totals remain distinct from raw coverage. Regression proofs cover omitted/explicit configuration, package roots,
+missing methods, command agreement and single-file scan coverage.
+
+### Wheels Mapper runtime component integration
+
+Mapper.init copies public methods from `wheels.mapper` CFCs into both `variables`
+and `this`. The resolver now recognizes the literal initializer and cached-plan
+consumer from source, checks Global's plan producer and the copier's public
+filter, and reads the nonrecursive mapper directory. Namespace lookup honors
+mappings even when the framework's physical directory has another name. The
+method's original source location and required arguments remain available.
+Private, package and remote methods are excluded, including script `access`
+attributes. Unused, conditional, closure, computed and no-op loaders do not
+provide this policy. Global helper overrides and cyclic inheritance are checked
+without recursively re-entering Mapper loader discovery.
+
+Copied methods replace Mapper's own members, matching the loader's assignments.
+Competing package definitions have no stable directory order and are withheld,
+including fallback to an overwritten own method. Source bytes and directory
+contents are rechecked; only lexical work is cached. Bound definitions are
+copies, so another lookup on the original source holder keeps its own return
+contract. Fluent returns follow `this` and self-method return chains, including
+recursive `$match` branches, with an actual self-return anchor and bounded
+recursion. Mixed values, foreign receivers and unanchored cycles stay unknown.
+
+Pinned Wheels with explicit vendor coverage changes **4,319 → 4,023** unresolved
+with presets and **9,912 → 9,616** without: **296 removed, zero added** in each
+mode. The removals are 294 `$draw` calls/chains and two `end` calls. Successfully
+checked calls increase **44,982 → 45,292** and **38,479 → 38,789**, respectively.
+All 1,195 indexed/scanned files and all raw call records are preserved per entry:
+**67,931** with presets and **67,484** without. Filtered accepted/report counts
+remain distinct from raw extraction coverage.
+
+All twelve default corpus comparisons are unchanged per entry; totals remain
+**6,797 / 14,691**. Masa configured remains **12,288 unresolved / 24,227 accepted**;
+automatic mappings remain **13,450 / 19,674**, over 897 indexed/scanned files.
+Configured Masa preserves **60,921 identical raw call records**. Independent
+regression proofs fail when either method integration or return binding is
+disabled, and pass with both restored.
+
+This covers the source shape of the pinned Mapper's cached-plan loader, not
+arbitrary runtime function copying or every Wheels release. Directory discovery
+is bounded to 128 entries; fluent proof to depth eight and 64 method expansions.
+Global's separately copied API, Controller's view/controller integration and
+`super` aliases, Model factory context, plugin/package overrides and terminal
+`init().adapter` property flow remain follow-up work.
+
+### Wheels loader and property follow-up (PR #190)
+
+At pinned Wheels `ef04365`, the Controller initializer integrates public methods
+from `wheels.controller` and `wheels.view`. Resolution now validates that loader,
+its cached public-method plan and copy policy. Application and inherited overrides
+keep priority; an observed override exposes the framework original as
+`super<name>`, with its original definition and arguments. Conditional/no-op
+loaders, overridden initialization/helpers, conflicting copies and inaccessible
+methods do not acquire this inference. Mapper also receives the public Global
+API copied by its loader, including the source-declared Adobe include fallback.
+
+WheelsTest's source-declared public helper binder and literal Global binding
+supply inherited Global helpers. The observed startup `mapper()` return and
+literal `$createObjectFromRoot` calls, including the spec's config-merging
+`$mapper()` wrapper, supply Mapper identities. Wrapper arguments remain specific
+to their call; config mutations, unknown argument bags, modified factories,
+primitive contracts and ambiguous same-line root calls withhold the result.
+
+A terminal property in `new Migration().init().adapter` no longer retains the
+Migration type. Dot-property hops follow indexed public `this` assignments,
+including inherited fields. Private fields do not supply public properties;
+unknown, conflicting and computed replacement writes withhold a concrete type.
+The computed database adapter remains dynamic. Property reads are separate from
+method calls and preserve existing ordinary call identities.
+
+With vendor explicitly included, the batch changes Wheels from **4,023 to
+3,275** unresolved with presets (750 removed, two added), and **9,616 to 8,929**
+without presets (846 removed, 159 added), over the same 1,195 indexed/scanned
+files. Most additions expose model-return chains after the real Global helper
+is found; they are remaining inference gaps, not established runtime defects.
+The twelve default scans total 6,796 / 14,690 unresolved. A Lucee safe-navigation
+finding changes reason, and one ColdBox property chain now resolves. Masa's
+897-file configured and automatic-mapping findings remain unchanged per entry.
+
+Remaining Wheels work includes argument-sensitive model/controller lookup through
+runtime model/controller paths, plugin and package overrides, arbitrary helper
+copying, collection/guarded lazy returns, computed adapter identities and Java
+returns. Other Wheels versions need their loader contracts checked independently.

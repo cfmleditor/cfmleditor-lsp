@@ -39,13 +39,13 @@ component {
 	 * @cacheProvider             The associated cache manager/provider of type: coldbox.system.cache.providers.ICacheProvider
 	 * @cacheProvider.doc_generic coldbox.system.cache.providers.ICacheProvider
 	 */
-	coldbox.system.cache.util.CacheStats function init( required cacheProvider ) {}
+	coldbox.system.cache.util.CacheStats function init( required coldbox.system.cache.providers.ICacheProvider cacheProvider ) {}
 	/**
 	 * Get the associated cache provider/manager of type: coldbox.system.cache.providers.ICacheProvider
 	 *
 	 * @return coldbox.system.cache.providers.ICacheProvider
 	 */
-	function getAssociatedCache() {}
+	coldbox.system.cache.providers.ICacheProvider function getAssociatedCache() {}
 	/**
 	 * Get the cache's performance ratio
 	 */

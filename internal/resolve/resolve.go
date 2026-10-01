@@ -22,10 +22,17 @@ import (
 
 // Resolver resolves component dot-paths to files and functions.
 type Resolver struct {
+	Discovery         *DiscoveryDependencies
+	configurationOnce sync.Once
+	// Context views keep runtime mappings while traversing physical library files.
+	callerMappings     map[string]string
+	contextViews       map[string]*Resolver
+	indexer            *Resolver
 	FS                 vfs.FS
 	WorkspaceFolders   []string
 	Mappings           map[string]string
-	StartupFiles       []string // configured startup templates, absolute; see startup.go
+	BeanPaths          map[string]string // configured factory-managed bean roots
+	StartupFiles       []string          // configured startup templates, absolute; see startup.go
 	ExpressionMappings map[string]string
 	Index              *index.Index
 	Resolvers          []parser.Resolver
@@ -41,19 +48,25 @@ type Resolver struct {
 	// a framework component nothing on disk does: calls on it are checked,
 	// and completion and hover see its methods. Nil for none. See
 	// internal/frameworkapi.
-	Stubs         *frameworkapi.Set
-	stubFS        vfs.FS
-	mu            sync.RWMutex
-	appRootCache  map[string]string          // dir → Application.cfc root
-	slugCache     map[string]string          // dir → its box.json slug, "" for none
-	resolveCache  map[string]string          // component+"\t"+baseDir → file path
-	dirCache      *cfpath.DirCache           // directory listings behind those resolutions
-	incGraph      *includeGraph              // the index's cfincludes, rebuilt when they change
-	exprKeys      []string                   // ExpressionMappings' keys in the order they apply
-	implicitCache map[string]string          // path → ImplicitExtends(path)
-	helpers       *helperSet                 // application helper templates, per set of config files
-	wb            *wireboxWorkspace          // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
-	startupCache  map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	Stubs          *frameworkapi.Set
+	stubFS         vfs.FS
+	mu             sync.RWMutex
+	appRootCache   map[string]string   // dir → Application.cfc root
+	slugCache      map[string]string   // dir → its box.json slug, "" for none
+	resolveCache   map[string]string   // component+"\t"+baseDir → file path
+	dirCache       *cfpath.DirCache    // directory listings behind those resolutions
+	incGraph       *includeGraph       // the index's cfincludes, rebuilt when they change
+	exprKeys       []string            // ExpressionMappings' keys in the order they apply
+	implicitCache  map[string]string   // path → ImplicitExtends(path)
+	helpers        *helperSet          // application helper templates, per set of config files
+	wb             *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
+	beanPathsCache map[string]string   // merged application/configured bean roots
+	fw1Scopes      map[string]fw1Scope // nearest application's source-defined injection scope
+	diOnce         sync.Once
+	diPolicies     []diPolicy                 // source-backed DI/1 injection contracts
+	discoveringDI  bool                       // private policy discovery never re-enters injection lookup
+	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
+	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
 }
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
@@ -527,6 +540,10 @@ func (r *Resolver) inFolderNamed(component string, dirs *cfpath.DirCache) string
 // asking the second question re-read and re-parsed every such file on every
 // single lookup, since re-indexing it produced the same empty result.
 func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
+	if r.indexer != nil {
+		return r.indexer.EnsureIndexed(cfcPath)
+	}
+
 	cfcURI := cfpath.ToURI(cfcPath)
 
 	if !r.Index.HasFile(cfcURI) {
@@ -535,7 +552,7 @@ func (r *Resolver) EnsureIndexed(cfcPath string) []*parser.FunctionDef {
 			return nil
 		}
 
-		r.Index.IndexFile(cfcURI, string(data))
+		r.Index.IndexFileWithOptions(cfcURI, string(data), &parser.ParseOptions{Resolvers: r.Resolvers, SetterLookup: r.SetterLookup(cfcPath), ConstructorLookup: r.ConstructorLookup(cfcPath), BeanLookup: r.InjectionBeanLookup(cfcPath), PropertyBeanLookup: r.InjectionPropertyLookup(cfcPath)})
 	}
 
 	return r.Index.FunctionsForFile(cfcURI)
@@ -562,6 +579,12 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		chain = append(chain, cfcPath)
 		cfcURI := cfpath.ToURI(cfcPath)
 
+		// Mapper copies its package methods over existing members. An ambiguous
+		// copy must not fall back to the definition it may have overwritten.
+		if d, copied := r.wheelsMapperFunc(cfcPath, funcName); copied {
+			return d
+		}
+
 		defs := r.EnsureIndexed(cfcPath)
 		for _, d := range defs {
 			if strings.EqualFold(d.Name, funcName) {
@@ -585,6 +608,14 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		if d := r.includedFunc(p, funcName); d != nil {
 			return d
 		}
+	}
+
+	if d := r.wheelsControllerFunc(chain, funcName); d != nil {
+		return d
+	}
+
+	if d := r.wheelsTestGlobalFunc(chain, funcName); d != nil {
+		return d
 	}
 
 	// A delegated method never replaces one the object has (Injector.cfc
@@ -823,6 +854,10 @@ func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bo
 // ResolveFunc finds a function definition by component path and function name,
 // handling pipe-separated alternatives, absolute paths, and the extends chain.
 func (r *Resolver) ResolveFunc(component, funcName, baseDir string) *parser.FunctionDef {
+	if context := r.forCaller(baseDir); context != r {
+		return context.ResolveFunc(component, funcName, baseDir)
+	}
+
 	alternatives := []string{component}
 	if strings.Contains(component, "|") {
 		alternatives = strings.Split(component, "|")
@@ -916,9 +951,13 @@ func (r *Resolver) EffectiveMappings(baseDir string) map[string]string {
 }
 
 func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
+	if r.indexer != nil {
+		return r.callerMappings
+	}
+
 	appDir := r.FindApplicationRoot(baseDir)
 	if appDir == "" {
-		return r.Mappings
+		appDir = baseDir
 	}
 
 	appMappings := cfpath.LoadAppMappings(appDir)
@@ -933,7 +972,15 @@ func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 	merged := make(map[string]string, len(appMappings)+len(r.Mappings))
 	maps.Copy(merged, appMappings)
 
-	maps.Copy(merged, r.Mappings)
+	for key, value := range r.Mappings {
+		for existing := range merged {
+			if strings.EqualFold(existing, key) {
+				delete(merged, existing)
+			}
+		}
+
+		merged[key] = value
+	}
 
 	return merged
 }
@@ -946,7 +993,7 @@ func (r *Resolver) ResolveFromCall(expr string) string {
 // CanResolveCall determines whether a function call can be resolved given the
 // parse result context. Returns empty string if resolved, or a reason if not.
 func (r *Resolver) CanResolveCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) string {
-	return r.canResolveCall(call, pr, baseDir, nil)
+	return r.forCaller(baseDir).canResolveCall(call, pr, baseDir, nil)
 }
 
 // ExplainCall runs the same resolution logic as CanResolveCall but also returns a
@@ -956,7 +1003,7 @@ func (r *Resolver) CanResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 // for the `explain` CLI command; not used on the hot lint path.
 func (r *Resolver) ExplainCall(call *parser.CallSite, pr *parser.ParseResult, baseDir string) (string, []string) {
 	tr := &callTrace{}
-	reason := r.canResolveCall(call, pr, baseDir, tr)
+	reason := r.forCaller(baseDir).canResolveCall(call, pr, baseDir, tr)
 
 	return reason, tr.steps
 }
@@ -1169,6 +1216,22 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 			break
 		}
 
+		if property, ok := parser.PropertyName(hop); ok {
+			ret := r.publicPropertyComponent(comp, property, baseDir)
+			if ret == "" {
+				return comp, softComp, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + funcName + "')", true
+			}
+
+			comp = ret
+
+			continue
+		}
+
+		expression, callHop := parser.CallExpression(hop)
+		if callHop {
+			hop = wheelsCallName(expression)
+		}
+
 		fd := r.ResolveFunc(comp, hop, baseDir)
 
 		// A decoration returns the mock it is called on, so the chain goes on
@@ -1185,6 +1248,10 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
+		if ret == "" && callHop {
+			ret = r.wheelsFactoryReturn(fd, expression, baseDir)
+		}
+
 		if soft {
 			softComp = ret
 		}
@@ -1280,7 +1347,7 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 	if r.fileExtends(pr) != "" {
 		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, funcName, baseDir); def != nil {
 			tr.hit(TargetExtends, r.fileExtends(pr), def)
 			tr.addf("found %q in extends chain", funcName)
 
@@ -1359,6 +1426,8 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
 	first := call.Chain[0]
 
+	expression := factoryCallExpression(pr.Content, first, int(call.Line))
+
 	tr.addf("chained on a call to %q — looking it up as an unqualified call", first)
 
 	def := r.bareFunc(first, pr, baseDir)
@@ -1391,6 +1460,10 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 	}
 
 	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
+	if ret == "" && expression != "" {
+		ret = r.wheelsFactoryReturn(def, expression, baseDir)
+	}
+
 	if ret == "" {
 		if e := r.receiverReturn(cfpath.FromURI(string(pr.URI)), first); e != "" {
 			tr.addf("%q on this component returns what it binds it to: %q", first, e)
@@ -1436,7 +1509,7 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 	}
 
 	if r.fileExtends(pr) != "" {
-		if def := r.ResolveFunc(r.fileExtends(pr), name, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, name, baseDir); def != nil {
 			return def
 		}
 	}
@@ -1465,7 +1538,7 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 	if r.fileExtends(pr) != "" {
 		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, funcName, baseDir); def != nil {
 			tr.hit(TargetExtends, r.fileExtends(pr), def)
 
 			return ""
@@ -1827,6 +1900,40 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // `returntype="pkg.tassui"` is a contract the engine enforces. Any other
 // inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
+	budget := 128
+
+	return r.returnComponentOf(fd, 0, &budget)
+}
+
+func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *int) string {
+	if depth > 8 {
+		return ""
+	}
+
+	if fd.ReturnComponent == "" || fd.ReturnComponent == "$any" {
+		if ret := r.wheelsFixedMapperReturn(fd); ret != "" {
+			return ret
+		}
+	}
+
+	if len(fd.ReturnSources) > 0 {
+		switch strings.ToLower(fd.ReturnType) {
+		case "", "any", "component", "object":
+		default:
+			if strings.Contains(fd.ReturnType, ".") {
+				if p := r.besideDeclaring(fd, fd.ReturnType); p != "" {
+					return p
+				}
+
+				return fd.ReturnType
+			}
+
+			return r.bareReturnComponent(fd)
+		}
+
+		return r.collectionReturnOf(fd, depth, budget)
+	}
+
 	switch {
 	case fd.ReturnComponent != "" && fd.ReturnComponent != "$any":
 		// `return new Expectation( … )` names the component beside the
@@ -1911,7 +2018,18 @@ func (r *Resolver) isInterface(path string) bool {
 // resolved from baseDir: ParseOptions.FuncLookup, which types a variable
 // assigned from a call on another component.
 func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) string {
+	r = r.forCaller(baseDir)
+
 	return func(component, funcName string) string {
+		if property, ok := parser.PropertyName(funcName); ok {
+			return r.publicPropertyComponent(component, property, baseDir)
+		}
+
+		expression, callHop := parser.CallExpression(funcName)
+		if callHop {
+			funcName = wheelsCallName(expression)
+		}
+
 		fd := r.ResolveFunc(component, funcName, baseDir)
 		if fd == nil {
 			return ""
@@ -1923,6 +2041,12 @@ func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) s
 			}
 
 			return ret
+		}
+
+		if callHop {
+			if ret := r.wheelsFactoryReturn(fd, expression, baseDir); ret != "" {
+				return ret
+			}
 		}
 
 		return r.receiverReturn(r.ComponentPath(component, baseDir), funcName)
@@ -2188,6 +2312,39 @@ func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseRes
 	return comp
 }
 
+func (r *Resolver) recordReceiver(variable, name string, scope parser.RefScope, line uint32, caller string, pr *parser.ParseResult) string {
+	if ref := funcScopedRef(pr, line, name, scope); ref != nil {
+		return ref.Component
+	}
+
+	root, _, _ := strings.Cut(name, ".")
+
+	explicit := strings.HasPrefix(strings.ToLower(variable), "variables.") || strings.HasPrefix(strings.ToLower(variable), "this.")
+	if !explicit && argumentOf(pr, caller, root) != nil {
+		return ""
+	}
+
+	if !explicit {
+		if strings.HasPrefix(strings.ToLower(variable), "local.") || strings.HasPrefix(strings.ToLower(variable), "arguments.") {
+			return ""
+		}
+
+		if fs := parser.FindFuncScopeAt(int(line), pr.Scopes); fs.Start != -1 {
+			for _, local := range pr.FuncVars(fs.Start, fs.End) {
+				if strings.EqualFold(local, root) {
+					return ""
+				}
+			}
+		}
+	}
+
+	if ref := fileLevelRef(pr, line, name, scope); ref != nil {
+		return ref.Component
+	}
+
+	return ""
+}
+
 // receiverComponent finds the component a qualified call's receiver holds at
 // line: a ref scoped to the enclosing function, the nearest preceding ref in the
 // file, an Application.cfc ref, an ARGUMENTS.x type, and refs up the extends
@@ -2199,6 +2356,9 @@ func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseRes
 // of primitive type calling a known member method, which canResolveCall
 // accepts outright. It needs funcName; ComponentOf passes none.
 func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
+	if name, scope, record := parser.MemberReceiverName(variable); record {
+		return r.recordReceiver(variable, name, scope, line, caller, pr), false
+	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 	// scope prefix and must not be stripped there.
@@ -2213,6 +2373,31 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
+	}
+
+	// An argument shadows a same-named component field. In particular, an
+	// untyped parameter in a sibling method must not borrow an injected field.
+	argumentReceiver := !strings.Contains(variable, ".") || strings.HasPrefix(strings.ToLower(variable), "arguments.")
+	if comp == "" && argumentReceiver {
+		if arg := argumentOf(pr, caller, lookupVar); arg != nil {
+			if arg.Component != "" {
+				return arg.Component, false
+			}
+
+			if strings.Contains(arg.Type, ".") {
+				tr.addf("resolved %q via enclosing function argument", variable)
+
+				return arg.Type, false
+			}
+
+			if parser.IsMemberMethod(funcName) {
+				return "$any", true
+			}
+
+			tr.addf("argument %q shadows component fields", lookupVar)
+
+			return "", false
+		}
 	}
 
 	if comp == "" {

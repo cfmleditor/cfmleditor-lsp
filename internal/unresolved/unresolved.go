@@ -78,6 +78,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		Resolvers:          opt.Resolvers,
 		Mappings:           opt.Mappings,
 		StartupFiles:       opt.StartupFiles,
+		BeanPaths:          opt.BeanPaths,
 		ExpressionMappings: opt.ExpressionMappings,
 		WorkspaceFolders:   opt.WorkspaceFolders,
 		ImplicitExtends:    opt.ImplicitExtends,
@@ -86,6 +87,12 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	}
 
 	started := time.Now()
+
+	resolver.Resolvers = resolver.BeanResolvers(opt.BeanPaths)
+	// Discovery lazily indexes factory metadata with the original rules.
+	// The scan must index every return using the augmented rules.
+	resolver.Index = index.New()
+	loadBeans(resolver, opt)
 
 	for _, f := range files {
 		data, err := fsys.ReadFile(f)
@@ -104,10 +111,8 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 			continue
 		}
 
-		resolver.Index.IndexFileWithResolvers(fileURI, string(data), opt.Resolvers)
+		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
 	}
-
-	loadBeans(resolver, opt)
 
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
 
@@ -186,11 +191,14 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 	funcLookup := resolver.FuncLookup(baseDir)
 
 	pr := parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
-		Resolvers:                opt.Resolvers,
+		Resolvers:                resolver.Resolvers,
 		ExpressionMappings:       opt.ExpressionMappings,
 		ServicePropertyResolvers: opt.ServicePropertyResolvers,
 		PropertyResolvers:        opt.PropertyResolvers,
-		BeanLookup:               resolver.Index.LookupBean,
+		BeanLookup:               resolver.InjectionBeanLookup(file),
+		PropertyBeanLookup:       resolver.InjectionPropertyLookup(file),
+		SetterLookup:             resolver.SetterLookup(file),
+		ConstructorLookup:        resolver.ConstructorLookup(file),
 		InterpolateAllText:       opt.InterpolateAll,
 		ExtractCalls:             true,
 		ScanAllScopes:            true,

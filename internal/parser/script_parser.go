@@ -39,6 +39,7 @@ type scriptParser struct {
 	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
 	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
+	argumentTypes       func(string, string, []Argument)
 	inFunc              string          // current function scope key, empty if global
 	localVarSet         map[string]bool // var'd/local. names in current function
 	returnVar           string          // last "return varName" seen in current function
@@ -46,6 +47,7 @@ type scriptParser struct {
 
 	// The flags sit together: spread between the wider fields above, each
 	// was padded to eight bytes, and the struct fell into a larger size class.
+	accessors    bool
 	persistent   bool
 	extractLinks bool // whether to extract document links
 	extractCalls bool // whether to extract all call sites
@@ -57,10 +59,11 @@ type scriptParser struct {
 
 // pendingCall records an unresolved assignment from a function call.
 type pendingCall struct {
-	varName  string
-	funcName string
-	baseVar  string // for x = baseVar.method() — resolve x to same component as baseVar
-	line     uint32
+	varName    string
+	funcName   string
+	expression string // argument-dependent root call, resolved after parsing
+	baseVar    string // for x = baseVar.method() — resolve x to same component as baseVar
+	line       uint32
 
 	// refThis is carried to the ref as ComponentRef.This; baseScope says which
 	// scope's refs baseVar may be read from. global files the ref at
@@ -69,10 +72,11 @@ type pendingCall struct {
 	// the call returns is what every function — and every sibling closure —
 	// reads. funcKey is kept, since baseVar may still be a local. Beside line,
 	// in its padding.
-	refThis   bool
-	global    bool
-	memberSet bool // not a call: `varName.funcName = …`; see checkMemberSet
-	baseScope RefScope
+	refThis    bool
+	global     bool
+	returnExpr bool // a return expression, grouped by function for factory-chain inference
+	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
+	baseScope  RefScope
 
 	funcKey string   // scope key, empty if global
 	rest    []string // calls chained after funcName, carried to the ref as ChainRest
@@ -622,7 +626,15 @@ func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []strin
 		p.sc.NextSkipComments() // consume method name
 
 		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
+			if baseComp == "" || !first {
+				chainHops = append(chainHops, funcName)
+			}
+
+			first = false
+			funcName = PropertyHop(methTok.Value)
+			consumed = append(consumed, funcName)
+
+			continue
 		}
 
 		if baseComp == "" || !first {
@@ -799,13 +811,8 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 		} else {
 			p.addPendingCall(varName, prevIdent, lastIdent, fullChain.String(), line)
 		}
-	} else if len(p.resolvers) > 0 {
-		if comp := p.resolveCall(fullChain.String()); comp != "" {
-			p.addRef(&ComponentRef{
-				Variable: varName, Component: comp,
-				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-			})
-		}
+	} else {
+		p.assignNonCall(varName, fullChain.String(), line)
 	}
 }
 
@@ -1073,6 +1080,11 @@ func (p *scriptParser) parse() {
 			// assignment falls through to the bare-call path and its RHS
 			// component type is silently dropped.
 			p.parseScopedVar(tok, sharedScopeOf(tok))
+		case "return":
+			// A script island can be inside a tag function whose scope was seeded.
+			if p.inFunc != "" {
+				p.checkReturnComponent()
+			}
 		case "import":
 			p.parseImport()
 		case "new":
@@ -1200,8 +1212,8 @@ func (p *scriptParser) parseProperty(startTok Token) {
 		}
 
 		if i+1 < len(tokens) && tokens[i+1].Kind == TokEquals {
-			if i+2 < len(tokens) && tokens[i+2].Kind == TokString {
-				val := unquote(tokens[i+2].Value)
+			if i+2 < len(tokens) && (tokens[i+2].Kind == TokString || tokens[i+2].Kind == TokIdent || tokens[i+2].Kind == TokNumber) {
+				val := propertyAttributeValue(tokens, i+2)
 				attrs[strings.ToLower(tok.Value)] = val
 			}
 
@@ -1254,6 +1266,10 @@ func (p *scriptParser) parseProperty(startTok Token) {
 		return
 	}
 
+	if typeName != "" {
+		attrs["type"] = typeName
+	}
+
 	p.properties = append(p.properties, propertyDef{name: name, typeName: typeName, line: line, attrs: attrs})
 }
 
@@ -1274,6 +1290,10 @@ func (p *scriptParser) parseComponentAttrs() {
 		case strings.EqualFold(tok.Value, "extends"):
 			if val, ok := p.attrValue(); ok && val.Kind == TokString {
 				p.extends = unquote(val.Value)
+			}
+		case strings.EqualFold(tok.Value, "accessors"):
+			if val, ok := p.attrValue(); ok {
+				p.accessors = isTruthy(unquote(val.Value))
 			}
 		case strings.EqualFold(tok.Value, "persistent"):
 			if val, ok := p.attrValue(); ok &&
@@ -1366,22 +1386,16 @@ func (p *scriptParser) parseFunction(startTok Token, access string, returnType s
 
 	// Apply JSDoc @param {type} annotations to arguments
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
+	}
+
+	if p.inFunc == "" {
+		if p.argumentTypes != nil {
+			p.argumentTypes(nameTok.Value, access, args)
+		}
 	}
 
 	funcLine := p.baseLine + startTok.Line
-
-	// Create component refs for arguments with component-like types
-	for _, a := range args {
-		if isComponentType(a.Type) {
-			p.componentRefs = append(p.componentRefs, ComponentRef{
-				Variable:  a.Name,
-				Component: a.Type,
-				URI:       uriFromString(p.fileURI),
-				Line:      conv.Uint32(funcLine),
-			})
-		}
-	}
 
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:       nameTok.Value,
@@ -1454,7 +1468,7 @@ func (p *scriptParser) parseFunctionValue(name string, startTok Token) bool {
 
 	args := p.parseArgList()
 	if docComment != "" {
-		applyJSDocParams(docComment, args)
+		applyParameterDocs(docComment, args)
 	}
 
 	if rhs.Kind == TokLParen {
@@ -1524,17 +1538,6 @@ func (p *scriptParser) skipParensQuiet() bool {
 // parseFunction does for a declared method.
 func (p *scriptParser) recordFunctionValue(name string, startTok Token, args []Argument) {
 	funcLine := p.baseLine + startTok.Line
-
-	for _, a := range args {
-		if isComponentType(a.Type) {
-			p.componentRefs = append(p.componentRefs, ComponentRef{
-				Variable:  a.Name,
-				Component: a.Type,
-				URI:       uriFromString(p.fileURI),
-				Line:      conv.Uint32(funcLine),
-			})
-		}
-	}
 
 	p.funcs = append(p.funcs, FunctionDef{
 		Name:      name,
@@ -2080,6 +2083,17 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.localVarSet = make(map[string]bool)
 	for _, a := range args {
 		p.localVarSet[strings.ToLower(a.Name)] = true
+
+		if comp := argumentComponentType(&a); comp != "" {
+			if p.funcRefs == nil {
+				p.funcRefs = make(map[string][]ComponentRef)
+			}
+
+			p.funcRefs[tempKey] = append(p.funcRefs[tempKey], ComponentRef{
+				Variable: a.Name, Component: comp,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(funcLine),
+			})
+		}
 	}
 
 	depth := 1
@@ -2282,6 +2296,12 @@ func (p *scriptParser) handleBodyToken(tok Token, depth int, afterLT bool) {
 
 // checkReturnComponent checks if a return statement returns a component expression or variable.
 func (p *scriptParser) checkReturnComponent() {
+	if p.inFunc != "" {
+		p.pendingCalls = append(p.pendingCalls, pendingCall{
+			varName: scriptReturnExpression(p.sc), funcKey: p.inFunc, returnExpr: true,
+		})
+	}
+
 	peek := p.sc.PeekSkipComments()
 	if peek.Kind != TokIdent {
 		return
@@ -3262,14 +3282,15 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 	}
 
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:   varName,
-		funcName:  lastIdent,
-		baseVar:   prevIdent,
-		line:      conv.Uint32(p.baseLine + line),
-		funcKey:   p.inFunc,
-		refThis:   p.refThis,
-		global:    p.forceGlobal,
-		baseScope: ReceiverRefScope(recv),
+		varName:    varName,
+		funcName:   lastIdent,
+		expression: callExpressionAt(p.sc, chain),
+		baseVar:    prevIdent,
+		line:       conv.Uint32(p.baseLine + line),
+		funcKey:    p.inFunc,
+		refThis:    p.refThis,
+		global:     p.forceGlobal,
+		baseScope:  ReceiverRefScope(recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
 }
@@ -3331,18 +3352,10 @@ func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
 
 // assignFromChain types varName from the chain on the right of its `=`: a
 // call's resolved component, else a pending call for resolvePendingCalls; a
-// chain that is not a call only through a componentResolver.
+// whole argument value or configured expression when it is not a call.
 func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIdent, lastIdent string, line int) {
 	if p.sc.PeekSkipComments().Kind != TokLParen {
-		if len(p.resolvers) > 0 {
-			// Try generic resolver match on non-call RHS (e.g. "_parent")
-			if comp := p.resolveCall(c.String()); comp != "" {
-				p.addRef(&ComponentRef{
-					Variable: varName, Component: comp,
-					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
-				})
-			}
-		}
+		p.assignNonCall(varName, c.String(), line)
 
 		return
 	}
@@ -3361,6 +3374,32 @@ func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIden
 	}
 
 	p.addPendingCall(varName, prevIdent, lastIdent, c.String(), line)
+}
+
+// argumentComponent is the declared type of a whole arguments.name value.
+// Copying it into variables scope preserves the constructor's dependency;
+// typing the parameter itself at component level instead leaked to siblings.
+func (p *scriptParser) argumentComponent(chain string) string {
+	return wholeArgumentComponent(chain, p.inFunc, p.funcs)
+}
+
+// assignNonCall handles a whole argument value or a configured non-call RHS.
+func (p *scriptParser) assignNonCall(varName, chain string, line int) {
+	comp := ""
+	if p.atStatementEnd() {
+		comp = p.argumentComponent(chain)
+	}
+
+	if comp == "" && len(p.resolvers) > 0 {
+		comp = p.resolveCall(chain)
+	}
+
+	if comp != "" {
+		p.addRef(&ComponentRef{
+			Variable: varName, Component: comp,
+			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+		})
+	}
 }
 
 // walkChain walks the `.name` hops after the identifier first, already
@@ -3593,7 +3632,9 @@ func (p *scriptParser) scanChainedCalls(component string, line int) []string {
 		p.sc.NextSkipComments()
 
 		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
+			hops = append(hops, PropertyHop(methTok.Value))
+
+			continue
 		}
 
 		p.addCall(&CallSite{
@@ -4042,8 +4083,8 @@ func (p *scriptParser) tryConfiguredResolvers(callExpr string) string {
 		named := p.sc.Save()
 		p.sc.NextSkipComments() // name
 
-		if p.sc.PeekSkipComments().Kind == TokEquals {
-			p.sc.NextSkipComments() // =
+		if kind := p.sc.PeekSkipComments().Kind; kind == TokEquals || kind == TokColon {
+			p.sc.NextSkipComments() // = or :
 
 			if p.sc.PeekSkipComments().Kind == TokString {
 				arg = p.sc.PeekSkipComments()
@@ -4057,6 +4098,12 @@ func (p *scriptParser) tryConfiguredResolvers(callExpr string) string {
 
 	if arg.Kind == TokString {
 		p.sc.NextSkipComments()
+
+		if kind := p.sc.PeekSkipComments().Kind; kind != TokComma && kind != TokRParen {
+			p.sc.Restore(saved)
+
+			return ""
+		}
 
 		// Build arg list: read comma-separated string args
 		var args strings.Builder
@@ -4869,4 +4916,22 @@ func applyJSDocParams(comment string, args []Argument) {
 			}
 		}
 	}
+}
+
+// Unquoted attribute literals may be dotted component names. Keep the complete
+// path rather than interpreting its first segment as the property's type.
+func propertyAttributeValue(tokens []Token, start int) string {
+	if tokens[start].Kind != TokIdent {
+		return unquote(tokens[start].Value)
+	}
+
+	var value strings.Builder
+	value.WriteString(tokens[start].Value)
+
+	for i := start + 1; i+1 < len(tokens) && tokens[i].Kind == TokDot && tokens[i+1].Kind == TokIdent; i += 2 {
+		value.WriteByte('.')
+		value.WriteString(tokens[i+1].Value)
+	}
+
+	return value.String()
 }

@@ -21,7 +21,8 @@ func TestParserStructsKeepTheirSize(t *testing.T) {
 	}{
 		{"CallSite", unsafe.Sizeof(CallSite{}), 112},
 		{"Scanner", unsafe.Sizeof(Scanner{}), 128},
-		{"scriptParser", unsafe.Sizeof(scriptParser{}), 368},
+		// The managed-setter lookup adds one word, within the existing 384-byte allocation class.
+		{"scriptParser", unsafe.Sizeof(scriptParser{}), 376},
 	}
 
 	for _, c := range cases {

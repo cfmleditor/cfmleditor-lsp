@@ -1,0 +1,26 @@
+{
+  "mappings": {
+    "mura": "core/mura",
+    "muraWRM": ".",
+    "config": "config",
+    "config/appcfc": "core/appcfc",
+    "core": "core",
+    "requirements": "core/vendor",
+    "cfformprotect": "core/vendor/cfformprotect",
+    "testbox": "core/vendor/testbox",
+    "docbox": "core/vendor/docbox"
+  },
+  "beanPaths": {
+    "": "core/mura"
+  },
+  "startupFiles": [
+    "core/appcfc/onApplicationStart_include.cfm"
+  ],
+  "componentResolvers": [
+    {
+      "match": "(?i)(?:^|\\.)getBean\\(\\s*(?:\\w+\\s*[=:]\\s*)?[\"']([A-Za-z_][\\w.]*)[\"']\\s*(?:,[^()]*)?\\)$",
+      "resolve": "$1",
+      "prefix": "getBean"
+    }
+  ]
+}

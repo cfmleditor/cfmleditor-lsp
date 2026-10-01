@@ -103,6 +103,11 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		resolvers = append(resolvers, r.Parser())
 	}
 
+	lookupRoots := []string{filepath.Dir(found.Path)}
+	if cs.fallback.Resolver != nil && len(cs.fallback.Resolver.WorkspaceFolders) > 0 {
+		lookupRoots = cs.fallback.Resolver.WorkspaceFolders
+	}
+
 	resolver := &resolve.Resolver{
 		FS:                 cs.fsys,
 		Index:              cs.shared,
@@ -110,7 +115,7 @@ func (cs *configSet) build(dir string) codemap.FileConfig {
 		Mappings:           found.Mappings(),
 		StartupFiles:       found.StartupFiles(),
 		ExpressionMappings: found.ExpressionMappings(),
-		WorkspaceFolders:   found.WorkspaceFolders(),
+		WorkspaceFolders:   cliWorkspaceFolders(cs.fsys, found, lookupRoots),
 		ImplicitExtends:    config.ImplicitExtends(found.Frameworks()),
 		HelperScope:        config.HelperScope(found.Frameworks()),
 		Stubs:              frameworkapi.For(found.Frameworks()),

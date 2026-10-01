@@ -29,6 +29,7 @@ type ParseResult struct {
 	ComponentRefs       []ComponentRef
 	Scopes              []FuncScope
 	Extends             string                                  // dot-path of parent component (from extends attribute)
+	Accessors           bool                                    // component has accessors=true
 	Persistent          bool                                    // true if component has persistent="true" (ORM entity)
 	Properties          []propertyDef                           // parsed property declarations
 	Delegates           []Delegate                              // WireBox delegations the component declares
@@ -38,7 +39,11 @@ type ParseResult struct {
 	Resolvers           []Resolver                              // optional component resolvers for RHS matching
 	resolverSet         *ResolverSet                            // pre-grouped resolvers for fast matching
 	PropertyResolvers   []PropertyResolver                      // optional property-to-component resolvers
+	managedSetterLookup func(string) string                     // current property metadata applied to setter injection
+	ConstructorLookup   func(string) string                     // known factory constructor dependency identity
+	SetterLookup        func(string) string                     // managed bean setter dependency → component
 	BeanLookup          func(string) string                     // optional bean name → dot-path lookup
+	PropertyBeanLookup  func(string, map[string]string) string  // optional factory property eligibility and identity
 	BuiltinReturnLookup func(string) string                     // optional: builtin function → return component
 	FuncLookup          func(component, funcName string) string // optional: resolve method return type from external components
 	expressionMappings  map[string]string                       // runtime expression → static value substitutions
@@ -88,10 +93,12 @@ type ParseResult struct {
 	funcVars   map[string][]string
 
 	// funcRefs caches per-function component refs keyed by "start:end".
-	funcRefsMu   sync.Mutex
-	funcRefsMap  map[string][]ComponentRef
-	funcLinksMap map[string][]DocumentLink
-	funcCallsMap map[string][]CallSite // per-function call sites keyed by "start:end"
+	memberSnapshot        *ParseResult // member refs computed once per document version
+	memberSnapshotContent string
+	funcRefsMu            sync.Mutex
+	funcRefsMap           map[string][]ComponentRef
+	funcLinksMap          map[string][]DocumentLink
+	funcCallsMap          map[string][]CallSite // per-function call sites keyed by "start:end"
 }
 
 // ParseOptions configures optional parse behaviour.
@@ -99,7 +106,10 @@ type ParseOptions struct {
 	Logger                   Logger
 	Resolvers                []Resolver
 	PropertyResolvers        []PropertyResolver
-	BeanLookup               func(name string) string                // optional: resolve bean name → dot-path
+	ConstructorLookup        func(name string) string // optional, only for known factory construction
+	SetterLookup             func(name string) string // optional, only for factory-managed components
+	BeanLookup               func(name string) string // optional: resolve bean name → dot-path
+	PropertyBeanLookup       func(name string, attrs map[string]string) string
 	BuiltinReturnLookup      func(name string) string                // optional: resolve builtin function → return component
 	FuncLookup               func(component, funcName string) string // optional: resolve method return type from external components
 	ExpressionMappings       map[string]string                       // runtime expression → static value substitutions
@@ -187,6 +197,9 @@ func ParseWithOptions(fileURI uri.URI, content string, opts *ParseOptions) *Pars
 		Resolvers:                opts.Resolvers,
 		PropertyResolvers:        opts.PropertyResolvers,
 		BeanLookup:               opts.BeanLookup,
+		PropertyBeanLookup:       opts.PropertyBeanLookup,
+		SetterLookup:             opts.SetterLookup,
+		ConstructorLookup:        opts.ConstructorLookup,
 		BuiltinReturnLookup:      opts.BuiltinReturnLookup,
 		FuncLookup:               opts.FuncLookup,
 		expressionMappings:       opts.ExpressionMappings,
@@ -218,6 +231,8 @@ func (pr *ParseResult) extractSignatures() {
 			log.Recovered(pr.log, "parse panic in extractSignatures", r, "uri", string(pr.URI))
 		}
 	}()
+
+	pr.prepareManagedSetterLookup()
 
 	var allPendingCalls []pendingCall
 
@@ -313,8 +328,16 @@ func (pr *ParseResult) extractSignatures() {
 		pr.generatePropertyAccessors()
 		pr.collectDelegates()
 		pr.appendResolverRefs()
+		pr.applyMemberBindings()
+		pr.applyFactoryReturnCalls(allPendingCalls)
+		pr.applyCollectionReturns(allPendingCalls)
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
+
+		if pr.hasMemberBinding(pr.Content) {
+			pr.memberSnapshot = &ParseResult{funcRefsMap: maps.Clone(pr.funcRefsMap)}
+			pr.memberSnapshotContent = pr.Content
+		}
 	} else {
 		// A shallow parse cannot afford FuncLookup, and a ref typed by the
 		// first call of a longer chain is wrong, so such a ref is dynamic.
@@ -379,6 +402,7 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	sp.extractLinks = pr.extractLinks
 	sp.extractCalls = pr.extractCalls
 	sp.builtinReturnLookup = pr.BuiltinReturnLookup
+	sp.argumentTypes = pr.argumentTypeLookup()
 
 	// If this <cfscript> region sits inside a tag <cffunction> body
 	// (nested script island — ClassifyRegions splits the file there),
@@ -386,8 +410,11 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	// scope instead of global. scriptParser bakes baseLine into its own
 	// keys, so the seed must be the function's absolute funcKey — unlike
 	// the tag-region continuation seed below, which stays region-relative.
-	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+	seed := -1
+
+	if s, ok := pr.regionTagScope(tagScopes, r.StartLine); ok {
 		sp.inFunc = funcKey(s.Start, s.End)
+		seed, sp.funcs = pr.seedRegionFunction(s.Start, s.Name)
 		sp.localVarSet = make(map[string]bool)
 
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
@@ -411,6 +438,11 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 		}
 
 		*open = openLocals{key: key, names: names}
+	}
+
+	if seed >= 0 {
+		pr.Funcs[seed] = sp.funcs[0]
+		sp.funcs = sp.funcs[1:]
 	}
 
 	pr.Funcs = append(pr.Funcs, sp.funcs...)
@@ -439,6 +471,8 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 		pr.Extends = sp.extends
 	}
 
+	pr.Accessors = pr.Accessors || sp.accessors
+
 	if sp.persistent {
 		pr.Persistent = true
 	}
@@ -456,6 +490,7 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	tp.extractLinks = pr.extractLinks
 	tp.extractCalls = pr.extractCalls
 	tp.builtinReturnLookup = pr.BuiltinReturnLookup
+	tp.argumentTypes = pr.argumentTypeLookup()
 	tp.baseLine = r.StartLine
 	tp.knownScopes = tagScopes
 	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
@@ -465,8 +500,11 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	// <cffunction> tag was in an earlier region (interrupted by a
 	// nested <cfscript> region split), seed inFunc/localVars so refs
 	// in this region still route to function scope instead of global.
-	if s, ok := enclosingTagScope(tagScopes, r.StartLine); ok {
+	seed := -1
+
+	if s, ok := pr.regionTagScope(tagScopes, r.StartLine); ok {
 		tp.inFunc = funcKey(s.Start-r.StartLine, s.End-r.StartLine)
+		seed, tp.funcs = pr.seedRegionFunction(s.Start, s.Name)
 		tp.localVars = nil
 
 		for _, arg := range pr.argsOfFuncAt(s.Start) {
@@ -479,6 +517,11 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	}
 
 	tp.parse()
+
+	if seed >= 0 {
+		pr.Funcs[seed] = tp.funcs[0]
+		tp.funcs = tp.funcs[1:]
+	}
 
 	// The function still open where the region ends continues in the next.
 	if tp.inFunc != "" {
@@ -568,6 +611,8 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	if tp.extends != "" {
 		pr.Extends = tp.extends
 	}
+
+	pr.Accessors = pr.Accessors || tp.accessors
 
 	if tp.persistent {
 		pr.Persistent = true
@@ -948,6 +993,10 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	for j := range calls {
 		c := &calls[j]
 
+		if c.returnExpr {
+			continue
+		}
+
 		if c.memberSet {
 			pr.memberSets = append(pr.memberSets, *c)
 
@@ -972,6 +1021,10 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 		// BaseORMService, and c was untyped.
 		if comp == "" && c.baseVar == "" && pr.FuncLookup != nil && pr.URI.IsFile() {
 			comp = pr.FuncLookup(pr.URI.Path(), c.funcName)
+		}
+
+		if comp == "" && c.baseVar == "" && c.expression != "" && pr.FuncLookup != nil && pr.URI.IsFile() {
+			comp = pr.FuncLookup(pr.URI.Path(), CallHop(c.expression))
 		}
 
 		// A mock made through the MockBox a spec holds,
@@ -1203,6 +1256,12 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 			return ret
 		}
 
+		if c.expression != "" {
+			if ret := pr.FuncLookup(comp, CallHop(c.expression)); ret != "" {
+				return ret
+			}
+		}
+
 		return "$any"
 	}
 
@@ -1326,6 +1385,8 @@ func (pr *ParseResult) generatePropertyAccessors() {
 	// Adobe's alike — so it is typed as `return this;` is: by the file's path.
 	self, _ := strings.CutPrefix(string(u), "file://")
 
+	fieldComponents := pr.propertyFieldComponents()
+
 	for _, prop := range pr.Properties {
 		capName := ucFirst(prop.name)
 
@@ -1338,6 +1399,7 @@ func (pr *ParseResult) generatePropertyAccessors() {
 
 			pr.Funcs = append(pr.Funcs, FunctionDef{
 				Name: "get" + capName, URI: u, Line: prop.line,
+				ReturnType: prop.typeName,
 			})
 		}
 
@@ -1369,29 +1431,12 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			comp = prop.typeName
 		}
 
-		if comp == "" && pr.BeanLookup != nil {
-			// Try inject attribute: full value (for namespace-qualified), then stripped name
-			if inject := prop.attrs["inject"]; inject != "" {
-				comp = pr.BeanLookup(normalizeBeanKey(inject))
-				if comp == "" {
-					comp = pr.BeanLookup(extractBeanName(inject))
-				}
-			}
-
-			if comp == "" {
-				comp = pr.BeanLookup(prop.name)
-			}
+		if comp == "" {
+			comp = prop.documentedComponent()
 		}
 
 		if comp == "" {
-			inject, ok := prop.attrs["inject"]
-			if ok && inject == "" {
-				// A bare `inject` is WireBox's default DSL, the model whose id
-				// is the property's name.
-				inject = prop.name
-			}
-
-			comp = injectedComponent(inject)
+			comp = pr.propertyBeanComponent(&prop)
 		}
 
 		if comp != "" {
@@ -1404,8 +1449,53 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			if getterIdx >= 0 {
 				pr.Funcs[getterIdx].ReturnComponent = comp
 			}
+		} else if getterIdx >= 0 && (prop.typeName == "" || strings.EqualFold(prop.typeName, "any")) {
+			pr.Funcs[getterIdx].ReturnComponent = fieldComponents[strings.ToLower(prop.name)]
 		}
 	}
+}
+
+// CFML's doc_generic property metadata names the value's component, just as
+// argument.doc_generic does for a generic argument. Preserve explicit types
+// and do not treat an array's element type as its receiver.
+func (prop *propertyDef) documentedComponent() string {
+	if prop.typeName != "" && !strings.EqualFold(prop.typeName, "any") && !strings.EqualFold(prop.typeName, "struct") {
+		return ""
+	}
+
+	if documented := prop.attrs["doc_generic"]; isComponentType(documented) {
+		return documented
+	}
+
+	return ""
+}
+
+// A generated getter reads variables.name. Constructor assignments
+// already type that field, even when the property has no metadata.
+// Locals and this.name are separate stores; unresolved call chains
+// cannot supply a getter type. Conflicting field types stay dynamic.
+func (pr *ParseResult) propertyFieldComponents() map[string]string {
+	fieldComponents := make(map[string]string, len(pr.ComponentRefs))
+	for i := range pr.ComponentRefs {
+		ref := &pr.ComponentRefs[i]
+		if ref.This {
+			continue
+		}
+
+		candidate := ref.Component
+		if candidate == "" || ref.ChainBase != "" || chainPending(ref) {
+			candidate = "$any"
+		}
+
+		key := strings.ToLower(ref.Variable)
+		if previous := fieldComponents[key]; previous != "" && !strings.EqualFold(previous, candidate) {
+			candidate = "$any"
+		}
+
+		fieldComponents[key] = candidate
+	}
+
+	return fieldComponents
 }
 
 // injectedComponent is the component a WireBox injection names, when no
@@ -1782,14 +1872,19 @@ func (pr *ParseResult) computeAnyScopedVars(scope Scope) []string {
 	return names
 }
 
-// InvalidateFunc clears the cached variables for a specific function,
-// forcing re-parse on next FuncVars call.
+// InvalidateFunc clears the body-dependent variable, ref and link caches.
 func (pr *ParseResult) InvalidateFunc(funcStart, funcEnd int) {
 	key := funcKey(funcStart, funcEnd)
 
 	pr.funcVarsMu.Lock()
 	delete(pr.funcVars, key)
 	pr.funcVarsMu.Unlock()
+	// Ref and link answers depend on the current body as well as its vars.
+	pr.funcRefsMu.Lock()
+	delete(pr.funcRefsMap, key)
+	pr.memberSnapshot = nil
+	delete(pr.funcLinksMap, key)
+	pr.funcRefsMu.Unlock()
 }
 
 // parseFuncBody parses a single function body for variable declarations.
@@ -2310,6 +2405,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		sp := newScriptParser(body, string(pr.URI), funcStart, pr.Resolvers)
 		sp.resolverSet = pr.resolverSet
 		sp.extractLinks = true
+		sp.argumentTypes = pr.argumentTypeLookup()
 		sp.parse()
 		refs = sp.componentRefs
 		links = sp.links
@@ -2326,6 +2422,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		tp.resolvers = pr.Resolvers
 		tp.resolverSet = pr.resolverSet
 		tp.extractLinks = true
+		tp.argumentTypes = pr.argumentTypeLookup()
 		tp.parse()
 		refs = tp.componentRefs
 
@@ -2386,6 +2483,23 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
 			refs[i].ChainRest = nil
 		}
+	}
+
+	if pr.hasMemberBinding(body) {
+		// A fresh full parse owns its slices and computes member identities once
+		// per edited document, rather than repeating whole-file work per function.
+		if pr.memberSnapshot == nil || pr.memberSnapshotContent != pr.Content {
+			pr.memberSnapshot = ParseWithOptions(pr.URI, pr.Content, &ParseOptions{
+				Resolvers: pr.Resolvers, PropertyResolvers: pr.PropertyResolvers,
+				FuncLookup: pr.FuncLookup, BeanLookup: pr.BeanLookup,
+				SetterLookup: pr.SetterLookup, ConstructorLookup: pr.ConstructorLookup,
+				PropertyBeanLookup: pr.PropertyBeanLookup, BuiltinReturnLookup: pr.BuiltinReturnLookup,
+				ExpressionMappings: pr.expressionMappings, ServicePropertyResolvers: pr.ServicePropertyResolvers,
+			})
+			pr.memberSnapshotContent = pr.Content
+		}
+
+		refs = slices.Clone(pr.memberSnapshot.funcRefsMap[funcKey(funcStart, funcEnd)])
 	}
 
 	return refs, links
@@ -2987,4 +3101,131 @@ func (pr *ParseResult) Declares(name string) bool {
 	}
 
 	return false
+}
+
+// A script island or tag continuation has no opening function declaration of
+// its own. Carry the enclosing typed arguments without publishing a duplicate
+// definition; whole-argument assignments must see the same signature throughout.
+func (pr *ParseResult) seedRegionFunction(start int, name string) (int, []FunctionDef) {
+	for i := range pr.Funcs {
+		fn := &pr.Funcs[i]
+		if int(fn.Line) != start || !strings.EqualFold(fn.Name, name) {
+			continue
+		}
+
+		for _, arg := range fn.Arguments {
+			if argumentComponentType(&arg) != "" {
+				return i, []FunctionDef{*fn}
+			}
+		}
+
+		break
+	}
+
+	return -1, nil
+}
+
+// An island can begin on the opening tag's own line. The declaration must
+// already have been parsed: a first tag region on that line is not a continuation.
+func (pr *ParseResult) regionTagScope(scopes []FuncScope, line int) (FuncScope, bool) {
+	if scope, ok := enclosingTagScope(scopes, line); ok {
+		return scope, true
+	}
+
+	for _, scope := range scopes {
+		if scope.Start != line {
+			continue
+		}
+
+		for i := range pr.Funcs {
+			fn := &pr.Funcs[i]
+			if int(fn.Line) == line && strings.EqualFold(fn.Name, scope.Name) {
+				return scope, true
+			}
+		}
+	}
+
+	return FuncScope{}, false
+}
+
+// prepareManagedSetterLookup reads properties before signatures so declaration
+// order cannot change DI/1 eligibility. The metadata parse has no injection
+// callbacks, and therefore does not recurse. Global edits rebuild this snapshot.
+func (pr *ParseResult) prepareManagedSetterLookup() {
+	pr.managedSetterLookup = pr.SetterLookup
+	if pr.SetterLookup == nil || pr.PropertyBeanLookup == nil {
+		return
+	}
+
+	metadata := pr.managedPropertyMetadata()
+
+	properties := make(map[string]map[string]string, len(metadata.Properties))
+	for _, prop := range metadata.Properties {
+		if !metadata.Accessors && !metadata.Persistent {
+			continue
+		}
+
+		properties[strings.ToLower(prop.name)] = prop.attrs
+	}
+
+	pr.managedSetterLookup = func(name string) string {
+		attrs, found := properties[strings.ToLower(name)]
+		// setter=false omits the implicit property setter, allowing an explicit one.
+		if found && !strings.EqualFold(attrs["setter"], "false") && pr.PropertyBeanLookup(name, attrs) == "" {
+			return ""
+		}
+
+		return pr.SetterLookup(name)
+	}
+}
+
+func (pr *ParseResult) propertyBeanComponent(prop *propertyDef) string {
+	if pr.PropertyBeanLookup != nil && !pr.Accessors && !pr.Persistent {
+		return ""
+	}
+
+	if pr.BeanLookup != nil {
+		lookup := pr.BeanLookup
+		if pr.PropertyBeanLookup != nil {
+			lookup = func(name string) string { return pr.PropertyBeanLookup(name, prop.attrs) }
+		}
+
+		if inject := prop.attrs["inject"]; inject != "" {
+			if comp := lookup(normalizeBeanKey(inject)); comp != "" {
+				return comp
+			}
+
+			if comp := lookup(extractBeanName(inject)); comp != "" {
+				return comp
+			}
+		}
+
+		if comp := lookup(prop.name); comp != "" {
+			return comp
+		}
+	}
+
+	if pr.PropertyBeanLookup != nil {
+		return ""
+	}
+
+	inject, ok := prop.attrs["inject"]
+	if ok && inject == "" {
+		inject = prop.name
+	}
+
+	return injectedComponent(inject)
+}
+
+func (pr *ParseResult) applyManagedArgumentTypes(name, access string, args []Argument) {
+	applySetterArgumentTypes(name, access, args, pr.managedSetterLookup)
+	applyConstructorArgumentTypes(name, access, args, pr.ConstructorLookup)
+}
+
+func (pr *ParseResult) argumentTypeLookup() func(string, string, []Argument) {
+	if pr.SetterLookup == nil && pr.ConstructorLookup == nil {
+		return nil
+	}
+
+	return pr.applyManagedArgumentTypes
 }

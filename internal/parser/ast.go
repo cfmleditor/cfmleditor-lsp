@@ -12,10 +12,18 @@ import (
 
 // Argument represents a parameter of a user-defined function.
 type Argument struct {
-	Name     string
-	Type     string // empty if untyped
-	Hint     string // hint attribute value (used as supplemental type when Type is generic)
-	Required bool
+	Name      string
+	Type      string // empty if untyped
+	Hint      string // hint attribute value (used as supplemental type when Type is generic)
+	Component string // inferred setter dependency; separate from the declared CFML type
+	Required  bool
+}
+
+// ReturnSource is a component value, optionally produced by method calls.
+// Collection getters retain these small contracts for closed-file lookup.
+type ReturnSource struct {
+	Component string
+	Methods   []string
 }
 
 // FunctionDef represents a user-defined function found in a CFC file.
@@ -24,8 +32,9 @@ type FunctionDef struct {
 	URI             uri.URI
 	Line            uint32
 	Arguments       []Argument
-	ReturnType      string // declared return type (e.g. "query", "models.User")
-	ReturnComponent string // inferred component from return statements (e.g. "services.Foo")
+	ReturnType      string         // declared return type (e.g. "query", "models.User")
+	ReturnSources   []ReturnSource // uniform collection element sources, resolved on demand
+	ReturnComponent string         // inferred component from return statements (e.g. "services.Foo")
 	// DocReturn is the dotted component the doc comment's @return names —
 	// ColdBox documents most return types and declares few. It is a claim,
 	// not a declaration: the resolver takes it only where it names a file.

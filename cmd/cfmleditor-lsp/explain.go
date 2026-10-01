@@ -98,7 +98,7 @@ func cmdExplain(args []string) {
 		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
 		helperScope = config.HelperScope(cfg.Frameworks())
 		stubs = frameworkapi.For(cfg.Frameworks())
-		workspaceFolders = cfg.WorkspaceFolders()
+		workspaceFolders = cliWorkspaceFolders(fsys, cfg, []string{searchDir})
 		mappings = cfg.Mappings()
 		startupFiles = cfg.StartupFiles()
 		expressionMappings = cfg.ExpressionMappings()

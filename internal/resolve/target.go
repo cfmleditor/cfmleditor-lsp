@@ -80,7 +80,7 @@ type CallTarget struct {
 // and pays nothing.
 func (r *Resolver) ResolveCallTarget(call *parser.CallSite, pr *parser.ParseResult, baseDir string) (CallTarget, string) {
 	tr := &callTrace{}
-	reason := r.canResolveCall(call, pr, baseDir, tr)
+	reason := r.forCaller(baseDir).canResolveCall(call, pr, baseDir, tr)
 
 	return tr.target, reason
 }

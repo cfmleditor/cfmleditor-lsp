@@ -22,7 +22,7 @@ component {
 	variables.utility = new testbox.system.util.Util();
 	variables.coverageService = new testbox.system.coverage.CoverageService();
 	variables.env = new testbox.system.util.Env();
-	variables.testResults = new testbox.system.TestResult();
+	variables.result = new testbox.system.TestResult();
 	/**
 	 * Constructor
 	 *

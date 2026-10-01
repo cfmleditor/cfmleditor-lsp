@@ -3,10 +3,70 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 )
+
+func TestGeneratedStubFollowsArgumentComponent(t *testing.T) {
+	root, out := t.TempDir(), t.TempDir()
+
+	event := filepath.Join(root, "LogEvent.cfc")
+	if err := os.WriteFile(event, []byte(`component { function getMessage() {} }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	appender := filepath.Join(root, "Appender.cfc")
+	if err := os.WriteFile(appender, []byte(`component { function logMessage(required test.LogEvent event) {} }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &generator{src: &frameworkapi.Source{Prefix: "test"}, root: root, out: out}
+	if err := g.emit(appender); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(out, "Appender.cfc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Contains(g.todo, event) || !strings.Contains(string(data), "required test.LogEvent event") {
+		t.Fatalf("argument component was not queued and qualified: todo=%v stub=%s", g.todo, data)
+	}
+}
+
+func TestGeneratedStubPreservesInterface(t *testing.T) {
+	for _, source := range []string{
+		`interface { function getName(); }`,
+		`<cfinterface><cffunction name="getName"></cffunction></cfinterface>`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			root, out := t.TempDir(), t.TempDir()
+
+			path := filepath.Join(root, "ICache.cfc")
+			if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			g := &generator{src: &frameworkapi.Source{Prefix: "test"}, root: root, out: out}
+			if err := g.emit(path); err != nil {
+				t.Fatal(err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(out, "ICache.cfc"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !interfaceRe.Match(data) || !strings.Contains(string(data), "function getName();") {
+				t.Fatalf("stub lost interface declaration or method: %s", data)
+			}
+		})
+	}
+}
 
 func TestArtifactPathReturnInference(t *testing.T) {
 	root := t.TempDir()
