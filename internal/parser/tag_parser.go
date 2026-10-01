@@ -1315,6 +1315,26 @@ func (p *tagParser) resolveRHS(rhs, varName string, line int) bool {
 		return true
 	}
 
+	// A configured factory describes the first call, not the value produced
+	// by later calls. Keep the suffix for the normal return-type settlement.
+	if root, methods := factoryReturnChain(rhs); root != "" && len(methods) > 0 {
+		var comp string
+		if p.resolverSet != nil {
+			comp = p.resolverSet.Resolve(root)
+		} else {
+			comp = ResolveFromCall(root, p.resolvers)
+		}
+
+		if comp != "" {
+			p.addRef(&ComponentRef{
+				Variable: varName, Component: comp, ChainRest: methods, strictChain: true,
+				URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
+			})
+
+			return true
+		}
+	}
+
 	// Try bare function name for exact-match resolvers
 	funcName := extractIdent(rhs)
 	if funcName == "" {

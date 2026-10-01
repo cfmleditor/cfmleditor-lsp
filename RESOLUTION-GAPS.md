@@ -1,5 +1,9 @@
 # Resolution gaps
 
+For the current post-PR #190 baseline, measured failure groups, coverage and
+prioritized proposed fixes, see [Remaining resolver gaps](RESOLUTION-GAPS-PLAN.md).
+The sections below retain the investigation and implementation history.
+
 What `unresolved` still reports over the six-project corpus after PR #184, what
 is behind each large group, and where a fix would go. Each item says how it was
 found, so it can be re-checked rather than taken on trust. Items are ordered by
@@ -1143,3 +1147,93 @@ Remaining Wheels work includes argument-sensitive model/controller lookup throug
 runtime model/controller paths, plugin and package overrides, arbitrary helper
 copying, collection/guarded lazy returns, computed adapter identities and Java
 returns. Other Wheels versions need their loader contracts checked independently.
+
+### Factory-chain and record receiver propagation (PR #192)
+
+Tag assignments now retain the configured factory identity of a complete first
+call while following its method suffix to the final component. For example,
+`application.factory.getBean('Builder').build()` binds the assigned variable to
+Product when build's return contract proves it. Init follows the existing
+constructor convention. Unknown suffix returns retain an unknown receiver,
+rather than changing subsequent calls to dynamic acceptance. Full, shallow and
+lazy function parses apply that same rule; the private flag occupies existing
+ComponentRef padding rather than growing the struct.
+
+Explicit record bindings now follow exact record-member producers and grounded
+self-updates, including `rc.manager.getContent()` and
+`rc.contentBean=arguments.rc.contentBean.save()`. All concrete sources and method
+results must agree. A snapshot per iteration makes the bounded sixteen-step
+settlement independent of map traversal order; unknown/conflicting producers,
+unseeded cycles, container replacement and invalid dependencies propagate to
+their consumers. An unrelated scalar with the same final name cannot supply
+the record's type. Existing closure/mutation safeguards remain in force.
+
+Against merged PR #190, configured Masa changes **12,288 → 11,881 unresolved**,
+**433 removed / 26 added**, net **407**, with accepted calls **24,227 → 24,669**.
+Removing only manual mappings changes **13,450 → 13,051**, **433 removed /
+34 added**, net **399**, accepted **19,674 → 20,099**. Both modes retain
+897 indexed/scanned files. The additions expose deeper wrapper/Java/return and
+inheritance gaps or withhold speculative chained values. They include lockedBy's
+loadBy result and a content producer with an unknown return, not established
+runtime defects. The configured CLI preserves all **60,921 raw call records
+identically per entry**; filtered accepted/report totals are not raw coverage.
+
+Of fourteen other corpus comparisons, thirteen are identical per entry. Wheels
+with presets and vendor coverage changes **3,275 → 3,263**, twelve removed and
+none added, accepted **46,148 → 46,162**. Its removals are model/create-assigned
+local.per/local.tony receivers in the two populate fixtures. No-preset Wheels
+remains **8,929 / 39,574 accepted**. Every index/scan count is preserved; the
+default six-project totals remain **6,796 / 14,690**.
+
+Both Wheels modes preserve raw extraction identically per entry: **67,931**
+with presets and **67,484** without. Instrumented final-source reports match
+the ordinary corpus reports; the probe was isolated and its source restored.
+
+Both new receiver regressions fail independently with their fix disabled and
+pass restored. Integration tests check real returned components, missing methods,
+unknown chains and exact record receivers. Generic callback arguments, event-slot
+typing, cross-request/view propagation and polymorphic loadBy/manager returns
+remain open. In particular, this does not resolve all rc.contentBean findings
+in Masa: producer contracts must be proven before member flow can carry them.
+
+Local build, vet, full short tests, full short race tests, pinned lint and diff
+checks pass. A concurrent race run initially exceeded the existing document-link
+timing threshold (51.16 ms average against 50 ms); the complete race suite passed
+when rerun without corpus scans. CI status must be checked on the published head.
+
+### No-argument optional getters (PR #192, second batch)
+
+A resolved script method can now supply a call-specific receiver when its
+no-argument path is proven: optional parameters without defaults, an exact
+`structKeyExists(arguments, 'parameter')` guard, and an else branch that directly
+returns one shared-scope field. Leading literal local initialization is allowed;
+interpolation, scope/argument shadowing, mutations, computed initializers,
+required/default parameters, overridden guard functions, nested fields and
+trailing work withhold inference.
+The source check is bounded to 2,048 body tokens and cached with source bytes.
+
+Masa's `globalConfig()` therefore returns the startup-configured configBean for
+that call. `globalConfig('property')` and the unconditional method contract
+remain untyped. Shared fields are interpreted in the caller's application;
+modified getter source invalidates its lexical contract. Direct receiver chains,
+bare/inherited calls and assignments use the same rule. Ambiguous same-name
+calls on one source line withhold direct-chain inference, and a missing method
+on a known bean still produces a diagnostic.
+
+Against the first batch, configured Masa changes **11,881 → 11,842 unresolved**,
+**39 removed / zero added**, accepted **24,669 → 24,709**. Automatic mappings
+changes **13,051 → 13,020**, **39 removed / eight added**, accepted
+**20,099 → 20,131**. Those eight additions expose `mura.configBean` paths not
+found in the caller's automatic-mapping context; they replace unknown getter
+returns, not established runtime defects. Both scans preserve 897 indexed/scanned
+files. Cumulatively against merged PR #190, reductions are **446 configured**
+and **430 automatic**.
+
+All fourteen other corpus comparisons are identical per finding, with unchanged
+indexed/scanned/accepted counts. Configured Masa preserves **60,921 raw call
+records identically per entry**. The regression fails behaviorally with this fix
+disabled and passes restored; negative cases cover unsupported arguments,
+primitive contracts, source refresh, side effects and separate applications.
+This does not supply a blanket contentBean/loadBy contract: manager/DAO producers
+can return caller-supplied objects and runtime-dependent values. Callback/event
+slots, cross-request flow and those polymorphic producers remain open.

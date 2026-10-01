@@ -39,6 +39,7 @@ func (pr *ParseResult) applyMemberBindings() {
 	locals, _, key := pr.collectionKeys(writes)
 	nodes := map[string]*collectionNode{}
 	identities := map[string]collectionWrite{}
+	dependencies := map[string][]memberDependency{}
 
 	for _, w := range writes {
 		if w.element {
@@ -56,6 +57,12 @@ func (pr *ParseResult) applyMemberBindings() {
 			n = &collectionNode{}
 			nodes[identity] = n
 			identities[identity] = w
+		}
+
+		if receiver, methods := pr.memberWriteDependency(w); receiver != "" {
+			dependencies[identity] = append(dependencies[identity], memberDependency{key(receiver, w.function), methods})
+
+			continue
 		}
 
 		source := pr.memberValueSource(w.expression, w.function, locals)
@@ -102,10 +109,12 @@ func (pr *ParseResult) applyMemberBindings() {
 		}
 	}
 
-	for identity, n := range nodes {
+	components := pr.settleMemberDependencies(nodes, dependencies)
+
+	for identity := range nodes {
 		w := identities[identity]
 		name, scope, _ := MemberReceiverName(w.target)
-		component := pr.memberSourceComponent(n)
+		component := components[identity]
 
 		ref := ComponentRef{Variable: strings.Clone(name), Component: component, URI: pr.URI, Line: conv.Uint32(strings.Count(pr.Content[:w.offset], "\n")), This: scope == RefThis}
 		if strings.Contains(identity, "\t") {
