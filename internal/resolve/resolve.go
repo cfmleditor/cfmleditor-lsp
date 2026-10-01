@@ -1248,8 +1248,12 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
+		if ret == "" && !callHop {
+			ret = r.absentArgumentComponent(fd, factoryCallExpression(pr.Content, hop, int(call.Line)), baseDir, comp)
+		}
+
 		if ret == "" && callHop {
-			ret = r.wheelsFactoryReturn(fd, expression, baseDir)
+			ret = r.expressionReturn(fd, expression, baseDir, comp)
 		}
 
 		if soft {
@@ -1461,7 +1465,7 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 
 	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
 	if ret == "" && expression != "" {
-		ret = r.wheelsFactoryReturn(def, expression, baseDir)
+		ret = r.expressionReturn(def, expression, baseDir, pr.URI.Path())
 	}
 
 	if ret == "" {
@@ -2044,7 +2048,7 @@ func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) s
 		}
 
 		if callHop {
-			if ret := r.wheelsFactoryReturn(fd, expression, baseDir); ret != "" {
+			if ret := r.expressionReturn(fd, expression, baseDir, component); ret != "" {
 				return ret
 			}
 		}

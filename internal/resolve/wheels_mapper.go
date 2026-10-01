@@ -192,8 +192,9 @@ func (r *Resolver) wheelsPlanFunc(global, name string) *parser.FunctionDef {
 }
 
 type wheelsMethod struct {
-	body   string
-	public bool
+	body         string
+	public       bool
+	noArgsReturn string
 }
 
 type wheelsSource struct {
@@ -290,7 +291,8 @@ func wheelsReadMethod(scanner *parser.Scanner, header []parser.Token) (string, w
 		}
 	}
 
-	if beanArguments(scanner) == nil {
+	params := beanArguments(scanner)
+	if params == nil {
 		return "", wheelsMethod{}
 	}
 
@@ -311,7 +313,10 @@ func wheelsReadMethod(scanner *parser.Scanner, header []parser.Token) (string, w
 		}
 	}
 
-	var body strings.Builder
+	var (
+		body   strings.Builder
+		tokens []parser.Token
+	)
 
 	braces := 1
 	for braces > 0 {
@@ -330,10 +335,14 @@ func wheelsReadMethod(scanner *parser.Scanner, header []parser.Token) (string, w
 
 		if braces > 0 {
 			wheelsWriteToken(&body, tok)
+
+			if len(tokens) <= 2048 {
+				tokens = append(tokens, tok)
+			}
 		}
 	}
 
-	return strings.ToLower(name.Value), wheelsMethod{body: body.String(), public: public}
+	return strings.ToLower(name.Value), wheelsMethod{body: body.String(), public: public, noArgsReturn: absentArgumentReturn(params, tokens)}
 }
 
 func wheelsTokens(source string) string {

@@ -1200,3 +1200,40 @@ Local build, vet, full short tests, full short race tests, pinned lint and diff
 checks pass. A concurrent race run initially exceeded the existing document-link
 timing threshold (51.16 ms average against 50 ms); the complete race suite passed
 when rerun without corpus scans. CI status must be checked on the published head.
+
+### No-argument optional getters (PR #192, second batch)
+
+A resolved script method can now supply a call-specific receiver when its
+no-argument path is proven: optional parameters without defaults, an exact
+`structKeyExists(arguments, 'parameter')` guard, and an else branch that directly
+returns one shared-scope field. Leading literal local initialization is allowed;
+interpolation, scope/argument shadowing, mutations, computed initializers,
+required/default parameters, overridden guard functions, nested fields and
+trailing work withhold inference.
+The source check is bounded to 2,048 body tokens and cached with source bytes.
+
+Masa's `globalConfig()` therefore returns the startup-configured configBean for
+that call. `globalConfig('property')` and the unconditional method contract
+remain untyped. Shared fields are interpreted in the caller's application;
+modified getter source invalidates its lexical contract. Direct receiver chains,
+bare/inherited calls and assignments use the same rule. Ambiguous same-name
+calls on one source line withhold direct-chain inference, and a missing method
+on a known bean still produces a diagnostic.
+
+Against the first batch, configured Masa changes **11,881 → 11,842 unresolved**,
+**39 removed / zero added**, accepted **24,669 → 24,709**. Automatic mappings
+changes **13,051 → 13,020**, **39 removed / eight added**, accepted
+**20,099 → 20,131**. Those eight additions expose `mura.configBean` paths not
+found in the caller's automatic-mapping context; they replace unknown getter
+returns, not established runtime defects. Both scans preserve 897 indexed/scanned
+files. Cumulatively against merged PR #190, reductions are **446 configured**
+and **430 automatic**.
+
+All fourteen other corpus comparisons are identical per finding, with unchanged
+indexed/scanned/accepted counts. Configured Masa preserves **60,921 raw call
+records identically per entry**. The regression fails behaviorally with this fix
+disabled and passes restored; negative cases cover unsupported arguments,
+primitive contracts, source refresh, side effects and separate applications.
+This does not supply a blanket contentBean/loadBy contract: manager/DAO producers
+can return caller-supplied objects and runtime-dependent values. Callback/event
+slots, cross-request flow and those polymorphic producers remain open.

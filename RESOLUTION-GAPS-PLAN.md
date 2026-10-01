@@ -368,3 +368,16 @@ untyped callbacks and polymorphic producers remain unresolved; this is not a
 blanket MuraScope or contentBean contract. See the final batch in
 [RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for boundaries and evidence. Session
 validation is in `/workspace/receiver-validation`.
+
+## Second implementation batch (PR #192)
+
+Category 4 now recognizes a bounded no-argument optional-getter path to a
+startup-proven shared bean. Masa's `globalConfig()` gains a receiver without
+assigning its property-getter calls an unconditional component return.
+Configured Masa is **11,842 unresolved / 24,709 accepted**; automatic mappings
+are **13,020 / 20,131**, retaining 897 indexed/scanned files. This batch removes
+39 findings in each mode, exposing eight missing component paths in automatic
+mode. Fourteen other comparisons remain identical per entry, and Masa's 60,921
+raw calls are unchanged. See [RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the
+contract, rejection cases and remaining producers. Session evidence is under
+`/workspace/optional-return-validation`.
