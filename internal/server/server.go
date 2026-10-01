@@ -92,7 +92,10 @@ type Server struct {
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
 	changeCount              map[uri.URI]int           // rapid change counter per file
 	changeWindowStart        map[uri.URI]time.Time     // start of current rapid-change window
-	beansResolver            *resolve.Resolver         // resolver whose bean roots the index contains
+	mappingJSONFiles         map[string]bool
+	mappingJSONDirs          map[string]bool
+	discoveryDependencies    *resolve.DiscoveryDependencies
+	beansResolver            *resolve.Resolver // resolver whose bean roots the index contains
 	index                    *index.Index
 	resolver                 *resolve.Resolver
 	linter                   *cflint.Runner
@@ -442,9 +445,14 @@ func (s *Server) getResolver() *resolve.Resolver {
 				cflog.Strings("unknown", unknown), cflog.Strings("known", config.KnownFrameworks()))
 		}
 
+		if s.discoveryDependencies == nil {
+			s.discoveryDependencies = &resolve.DiscoveryDependencies{}
+		}
+
 		s.logPresetSuggestion()
 
 		s.resolver = &resolve.Resolver{
+			Discovery:          s.discoveryDependencies,
 			FS:                 s.FS,
 			WorkspaceFolders:   s.searchRoots(),
 			Mappings:           s.Mappings,
@@ -497,6 +505,9 @@ func (s *Server) invalidateResolver() {
 
 	s.resolverMu.Lock()
 	s.resolver = nil
+	s.discoveryDependencies = nil
+	s.mappingJSONFiles = nil
+	s.mappingJSONDirs = nil
 	s.cachedResolvers = nil
 	s.cachedResolverSet = nil
 	s.resolverMu.Unlock()
@@ -783,8 +794,12 @@ func (s *Server) buildResolvers() []parser.Resolver {
 
 	// Discovery uses a private index: parsing startup files while holding
 	// resolverMu must not re-enter the server's shared index locks.
+	if s.discoveryDependencies == nil {
+		s.discoveryDependencies = &resolve.DiscoveryDependencies{}
+	}
+
 	discovery := &resolve.Resolver{
-		FS: s.FS, Index: index.New(), WorkspaceFolders: s.searchRoots(),
+		FS: resolve.TrackDiscoveryFS(s.FS, s.discoveryDependencies), Index: index.New(), WorkspaceFolders: s.searchRoots(),
 		Mappings: s.Mappings, StartupFiles: s.StartupFiles, Resolvers: r,
 	}
 	r = discovery.BeanResolvers(s.BeanPaths)

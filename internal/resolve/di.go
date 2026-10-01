@@ -214,7 +214,7 @@ type diSource struct {
 }
 
 func (r *Resolver) buildDIPolicies() {
-	d := &Resolver{FS: r.FS, Index: index.New(), WorkspaceFolders: r.WorkspaceFolders, Mappings: r.Mappings, Resolvers: r.Resolvers, ExpressionMappings: r.ExpressionMappings, discoveringDI: true}
+	d := &Resolver{FS: TrackDiscoveryFS(r.fs(), r.Discovery), Index: index.New(), WorkspaceFolders: r.WorkspaceFolders, Mappings: r.Mappings, Resolvers: r.Resolvers, ExpressionMappings: r.ExpressionMappings, discoveringDI: true}
 	sources := r.diSources(d)
 	factories := map[string][]int{}
 
@@ -270,6 +270,8 @@ func (r *Resolver) diSources(d *Resolver) []diSource {
 		}
 
 		seen[pathKey(file)] = true
+
+		r.Discovery.add(file)
 
 		data, err := r.fs().ReadFile(file)
 		if err != nil {
@@ -407,6 +409,8 @@ func (r *Resolver) isDI1(component, dir string) bool {
 		}
 
 		seen[pathKey(file)] = true
+
+		r.Discovery.add(file)
 
 		data, err := r.fs().ReadFile(file)
 		if err != nil {

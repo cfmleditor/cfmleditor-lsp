@@ -121,6 +121,8 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 
 	var indexed, removed, skipped, appChanged, mappingChanged int
 
+	discoveryChanged := false
+
 	reload := map[string]bool{}
 
 	for _, ev := range changes {
@@ -131,7 +133,9 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		}
 
 		if strings.EqualFold(filepath.Ext(cfpath.FromURI(string(ev.URI))), ".json") {
-			mappingChanged++
+			if s.isMappingJSON(cfpath.FromURI(string(ev.URI))) {
+				mappingChanged++
+			}
 
 			continue
 		}
@@ -139,8 +143,10 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		switch s.applyWatchedFileChange(ev) {
 		case watchedIndexed:
 			indexed++
+			discoveryChanged = discoveryChanged || isApplicationFile(cfpath.FromURI(string(ev.URI))) || s.getResolver().DiscoveryAffected(cfpath.FromURI(string(ev.URI)))
 		case watchedRemoved:
 			removed++
+			discoveryChanged = discoveryChanged || isApplicationFile(cfpath.FromURI(string(ev.URI))) || s.getResolver().DiscoveryAffected(cfpath.FromURI(string(ev.URI)))
 		case watchedSkipped:
 			skipped++
 		}
@@ -162,7 +168,13 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 
 	// Both caches are keyed on answers the index just stopped agreeing with.
 	// This mirrors what didSave does for an edit made in the editor.
-	s.invalidateResolveCache()
+
+	if discoveryChanged || mappingChanged > 0 {
+		s.invalidateResolver()
+	} else {
+		s.getResolver().InvalidatePaths()
+		s.invalidateRoutes()
+	}
 
 	cfpath.InvalidateAppMappingsCache()
 

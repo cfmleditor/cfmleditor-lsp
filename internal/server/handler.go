@@ -667,14 +667,9 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 
 	docURI := params.TextDocument.URI
 
-	s.invalidateResolveCache()
+	s.invalidateSourceFile(docURI.Path())
 
-	// Invalidate Application.cfc mappings cache if an Application file was saved
 	filePath := docURI.Path()
-
-	if cfpath.IsCFMLFile(filePath) || strings.EqualFold(filepath.Ext(filePath), ".json") {
-		cfpath.InvalidateAppMappingsCache()
-	}
 
 	// A saved file's known issues are anchored again, since an edit above one
 	// moves the line it is on.

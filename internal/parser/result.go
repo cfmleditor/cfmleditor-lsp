@@ -93,10 +93,12 @@ type ParseResult struct {
 	funcVars   map[string][]string
 
 	// funcRefs caches per-function component refs keyed by "start:end".
-	funcRefsMu   sync.Mutex
-	funcRefsMap  map[string][]ComponentRef
-	funcLinksMap map[string][]DocumentLink
-	funcCallsMap map[string][]CallSite // per-function call sites keyed by "start:end"
+	memberSnapshot        *ParseResult // member refs computed once per document version
+	memberSnapshotContent string
+	funcRefsMu            sync.Mutex
+	funcRefsMap           map[string][]ComponentRef
+	funcLinksMap          map[string][]DocumentLink
+	funcCallsMap          map[string][]CallSite // per-function call sites keyed by "start:end"
 }
 
 // ParseOptions configures optional parse behaviour.
@@ -331,6 +333,11 @@ func (pr *ParseResult) extractSignatures() {
 		pr.applyCollectionReturns(allPendingCalls)
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
+
+		if pr.hasMemberBinding(pr.Content) {
+			pr.memberSnapshot = &ParseResult{funcRefsMap: maps.Clone(pr.funcRefsMap)}
+			pr.memberSnapshotContent = pr.Content
+		}
 	} else {
 		// A shallow parse cannot afford FuncLookup, and a ref typed by the
 		// first call of a longer chain is wrong, so such a ref is dynamic.
@@ -1875,6 +1882,7 @@ func (pr *ParseResult) InvalidateFunc(funcStart, funcEnd int) {
 	// Ref and link answers depend on the current body as well as its vars.
 	pr.funcRefsMu.Lock()
 	delete(pr.funcRefsMap, key)
+	pr.memberSnapshot = nil
 	delete(pr.funcLinksMap, key)
 	pr.funcRefsMu.Unlock()
 }
@@ -2478,17 +2486,20 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 	}
 
 	if pr.hasMemberBinding(body) {
-		// Incremental invalidation reparses ordinary refs first. Member analysis
-		// uses the current document and those refs without modifying sibling caches.
-		memberParse := &ParseResult{
-			URI: pr.URI, Content: pr.Content, Regions: pr.Regions,
-			Scopes: pr.Scopes, Funcs: pr.Funcs, ComponentRefs: pr.ComponentRefs,
-			Resolvers: pr.Resolvers, resolverSet: pr.resolverSet, FuncLookup: pr.FuncLookup,
-			funcRefsMap: map[string][]ComponentRef{funcKey(funcStart, funcEnd): refs},
+		// A fresh full parse owns its slices and computes member identities once
+		// per edited document, rather than repeating whole-file work per function.
+		if pr.memberSnapshot == nil || pr.memberSnapshotContent != pr.Content {
+			pr.memberSnapshot = ParseWithOptions(pr.URI, pr.Content, &ParseOptions{
+				Resolvers: pr.Resolvers, PropertyResolvers: pr.PropertyResolvers,
+				FuncLookup: pr.FuncLookup, BeanLookup: pr.BeanLookup,
+				SetterLookup: pr.SetterLookup, ConstructorLookup: pr.ConstructorLookup,
+				PropertyBeanLookup: pr.PropertyBeanLookup, BuiltinReturnLookup: pr.BuiltinReturnLookup,
+				ExpressionMappings: pr.expressionMappings, ServicePropertyResolvers: pr.ServicePropertyResolvers,
+			})
+			pr.memberSnapshotContent = pr.Content
 		}
-		memberParse.Regions, memberParse.contentLineIdx = memberParse.classifyRegions()
-		memberParse.applyMemberBindings()
-		refs = memberParse.funcRefsMap[funcKey(funcStart, funcEnd)]
+
+		refs = slices.Clone(pr.memberSnapshot.funcRefsMap[funcKey(funcStart, funcEnd)])
 	}
 
 	return refs, links
@@ -3146,7 +3157,7 @@ func (pr *ParseResult) prepareManagedSetterLookup() {
 		return
 	}
 
-	metadata := ParseWithOptions(pr.URI, pr.Content, &ParseOptions{})
+	metadata := pr.managedPropertyMetadata()
 
 	properties := make(map[string]map[string]string, len(metadata.Properties))
 	for _, prop := range metadata.Properties {

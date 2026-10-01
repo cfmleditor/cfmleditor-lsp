@@ -22,6 +22,8 @@ import (
 
 // Resolver resolves component dot-paths to files and functions.
 type Resolver struct {
+	Discovery         *DiscoveryDependencies
+	configurationOnce sync.Once
 	// Context views keep runtime mappings while traversing physical library files.
 	callerMappings     map[string]string
 	contextViews       map[string]*Resolver

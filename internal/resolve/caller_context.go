@@ -1,7 +1,5 @@
 package resolve
 
-import "path/filepath"
-
 // forCaller binds mappings to the application's execution context. A library's
 // nearest Application.cfc governs direct requests to that directory, not method
 // calls from another application. Keep physical directories for relative lookup
@@ -13,9 +11,6 @@ func (r *Resolver) forCaller(baseDir string) *Resolver {
 	}
 
 	root := r.FindApplicationRoot(baseDir)
-	if root == "" {
-		root = filepath.Clean(baseDir)
-	}
 
 	r.mu.RLock()
 	view := r.contextViews[root]
