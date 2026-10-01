@@ -7,6 +7,7 @@ import (
 
 type collectionWrite struct {
 	target, expression, function string
+	offset                       int
 	element, local, unknown      bool
 }
 
@@ -552,7 +553,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 
 			root, element := collectionTarget(&cursor)
 			if root != "" && !element {
-				writes = append(writes, collectionWrite{target: root, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, function: functionAt(offset + t.Offset), unknown: true})
 			}
 		}
 
@@ -571,7 +572,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 
 		if cursor.PeekSkipComments().Kind == TokLParen {
 			if base, method, ok := strings.CutLast(root, "."); ok && collectionMemberMutator(method) {
-				writes = append(writes, collectionWrite{target: base, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: base, function: functionAt(offset + t.Offset), unknown: true})
 			}
 		}
 
@@ -579,7 +580,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 		if operator.Kind == TokPlus || operator.Kind == TokMinus || operator.Kind == TokStar || operator.Kind == TokSlash || operator.Kind == TokAmpersand || operator.Kind == TokPercent || operator.Kind == TokCaret {
 			next := cursor.PeekSkipComments().Kind
 			if next == TokEquals || next == operator.Kind {
-				writes = append(writes, collectionWrite{target: root, element: element, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, element: element, function: functionAt(offset + t.Offset), unknown: true})
 			}
 
 			continue
@@ -589,7 +590,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 			continue
 		}
 
-		writes = append(writes, collectionWrite{target: root, expression: scriptReturnExpression(&cursor), function: functionAt(offset + t.Offset), element: element, local: local || hasPrefixFold(root, "local.")})
+		writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, expression: scriptReturnExpression(&cursor), function: functionAt(offset + t.Offset), element: element, local: local || hasPrefixFold(root, "local.")})
 	}
 
 	return writes
@@ -626,7 +627,7 @@ func collectCollectionTags(text string, offset int, functionAt func(int) string,
 
 		for _, attribute := range collectionOutputAttributes(name) {
 			if root, element := collectionRead(getAttr(tag, attribute)); root != "" {
-				writes = append(writes, collectionWrite{target: root, element: element, function: functionAt(offset + idx), unknown: true})
+				writes = append(writes, collectionWrite{offset: offset + idx, target: root, element: element, function: functionAt(offset + idx), unknown: true})
 			}
 		}
 
@@ -637,7 +638,7 @@ func collectCollectionTags(text string, offset int, functionAt func(int) string,
 			if name != "" {
 				root, element := collectionRead(name)
 				if root != "" {
-					writes = append(writes, collectionWrite{target: root, expression: def, element: element, unknown: element, function: functionAt(offset + idx)})
+					writes = append(writes, collectionWrite{offset: offset + idx, target: root, expression: def, element: element, unknown: element, function: functionAt(offset + idx)})
 				}
 			}
 		}

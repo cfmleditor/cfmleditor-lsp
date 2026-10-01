@@ -6,15 +6,6 @@ import (
 	"strings"
 )
 
-// mappingRe matches this.mappings["/key"] = <value>, where the value is one of
-// expandPath("./path"), a plain "path", or getDirectoryFromPath(
-// getCurrentTemplatePath()) — the idiom for the folder this Application.cfc is
-// in — optionally followed by & "sub/dir".
-//
-// Groups: 1 key, 2 expandPath argument, 3 plain string, 4 the
-// getDirectoryFromPath form, 5 its optional suffix.
-var mappingRe = regexp.MustCompile(`(?i)this\.mappings\[\s*["']([^"']+)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["']|(getDirectoryFromPath\(\s*getCurrentTemplatePath\(\s*\)\s*\))(?:\s*&\s*["']([^"']*)["'])?)`)
-
 // beanPathRe matches: this.beanPaths["namespace"] = expandPath("./path") or this.beanPaths["namespace"] = "path".
 var beanPathRe = regexp.MustCompile(`(?i)this\.beanPaths\[\s*["']([^"']*)["']\s*\]\s*=\s*(?:expandPath\(\s*["']([^"']+)["']\s*\)|["']([^"']+)["'])`)
 
@@ -34,99 +25,18 @@ var ormCfcLocationArrayRe = regexp.MustCompile(`(?i)cfcLocation\s*[:=]\s*\[([^\]
 // appDir is the directory containing Application.cfc, used to resolve relative paths.
 // Returns a map of mapping key (without leading /) to absolute directory path.
 func ParseApplicationMappings(content string, appDir string) map[string]string {
-	if indexFold(content, "mappings") < 0 {
+	s := &mappingSourceState{mappings: map[string]string{}, env: map[string]string{}, base: filepath.Join(appDir, "Application.cfc")}
+	s.content(content, s.base, 0)
+
+	if len(s.mappings) == 0 {
 		return nil
 	}
 
-	matches := mappingRe.FindAllStringSubmatch(content, -1)
-	out := make(map[string]string, len(matches))
-
-	for _, m := range matches {
-		key := strings.TrimPrefix(m[1], "/")
-		if key == "" {
-			continue
-		}
-
-		val := m[2]
-		if val == "" {
-			val = m[3]
-		}
-
-		if m[4] != "" {
-			val = m[5]
-		}
-
-		if !filepath.IsAbs(val) {
-			val = filepath.Join(appDir, val)
-		}
-
-		out[key] = filepath.Clean(val)
-	}
-
-	for key, val := range evaluatedMappings(content, appDir) {
-		if _, ok := out[key]; !ok {
-			out[key] = val
-		}
-	}
-
-	if len(out) == 0 {
-		return nil
-	}
-
-	return out
+	return s.mappings
 }
-
-// assignmentRe is one assignment on a line of an Application.cfc or .cfm, in
-// script or in a <cfset>: its target and the expression assigned, up to the
-// statement's end.
-var assignmentRe = regexp.MustCompile(`(?i)^\s*(?:<cfset\s+)?(?:var\s+)?([\w.]+(?:\[\s*["'][^"']+["']\s*\])?)\s*=\s*([^;]+?)\s*;?\s*/?>?\s*$`)
 
 // mappingTargetRe is `this.mappings["/key"]`, in any case and either quote.
 var mappingTargetRe = regexp.MustCompile(`(?i)^this\.mappings\[\s*["']([^"']+)["']\s*\]$`)
-
-// evaluatedMappings reads the mappings a literal-only match cannot: most
-// Application.cfc files build them from the file's own directory and from
-// variables set a line or two above —
-//
-//	local.projectRoot = expandPath( "../../../" );
-//	this.mappings[ "/cli" ] = local.projectRoot & "cli/";
-//	this.mappings[ "/tests" ] = getDirectoryFromPath( getCurrentTemplatePath() );
-//
-// — 90 of the 110 mapping assignments in the corpus. The statements are read
-// in order, every assignment whose value evaluates is remembered by name, and
-// a mapping is kept when its value evaluates. evalPathExpr says what does.
-func evaluatedMappings(content, appDir string) map[string]string {
-	env := map[string]string{}
-	out := map[string]string{}
-
-	for line := range strings.SplitSeq(content, "\n") {
-		m := assignmentRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-
-		val, ok := evalPathExpr(m[2], env, appDir)
-		if !ok {
-			continue
-		}
-
-		if mk := mappingTargetRe.FindStringSubmatch(m[1]); mk != nil {
-			key := strings.Trim(strings.TrimSpace(mk[1]), "/")
-			if key == "" {
-				continue
-			}
-
-			env["mapping:"+strings.ToLower(key)] = val
-			out[key] = cleanMappingPath(val, appDir)
-
-			continue
-		}
-
-		env[envName(m[1])] = val
-	}
-
-	return out
-}
 
 // envName is how a variable is remembered: lowercased, without the local. or
 // variables. that CFML lets a component's pseudo-constructor leave off.
@@ -159,6 +69,10 @@ func cleanMappingPath(p, appDir string) string {
 // server's own — is not a path the source states, and the whole expression
 // is declined rather than half-read.
 func evalPathExpr(expr string, env map[string]string, appDir string) (string, bool) {
+	if len(expr) > 8192 || strings.Count(expr, "(") > 32 {
+		return "", false
+	}
+
 	var b strings.Builder
 
 	for _, term := range splitConcat(expr) {
@@ -211,8 +125,20 @@ func evalPathTerm(term string, env map[string]string, appDir string) (string, bo
 
 	for _, fn := range []string{"getCurrentTemplatePath", "getBaseTemplatePath"} {
 		if arg, ok := callArg(term, fn); ok && strings.TrimSpace(arg) == "" {
+			if value := env["@template"]; value != "" && fn == "getCurrentTemplatePath" {
+				return value, true
+			}
+
+			if value := env["@baseTemplate"]; value != "" && fn == "getBaseTemplatePath" {
+				return value, true
+			}
+
 			return filepath.Join(appDir, "Application.cfc"), true
 		}
+	}
+
+	if value, ok := slicedMappingPath(term, env, appDir); ok {
+		return value, true
 	}
 
 	if m := mappingTargetRe.FindStringSubmatch(term); m != nil {

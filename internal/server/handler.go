@@ -672,7 +672,7 @@ func (s *Server) handleDidSave(_ context.Context, rawParams []byte) (any, error)
 	// Invalidate Application.cfc mappings cache if an Application file was saved
 	filePath := docURI.Path()
 
-	if isApplicationFile(filePath) {
+	if cfpath.IsCFMLFile(filePath) || strings.EqualFold(filepath.Ext(filePath), ".json") {
 		cfpath.InvalidateAppMappingsCache()
 	}
 

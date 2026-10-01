@@ -895,3 +895,88 @@ real missing methods on the final CFC. Regressions fail with collection
 settlement disabled; the closed-file regression separately fails with deferred
 lookup disabled. Restored checks, build, vet, full short/race suites, pinned lint,
 formatting and diff checks pass.
+
+
+## Automatic mappings, literal bootstrap services and explicit record members
+
+Mapping discovery now reads the governing Application's literal includes and
+relative parent constructors, including dot assignments and whole mapping
+structs. Known path variables, current/base template paths and literal
+left/right length arithmetic preserve the declaring template's context. Whole
+struct RHS expressions read the previous struct before replacement, so map
+iteration order cannot create a false dependency. Comments, computed paths and
+cyclic/deep include traversal do not execute CFML; traversal is bounded to 64
+files and 16 levels. Repeated includes and mapped parent aliases are not yet
+modeled as distinct execution contexts.
+
+Physical non-root CFConfig mappings are defaults, loaded from the nearest
+.cfconfig.json or a static server.json cfconfig.file selection (up to 32 ancestor
+directories). Relative physical paths are based on the selected config file.
+Archive-primary entries and environment/runtime placeholders remain unknown.
+Application declarations override defaults and explicit editor configuration
+wins case-insensitively. Watched includes, parent CFCs and JSON changes invalidate
+mapping and resolver caches; the known-issues reload path retains priority.
+
+Finite script listToArray loops now model shared-scope service installation.
+The list must be literal (at most 64 simple IDs), key and bean interpolation must
+use the same iterator, and nested loops, closures and iterator mutations are
+excluded. The actual factory must expose getBean(beanName) and
+declareBean(beanName,dottedPath); configured/registered bean identities supply
+the component, never a service-name guess. Scalar variables-scope factory writes
+and shared aliases are followed with bounded recursion. Unknown factory
+replacements, absent beans and conflicting/unknown service writes withhold the
+new loop inference.
+
+Explicit static record writes such as rc.$=getBean('$') or
+variables.instance.gateway=new Gateway() type that exact member without typing
+the container. Constructors, configured factories and verified return contracts
+supply identities. Unknown/conflicting writes, dynamic keys, parent replacement,
+recognized mutators, escaping container aliases and closure-containing source
+withhold new inference. Record paths retain their full identity: arguments.data.$
+cannot borrow an unrelated $. Local/argument roots shadow component record fields,
+and variables/this remain distinct. Body edits invalidate ref/link caches and
+recompute member bindings from current content. Struct-literal members, arbitrary
+record aliases, object property contracts and generic keyed event values remain
+open; getValue('MuraScope') is not typed from its key alone because externally
+supplied data and arguments can replace that slot.
+
+At the pinned Masa commit, with the existing configuration and the same **897
+indexed/scanned files**, this batch changes **13,749 → 12,288**, **1,490 removed /
+29 added**, net **1,461**. The removed groups include 673 application.settingsManager,
+133 application.serviceFactory, 122 application.contentManager, 106
+application.permUtility and 95 application.pluginManager findings. All 29
+additions were reviewed: fifteen arguments.data record findings, five rc.$,
+one arguments.rc.userBean, six newly reached return-chain gaps, and two checked
+missing methods (emailDAO.getSubject and userManager.readByEmail). Whole PR
+against the original base is **18,539 → 12,288**, **6,576 removed / 325 added**,
+net **6,251**.
+
+Removing only the manual mappings, while retaining bean/startup/resolver config,
+changes **17,488 → 13,484**, **4,189 removed / 185 added**, net **4,004** over the
+same 897 files. All eleven root mappings are discovered from source. This is
+not identical to the configured run: nested access-restriction Applications
+under core/mura and other directories do not declare those mappings. Library
+analysis needs the calling application's mapping context to bridge that gap;
+blindly inheriting parent mappings would break application isolation.
+
+All fourteen other corpus comparisons retain indexed/scanned coverage.
+ContentBox changes 2,709→2,705 / 7,849→7,845 (five removed, one added per mode).
+TestBox changes 288→291 / 712→715 (three thread-attribute findings per mode).
+Default Wheels changes 16→18 / 61→63 (two argument-record findings per mode).
+ColdBox changes 1,397→1,404 / 3,404→3,411 (seven record findings per mode).
+Lucee and FW/1 are unchanged per entry. Six-project totals are **6,812 / 14,714**.
+Wheels vendor coverage changes **6,901→6,915** (five removed, nineteen added)
+and **13,262→13,264** (three removed, five added). New findings involve thread
+attributes, struct literals, returned records, dynamic object properties and
+mock members previously accepted by the incorrect last-segment fallback.
+Every new entry has a source review; reductions are not obtained by losing files.
+
+A fresh raw-call capture immediately after AllCalls in the actual CLI scan
+preserves all **60,921 records per entry** in both versions. The earlier 60,546
+capture used a different probe path; it is not directly comparable. Filtered
+resolved-plus-reported totals remain unsuitable as raw coverage measurements.
+Regressions fail independently when source walking, CFConfig loading, startup
+loop inference, member settlement or preserved record identity is disabled,
+then pass restored. Build, vet, full short/race suites, pinned lint, formatting,
+diff and parser performance checks pass. CI must be checked on the published
+commit, as for earlier batches.

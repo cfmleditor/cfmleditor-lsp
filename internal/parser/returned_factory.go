@@ -34,6 +34,14 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 		return "", nil
 	}
 
+	for sc.PeekSkipComments().Kind == TokDot {
+		sc.NextSkipComments()
+
+		if sc.NextSkipComments().Kind != TokIdent {
+			return "", nil
+		}
+	}
+
 	for {
 		if sc.NextSkipComments().Kind != TokLParen {
 			return "", nil
@@ -156,3 +164,7 @@ func (pr *ParseResult) applyFactoryReturnCalls(calls []pendingCall) {
 		}
 	}
 }
+
+// FactoryCallChain extracts a whole call and its fluent method suffix. Whether
+// the root is a configured factory remains the caller's responsibility.
+func FactoryCallChain(expression string) (string, []string) { return factoryReturnChain(expression) }

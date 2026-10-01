@@ -2,6 +2,7 @@
 package path
 
 import (
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -51,12 +52,18 @@ func LoadAppMappings(appDir string) map[string]string {
 
 	appMappingsCacheMu.RUnlock()
 
-	content := readApplicationFile(appDir)
-	if content == nil {
-		return nil
-	}
+	m := loadServerMappings(appDir)
+	for _, name := range []string{"Application.cfc", "Application.cfm"} {
+		file := filepath.Join(appDir, name)
+		if _, err := DefaultFS.Stat(file); err != nil {
+			continue
+		}
 
-	m := parser.ParseApplicationMappings(string(content), appDir)
+		app := parser.MappingSources(file, m, DefaultFS.ReadFile)
+		maps.Copy(m, app)
+
+		break
+	}
 
 	appMappingsCacheMu.Lock()
 	appMappingsCache[appDir] = m

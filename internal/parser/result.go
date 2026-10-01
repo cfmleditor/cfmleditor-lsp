@@ -326,6 +326,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.generatePropertyAccessors()
 		pr.collectDelegates()
 		pr.appendResolverRefs()
+		pr.applyMemberBindings()
 		pr.applyFactoryReturnCalls(allPendingCalls)
 		pr.applyCollectionReturns(allPendingCalls)
 		pr.resolvePendingCalls(allPendingCalls)
@@ -1854,14 +1855,18 @@ func (pr *ParseResult) computeAnyScopedVars(scope Scope) []string {
 	return names
 }
 
-// InvalidateFunc clears the cached variables for a specific function,
-// forcing re-parse on next FuncVars call.
+// InvalidateFunc clears the body-dependent variable, ref and link caches.
 func (pr *ParseResult) InvalidateFunc(funcStart, funcEnd int) {
 	key := funcKey(funcStart, funcEnd)
 
 	pr.funcVarsMu.Lock()
 	delete(pr.funcVars, key)
 	pr.funcVarsMu.Unlock()
+	// Ref and link answers depend on the current body as well as its vars.
+	pr.funcRefsMu.Lock()
+	delete(pr.funcRefsMap, key)
+	delete(pr.funcLinksMap, key)
+	pr.funcRefsMu.Unlock()
 }
 
 // parseFuncBody parses a single function body for variable declarations.
@@ -2460,6 +2465,20 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 			refs[i].Component = typ(refs[i].Component, refs[i].ChainRest)
 			refs[i].ChainRest = nil
 		}
+	}
+
+	if pr.hasMemberBinding(body) {
+		// Incremental invalidation reparses ordinary refs first. Member analysis
+		// uses the current document and those refs without modifying sibling caches.
+		memberParse := &ParseResult{
+			URI: pr.URI, Content: pr.Content, Regions: pr.Regions,
+			Scopes: pr.Scopes, Funcs: pr.Funcs, ComponentRefs: pr.ComponentRefs,
+			Resolvers: pr.Resolvers, resolverSet: pr.resolverSet, FuncLookup: pr.FuncLookup,
+			funcRefsMap: map[string][]ComponentRef{funcKey(funcStart, funcEnd): refs},
+		}
+		memberParse.Regions, memberParse.contentLineIdx = memberParse.classifyRegions()
+		memberParse.applyMemberBindings()
+		refs = memberParse.funcRefsMap[funcKey(funcStart, funcEnd)]
 	}
 
 	return refs, links

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // A shared-scope variable — REQUEST.context, SERVER.kernel — is set up once,
@@ -41,9 +42,11 @@ var (
 
 // startupAssign is one shared-scope assignment a startup template makes.
 type startupAssign struct {
-	key string // "request.context", lowercased
-	rhs string
-	dir string // the template's directory, for resolving what the RHS names
+	key           string // "request.context", lowercased
+	rhs           string
+	dir           string // the template's directory, for resolving what the RHS names
+	factory, bean string
+	strict        bool // populated only by a bounded service-list loop
 }
 
 // splitSharedScope splits "REQUEST.context" into its lowercased key, or reports
@@ -114,6 +117,15 @@ func (r *Resolver) startupAssigns(baseDir string) []startupAssign {
 
 		content := string(data)
 		out = append(out, sharedAssignments(content, filepath.Dir(file))...)
+
+		pr := parser.Parse(cfpath.ToURI(file), content, r.Resolvers)
+		for _, assignment := range pr.StartupVariableAssignments() {
+			out = append(out, startupAssign{key: strings.ToLower(assignment.Variable), rhs: assignment.Expression, dir: filepath.Dir(file), strict: true})
+		}
+
+		for _, binding := range parser.StartupBeanBindings(content) {
+			out = append(out, startupAssign{key: strings.ToLower(binding.Variable), dir: filepath.Dir(file), factory: strings.ToLower(binding.Factory), bean: binding.Bean})
+		}
 
 		for _, raw := range parser.ExtractIncludes(content) {
 			if target := r.IncludePath(raw, file); target != "" {
@@ -272,7 +284,7 @@ func (r *Resolver) startupComponent(variable, baseDir string, tr *callTrace) str
 
 // typeOfShared types key from every assignment of it in assigns.
 func (r *Resolver) typeOfShared(key string, assigns []startupAssign, visiting map[string]bool) string {
-	if visiting[key] {
+	if visiting[key] || len(visiting) >= maxStartupTemplates {
 		return ""
 	}
 
@@ -281,12 +293,33 @@ func (r *Resolver) typeOfShared(key string, assigns []startupAssign, visiting ma
 
 	var comps []string
 
-	for _, a := range assigns {
+	strict := false
+
+	for i := range assigns {
+		a := &assigns[i]
+		if a.key == key && (a.bean != "" || a.strict) {
+			strict = true
+
+			break
+		}
+	}
+
+	for i := range assigns {
+		a := &assigns[i]
 		if a.key != key {
 			continue
 		}
 
-		if c := r.typeOfExpr(a.rhs, a.dir, assigns, visiting); c != "" && !slices.Contains(comps, c) {
+		c := r.typeOfExpr(a.rhs, a.dir, assigns, visiting)
+		if a.bean != "" {
+			c = r.startupLoopBean(a, assigns, visiting)
+		}
+
+		if strict && (c == "" || len(comps) > 0 && comps[0] != c) {
+			return ""
+		}
+
+		if c != "" && !slices.Contains(comps, c) {
 			comps = append(comps, c)
 		}
 	}
@@ -298,6 +331,28 @@ func (r *Resolver) typeOfShared(key string, assigns []startupAssign, visiting ma
 // component, another shared variable, or a chain of calls on either, walked
 // through each hop's return type. Anything else is not typed.
 func (r *Resolver) typeOfExpr(rhs, dir string, assigns []startupAssign, visiting map[string]bool) string {
+	if root, methods := parser.FactoryCallChain(rhs); root != "" {
+		if comp, _, _ := r.matchResolver(root, nil, nil); comp != "" {
+			for _, method := range methods {
+				if strings.EqualFold(method, "init") {
+					continue
+				}
+
+				def := r.ResolveFunc(comp, method, dir)
+				if def == nil {
+					return ""
+				}
+
+				comp = r.ReturnComponentOf(def)
+				if comp == "" || strings.HasPrefix(comp, "$") {
+					return ""
+				}
+			}
+
+			return r.staticPath(comp)
+		}
+	}
+
 	if m := createdComponent.FindStringSubmatch(rhs); m != nil {
 		return r.staticPath(m[1])
 	}
@@ -329,10 +384,7 @@ func (r *Resolver) typeOfExpr(rhs, dir string, assigns []startupAssign, visiting
 
 	base := strings.Join(segs[:first], ".")
 
-	comp := ""
-	if key, ok := splitSharedScope(base); ok {
-		comp = r.typeOfShared(key, assigns, visiting)
-	}
+	comp := r.typeOfShared(strings.ToLower(base), assigns, visiting)
 
 	if comp == "" {
 		comp, _, _ = r.matchResolver(base, nil, nil)
@@ -484,4 +536,20 @@ func argsEnd(s string, open int) int {
 	}
 
 	return -1
+}
+
+func (r *Resolver) startupLoopBean(a *startupAssign, assigns []startupAssign, visiting map[string]bool) string {
+	comp := r.typeOfShared(a.factory, assigns, visiting)
+	if comp == "" || strings.Contains(comp, "|") {
+		return ""
+	}
+
+	getter := r.ResolveFunc(comp, "getBean", a.dir)
+
+	declaration := r.ResolveFunc(comp, "declareBean", a.dir)
+	if getter == nil || len(getter.Arguments) == 0 || !strings.EqualFold(getter.Arguments[0].Name, "beanName") || declaration == nil || len(declaration.Arguments) < 2 || !strings.EqualFold(declaration.Arguments[0].Name, "beanName") || !strings.EqualFold(declaration.Arguments[1].Name, "dottedPath") {
+		return ""
+	}
+
+	return r.BeanLookup(a.bean)
 }

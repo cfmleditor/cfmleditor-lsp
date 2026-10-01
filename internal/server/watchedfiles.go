@@ -27,7 +27,7 @@ const watchedFilesRegistrationID = "cfmleditor-watched-files"
 // `.cfc`, because Application.cfm carries mappings, beans and ORM locations
 // that cfpath caches; a change to one has to invalidate that cache the same way
 // saving it in the editor does.
-var watchedGlobs = []string{"**/*.cfc", "**/*.cfm"}
+var watchedGlobs = []string{"**/*.cfc", "**/*.cfm", "**/*.json"}
 
 // registerFileWatchers asks the client to watch the workspace for CFML files
 // changing outside the editor.
@@ -119,13 +119,19 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		return
 	}
 
-	var indexed, removed, skipped, appChanged int
+	var indexed, removed, skipped, appChanged, mappingChanged int
 
 	reload := map[string]bool{}
 
 	for _, ev := range changes {
 		if p := filepath.Clean(cfpath.FromURI(string(ev.URI))); s.isKnownIssuesFile(p) {
 			reload[p] = true
+
+			continue
+		}
+
+		if strings.EqualFold(filepath.Ext(cfpath.FromURI(string(ev.URI))), ".json") {
+			mappingChanged++
 
 			continue
 		}
@@ -148,7 +154,7 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 		s.loadKnownIssuesFile(context.Background(), file)
 	}
 
-	if indexed == 0 && removed == 0 {
+	if indexed == 0 && removed == 0 && mappingChanged == 0 {
 		s.log.Debug("watched files: nothing to apply", cflog.Int("skipped", skipped))
 
 		return
@@ -158,9 +164,7 @@ func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) {
 	// This mirrors what didSave does for an edit made in the editor.
 	s.invalidateResolveCache()
 
-	if appChanged > 0 {
-		cfpath.InvalidateAppMappingsCache()
-	}
+	cfpath.InvalidateAppMappingsCache()
 
 	s.log.Info("watched files applied",
 		cflog.Int("indexed", indexed),

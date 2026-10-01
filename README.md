@@ -610,7 +610,15 @@ A `REQUEST`, `SESSION`, `APPLICATION` or `SERVER` variable is usually set up in 
 
   An entry is a file path, relative to the config or absolute, or a template path starting with `/`, resolved as a `cfinclude` of it would be: through `mappings`, the workspace folders and a folder named by its first segment.
 
-Only one-line assignments of the form `SCOPE.name = value` are read, in tag or script syntax. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
+Assignments of the form `SCOPE.name = value` are read in tag or script syntax, including multiline expressions. The value is typed if it creates a component (`createObject("component", …)` or `new …`), or if it is a chain of calls on another shared variable or on something a `componentResolvers` entry names, followed through each call's return type. So `REQUEST.context = REQUEST.kernel.getContextObject()` gives `REQUEST.context` whatever `getContextObject()` returns. This is tried after every assignment in the calling file, its `Application.cfc` and its extends chain.
+
+A bounded script loop over a literal `listToArray` service list can also type
+`application["#name#"] = factory.getBean("#name#")`. The key and bean ID must use
+the same unchanged iterator. The factory must expose the actual `getBean` and
+`declareBean` argument contracts; bean identities still come from registered or
+configured beans. Unknown factories, dynamic lists, missing beans and conflicting
+or unknown service replacements remain unresolved.
+
 
 A configured `getBean` resolver with `"resolve": "$1"` also learns literal
 `declareBean(beanName, dottedPath)` and `addAlias(aliasName, beanName)` registrations
@@ -1058,6 +1066,20 @@ above it — `this.mappings[ "/cli" ] = local.projectRoot & "cli/"` after
 are `getDirectoryFromPath( getCurrentTemplatePath() )` and earlier mappings.
 A mapping whose name has several segments (`/modules/wheels`) is used for
 paths under it, the longest match first.
+Literal includes and relative parent constructors are read with the declaring
+template's path context, bounded to 64 source files and 16 levels. Bracket/dot
+assignments, whole mapping literals and static `left`/`right` path slicing are
+supported. Runtime expressions are not executed.
+
+Physical non-root mappings in `.cfconfig.json`, or a static `server.json`
+`cfconfig.file` selection, supply defaults. Application mappings override those
+and explicit editor mappings override application values, case-insensitively.
+Relative CFConfig paths are based on that config file; environment placeholders
+and archive-primary entries are not guessed. Watched CFML/JSON edits refresh
+mapping and resolver caches. Nested applications keep their own mapping context;
+caller mapping context for library definitions behind a different Application
+remains a limitation, so explicit workspace mappings can still be needed.
+
 
 **A framework's own namespace needs no preset.** `coldbox.system.*`,
 `testbox.system.*`, `commandbox.system.*`, `qb.models.*`,

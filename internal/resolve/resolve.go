@@ -924,7 +924,7 @@ func (r *Resolver) EffectiveMappings(baseDir string) map[string]string {
 func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 	appDir := r.FindApplicationRoot(baseDir)
 	if appDir == "" {
-		return r.Mappings
+		appDir = baseDir
 	}
 
 	appMappings := cfpath.LoadAppMappings(appDir)
@@ -939,7 +939,15 @@ func (r *Resolver) effectiveMappings(baseDir string) map[string]string {
 	merged := make(map[string]string, len(appMappings)+len(r.Mappings))
 	maps.Copy(merged, appMappings)
 
-	maps.Copy(merged, r.Mappings)
+	for key, value := range r.Mappings {
+		for existing := range merged {
+			if strings.EqualFold(existing, key) {
+				delete(merged, existing)
+			}
+		}
+
+		merged[key] = value
+	}
 
 	return merged
 }
@@ -2222,6 +2230,39 @@ func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseRes
 	return comp
 }
 
+func (r *Resolver) recordReceiver(variable, name string, scope parser.RefScope, line uint32, caller string, pr *parser.ParseResult) string {
+	if ref := funcScopedRef(pr, line, name, scope); ref != nil {
+		return ref.Component
+	}
+
+	root, _, _ := strings.Cut(name, ".")
+
+	explicit := strings.HasPrefix(strings.ToLower(variable), "variables.") || strings.HasPrefix(strings.ToLower(variable), "this.")
+	if !explicit && argumentOf(pr, caller, root) != nil {
+		return ""
+	}
+
+	if !explicit {
+		if strings.HasPrefix(strings.ToLower(variable), "local.") || strings.HasPrefix(strings.ToLower(variable), "arguments.") {
+			return ""
+		}
+
+		if fs := parser.FindFuncScopeAt(int(line), pr.Scopes); fs.Start != -1 {
+			for _, local := range pr.FuncVars(fs.Start, fs.End) {
+				if strings.EqualFold(local, root) {
+					return ""
+				}
+			}
+		}
+	}
+
+	if ref := fileLevelRef(pr, line, name, scope); ref != nil {
+		return ref.Component
+	}
+
+	return ""
+}
+
 // receiverComponent finds the component a qualified call's receiver holds at
 // line: a ref scoped to the enclosing function, the nearest preceding ref in the
 // file, an Application.cfc ref, an ARGUMENTS.x type, and refs up the extends
@@ -2233,6 +2274,9 @@ func (r *Resolver) ComponentOf(variable string, line uint32, pr *parser.ParseRes
 // of primitive type calling a known member method, which canResolveCall
 // accepts outright. It needs funcName; ComponentOf passes none.
 func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
+	if name, scope, record := parser.MemberReceiverName(variable); record {
+		return r.recordReceiver(variable, name, scope, line, caller, pr), false
+	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
 	// scope prefix and must not be stripped there.
