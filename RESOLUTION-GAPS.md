@@ -1104,3 +1104,42 @@ is bounded to 128 entries; fluent proof to depth eight and 64 method expansions.
 Global's separately copied API, Controller's view/controller integration and
 `super` aliases, Model factory context, plugin/package overrides and terminal
 `init().adapter` property flow remain follow-up work.
+
+### Wheels loader and property follow-up (PR #190)
+
+At pinned Wheels `ef04365`, the Controller initializer integrates public methods
+from `wheels.controller` and `wheels.view`. Resolution now validates that loader,
+its cached public-method plan and copy policy. Application and inherited overrides
+keep priority; an observed override exposes the framework original as
+`super<name>`, with its original definition and arguments. Conditional/no-op
+loaders, overridden initialization/helpers, conflicting copies and inaccessible
+methods do not acquire this inference. Mapper also receives the public Global
+API copied by its loader, including the source-declared Adobe include fallback.
+
+WheelsTest's source-declared public helper binder and literal Global binding
+supply inherited Global helpers. The observed startup `mapper()` return and
+literal `$createObjectFromRoot` calls, including the spec's config-merging
+`$mapper()` wrapper, supply Mapper identities. Wrapper arguments remain specific
+to their call; config mutations, unknown argument bags, modified factories,
+primitive contracts and ambiguous same-line root calls withhold the result.
+
+A terminal property in `new Migration().init().adapter` no longer retains the
+Migration type. Dot-property hops follow indexed public `this` assignments,
+including inherited fields. Private fields do not supply public properties;
+unknown, conflicting and computed replacement writes withhold a concrete type.
+The computed database adapter remains dynamic. Property reads are separate from
+method calls and preserve existing ordinary call identities.
+
+With vendor explicitly included, the batch changes Wheels from **4,023 to
+3,275** unresolved with presets (750 removed, two added), and **9,616 to 8,929**
+without presets (846 removed, 159 added), over the same 1,195 indexed/scanned
+files. Most additions expose model-return chains after the real Global helper
+is found; they are remaining inference gaps, not established runtime defects.
+The twelve default scans total 6,796 / 14,690 unresolved. A Lucee safe-navigation
+finding changes reason, and one ColdBox property chain now resolves. Masa's
+897-file configured and automatic-mapping findings remain unchanged per entry.
+
+Remaining Wheels work includes argument-sensitive model/controller lookup through
+runtime model/controller paths, plugin and package overrides, arbitrary helper
+copying, collection/guarded lazy returns, computed adapter identities and Java
+returns. Other Wheels versions need their loader contracts checked independently.

@@ -59,10 +59,11 @@ type scriptParser struct {
 
 // pendingCall records an unresolved assignment from a function call.
 type pendingCall struct {
-	varName  string
-	funcName string
-	baseVar  string // for x = baseVar.method() — resolve x to same component as baseVar
-	line     uint32
+	varName    string
+	funcName   string
+	expression string // argument-dependent root call, resolved after parsing
+	baseVar    string // for x = baseVar.method() — resolve x to same component as baseVar
+	line       uint32
 
 	// refThis is carried to the ref as ComponentRef.This; baseScope says which
 	// scope's refs baseVar may be read from. global files the ref at
@@ -625,7 +626,15 @@ func (p *scriptParser) recordChainContinuationFrom(baseVar string, prior []strin
 		p.sc.NextSkipComments() // consume method name
 
 		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
+			if baseComp == "" || !first {
+				chainHops = append(chainHops, funcName)
+			}
+
+			first = false
+			funcName = PropertyHop(methTok.Value)
+			consumed = append(consumed, funcName)
+
+			continue
 		}
 
 		if baseComp == "" || !first {
@@ -3273,14 +3282,15 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 	}
 
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:   varName,
-		funcName:  lastIdent,
-		baseVar:   prevIdent,
-		line:      conv.Uint32(p.baseLine + line),
-		funcKey:   p.inFunc,
-		refThis:   p.refThis,
-		global:    p.forceGlobal,
-		baseScope: ReceiverRefScope(recv),
+		varName:    varName,
+		funcName:   lastIdent,
+		expression: callExpressionAt(p.sc, chain),
+		baseVar:    prevIdent,
+		line:       conv.Uint32(p.baseLine + line),
+		funcKey:    p.inFunc,
+		refThis:    p.refThis,
+		global:     p.forceGlobal,
+		baseScope:  ReceiverRefScope(recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
 }
@@ -3622,7 +3632,9 @@ func (p *scriptParser) scanChainedCalls(component string, line int) []string {
 		p.sc.NextSkipComments()
 
 		if p.sc.PeekSkipComments().Kind != TokLParen {
-			break
+			hops = append(hops, PropertyHop(methTok.Value))
+
+			continue
 		}
 
 		p.addCall(&CallSite{

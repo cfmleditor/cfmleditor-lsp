@@ -44,32 +44,7 @@ func (r *Resolver) wheelsMapperFunc(path, name string) (*parser.FunctionDef, boo
 		return nil, false
 	}
 
-	plan := r.wheelsPlanFunc(global, "$componentIntegrationPlan")
-
-	builder := r.wheelsPlanFunc(global, "$buildComponentIntegrationPlan")
-	if plan == nil || builder == nil {
-		return nil, false
-	}
-
-	planBody := r.wheelsSource(plan.URI.Path()).methods["$componentintegrationplan"].body
-	builderBody := r.wheelsSource(builder.URI.Path()).methods["$buildcomponentintegrationplan"].body
-	// Both the producer and consumer must agree on publicMethods. Comments and
-	// quoted descriptions cannot supply this evidence: token boundaries are kept.
-	for _, evidence := range []string{
-		`local.folderPath = ExpandPath("/#Replace(arguments.path, ".", "/", "all")#");`,
-		`local.fileList = DirectoryList(local.folderPath, false, "name", "*.cfc");`,
-		`local.instance = CreateObject("component", "#arguments.path#.#local.componentName#");`,
-		`if (local.fns[local.f].access == "public") { local.ref = local.instance[local.fns[local.f].name];`,
-		`ArrayAppend(local.publicMethods, {name = local.fns[local.f].name, ref = local.ref});`,
-		`publicMethods = local.publicMethods`,
-		`return local.rv;`,
-	} {
-		if !strings.Contains(builderBody, wheelsTokens(evidence)) {
-			return nil, false
-		}
-	}
-
-	if !strings.Contains(planBody, wheelsTokens(`$buildComponentIntegrationPlan(arguments.path)`)) {
+	if !r.wheelsIntegrationPlan(global) {
 		return nil, false
 	}
 
@@ -146,7 +121,48 @@ func (r *Resolver) wheelsMapperFunc(path, name string) (*parser.FunctionDef, boo
 		}
 	}
 
+	if found == nil && !strings.EqualFold(name, "get") && !strings.EqualFold(name, "controller") {
+		// Global is copied first, before mapper package methods. Only add its
+		// otherwise missing public API; included UDFs require the Adobe fallback.
+		if _, own := source.methods[strings.ToLower(name)]; !own {
+			def := r.wheelsPlanFunc(global, name)
+			if def != nil && (samePath(def.URI.Path(), global) || strings.Contains(copyBody, wheelsTokens(wheelsGlobalIncludeCopy))) {
+				found = def
+			}
+		}
+	}
+
 	return found, found != nil
+}
+
+// The cached public-method producer is shared by Mapper and Controller.
+func (r *Resolver) wheelsIntegrationPlan(global string) bool {
+	plan := r.wheelsPlanFunc(global, "$componentIntegrationPlan")
+
+	builder := r.wheelsPlanFunc(global, "$buildComponentIntegrationPlan")
+	if plan == nil || builder == nil {
+		return false
+	}
+
+	planBody := r.wheelsSource(plan.URI.Path()).methods["$componentintegrationplan"].body
+	builderBody := r.wheelsSource(builder.URI.Path()).methods["$buildcomponentintegrationplan"].body
+	// Both the producer and consumer must agree on publicMethods. Comments and
+	// quoted descriptions cannot supply this evidence: token boundaries are kept.
+	for _, evidence := range []string{
+		`local.folderPath = ExpandPath("/#Replace(arguments.path, ".", "/", "all")#");`,
+		`local.fileList = DirectoryList(local.folderPath, false, "name", "*.cfc");`,
+		`local.instance = CreateObject("component", "#arguments.path#.#local.componentName#");`,
+		`if (local.fns[local.f].access == "public") { local.ref = local.instance[local.fns[local.f].name];`,
+		`ArrayAppend(local.publicMethods, {name = local.fns[local.f].name, ref = local.ref});`,
+		`publicMethods = local.publicMethods`,
+		`return local.rv;`,
+	} {
+		if !strings.Contains(builderBody, wheelsTokens(evidence)) {
+			return false
+		}
+	}
+
+	return strings.Contains(planBody, wheelsTokens(`$buildComponentIntegrationPlan(arguments.path)`))
 }
 
 // Global's known integration helpers are declared directly or in literal
@@ -429,3 +445,15 @@ func wheelsReturnsMapper(name string, methods map[string]wheelsMethod) bool {
 
 	return visit(name, 0, make(map[string]bool)) && anchored
 }
+
+const wheelsGlobalIncludeCopy = `if (StructKeyExists(arguments.componentInstance, "$frameworkGlobalFunctionNames")) {
+ local.includeNames=arguments.componentInstance.$frameworkGlobalFunctionNames();
+ local.includeCount=ArrayLen(local.includeNames);
+ for(local.n=1;local.n<=local.includeCount;local.n++) {
+  local.functionName=local.includeNames[local.n];
+  if(!StructKeyExists(this,local.functionName) && (!ListFindNoCase(local.excludeList,local.functionName) || FindNoCase("wheels.mapper",local.componentName))) {
+   variables[local.functionName]=arguments.componentInstance[local.functionName];
+   this[local.functionName]=arguments.componentInstance[local.functionName];
+  }
+ }
+}`

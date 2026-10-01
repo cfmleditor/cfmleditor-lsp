@@ -1016,6 +1016,10 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			comp = pr.FuncLookup(pr.URI.Path(), c.funcName)
 		}
 
+		if comp == "" && c.baseVar == "" && c.expression != "" && pr.FuncLookup != nil && pr.URI.IsFile() {
+			comp = pr.FuncLookup(pr.URI.Path(), CallHop(c.expression))
+		}
+
 		// A mock made through the MockBox a spec holds,
 		// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
 		if comp == "" {
@@ -1243,6 +1247,12 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	if comp != "" && c.funcName != "" && pr.FuncLookup != nil {
 		if ret := pr.FuncLookup(comp, c.funcName); ret != "" {
 			return ret
+		}
+
+		if c.expression != "" {
+			if ret := pr.FuncLookup(comp, CallHop(c.expression)); ret != "" {
+				return ret
+			}
 		}
 
 		return "$any"

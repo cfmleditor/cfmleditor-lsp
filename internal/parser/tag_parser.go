@@ -1421,13 +1421,14 @@ func (p *tagParser) funcCallRHS(rhs string, paren int, varName string, line int)
 	}
 
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:  varName,
-		funcName: funcName,
-		line:     conv.Uint32(line),
-		funcKey:  p.inFunc,
-		rest:     trailingCalls(rhs),
-		refThis:  p.refThis,
-		global:   p.forceGlobal,
+		varName:    varName,
+		funcName:   funcName,
+		expression: callExpressionAt(NewScanner(rhs[paren:]), funcName),
+		line:       conv.Uint32(line),
+		funcKey:    p.inFunc,
+		rest:       trailingCalls(rhs),
+		refThis:    p.refThis,
+		global:     p.forceGlobal,
 	})
 }
 
@@ -2153,8 +2154,16 @@ func trailingCalls(expr string) []string {
 		name := expr[start:j]
 
 		j = skipSpace(expr, j)
-		if name == "" || j >= len(expr) || expr[j] != '(' {
+
+		if name == "" {
 			break
+		}
+
+		if j >= len(expr) || expr[j] != '(' {
+			hops = append(hops, PropertyHop(name))
+			i = j
+
+			continue
 		}
 
 		hops = append(hops, name)

@@ -608,6 +608,14 @@ func (r *Resolver) lookupFunc(cfcPath, funcName string, depth int) *parser.Funct
 		}
 	}
 
+	if d := r.wheelsControllerFunc(chain, funcName); d != nil {
+		return d
+	}
+
+	if d := r.wheelsTestGlobalFunc(chain, funcName); d != nil {
+		return d
+	}
+
 	// A delegated method never replaces one the object has (Injector.cfc
 	// processDelegation skips a name the target already holds), so the whole
 	// chain is searched first.
@@ -1206,6 +1214,22 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 			break
 		}
 
+		if property, ok := parser.PropertyName(hop); ok {
+			ret := r.publicPropertyComponent(comp, property, baseDir)
+			if ret == "" {
+				return comp, softComp, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + funcName + "')", true
+			}
+
+			comp = ret
+
+			continue
+		}
+
+		expression, callHop := parser.CallExpression(hop)
+		if callHop {
+			hop = wheelsCallName(expression)
+		}
+
 		fd := r.ResolveFunc(comp, hop, baseDir)
 
 		// A decoration returns the mock it is called on, so the chain goes on
@@ -1222,6 +1246,10 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
+		if ret == "" && callHop {
+			ret = r.wheelsFactoryReturn(fd, expression, baseDir)
+		}
+
 		if soft {
 			softComp = ret
 		}
@@ -1317,7 +1345,7 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 	if r.fileExtends(pr) != "" {
 		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, funcName, baseDir); def != nil {
 			tr.hit(TargetExtends, r.fileExtends(pr), def)
 			tr.addf("found %q in extends chain", funcName)
 
@@ -1396,6 +1424,8 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
 	first := call.Chain[0]
 
+	expression := factoryCallExpression(pr.Content, first, int(call.Line))
+
 	tr.addf("chained on a call to %q — looking it up as an unqualified call", first)
 
 	def := r.bareFunc(first, pr, baseDir)
@@ -1428,6 +1458,10 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 	}
 
 	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
+	if ret == "" && expression != "" {
+		ret = r.wheelsFactoryReturn(def, expression, baseDir)
+	}
+
 	if ret == "" {
 		if e := r.receiverReturn(cfpath.FromURI(string(pr.URI)), first); e != "" {
 			tr.addf("%q on this component returns what it binds it to: %q", first, e)
@@ -1473,7 +1507,7 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 	}
 
 	if r.fileExtends(pr) != "" {
-		if def := r.ResolveFunc(r.fileExtends(pr), name, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, name, baseDir); def != nil {
 			return def
 		}
 	}
@@ -1502,7 +1536,7 @@ func (r *Resolver) resolveThisCall(funcName string, pr *parser.ParseResult, base
 	if r.fileExtends(pr) != "" {
 		tr.addf("not in this file — checking extends chain (%s)", r.fileExtends(pr))
 
-		if def := r.ResolveFunc(r.fileExtends(pr), funcName, baseDir); def != nil {
+		if def := r.inheritedFunc(pr, funcName, baseDir); def != nil {
 			tr.hit(TargetExtends, r.fileExtends(pr), def)
 
 			return ""
@@ -1874,6 +1908,12 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 		return ""
 	}
 
+	if fd.ReturnComponent == "" || fd.ReturnComponent == "$any" {
+		if ret := r.wheelsFixedMapperReturn(fd); ret != "" {
+			return ret
+		}
+	}
+
 	if len(fd.ReturnSources) > 0 {
 		switch strings.ToLower(fd.ReturnType) {
 		case "", "any", "component", "object":
@@ -1979,6 +2019,15 @@ func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) s
 	r = r.forCaller(baseDir)
 
 	return func(component, funcName string) string {
+		if property, ok := parser.PropertyName(funcName); ok {
+			return r.publicPropertyComponent(component, property, baseDir)
+		}
+
+		expression, callHop := parser.CallExpression(funcName)
+		if callHop {
+			funcName = wheelsCallName(expression)
+		}
+
 		fd := r.ResolveFunc(component, funcName, baseDir)
 		if fd == nil {
 			return ""
@@ -1990,6 +2039,12 @@ func (r *Resolver) FuncLookup(baseDir string) func(component, funcName string) s
 			}
 
 			return ret
+		}
+
+		if callHop {
+			if ret := r.wheelsFactoryReturn(fd, expression, baseDir); ret != "" {
+				return ret
+			}
 		}
 
 		return r.receiverReturn(r.ComponentPath(component, baseDir), funcName)
