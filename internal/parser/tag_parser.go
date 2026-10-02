@@ -1036,6 +1036,8 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 		return // already set from an earlier return
 	}
 
+	f.returnLine = conv.Uint32(line)
+
 	if inner == "" {
 		return
 	}
@@ -1407,6 +1409,7 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
+		baseArgs:  readThroughArguments(varChain),
 	})
 }
 
