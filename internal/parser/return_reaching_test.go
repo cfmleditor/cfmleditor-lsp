@@ -17,13 +17,14 @@ function f() {
 	return x;
 }
 }`},
-		{"script try catch", `component {
+		{"script try catch then overwritten", `component {
 function f() {
 	try {
 		var x = new models.A();
 	} catch ( any e ) {
-		x = new models.B();
+		x = new models.A();
 	}
+	x = new models.B();
 	return x;
 }
 }`},

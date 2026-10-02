@@ -793,9 +793,15 @@ the closure's own `var target = getInterceptor( "Test1" )`, which nothing
 types. They had passed because the component-level `target`, a `$any` mock,
 was read in its place.
 
-Not done: assignments on different branches are not compared, so the one
-reaching the return by line wins even where another branch assigns something
-else. `buildBinder()` is `$any` only because its later branch is.
+Assignments on different branches are compared now (`flow.go`): those that
+may reach a return must agree, a dynamic one makes the return dynamic, and
+otherwise the function has no return type. `buildBinder()` is `$any` because
+one of its branches is. Corpus: ColdBox 0 removed / 1 added, every other scan
+unchanged. The addition is `Util.cfc:30`: `getClassMappingHelper()` assigns a
+`BoxLangMappingHelper`, a `LuceeMappingHelper` or a `CFMappingHelper` by
+engine, three components with no common base that each declare
+`addCustomTagPath()`. It had been typed as the last. Answering it needs a
+return type that is a set of components, which nothing holds yet.
 
 ## ContentBox: measurement and relationship getters
 

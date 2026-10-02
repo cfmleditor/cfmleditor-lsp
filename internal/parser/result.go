@@ -99,6 +99,9 @@ type ParseResult struct {
 	funcRefsMap           map[string][]ComponentRef
 	funcLinksMap          map[string][]DocumentLink
 	funcCallsMap          map[string][]CallSite // per-function call sites keyed by "start:end"
+	// flow is the blocks a full parse recorded, for comparing the branches
+	// that reach a return; nil once resolvePendingCalls has read it.
+	flow *flowBlocks
 
 	// writesMemo, while set, holds collectionWrites' answer for the passes
 	// in extractSignatures that share it.
@@ -246,6 +249,10 @@ func (pr *ParseResult) extractSignatures() {
 
 	var allPendingCalls []pendingCall
 
+	if !pr.shallow {
+		pr.flow = newFlowBlocks(0)
+	}
+
 	// Pre-compute tag function boundaries from the whole file (not per-region)
 	// so a function whose body is interrupted by a nested <cfscript> block
 	// (which splits the file into separate Tag/Script/Tag... regions) still
@@ -346,6 +353,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.applyCollectionReturns(allPendingCalls)
 		pr.writesMemo = nil
 		pr.resolvePendingCalls(allPendingCalls)
+		pr.flow = nil
 		pr.applyChainedReturnLookup()
 
 		if pr.hasMemberBinding(pr.Content) {
@@ -417,6 +425,10 @@ func (pr *ParseResult) mergeScriptRegion(r *Region, tagScopes []FuncScope, open 
 	sp.extractCalls = pr.extractCalls
 	sp.builtinReturnLookup = pr.BuiltinReturnLookup
 	sp.argumentTypes = pr.argumentTypeLookup()
+
+	if pr.flow != nil {
+		sp.flow = pr.flow.region(r.Offset, 0)
+	}
 
 	// If this <cfscript> region sits inside a tag <cffunction> body
 	// (nested script island — ClassifyRegions splits the file there),
@@ -509,6 +521,10 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 	tp.knownScopes = tagScopes
 	tp.outputSpans, tp.importPrefixes, tp.gated = pr.outputGate()
 	tp.srcOffset = r.Offset
+
+	if pr.flow != nil {
+		tp.flow = pr.flow.region(r.Offset, conv.Uint32(r.StartLine))
+	}
 
 	// If this region starts partway through a function whose opening
 	// <cffunction> tag was in an earlier region (interrupted by a
@@ -1218,6 +1234,10 @@ func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
 		pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
 	}
 
+	if pr.flow != nil && c.funcKey != "" {
+		pr.flow.note(c.varName, c.line, c.block)
+	}
+
 	return true
 }
 
@@ -1341,31 +1361,29 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending, calls []pending
 		name, called, scope := returnedVar(rp.varName)
 
 		// A scoped name is the component's variable, not a local of the
-		// function's.
-		if scope != RefAny {
-			ref := refReaching(pr.ComponentRefs, name, rp.line, scope.Admits)
-			if ref != nil && !assignedBetween(calls, name, ref.Line, rp.line) {
-				pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], pr.settledComponent(ref))
-			}
+		// function's. Of its refs, every one that may reach the return is
+		// read (flowBlocks.reaching), and they must agree.
+		refs, admit := pr.ComponentRefs, scope.Admits
 
-			if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
-				settled++
+		if scope == RefAny {
+			// A closure's local of the same name is not what the function
+			// returns. An unscoped name the function never declared is a
+			// variables-scope one, as settleReturnComponent reads it: a
+			// pending call assigning it settles at component level.
+			refs, admit = pr.funcRefsMap[rp.funcKey], func(ref *ComponentRef) bool { return ref.VisibleTo == 0 }
+			if refReaching(refs, name, rp.line, admit) == nil {
+				refs, admit = pr.ComponentRefs, func(*ComponentRef) bool { return true }
 			}
-
-			continue
 		}
 
-		// A closure's local of the same name is not what the function
-		// returns. An unscoped name the function never declared is a
-		// variables-scope one, as settleReturnComponent reads it: a pending
-		// call assigning it settles at component level.
-		ref := refReaching(pr.funcRefsMap[rp.funcKey], name, rp.line, func(ref *ComponentRef) bool { return ref.VisibleTo == 0 })
-		if ref == nil {
-			ref = refReaching(pr.ComponentRefs, name, rp.line, func(*ComponentRef) bool { return true })
-		}
+		reaching := pr.flow.reaching(refs, name, rp.line, admit)
+		if len(reaching) > 0 && !assignedBetween(calls, name, reaching[0].Line, rp.line) {
+			comp := agreedComponent(reaching, pr.settledComponent)
+			if scope == RefAny {
+				comp = returnedComponent(comp, called)
+			}
 
-		if ref != nil && !assignedBetween(calls, name, ref.Line, rp.line) {
-			pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], returnedComponent(pr.settledComponent(ref), called))
+			pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], comp)
 		}
 
 		if pr.Funcs[rp.funcIdx].ReturnComponent != "" {

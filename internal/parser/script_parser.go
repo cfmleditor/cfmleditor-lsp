@@ -43,6 +43,7 @@ type scriptParser struct {
 	localVarSet         map[string]bool // var'd/local. names in current function
 	returnVar           string          // last "return varName" seen in current function
 	pendingCalls        []pendingCall   // unresolved varName = funcCall(...) assignments
+	flow                *flowBlocks     // the blocks a function body opens; nil outside a full parse
 
 	// The flags sit together: spread between the wider fields above, each
 	// was padded to eight bytes, and the struct fell into a larger size class.
@@ -77,10 +78,11 @@ type pendingCall struct {
 	// in its padding.
 	refThis    bool
 	global     bool
-	returnExpr bool // a return expression, grouped by function for factory-chain inference
-	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
-	baseLocal  bool // baseVar is the function's own, an argument or a local; see baseVarComponent
-	rebinds    bool // the call is made on varName itself; see ComponentRef.Rebinds
+	returnExpr bool   // a return expression, grouped by function for factory-chain inference
+	memberSet  bool   // not a call: `varName.funcName = …`; see checkMemberSet
+	baseLocal  bool   // baseVar is the function's own, an argument or a local; see baseVarComponent
+	rebinds    bool   // the call is made on varName itself; see ComponentRef.Rebinds
+	block      uint32 // the block the assignment was made in; see flowBlocks
 	baseScope  RefScope
 
 	funcKey string   // scope key, empty if global
@@ -285,6 +287,10 @@ func finalCall(expr string) (name, args string) {
 
 func (p *scriptParser) addRef(ref *ComponentRef) {
 	ref.This = p.refThis
+
+	if p.flow != nil && p.inFunc != "" {
+		p.flow.note(ref.Variable, ref.Line, p.flow.innermost())
+	}
 
 	if p.inFunc == "" || p.forceGlobal {
 		p.componentRefs = append(p.componentRefs, *ref)
@@ -2110,6 +2116,12 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 
 	p.sc.NextSkipComments() // consume {
 
+	// The body is a block: what it assigns runs before a return in it.
+	if p.flow != nil {
+		p.flow.open(tok.Offset, "")
+		defer p.flow.close("")
+	}
+
 	// Enter function scope with a temporary key (will fix up after finding end)
 	prevInFunc := p.inFunc
 	prevLocalVarSet := p.localVarSet
@@ -2156,18 +2168,28 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		switch t.Kind {
 		case TokLBrace:
 			depth++
+
+			if p.flow != nil {
+				p.flow.open(t.Offset, "")
+			}
 		case TokRBrace:
 			depth--
 			if depth == 0 {
 				endLine = t.Line
+			} else if p.flow != nil {
+				p.flow.close("")
 			}
 		case TokIdent:
 			if depth > 0 {
+				mark := p.flowMark()
 				p.handleBodyToken(t, depth, afterLT)
+				p.stampFlow(mark)
 			}
 		case TokString, TokRBracket:
 			if depth > 0 {
+				mark := p.flowMark()
 				p.handleLiteralToken(t)
+				p.stampFlow(mark)
 			}
 		default:
 			// Any other token is passed over.
@@ -2190,6 +2212,29 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.returnVar, p.returnLine = prevReturnVar, prevReturnLine
 
 	return endLine
+}
+
+// flowMark is how many pending calls there were before a statement, so
+// stampFlow can find the ones it made. A ref notes its block itself, in
+// addRef; a pending call is made at a dozen sites and its ref only later.
+func (p *scriptParser) flowMark() int { return len(p.pendingCalls) }
+
+// stampFlow records the innermost open block as the one the pending calls
+// made since mark were made in.
+func (p *scriptParser) stampFlow(mark int) {
+	stampPending(p.flow, p.pendingCalls[mark:])
+}
+
+// stampPending gives calls the innermost block open in fb.
+func stampPending(fb *flowBlocks, calls []pendingCall) {
+	if fb == nil || len(calls) == 0 {
+		return
+	}
+
+	b := fb.innermost()
+	for i := range calls {
+		calls[i].block = b
+	}
 }
 
 // sharedScopeOf is the scope a request., session., application. or server.
@@ -2231,8 +2276,8 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 	// Look up returnVar in this function's refs, then in componentRefs. A
 	// name read through variables. or this. is the component's alone, and
 	// only a ref made through that scope holds it. Of the refs for it, the
-	// one reaching the return decides; a closure's local of the same name is
-	// another variable.
+	// ones that may reach the return decide; a closure's local of the same
+	// name is another variable.
 	name, called, scope := returnedVar(p.returnVar)
 
 	lookIn := [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs}
@@ -2244,15 +2289,17 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 	}
 
 	for _, refs := range lookIn {
-		ref := refReaching(refs, name, p.returnLine, admit)
-		if ref == nil {
+		reaching := p.flow.reaching(refs, name, p.returnLine, admit)
+		if len(reaching) == 0 {
 			continue
 		}
 
-		// A ref still to be typed, or an assignment between it and the
+		// A ref still to be typed, or an assignment among those reaching the
 		// return that only resolvePendingCalls can type, is settled there.
-		if !chainPending(ref) && !assignedBetween(p.pendingCalls, name, ref.Line, p.returnLine) {
-			f.ReturnComponent = returnedComponent(ref.Component, called)
+		// The ones that may reach it must agree: two branches assigning two
+		// components give the function no return type.
+		if !slices.ContainsFunc(reaching, chainPending) && !assignedBetween(p.pendingCalls, name, reaching[0].Line, p.returnLine) {
+			f.ReturnComponent = returnedComponent(agreedComponent(reaching, func(ref *ComponentRef) string { return ref.Component }), called)
 		}
 
 		break
@@ -2399,6 +2446,10 @@ func (p *scriptParser) checkReturnComponent() {
 		// which returnsCallOn keeps.
 		p.returnVar = peek.Value
 		p.returnLine = conv.Uint32(p.baseLine + peek.Line)
+
+		if p.flow != nil {
+			p.flow.noteReturn(p.returnLine)
+		}
 
 		bare, call := p.returnCall(peek)
 		if !bare {
