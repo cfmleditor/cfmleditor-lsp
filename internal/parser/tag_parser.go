@@ -1564,7 +1564,7 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
-		baseArgs:  readThroughArguments(varChain),
+		baseLocal: readThroughLocal(varChain) || p.inFunc != "" && (p.isVarDeclaredLocal(varChain) || p.isArgument(varChain)),
 		rebinds:   rebinds(varName, varChain),
 	})
 }
@@ -1971,6 +1971,22 @@ func hasPrefixFold(s, prefix string) bool {
 }
 
 // addRef appends a component ref to the correct bucket (global or per-function).
+// isArgument reports whether name is an argument of the function being
+// parsed.
+func (p *tagParser) isArgument(name string) bool {
+	if len(p.funcs) == 0 {
+		return false
+	}
+
+	for _, a := range p.funcs[len(p.funcs)-1].Arguments {
+		if strings.EqualFold(a.Name, name) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isVarDeclaredLocal returns true if the variable was declared with var or local.
 // in the current function.
 func (p *tagParser) isVarDeclaredLocal(name string) bool {

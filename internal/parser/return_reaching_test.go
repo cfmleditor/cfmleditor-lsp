@@ -195,3 +195,40 @@ func TestRebindsNamesTheVariableItself(t *testing.T) {
 		}
 	}
 }
+
+// An unscoped argument or local is not the component's variable of the same
+// name either, in either syntax.
+func TestALocalReceiverIsNotTheComponentsVariable(t *testing.T) {
+	for _, src := range []string{
+		`component {
+function setup() { svc = new models.A(); }
+function f( svc ) {
+	var x = svc.make();
+	return x;
+}
+}`,
+		`component {
+function setup() { svc = new models.A(); }
+function f() {
+	var svc = arguments.other;
+	var x = svc.make();
+	return x;
+}
+}`,
+		`<cfcomponent>
+<cffunction name="setup"><cfset svc = createObject("component", "models.A")></cffunction>
+<cffunction name="f">
+	<cfargument name="svc">
+	<cfset var x = svc.make()>
+	<cfreturn x>
+</cffunction>
+</cfcomponent>`,
+	} {
+		pr := Parse(testURI, src)
+		for i := range pr.Funcs {
+			if f := &pr.Funcs[i]; f.Name == "f" && f.ReturnComponent != "" {
+				t.Errorf("f returns %q, want nothing:\n%s", f.ReturnComponent, src)
+			}
+		}
+	}
+}
