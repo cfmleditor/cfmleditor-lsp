@@ -786,13 +786,24 @@ func (p *producerTagParser) branch(condition string) producerNode {
 	return producerNode{kind: "if", expression: condition, body: body, alternative: alternate}
 }
 
+// producerUnwrap is tokens without the parentheses around the whole of them:
+// `return( this );` is how jsonSerializer, and many a CFML style guide, writes
+// `return this;`.
+func producerUnwrap(tokens []parser.Token) []parser.Token {
+	for len(tokens) > 2 && tokens[0].Kind == parser.TokLParen && producerGroupEnd(tokens, 0, parser.TokLParen, parser.TokRParen) == len(tokens)-1 {
+		tokens = tokens[1 : len(tokens)-1]
+	}
+
+	return tokens
+}
+
 func producerReturnsThis(nodes []producerNode) bool {
 	found := false
 
 	for i := range nodes {
 		node := &nodes[i]
 		if node.kind == "return" {
-			if producerPath(producerTokens(node.expression)) != "this" {
+			if producerPath(producerUnwrap(producerTokens(node.expression))) != "this" {
 				return false
 			}
 

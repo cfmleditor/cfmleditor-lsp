@@ -1986,6 +1986,10 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 	}
 
 	if fd.URI.IsFile() && (fd.ReturnType == "" || strings.EqualFold(fd.ReturnType, "any") || strings.EqualFold(fd.ReturnType, "component") || strings.EqualFold(fd.ReturnType, "object")) {
+		if ret := r.sharedGetterReturn(fd); ret != "" {
+			return ret
+		}
+
 		method := r.producerFor(fd)
 		if method != nil && (producerNeedsSpecialization(method, fd) || (fd.ReturnComponent == "" || fd.ReturnComponent == "$any") && len(fd.ReturnSources) == 0 && fd.DocReturn == "") {
 			eval := producerEvaluation{resolver: r, fd: fd, baseDir: filepath.Dir(fd.URI.Path()), depth: depth, budget: budget}
@@ -2767,4 +2771,36 @@ func (r *Resolver) componentExists(component, baseDir string) bool {
 	}
 
 	return false
+}
+
+// sharedGetterReturn is what a function whose whole body is `return
+// application.x` (or another shared scope) returns: what the startup
+// templates assign x, the type it already has as a receiver. Mura's
+// getPluginManager() and getServiceFactory() are this. Anything else in the
+// body withholds it, a call above all, since a call can write the scope:
+// TestAbsentOptionalArgumentBoundaries holds the guarded and computed shapes
+// to no answer.
+func (r *Resolver) sharedGetterReturn(fd *parser.FunctionDef) string {
+	method := r.producerFor(fd)
+	if method == nil || len(method.body) != 1 || method.body[0].kind != "return" {
+		return ""
+	}
+
+	path := producerPath(producerUnwrap(producerTokens(method.body[0].expression)))
+	if _, shared := splitSharedScope(path); !shared {
+		return ""
+	}
+
+	dir := filepath.Dir(fd.URI.Path())
+
+	comp := r.startupComponent(path, dir, nil)
+	if comp == "" || strings.HasPrefix(comp, "$") {
+		return ""
+	}
+
+	if p := r.ComponentPath(comp, dir); p != "" {
+		return p
+	}
+
+	return comp
 }
