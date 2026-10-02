@@ -329,6 +329,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.fillCallers()
 	}
 
+	pr.markStructReturns(allPendingCalls)
 	pr.discardPrimitiveReturnComponents()
 
 	// Generate synthetic accessor functions for properties (skip if explicit function exists).
@@ -359,10 +360,44 @@ func (pr *ParseResult) extractSignatures() {
 	}
 }
 
+// markStructReturns flags each function one of whose returns is a struct
+// literal or structNew(), from the return expressions both parsers record.
+func (pr *ParseResult) markStructReturns(calls []pendingCall) {
+	var byKey map[string][]int
+
+	for i := range calls {
+		c := &calls[i]
+		if !c.returnExpr || c.funcKey == "" {
+			continue
+		}
+
+		expr := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(c.varName), "/"))
+		if !strings.HasPrefix(expr, "{") && !hasPrefixFold(expr, "structnew(") {
+			continue
+		}
+
+		if byKey == nil {
+			byKey = make(map[string][]int, len(pr.Funcs))
+
+			for j := range pr.Funcs {
+				if scope := findFuncScope(int(pr.Funcs[j].Line), pr.Scopes); scope.Start >= 0 {
+					key := funcKey(scope.Start, scope.End)
+					byKey[key] = append(byKey[key], j)
+				}
+			}
+		}
+
+		for _, j := range byKey[c.funcKey] {
+			pr.Funcs[j].returnsStruct = true
+		}
+	}
+}
+
 // discardPrimitiveReturnComponents keeps an inference from overriding a
 // declared primitive return type. Without this, a string method's local
 // assigned from a receiver call can make the method and its callers return
-// the receiver's component. Generic any/component declarations still infer.
+// the receiver's component. Generic any/component/struct declarations still
+// infer.
 func (pr *ParseResult) discardPrimitiveReturnComponents() {
 	for i := range pr.Funcs {
 		f := &pr.Funcs[i]
@@ -371,9 +406,29 @@ func (pr *ParseResult) discardPrimitiveReturnComponents() {
 }
 
 // componentReturnFor also guards returns settled after resolver refs become
-// available. A runtime-created component remains dynamic even when its method
-// declares struct; it must not acquire a concrete component type.
+// available. A runtime-created component remains dynamic; it must not acquire
+// a concrete component type.
+//
+// `struct` admits a component instance, because to the engine a component is
+// a struct, so it keeps the inference as `any` does. tassweb leans on that
+// throughout: kernel2's GetPageTools, GetLockBroker and getController all
+// declare struct and hand back components, and treating struct as primitive
+// left every caller of getTASSWebUser() holding nothing.
 func (pr *ParseResult) componentReturnFor(f *FunctionDef, comp string) string {
+	if strings.EqualFold(f.ReturnType, "struct") {
+		if pr.replaceExpressions(comp) == "$any" {
+			return "$any"
+		}
+
+		// One path returns a plain struct: Wheels' mapper writes
+		// `if (flag) { return {}; } return this;`.
+		if f.returnsStruct {
+			return ""
+		}
+
+		return comp
+	}
+
 	if f.ReturnType != "" && !strings.EqualFold(f.ReturnType, "any") && !looksLikeCFCType(f.ReturnType) {
 		if pr.replaceExpressions(comp) == "$any" {
 			return "$any"
@@ -1090,7 +1145,7 @@ func (pr *ParseResult) funcReturns() map[string]string {
 // "" when nothing says. It may clear c.rest, when the chain ends in a mock.
 func (pr *ParseResult) pendingCallComponent(c *pendingCall, funcReturns map[string]string) string {
 	var comp string
-	if c.callsOwnFunction() {
+	if c.callsOwnFunction() || pr.receiverIsThisFile(c) {
 		comp = funcReturns[strings.ToLower(c.funcName)]
 	}
 
@@ -1170,6 +1225,27 @@ func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
 	}
 
 	return true
+}
+
+// receiverIsThisFile reports whether a pending call is made on a variable
+// this file has typed as itself (`var node = this; node = node.getParent()`),
+// which callsOwnFunction cannot see from the receiver's name.
+func (pr *ParseResult) receiverIsThisFile(c *pendingCall) bool {
+	if c.baseVar == "" {
+		return false
+	}
+
+	self, ok := strings.CutPrefix(string(pr.URI), "file://")
+	if !ok || self == "" {
+		return false
+	}
+
+	ref := firstRefIn(pr.ComponentRefs, c.baseVar, c.baseScope)
+	if ref == nil && c.funcKey != "" {
+		ref = firstRefIn(pr.funcRefsMap[c.funcKey], c.baseVar, c.baseScope)
+	}
+
+	return ref != nil && ref.Component == self
 }
 
 // returnPending is a function whose return type is whatever a variable it

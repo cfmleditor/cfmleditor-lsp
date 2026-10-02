@@ -49,6 +49,10 @@ type FunctionDef struct {
 	// variable's type is what its latest assignment at or before that line
 	// gave it, not its first.
 	returnLine uint32
+	// returnsStruct: some return is a struct literal or structNew(). A
+	// function declared struct that also returns a component returns
+	// either, so it is not typed by the component — see componentReturnFor.
+	returnsStruct bool
 }
 
 // Scope represents the CFML variable scope.

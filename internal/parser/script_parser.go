@@ -808,6 +808,28 @@ func (p *scriptParser) parseVarDecl(tok Token) {
 // tries resolver match or records pending call.
 func (p *scriptParser) checkVarRHS(varName string, line int) {
 	rhs := p.sc.PeekSkipComments()
+
+	// `var node = this` holds this component, as `variables.x = this` does
+	// in parseBodyScopedVar; `this` is a keyword, so the check below would
+	// otherwise drop it. `x = this.y` reads a member and is not this.
+	if rhs.Kind == TokIdent && identEq(rhs.Value, "this") {
+		st := p.sc.Save()
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokDot {
+			if selfPath := strings.TrimPrefix(p.fileURI, "file://"); selfPath != "" {
+				p.addRef(&ComponentRef{
+					Variable: varName, Component: selfPath,
+					URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+				})
+			}
+
+			return
+		}
+
+		p.sc.Restore(st)
+	}
+
 	if rhs.Kind != TokIdent || isKeyword(rhs.Value) {
 		return
 	}
