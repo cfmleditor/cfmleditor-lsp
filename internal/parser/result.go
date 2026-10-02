@@ -1572,10 +1572,15 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			existing[getter] = true
 			getterIdx = len(pr.Funcs)
 
-			pr.Funcs = append(pr.Funcs, FunctionDef{
+			getterDef := FunctionDef{
 				Name: "get" + capName, URI: u, Line: prop.line,
 				ReturnType: prop.typeName,
-			})
+			}
+			if pr.Persistent {
+				getterDef.ElementComponent = prop.collectionEntity()
+			}
+
+			pr.Funcs = append(pr.Funcs, getterDef)
 		}
 
 		setter := "set" + strings.ToLower(prop.name)
@@ -1634,6 +1639,24 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			pr.Funcs[getterIdx].ReturnComponent = fieldComponents[strings.ToLower(prop.name)]
 		}
 	}
+}
+
+// collectionEntity is the entity each element of a collection ORM
+// relationship holds: a one-to-many or many-to-many property names it in its
+// cfc attribute. ContentBox loops over them: `for ( var c in getComments() )`.
+func (prop *propertyDef) collectionEntity() string {
+	switch strings.ToLower(prop.attrs["fieldtype"]) {
+	case "one-to-many", "many-to-many":
+	default:
+		return ""
+	}
+
+	cfc := strings.TrimSpace(prop.attrs["cfc"])
+	if cfc == "" || strings.Contains(cfc, "#") {
+		return ""
+	}
+
+	return cfc
 }
 
 // relatedEntity is the entity a single-valued ORM relationship holds: a

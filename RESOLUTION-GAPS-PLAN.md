@@ -820,3 +820,37 @@ calls on Mura's `site` beans report a component that does not exist.
   collection or a loop variable to carry it: the next feature here.
 - Closure parameters such as `c` in `newCriteria().…( function( c ) { … } )` and
   arguments typed only by their callers, as on MuraCMS.
+
+## ContentBox: loop variables over entity collections
+
+590 of ContentBox's unknown receivers are loop variables. 421 iterate a `prc.*`
+collection in an admin view, which a handler fills: that is the request/view
+handoff, unprovable without the framework's routing, and left alone. The rest
+iterate a local collection, and a loop variable now holds the collection's
+element when the source states it (`Resolver.loopElement`):
+
+- a persistent entity's `one-to-many` or `many-to-many` property, whose
+  generated getter carries the element entity (`FunctionDef.ElementComponent`),
+  whether the loop calls the getter or reads the property;
+- a cborm service bound to an entity, whose `getAll()` returns an array of it,
+  except with `properties`, when it returns structs;
+- a local variable assigned from either, by its nearest preceding assignment.
+
+Both `for ( [var] x in collection ) { … }` and `<cfloop array="#collection#"
+index|item="x">` count, and only for a call inside the loop's body. The element
+is the entity *and every component extending it*, as alternatives: an ORM
+collection holds subclasses, and ContentBox's subscriber calls
+`getRelatedContent()`, a `CommentSubscription` method, on the comment ones.
+Loops are found once per file version and cached, since the lookup runs for
+every untyped receiver; the scan's cost is within noise.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, presets | 2,870 | 2,821 | 62 / 13 |
+| ContentBox, no config | 7,764 | 7,715 | 62 / 13 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+All 13 additions are calls that were already findings, now naming the method
+the entity lacks instead of an untyped variable: `build/patches/3.7.0`–`4.2.1`
+call `Author.getAPIToken()`/`generateAPIToken()` and `1-0-4` calls
+`Page.getRecursiveSlug()`, none of which today's model declares.
