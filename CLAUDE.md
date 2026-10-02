@@ -515,6 +515,18 @@ the *formatter*, not the parser.
   `hasRefFor` skips a pending call only for a ref on its own line, and a call on
   a value is never the file's function of that name (`callsOwnFunction`).
   Branches are not compared. `TestReturnTypeIsTheAssignmentReachingTheReturn`.
+- **A call in `x = x.m()` is made on what x held before the line.** The ref
+  the assignment makes carries `ComponentRef.Rebinds`, and the resolver's
+  latest-at-or-before rule (`funcScopedRef`, `fileLevelRef`) skips it on its
+  own line (`assignedByCallAt`); an assignment on the same line that does not
+  rebind (`x = new A(); x.m()`) still reaches the call. The tag parser fixes a
+  call's component while parsing (`lookupComponentRef`), from the refs it has
+  so far, so it leaves it empty when an assignment only `resolvePendingCalls`
+  can type sits between that ref and the call.
+  `TestACallInAnAssignmentReadsTheValueBeforeIt`. Not fixed: a script function
+  with no local refs is re-parsed lazily by `FuncRefs`, and that parse
+  resolves no pending calls, so `variables.y = variables.y.next()` leaves
+  `variables.y` its first type there.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.

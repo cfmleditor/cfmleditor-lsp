@@ -1160,7 +1160,7 @@ func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
 
 	ref := ComponentRef{
 		Variable: c.varName, Component: comp, ChainRest: c.rest,
-		URI: pr.URI, Line: c.line, This: c.refThis,
+		URI: pr.URI, Line: c.line, This: c.refThis, Rebinds: c.rebinds,
 		VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 	}
 	if c.funcKey == "" || c.global {
@@ -1453,6 +1453,31 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	}
 
 	return comp
+}
+
+// rebinds reports whether an assignment to varName whose right-hand side is
+// a call on recv assigns the variable the call is made on: `x = x.next()`,
+// `variables.x = variables.x.next()`. An argument of the same name is another
+// variable, and so is a member: `x = y.x.next()` is made on y.
+func rebinds(varName, recv string) bool {
+	if varName == "" || recv == "" {
+		return false
+	}
+
+	if scope, name, ok := strings.Cut(recv, "."); ok {
+		if strings.Contains(name, ".") {
+			return false
+		}
+
+		switch {
+		case strings.EqualFold(scope, "local"), strings.EqualFold(scope, "variables"), strings.EqualFold(scope, "this"):
+			recv = name
+		default:
+			return false
+		}
+	}
+
+	return strings.EqualFold(StripReceiverScope(varName), recv)
 }
 
 // readThroughArguments reports whether the receiver recv is written

@@ -777,6 +777,11 @@ because the file's own `getNative()` typed it. Two of Mura's removals
 `pluginEvent = pluginEvent.init(…).getEvent()`) are the receiver reading the
 ref its own assignment makes, since `funcScopedRef` admits a ref on the call's
 line: pre-existing, and the same effect `Future.cfc:66` relied on before.
+Since fixed: such a ref carries `Rebinds` and does not reach a call on its own
+line. Mura, against the branch above: 25 removed, 2 added. The additions are
+those two lines, reported again against the `MuraScope` they are called on;
+the removals are calls after a reassignment that the tag parser had fixed to
+the type before it while parsing. Every other corpus scan is unchanged.
 
 Not done: assignments on different branches are not compared, so the one
 reaching the return by line wins even where another branch assigns something

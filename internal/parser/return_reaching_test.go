@@ -172,3 +172,26 @@ function f( binder ) {
 		}
 	}
 }
+
+// An assignment rebinds its variable when the call on its right-hand side is
+// made on that variable; an argument or a member of the same name is another.
+func TestRebindsNamesTheVariableItself(t *testing.T) {
+	for _, tc := range []struct {
+		varName, recv string
+		want          bool
+	}{
+		{"x", "x", true},
+		{"x", "local.x", true},
+		{"variables.x", "variables.x", true},
+		{"x", "variables.X", true},
+		{"x", "arguments.x", false},
+		{"x", "y.x", false},
+		{"x", "variables.x.y", false},
+		{"x", "y", false},
+		{"x", "", false},
+	} {
+		if got := rebinds(tc.varName, tc.recv); got != tc.want {
+			t.Errorf("rebinds(%q, %q) = %t, want %t", tc.varName, tc.recv, got, tc.want)
+		}
+	}
+}
