@@ -42,6 +42,8 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 		}
 	}
 
+	hops := 0
+
 	for {
 		if sc.NextSkipComments().Kind != TokLParen {
 			return "", nil
@@ -68,13 +70,22 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 
 		switch sc.NextSkipComments().Kind {
 		case TokEOF:
-			return root, trailingCalls(expr)
+			// trailingCalls splits the hops without the scanner's comment
+			// rules; a count that disagrees would type the chain by an
+			// intermediate call, so decline rather than guess.
+			methods = trailingCalls(expr)
+			if len(methods) != hops {
+				return "", nil
+			}
+
+			return root, methods
 		case TokDot:
 			t := sc.NextSkipComments()
 			if t.Kind != TokIdent {
 				return "", nil
 			}
 
+			hops++
 		default:
 			return "", nil
 		}

@@ -496,3 +496,53 @@ func TestProducerPreservesNonComponentContracts(t *testing.T) {
 		t.Fatalf("dynamic contract lost: %v", got)
 	}
 }
+
+func TestProducerHiddenWritesWithholdTheReturn(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"A.cfc": `component {function a(){}}`,
+		"B.cfc": `component {function b(){}}`,
+		"F.cfc": `component {
+function makeA(){ return new A(); }
+function closure(xs){ var r = makeA(); arrayEach(xs, function(x){ r = new B(); }); return r; }
+function arrow(xs){ var r = makeA(); xs.each((x) => { r = new B(); }); return r; }
+function included(){ var r = makeA(); include "x.cfm"; return r; }
+function plain(){ var r = makeA(); return r; }
+}`,
+	})
+
+	r := &Resolver{}
+	_ = reasonsWith(t, r, dir, "A.cfc")
+	lookup := r.FuncLookup(dir)
+
+	for _, m := range []string{"closure([])", "arrow([])", "included()"} {
+		if got := lookup("F", parser.CallHop(m)); got != "" {
+			t.Errorf("%s ignored a hidden write: %q", m, got)
+		}
+	}
+
+	if got := lookup("F", parser.CallHop("plain()")); r.ComponentPath(got, dir) != filepath.Join(dir, "A.cfc") {
+		t.Fatalf("plain return %q", got)
+	}
+}
+
+func TestProducerPlanMustMatchTheIndexedSignature(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"DAO.cfc": `component {function read(value=""){var bean=value;if(!isObject(bean)){bean=new DAO();}return bean;}}`,
+	})
+
+	r := &Resolver{}
+	_ = reasonsWith(t, r, dir, "DAO.cfc")
+	fd := &parser.FunctionDef{Name: "read", URI: cfpath.ToURI(filepath.Join(dir, "DAO.cfc")), Arguments: []parser.Argument{{Name: "value"}}}
+
+	if r.producerFor(fd) == nil {
+		t.Fatal("matching signature has no plan")
+	}
+
+	// The buffer renamed the parameter; the plan on disk is another version.
+	fd.Arguments = []parser.Argument{{Name: "id"}, {Name: "value"}}
+	if r.producerFor(fd) != nil {
+		t.Fatal("plan used against a different signature")
+	}
+}

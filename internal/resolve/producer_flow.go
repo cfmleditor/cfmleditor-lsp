@@ -163,7 +163,7 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 		return producerUnknown()
 	}
 
-	method := e.resolver.wheelsSource(fd.URI.Path()).producers[strings.ToLower(fd.Name)]
+	method := e.resolver.producerFor(fd)
 	// Existing concrete/declared contracts take priority unless the source
 	// contains an object guard, whose supplied-object path needs specialization.
 	if !producerNeedsSpecialization(method, fd) {
@@ -207,6 +207,25 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 	}
 
 	return value
+}
+
+// producerFor is fd's source plan. The plan is read from the file while fd
+// comes from the index, which follows an unsaved buffer in the editor; a
+// plan whose parameters are not fd's describes another version of the
+// function, and binding arguments by position through it would misplace them.
+func (r *Resolver) producerFor(fd *parser.FunctionDef) *producerMethod {
+	method := r.wheelsSource(fd.URI.Path()).producers[strings.ToLower(fd.Name)]
+	if method == nil || len(method.parameters) != len(fd.Arguments) {
+		return nil
+	}
+
+	for i, name := range method.parameters {
+		if !strings.EqualFold(name, fd.Arguments[i].Name) {
+			return nil
+		}
+	}
+
+	return method
 }
 
 func (e *producerEvaluation) concrete(component, baseDir string) producerValue {
@@ -659,8 +678,12 @@ func (e *producerEvaluation) effect(expression string, env producerEnvironment) 
 		return
 	}
 
-	for _, tok := range tokens {
-		if strings.EqualFold(tok.Value, "evaluate") {
+	for i, tok := range tokens {
+		// A closure writes the enclosing function's locals by reference, and an
+		// included template runs in its scope; neither write is visible here.
+		hidden := tok.Kind == parser.TokIdent && (strings.EqualFold(tok.Value, "function") || strings.EqualFold(tok.Value, "cfinclude") || i == 0 && strings.EqualFold(tok.Value, "include")) ||
+			tok.Kind == parser.TokEquals && i+1 < len(tokens) && tokens[i+1].Kind == parser.TokGT
+		if hidden || strings.EqualFold(tok.Value, "evaluate") {
 			env["@variables"] = producerUnknown()
 			for key := range env {
 				env[key] = producerUnknown()
