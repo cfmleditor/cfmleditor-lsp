@@ -1395,14 +1395,15 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 	}
 
 	p.pendingCalls = append(p.pendingCalls, pendingCall{
-		varName:  varName,
-		funcName: methodForPending,
-		baseVar:  baseVar,
-		line:     conv.Uint32(line),
-		funcKey:  p.inFunc,
-		rest:     trailingCalls(rhs),
-		refThis:  p.refThis,
-		global:   p.forceGlobal,
+		varName:    varName,
+		funcName:   methodForPending,
+		expression: callExpressionAt(NewScanner(rhs[strings.IndexByte(rhs, '('):]), methodForPending),
+		baseVar:    baseVar,
+		line:       conv.Uint32(line),
+		funcKey:    p.inFunc,
+		rest:       trailingCalls(rhs),
+		refThis:    p.refThis,
+		global:     p.forceGlobal,
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
@@ -2186,8 +2187,13 @@ func trailingCalls(expr string) []string {
 			continue
 		}
 
-		hops = append(hops, name)
-		i = skipCallGroup(expr, j)
+		end := skipCallGroup(expr, j)
+		if end < 0 {
+			break
+		}
+
+		hops = append(hops, CallHop(expr[start:end]))
+		i = end
 	}
 
 	return hops

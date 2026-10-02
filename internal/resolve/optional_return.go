@@ -7,6 +7,10 @@ import (
 )
 
 func (r *Resolver) expressionReturn(fd *parser.FunctionDef, expression, baseDir, component string) string {
+	if ret := r.producerExpressionReturn(fd, expression, baseDir, component); ret != "" {
+		return ret
+	}
+
 	if ret := r.absentArgumentComponent(fd, expression, baseDir, component); ret != "" {
 		return ret
 	}

@@ -196,7 +196,17 @@ func ResolvePathCached(dotPath string, baseDir string, mappings map[string]strin
 	segments := strings.Split(dotPath, ".")
 	segments[len(segments)-1] += ".cfc"
 
-	return resolveSegmentsCached(baseDir, segments, cache)
+	if abs := resolveSegmentsCached(baseDir, segments, cache); abs != "" {
+		return abs
+	}
+
+	// The empty key represents a configured "/" default. Named mappings and
+	// components beside the caller retain precedence.
+	if root, ok := lookupFold(mappings, ""); ok && root != "" {
+		return resolveSegmentsCached(root, segments, cache)
+	}
+
+	return ""
 }
 
 // InFolderNamed returns where rel lands when its first segment names one of

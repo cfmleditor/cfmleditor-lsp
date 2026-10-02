@@ -381,3 +381,94 @@ mode. Fourteen other comparisons remain identical per entry, and Masa's 60,921
 raw calls are unchanged. See [RESOLUTION-GAPS.md](RESOLUTION-GAPS.md) for the
 contract, rejection cases and remaining producers. Session evidence is under
 `/workspace/optional-return-validation`.
+
+## Wrap-up and loose ends (follow-up to merged PR #192)
+
+PR #192 merged at its second-batch head while this batch was unpublished.
+The producer/root fixes and this wrap-up belong to the follow-up PR.
+
+This section supersedes the implementation status above; the original tables
+remain historical measurements. The current batch adds call-specific producer
+proof, scalar-call return correction, argument-preserving collection chains,
+owned array element inference, mixed tag/cfscript bodies, and literal root `/`
+mappings from Application.cfc and CFConfig. It does not close every category.
+
+### Remaining work
+
+| Area | Current coverage | Loose end and next proof |
+|---|---|---|
+| Application mappings | Literal root defaults, named/relative precedence and application overrides now resolve. Unknown root writes suppress stale defaults, including struct-literal replacement. | Automatic mode still misses source/runtime aliases and external mappings. Reproduce each missing base in its nearest Application context; do not map `mura` from a folder-name guess. |
+| DI ownership | Previously supported registrations, aliases and caller isolation remain. | Automatic DI roots and subsystem ownership need explicit source/configuration proof and separate application fixtures. This batch does not add them. |
+| Request/view propagation | Proven member producers and self-updates carry their concrete returns. | Controller-to-view `rc.$`, event slots, callback records and cross-request values still lack a proven origin. Track documented framework boundaries before propagating them. |
+| Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, object/presence guards and supported branch flow now specialize a call. | Arbitrary caller identifiers, dynamic argument bags, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. Add call-site reaching-definition proof before carrying caller variables. |
+| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. Masa's `settingsManager.getSite` try/catch cache and `settingsBean.getRazunaSettings` shared-field cache are concrete follow-up fixtures. Do not restore a receiver-class guess to silence these findings. |
+| Tags/control flow | Tag and mixed cfscript method plans now remain connected. Query output names can invalidate a returned local through finite attribute bags. | Unsupported controls/tags, computed output names, record aliases, uncertain mutation and exhausted bounds withhold inference. Extend one source shape at a time with negative tests. |
+| Callback/parameter contracts | Declared component types and existing framework contracts continue to work. | Untyped bean/feed/event parameters require verified registration/call-site contracts; arbitrary TestBox actual/target values should remain dynamic. |
+| Includes and unqualified calls | Existing static include/helper discovery remains. | Scope ownership for runtime includes and helpers needs a provenance fixture; a matching method name alone is insufficient. |
+| Wheels factories | Existing literal root factories, associations, model finders and loader integration remain. | Runtime model/controller path construction needs documented configuration/plugin root selection. This batch adds no blanket factory contract. |
+| External APIs/dependencies | Existing builtin and Java dynamic contracts are preserved. Known concrete receivers still report missing methods. | Missing dependencies, versioned builtin members, ORM additions and intentional invalid fixtures need separate classification. Arbitrary reflection/runtime mutation cannot yield a static CFC identity without a contract. |
+
+### Validation and operational follow-up
+
+Producer plans contain lexical source, not cached inferred caller types. Source
+bytes refresh their plans, and supplied constructors use the caller's directory.
+Inference is bounded: 4,096 body tokens/tags, eight nested calls, shared work
+budgets and sixteen loop/settlement iterations. Hitting a boundary loses proof;
+it must not manufacture a receiver.
+
+All nine targeted disabled-fix checks must fail behaviorally and pass restored.
+Corpus findings are compared per entry, with additions retained in the evidence
+rather than hidden by a net total. Raw parser call records are checked separately
+from accepted/unresolved CLI totals.
+
+The existing route/document-link performance assertions are timing-sensitive.
+Run corpus scans separately from tests, with `GOMAXPROCS=2` and package
+parallelism `-p 1` for this environment's full short/race checks. Those settings
+make local validation reproducible; they do not change the tests or establish a
+source fix for timing variability. Source-plan interpretation adds work, so
+representative cold/warm latency and memory measurements remain a follow-up
+before broadening inference. CI is checked on the published commit separately.
+
+For future sessions, run `bash scripts/dev-env.sh check`, use setup if needed,
+and source `target/dev-env/env.sh`. Sandbox proxy reachability must be checked in
+the approved execution context, as described in AGENTS.md; cached local tests
+and exact-head CI remain separate evidence.
+
+The next focused batch should start with the two lazy-cache fixtures above and
+call-site variable provenance. Those are concrete producer gaps that can unblock
+existing member flow. Request/view and callback propagation follows once its
+framework handoff is proven; receiver-frequency totals alone are not a fix plan.
+
+### Final measurements for this batch
+
+| Scan | Files | Previous unresolved | Current unresolved | Accepted now | Batch removed / added |
+|---|---:|---:|---:|---:|---:|
+| Masa configured | 897 | 11,842 | 11,701 | 24,868 | 208 / 67 |
+| Masa automatic | 897 | 13,020 | 12,886 | 20,270 | 201 / 67 |
+| Wheels presets, vendor included | 1,195 | 3,263 | 3,263 | 46,162 | 0 / 0 |
+| Wheels no-presets, vendor included | 1,195 | 8,929 | 8,929 | 39,574 | 0 / 0 |
+
+These are filtered diagnostic/accepted counts, not a raw call success rate.
+Both Masa modes retain 897 files; all fourteen other corpus comparisons retain
+their indexed/scanned coverage. Cumulative Masa reductions against merged PR #190
+are 587 configured and 564 automatic.
+
+### Known corpus coverage losses to revisit
+
+ColdBox with presets has **55 removed / 55 added** findings, so its net total
+stays 1,403. The new receiver-stage findings affect `event1`/`event2`, `e` and
+`this.event` in integration/context fixtures. Its BaseTestCase
+`getMockRequestContext` accepts an optional decorator and constructs mocks through
+MockBox; the producer interpreter does not prove those `isNull`/mock factory
+branches. The related `execute()` wrapper therefore loses its receiver at some
+uses. This is a known inference limitation at these calls, not evidence that
+those application methods are missing. A focused no-argument/default-decorator
+contract must prove both the original class and the supplied-decorator boundary.
+
+Without presets, ColdBox removes 43 and adds five findings (net 38 fewer). The
+five additions are Controller `getRenderer` chains in FrameworkSupertype/Renderer:
+the lazy WireBox-backed field is not proven by this interpreter. Preserve the
+source-backed documented/DI receiver when that initialization contract is proven;
+do not substitute Controller itself as the returned class. These cases join the
+lazy-cache follow-up above. Per-entry additions are retained even when a project
+improves overall.

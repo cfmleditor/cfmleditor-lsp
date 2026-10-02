@@ -4,6 +4,7 @@ import (
 	"maps"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
@@ -198,14 +199,39 @@ type wheelsMethod struct {
 }
 
 type wheelsSource struct {
-	content string
-	methods map[string]wheelsMethod
+	content   string
+	methods   map[string]wheelsMethod
+	producers map[string]*producerMethod
+
+	// size and modTime are the file's stamp when content was read. An
+	// unchanged stamp serves the cache without reading the file again: this
+	// is asked for every untyped return lookup, on the keystroke path.
+	size    int64
+	modTime time.Time
 }
 
-// Cache lexical work, not definitions or directory listings. Re-read bytes on
-// lookup so a changed loader/access modifier is not accepted by an old policy;
-// EnsureIndexed supplies the current definition from the shared index.
+// Cache lexical work, not definitions or directory listings. Re-read bytes
+// when the file's size or modification time moves, so a changed loader/access
+// modifier is not accepted by an old policy; EnsureIndexed supplies the
+// current definition from the shared index.
 func (r *Resolver) wheelsSource(path string) wheelsSource {
+	if r.indexer != nil {
+		return r.indexer.wheelsSource(path)
+	}
+
+	info, err := r.fs().Stat(path)
+	if err != nil {
+		return wheelsSource{}
+	}
+
+	r.mu.RLock()
+	cached, ok := r.wheelsSources[path]
+	r.mu.RUnlock()
+
+	if ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		return cached
+	}
+
 	data, err := r.fs().ReadFile(path)
 	if err != nil {
 		return wheelsSource{}
@@ -213,15 +239,12 @@ func (r *Resolver) wheelsSource(path string) wheelsSource {
 
 	content := string(data)
 
-	r.mu.RLock()
-	cached, ok := r.wheelsSources[path]
-	r.mu.RUnlock()
-
-	if ok && cached.content == content {
-		return cached
+	result := cached
+	if !ok || cached.content != content {
+		result = wheelsSource{content: content, methods: wheelsMethods(content), producers: producerMethods(content)}
 	}
 
-	result := wheelsSource{content: content, methods: wheelsMethods(content)}
+	result.size, result.modTime = info.Size(), info.ModTime()
 
 	r.mu.Lock()
 	if r.wheelsSources == nil {

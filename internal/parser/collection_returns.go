@@ -403,8 +403,13 @@ func emptyCollection(expression string) bool {
 
 	t := sc.NextSkipComments()
 	switch {
-	case t.Kind == TokLBrace:
-		if sc.NextSkipComments().Kind != TokRBrace {
+	case t.Kind == TokLBrace || t.Kind == TokLBracket:
+		closing := TokRBrace
+		if t.Kind == TokLBracket {
+			closing = TokRBracket
+		}
+
+		if sc.NextSkipComments().Kind != closing {
 			return false
 		}
 	case t.Kind == TokIdent && identEq(t.Value, "structNew"):
@@ -684,13 +689,13 @@ func (pr *ParseResult) collectionValueSource(expression, function string, locals
 			}
 
 			if ref != nil {
-				return ReturnSource{Component: pr.settledComponent(ref), Methods: append([]string{c.funcName}, c.rest...)}
+				return ReturnSource{Component: pr.settledComponent(ref), Methods: append([]string{collectionCallHop(c)}, c.rest...)}
 			}
 		} else {
 			for i := range pr.Funcs {
 				f := &pr.Funcs[i]
 				if strings.EqualFold(f.Name, c.funcName) {
-					return ReturnSource{Component: pr.URI.Path(), Methods: append([]string{c.funcName}, c.rest...)}
+					return ReturnSource{Component: pr.URI.Path(), Methods: append([]string{collectionCallHop(c)}, c.rest...)}
 				}
 			}
 		}
@@ -806,4 +811,12 @@ func collectionOutputAttributes(name string) []string {
 	default:
 		return nil
 	}
+}
+
+func collectionCallHop(c *pendingCall) string {
+	if c.expression != "" {
+		return CallHop(c.expression)
+	}
+
+	return c.funcName
 }

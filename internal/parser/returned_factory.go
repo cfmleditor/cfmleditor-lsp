@@ -42,6 +42,8 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 		}
 	}
 
+	hops := 0
+
 	for {
 		if sc.NextSkipComments().Kind != TokLParen {
 			return "", nil
@@ -68,6 +70,14 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 
 		switch sc.NextSkipComments().Kind {
 		case TokEOF:
+			// trailingCalls splits the hops without the scanner's comment
+			// rules; a count that disagrees would type the chain by an
+			// intermediate call, so decline rather than guess.
+			methods = trailingCalls(expr)
+			if len(methods) != hops {
+				return "", nil
+			}
+
 			return root, methods
 		case TokDot:
 			t := sc.NextSkipComments()
@@ -75,7 +85,7 @@ func factoryReturnChain(expr string) (root string, methods []string) {
 				return "", nil
 			}
 
-			methods = append(methods, t.Value)
+			hops++
 		default:
 			return "", nil
 		}
@@ -167,4 +177,11 @@ func (pr *ParseResult) applyFactoryReturnCalls(calls []pendingCall) {
 
 // FactoryCallChain extracts a whole call and its fluent method suffix. Whether
 // the root is a configured factory remains the caller's responsibility.
-func FactoryCallChain(expression string) (string, []string) { return factoryReturnChain(expression) }
+func FactoryCallChain(expression string) (string, []string) {
+	root, methods := factoryReturnChain(expression)
+	for i := range methods {
+		methods[i] = callHopName(methods[i])
+	}
+
+	return root, methods
+}

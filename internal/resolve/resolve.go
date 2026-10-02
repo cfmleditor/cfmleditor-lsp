@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
@@ -67,7 +68,27 @@ type Resolver struct {
 	discoveringDI  bool                       // private policy discovery never re-enters injection lookup
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
+	returnCache    returnCache                // ReturnComponentOf answers, for one index generation
 }
+
+// returnCache holds ReturnComponentOf's answers. An answer reads the index and
+// the declaring file's source, so it is kept only while the index generation
+// is the one it was computed under and the declaring file's stamp is
+// unchanged. Keys are the definitions themselves: a re-indexed file gets new
+// ones, and a cache that outgrows maxReturnCache (definitions from transient
+// parses never repeat) starts again rather than holding them.
+type returnCache struct {
+	gen     uint64
+	entries map[*parser.FunctionDef]returnEntry
+}
+
+type returnEntry struct {
+	component string
+	size      int64
+	modTime   time.Time
+}
+
+const maxReturnCache = 1 << 16
 
 // describeResolver names the resolver at idx for trace output, so a wrong component can be
 // traced back to the exact componentResolvers entry that produced it rather than just to
@@ -1249,7 +1270,7 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 
 		ret, noFollow, soft := r.hopReturn(comp, hop, fd, baseDir, tr)
 		if ret == "" && !callHop {
-			ret = r.absentArgumentComponent(fd, factoryCallExpression(pr.Content, hop, int(call.Line)), baseDir, comp)
+			ret = r.expressionReturn(fd, factoryCallExpression(pr.Content, hop, int(call.Line)), baseDir, comp)
 		}
 
 		if ret == "" && callHop {
@@ -1904,9 +1925,45 @@ func (r *Resolver) chainHopReturn(comp, hop string, fd *parser.FunctionDef, tr *
 // `returntype="pkg.tassui"` is a contract the engine enforces. Any other
 // inferred component is kept, since it may be the more specific of the two.
 func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
-	budget := 128
+	if r.Index == nil || fd == nil {
+		budget := 128
 
-	return r.returnComponentOf(fd, 0, &budget)
+		return r.returnComponentOf(fd, 0, &budget)
+	}
+
+	// The generation is read before the answer is computed, so a write made
+	// meanwhile moves it past the one the answer is stored under.
+	gen := r.Index.Generation()
+
+	var stamp returnEntry
+
+	if fd.URI.IsFile() {
+		if info, err := r.fs().Stat(fd.URI.Path()); err == nil {
+			stamp.size, stamp.modTime = info.Size(), info.ModTime()
+		}
+	}
+
+	r.mu.RLock()
+	entry, ok := r.returnCache.entries[fd]
+	ok = ok && r.returnCache.gen == gen
+	r.mu.RUnlock()
+
+	if ok && entry.size == stamp.size && entry.modTime.Equal(stamp.modTime) {
+		return entry.component
+	}
+
+	budget := 128
+	component := r.returnComponentOf(fd, 0, &budget)
+
+	r.mu.Lock()
+	if r.returnCache.gen != gen || r.returnCache.entries == nil || len(r.returnCache.entries) >= maxReturnCache {
+		r.returnCache = returnCache{gen: gen, entries: make(map[*parser.FunctionDef]returnEntry)}
+	}
+
+	r.returnCache.entries[fd] = returnEntry{component: component, size: stamp.size, modTime: stamp.modTime}
+	r.mu.Unlock()
+
+	return component
 }
 
 func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *int) string {
@@ -1917,6 +1974,18 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 	if fd.ReturnComponent == "" || fd.ReturnComponent == "$any" {
 		if ret := r.wheelsFixedMapperReturn(fd); ret != "" {
 			return ret
+		}
+	}
+
+	if fd.URI.IsFile() && (fd.ReturnType == "" || strings.EqualFold(fd.ReturnType, "any") || strings.EqualFold(fd.ReturnType, "component") || strings.EqualFold(fd.ReturnType, "object")) {
+		method := r.producerFor(fd)
+		if method != nil && (producerNeedsSpecialization(method, fd) || (fd.ReturnComponent == "" || fd.ReturnComponent == "$any") && len(fd.ReturnSources) == 0 && fd.DocReturn == "") {
+			eval := producerEvaluation{resolver: r, fd: fd, baseDir: filepath.Dir(fd.URI.Path()), depth: depth, budget: budget}
+
+			ret := eval.call(fd, "", nil, false).component()
+			if ret != "" || producerNeedsSpecialization(method, fd) {
+				return ret
+			}
 		}
 	}
 

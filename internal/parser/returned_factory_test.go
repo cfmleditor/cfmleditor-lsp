@@ -137,3 +137,19 @@ func returnedFactoryLookup(component, method string) string {
 
 	return ""
 }
+
+func TestFactoryChainDeclinesHopsTheSplitterCannotSee(t *testing.T) {
+	for _, expr := range []string{
+		`getFactory("x").make( /* ) */ ).build()`,
+		"getFactory(\"x\").make( // don't\n ).build()",
+	} {
+		if root, methods := FactoryCallChain(expr); root != "" {
+			t.Errorf("%q: root %q methods %v, want declined", expr, root, methods)
+		}
+	}
+
+	root, methods := FactoryCallChain(`getFactory("x").make( 1 ).build()`)
+	if root != `getFactory("x")` || len(methods) != 2 || methods[0] != "make" || methods[1] != "build" {
+		t.Fatalf("plain chain: root %q methods %v", root, methods)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -15,7 +16,7 @@ import (
 
 // Index is a concurrency-safe store of function definitions keyed by name.
 type Index struct {
-	mu        sync.RWMutex
+	mu        writeCountingMutex
 	funcs     map[string][]*parser.FunctionDef             // lowercase name -> definitions
 	fileFuncs map[string][]*parser.FunctionDef             // lowercase URI -> definitions in that file
 	comprefs  map[string][]*parser.ComponentRef            // lowercase variable -> refs
@@ -32,6 +33,24 @@ type Index struct {
 	// from all of them — the resolver's reverse map — can tell when to rebuild.
 	includeGen uint64
 }
+
+// writeCountingMutex counts every write lock taken, so a reader caching an
+// answer derived from the index can tell when anything may have changed. It
+// is the lock rather than each writer that counts, so a writer added later
+// cannot forget to.
+type writeCountingMutex struct {
+	sync.RWMutex
+	writes atomic.Uint64
+}
+
+func (m *writeCountingMutex) Lock() {
+	m.RWMutex.Lock()
+	m.writes.Add(1)
+}
+
+// Generation reports a counter that moves whenever anything in the index may
+// have changed. It never moves for reads.
+func (idx *Index) Generation() uint64 { return idx.mu.writes.Load() }
 
 // fileIncludes is one file's cfinclude paths as written, with the file's own
 // URI: resolving a relative path needs its directory in its real case.

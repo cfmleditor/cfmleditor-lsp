@@ -27,6 +27,11 @@ func (r *Resolver) collectionReturnOf(fd *parser.FunctionDef, depth int, budget 
 		}
 
 		for _, method := range source.Methods {
+			expression, callHop := parser.CallExpression(method)
+			if callHop {
+				method = wheelsCallName(expression)
+			}
+
 			if *budget <= 0 {
 				return ""
 			}
@@ -43,6 +48,10 @@ func (r *Resolver) collectionReturnOf(fd *parser.FunctionDef, depth int, budget 
 			}
 
 			ret := r.returnComponentOf(called, depth+1, budget)
+			if (ret == "" || ret == "$any") && callHop {
+				ret = r.producerExpressionValue(called, expression, baseDir, comp, depth+1, budget).component()
+			}
+
 			if ret == "" {
 				ret = r.receiverReturn(r.ComponentPath(comp, baseDir), method)
 			}
