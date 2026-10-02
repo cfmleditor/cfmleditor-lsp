@@ -110,7 +110,7 @@ func (r *Resolver) BeanResolvers(beanPaths map[string]string) []parser.Resolver 
 
 	for _, registrations := range factories {
 		for key := range registrations {
-			path := registeredBean(key, registrations, beans, map[string]bool{})
+			path := r.registeredBean(key, registrations, beans, map[string]bool{})
 			if old, found := paths[key]; found && !cfpath.SamePath(old, path) {
 				paths[key] = ""
 			} else if !found {
@@ -164,7 +164,7 @@ type beanRegistration struct {
 	component bool
 }
 
-func registeredBean(name string, registrations map[string][]beanRegistration, beans map[string]string, visiting map[string]bool) string {
+func (r *Resolver) registeredBean(name string, registrations map[string][]beanRegistration, beans map[string]string, visiting map[string]bool) string {
 	if visiting[name] || len(visiting) >= maxStartupTemplates {
 		return ""
 	}
@@ -177,22 +177,68 @@ func registeredBean(name string, registrations map[string][]beanRegistration, be
 	visiting[name] = true
 	defer delete(visiting, name)
 
-	path := ""
+	var targets []string
 
 	for _, entry := range entries {
 		next := entry.target
 		if !entry.component {
-			next = registeredBean(next, registrations, beans, visiting)
+			next = r.registeredBean(next, registrations, beans, visiting)
 		}
 
-		if next == "" || (path != "" && !cfpath.SamePath(path, next)) {
+		if next == "" {
 			return ""
+		}
+
+		if !slices.ContainsFunc(targets, func(t string) bool { return cfpath.SamePath(t, next) }) {
+			targets = append(targets, next)
+		}
+	}
+
+	return r.commonBase(targets)
+}
+
+// commonBase is the one of targets every other extends, or "" when none is.
+// Registrations of one id that disagree are a choice made at run time, and
+// this is the type every choice has: Mura aliases contentGateway to
+// contentGatewayAdobe on Adobe ColdFusion and to contentGatewayLucee, which
+// extends it, otherwise. A method the base declares exists under either
+// engine; one only a subclass declares is still reported.
+func (r *Resolver) commonBase(targets []string) string {
+	if len(targets) == 1 {
+		return targets[0]
+	}
+
+	for _, base := range targets {
+		if !slices.ContainsFunc(targets, func(t string) bool { return !cfpath.SamePath(t, base) && !r.descendsFrom(t, base) }) {
+			return base
+		}
+	}
+
+	return ""
+}
+
+// descendsFrom reports whether the component at path extends the one at
+// ancestor, directly or through its chain.
+func (r *Resolver) descendsFrom(path, ancestor string) bool {
+	for range 16 {
+		ext, ok := r.extendsOf(path, cfpath.ToURI(path))
+		if !ok || ext == "" {
+			return false
+		}
+
+		next := r.ComponentPath(ext, filepath.Dir(path))
+		if next == "" || cfpath.SamePath(next, path) {
+			return false
+		}
+
+		if cfpath.SamePath(next, ancestor) {
+			return true
 		}
 
 		path = next
 	}
 
-	return path
+	return false
 }
 
 type beanCall struct {

@@ -93,3 +93,53 @@ func TestStartupBeanRegistrations(t *testing.T) {
 		t.Errorf("unconfigured discovery: %d", got)
 	}
 }
+
+// TestARegistrationThatDependsOnTheEngineIsTheirCommonBase: Mura aliases
+// contentGateway to contentGatewayAdobe on Adobe ColdFusion and to
+// contentGatewayLucee, which extends it, everywhere else. Either way the bean
+// is a contentGatewayAdobe, so that is its type; targets neither of which
+// extends the other still have none.
+func TestARegistrationThatDependsOnTheEngineIsTheirCommonBase(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return path
+	}
+	write("Factory.cfc", `component {
+ function getBean(string beanName) {}
+ function addAlias(string aliasName, string beanName) {}
+ }`)
+	base := write("beans/GatewayAdobe.cfc", `component { function getTop() {} }`)
+	write("beans/GatewayLucee.cfc", `component extends="GatewayAdobe" { function luceeOnly() {} }`)
+	write("beans/Unrelated.cfc", `component { function other() {} }`)
+	startup := write("startup.cfm", `<cfscript>
+ f = new Factory();
+ if ( server.coldfusion.productName eq "ColdFusion Server" ) {
+ 	f.addAlias("gateway", "GatewayAdobe");
+ } else {
+ 	f.addAlias("gateway", "GatewayLucee");
+ }
+ if ( x ) { f.addAlias("either", "GatewayLucee"); } else { f.addAlias("either", "Unrelated"); }
+ </cfscript>`)
+
+	r := &resolve.Resolver{FS: vfs.OS{}, Index: index.New(), WorkspaceFolders: []string{dir}, StartupFiles: []string{startup}, Resolvers: []parser.Resolver{{Match: `(?i)getBean\(['"]([\w.]+)['"]\)$`, Resolve: "$1", Prefix: "getBean"}}}
+
+	rules := r.BeanResolvers(map[string]string{"": filepath.Join(dir, "beans")})
+	if got := parser.ResolveFromCall(`getBean("gateway")`, rules); got != base {
+		t.Errorf("gateway: got %q, want the common base %q", got, base)
+	}
+
+	if got := parser.ResolveFromCall(`getBean("either")`, rules); filepath.IsAbs(got) {
+		t.Errorf("either: unrelated targets resolved to %q", got)
+	}
+}
