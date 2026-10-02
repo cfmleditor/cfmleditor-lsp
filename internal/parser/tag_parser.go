@@ -993,19 +993,94 @@ func (p *tagParser) parseCFObject(tag string, line int) {
 	}
 }
 
-// parseCFInvoke handles <cfinvoke component="path" returnvariable="var">.
+// parseCFInvoke handles <cfinvoke component="…" method="m" returnvariable="v">,
+// which is the assignment `v = <component>.m()`: v holds what m returns, not
+// an instance of the component. It used to be recorded as the component, so
+// kernel2's getSandBox — `var result = getService("sandbox")`, then a
+// cfinvoke of `get#name#` on it into result — was typed as the sandbox
+// service, and 333 calls on what it really returns were reported against it.
+//
+// The assignment goes through setAssign, as a <cfset> would, so a component
+// path, a variable holding one and a method's declared return are all read
+// the way the script form reads them. A method whose name is computed at run
+// time makes v dynamic.
 func (p *tagParser) parseCFInvoke(tag string, line int) {
-	component := getAttr(tag, "component")
 	variable := getAttr(tag, "returnvariable")
-
-	if component != "" && variable != "" {
-		p.addRef(&ComponentRef{
-			Variable:  variable,
-			Component: component,
-			URI:       uriFromString(p.fileURI),
-			Line:      conv.Uint32(line),
-		})
+	if variable == "" {
+		return
 	}
+
+	if rhs := invokeExpression(getAttr(tag, "component"), getAttr(tag, "method")); rhs != "" {
+		p.setAssign(variable+" = "+rhs, line)
+
+		return
+	}
+
+	p.addRef(&ComponentRef{
+		Variable:  variable,
+		Component: "$any",
+		URI:       uriFromString(p.fileURI),
+		Line:      conv.Uint32(line),
+	})
+}
+
+// invokeExpression spells a <cfinvoke> as the call it makes, or "" when its
+// target is not known from the source: no component, or a computed method.
+// A component attribute is a dot-path, or `#expr#` naming an object.
+func invokeExpression(component, method string) string {
+	component, method = strings.TrimSpace(component), strings.TrimSpace(method)
+	if component == "" || !isIdentText(method) {
+		return ""
+	}
+
+	if expr, ok := wholeHashExpr(component); ok {
+		if !isDottedIdentText(expr) {
+			return ""
+		}
+
+		return expr + "." + method + "()"
+	}
+
+	if strings.ContainsAny(component, "#\"'") {
+		return ""
+	}
+
+	return `createObject("component", "` + component + `").` + method + "()"
+}
+
+// wholeHashExpr returns expr when s is exactly `#expr#`.
+func wholeHashExpr(s string) (string, bool) {
+	if len(s) < 3 || s[0] != '#' || s[len(s)-1] != '#' || strings.Contains(s[1:len(s)-1], "#") {
+		return "", false
+	}
+
+	return strings.TrimSpace(s[1 : len(s)-1]), true
+}
+
+// isIdentText reports whether s is one identifier; a computed method name
+// (`get#name#`) is not.
+func isIdentText(s string) bool {
+	if s == "" || !isIdentStart(s[0]) {
+		return false
+	}
+
+	for i := 1; i < len(s); i++ {
+		if !isIdentStart(s[i]) && (s[i] < '0' || s[i] > '9') {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isDottedIdentText(s string) bool {
+	for part := range strings.SplitSeq(s, ".") {
+		if !isIdentText(part) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // parseCFReturn handles <cfreturn expr /> to infer function return component.
