@@ -71,6 +71,7 @@ type Resolver struct {
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
 	returnCache    returnCache                // ReturnComponentOf answers, for one index generation
+	loopCache      map[string][]loopSpan      // file URI and content hash → every loop it holds (loopsOf)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and
@@ -1272,6 +1273,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 			return ""
 		}
+	}
+
+	if comp == "" {
+		comp = r.loopElement(call, pr, baseDir, tr)
 	}
 
 	if comp == "" {
