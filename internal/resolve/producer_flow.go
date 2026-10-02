@@ -178,7 +178,7 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 		}
 	}
 
-	if method == nil {
+	if method == nil || producerAugmentsReturn(method.body) {
 		return producerUnknown()
 	}
 
@@ -940,10 +940,14 @@ func (e *producerEvaluation) rootCall(tokens []parser.Token, open, end int, befo
 		target = e.fd.URI.Path()
 	}
 
-	if qualified {
-		target = e.read(receiver, env).component()
-	} else {
+	// this.f() and variables.f() call the component's own f(), as a bare
+	// f() does: ColdBox's request() is `return this.execute( … )` and get()
+	// `return variables.request( … )`.
+	switch {
+	case !qualified:
 		method = before
+	case !strings.EqualFold(receiver, "this") && !strings.EqualFold(receiver, "variables"):
+		target = e.read(receiver, env).component()
 	}
 
 	if target == "" {
