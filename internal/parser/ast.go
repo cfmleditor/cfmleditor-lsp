@@ -40,6 +40,10 @@ type FunctionDef struct {
 	// not a declaration: the resolver takes it only where it names a file.
 	DocReturn string
 	returnVar string // unexported: variable name from "return varName" for deferred resolution
+	// returnLine is the line of the return returnVar came from. The
+	// variable's type is what its latest assignment at or before that line
+	// gave it, not its first.
+	returnLine uint32
 }
 
 // Scope represents the CFML variable scope.

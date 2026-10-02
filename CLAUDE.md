@@ -506,6 +506,15 @@ the *formatter*, not the parser.
   comparison and chains nothing. The script check runs on every assignment, so it
   decides from the cached peek and `Scanner.bytesAfterPeek` rather than a save and
   restore, which drops the peek and cost 4.5% of a script parse.
+- **A returned variable holds what reaches the return, not its first
+  assignment** (`refReaching`), as a receiver does in `funcScopedRef`:
+  `var x = new A(); x = new B(); return x;` returns a B, in either syntax. A
+  pending call assigning it between that ref and the return defers the answer
+  to the pass after calls are typed (`assignedBetween`), and calls left untyped
+  are looked at again while returns keep settling (`maxReturnRounds`).
+  `hasRefFor` skips a pending call only for a ref on its own line, and a call on
+  a value is never the file's function of that name (`callsOwnFunction`).
+  Branches are not compared. `TestReturnTypeIsTheAssignmentReachingTheReturn`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.

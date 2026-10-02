@@ -1002,22 +1002,11 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	returnPendings := pr.pendingReturnVars()
 
 	// Resolve ReturnComponent from return var before processing calls
-	pr.settleReturnVars(returnPendings)
+	pr.settleReturnVars(returnPendings, calls)
 
-	// Function name → return component, including the ones just settled.
-	funcReturns := make(map[string]string, len(pr.Funcs))
-	for i := range pr.Funcs {
-		f := &pr.Funcs[i]
+	funcReturns := pr.funcReturns()
 
-		comp := f.ReturnComponent
-		if comp == "" && isComponentType(f.ReturnType) {
-			comp = f.ReturnType
-		}
-
-		if comp != "" {
-			funcReturns[strings.ToLower(f.Name)] = comp
-		}
-	}
+	var untyped []int
 
 	for j := range calls {
 		c := &calls[j]
@@ -1037,64 +1026,150 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			continue
 		}
 
-		comp := funcReturns[strings.ToLower(c.funcName)]
-
-		// Fallback: x = baseVar.method() — assign x same component as baseVar
-		if comp == "" && c.baseVar != "" {
-			comp = pr.baseVarComponent(c)
-		}
-
-		// x = inherited(): a method the file does not declare is its base's,
-		// which FuncLookup reaches from the file itself. ContentBox's
-		// services write `var c = newCriteria()`, a method of cborm's
-		// BaseORMService, and c was untyped.
-		if comp == "" && c.baseVar == "" && pr.FuncLookup != nil && pr.URI.IsFile() {
-			comp = pr.FuncLookup(pr.URI.Path(), c.funcName)
-		}
-
-		if comp == "" && c.baseVar == "" && c.expression != "" && pr.FuncLookup != nil && pr.URI.IsFile() {
-			comp = pr.FuncLookup(pr.URI.Path(), CallHop(c.expression))
-		}
-
-		// A mock made through the MockBox a spec holds,
-		// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
-		if comp == "" {
-			last := c.funcName
-			if len(c.rest) > 0 {
-				last = callHopName(c.rest[len(c.rest)-1])
-			}
-
-			if comp = dynamicCall(last + "()"); comp != "" {
-				c.rest = nil // the chain ends in the mock; nothing to walk
-			}
-		}
-
-		// A chain that decorates what it is made on is made on a mock, and
-		// a mock of a class nothing here names is dynamic:
-		// `variables.iService = model.init( c ).$( "getCache", x )`, where
-		// model is the base class's createMock( annotations.model ).
-		if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, func(hop string) bool { return IsMockDecoration(callHopName(hop)) })) {
-			comp, c.rest = "$any", nil
-		}
-
-		if comp == "" {
-			continue
-		}
-
-		ref := ComponentRef{
-			Variable: c.varName, Component: comp, ChainRest: c.rest,
-			URI: pr.URI, Line: c.line, This: c.refThis,
-			VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
-		}
-		if c.funcKey == "" || c.global {
-			pr.ComponentRefs = append(pr.ComponentRefs, ref)
-		} else {
-			pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
+		if !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns)) {
+			untyped = append(untyped, j)
 		}
 	}
 
-	// Second pass: resolve ReturnComponent for functions whose return var was just added by calls
-	pr.settleReturnVars(returnPendings)
+	// Later passes: resolve ReturnComponent for functions whose return var was
+	// just added by calls, and look again at the calls left untyped, which
+	// may assign what such a function returns or call a method on a variable
+	// typed by one. A function whose return waited for a call to type its
+	// variable settles here, and `variables.binder = buildBinder()` had been
+	// left untyped because the call was looked at first.
+	for range maxReturnRounds {
+		if pr.settleReturnVars(returnPendings, nil) == 0 || len(untyped) == 0 {
+			return
+		}
+
+		funcReturns = pr.funcReturns()
+
+		var still []int
+
+		for _, j := range untyped {
+			if c := &calls[j]; !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns)) {
+				still = append(still, j)
+			}
+		}
+
+		if len(still) == len(untyped) {
+			return
+		}
+
+		untyped = still
+	}
+}
+
+// maxReturnRounds bounds how many times resolvePendingCalls goes back for the
+// calls left untyped once a function's return has settled late: each round
+// follows one more step of a call typed by a return typed by a call.
+const maxReturnRounds = 4
+
+// funcReturns maps each function's lowercased name to the component it
+// returns, inferred or declared.
+func (pr *ParseResult) funcReturns() map[string]string {
+	out := make(map[string]string, len(pr.Funcs))
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
+		comp := f.ReturnComponent
+		if comp == "" && isComponentType(f.ReturnType) {
+			comp = f.ReturnType
+		}
+
+		if comp != "" {
+			out[strings.ToLower(f.Name)] = comp
+		}
+	}
+
+	return out
+}
+
+// pendingCallComponent is the component the call c assigns its variable, or
+// "" when nothing says. It may clear c.rest, when the chain ends in a mock.
+func (pr *ParseResult) pendingCallComponent(c *pendingCall, funcReturns map[string]string) string {
+	var comp string
+	if c.callsOwnFunction() {
+		comp = funcReturns[strings.ToLower(c.funcName)]
+	}
+
+	// Fallback: x = baseVar.method() — assign x same component as baseVar
+	if comp == "" && c.baseVar != "" {
+		comp = pr.baseVarComponent(c)
+	}
+
+	// x = inherited(): a method the file does not declare is its base's,
+	// which FuncLookup reaches from the file itself. ContentBox's
+	// services write `var c = newCriteria()`, a method of cborm's
+	// BaseORMService, and c was untyped.
+	if comp == "" && c.baseVar == "" && pr.FuncLookup != nil && pr.URI.IsFile() {
+		comp = pr.FuncLookup(pr.URI.Path(), c.funcName)
+	}
+
+	if comp == "" && c.baseVar == "" && c.expression != "" && pr.FuncLookup != nil && pr.URI.IsFile() {
+		comp = pr.FuncLookup(pr.URI.Path(), CallHop(c.expression))
+	}
+
+	// A mock made through the MockBox a spec holds,
+	// getMockBox().createEmptyMock(…), is as dynamic as one made directly.
+	if comp == "" {
+		last := c.funcName
+		if len(c.rest) > 0 {
+			last = callHopName(c.rest[len(c.rest)-1])
+		}
+
+		if comp = dynamicCall(last + "()"); comp != "" {
+			c.rest = nil // the chain ends in the mock; nothing to walk
+		}
+	}
+
+	// A chain that decorates what it is made on is made on a mock, and
+	// a mock of a class nothing here names is dynamic:
+	// `variables.iService = model.init( c ).$( "getCache", x )`, where
+	// model is the base class's createMock( annotations.model ).
+	if comp == "" && (IsMockDecoration(c.funcName) || slices.ContainsFunc(c.rest, func(hop string) bool { return IsMockDecoration(callHopName(hop)) })) {
+		comp, c.rest = "$any", nil
+	}
+
+	return comp
+}
+
+// callsOwnFunction reports whether c calls a function of the file's own
+// component, bare or through this., variables. or super., rather than a
+// method of some value: `x = arguments.binder.init()` is not the file's
+// init(), and ColdBox's Injector, whose init() returns this, was taken for
+// the binder it builds.
+func (c *pendingCall) callsOwnFunction() bool {
+	switch {
+	case c.baseVar == "":
+		return true
+	case strings.EqualFold(c.baseVar, "this"), strings.EqualFold(c.baseVar, "variables"), strings.EqualFold(c.baseVar, "super"):
+		return true
+	default:
+		return false
+	}
+}
+
+// addPendingRef files the ref c's assignment makes, when comp says what it
+// holds, and reports whether it did.
+func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
+	if comp == "" {
+		return false
+	}
+
+	ref := ComponentRef{
+		Variable: c.varName, Component: comp, ChainRest: c.rest,
+		URI: pr.URI, Line: c.line, This: c.refThis,
+		VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
+	}
+	if c.funcKey == "" || c.global {
+		pr.ComponentRefs = append(pr.ComponentRefs, ref)
+	} else {
+		pr.funcRefsMap = appendKeyed(pr.funcRefsMap, c.funcKey, []ComponentRef{ref})
+	}
+
+	return true
 }
 
 // returnPending is a function whose return type is whatever a variable it
@@ -1103,6 +1178,7 @@ type returnPending struct {
 	funcIdx int
 	varName string
 	funcKey string
+	line    uint32 // the return's
 }
 
 // pendingReturnVars lists the functions that return a variable and have no
@@ -1131,6 +1207,7 @@ func (pr *ParseResult) pendingReturnVars() []returnPending {
 				funcIdx: i,
 				varName: f.returnVar,
 				funcKey: funcKey(scope.Start, scope.End),
+				line:    f.returnLine,
 			})
 		}
 	}
@@ -1201,8 +1278,12 @@ func returnedComponent(comp string, called bool) string {
 }
 
 // settleReturnVars gives each pending function without a return component
-// the component its return variable holds, when a ref in its body says.
-func (pr *ParseResult) settleReturnVars(pending []returnPending) {
+// the component its return variable holds, when the ref reaching the return
+// says. A pending call in calls that assigns the variable between that ref
+// and the return is what the variable holds instead, so such a function waits
+// for the pass after calls are typed, which passes none. It reports how many
+// functions it settled.
+func (pr *ParseResult) settleReturnVars(pending []returnPending, calls []pendingCall) (settled int) {
 	for _, rp := range pending {
 		if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
 			continue
@@ -1213,8 +1294,13 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 		// A scoped name is the component's variable, not a local of the
 		// function's.
 		if scope != RefAny {
-			if ref := firstRefIn(pr.ComponentRefs, name, scope); ref != nil {
+			ref := refReaching(pr.ComponentRefs, name, rp.line, scope.Admits)
+			if ref != nil && !assignedBetween(calls, name, ref.Line, rp.line) {
 				pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], pr.settledComponent(ref))
+			}
+
+			if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
+				settled++
 			}
 
 			continue
@@ -1224,45 +1310,109 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 		// returns. An unscoped name the function never declared is a
 		// variables-scope one, as settleReturnComponent reads it: a pending
 		// call assigning it settles at component level.
-		ref := lastWideRefNamed(pr.funcRefsMap[rp.funcKey], name)
+		ref := refReaching(pr.funcRefsMap[rp.funcKey], name, rp.line, func(ref *ComponentRef) bool { return ref.VisibleTo == 0 })
 		if ref == nil {
-			ref = firstRefNamed(pr.ComponentRefs, name)
+			ref = refReaching(pr.ComponentRefs, name, rp.line, func(*ComponentRef) bool { return true })
 		}
 
-		if ref != nil {
+		if ref != nil && !assignedBetween(calls, name, ref.Line, rp.line) {
 			pr.Funcs[rp.funcIdx].ReturnComponent = pr.componentReturnFor(&pr.Funcs[rp.funcIdx], returnedComponent(pr.settledComponent(ref), called))
 		}
+
+		if pr.Funcs[rp.funcIdx].ReturnComponent != "" {
+			settled++
+		}
 	}
+
+	return settled
 }
 
-// hasRefFor reports whether the variable a pending call assigns already has a
-// ref, in its function or at file level.
+// refReaching is the ref for name in refs that reaches line: of those admit
+// accepts, the latest assigned at or before it, the later of two on one line.
+// When every one is assigned after it, the first, as fileLevelRef reads a
+// forward reference. `var x = new A(); x = new B(); return x;` returns a B.
+func refReaching(refs []ComponentRef, name string, line uint32, admit func(*ComponentRef) bool) *ComponentRef {
+	var first, best *ComponentRef
+
+	for i := range refs {
+		ref := &refs[i]
+		if !strings.EqualFold(ref.Variable, name) || !admit(ref) {
+			continue
+		}
+
+		if first == nil {
+			first = ref
+		}
+
+		if ref.Line <= line && (best == nil || ref.Line >= best.Line) {
+			best = ref
+		}
+	}
+
+	if best != nil {
+		return best
+	}
+
+	return first
+}
+
+// assignedBetween reports whether one of calls assigns name after line from
+// and at or before line to.
+func assignedBetween(calls []pendingCall, name string, from, to uint32) bool {
+	for i := range calls {
+		c := &calls[i]
+		if !c.returnExpr && !c.memberSet && c.line > from && c.line <= to && strings.EqualFold(c.varName, name) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasRefFor reports whether the assignment a pending call makes already has
+// a ref, in its function or at file level: one for the same variable on the
+// same line.
 //
 // Only a ref in the pending call's own scope counts: a sibling closure's `t`
 // is another variable, and letting it stand for this one left this `t`
 // untyped whenever an earlier test in the spec declared a `t` of its own.
+// Nor does a ref from another assignment: `var x = new A(); x = makeB();`
+// left x an A for good, and a return of x after it returning one.
 func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
 	if c.funcKey != "" {
 		refs := pr.funcRefsMap[c.funcKey]
 		for i := range refs {
-			if ref := &refs[i]; strings.EqualFold(ref.Variable, c.varName) &&
+			if ref := &refs[i]; ref.Line == c.line && strings.EqualFold(ref.Variable, c.varName) &&
 				ref.VisibleFrom == c.visibleFrom && ref.VisibleTo == c.visibleTo {
 				return true
 			}
 		}
 	}
 
-	return firstRefNamed(pr.ComponentRefs, c.varName) != nil
+	for i := range pr.ComponentRefs {
+		if ref := &pr.ComponentRefs[i]; ref.Line == c.line && strings.EqualFold(ref.Variable, c.varName) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // baseVarComponent is the component `x = baseVar.method()` gives x: the
 // method's declared return type when FuncLookup can say, else baseVar's own
 // component, or "$any" when the method is known to declare none.
+//
+// An argument is the function's own, so `arguments.binder.init()` is not read
+// from the component's refs: ColdBox's Injector holds a `variables.binder`
+// built from the argument, and taking that for it made the argument the
+// injector.
 func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	var comp string
 
-	if ref := firstRefIn(pr.ComponentRefs, c.baseVar, c.baseScope); ref != nil {
-		comp = pr.settledComponent(ref)
+	if !c.baseArgs {
+		if ref := firstRefIn(pr.ComponentRefs, c.baseVar, c.baseScope); ref != nil {
+			comp = pr.settledComponent(ref)
+		}
 	}
 
 	if comp == "" && c.funcKey != "" {
@@ -1305,6 +1455,14 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
 	return comp
 }
 
+// readThroughArguments reports whether the receiver recv is written
+// `arguments.x`.
+func readThroughArguments(recv string) bool {
+	scope, name, ok := strings.Cut(recv, ".")
+
+	return ok && name != "" && strings.EqualFold(scope, "arguments")
+}
+
 // firstRefIn is firstRefNamed among the refs scope admits.
 func firstRefIn(refs []ComponentRef, name string, scope RefScope) *ComponentRef {
 	for i := range refs {
@@ -1326,23 +1484,6 @@ func firstRefNamed(refs []ComponentRef, name string) *ComponentRef {
 	}
 
 	return nil
-}
-
-// lastWideRefNamed is the latest assignment the whole function makes to name,
-// by line, passing over the ones a closure declared. A function returns what
-// its variable holds at the return, which follows the assignments: taking
-// the first typed kernel2's getSandBox by `var result = getService(…)` when
-// a cfinvoke two lines later replaces result with what the sandbox returns.
-func lastWideRefNamed(refs []ComponentRef, name string) *ComponentRef {
-	var last *ComponentRef
-
-	for i := range refs {
-		if refs[i].VisibleTo == 0 && strings.EqualFold(refs[i].Variable, name) && (last == nil || refs[i].Line >= last.Line) {
-			last = &refs[i]
-		}
-	}
-
-	return last
 }
 
 // extractBeanName strips framework namespace prefixes from an inject value.
