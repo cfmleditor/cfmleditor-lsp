@@ -2220,27 +2220,44 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 	// only a ref made through that scope holds it.
 	name, called, scope := returnedVar(p.returnVar)
 
-	lookIn := [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs}
-	if scope != RefAny {
-		lookIn = lookIn[1:]
-	}
-
-	for _, refs := range lookIn {
-		for i := range refs {
-			if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) && !chainPending(&refs[i]) {
-				f.ReturnComponent = returnedComponent(refs[i].Component, called)
-
-				break
+	// In the function's own refs the latest assignment is the one in force
+	// at the return, as settleReturnVars reads it; a component's variable is
+	// assigned from many functions, so there the first one stands, as it
+	// always has.
+	if scope == RefAny {
+		if ref := lastReturnableRef(p.funcRefs[p.inFunc], name, scope); ref != nil {
+			if f.ReturnComponent = returnedComponent(ref.Component, called); f.ReturnComponent != "" {
+				return
 			}
 		}
+	}
 
-		if f.ReturnComponent != "" {
-			return
+	for i := range p.componentRefs {
+		ref := &p.componentRefs[i]
+		if strings.EqualFold(ref.Variable, name) && scope.Admits(ref) && !chainPending(ref) {
+			if f.ReturnComponent = returnedComponent(ref.Component, called); f.ReturnComponent != "" {
+				return
+			}
+
+			break
 		}
 	}
 
 	// If still unresolved, store for deferred resolution
 	f.returnVar = p.returnVar
+}
+
+// lastReturnableRef is the latest ref to name a function's return can read.
+func lastReturnableRef(refs []ComponentRef, name string, scope RefScope) *ComponentRef {
+	var last *ComponentRef
+
+	for i := range refs {
+		if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) && !chainPending(&refs[i]) && (last == nil || refs[i].Line >= last.Line) {
+			last = &refs[i]
+		}
+	}
+
+	return last
 }
 
 // handleBodyToken processes an identifier inside a function body.

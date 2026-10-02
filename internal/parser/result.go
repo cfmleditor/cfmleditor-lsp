@@ -1210,7 +1210,7 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending) {
 		// returns. An unscoped name the function never declared is a
 		// variables-scope one, as settleReturnComponent reads it: a pending
 		// call assigning it settles at component level.
-		ref := firstWideRefNamed(pr.funcRefsMap[rp.funcKey], name)
+		ref := lastWideRefNamed(pr.funcRefsMap[rp.funcKey], name)
 		if ref == nil {
 			ref = firstRefNamed(pr.ComponentRefs, name)
 		}
@@ -1314,16 +1314,21 @@ func firstRefNamed(refs []ComponentRef, name string) *ComponentRef {
 	return nil
 }
 
-// firstWideRefNamed is firstRefNamed over the refs the whole function sees,
-// passing over the ones a closure declared.
-func firstWideRefNamed(refs []ComponentRef, name string) *ComponentRef {
+// lastWideRefNamed is the latest assignment the whole function makes to name,
+// by line, passing over the ones a closure declared. A function returns what
+// its variable holds at the return, which follows the assignments: taking
+// the first typed kernel2's getSandBox by `var result = getService(…)` when
+// a cfinvoke two lines later replaces result with what the sandbox returns.
+func lastWideRefNamed(refs []ComponentRef, name string) *ComponentRef {
+	var last *ComponentRef
+
 	for i := range refs {
-		if refs[i].VisibleTo == 0 && strings.EqualFold(refs[i].Variable, name) {
-			return &refs[i]
+		if refs[i].VisibleTo == 0 && strings.EqualFold(refs[i].Variable, name) && (last == nil || refs[i].Line >= last.Line) {
+			last = &refs[i]
 		}
 	}
 
-	return nil
+	return last
 }
 
 // extractBeanName strips framework namespace prefixes from an inject value.
