@@ -65,7 +65,7 @@ func reasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string 
 	calls := pr.AllCalls()
 	for i := range calls {
 		c := &calls[i]
-		key := strings.Join(append(append([]string{c.Variable}, c.Chain...), c.FuncName), ".")
+		key := strings.Join(append(append([]string{c.Variable}, hopNames(c.Chain)...), c.FuncName), ".")
 		key = strings.TrimPrefix(key, ".")
 
 		got[key] = r.CanResolveCall(c, pr, filepath.Dir(file))

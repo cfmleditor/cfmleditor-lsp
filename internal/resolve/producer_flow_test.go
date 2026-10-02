@@ -546,3 +546,46 @@ func TestProducerPlanMustMatchTheIndexedSignature(t *testing.T) {
 		t.Fatal("plan used against a different signature")
 	}
 }
+
+// hopNames is a CallSite.Chain as the methods it calls.
+func hopNames(chain []string) []string {
+	names := make([]string, len(chain))
+	for i, hop := range chain {
+		names[i] = parser.CallHopName(hop)
+	}
+
+	return names
+}
+
+// TestAProducerHopReadsItsOwnArguments: the second chain on the line is
+// typed by its own call's arguments. The hop's arguments used to be found by
+// searching the line for the hop's name, which answers nothing when the name
+// is called twice there — two chains, or a bare read( id ) beside one — and
+// the hop fell back to read's unspecialised return, which is none.
+func TestAProducerHopReadsItsOwnArguments(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Product.cfc": `component {function work(){}}`,
+		"Other.cfc":   `component {function other(){}}`,
+		"DAO.cfc":     `component {function read(id, supplied=""){var bean=arguments.supplied;if(!isObject(bean)){bean=new Product();}return bean;}}`,
+		"Page.cfc": `component {function read(id){} function run(){var dao=new DAO();
+ dao.read(1).work(); dao.read(1, new Other()).other();
+ read(1); dao.read(2, new Other()).nope();
+ }}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Page.cfc"), map[string]string{
+		"dao.read.work":  "",
+		"dao.read.other": "",
+		"dao.read.nope":  "method 'nope' not found in Other",
+	})
+}
+
+// TestCallTextNamesHopsWithoutTheirArguments: the explain report heads a call
+// with its hops' names, as it did before a hop carried its arguments.
+func TestCallTextNamesHopsWithoutTheirArguments(t *testing.T) {
+	call := &parser.CallSite{FuncName: "work", Variable: "dao", Chain: []string{parser.CallHop("read( 1, x.y() )"), "make"}}
+	if got := CallText(call); got != "dao.read().make().work" {
+		t.Fatalf("CallText = %q", got)
+	}
+}

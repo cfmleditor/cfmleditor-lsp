@@ -91,7 +91,7 @@ func TestACallChainedOnABareCallIsCheckedOnWhatItReturns(t *testing.T) {
 
 	for _, c := range pr.AllCalls() {
 		if len(c.Chain) > 0 {
-			got[c.Chain[0]+"."+c.FuncName] = r.CanResolveCall(&c, pr, dir)
+			got[parser.CallHopName(c.Chain[0])+"."+c.FuncName] = r.CanResolveCall(&c, pr, dir)
 		}
 	}
 
