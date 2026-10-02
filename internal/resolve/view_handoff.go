@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
@@ -28,15 +29,21 @@ import (
 // sidebar) has no handoff, and its prc stays unknown.
 
 var (
-	setViewRe     = regexp.MustCompile(`(?i)\bsetView\s*\(\s*(?:view\s*=\s*)?["']/?([\w./-]+)["']`)
+	// setView, and view() or renderView() (ColdBox 7 renamed the second the
+	// first): an action calls the latter to render a viewlet it returns, and
+	// a view to render a partial.
+	renderCallRe  = regexp.MustCompile(`(?i)\b(?:setView|renderView|view)\s*\(\s*(?:view\s*=\s*)?["']/?([\w./-]+)["']([^)]*)`)
+	renderModRe   = regexp.MustCompile(`(?i)\bmodule\s*=\s*["']([^"']*)["']`)
 	actionStartRe = regexp.MustCompile(`(?i)\bfunction\s+(\w+)\s*\(`)
 )
 
-// handoffAction is one handler action that renders a view.
+// handoffAction is one handler action that renders a view, directly or
+// through the views that render it as a partial.
 type handoffAction struct {
-	handler, name  string // the handler's path and the action's name
-	start, setView int    // the lines the action starts on and calls setView on
-	body           string // the action's source up to the setView call
+	handler, name  string   // the handler's path and the action's name
+	start, setView int      // the lines the action starts on and renders on
+	body           string   // the action's source up to the render call
+	through        []string // the views between the action and this one, which must not assign the prc member
 }
 
 // handoffIndex is every module's handler actions by the view each renders,
@@ -46,8 +53,16 @@ type handoffAction struct {
 // the generation during a scan; reading every handler per call made a
 // ContentBox scan 60% slower.
 type handoffIndex struct {
-	modules map[string]map[string][]handoffAction // module dir → lowercased view name → actions
+	modules map[string]map[string]renderers // module dir → lowercased view name → what renders it
 }
+
+// renderers is what renders one view: handler actions, and parent views.
+type renderers struct {
+	actions []handoffAction
+	parents []parentView
+}
+
+type parentView struct{ name, file string }
 
 // viewActions are the handler actions that render the view at path, or nil.
 func (r *Resolver) viewActions(path string) []handoffAction {
@@ -70,22 +85,58 @@ func (r *Resolver) viewActions(path string) []handoffAction {
 
 		r.mu.Lock()
 		if r.handoffs.modules == nil {
-			r.handoffs.modules = make(map[string]map[string][]handoffAction)
+			r.handoffs.modules = make(map[string]map[string]renderers)
 		}
 
 		r.handoffs.modules[module] = byView
 		r.mu.Unlock()
 	}
 
-	return byView[view]
+	return expandPartials(byView, view, nil)
 }
 
-// moduleActions is every setView with a literal view name in module's
-// handlers, by that name lowercased.
-func (r *Resolver) moduleActions(module string) map[string][]handoffAction {
-	out := map[string][]handoffAction{}
+// expandPartials is the actions rendering view: its own, and those of every
+// view that renders it as a partial, since prc is the request's and a partial
+// reads what its parent's action left there.
+func expandPartials(byView map[string]renderers, view string, seen []string) []handoffAction {
+	if len(seen) > 4 || slices.Contains(seen, view) {
+		return nil
+	}
 
-	for _, handler := range r.moduleHandlers(module) {
+	entry := byView[view]
+	out := slices.Clone(entry.actions)
+
+	for _, parent := range entry.parents {
+		inherited := expandPartials(byView, parent.name, append(slices.Clone(seen), view))
+		for i := range inherited {
+			a := inherited[i]
+			a.through = append(slices.Clone(a.through), parent.file)
+			out = append(out, a)
+		}
+	}
+
+	return out
+}
+
+// moduleActions is what renders each view of module, by its name lowercased:
+// every literal setView, view() or renderView() in its handlers, and every
+// literal view() or renderView() in its views. A call naming another module
+// renders that module's view and is not this one's.
+func (r *Resolver) moduleActions(dir string) map[string]renderers {
+	out := map[string]renderers{}
+	name := strings.ToLower(filepath.Base(dir))
+
+	calls := func(content string, visit func(view string, m []int)) {
+		for _, m := range renderCallRe.FindAllStringSubmatchIndex(content, -1) {
+			if mod := renderModRe.FindStringSubmatch(content[m[4]:m[5]]); mod != nil && !strings.EqualFold(mod[1], name) {
+				continue
+			}
+
+			visit(strings.ToLower(content[m[2]:m[3]]), m)
+		}
+	}
+
+	for _, handler := range r.moduleFiles(dir, "handlers", ".cfc") {
 		data, err := r.fs().ReadFile(handler)
 		if err != nil {
 			continue
@@ -93,31 +144,53 @@ func (r *Resolver) moduleActions(module string) map[string][]handoffAction {
 
 		content := string(data)
 
-		for _, m := range setViewRe.FindAllStringSubmatchIndex(content, -1) {
-			view := strings.ToLower(content[m[2]:m[3]])
-
+		calls(content, func(view string, m []int) {
 			starts := actionStartRe.FindAllStringSubmatchIndex(content[:m[0]], -1)
 			if len(starts) == 0 {
-				continue
+				return
 			}
 
 			last := starts[len(starts)-1]
-			out[view] = append(out[view], handoffAction{
+			entry := out[view]
+			entry.actions = append(entry.actions, handoffAction{
 				handler: handler,
 				name:    content[last[2]:last[3]],
 				start:   strings.Count(content[:last[0]], "\n"),
 				setView: strings.Count(content[:m[0]], "\n"),
 				body:    content[last[0]:m[0]],
 			})
+			out[view] = entry
+		})
+	}
+
+	views := filepath.Join(dir, "views")
+
+	for _, file := range r.moduleFiles(dir, "views", ".cfm") {
+		data, err := r.fs().ReadFile(file)
+		if err != nil {
+			continue
 		}
+
+		rel, err := filepath.Rel(views, file)
+		if err != nil {
+			continue
+		}
+
+		parent := strings.ToLower(strings.TrimSuffix(filepath.ToSlash(rel), filepath.Ext(rel)))
+
+		calls(string(data), func(view string, _ []int) {
+			entry := out[view]
+			entry.parents = append(entry.parents, parentView{name: parent, file: file})
+			out[view] = entry
+		})
 	}
 
 	return out
 }
 
-// moduleHandlers are the handler components under module/handlers.
-func (r *Resolver) moduleHandlers(module string) []string {
-	dir := filepath.Join(module, "handlers")
+// moduleFiles are the files with extension ext under module/sub.
+func (r *Resolver) moduleFiles(module, sub, ext string) []string {
+	dir := filepath.Join(module, sub)
 
 	var out []string
 
@@ -126,7 +199,7 @@ func (r *Resolver) moduleHandlers(module string) []string {
 			return nil //nolint:nilerr // a directory that cannot be read has no handlers to offer
 		}
 
-		if !info.IsDir() && strings.EqualFold(filepath.Ext(p), ".cfc") && len(out) < 512 {
+		if !info.IsDir() && strings.EqualFold(filepath.Ext(p), ext) && len(out) < 2048 {
 			out = append(out, p)
 		}
 
@@ -192,6 +265,9 @@ func (r *Resolver) viewPrc(variable, funcName string, pr *parser.ParseResult, tr
 
 	for i := range actions {
 		a := &actions[i]
+		if r.throughAssigns(a.through, name) {
+			return ""
+		}
 
 		hpr := r.handlerParse(a.handler)
 		if hpr == nil {
@@ -234,6 +310,9 @@ func (r *Resolver) viewPrcElement(name string, pr *parser.ParseResult, depth int
 
 	for i := range actions {
 		a := &actions[i]
+		if r.throughAssigns(a.through, name) {
+			return ""
+		}
 
 		rhs, ok := lastPrcAssignment(a.body, name)
 		if !ok {
@@ -254,6 +333,22 @@ func (r *Resolver) viewPrcElement(name string, pr *parser.ParseResult, depth int
 	}
 
 	return answer
+}
+
+// throughAssigns reports whether a view between an action and the partial
+// it reaches assigns prc.name itself, so that the action's value is not the
+// one the partial reads.
+func (r *Resolver) throughAssigns(views []string, name string) bool {
+	re := regexp.MustCompile(`(?i)\bprc\.` + regexp.QuoteMeta(name) + `\s*=[^=]`)
+
+	for _, v := range views {
+		data, err := r.fs().ReadFile(v)
+		if err != nil || re.Match(data) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // prcMember is X for a receiver written prc.X.
