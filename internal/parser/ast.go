@@ -238,6 +238,11 @@ type CallSite struct {
 	// "getPublic"}). Empty for a plain "x.method()" call. CanResolveCall walks Chain
 	// via ResolveFunc, applying each hop's declared return type in turn, before
 	// checking FuncName against the final component.
+	//
+	// A hop is a bare name, a PropertyHop, or a CallHop carrying the call with
+	// its arguments (`$call:generateKeyPair( 2048 )`) wherever the parser read
+	// them, which is what an argument-sensitive return is specialised from.
+	// Read a hop's method through CallHopName, never verbatim.
 	Chain []string
 }
 
