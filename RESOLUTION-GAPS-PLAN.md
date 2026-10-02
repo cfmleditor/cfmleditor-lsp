@@ -859,3 +859,44 @@ All 13 additions are calls that were already findings, now naming the method
 the entity lacks instead of an untyped variable: `build/patches/3.7.0`–`4.2.1`
 call `Author.getAPIToken()`/`generateAPIToken()` and `1-0-4` calls
 `Page.getRecursiveSlug()`, none of which today's model declares.
+
+## ContentBox: the prc handoff from handler to view
+
+A ColdBox view reads the `prc` its handler action filled, and names neither the
+handler nor a type. The handoff is the `setView` call: for a view at
+`<module>/views/<name>.cfm`, every action in `<module>/handlers` that calls
+`event.setView( "<name>" )` renders it, and `prc.X` holds what each of those
+actions last assigned before the call, typed in the handler with the handler's
+own rules (`Resolver.viewPrc`, and `viewPrcElement` for a loop over it). It is
+an answer only when every rendering action types it and they agree: an action
+that does not assign `prc.X` leaves it to a pre-handler, an interceptor or a
+layout. A view no `setView` names, such as a partial rendered by `renderView`,
+has no handoff.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, presets | 2,821 | 2,750 | 71 / 0 |
+| ContentBox, no config | 7,715 | 7,644 | 71 / 0 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+The handler index and the handler parses are built once for the life of the
+resolver, as `startupCache` is. Keyed by index generation they were rebuilt all
+the time, since lazy indexing moves the generation during a scan, and the scan
+was 60% slower; cached, it is within noise.
+
+What the handoff cannot yet reach, of the 421 loop and 226 direct `prc`
+findings in views:
+
+- **Partials** (202 of the loop findings): sidebars, pagers and editors that
+  another view renders or includes. Their `prc` is their parent view's.
+- **Struct fields of a search result** (about 95): `prc.comments =
+  commentResults.comments`, where `search()` returns a struct holding a criteria
+  `list()`.
+- **`xService.list(…)`** (about 54): whether it returns entities or a query
+  depends on cborm's configuration.
+- **A prc member assigned from an injected service's entity method**:
+  `prc.author = authorService.get( rc.authorID )` in the handler leaves
+  `prc.author` untyped even in the handler itself, while the same call assigned
+  to a local is typed `cbAuthor`. The member's ref is recorded with no
+  component. This is most of `prc.author` (60) and `prc.content` (48), and a
+  record-member fix, not a handoff one.

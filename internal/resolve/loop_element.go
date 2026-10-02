@@ -285,6 +285,11 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 		return r.methodElement(target, method, arguments, baseDir)
 	}
 
+	// A view's prc.X is what the handler action rendering the view assigns.
+	if name, ok := prcMember(expression); ok {
+		return r.viewPrcElement(name, pr, depth)
+	}
+
 	m := loopPathRe.FindStringSubmatch(expression)
 	if m == nil {
 		return ""
