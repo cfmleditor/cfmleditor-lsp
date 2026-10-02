@@ -1330,36 +1330,13 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if property, ok := parser.PropertyName(hop); ok {
-			ret := r.publicPropertyComponent(comp, property, baseDir)
-			if ret == "" {
-				var noFollow, soft bool
-
-				// The parse may have folded the calls before the property
-				// into call.Component, so the source line is asked too.
-				for _, text := range []string{propertyHopText(call, i, property), propertyReadText(lineOfContent(pr.Content, int(call.Line)), property)} {
-					if text == "" {
-						continue
-					}
-
-					ret, noFollow, soft = r.propertyResolver(text, property, tr)
-					if ret != "" {
-						break
-					}
-				}
-
-				if noFollow && ret != "" {
-					tr.hit(TargetDynamic, ret, nil)
-
-					return comp, softComp, "", true
-				}
-
-				if soft {
-					softComp = ret
-				}
+			ret, soft, reason, done := r.propertyHop(comp, property, call, i, pr, baseDir, tr)
+			if done {
+				return comp, softComp, reason, true
 			}
 
-			if ret == "" {
-				return comp, softComp, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + funcName + "')", true
+			if soft {
+				softComp = ret
 			}
 
 			comp = ret
@@ -1423,6 +1400,41 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 	}
 
 	return comp, softComp, "", false
+}
+
+// propertyHop is walkHops for a property hop: what the property holds, from
+// the component's typed properties or else a componentResolver matched
+// against the property read, or done with the answer when that settles the
+// call.
+func (r *Resolver) propertyHop(comp, property string, call *parser.CallSite, i int, pr *parser.ParseResult, baseDir string, tr *callTrace) (ret string, soft bool, reason string, done bool) {
+	if ret = r.publicPropertyComponent(comp, property, baseDir); ret != "" {
+		return ret, false, "", false
+	}
+
+	var noFollow bool
+
+	// The parse may have folded the calls before the property into
+	// call.Component, so the source line is asked too.
+	for _, text := range []string{propertyHopText(call, i, property), propertyReadText(lineOfContent(pr.Content, int(call.Line)), property)} {
+		if text == "" {
+			continue
+		}
+
+		if ret, noFollow, soft = r.propertyResolver(text, property, tr); ret != "" {
+			break
+		}
+	}
+
+	switch {
+	case ret == "":
+		return "", false, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + call.FuncName + "')", true
+	case noFollow:
+		tr.hit(TargetDynamic, ret, nil)
+
+		return "", false, "", true
+	}
+
+	return ret, soft, "", false
 }
 
 // propertyHopText is a property hop as a resolver sees it: the call or
