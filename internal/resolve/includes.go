@@ -77,6 +77,43 @@ func (r *Resolver) IncludePath(raw, fromFile string) string {
 	return ""
 }
 
+// includeTargets is the files raw names from fromFile: IncludePath's one, or
+// for a directory listing's glob (parser.directoryIncludes, `sub/*.cfm`) every
+// template in that directory beside fromFile, in name order.
+func (r *Resolver) includeTargets(raw, fromFile string) []string {
+	dir, pattern, glob := strings.Cut(raw, "/*")
+	if !glob {
+		if target := r.IncludePath(raw, fromFile); target != "" {
+			return []string{target}
+		}
+
+		return nil
+	}
+
+	if pattern != ".cfm" || strings.ContainsAny(dir, "*#") {
+		return nil
+	}
+
+	listed := filepath.Join(filepath.Dir(fromFile), filepath.FromSlash(dir))
+
+	entries, err := r.fs().ReadDir(listed)
+	if err != nil {
+		return nil
+	}
+
+	var out []string
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".cfm") {
+			out = append(out, filepath.Join(listed, entry.Name()))
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
 // includes returns the include graph for the index as it now stands, building
 // it again only when the index's include generation has moved.
 func (r *Resolver) includes() *includeGraph {
@@ -118,15 +155,12 @@ func (r *Resolver) includes() *includeGraph {
 		g.paths[from] = e.file
 
 		for _, raw := range e.paths {
-			target := r.IncludePath(raw, e.file)
-			if target == "" {
-				continue
+			for _, target := range r.includeTargets(raw, e.file) {
+				to := pathKey(target)
+				g.paths[to] = target
+				g.fwd[from] = append(g.fwd[from], to)
+				g.rev[to] = append(g.rev[to], from)
 			}
-
-			to := pathKey(target)
-			g.paths[to] = target
-			g.fwd[from] = append(g.fwd[from], to)
-			g.rev[to] = append(g.rev[to], from)
 		}
 	}
 
