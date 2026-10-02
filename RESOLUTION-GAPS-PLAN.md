@@ -546,3 +546,21 @@ typed, and the additions are deeper unknown returns (`$.currentUser()` 86,
 `$.content()` 34). It is also what this plan's rule forbids as inference.
 Either contract is a project's own decision to make in its config; the
 resolver does not make it.
+
+## Untyped arguments: what the caller rule can reach
+
+Measured on MuraCMS with `scripts/corpus/masacms.json`. 2,772 unknown receivers
+are `arguments.*`. The plan's rule (type a parameter from consistent callers
+only in a private or local helper) reaches 6 of them: 2,621 are in public or
+default-access methods and 145 are outside any function.
+
+| Group | Findings | Example | Provable |
+|---|---:|---|---|
+| DAO, gateway and manager methods | 1,416 | `contentDAO.create(contentBean)`, `settingsDAO.create`/`update(bean)`, `feedGateway.getFeed` | Only under a closed-workspace assumption: each tends to have one in-workspace caller (`settingsManager` calling `variables.DAO.create(bean)`), but a public method can be called from outside it |
+| Framework callback arguments | 596 | `standardEventsHandler.doAction(event, $)` | No: Mura invokes them by dynamic dispatch, and `$` is the MuraScope case above |
+| Other | 760 | `renderer`, `item`, `bundle` | Mixed |
+
+Typing the first group means letting the agreement of a public method's
+workspace callers decide its parameter's type, which this plan's rule keeps
+shared signatures independent of. If it is done, it belongs behind an explicit,
+default-off closed-workspace setting, measured on its own.
