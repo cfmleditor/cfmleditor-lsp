@@ -75,6 +75,8 @@ func (pr *ParseResult) applyMemberBindings() {
 		n.addSource(source)
 	}
 
+	descendants := memberDescendants(nodes)
+
 	for _, w := range writes {
 		if w.target == "" && w.unknown {
 			for _, n := range nodes {
@@ -89,12 +91,7 @@ func (pr *ParseResult) applyMemberBindings() {
 		}
 
 		if source, indexed := collectionRead(w.expression); source != "" && !indexed {
-			sourceKey := key(source, w.function)
-			for identity, n := range nodes {
-				if strings.HasPrefix(identity, sourceKey+".") {
-					n.invalid = true
-				}
-			}
+			invalidate(descendants[key(source, w.function)])
 		}
 
 		parent := key(w.target, w.function)
@@ -102,11 +99,7 @@ func (pr *ParseResult) applyMemberBindings() {
 			parent = strings.ToLower(w.target)
 		}
 
-		for identity, n := range nodes {
-			if strings.HasPrefix(identity, parent+".") {
-				n.invalid = true
-			}
-		}
+		invalidate(descendants[parent])
 	}
 
 	components := pr.settleMemberDependencies(nodes, dependencies)
@@ -116,7 +109,7 @@ func (pr *ParseResult) applyMemberBindings() {
 		name, scope, _ := MemberReceiverName(w.target)
 		component := components[identity]
 
-		ref := ComponentRef{Variable: strings.Clone(name), Component: component, URI: pr.URI, Line: conv.Uint32(strings.Count(pr.Content[:w.offset], "\n")), This: scope == RefThis}
+		ref := ComponentRef{Variable: strings.Clone(name), Component: component, URI: pr.URI, Line: conv.Uint32(pr.lineAt(w.offset)), This: scope == RefThis}
 		if strings.Contains(identity, "\t") {
 			if pr.funcRefsMap == nil {
 				pr.funcRefsMap = map[string][]ComponentRef{}
@@ -126,6 +119,30 @@ func (pr *ParseResult) applyMemberBindings() {
 		} else {
 			pr.ComponentRefs = append(pr.ComponentRefs, ref)
 		}
+	}
+}
+
+// memberDescendants files each node under every proper prefix of its identity
+// that ends before a dot, so the members a write replaces are one lookup away.
+// Every write used to test every node's identity against its own key, which
+// made a component holding many members quadratic in them.
+func memberDescendants(nodes map[string]*collectionNode) map[string][]*collectionNode {
+	descendants := map[string][]*collectionNode{}
+
+	for identity, n := range nodes {
+		for i := range len(identity) {
+			if identity[i] == '.' {
+				descendants[identity[:i]] = append(descendants[identity[:i]], n)
+			}
+		}
+	}
+
+	return descendants
+}
+
+func invalidate(nodes []*collectionNode) {
+	for _, n := range nodes {
+		n.invalid = true
 	}
 }
 

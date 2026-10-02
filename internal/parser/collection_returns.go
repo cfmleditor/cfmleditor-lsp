@@ -491,7 +491,24 @@ func settleCollections(nodes map[string]*collectionNode) {
 	propagate()
 }
 
+type writesMemo struct {
+	writes []collectionWrite
+	done   bool
+}
+
 func (pr *ParseResult) collectionWrites() []collectionWrite {
+	if m := pr.writesMemo; m != nil {
+		if !m.done {
+			m.writes, m.done = pr.collectWrites(), true
+		}
+
+		return m.writes
+	}
+
+	return pr.collectWrites()
+}
+
+func (pr *ParseResult) collectWrites() []collectionWrite {
 	var writes []collectionWrite
 
 	lines := pr.contentLineIdx

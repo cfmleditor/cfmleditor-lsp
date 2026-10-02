@@ -99,6 +99,16 @@ type ParseResult struct {
 	funcRefsMap           map[string][]ComponentRef
 	funcLinksMap          map[string][]DocumentLink
 	funcCallsMap          map[string][]CallSite // per-function call sites keyed by "start:end"
+
+	// writesMemo, while set, holds collectionWrites' answer for the passes
+	// in extractSignatures that share it.
+	writesMemo *writesMemo
+
+	// lineStarts holds the byte offset of each line of lineStartsContent, so
+	// a function body is sliced without walking the file from its start.
+	lineStartsMu      sync.Mutex
+	lineStarts        []int
+	lineStartsContent string
 }
 
 // ParseOptions configures optional parse behaviour.
@@ -328,9 +338,13 @@ func (pr *ParseResult) extractSignatures() {
 		pr.generatePropertyAccessors()
 		pr.collectDelegates()
 		pr.appendResolverRefs()
+		// Both passes read the same writes, and nothing between them changes
+		// the regions or scopes those are read from.
+		pr.writesMemo = &writesMemo{}
 		pr.applyMemberBindings()
 		pr.applyFactoryReturnCalls(allPendingCalls)
 		pr.applyCollectionReturns(allPendingCalls)
+		pr.writesMemo = nil
 		pr.resolvePendingCalls(allPendingCalls)
 		pr.applyChainedReturnLookup()
 
@@ -1848,7 +1862,7 @@ func (pr *ParseResult) computeAnyScopedVars(scope Scope) []string {
 	var names []string
 
 	for _, fs := range pr.Scopes {
-		start, end := lineOffsets(pr.Content, fs.Start, fs.End)
+		start, end := pr.lineOffsets(fs.Start, fs.End)
 		if start < 0 {
 			continue
 		}
@@ -1910,7 +1924,7 @@ func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 		}
 	}()
 
-	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	start, end := pr.lineOffsets(funcStart, funcEnd)
 	if start < 0 {
 		return nil
 	}
@@ -2010,7 +2024,7 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 		return names
 	}
 
-	start, end := lineOffsets(pr.Content, initScope.Start, initScope.End)
+	start, end := pr.lineOffsets(initScope.Start, initScope.End)
 	if start < 0 {
 		return names
 	}
@@ -2395,7 +2409,7 @@ func (pr *ParseResult) cachedFuncRefs(funcStart, funcEnd int) ([]ComponentRef, [
 }
 
 func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
-	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	start, end := pr.lineOffsets(funcStart, funcEnd)
 	if start < 0 {
 		return nil, nil
 	}
@@ -2523,7 +2537,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 // resolveMethodReturnRefs scans a function body for x = y.method() assignments
 // where y has a known component ref and method declares a return type.
 func (pr *ParseResult) resolveMethodReturnRefs(funcStart, funcEnd int, existingRefs []ComponentRef) []ComponentRef {
-	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	start, end := pr.lineOffsets(funcStart, funcEnd)
 	if start < 0 {
 		return existingRefs
 	}
@@ -2756,7 +2770,7 @@ func (pr *ParseResult) AllCalls() []CallSite {
 
 // funcCallsUncached parses a function body on-demand to extract call sites.
 func (pr *ParseResult) funcCallsUncached(funcStart, funcEnd int) []CallSite {
-	start, end := lineOffsets(pr.Content, funcStart, funcEnd)
+	start, end := pr.lineOffsets(funcStart, funcEnd)
 	if start < 0 {
 		return nil
 	}
@@ -2986,31 +3000,68 @@ func atoi(s string) int {
 	return n
 }
 
-// lineOffsets converts line numbers to byte offsets.
-func lineOffsets(content string, startLine, endLine int) (start, end int) {
-	line := 0
+// lineOffsets converts line numbers to byte offsets: start is where startLine
+// begins and end is just past endLine's newline (or the end of the content).
+// The line table is built once per content, since every function body's
+// parse asks and walking from the top each time made a file with many
+// functions quadratic in its length. Comparing the cached content is cheap:
+// two strings sharing their bytes compare equal without reading them.
+func (pr *ParseResult) lineOffsets(startLine, endLine int) (start, end int) {
+	return offsetsFromTable(pr.lineStartsTable(), len(pr.Content), startLine, endLine)
+}
 
-	for line < startLine {
-		idx := strings.IndexByte(content[start:], '\n')
-		if idx < 0 {
-			return -1, -1
-		}
+// lineAt is the 0-based line holding byte offset off of Content, from the
+// same table lineOffsets reads.
+func (pr *ParseResult) lineAt(off int) int {
+	starts := pr.lineStartsTable()
 
-		start += idx + 1
-		line++
+	return sort.Search(len(starts), func(i int) bool { return starts[i] > off }) - 1
+}
+
+func (pr *ParseResult) lineStartsTable() []int {
+	pr.lineStartsMu.Lock()
+	defer pr.lineStartsMu.Unlock()
+
+	if pr.lineStarts == nil || pr.lineStartsContent != pr.Content {
+		pr.lineStarts = lineStartTable(pr.Content)
+		pr.lineStartsContent = pr.Content
 	}
 
-	end = start
-	for line <= endLine {
-		idx := strings.IndexByte(content[end:], '\n')
-		if idx < 0 {
-			end = len(content)
+	return pr.lineStarts
+}
 
-			break
+func lineStartTable(content string) []int {
+	starts := make([]int, 1, strings.Count(content, "\n")+1)
+
+	for i := 0; ; {
+		idx := strings.IndexByte(content[i:], '\n')
+		if idx < 0 {
+			return starts
 		}
 
-		end += idx + 1
-		line++
+		i += idx + 1
+		starts = append(starts, i)
+	}
+}
+
+func offsetsFromTable(starts []int, size, startLine, endLine int) (start, end int) {
+	if startLine < 0 {
+		startLine = 0
+	}
+
+	if startLine >= len(starts) {
+		return -1, -1
+	}
+
+	start = starts[startLine]
+
+	switch {
+	case endLine < startLine:
+		end = start
+	case endLine+1 < len(starts):
+		end = starts[endLine+1]
+	default:
+		end = size
 	}
 
 	return start, end

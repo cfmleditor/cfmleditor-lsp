@@ -28,6 +28,9 @@ import (
 var version = "dev"
 
 func main() {
+	stopProfiling := startProfiling()
+	defer stopProfiling()
+
 	// Subcommand routing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {

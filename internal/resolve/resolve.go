@@ -55,6 +55,8 @@ type Resolver struct {
 	appRootCache   map[string]string   // dir → Application.cfc root
 	slugCache      map[string]string   // dir → its box.json slug, "" for none
 	resolveCache   map[string]string   // component+"\t"+baseDir → file path
+	includeCache   map[string]string   // include path+"\t"+including directory → template
+	interfaceCache map[string]bool     // component file → whether it declares an interface
 	dirCache       *cfpath.DirCache    // directory listings behind those resolutions
 	incGraph       *includeGraph       // the index's cfincludes, rebuilt when they change
 	exprKeys       []string            // ExpressionMappings' keys in the order they apply
@@ -80,6 +82,57 @@ type Resolver struct {
 type returnCache struct {
 	gen     uint64
 	entries map[*parser.FunctionDef]returnEntry
+	stamps  map[string]fileStamp // declaring file → its stamp, read once per generation
+}
+
+type fileStamp struct {
+	size    int64
+	modTime time.Time
+}
+
+// stampsFor keeps the stamps across a reset that stays in one generation,
+// which is only the size cap: they describe files, not answers.
+func (c returnCache) stampsFor(gen uint64) map[string]fileStamp {
+	if c.gen == gen {
+		return c.stamps
+	}
+
+	return nil
+}
+
+// returnStamp is the declaring file's stamp, read from disk at most once per
+// index generation. Every call used to stat the file, cache hit or not, and
+// that was a tenth of an unresolved scan's CPU. A change on disk the index
+// has not seen is therefore noticed at the next index write rather than at
+// once; in the editor every edit is one, and a watched-file event is one and
+// clears this cache besides.
+func (r *Resolver) returnStamp(gen uint64, path string) fileStamp {
+	r.mu.RLock()
+	stamp, ok := r.returnCache.stamps[path]
+	ok = ok && r.returnCache.gen == gen
+	r.mu.RUnlock()
+
+	if ok {
+		return stamp
+	}
+
+	if info, err := r.fs().Stat(path); err == nil {
+		stamp = fileStamp{size: info.Size(), modTime: info.ModTime()}
+	}
+
+	r.mu.Lock()
+	if r.returnCache.gen != gen || r.returnCache.entries == nil {
+		r.returnCache = returnCache{gen: gen, entries: make(map[*parser.FunctionDef]returnEntry)}
+	}
+
+	if r.returnCache.stamps == nil {
+		r.returnCache.stamps = map[string]fileStamp{}
+	}
+
+	r.returnCache.stamps[path] = stamp
+	r.mu.Unlock()
+
+	return stamp
 }
 
 type returnEntry struct {
@@ -1943,12 +1996,10 @@ func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
 	// meanwhile moves it past the one the answer is stored under.
 	gen := r.Index.Generation()
 
-	var stamp returnEntry
+	var stamp fileStamp
 
 	if fd.URI.IsFile() {
-		if info, err := r.fs().Stat(fd.URI.Path()); err == nil {
-			stamp.size, stamp.modTime = info.Size(), info.ModTime()
-		}
+		stamp = r.returnStamp(gen, fd.URI.Path())
 	}
 
 	r.mu.RLock()
@@ -1965,7 +2016,7 @@ func (r *Resolver) ReturnComponentOf(fd *parser.FunctionDef) string {
 
 	r.mu.Lock()
 	if r.returnCache.gen != gen || r.returnCache.entries == nil || len(r.returnCache.entries) >= maxReturnCache {
-		r.returnCache = returnCache{gen: gen, entries: make(map[*parser.FunctionDef]returnEntry)}
+		r.returnCache = returnCache{gen: gen, entries: make(map[*parser.FunctionDef]returnEntry), stamps: r.returnCache.stampsFor(gen)}
 	}
 
 	r.returnCache.entries[fd] = returnEntry{component: component, size: stamp.size, modTime: stamp.modTime}
@@ -2094,9 +2145,29 @@ func (r *Resolver) isInterface(path string) bool {
 		return false
 	}
 
-	data, err := r.fs().ReadFile(path)
+	r.mu.RLock()
+	answer, ok := r.interfaceCache[path]
+	r.mu.RUnlock()
 
-	return err == nil && interfaceRe.Match(data)
+	if ok {
+		return answer
+	}
+
+	// Read and matched once per path: it is asked for every call checked on
+	// a component that lacks the method, and the whole-file regex was 6% of
+	// an unresolved scan. InvalidatePaths drops it with the path caches.
+	data, err := r.fs().ReadFile(path)
+	answer = err == nil && interfaceRe.Match(data)
+
+	r.mu.Lock()
+	if r.interfaceCache == nil {
+		r.interfaceCache = map[string]bool{}
+	}
+
+	r.interfaceCache[path] = answer
+	r.mu.Unlock()
+
+	return answer
 }
 
 // FuncLookup is the parser's hook for what a method of a component returns,
