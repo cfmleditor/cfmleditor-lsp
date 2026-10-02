@@ -998,9 +998,8 @@ findings in views:
   | MuraCMS, ColdBox, cfwheels, fw1, Lucee | | | 0 / 0 each |
 
   `prc.content` went from 49 to 30. The 30 left are all `content/quickLook.cfm`,
-  whose action in `baseContentHandler` assigns `variables.ormService.get( … )`,
-  and `variables.ormService` is set by each subclass handler: a handoff through
-  a base handler's variables, not this gap.
+  a separate gap: see "ContentBox: a base handler's variable its subclasses
+  inject" below.
 
 ## ContentBox: partials
 
@@ -1029,3 +1028,100 @@ fixed; see there.
 | ContentBox, presets | 2,752 | 2,751 | 1 / 0 |
 | ContentBox, no config | 7,644 | 7,643 | 1 / 0 |
 | MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+## ContentBox: a base handler's variable its subclasses inject
+
+Open; measured after PR #216. Known for short as **the quickLook ormService
+gap**, after the view it empties. The largest single cause left in
+`contentbox-admin`'s handlers. Listed as gap 11 in RESOLUTION-GAPS.md.
+
+**To pick it up:** read this section, rebuild the ContentBox scratch copy
+(`~/corpus/Ortus-Solutions_ContentBox` copied to a scratch directory with
+`.cfmleditor.json` `{"workspaceName":"cbox","frameworks":["coldbox","contentbox","testbox","cfmigrations"]}`;
+never write into `~/corpus`), run the repro below, write the failing test in
+`internal/resolve` (a base component calling `variables.svc.get()`, two or
+three subclasses injecting different services), then follow CLAUDE.md's
+verification discipline.
+
+**Shape.** `handlers/baseContentHandler.cfc` is an abstract handler. It calls
+`variables.ormService` throughout and never declares it; each concrete handler
+that extends it injects its own:
+
+```cfml
+// pages.cfc
+component extends="baseContentHandler" {
+	property name="ormService" inject="pageService@contentbox";
+// entries.cfc        inject="entryService@contentbox"
+// contentStore.cfc   inject="contentStoreService@contentbox"
+```
+
+The base file's own header says so ("These properties must be set by the
+concrete content type handler"). The three services all extend
+`ContentService`, which since PR #216 binds `cbContent`; their own entities
+(`cbPage`, `cbEntry`, `cbContentStore`) all extend `BaseContent`
+(`cbContent`).
+
+**What it costs.** `receiverComponent` looks a `variables.x` receiver up in the
+file's refs, then up its extends chain (step 6), and never down: nothing in
+`baseContentHandler.cfc` or `baseHandler.cfc` types `ormService`, so every call
+on it is `variable 'variables.ormService' has no component ref`, and every value
+read from it is untyped. On the ContentBox scratch copy (presets, 2,637 entries):
+
+- about 50 entries in `baseContentHandler.cfc` itself: the calls on
+  `variables.ormService` (`save`, `saveAll`, `populate`, `getAllForExport`,
+  `importFromFile`, …) and on what it returned (`oContent`, `original`,
+  `prc.oContent`, `prc.oParent`);
+- all 31 of `views/content/quickLook.cfm`: its only renderer is
+  `baseContentHandler.quickLook()`, which assigns
+  `prc.content = variables.ormService.get( … )`, so the prc handoff
+  (`Resolver.viewPrc`) has nothing to hand on.
+
+Reproduce: `cfmleditor-lsp explain --root <scratch>/cbox
+<scratch>/cbox/modules/contentbox/modules/contentbox-admin/handlers/baseContentHandler.cfc 181 ormService`,
+which prints "no ref found in this file — checking extends chain (baseHandler)"
+and then "has no component ref".
+
+**Where the fix goes.** A new step in `receiverComponent`
+(`internal/resolve/resolve.go`), after the extends chain and before the
+`componentResolver` fallbacks, for a receiver the file and its bases never
+assign: the components that extend this file (`Index.FilesExtendingName` +
+`descendsFrom`, as `withSubclasses` in `loop_element.go` already does for ORM
+collections) are asked for their own file-level ref for the name, injected
+property included. That needs a subclass's parse (or its indexed property
+refs), not just its function index.
+
+**Decisions to make, each with a test that fails the wrong way:**
+
+- **Every subclass or some?** Answer only when every concrete subclass types the
+  name. One that does not leaves it to a pre-handler, a mixin or a runtime set,
+  and guessing from the others would invent a type. This matches the handoff's
+  own rule: an answer only when every renderer types it and they agree.
+- **Agreeing or not.** Three different services do not agree. Two answers are
+  defensible: the alternatives (`pageService@contentbox|entryService@contentbox|contentStoreService@contentbox`,
+  the spelling `withSubclasses` uses, where a method any alternative declares is
+  found), or their nearest common base (`ContentService`). Alternatives are
+  more permissive (a method only `EntryService` has is accepted in the base
+  code, which may be right: such code is often under a type check). The common
+  base is stricter and would report it. Prefer alternatives, for consistency
+  with `withSubclasses`, and check that `FuncLookup`/`walkChainRest` and
+  `boundEntity` cope with an alternatives string on a chain hop
+  (`variables.ormService.get( id ).getSlug()` must become
+  `cbPage|cbEntry|cbContentStore`, or at least `cbContent`). That is untested
+  today and is the likeliest place for the work to grow.
+- **Scope.** Only a receiver the file never assigns, and only `variables.` or
+  unscoped (a `this.` member is public and the same rule would hold, but nothing
+  in the corpus needs it). Only when the file is extended within the
+  workspace; a framework base class extended by every app would otherwise ask
+  every handler in the workspace. Cap the subclass walk as `withSubclasses` does
+  (16).
+- **Not ColdBox-specific.** The shape is any abstract component whose
+  subclasses inject or assign what it uses, so it belongs in the resolver, not
+  in a preset. Measure MuraCMS, ColdBox, cfwheels, fw1 and Lucee too: a
+  0 / 0 there is the expected result, and an addition is the thing to explain.
+
+**Measure** with the per-entry sorted diff over the scratch copy and the six
+corpus projects, as for the sections above. Expected: about 80 removed in
+ContentBox, and `quickLook.cfm` to 0 if the handoff picks up the alternatives;
+any added entry is a method one subclass's entity lacks, which is either a real
+finding or a reason to prefer the common base.
+
