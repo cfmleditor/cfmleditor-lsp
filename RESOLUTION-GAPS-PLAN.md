@@ -640,13 +640,12 @@ instance, and the stub otherwise.
 
 Mura's admin embeds FW/1 1.x as `admin/framework.cfc`, and every admin view
 calls `rbKey()`, which `admin/Application.cfc` declares. MuraCMS with
-`scripts/corpus/masacms.json` plus `"frameworks": ["fw1"]` (a scratch config;
-the committed one does not opt in):
+`scripts/corpus/masacms.json`, which now opts into `"frameworks": ["fw1"]`:
 
-| Build | Findings | Removed / added against `main` without the preset |
+| Build | Findings | Removed / added against the config without the preset |
 |---|---:|---:|
-| Preset as it was | 11,044 | 380 / 253: every `rbKey` became "not found in extends chain" |
-| Preset with the Application base | 10,791 | 380 / 0 |
+| Preset as it was | 10,905 | 380 / 253: every `rbKey` became "not found in extends chain" |
+| Preset with the Application base | 10,652 | 380 / 0 |
 
 The removals are `rbKey` (253) and `buildURL` (37) in admin views, and 88
 `variables.fw` calls in controllers (`redirect`, `setView`) that the preset's
@@ -654,5 +653,8 @@ existing `fw` resolver types; both methods exist in Mura's own FW/1. FW/1's
 repository with the preset is unchanged (409), and no project changes without
 the preset.
 
-Opting `masacms.json` into `fw1` would shift the documented Masa baseline, so it
-is left to a separate decision.
+**The configured baseline moves with this.** `masacms.json` opting into `fw1`
+means a configured scan of Masa or MuraCMS now runs the FW/1 preset: compare a
+later configured measurement against 10,652 on MuraCMS, not 11,032, and rescan
+Masa's configured baseline before comparing to the figures earlier in this
+plan.
