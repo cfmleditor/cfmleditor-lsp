@@ -1125,3 +1125,107 @@ ContentBox, and `quickLook.cfm` to 0 if the handoff picks up the alternatives;
 any added entry is a method one subclass's entity lacks, which is either a real
 finding or a reason to prefer the common base.
 
+## Next: search-result struct fields (not started)
+
+The largest group of loop findings left in ContentBox's admin views, ready to
+pick up. Measured on `main` at 6e3771f (after #212, #214–#217) with the
+ContentBox scratch config from "ContentBox: measurement and relationship
+getters" (presets `coldbox`, `contentbox`, `testbox`, `cfmigrations`): 2,637
+findings, of which about **250** are loop variables over a `prc` collection
+that a handler fills from a field of the struct a service's `search()`
+returns, and about 60 more from a cborm `list()`.
+
+**The shape.** Handler, service and view, as ContentBox writes them:
+
+```cfml
+// handlers/comments.cfc, action index
+var commentResults = variables.commentService.search( search = rc.searchComments, … );
+prc.comments       = commentResults.comments;
+event.setView( "comments/index" );
+
+// models/comments/CommentService.cfc
+struct function search( … ){
+	var results = { "count": 0, "comments": [] };
+	var c       = newCriteria();
+	…
+	results.count    = c.count();
+	results.comments = c.list( offset = …, max = …, sortOrder = …, asQuery = false );
+	return results;
+}
+```
+```cfml
+<!--- views/comments/index.cfm --->
+<cfloop array="#prc.comments#" index="comment"> #comment.getCommentID()# </cfloop>
+```
+
+| Handler right-hand side | Loop findings |
+|---|---:|
+| `contentResults.content`, `contentResults[ variables.entityPlural ]` (`baseContentHandler`, shared by entries/pages/contentStore) | ~95 |
+| `commentResults.comments` (index and pager) | ~52 |
+| `results.authors` (`AuthorService.search`) | ~40 |
+| `results.versions` | ~22 |
+| `results.settings` | ~19 |
+| `results.menus` | ~12 |
+| `modules.modules` (`ModuleService.findModules`) | ~11 |
+
+**The links to prove**, each by source:
+
+1. **Handler → view.** Done: `Resolver.viewPrcElement` (#212, #214) types a loop
+   over `prc.X` from the rendering action's last `prc.X = <rhs>`.
+2. **`<rhs>` is a struct field of a local holding a call's result**
+   (`commentResults.comments`). `elementOf` (`internal/resolve/loop_element.go`)
+   understands a call and a bare or `local.`/`variables.` name; it needs a case
+   for `name.field` where `name` is a local assigned from a call: the element of
+   that call's returned struct's `field`.
+3. **What a function's returned struct holds in each field.** The producer
+   interpreter (`internal/resolve/producer_flow.go`) already models struct
+   literals and member writes: `producerValue.fields`, and `assign` writing
+   `results.comments`. It has no collection value: a `producerValue` is a set of
+   components, so `c.list(…)` has nowhere to put "array of cbComment". Add an
+   element type to `producerValue` (for example `elements []string`), merged as
+   `components` are, and a way to ask for one field's element.
+4. **A cborm criteria `list()` returns its entity's array.** `c = newCriteria()`
+   on a service bound to an entity (`Resolver.boundEntity`, which #216 extended
+   to an init argument's default) is a `CriteriaBuilder` over that entity, and
+   `c.list( …, asQuery = false )` returns an array of it. Only `asQuery = false`
+   written literally counts at first. `AuthorService.search` passes
+   `asQuery = arguments.asQuery` with a default of `false`, which needs the
+   call-site specialisation the interpreter already does for defaults. **Verify
+   `CriteriaBuilder.list`'s own `asQuery` default against cborm 4.12.1's source**
+   (the version the stubs pin; the stub in
+   `internal/frameworkapi/stubs/cborm/cborm/models/criterion/CriteriaBuilder.cfc`
+   drops defaults) before treating an omitted `asQuery` as an array.
+   `c.resultTransformer( c.DISTINCT_ROOT_ENTITY ).list( … )` should be the same
+   builder (resultTransformer returns it).
+
+**Rules to keep it sound:**
+
+- A field has an element type only when every write to it that reaches the
+  return agrees: the initial `[]` in the literal is compatible with any element
+  type, but a field also written with a query or a computed value is unknown.
+- A computed key (`results[ variables.entityPlural ]`, `contentResults[ … ]`) names
+  no field; leave it unknown. `baseContentHandler`'s `entityPlural` is set per
+  subclass, so its ~95 findings may stay out, or need the subclass's literal;
+  they also depend on "a base handler's variable its subclasses inject" above,
+  since that handler's `ormService` is untyped in the base.
+- `xService.list( … )` without `asQuery = false` stays unknown: cborm's
+  configuration decides whether it returns a query.
+- Collection elements are the entity and its subclasses, as in #209
+  (`Resolver.withSubclasses`).
+
+**Validation.** Tests in `internal/resolve` modelled on
+`TestALoopVariableHoldsTheCollectionsElement` and
+`TestAViewReadsThePrcItsHandlerActionAssigns`: a struct literal with a field
+written from a criteria `list( asQuery = false )`; the same through a handler
+and a view; and negatives for `asQuery = true`, an omitted `asQuery`, a computed
+key, a field written twice with different entities, and a field written with a
+query. Each must fail with its piece removed. Measure per entry (sorted diff)
+on the ContentBox scratch copy, both modes, and on MuraCMS (both), ColdBox
+(presets with the checkout mapped as `coldbox`, and default), cfwheels, fw1 and
+Lucee, against `main`, and check scan cost with alternating builds. Run
+`unresolved` with absolute directories: a relative one breaks the producer
+plans' file reads.
+
+**Also open in the same views**, recorded rather than planned: `cache.get( … )`
+for `results.settings` in one action (a cache entry is dynamic), and the
+partials rendered through `cbAdminComponent( … )`'s computed view name.
