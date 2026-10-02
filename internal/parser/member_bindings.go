@@ -79,11 +79,9 @@ func (pr *ParseResult) applyMemberBindings() {
 
 	for _, w := range writes {
 		if w.target == "" && w.unknown {
-			for _, n := range nodes {
-				n.invalid = true
-			}
+			withholdForClosure(nodes, w.function)
 
-			break
+			continue
 		}
 
 		if !w.element && emptyCollection(w.expression) {
@@ -138,6 +136,22 @@ func memberDescendants(nodes map[string]*collectionNode) map[string][]*collectio
 	}
 
 	return descendants
+}
+
+// withholdForClosure invalidates the members a closure written in function
+// could write: that function's own, which its parameters may shadow, and the
+// component's, which it reaches as any function does. Another function's
+// locals and arguments are out of its reach. A closure outside any function
+// withholds every member. It used to withhold every member in the file, so
+// one closure in a ColdBox handler untyped `prc.x = svc.get()` in every
+// other action.
+func withholdForClosure(nodes map[string]*collectionNode, function string) {
+	for identity, n := range nodes {
+		owner, _, local := strings.Cut(identity, "\t")
+		if function == "" || !local || owner == function {
+			n.invalid = true
+		}
+	}
 }
 
 func invalidate(nodes []*collectionNode) {

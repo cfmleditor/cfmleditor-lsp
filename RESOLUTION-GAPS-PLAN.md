@@ -904,9 +904,26 @@ findings in views:
   `list()`.
 - **`xService.list(…)`** (about 54): whether it returns entities or a query
   depends on cborm's configuration.
-- **A prc member assigned from an injected service's entity method**:
-  `prc.author = authorService.get( rc.authorID )` in the handler leaves
-  `prc.author` untyped even in the handler itself, while the same call assigned
-  to a local is typed `cbAuthor`. The member's ref is recorded with no
-  component. This is most of `prc.author` (60) and `prc.content` (48), and a
-  record-member fix, not a handoff one.
+- **A prc member assigned from an injected service's entity method** (fixed):
+  `prc.author = authorService.get( rc.authorID )` was untyped even in the
+  handler, while the same call assigned to a local was typed `cbAuthor`. The
+  cause was not the WireBox id: any closure in the file (`function(` or `=>`,
+  here a `.each()` callback in another action) withheld every record member in
+  the file, and the member's ref, recorded with no component, then kept the
+  pending call from typing it. A closure now withholds only the members it can
+  write (`withholdForClosure`): its own function's and the component's.
+
+  | Scan | Before | After | Removed / added |
+  |---|---:|---:|---:|
+  | ContentBox, presets | 2,752 | 2,703 | 49 / 0 |
+  | ContentBox, no config | 7,644 | 7,606 | 38 / 0 |
+  | MuraCMS, ColdBox, cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+  `prc.author` went from 61 to 42. `prc.content` (49) is unchanged and has
+  another cause: `ContentService` binds its entity through an argument default,
+  `init( entityName = "cbContent" )` then `super.init( entityName =
+  arguments.entityName )`, which `resolve/orm.go` does not follow, so even a
+  local is `$any`; and a member binding withholds a `$` component rather than
+  taking it, so the member is reported where the local is silent. The same
+  file-wide closure wipe remains in `applyCollectionReturns`
+  (`collection_returns.go`), unmeasured.
