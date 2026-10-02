@@ -164,8 +164,10 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		"/p/task.cfc":                     "commandbox.system.BaseTask",
 		"/p/deep/in/tree/Task.cfc":        "commandbox.system.BaseTask",
 		"/p/commands/wheels/Generate.cfc": "commandbox.system.BaseCommand",
-		"/p/views/main/default.cfm":       "framework.one",
-		"/p/models/task.cfm":              "",
+		// The governing Application.cfc when it is the framework instance;
+		// the resolver decides that (resolve.applicationBase).
+		"/p/views/main/default.cfm": parser.ApplicationBase + "framework.one",
+		"/p/models/task.cfm":        "",
 	} {
 		if got := implicit(path); got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)

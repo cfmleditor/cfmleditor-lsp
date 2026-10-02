@@ -181,6 +181,13 @@ func docReturn(comment string) string {
 // MockBox adds are accepted on any component.
 const MockPrefix = "$mock:"
 
+// ApplicationBase marks an implicit base that is the governing Application.cfc
+// when that file is the framework instance, and otherwise the component after
+// the marker: FW/1 includes a view inside the framework object, and an
+// Application.cfc extending the framework is that object. config's FW/1 preset
+// writes it and the resolver reads it; the parser only holds the spelling.
+const ApplicationBase = "$application:"
+
 // mockDecorations are the methods MockBox's decorateMock adds to an object it
 // mocks (TestBox system/MockBox.cfc). Each returns the mock it is called on,
 // except the ones that report on it ($count, $callLog, …), whose result no

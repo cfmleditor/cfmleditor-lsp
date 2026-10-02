@@ -626,3 +626,35 @@ object (it extends `framework`), so a view calls its functions unqualified.
 Typing it needs the FW/1 preset to take a view's implicit base as the governing
 `Application.cfc` rather than the `framework.one` stub, and the project config
 to opt into `fw1`; the second shifts the documented Masa baseline.
+
+## FW/1 views run inside the Application
+
+FW/1 includes a view or layout inside the framework object, and an
+`Application.cfc` that extends the framework is that object, so a view calls
+the Application's own functions unqualified. The `fw1` preset gave views the
+`framework.one` stub as their base, which has FW/1's functions but none of the
+Application's. It now marks the base `parser.ApplicationBase` + `framework.one`.
+The resolver (`applicationBase`) takes the governing `Application.cfc` when that
+file's chain declares `view()` and `buildURL()`, the sign it is the framework
+instance, and the stub otherwise.
+
+Mura's admin embeds FW/1 1.x as `admin/framework.cfc`, and every admin view
+calls `rbKey()`, which `admin/Application.cfc` declares. MuraCMS with
+`scripts/corpus/masacms.json`, which now opts into `"frameworks": ["fw1"]`:
+
+| Build | Findings | Removed / added against the config without the preset |
+|---|---:|---:|
+| Preset as it was | 10,905 | 380 / 253: every `rbKey` became "not found in extends chain" |
+| Preset with the Application base | 10,652 | 380 / 0 |
+
+The removals are `rbKey` (253) and `buildURL` (37) in admin views, and 88
+`variables.fw` calls in controllers (`redirect`, `setView`) that the preset's
+existing `fw` resolver types; both methods exist in Mura's own FW/1. FW/1's
+repository with the preset is unchanged (409), and no project changes without
+the preset.
+
+**The configured baseline moves with this.** `masacms.json` opting into `fw1`
+means a configured scan of Masa or MuraCMS now runs the FW/1 preset: compare a
+later configured measurement against 10,652 on MuraCMS, not 11,032, and rescan
+Masa's configured baseline before comparing to the figures earlier in this
+plan.
