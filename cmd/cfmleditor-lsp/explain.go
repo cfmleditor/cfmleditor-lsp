@@ -6,16 +6,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
-	"go.lsp.dev/uri"
 )
 
 // cmdExplain prints, for one or more call sites on a given line, every resolution
@@ -80,69 +74,19 @@ func cmdExplain(args []string) {
 		searchDir = abs
 	}
 
-	var (
-		cfResolvers              []parser.Resolver
-		mappings                 map[string]string
-		startupFiles             []string
-		expressionMappings       map[string]string
-		servicePropertyResolvers map[string]string
-		interpolateAll           bool
-		workspaceFolders         []string
-		implicitExtends          func(string) string
-		helperScope              func(string) bool
-		stubs                    *frameworkapi.Set
-	)
-
+	// The resolver and the parse are the unresolved scan's own, so the trace
+	// explains the verdict the report gives.
 	cfg, _ := daemon.FindConfig(searchDir)
 	if cfg != nil {
-		implicitExtends = config.ImplicitExtends(cfg.Frameworks())
-		helperScope = config.HelperScope(cfg.Frameworks())
-		stubs = frameworkapi.For(cfg.Frameworks())
-		workspaceFolders = cliWorkspaceFolders(fsys, cfg, []string{searchDir})
-		mappings = cfg.Mappings()
-		startupFiles = cfg.StartupFiles()
-		expressionMappings = cfg.ExpressionMappings()
-		servicePropertyResolvers = cfg.ServicePropertyResolvers()
-		interpolateAll = !cfg.ResolvedFeatures().OutputContextInterpolation
-
-		for _, r := range cfg.ComponentResolvers() {
-			cfResolvers = append(cfResolvers, r.Parser())
-		}
-
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
-	} else {
-		workspaceFolders = []string{searchDir}
 	}
 
-	files := collectCFMLFiles(fsys, workspaceFolders)
-
-	resolver := &resolve.Resolver{
-		FS:                 fsys,
-		Index:              index.New(),
-		Resolvers:          cfResolvers,
-		Mappings:           mappings,
-		StartupFiles:       startupFiles,
-		ExpressionMappings: expressionMappings,
-		WorkspaceFolders:   workspaceFolders,
-		ImplicitExtends:    implicitExtends,
-		HelperScope:        helperScope,
-		Stubs:              stubs,
-	}
+	opt := unresolvedOptions(cfg, []string{searchDir}, &unresolvedFlags{})
+	files := collectCFMLFiles(fsys, opt.WorkspaceFolders)
 
 	fmt.Fprintf(os.Stderr, "Indexing %d files...\n", len(files))
 
-	for _, f := range files {
-		if !cfpath.IsCFCFile(f) {
-			continue
-		}
-
-		data, err := fsys.ReadFile(f)
-		if err != nil || cfpath.IsBinary(data) {
-			continue
-		}
-
-		resolver.Index.IndexFile(uri.URI("file://"+f), string(data))
-	}
+	resolver := unresolved.NewResolver(fsys, files, opt)
 
 	data, err := fsys.ReadFile(file)
 	if err != nil {
@@ -150,23 +94,8 @@ func cmdExplain(args []string) {
 		os.Exit(1)
 	}
 
-	content := string(data)
-	fileURI := uri.URI("file://" + file)
 	baseDir := filepath.Dir(file)
-
-	funcLookup := resolver.FuncLookup(baseDir)
-
-	pr := parser.ParseWithOptions(fileURI, content, &parser.ParseOptions{
-		Resolvers:                cfResolvers,
-		ExpressionMappings:       expressionMappings,
-		ServicePropertyResolvers: servicePropertyResolvers,
-		InterpolateAllText:       interpolateAll,
-		ExtractCalls:             true,
-		ScanAllScopes:            true,
-		FuncLookup:               funcLookup,
-		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
-	})
-	pr.FuncLookup = funcLookup
+	pr := unresolved.Parse(resolver, file, string(data), opt)
 
 	// The selection and the report are shared with cfmleditor.explainCall, so
 	// the server's answer reads exactly as this one does.

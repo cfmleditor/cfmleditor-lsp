@@ -72,48 +72,8 @@ type Report struct {
 // Scan indexes files, then reports the unresolved calls in targets, or in
 // every one of files when targets is empty.
 func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
-	resolver := &resolve.Resolver{
-		FS:                 fsys,
-		Index:              index.New(),
-		Resolvers:          opt.Resolvers,
-		Mappings:           opt.Mappings,
-		StartupFiles:       opt.StartupFiles,
-		BeanPaths:          opt.BeanPaths,
-		ExpressionMappings: opt.ExpressionMappings,
-		WorkspaceFolders:   opt.WorkspaceFolders,
-		ImplicitExtends:    opt.ImplicitExtends,
-		HelperScope:        opt.HelperScope,
-		Stubs:              opt.Stubs,
-	}
-
 	started := time.Now()
-
-	resolver.Resolvers = resolver.BeanResolvers(opt.BeanPaths)
-	// Discovery lazily indexes factory metadata with the original rules.
-	// The scan must index every return using the augmented rules.
-	resolver.Index = index.New()
-	loadBeans(resolver, opt)
-
-	for _, f := range files {
-		data, err := fsys.ReadFile(f)
-		if err != nil || cfpath.IsBinary(data) {
-			continue
-		}
-
-		fileURI := uri.URI("file://" + f)
-
-		// A template is not indexed for its functions here, but what it
-		// includes is part of the include graph a bare call resolves through:
-		// a page that includes a helper can call what the helper declares.
-		if !cfpath.IsCFCFile(f) {
-			resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
-
-			continue
-		}
-
-		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
-	}
-
+	resolver := NewResolver(fsys, files, opt)
 	rep := Report{Indexed: len(files), IndexTime: time.Since(started)}
 
 	if len(targets) == 0 {
@@ -164,6 +124,55 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 	return rep
 }
 
+// NewResolver is the resolver a scan checks calls with, its index built from
+// files. The explain command builds its resolver here too, so a trace and the
+// report it explains cannot disagree: explain used to build its own, without
+// beanPaths or the setter and constructor policies, and rejected calls the
+// report accepted.
+func NewResolver(fsys vfs.FS, files []string, opt *Options) *resolve.Resolver {
+	resolver := &resolve.Resolver{
+		FS:                 fsys,
+		Index:              index.New(),
+		Resolvers:          opt.Resolvers,
+		Mappings:           opt.Mappings,
+		StartupFiles:       opt.StartupFiles,
+		BeanPaths:          opt.BeanPaths,
+		ExpressionMappings: opt.ExpressionMappings,
+		WorkspaceFolders:   opt.WorkspaceFolders,
+		ImplicitExtends:    opt.ImplicitExtends,
+		HelperScope:        opt.HelperScope,
+		Stubs:              opt.Stubs,
+	}
+
+	resolver.Resolvers = resolver.BeanResolvers(opt.BeanPaths)
+	// Discovery lazily indexes factory metadata with the original rules.
+	// The scan must index every return using the augmented rules.
+	resolver.Index = index.New()
+	loadBeans(resolver, opt)
+
+	for _, f := range files {
+		data, err := fsys.ReadFile(f)
+		if err != nil || cfpath.IsBinary(data) {
+			continue
+		}
+
+		fileURI := uri.URI("file://" + f)
+
+		// A template is not indexed for its functions here, but what it
+		// includes is part of the include graph a bare call resolves through:
+		// a page that includes a helper can call what the helper declares.
+		if !cfpath.IsCFCFile(f) {
+			resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
+
+			continue
+		}
+
+		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
+	}
+
+	return resolver
+}
+
 // loadBeans gives the resolver's index the bean map the server would build
 // for the same workspace, so an injected property is typed the same way in
 // the report as in the editor. The report used to ignore beanPaths and
@@ -185,29 +194,8 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		return nil, 0
 	}
 
-	fileURI := uri.URI("file://" + file)
 	baseDir := filepath.Dir(file)
-
-	funcLookup := resolver.FuncLookup(baseDir)
-
-	pr := parser.ParseWithOptions(fileURI, string(data), &parser.ParseOptions{
-		Resolvers:                resolver.Resolvers,
-		ExpressionMappings:       opt.ExpressionMappings,
-		ServicePropertyResolvers: opt.ServicePropertyResolvers,
-		PropertyResolvers:        opt.PropertyResolvers,
-		BeanLookup:               resolver.InjectionBeanLookup(file),
-		PropertyBeanLookup:       resolver.InjectionPropertyLookup(file),
-		SetterLookup:             resolver.SetterLookup(file),
-		ConstructorLookup:        resolver.ConstructorLookup(file),
-		InterpolateAllText:       opt.InterpolateAll,
-		ExtractCalls:             true,
-		ScanAllScopes:            true,
-		FuncLookup:               funcLookup,
-		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
-	})
-
-	pr.FuncLookup = funcLookup
-
+	pr := Parse(resolver, file, string(data), opt)
 	calls := pr.AllCalls()
 
 	// Calls into a base that does not resolve are one finding per file and
@@ -550,4 +538,30 @@ func relativePath(base, file string) (string, bool) {
 
 func isOutside(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Parse is file parsed as a scan checks it: with the resolver's lookups, so
+// what a variable is assigned from is typed the same way in both commands.
+func Parse(resolver *resolve.Resolver, file, content string, opt *Options) *parser.ParseResult {
+	funcLookup := resolver.FuncLookup(filepath.Dir(file))
+
+	pr := parser.ParseWithOptions(uri.URI("file://"+file), content, &parser.ParseOptions{
+		Resolvers:                resolver.Resolvers,
+		ExpressionMappings:       opt.ExpressionMappings,
+		ServicePropertyResolvers: opt.ServicePropertyResolvers,
+		PropertyResolvers:        opt.PropertyResolvers,
+		BeanLookup:               resolver.InjectionBeanLookup(file),
+		PropertyBeanLookup:       resolver.InjectionPropertyLookup(file),
+		SetterLookup:             resolver.SetterLookup(file),
+		ConstructorLookup:        resolver.ConstructorLookup(file),
+		InterpolateAllText:       opt.InterpolateAll,
+		ExtractCalls:             true,
+		ScanAllScopes:            true,
+		FuncLookup:               funcLookup,
+		BuiltinReturnLookup:      docs.LookupBuiltinReturnComponent,
+	})
+
+	pr.FuncLookup = funcLookup
+
+	return pr
 }
