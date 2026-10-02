@@ -910,3 +910,30 @@ findings in views:
   to a local is typed `cbAuthor`. The member's ref is recorded with no
   component. This is most of `prc.author` (60) and `prc.content` (48), and a
   record-member fix, not a handoff one.
+
+## ContentBox: partials
+
+The prc handoff now follows `view()` and `renderView()` as well as `setView`
+(ColdBox 7 renamed the second the first). A handler action that returns a
+viewlet (`return view( view = "comments/pager", module = "contentbox-admin" )`)
+renders that view as setView would, and a partial a view renders
+(`#view( view = "authors/editor/sidebar" )#`) reads the prc of whatever renders
+its parent, since prc is the request's. A parent view that assigns the member
+itself does not hand it on, and a `view()` naming another module renders that
+module's view. Computed names (`cbAdminComponent( "editor/sidebar/…" )`, which
+wraps `view( view = "_components/#arguments.component#" )`, and the
+`*/indexTable` views) are not followed.
+
+This links the partials but resolves only one more finding today
+(`prc.widgetService` in `widgets/widgetList.cfm`): what most partials inherit
+is a prc member the handler itself leaves untyped. `prc.commentPager_oPaging =
+getInstance( "Paging@contentbox" )` and `prc.author = authorService.get( … )`
+are untyped in the handler even though the same right-hand sides assigned to a
+local are typed: the record-member gap under the handoff section above, which
+also blocks the pagers and the author editor's partials.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, presets | 2,752 | 2,751 | 1 / 0 |
+| ContentBox, no config | 7,644 | 7,643 | 1 / 0 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
