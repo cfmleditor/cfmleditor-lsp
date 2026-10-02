@@ -287,9 +287,13 @@ var frameworkPresets = map[string]frameworkPreset{
 			// (resolve.componentPathUncached, cfpath.BuildBeanMap).
 			idResolver("getBean"),
 		},
+		// A view or layout runs inside the framework object, and an
+		// Application.cfc that extends the framework is that object, so its
+		// own functions are callable from the view. Mura's admin embeds FW/1
+		// 1.x as admin/framework.cfc and declares rbKey() in the Application.
 		bases: []implicitBase{
-			{dir: "views", ext: ".cfm", component: "framework.one"},
-			{dir: "layouts", ext: ".cfm", component: "framework.one"},
+			{dir: "views", ext: ".cfm", component: parser.ApplicationBase + "framework.one"},
+			{dir: "layouts", ext: ".cfm", component: parser.ApplicationBase + "framework.one"},
 		},
 	},
 }

@@ -194,3 +194,44 @@ func TestADynamicIfMissingReturnOnABareChainIsDynamic(t *testing.T) {
 		expectReasons(t, reasonsWith(t, &Resolver{Resolvers: rs}, dir, "Page.cfc"), map[string]string{"make.go": want})
 	}
 }
+
+// TestAFrameworkViewRunsInsideTheApplication: FW/1 includes a view inside the
+// framework object, and an Application.cfc that extends the framework is that
+// object, so a view calls the Application's own functions unqualified. Mura's
+// admin embeds FW/1 1.x and every admin view calls the Application's rbKey().
+// An Application.cfc that is not the framework instance gives the view only
+// the framework's functions.
+func TestAFrameworkViewRunsInsideTheApplication(t *testing.T) {
+	viewBase := func(path string) string {
+		if strings.Contains(filepath.ToSlash(path), "/views/") {
+			return parser.ApplicationBase + "fw.one"
+		}
+
+		return ""
+	}
+
+	page := `<cfoutput>#rbKey( "x" )# #buildURL( "a.b" )# #nope()#</cfoutput>`
+	framework := `component { function view( path ) {} function buildURL( action ) {} }`
+
+	instance, plain := t.TempDir(), t.TempDir()
+	writeFiles(t, instance, map[string]string{
+		"framework.cfc":         framework,
+		"Application.cfc":       `component extends="framework" { function rbKey( key ) {} }`,
+		"core/views/x/list.cfm": page,
+	})
+	writeFiles(t, plain, map[string]string{
+		"fw/one.cfc":            framework,
+		"Application.cfc":       `component { function rbKey( key ) {} }`,
+		"core/views/x/list.cfm": page,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{ImplicitExtends: viewBase}, instance, "core/views/x/list.cfm"), map[string]string{
+		"rbKey":    "",
+		"buildURL": "",
+		"nope":     "not found in extends chain",
+	})
+	expectReasons(t, reasonsWith(t, &Resolver{ImplicitExtends: viewBase}, plain, "core/views/x/list.cfm"), map[string]string{
+		"rbKey":    "not found in extends chain",
+		"buildURL": "",
+	})
+}

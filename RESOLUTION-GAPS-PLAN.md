@@ -626,3 +626,33 @@ object (it extends `framework`), so a view calls its functions unqualified.
 Typing it needs the FW/1 preset to take a view's implicit base as the governing
 `Application.cfc` rather than the `framework.one` stub, and the project config
 to opt into `fw1`; the second shifts the documented Masa baseline.
+
+## FW/1 views run inside the Application
+
+FW/1 includes a view or layout inside the framework object, and an
+`Application.cfc` that extends the framework is that object, so a view calls
+the Application's own functions unqualified. The `fw1` preset gave views the
+`framework.one` stub as their base, which has FW/1's functions but none of the
+Application's. It now marks the base `parser.ApplicationBase` + `framework.one`.
+The resolver (`applicationBase`) takes the governing `Application.cfc` when that
+file's chain declares `view()` and `buildURL()`, the sign it is the framework
+instance, and the stub otherwise.
+
+Mura's admin embeds FW/1 1.x as `admin/framework.cfc`, and every admin view
+calls `rbKey()`, which `admin/Application.cfc` declares. MuraCMS with
+`scripts/corpus/masacms.json` plus `"frameworks": ["fw1"]` (a scratch config;
+the committed one does not opt in):
+
+| Build | Findings | Removed / added against `main` without the preset |
+|---|---:|---:|
+| Preset as it was | 11,044 | 380 / 253: every `rbKey` became "not found in extends chain" |
+| Preset with the Application base | 10,791 | 380 / 0 |
+
+The removals are `rbKey` (253) and `buildURL` (37) in admin views, and 88
+`variables.fw` calls in controllers (`redirect`, `setView`) that the preset's
+existing `fw` resolver types; both methods exist in Mura's own FW/1. FW/1's
+repository with the preset is unchanged (409), and no project changes without
+the preset.
+
+Opting `masacms.json` into `fw1` would shift the documented Masa baseline, so it
+is left to a separate decision.

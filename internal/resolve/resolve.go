@@ -814,6 +814,9 @@ func (r *Resolver) extendsFor(declared, path string) string {
 	}
 
 	ext = r.ImplicitExtends(path)
+	if fallback, ok := strings.CutPrefix(ext, parser.ApplicationBase); ok {
+		ext = r.applicationBase(path, fallback)
+	}
 
 	r.mu.Lock()
 	if r.implicitCache == nil {
@@ -824,6 +827,31 @@ func (r *Resolver) extendsFor(declared, path string) string {
 	r.mu.Unlock()
 
 	return ext
+}
+
+// applicationBase is the base parser.ApplicationBase names for path: the
+// Application.cfc governing it, when that file is the framework instance, and
+// fallback otherwise. It is the framework instance when its chain declares
+// FW/1's view() and buildURL(): an Application.cfc that extends the framework
+// is the object FW/1 renders a view inside, so a view calls its functions
+// unqualified. Mura's admin/Application.cfc extends its embedded FW/1 1.x and
+// declares rbKey(), which every admin view calls.
+func (r *Resolver) applicationBase(path, fallback string) string {
+	root := r.FindApplicationRoot(filepath.Dir(path))
+	if root == "" {
+		return fallback
+	}
+
+	app := filepath.Join(root, "Application.cfc")
+	if info, err := r.fs().Stat(app); err != nil || info.IsDir() || pathKey(app) == pathKey(path) {
+		return fallback
+	}
+
+	if r.ResolveFunc(app, "view", root) == nil || r.ResolveFunc(app, "buildURL", root) == nil {
+		return fallback
+	}
+
+	return app
 }
 
 // extendsOf reports what cfcPath extends, reading and parsing the file only if
