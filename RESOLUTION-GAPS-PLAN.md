@@ -401,7 +401,7 @@ mappings from Application.cfc and CFConfig. It does not close every category.
 | DI ownership | Previously supported registrations, aliases and caller isolation remain. | Automatic DI roots and subsystem ownership need explicit source/configuration proof and separate application fixtures. This batch does not add them. |
 | Request/view propagation | Proven member producers and self-updates carry their concrete returns. | Controller-to-view `rc.$`, event slots, callback records and cross-request values still lack a proven origin. Track documented framework boundaries before propagating them. |
 | Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, object/presence guards and supported branch flow now specialize a call. | Arbitrary caller identifiers, dynamic argument bags, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. Add call-site reaching-definition proof before carrying caller variables. |
-| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. Masa's `settingsManager.getSite` try/catch cache and `settingsBean.getRazunaSettings` shared-field cache are concrete follow-up fixtures. Do not restore a receiver-class guess to silence these findings. |
+| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. `settingsManager.getSite`'s try/catch cache is proven (see below); `settingsBean.getRazunaSettings`'s shared-field cache is the remaining concrete fixture. Do not restore a receiver-class guess to silence these findings. |
 | Tags/control flow | Tag and mixed cfscript method plans now remain connected. Query output names can invalidate a returned local through finite attribute bags. | Unsupported controls/tags, computed output names, record aliases, uncertain mutation and exhausted bounds withhold inference. Extend one source shape at a time with negative tests. |
 | Callback/parameter contracts | Declared component types and existing framework contracts continue to work. | Untyped bean/feed/event parameters require verified registration/call-site contracts; arbitrary TestBox actual/target values should remain dynamic. |
 | Includes and unqualified calls | Existing static include/helper discovery remains. | Scope ownership for runtime includes and helpers needs a provenance fixture; a matching method name alone is insufficient. |
@@ -472,3 +472,95 @@ source-backed documented/DI receiver when that initialization contract is proven
 do not substitute Controller itself as the returned class. These cases join the
 lazy-cache follow-up above. Per-entry additions are retained even when a project
 improves overall.
+
+## The getSite cache, and Mura's service loop (follow-up to merged PR #195)
+
+`settingsManager.getSite`'s lazy try/catch cache needed no new inference. The
+existing collection contract already proves it: every write to `variables.sites`
+is the `cfparam` empty struct or the `builtSites` struct `setSites` rebuilds,
+whose elements are each a copy of a cached element or `variables.DAO.read(...)`,
+so `getSite` returns what `read` does. `TestALazyCacheReturnsItsElementType`
+pins the shape. On MuraCMS (the corpus's `MSU-NatSci_MuraCMS`, scanned with
+`scripts/corpus/masacms.json`) it returns `settingsBean`. A call on that bean is
+then accepted as dynamic, correctly, because `mura.bean.bean` defines
+`OnMissingMethod`.
+
+What blocked `getSite` in Mura was its receiver. Mura appends a legacy service
+under a condition, `variables.serviceList=listAppend(variables.serviceList,'advertiserManager')`,
+before the startup service loop. The non-literal assignment dropped the list, so
+none of the 25 `application.*` services was typed. A `listAppend` of a literal
+onto the same known list now keeps it, with the appended name included: a
+binding says what the loop assigns a name, not that it does. Masa's startup
+template evidently lacks the append, which is why its configured baseline
+already typed these services.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| MuraCMS, configured | 12,575 | 11,290 | 1,293 / 8 |
+| Six other corpus projects | | | 0 / 0 each |
+
+Seven of the additions are deeper unknown returns the typed receiver now reaches
+(`contentManager.getActiveContent`, `userManager.getCurrentUser`,
+`settingsManager.save`). One is a genuine missing method:
+`client/api/soap/v1/user.cfc:70` calls `userManager.readByEmail`, which Mura's
+user package does not declare.
+
+`explain` now builds its resolver and parse through the unresolved scan's own
+`unresolved.NewResolver` and `unresolved.Parse`. It used to build its own
+without `beanPaths` or the setter and constructor policies, and reported these
+receivers unresolved while the scan accepted them.
+
+## MuraScope: why `$` stays unknown
+
+Measured on MuraCMS with `scripts/corpus/masacms.json`, after the service-loop
+fix above. `variables.$`, `$` and `rc.$` are 2,910 of 10,070 unknown-receiver
+findings: 1,344 in display modules under `core/modules/v1`, 889 in admin views,
+and most of the rest in `standardEventsHandler.cfc` and
+`contentRendererUtility.cfc`. Typing them soundly needs three links, and none
+is provable from source:
+
+1. **The value.** Both bulk origins read an event slot:
+   `request.context.$=request.event.getValue('MuraScope')`
+   (`admin/Application.cfc:384`) and
+   `variables.$=variables.event.getValue("muraScope")` (`contentRenderer.init`).
+   `servletEvent.getValue` reads the global `request` scope and returns `""`
+   for an unset key, and any dynamic-key write to `request` can replace the
+   slot. The provable origin, `getBean('$').init()` (`$` is a literal alias of
+   `MuraScope`), covers a handful of locals.
+2. **Into the display modules.** The renderer includes them through computed
+   paths (`#filePath#themes/#theme#/…`, `#theIncludePath#/modules/…`), so there
+   is no static include edge to carry `variables.$` along.
+3. **Into the admin views.** FW/1 renders views through computed includes too,
+   so `rc.$` never reaches a view statically.
+
+Two project contracts were measured on a scratch copy of the config, not committed:
+
+| Contract | Findings | Removed / added |
+|---|---|---|
+| `getValue("muraScope")` is `mura.MuraScope` | 11,290 → 11,251 | 113 / 74 |
+| A receiver named `$`, `variables.$` or `rc.$` is `mura.MuraScope` | 11,290 → 8,365 | 3,126 / 201 |
+
+The name contract's drop is mostly not proof. `MuraScope` defines
+`onMissingMethod`, so most calls on it are accepted as dynamic once `$` is
+typed, and the additions are deeper unknown returns (`$.currentUser()` 86,
+`$.content()` 34). It is also what this plan's rule forbids as inference.
+Either contract is a project's own decision to make in its config; the
+resolver does not make it.
+
+## Untyped arguments: what the caller rule can reach
+
+Measured on MuraCMS with `scripts/corpus/masacms.json`. 2,772 unknown receivers
+are `arguments.*`. The plan's rule (type a parameter from consistent callers
+only in a private or local helper) reaches 6 of them: 2,621 are in public or
+default-access methods and 145 are outside any function.
+
+| Group | Findings | Example | Provable |
+|---|---:|---|---|
+| DAO, gateway and manager methods | 1,416 | `contentDAO.create(contentBean)`, `settingsDAO.create`/`update(bean)`, `feedGateway.getFeed` | Only under a closed-workspace assumption: each tends to have one in-workspace caller (`settingsManager` calling `variables.DAO.create(bean)`), but a public method can be called from outside it |
+| Framework callback arguments | 596 | `standardEventsHandler.doAction(event, $)` | No: Mura invokes them by dynamic dispatch, and `$` is the MuraScope case above |
+| Other | 760 | `renderer`, `item`, `bundle` | Mixed |
+
+Typing the first group means letting the agreement of a public method's
+workspace callers decide its parameter's type, which this plan's rule keeps
+shared signatures independent of. If it is done, it belongs behind an explicit,
+default-off closed-workspace setting, measured on its own.
