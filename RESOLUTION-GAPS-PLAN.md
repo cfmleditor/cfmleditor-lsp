@@ -920,14 +920,29 @@ findings in views:
   | MuraCMS, ColdBox, cfwheels, fw1, Lucee | | | 0 / 0 each |
 
   Measured on top of the partials handoff below, which the fix unblocks:
-  `prc.author` went from 61 to 19. `prc.content` (49) is unchanged and has
-  another cause: `ContentService` binds its entity through an argument default,
-  `init( entityName = "cbContent" )` then `super.init( entityName =
-  arguments.entityName )`, which `resolve/orm.go` does not follow, so even a
-  local is `$any`; and a member binding withholds a `$` component rather than
-  taking it, so the member is reported where the local is silent. The same
-  file-wide closure wipe remains in `applyCollectionReturns`
-  (`collection_returns.go`), unmeasured.
+  `prc.author` went from 61 to 19. The same file-wide closure wipe remains in
+  `applyCollectionReturns` (`collection_returns.go`), unmeasured.
+
+- **A service bound through its init's argument default** (fixed):
+  `ContentService` declares `init( entityName = "cbContent" )` and calls
+  `super.init( entityName = arguments.entityName )`, which the ORM rule, reading
+  only a literal, did not follow, so `contentService.get()` was `$any` and a
+  `prc` member assigned from it, which withholds a `$` component, was reported.
+  `boundEntity` now takes the argument's literal default from the service's own
+  init(), in script or tag syntax; one with no default binds nothing. A subclass
+  passing its own literal (`EntryService`, `cbEntry`) still wins, since the walk
+  starts at the service asked about.
+
+  | Scan | Before | After | Removed / added |
+  |---|---:|---:|---:|
+  | ContentBox, presets | 2,670 | 2,637 | 33 / 0 |
+  | ContentBox, no config | 7,576 | 7,543 | 33 / 0 |
+  | MuraCMS, ColdBox, cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+  `prc.content` went from 49 to 30. The 30 left are all `content/quickLook.cfm`,
+  whose action in `baseContentHandler` assigns `variables.ormService.get( … )`,
+  and `variables.ormService` is set by each subclass handler: a handoff through
+  a base handler's variables, not this gap.
 
 ## ContentBox: partials
 
