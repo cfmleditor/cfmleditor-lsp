@@ -109,3 +109,62 @@ func TestAVirtualEntityServiceReturnsItsEntity(t *testing.T) {
 		"c.isEq.list": "",
 	})
 }
+
+// TestAServiceBoundThroughItsInitArgumentDefault: ContentBox's ContentService
+// declares `init( entityName = "cbContent" )` and passes it on as
+// `super.init( entityName = arguments.entityName )`, so the service is bound
+// to the default unless a subclass passes its own, as EntryService does.
+func TestAServiceBoundThroughItsInitArgumentDefault(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"models/Content.cfc": `component persistent="true" entityname="cbContent" { property name="title"; }`,
+		"models/Entry.cfc":   `component persistent="true" entityname="cbEntry" extends="Content" { property name="excerpt"; }`,
+		"models/ContentService.cfc": `component extends="cborm.models.VirtualEntityService" singleton {
+	ContentService function init( entityName = "cbContent" ) {
+		super.init( entityName = arguments.entityName, useQueryCaching = true );
+		return this;
+	}
+}`,
+		"models/EntryService.cfc": `component extends="ContentService" singleton {
+	EntryService function init() {
+		super.init( entityName = "cbEntry", useQueryCaching = true );
+		return this;
+	}
+}`,
+		"models/TagService.cfc": `<cfcomponent extends="cborm.models.VirtualEntityService">
+	<cffunction name="init">
+		<cfargument name="entityName" default="cbContent">
+		<cfset super.init( entityName = arguments.entityName )>
+		<cfreturn this>
+	</cffunction>
+</cfcomponent>`,
+		"models/OpenService.cfc": `component extends="cborm.models.VirtualEntityService" singleton {
+	function init( required entityName ) {
+		super.init( entityName = arguments.entityName );
+		return this;
+	}
+}`,
+		"handlers/Content.cfc": `component {
+	property name="contentService" inject="ContentService";
+	property name="entryService" inject="EntryService";
+	property name="tagService" inject="TagService";
+	property name="openService" inject="OpenService";
+	function show( event, rc, prc ) {
+		prc.content = contentService.get( 1 );
+		prc.content.getTitle();
+		prc.content.notAMethod();
+		entryService.get( 1 ).getExcerpt();
+		tagService.get( 1 ).notAMethod();
+		openService.get( 1 ).anything();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "handlers/Content.cfc"), map[string]string{
+		"prc.content.getTitle":        "",
+		"prc.content.notAMethod":      "method 'notAMethod' not found in cbContent",
+		"entryService.get.getExcerpt": "",
+		"tagService.get.notAMethod":   "method 'notAMethod' not found in cbContent",
+		"openService.get.anything":    "method 'get' in OpenService has no component return type (chain to 'anything')",
+	})
+}
