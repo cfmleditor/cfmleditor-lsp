@@ -181,6 +181,11 @@ type ComponentRef struct {
 	// with either qualifier is looked up among its own scope's refs only; an
 	// unqualified one still sees both.
 	This bool
+	// Rebinds is set when the assignment's right-hand side is a call on the
+	// variable it assigns: `x = x.next()`. That call is made on what x held
+	// before the line, so a receiver on the ref's own line does not read
+	// this ref; see resolve's funcScopedRef.
+	Rebinds bool
 	// New factory chains require a concrete result, not dynamic acceptance
 	// when a suffix method has an unknown return.
 	strictChain bool

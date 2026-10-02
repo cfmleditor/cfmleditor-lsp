@@ -2919,7 +2919,7 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.R
 
 		for i := range refs {
 			ref := &refs[i]
-			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) {
+			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) || assignedByCallAt(ref, line) {
 				continue
 			}
 
@@ -2958,7 +2958,7 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser
 
 	for i := range pr.ComponentRefs {
 		ref := &pr.ComponentRefs[i]
-		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) {
+		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) || assignedByCallAt(ref, line) {
 			continue
 		}
 
@@ -2972,12 +2972,21 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser
 	}
 
 	for i := range pr.ComponentRefs {
-		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) && scope.Admits(&pr.ComponentRefs[i]) {
-			return &pr.ComponentRefs[i]
+		if ref := &pr.ComponentRefs[i]; strings.EqualFold(ref.Variable, name) && scope.Admits(ref) && !assignedByCallAt(ref, line) {
+			return ref
 		}
 	}
 
 	return nil
+}
+
+// assignedByCallAt reports whether ref is the result of a call on line made
+// on the variable ref assigns, `x = x.next()`: a receiver on that line is
+// what the variable held before it. Mura writes
+// `pluginEvent = pluginEvent.init( data ).getEvent()`, and init() was looked
+// for in what getEvent() returns.
+func assignedByCallAt(ref *parser.ComponentRef, line uint32) bool {
+	return ref.Rebinds && ref.Line == line
 }
 
 // appRef is a ref for a name in one of the Application files.

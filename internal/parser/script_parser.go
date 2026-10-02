@@ -80,6 +80,7 @@ type pendingCall struct {
 	returnExpr bool // a return expression, grouped by function for factory-chain inference
 	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
 	baseArgs   bool // baseVar was read through arguments.; see baseVarComponent
+	rebinds    bool // the call is made on varName itself; see ComponentRef.Rebinds
 	baseScope  RefScope
 
 	funcKey string   // scope key, empty if global
@@ -830,6 +831,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 				Variable: varName, Component: comp,
 				ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+				Rebinds: rebinds(varName, receiverOf(fullChain.String())),
 			})
 		} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 			rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, line)
@@ -3341,6 +3343,7 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 		global:     p.forceGlobal,
 		baseScope:  ReceiverRefScope(recv),
 		baseArgs:   readThroughArguments(recv),
+		rebinds:    rebinds(varName, recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
 }
@@ -3418,6 +3421,7 @@ func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIden
 			Variable: varName, Component: comp,
 			ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+			Rebinds: rebinds(varName, receiverOf(c.String())),
 		})
 
 		return
