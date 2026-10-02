@@ -46,8 +46,9 @@ type tagParser struct {
 	// the map cost both its buckets and a strings.ToLower per insert and per
 	// lookup — together 7% of everything a tag parse allocated.
 	localVars   []string
-	forceGlobal bool // when true, addRef routes to componentRefs regardless of inFunc
-	refThis     bool // the assignment being parsed is through `this.` — see ComponentRef.This
+	flow        *flowBlocks // the blocks a function's tags open; nil outside a full parse
+	forceGlobal bool        // when true, addRef routes to componentRefs regardless of inFunc
+	refThis     bool        // the assignment being parsed is through `this.` — see ComponentRef.This
 
 	// baseLine is this region's absolute start line (0 if parsing the whole
 	// file as one region). knownScopes, when set by the caller, gives the
@@ -305,9 +306,12 @@ func (p *tagParser) parse() {
 			continue
 		}
 
+		mark := p.flowMark()
+
 		// Check for cfscript block
 		if idx+10 <= len(p.src) && strings.EqualFold(p.src[idx:idx+10], "<cfscript>") {
 			pos = p.parseNestedScript(idx)
+			p.stampFlow(mark)
 
 			continue
 		}
@@ -315,16 +319,21 @@ func (p *tagParser) parse() {
 		// Check for CF tags we care about
 		switch {
 		case idx+1 < len(p.src) && p.src[idx+1] == '/':
+			p.trackBlock(idx)
 			p.closeTag(idx)
 
 			pos = idx + 1
 		case idx+3 < len(p.src) && toLowerByte(p.src[idx+1]) == 'c' && toLowerByte(p.src[idx+2]) == 'f':
+			p.trackBlock(idx)
+
 			pos = p.handleCFTag(idx)
 		case p.gated && customPrefixTag(p.src[idx:], p.importPrefixes):
 			pos = p.stepOverEvaluatedTag(idx)
 		default:
 			pos = idx + 1
 		}
+
+		p.stampFlow(mark)
 	}
 
 	if p.extractLinks {
@@ -415,6 +424,92 @@ func (p *tagParser) parseNestedScript(idx int) int {
 // typed a variable of the function, its unscoped names were read against the
 // function's var'd locals, and a call the tag parser records itself named
 // the function as its caller.
+// blockKind is the block a tag named name opens or closes, "" for any other
+// tag: the tags whose body may not run, or may run more than once, each the
+// opener a close tag of its name is matched to. <cfelseif> and <cfelse> end
+// the branch before them and open the next, as a branch of the same <cfif>.
+// A <cffunction> body is a block too, the one its statements always run in.
+// A <cflock>, <cftransaction> or <cfoutput> runs its body once, so it is not
+// one. None of these is written self-closed.
+func blockKind(name []byte) string {
+	switch string(name) {
+	case "cffunction":
+		return "cffunction"
+	case "cfif", "cfelseif", "cfelse":
+		return "cfif"
+	case "cfloop":
+		return "cfloop"
+	case "cftry":
+		return "cftry"
+	case "cfcatch":
+		return "cfcatch"
+	case "cfcase":
+		return "cfcase"
+	case "cfdefaultcase":
+		return "cfdefaultcase"
+	default:
+		return ""
+	}
+}
+
+// trackBlock opens or closes the block the CF tag at idx opens or closes,
+// when blocks are being recorded.
+func (p *tagParser) trackBlock(idx int) {
+	if p.flow == nil {
+		return
+	}
+
+	closing := idx+1 < len(p.src) && p.src[idx+1] == '/'
+
+	start := idx + 1
+	if closing {
+		start++
+	}
+
+	// Every block tag's name continues past "cf" with one of these.
+	if start+2 >= len(p.src) {
+		return
+	}
+
+	switch toLowerByte(p.src[start+2]) {
+	case 'f', 'i', 'e', 'l', 't', 'c', 'd':
+	default:
+		return
+	}
+
+	end := start
+	for end < len(p.src) && isIdentByte(p.src[end]) {
+		end++
+	}
+
+	var buf foldScratch
+
+	name := buf.lowerFold(p.src[start:end])
+
+	kind := blockKind(name)
+	if kind == "" {
+		return
+	}
+
+	if !closing && kind == "cfif" && string(name) != "cfif" {
+		p.flow.close(kind)
+	} else if closing {
+		p.flow.close(kind)
+
+		return
+	}
+
+	p.flow.open(idx, kind)
+}
+
+// flowMark and stampFlow are the script parser's, for a tag: what a tag
+// assigns was assigned in the innermost block open at it.
+func (p *tagParser) flowMark() int { return len(p.pendingCalls) }
+
+func (p *tagParser) stampFlow(mark int) {
+	stampPending(p.flow, p.pendingCalls[mark:])
+}
+
 func (p *tagParser) closeTag(idx int) {
 	if !isCloseTagFor(p.src[idx:], "cffunction") {
 		return
@@ -1112,6 +1207,10 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 	}
 
 	f.returnLine = conv.Uint32(line)
+
+	if p.flow != nil {
+		p.flow.noteReturn(f.returnLine)
+	}
 
 	if inner == "" {
 		return
@@ -2018,6 +2117,10 @@ func (p *tagParser) resolveCall(expr string) string {
 // Refs assigned to VARIABLES. or this. scopes are always global.
 func (p *tagParser) addRef(ref *ComponentRef) {
 	ref.This = p.refThis
+
+	if p.flow != nil && p.inFunc != "" {
+		p.flow.note(ref.Variable, ref.Line, p.flow.innermost())
+	}
 
 	if p.inFunc == "" || p.forceGlobal {
 		p.componentRefs = append(p.componentRefs, *ref)

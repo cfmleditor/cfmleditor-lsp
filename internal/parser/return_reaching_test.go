@@ -17,13 +17,14 @@ function f() {
 	return x;
 }
 }`},
-		{"script try catch", `component {
+		{"script try catch then overwritten", `component {
 function f() {
 	try {
 		var x = new models.A();
 	} catch ( any e ) {
-		x = new models.B();
+		x = new models.A();
 	}
+	x = new models.B();
 	return x;
 }
 }`},
@@ -229,6 +230,29 @@ function f() {
 			if f := &pr.Funcs[i]; f.Name == "f" && f.ReturnComponent != "" {
 				t.Errorf("f returns %q, want nothing:\n%s", f.ReturnComponent, src)
 			}
+		}
+	}
+}
+
+// A tag region after a <cfscript> block starts partway down the file, and the
+// return's line is shifted with everything else the region recorded. It was
+// not, so the return was read at a line above both assignments and the first
+// one was taken.
+func TestATagReturnAfterAScriptBlockReadsItsOwnLine(t *testing.T) {
+	pr := Parse(testURI, `<cfcomponent>
+<cfscript>
+	variables.ready = true;
+</cfscript>
+<cffunction name="f">
+	<cfset var x = createObject("component", "models.A")>
+	<cfset x = createObject("component", "models.B")>
+	<cfreturn x>
+</cffunction>
+</cfcomponent>`)
+
+	for i := range pr.Funcs {
+		if f := &pr.Funcs[i]; f.Name == "f" && f.ReturnComponent != "models.B" {
+			t.Errorf("f returns %q, want models.B", f.ReturnComponent)
 		}
 	}
 }

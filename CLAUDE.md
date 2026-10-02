@@ -514,7 +514,22 @@ the *formatter*, not the parser.
   are looked at again while returns keep settling (`maxReturnRounds`).
   `hasRefFor` skips a pending call only for a ref on its own line, and a call on
   a value is never the file's function of that name (`callsOwnFunction`).
-  Branches are not compared. `TestReturnTypeIsTheAssignmentReachingTheReturn`.
+  `TestReturnTypeIsTheAssignmentReachingTheReturn`.
+- **Branches reaching a return must agree** (`flow.go`). A full parse records
+  the block every assignment in a function was made in and the blocks open at
+  each return: a brace group in CFScript, the body of `<cfif>`/`<cfelseif>`/
+  `<cfelse>`/`<cfloop>`/`<cftry>`/`<cfcatch>`/`<cfcase>`/`<cfdefaultcase>`,
+  and the function body. An assignment in a block open at the return always
+  ran and replaces what came before; any other may not have and joins it
+  (`flowBlocks.reaching`). If what reaches the return disagrees the function
+  has no return type, and if any of it is `$any` the return is
+  (`agreedComponent`). `<cflock>`, `<cftransaction>` and `<cfoutput>` run their
+  body once and are not blocks. A ref notes its block in `addRef`, and a
+  pending call is stamped by the body loop (`stampFlow`), so a ref appended
+  anywhere else reads as always running, as every ref did before. A braceless
+  `if` body is not a block. It costs a full parse about 4% (script) and 6%
+  (tag), and a shallow or lazy parse nothing, since neither records blocks.
+  `TestReturnTypeComparesTheBranchesReachingIt`.
 - **A call in `x = x.m()` is made on what x held before the line.** The ref
   the assignment makes carries `ComponentRef.Rebinds`, and the resolver's
   latest-at-or-before rule (`funcScopedRef`, `fileLevelRef`) skips it on its
