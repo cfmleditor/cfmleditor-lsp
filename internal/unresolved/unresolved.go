@@ -5,9 +5,11 @@
 package unresolved
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -88,7 +90,7 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 		wg sync.WaitGroup
 	)
 
-	sem := make(chan struct{}, 8)
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
 
 	for _, f := range targets {
 		wg.Add(1)
@@ -113,12 +115,22 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 
 	rep.ScanTime = time.Since(started)
 
+	// Every field takes part, so two calls on one line come out in the same
+	// order whichever goroutine finished first: a report is diffed against
+	// an earlier one.
 	sort.Slice(rep.Calls, func(i, j int) bool {
-		if rep.Calls[i].File != rep.Calls[j].File {
-			return rep.Calls[i].File < rep.Calls[j].File
-		}
+		a, b := &rep.Calls[i], &rep.Calls[j]
 
-		return rep.Calls[i].Line < rep.Calls[j].Line
+		return cmp.Or(
+			cmp.Compare(a.File, b.File),
+			cmp.Compare(a.Line, b.Line),
+			cmp.Compare(a.Variable, b.Variable),
+			cmp.Compare(a.Function, b.Function),
+			cmp.Compare(a.Reason, b.Reason),
+			cmp.Compare(a.Caller, b.Caller),
+			cmp.Compare(a.Text, b.Text),
+			cmp.Compare(a.Unchecked, b.Unchecked),
+		) < 0
 	})
 
 	return rep
@@ -150,27 +162,50 @@ func NewResolver(fsys vfs.FS, files []string, opt *Options) *resolve.Resolver {
 	resolver.Index = index.New()
 	loadBeans(resolver, opt)
 
-	for _, f := range files {
-		data, err := fsys.ReadFile(f)
-		if err != nil || cfpath.IsBinary(data) {
-			continue
-		}
+	// Each file is read and parsed on its own, and what a parse looks up (the
+	// bean map and the DI policies) is settled before the first one starts,
+	// so the files are indexed in parallel. Serially this was most of a
+	// scan's wall time on a large workspace.
+	work := make(chan string)
 
-		fileURI := uri.URI("file://" + f)
+	var wg sync.WaitGroup
 
-		// A template is not indexed for its functions here, but what it
-		// includes is part of the include graph a bare call resolves through:
-		// a page that includes a helper can call what the helper declares.
-		if !cfpath.IsCFCFile(f) {
-			resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
-
-			continue
-		}
-
-		resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			for f := range work {
+				indexOne(fsys, resolver, f, opt)
+			}
+		})
 	}
 
+	for _, f := range files {
+		work <- f
+	}
+
+	close(work)
+	wg.Wait()
+
 	return resolver
+}
+
+func indexOne(fsys vfs.FS, resolver *resolve.Resolver, f string, opt *Options) {
+	data, err := fsys.ReadFile(f)
+	if err != nil || cfpath.IsBinary(data) {
+		return
+	}
+
+	fileURI := uri.URI("file://" + f)
+
+	// A template is not indexed for its functions here, but what it
+	// includes is part of the include graph a bare call resolves through:
+	// a page that includes a helper can call what the helper declares.
+	if !cfpath.IsCFCFile(f) {
+		resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
+
+		return
+	}
+
+	resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
 }
 
 // loadBeans gives the resolver's index the bean map the server would build

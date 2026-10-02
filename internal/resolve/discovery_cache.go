@@ -95,6 +95,8 @@ func (r *Resolver) InvalidatePaths() {
 	views := r.contextViews
 	r.contextViews = nil
 	r.resolveCache = nil
+	r.includeCache = nil
+	r.interfaceCache = nil
 	r.dirCache = nil
 	r.appRootCache = nil
 	r.slugCache = nil

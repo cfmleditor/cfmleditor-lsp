@@ -44,6 +44,35 @@ func (r *Resolver) IncludePath(raw, fromFile string) string {
 	}
 
 	baseDir := filepath.Dir(fromFile)
+	key := raw + "\t" + baseDir
+
+	r.mu.RLock()
+	p, ok := r.includeCache[key]
+	r.mu.RUnlock()
+
+	if ok {
+		return p
+	}
+
+	p = r.includePathUncached(raw, baseDir)
+
+	r.mu.Lock()
+	if r.includeCache == nil {
+		r.includeCache = map[string]string{}
+	}
+
+	r.includeCache[key] = p
+	r.mu.Unlock()
+
+	return p
+}
+
+// includePathUncached stats each candidate in turn. It depends only on the
+// path and the including file's directory, and a scan asks it for the same
+// include once per lookup through it, which made it a quarter of the CPU of
+// an unresolved scan; IncludePath memoises it beside resolveCache, and
+// InvalidatePaths drops both.
+func (r *Resolver) includePathUncached(raw, baseDir string) string {
 	rel := filepath.FromSlash(raw)
 
 	candidates := []string{filepath.Join(baseDir, rel)}
