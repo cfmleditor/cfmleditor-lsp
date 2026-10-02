@@ -389,6 +389,19 @@ types from its `@see` links or conditional factory assignments.
 The separate Wheels vendor reports are 6,910 → 6,901 with presets (nine
 removed), and 13,262 → 13,262 without (13 removed, 13 added).
 
+### 11. A base component's variable only its subclasses assign — open (the quickLook ormService gap)
+
+ContentBox's `contentbox-admin/handlers/baseContentHandler.cfc` calls
+`variables.ormService` and never declares it; `pages.cfc`, `entries.cfc` and
+`contentStore.cfc` each inject a different service under that name. The
+resolver looks a receiver up the extends chain, never down into subclasses, so
+every call on it is `variable 'variables.ormService' has no component ref`:
+about 50 entries in the base handler and all 31 in
+`views/content/quickLook.cfm`, which only `baseContentHandler.quickLook()`
+renders. The shape, the repro, where the fix goes, the decisions to make and
+the expected measurement are in RESOLUTION-GAPS-PLAN.md, "ContentBox: a base
+handler's variable its subclasses inject".
+
 ## Hand-maintained lists that could be generated
 
 - **`moduleHelpers`** (`internal/resolve/modules.go`): the cbi18n, cbfs and

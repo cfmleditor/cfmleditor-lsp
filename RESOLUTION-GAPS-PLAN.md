@@ -973,8 +973,17 @@ fixed; see there.
 
 ## ContentBox: a base handler's variable its subclasses inject
 
-Open; measured after PR #216. The largest single cause left in
-`contentbox-admin`'s handlers.
+Open; measured after PR #216. Known for short as **the quickLook ormService
+gap**, after the view it empties. The largest single cause left in
+`contentbox-admin`'s handlers. Listed as gap 11 in RESOLUTION-GAPS.md.
+
+**To pick it up:** read this section, rebuild the ContentBox scratch copy
+(`~/corpus/Ortus-Solutions_ContentBox` copied to a scratch directory with
+`.cfmleditor.json` `{"workspaceName":"cbox","frameworks":["coldbox","contentbox","testbox","cfmigrations"]}`;
+never write into `~/corpus`), run the repro below, write the failing test in
+`internal/resolve` (a base component calling `variables.svc.get()`, two or
+three subclasses injecting different services), then follow CLAUDE.md's
+verification discipline.
 
 **Shape.** `handlers/baseContentHandler.cfc` is an abstract handler. It calls
 `variables.ormService` throughout and never declares it; each concrete handler
