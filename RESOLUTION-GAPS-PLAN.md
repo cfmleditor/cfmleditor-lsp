@@ -915,11 +915,12 @@ findings in views:
 
   | Scan | Before | After | Removed / added |
   |---|---:|---:|---:|
-  | ContentBox, presets | 2,752 | 2,703 | 49 / 0 |
-  | ContentBox, no config | 7,644 | 7,606 | 38 / 0 |
+  | ContentBox, presets | 2,751 | 2,670 | 81 / 0 |
+  | ContentBox, no config | 7,643 | 7,576 | 67 / 0 |
   | MuraCMS, ColdBox, cfwheels, fw1, Lucee | | | 0 / 0 each |
 
-  `prc.author` went from 61 to 42. `prc.content` (49) is unchanged and has
+  Measured on top of the partials handoff below, which the fix unblocks:
+  `prc.author` went from 61 to 19. `prc.content` (49) is unchanged and has
   another cause: `ContentService` binds its entity through an argument default,
   `init( entityName = "cbContent" )` then `super.init( entityName =
   arguments.entityName )`, which `resolve/orm.go` does not follow, so even a
@@ -927,3 +928,31 @@ findings in views:
   taking it, so the member is reported where the local is silent. The same
   file-wide closure wipe remains in `applyCollectionReturns`
   (`collection_returns.go`), unmeasured.
+
+## ContentBox: partials
+
+The prc handoff now follows `view()` and `renderView()` as well as `setView`
+(ColdBox 7 renamed the second the first). A handler action that returns a
+viewlet (`return view( view = "comments/pager", module = "contentbox-admin" )`)
+renders that view as setView would, and a partial a view renders
+(`#view( view = "authors/editor/sidebar" )#`) reads the prc of whatever renders
+its parent, since prc is the request's. A parent view that assigns the member
+itself does not hand it on, and a `view()` naming another module renders that
+module's view. Computed names (`cbAdminComponent( "editor/sidebar/…" )`, which
+wraps `view( view = "_components/#arguments.component#" )`, and the
+`*/indexTable` views) are not followed.
+
+This links the partials but resolves only one more finding today
+(`prc.widgetService` in `widgets/widgetList.cfm`): what most partials inherit
+is a prc member the handler itself leaves untyped. `prc.commentPager_oPaging =
+getInstance( "Paging@contentbox" )` and `prc.author = authorService.get( … )`
+were untyped in the handler even though the same right-hand sides assigned to a
+local were typed: the record-member gap under the handoff section above, which
+also blocked the pagers and the author editor's partials. That gap is now
+fixed; see there.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, presets | 2,752 | 2,751 | 1 / 0 |
+| ContentBox, no config | 7,644 | 7,643 | 1 / 0 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
