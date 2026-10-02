@@ -40,6 +40,10 @@ type FunctionDef struct {
 	// not a declaration: the resolver takes it only where it names a file.
 	DocReturn string
 	returnVar string // unexported: variable name from "return varName" for deferred resolution
+	// returnsStruct: some return is a struct literal or structNew(). A
+	// function declared struct that also returns a component returns
+	// either, so it is not typed by the component — see componentReturnFor.
+	returnsStruct bool
 }
 
 // Scope represents the CFML variable scope.

@@ -1346,6 +1346,84 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 }
 
 // currentCaller is the function the walk is inside, or "".
+// callsOnResolvedReceiver lists the calls rhs makes on a receiver that comp
+// already describes, outermost last. A regex resolver is unanchored at its
+// end, so tassweb's `subsObj\.([a-zA-Z]+)` claims
+// `variables.subsObj.subsLib.startCFC(x)` on its first two segments: the
+// value is what startCFC returns, and recording comp alone typed it as
+// subsLib. Each call peeled off while the receiver keeps comp is a hop to
+// walk. `init()` returns its receiver, so it is not one.
+func (p *tagParser) callsOnResolvedReceiver(rhs, comp string) []string {
+	var methods []string
+
+	for expr := rhs; ; {
+		receiver, method := callReceiver(expr)
+		if receiver == "" || p.resolveCall(receiver) != comp {
+			break
+		}
+
+		if !strings.EqualFold(method, "init") {
+			methods = append([]string{method}, methods...)
+		}
+
+		expr = receiver
+	}
+
+	return methods
+}
+
+// callReceiver splits `<receiver>.m(args)` into receiver and m, or returns
+// "" when expr is not a method call ending at its argument list.
+func callReceiver(expr string) (receiver, method string) {
+	expr = strings.TrimSpace(expr)
+	if !strings.HasSuffix(expr, ")") {
+		return "", ""
+	}
+
+	depth, open := 0, -1
+
+	var quote byte
+
+	for i := range len(expr) {
+		c := expr[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			if depth == 0 {
+				open = i
+			}
+
+			depth++
+		case c == ')':
+			depth--
+			if depth < 0 {
+				return "", ""
+			}
+		}
+	}
+
+	if depth != 0 || quote != 0 || open <= 0 {
+		return "", ""
+	}
+
+	j := open
+	for j > 0 && isIdentByte(expr[j-1]) {
+		j--
+	}
+
+	if j == open || j == 0 || expr[j-1] != '.' {
+		return "", ""
+	}
+
+	return strings.TrimSpace(expr[:j-1]), expr[j:open]
+}
+
 func (p *tagParser) currentCaller() string {
 	if p.inFunc != "" && len(p.funcs) > 0 {
 		return p.funcs[len(p.funcs)-1].Name
@@ -1382,8 +1460,10 @@ func (p *tagParser) resolveRHS(rhs, varName string, line int) bool {
 	}
 
 	if comp := p.resolveCall(rhs); comp != "" {
+		methods := p.callsOnResolvedReceiver(rhs, comp)
+
 		p.addRef(&ComponentRef{
-			Variable: varName, Component: comp,
+			Variable: varName, Component: comp, ChainRest: methods, strictChain: len(methods) > 0,
 			URI: uriFromString(p.fileURI), Line: conv.Uint32(line),
 		})
 
