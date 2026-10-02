@@ -401,7 +401,7 @@ mappings from Application.cfc and CFConfig. It does not close every category.
 | DI ownership | Previously supported registrations, aliases and caller isolation remain. | Automatic DI roots and subsystem ownership need explicit source/configuration proof and separate application fixtures. This batch does not add them. |
 | Request/view propagation | Proven member producers and self-updates carry their concrete returns. | Controller-to-view `rc.$`, event slots, callback records and cross-request values still lack a proven origin. Track documented framework boundaries before propagating them. |
 | Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, object/presence guards and supported branch flow now specialize a call. | Arbitrary caller identifiers, dynamic argument bags, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. Add call-site reaching-definition proof before carrying caller variables. |
-| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. Masa's `settingsManager.getSite` try/catch cache and `settingsBean.getRazunaSettings` shared-field cache are concrete follow-up fixtures. Do not restore a receiver-class guess to silence these findings. |
+| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. `settingsManager.getSite`'s try/catch cache is proven (see below); `settingsBean.getRazunaSettings`'s shared-field cache is the remaining concrete fixture. Do not restore a receiver-class guess to silence these findings. |
 | Tags/control flow | Tag and mixed cfscript method plans now remain connected. Query output names can invalidate a returned local through finite attribute bags. | Unsupported controls/tags, computed output names, record aliases, uncertain mutation and exhausted bounds withhold inference. Extend one source shape at a time with negative tests. |
 | Callback/parameter contracts | Declared component types and existing framework contracts continue to work. | Untyped bean/feed/event parameters require verified registration/call-site contracts; arbitrary TestBox actual/target values should remain dynamic. |
 | Includes and unqualified calls | Existing static include/helper discovery remains. | Scope ownership for runtime includes and helpers needs a provenance fixture; a matching method name alone is insufficient. |
@@ -472,3 +472,40 @@ source-backed documented/DI receiver when that initialization contract is proven
 do not substitute Controller itself as the returned class. These cases join the
 lazy-cache follow-up above. Per-entry additions are retained even when a project
 improves overall.
+
+## The getSite cache, and Mura's service loop (follow-up to merged PR #195)
+
+`settingsManager.getSite`'s lazy try/catch cache needed no new inference. The
+existing collection contract already proves it: every write to `variables.sites`
+is the `cfparam` empty struct or the `builtSites` struct `setSites` rebuilds,
+whose elements are each a copy of a cached element or `variables.DAO.read(...)`,
+so `getSite` returns what `read` does. `TestALazyCacheReturnsItsElementType`
+pins the shape. On MuraCMS (the corpus's `MSU-NatSci_MuraCMS`, scanned with
+`scripts/corpus/masacms.json`) it returns `settingsBean`. A call on that bean is
+then accepted as dynamic, correctly, because `mura.bean.bean` defines
+`OnMissingMethod`.
+
+What blocked `getSite` in Mura was its receiver. Mura appends a legacy service
+under a condition, `variables.serviceList=listAppend(variables.serviceList,'advertiserManager')`,
+before the startup service loop. The non-literal assignment dropped the list, so
+none of the 25 `application.*` services was typed. A `listAppend` of a literal
+onto the same known list now keeps it, with the appended name included: a
+binding says what the loop assigns a name, not that it does. Masa's startup
+template evidently lacks the append, which is why its configured baseline
+already typed these services.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| MuraCMS, configured | 12,575 | 11,290 | 1,293 / 8 |
+| Six other corpus projects | | | 0 / 0 each |
+
+Seven of the additions are deeper unknown returns the typed receiver now reaches
+(`contentManager.getActiveContent`, `userManager.getCurrentUser`,
+`settingsManager.save`). One is a genuine missing method:
+`client/api/soap/v1/user.cfc:70` calls `userManager.readByEmail`, which Mura's
+user package does not declare.
+
+`explain` now builds its resolver and parse through the unresolved scan's own
+`unresolved.NewResolver` and `unresolved.Parse`. It used to build its own
+without `beanPaths` or the setter and constructor policies, and reported these
+receivers unresolved while the scan accepted them.
