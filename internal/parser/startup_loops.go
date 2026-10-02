@@ -85,6 +85,8 @@ func StartupBeanBindings(content string) []StartupBeanBinding {
 		expr := mappingSourceExpression(&cursor)
 		if value, ok := stringLiteral(expr); ok {
 			env[envName(target)] = value
+		} else if value, ok := listAppendLiteral(expr, target, env); ok {
+			env[envName(target)] = value
 		} else {
 			delete(env, envName(target))
 		}
@@ -195,4 +197,31 @@ func (pr *ParseResult) StartupVariableAssignments() []StartupVariableAssignment 
 	}
 
 	return out
+}
+
+// serviceListAppend is `list = listAppend( list, "name" )`.
+var serviceListAppend = regexp.MustCompile(`(?is)^listAppend\s*\(\s*((?:variables\.|local\.)?[\w$]+)\s*,\s*(["'][^"'#]*["'])\s*\)$`)
+
+// listAppendLiteral is what a known literal list may hold after expr appends
+// a literal to it: every name it held and the appended one. A loop over it
+// then binds the appended name too, which is right whether or not the append
+// ran: a binding says what the loop assigns that name, not that it does. It
+// is how Mura adds a legacy service under a condition before its loop.
+func listAppendLiteral(expr, target string, env map[string]string) (string, bool) {
+	m := serviceListAppend.FindStringSubmatch(strings.TrimSpace(expr))
+	if m == nil || envName(m[1]) != envName(target) {
+		return "", false
+	}
+
+	list, known := env[envName(target)]
+	if !known {
+		return "", false
+	}
+
+	item, ok := stringLiteral(m[2])
+	if !ok || item == "" || strings.Contains(item, ",") {
+		return "", false
+	}
+
+	return list + "," + item, true
 }

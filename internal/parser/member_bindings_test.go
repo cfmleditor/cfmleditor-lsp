@@ -63,6 +63,12 @@ func TestLiteralStartupServiceLoop(t *testing.T) {
 		{"incremented iterator", `for(i in listToArray("first")){i++;application["#i#"]=variables.factory.getBean("#i#");}`, 0},
 		{"nested loop", `for(i in listToArray("first")){for(j in listToArray("second")){application["#i#"]=variables.factory.getBean("#i#");}}`, 0},
 		{"comment", `/*for(i in listToArray("first")){application["#i#"]=variables.factory.getBean("#i#");}*/`, 0},
+		// Mura appends a legacy service under a condition before its loop.
+		{"conditional literal append", `variables.services="first,second";if(x){variables.services=listAppend(variables.services,'third');}for(variables.i in listToArray(variables.services)){application["#variables.i#"]=variables.factory.getBean("#variables.i#");}`, 3},
+		{"append to another list", `variables.services="first";variables.services=listAppend(variables.other,'third');for(i in listToArray(variables.services)){application["#i#"]=variables.factory.getBean("#i#");}`, 0},
+		{"computed append", `variables.services="first";variables.services=listAppend(variables.services,name);for(i in listToArray(variables.services)){application["#i#"]=variables.factory.getBean("#i#");}`, 0},
+		{"append to an unknown list", `variables.services=listAppend(variables.services,'third');for(i in listToArray(variables.services)){application["#i#"]=variables.factory.getBean("#i#");}`, 0},
+		{"interpolated append", `variables.services="first";variables.services=listAppend(variables.services,'#x#');for(i in listToArray(variables.services)){application["#i#"]=variables.factory.getBean("#i#");}`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := StartupBeanBindings(tc.source); len(got) != tc.count {
