@@ -1469,6 +1469,12 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			comp = prop.documentedComponent()
 		}
 
+		// Only a CFML ORM entity: Mura's own beans declare relationships the
+		// same way, but their cfc names a bean id ("site"), not a component.
+		if comp == "" && pr.Persistent {
+			comp = prop.relatedEntity()
+		}
+
 		if comp == "" {
 			comp = pr.propertyBeanComponent(&prop)
 		}
@@ -1487,6 +1493,30 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			pr.Funcs[getterIdx].ReturnComponent = fieldComponents[strings.ToLower(prop.name)]
 		}
 	}
+}
+
+// relatedEntity is the entity a single-valued ORM relationship holds: a
+// many-to-one or one-to-one property names it in its cfc attribute, so the
+// generated getter returns one. ContentBox's content items reach their site
+// through `property name="site" fieldtype="many-to-one" cfc="…system.Site"`.
+// A collection relationship holds an array or struct of them, not one.
+func (prop *propertyDef) relatedEntity() string {
+	switch strings.ToLower(prop.attrs["fieldtype"]) {
+	case "many-to-one", "one-to-one":
+	default:
+		return ""
+	}
+
+	if prop.typeName != "" && !strings.EqualFold(prop.typeName, "any") {
+		return ""
+	}
+
+	cfc := strings.TrimSpace(prop.attrs["cfc"])
+	if cfc == "" || strings.Contains(cfc, "#") {
+		return ""
+	}
+
+	return cfc
 }
 
 // CFML's doc_generic property metadata names the value's component, just as
