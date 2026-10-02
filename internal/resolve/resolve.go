@@ -1330,9 +1330,13 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if property, ok := parser.PropertyName(hop); ok {
-			ret := r.publicPropertyComponent(comp, property, baseDir)
-			if ret == "" {
-				return comp, softComp, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + funcName + "')", true
+			ret, soft, reason, done := r.propertyHop(comp, property, call, i, pr, baseDir, tr)
+			if done {
+				return comp, softComp, reason, true
+			}
+
+			if soft {
+				softComp = ret
 			}
 
 			comp = ret
@@ -1396,6 +1400,205 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 	}
 
 	return comp, softComp, "", false
+}
+
+// propertyHop is walkHops for a property hop: what the property holds, from
+// the component's typed properties or else a componentResolver matched
+// against the property read, or done with the answer when that settles the
+// call.
+func (r *Resolver) propertyHop(comp, property string, call *parser.CallSite, i int, pr *parser.ParseResult, baseDir string, tr *callTrace) (ret string, soft bool, reason string, done bool) {
+	if ret = r.publicPropertyComponent(comp, property, baseDir); ret != "" {
+		return ret, false, "", false
+	}
+
+	var noFollow bool
+
+	// The parse may have folded the calls before the property into
+	// call.Component, so the source line is asked too.
+	for _, text := range []string{propertyHopText(call, i, property), propertyReadText(lineOfContent(pr.Content, int(call.Line)), property)} {
+		if text == "" {
+			continue
+		}
+
+		if ret, noFollow, soft = r.propertyResolver(text, property, tr); ret != "" {
+			break
+		}
+	}
+
+	switch {
+	case ret == "":
+		return "", false, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + call.FuncName + "')", true
+	case noFollow:
+		tr.hit(TargetDynamic, ret, nil)
+
+		return "", false, "", true
+	}
+
+	return ret, soft, "", false
+}
+
+// propertyHopText is a property hop as a resolver sees it: the call or
+// variable the property is read from, then the property. A struct a factory
+// fills at run time is typed nowhere in the source — tassweb's
+// getSubServices() is one key per subservice, each a component created from
+// a list — so the property's component can only come from configuration,
+// `{"match": "getSubServices().$1", "resolve": "subservices.${1:lower}.service"}`,
+// as a method hop's can from one matched against `hop()`.
+func propertyHopText(call *parser.CallSite, i int, property string) string {
+	if i == 0 {
+		return call.Variable + "." + property
+	}
+
+	prev := call.Chain[i-1]
+	if name, ok := parser.PropertyName(prev); ok {
+		return propertyHopText(call, i-1, name) + "." + property
+	}
+
+	expression, callHop := parser.CallExpression(prev)
+	if !callHop {
+		expression = prev + "()"
+	}
+
+	return expression + "." + property
+}
+
+// propertyResolver is the componentResolver answer for a property read, or
+// "" when the answer does not depend on the property. A resolver's prefix is
+// found anywhere in the text, so the catch-all `get$1()` matches
+// `foo.getBar().baz` on its `getBar()` and would type baz as getBar's
+// component; an answer the text without the property gives too is that.
+func (r *Resolver) propertyResolver(text, property string, tr *callTrace) (comp string, noFollow, soft bool) {
+	comp, noFollow, soft = r.matchResolver(text, nil, nil)
+	if comp == "" {
+		return "", false, false
+	}
+
+	receiver := strings.TrimSuffix(text, text[len(text)-len(property):])
+	receiver = strings.TrimSuffix(receiver, ".")
+
+	if without, _, _ := r.matchResolver(receiver, nil, nil); without == comp {
+		return "", false, false
+	}
+
+	_, _, idx := parser.ResolveFromCallMatch(text, r.Resolvers)
+	tr.addf("property hop %q: resolved %q to %q via %s", property, text, comp, r.describeResolver(idx))
+
+	return comp, noFollow, soft
+}
+
+// lineOfContent is the 0-based line n of content, or "".
+func lineOfContent(content string, n int) string {
+	for range n {
+		i := strings.IndexByte(content, '\n')
+		if i < 0 {
+			return ""
+		}
+
+		content = content[i+1:]
+	}
+
+	line, _, _ := strings.Cut(content, "\n")
+
+	return line
+}
+
+// propertyReadText is the expression that reads property on line, from the
+// start of its receiver through the property: `a.getB( x ).prop` for a line
+// holding `a.getB( x ).prop.c()`. "" when the line reads it nowhere, or more
+// than once, since the two reads could be of different receivers.
+func propertyReadText(line, property string) string {
+	end := -1
+
+	for from := 0; ; {
+		i := indexFoldFrom(line, "."+property, from)
+		if i < 0 {
+			break
+		}
+
+		from = i + 1
+
+		after := i + 1 + len(property)
+		if after < len(line) && isIdentChar(line[after]) {
+			continue
+		}
+
+		if end >= 0 {
+			return ""
+		}
+
+		end = after
+	}
+
+	if end < 0 {
+		return ""
+	}
+
+	start := end - len(property) - 1
+
+	for start > 0 {
+		j := start
+
+		if line[j-1] == ')' {
+			depth := 0
+
+			for j > 0 {
+				j--
+
+				switch line[j] {
+				case ')':
+					depth++
+				case '(':
+					depth--
+				}
+
+				if depth == 0 {
+					break
+				}
+			}
+
+			if depth != 0 {
+				return ""
+			}
+		}
+
+		k := j
+		for k > 0 && isIdentChar(line[k-1]) {
+			k--
+		}
+
+		if k == j {
+			// An argument list with no name before it was not walked
+			// correctly (a parenthesis inside a string); decline.
+			if j < start {
+				return ""
+			}
+
+			break
+		}
+
+		start = k
+		if start == 0 || line[start-1] != '.' {
+			break
+		}
+
+		start--
+	}
+
+	return strings.TrimPrefix(line[start:end], ".")
+}
+
+func isIdentChar(c byte) bool {
+	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func indexFoldFrom(s, sub string, from int) int {
+	for i := from; i+len(sub) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(sub)], sub) {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // hopReturn is chainHopReturn, and failing that what the receiver binds the

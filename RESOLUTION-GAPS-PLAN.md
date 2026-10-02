@@ -781,3 +781,42 @@ line: pre-existing, and the same effect `Future.cfc:66` relied on before.
 Not done: assignments on different branches are not compared, so the one
 reaching the return by line wins even where another branch assigns something
 else. `buildBinder()` is `$any` only because its later branch is.
+
+## ContentBox: measurement and relationship getters
+
+**Measure ContentBox with `cfmigrations` on.** The checkout has no root
+`box.json`, so nothing suggests presets. With `coldbox`, `contentbox` and
+`testbox` it reports 4,055 findings, 884 of them `table` in
+`modules/contentbox/migrations`: cfmigrations' schema builder hands its callback
+a `Blueprint`, which the `cfmigrations` preset types by name. With the preset
+added it reports 2,919, the scale of the 2,705 recorded earlier, which evidently
+had it on. `cborm` is not a preset name.
+
+**A single-valued ORM relationship's getter returns its entity.** A
+`many-to-one` or `one-to-one` property names the entity it holds in its `cfc`
+attribute, so the generated getter returns one: ContentBox's content items reach
+their site through `property name="site" fieldtype="many-to-one"
+cfc="contentbox.models.system.Site"`, and `getSite()` had no return type. Only
+a persistent component counts. Mura's own beans declare relationships the same
+way, but their `cfc` is a bean id (`site`), and typing it as a component made 13
+calls on Mura's `site` beans report a component that does not exist.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, `coldbox` + `contentbox` + `testbox` + `cfmigrations` | 2,919 | 2,872 | 47 / 0 |
+| ContentBox, no config | 7,807 | 7,766 | 41 / 0 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+**What is left of ContentBox's unknown receivers**, largest first:
+
+- `print` (204): CommandBox task runners (`build/patches/*/Updater.cfc`, the
+  archive seeder). CommandBox makes a task runner extend `BaseTask`; nothing in
+  the source says which files are run as tasks.
+- Loop variables over relationship collections: `for ( var thisContent in
+  aRelatedContent )`, `<cfloop array="#prc.comments#" index="comment">`.
+  `thisContent`, `comment`, `oRule`, `entry`, `page` and `author` are largely
+  this shape, a few hundred findings. A `*-to-many` property holds an array of
+  its `cfc`, so the elements are typed, but there is no element type on a
+  collection or a loop variable to carry it: the next feature here.
+- Closure parameters such as `c` in `newCriteria().…( function( c ) { … } )` and
+  arguments typed only by their callers, as on MuraCMS.

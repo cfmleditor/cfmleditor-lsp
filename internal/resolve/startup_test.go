@@ -267,3 +267,47 @@ REQUEST.sc
 		t.Errorf("REQUEST.raw.anything() should stay dynamic, got %q", reason)
 	}
 }
+
+// TestAStartupCallOnAReceiverOutranksABroadResolver is tassweb's
+// REQUEST.context: a catch-all `get$1()` resolver matches the tail of
+// `REQUEST.kernel.getContext()` and names a component that does not exist,
+// when the kernel says what getContext returns. The receiver's answer wins.
+// A bare factory call the catch-all claims, naming no file, types nothing
+// rather than a missing component, since the resolver is dynamicIfMissing.
+func TestAStartupCallOnAReceiverOutranksABroadResolver(t *testing.T) {
+	app := startupWorkspace(t)
+
+	startup := filepath.Join(app, "startup.cfm")
+
+	src, err := os.ReadFile(startup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(startup, append(src, "\n<cfset REQUEST.widget = getWidget()>"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &resolve.Resolver{
+		FS: vfs.OS{}, Index: index.New(), WorkspaceFolders: []string{app},
+		Resolvers: []parser.Resolver{{Match: `get([A-Za-z]+)\(\)`, Resolve: "made.${1:lower}", Prefix: "get", DynamicIfMissing: true}},
+	}
+
+	got := reasonsFor(t, r, filepath.Join(app, "pages", "page.cfm"), `<cfoutput>
+<cfset u = REQUEST.context.getUser()>
+<cfset x = REQUEST.context.nope()>
+<cfset w = REQUEST.widget.spin()>
+</cfoutput>`)
+
+	if reason := got["REQUEST.context.getUser"]; reason != "" {
+		t.Errorf("REQUEST.context.getUser() did not resolve: %s", reason)
+	}
+
+	if reason := got["REQUEST.context.nope"]; !strings.Contains(reason, "not found in lib.Context") {
+		t.Errorf("REQUEST.context.nope() should be checked against lib.Context, got %q", reason)
+	}
+
+	if reason := got["REQUEST.widget.spin"]; strings.Contains(reason, "does not exist") {
+		t.Errorf("REQUEST.widget was typed as a component that does not exist: %q", reason)
+	}
+}
