@@ -168,7 +168,7 @@ func chainOf(t *testing.T, stmt string) []string {
 		}
 
 		if len(c.Chain) > 0 {
-			v += "[" + strings.Join(c.Chain, " ") + "]"
+			v += "[" + strings.Join(hopNames(c.Chain), " ") + "]"
 		}
 
 		out = append(out, v+"."+c.FuncName)
@@ -243,7 +243,7 @@ func TestAHopChainedOntoAScopeMemberCallKeepsItsReceiver(t *testing.T) {
 			}
 
 			if len(c.Chain) > 0 {
-				v += "[" + strings.Join(c.Chain, " ") + "]"
+				v += "[" + strings.Join(hopNames(c.Chain), " ") + "]"
 			}
 
 			out = append(out, v+"."+c.FuncName)
@@ -292,7 +292,7 @@ func callShapes(t *testing.T, body string) []string {
 		}
 
 		if len(c.Chain) > 0 {
-			s += "{" + strings.Join(c.Chain, ",") + "}"
+			s += "{" + strings.Join(hopNames(c.Chain), ",") + "}"
 		}
 
 		out = append(out, s+"."+c.FuncName)

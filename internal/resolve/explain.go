@@ -43,7 +43,12 @@ func CallsOnLine(pr *parser.ParseResult, line int, filter string) []parser.CallS
 // any chained hops, then the method.
 func CallText(call *parser.CallSite) string {
 	if len(call.Chain) > 0 {
-		return call.Variable + "." + strings.Join(call.Chain, "().") + "()." + call.FuncName
+		hops := make([]string, len(call.Chain))
+		for i, hop := range call.Chain {
+			hops[i] = parser.CallHopName(hop)
+		}
+
+		return call.Variable + "." + strings.Join(hops, "().") + "()." + call.FuncName
 	}
 
 	if call.Variable != "" {

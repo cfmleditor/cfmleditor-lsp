@@ -3578,12 +3578,12 @@ func TestCheckBareCall_DeepChainTracksReceiver(t *testing.T) {
 	}
 
 	getPublic, ok := byFunc["getPublic"]
-	if !ok || getPublic.Variable != "kpg" || !slices.Equal(getPublic.Chain, []string{"generateKeyPair"}) {
+	if !ok || getPublic.Variable != "kpg" || !slices.Equal(hopNames(getPublic.Chain), []string{"generateKeyPair"}) {
 		t.Errorf("expected getPublic CallSite Variable=kpg Chain=[generateKeyPair], got %+v", getPublic)
 	}
 
 	getParams, ok := byFunc["getParams"]
-	if !ok || getParams.Variable != "kpg" || !slices.Equal(getParams.Chain, []string{"generateKeyPair", "getPublic"}) {
+	if !ok || getParams.Variable != "kpg" || !slices.Equal(hopNames(getParams.Chain), []string{"generateKeyPair", "getPublic"}) {
 		t.Errorf("expected getParams CallSite Variable=kpg Chain=[generateKeyPair getPublic], got %+v", getParams)
 	}
 }
@@ -3612,7 +3612,7 @@ func TestChainedAssignRHS_FailedFirstHopContinuesChain(t *testing.T) {
 	}
 
 	getRGBColor, ok := byFunc["getRGBColor"]
-	if !ok || getRGBColor.Variable != "document" || !slices.Equal(getRGBColor.Chain, []string{"getJavaUtils"}) {
+	if !ok || getRGBColor.Variable != "document" || !slices.Equal(hopNames(getRGBColor.Chain), []string{"getJavaUtils"}) {
 		t.Errorf("expected getRGBColor CallSite Variable=document Chain=[getJavaUtils], got %+v", getRGBColor)
 	}
 }
@@ -3705,7 +3705,7 @@ func TestChainedAssignRHS_ResolvedFirstHopKeepsItsArguments(t *testing.T) {
 		}
 	}
 
-	if got := byFunc["getName"]; got.Component != "packages.staff.service" || !slices.Equal(got.Chain, []string{"getStaff"}) {
+	if got := byFunc["getName"]; got.Component != "packages.staff.service" || !slices.Equal(hopNames(got.Chain), []string{"getStaff"}) {
 		t.Errorf("expected getName CallSite Component=packages.staff.service Chain=[getStaff], got %+v", got)
 	}
 }

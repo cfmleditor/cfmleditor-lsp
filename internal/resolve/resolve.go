@@ -1218,6 +1218,13 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 	funcName := call.FuncName
 
 	for i, hop := range call.Chain {
+		// A hop carries its call's arguments when the parser could read
+		// them; every check and every reason below is about its name.
+		expression, callHop := parser.CallExpression(hop)
+		if callHop {
+			hop = parser.CallHopName(hop)
+		}
+
 		// A mock of a class is the class, or dynamic where it names none.
 		if cls, ok := strings.CutPrefix(comp, parser.MockPrefix); ok {
 			comp = cls
@@ -1246,11 +1253,6 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 			comp = ret
 
 			continue
-		}
-
-		expression, callHop := parser.CallExpression(hop)
-		if callHop {
-			hop = wheelsCallName(expression)
 		}
 
 		fd := r.ResolveFunc(comp, hop, baseDir)
@@ -1292,7 +1294,7 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 			// is one MockBox adds: `c.getRequestService().$( "getContext", x )`.
 			next := funcName
 			if i+1 < len(call.Chain) {
-				next = call.Chain[i+1]
+				next = parser.CallHopName(call.Chain[i+1])
 			}
 
 			if mockDecoration(next) {
@@ -1449,9 +1451,15 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 // among the spec's own methods and reported it "not found in extends chain"
 // — once the chain resolved, in every TestBox assertion.
 func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
-	first := call.Chain[0]
+	first := parser.CallHopName(call.Chain[0])
 
-	expression := factoryCallExpression(pr.Content, first, int(call.Line))
+	// The hop carries its arguments when the parser read them. Recovering
+	// them from the line instead finds nothing when the name is called
+	// twice there.
+	expression, ok := parser.CallExpression(call.Chain[0])
+	if !ok {
+		expression = factoryCallExpression(pr.Content, first, int(call.Line))
+	}
 
 	tr.addf("chained on a call to %q — looking it up as an unqualified call", first)
 

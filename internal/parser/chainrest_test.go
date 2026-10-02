@@ -139,7 +139,7 @@ func TestCreateObjectChainHopsCarryTheirChain(t *testing.T) {
 
 		delete(want, c.FuncName)
 
-		if c.Component != "stubs.Options" || strings.Join(c.Chain, ",") != w {
+		if c.Component != "stubs.Options" || strings.Join(hopNames(c.Chain), ",") != w {
 			t.Errorf("%s: Component %q Chain %v, want stubs.Options and [%s]", c.FuncName, c.Component, c.Chain, w)
 		}
 	}
@@ -223,7 +223,7 @@ func TestAssignedChainKeepsItsReceiverAndHops(t *testing.T) {
 
 		delete(want, c.FuncName)
 
-		if c.Variable != w.recv || strings.Join(c.Chain, ",") != w.chain {
+		if c.Variable != w.recv || strings.Join(hopNames(c.Chain), ",") != w.chain {
 			t.Errorf("%s: Variable %q Chain %v, want %q [%s]", c.FuncName, c.Variable, c.Chain, w.recv, w.chain)
 		}
 	}

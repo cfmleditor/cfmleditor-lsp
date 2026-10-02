@@ -32,7 +32,9 @@ settings.work();}}`,
 	got := reasonsWith(t, r, dir, "Page.cfc")
 	expectReasons(t, got, map[string]string{"scope.config.work": "", "scope.config.other": "method 'config' in Scope has no component return type (chain to 'other')", "scope.config.missing": "method 'missing' not found in Config", "settings.work": ""})
 	expectReasons(t, reasonsWith(t, r, dir, "Bare.cfc"), map[string]string{"config.work": ""})
-	expectReasons(t, reasonsWith(t, r, dir, "Ambiguous.cfc"), map[string]string{"scope.config.work": "method 'config' in Scope has no component return type (chain to 'work')"})
+	// Two calls to config on one line: each hop carries its own arguments,
+	// so neither borrows the other's.
+	expectReasons(t, reasonsWith(t, r, dir, "Ambiguous.cfc"), map[string]string{"scope.config.work": "", "scope.config.other": "method 'config' in Scope has no component return type (chain to 'other')"})
 
 	lookup := r.FuncLookup(dir)
 	if got := lookup("Scope", parser.CallHop("config()")); r.ComponentPath(got, dir) != filepath.Join(dir, "Config.cfc") {

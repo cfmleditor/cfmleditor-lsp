@@ -44,3 +44,30 @@ func callExpressionAt(scanner *Scanner, name string) string {
 
 	return ""
 }
+
+// callHopAt is name as a CallSite.Chain entry, with the argument list the
+// scanner is in front of, or the bare name when there is none to read.
+func callHopAt(scanner *Scanner, name string) string {
+	if expression := callExpressionAt(scanner, name); expression != "" {
+		return CallHop(expression)
+	}
+
+	return name
+}
+
+// hopSince is name as a CallSite.Chain entry, for an argument list the scan
+// has just consumed from start, the offset of its "(". A peek leaves the
+// scanner's position where it was, so pos is just past the ")".
+func (p *scriptParser) hopSince(name string, start int) string {
+	end := p.sc.pos
+	if start < 0 || end <= start || end > len(p.sc.src) || p.sc.src[start] != '(' || p.sc.src[end-1] != ')' {
+		return name
+	}
+
+	return CallHop(name + p.sc.src[start:end])
+}
+
+// CallHopName is the method a chain hop calls, whether the hop carries its
+// arguments or is a bare name. Anything reporting a hop to a user reads it
+// through this, so a reason or a trace names the method and not its call.
+func CallHopName(hop string) string { return callHopName(hop) }
