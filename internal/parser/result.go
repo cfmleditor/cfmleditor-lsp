@@ -1005,9 +1005,42 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 	pr.settleReturnVars(returnPendings, calls)
 
 	funcReturns := pr.funcReturns()
+	untyped := pr.typePendingCalls(calls, funcReturns, nil)
 
-	var untyped []int
+	// Later passes: resolve ReturnComponent for functions whose return var was
+	// just added by calls, and look again at the calls left untyped, which
+	// may assign what such a function returns or call a method on a variable
+	// typed by one. A function whose return waited for a call to type its
+	// variable settles here, and `variables.binder = buildBinder()` had been
+	// left untyped because the call was looked at first.
+	for range maxReturnRounds {
+		if pr.settleReturnVars(returnPendings, nil) == 0 || len(untyped) == 0 {
+			return
+		}
 
+		funcReturns = pr.funcReturns()
+
+		var still []int
+
+		for _, j := range untyped {
+			if c := &calls[j]; !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns, nil)) {
+				still = append(still, j)
+			}
+		}
+
+		if len(still) == len(untyped) {
+			return
+		}
+
+		untyped = still
+	}
+}
+
+// typePendingCalls files a ref for each assignment in calls whose call says
+// what it returns, and reports the ones nothing typed. A member set is kept
+// for applyMemberBindings instead. globals are the file's refs a receiver is
+// looked up in, nil for pr's own; see baseVarComponent.
+func (pr *ParseResult) typePendingCalls(calls []pendingCall, funcReturns map[string]string, globals []ComponentRef) (untyped []int) {
 	for j := range calls {
 		c := &calls[j]
 
@@ -1026,38 +1059,12 @@ func (pr *ParseResult) resolvePendingCalls(calls []pendingCall) {
 			continue
 		}
 
-		if !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns)) {
+		if !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns, globals)) {
 			untyped = append(untyped, j)
 		}
 	}
 
-	// Later passes: resolve ReturnComponent for functions whose return var was
-	// just added by calls, and look again at the calls left untyped, which
-	// may assign what such a function returns or call a method on a variable
-	// typed by one. A function whose return waited for a call to type its
-	// variable settles here, and `variables.binder = buildBinder()` had been
-	// left untyped because the call was looked at first.
-	for range maxReturnRounds {
-		if pr.settleReturnVars(returnPendings, nil) == 0 || len(untyped) == 0 {
-			return
-		}
-
-		funcReturns = pr.funcReturns()
-
-		var still []int
-
-		for _, j := range untyped {
-			if c := &calls[j]; !pr.addPendingRef(c, pr.pendingCallComponent(c, funcReturns)) {
-				still = append(still, j)
-			}
-		}
-
-		if len(still) == len(untyped) {
-			return
-		}
-
-		untyped = still
-	}
+	return untyped
 }
 
 // maxReturnRounds bounds how many times resolvePendingCalls goes back for the
@@ -1086,9 +1093,42 @@ func (pr *ParseResult) funcReturns() map[string]string {
 	return out
 }
 
+// funcReturnsFor is funcReturns limited to the functions calls name, for a
+// body typed on its own: building the whole map for every function asked
+// about was most of what typing one cost.
+func (pr *ParseResult) funcReturnsFor(calls []pendingCall) map[string]string {
+	out := map[string]string{}
+
+	for i := range calls {
+		if c := &calls[i]; c.funcName != "" && !c.returnExpr && c.callsOwnFunction() {
+			out[strings.ToLower(c.funcName)] = ""
+		}
+	}
+
+	for i := range pr.Funcs {
+		f := &pr.Funcs[i]
+
+		key := strings.ToLower(f.Name)
+		if _, ok := out[key]; !ok {
+			continue
+		}
+
+		comp := f.ReturnComponent
+		if comp == "" && isComponentType(f.ReturnType) {
+			comp = f.ReturnType
+		}
+
+		if comp != "" {
+			out[key] = comp
+		}
+	}
+
+	return out
+}
+
 // pendingCallComponent is the component the call c assigns its variable, or
 // "" when nothing says. It may clear c.rest, when the chain ends in a mock.
-func (pr *ParseResult) pendingCallComponent(c *pendingCall, funcReturns map[string]string) string {
+func (pr *ParseResult) pendingCallComponent(c *pendingCall, funcReturns map[string]string, globals []ComponentRef) string {
 	var comp string
 	if c.callsOwnFunction() {
 		comp = funcReturns[strings.ToLower(c.funcName)]
@@ -1096,7 +1136,7 @@ func (pr *ParseResult) pendingCallComponent(c *pendingCall, funcReturns map[stri
 
 	// Fallback: x = baseVar.method() — assign x same component as baseVar
 	if comp == "" && c.baseVar != "" {
-		comp = pr.baseVarComponent(c)
+		comp = pr.baseVarComponent(c, globals)
 	}
 
 	// x = inherited(): a method the file does not declare is its base's,
@@ -1402,15 +1442,26 @@ func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
 // method's declared return type when FuncLookup can say, else baseVar's own
 // component, or "$any" when the method is known to declare none.
 //
-// An argument is the function's own, so `arguments.binder.init()` is not read
-// from the component's refs: ColdBox's Injector holds a `variables.binder`
-// built from the argument, and taking that for it made the argument the
-// injector.
-func (pr *ParseResult) baseVarComponent(c *pendingCall) string {
+// An argument or a local is the function's own, so `arguments.binder.init()`
+// is not read from the component's refs: ColdBox's Injector holds a
+// `variables.binder` built from the argument, and taking that for it made the
+// argument the injector. Nor is an unscoped name the function declared:
+// Lucee's mail tests pass `smtpServer` to a helper whose argument has that
+// name, and the helper's `it = smtpServer.getReceivedEmail()` was typed by
+// the callers' variables-scope one, but only once those had refs, so the
+// answer depended on which parse got there first.
+//
+// globals are the file-level refs to look in, nil for pr's own: a function
+// body parsed on its own (funcRefsUncached) reads the file's.
+func (pr *ParseResult) baseVarComponent(c *pendingCall, globals []ComponentRef) string {
 	var comp string
 
-	if !c.baseArgs {
-		if ref := firstRefIn(pr.ComponentRefs, c.baseVar, c.baseScope); ref != nil {
+	if globals == nil {
+		globals = pr.ComponentRefs
+	}
+
+	if !c.baseLocal {
+		if ref := firstRefIn(globals, c.baseVar, c.baseScope); ref != nil {
 			comp = pr.settledComponent(ref)
 		}
 	}
@@ -1480,12 +1531,12 @@ func rebinds(varName, recv string) bool {
 	return strings.EqualFold(StripReceiverScope(varName), recv)
 }
 
-// readThroughArguments reports whether the receiver recv is written
-// `arguments.x`.
-func readThroughArguments(recv string) bool {
+// readThroughLocal reports whether the receiver recv is written
+// `arguments.x` or `local.x`.
+func readThroughLocal(recv string) bool {
 	scope, name, ok := strings.Cut(recv, ".")
 
-	return ok && name != "" && strings.EqualFold(scope, "arguments")
+	return ok && name != "" && (strings.EqualFold(scope, "arguments") || strings.EqualFold(scope, "local"))
 }
 
 // firstRefIn is firstRefNamed among the refs scope admits.
@@ -2609,6 +2660,37 @@ func (pr *ParseResult) cachedFuncRefs(funcStart, funcEnd int) ([]ComponentRef, [
 	return refs, links
 }
 
+// typeBodyPendingCalls types the assignments a function body parsed on its
+// own made from calls, as the full parse types them: without it
+// `variables.y = variables.y.next()` and `z = make()` added no ref, and the
+// variable kept its first type wherever FuncRefs parsed the body itself:
+// for a function the parse filed no ref under, and for every function after
+// an edit. Chained refs are settled as applyChainedReturnLookup settles them.
+// The body's refs are its own, keyed as its parser keyed them; a receiver is
+// also looked up among the file's.
+func (pr *ParseResult) typeBodyPendingCalls(global []ComponentRef, local map[string][]ComponentRef, calls []pendingCall) ([]ComponentRef, map[string][]ComponentRef) {
+	body := &ParseResult{
+		URI: pr.URI, FuncLookup: pr.FuncLookup, Resolvers: pr.Resolvers, resolverSet: pr.resolverSet,
+		ComponentRefs: global, funcRefsMap: local,
+	}
+
+	// The file's refs hold the body's own as well, from the parse or shifted
+	// by an edit, so they are read as they are rather than copied with the
+	// body's for every function asked about.
+	if len(calls) > 0 {
+		globals := pr.ComponentRefs
+		if len(globals) == 0 {
+			globals = global
+		}
+
+		body.typePendingCalls(calls, pr.funcReturnsFor(calls), globals)
+	}
+
+	body.applyChainedReturnLookup()
+
+	return body.ComponentRefs, body.funcRefsMap
+}
+
 func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef, []DocumentLink) {
 	start, end := pr.lineOffsets(funcStart, funcEnd)
 	if start < 0 {
@@ -2637,6 +2719,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		sp.extractLinks = true
 		sp.argumentTypes = pr.argumentTypeLookup()
 		sp.parse()
+		sp.componentRefs, sp.funcRefs = pr.typeBodyPendingCalls(sp.componentRefs, sp.funcRefs, sp.pendingCalls)
 		refs = sp.componentRefs
 		links = sp.links
 		// Include function-scoped refs (nested functions in body)
@@ -2654,6 +2737,7 @@ func (pr *ParseResult) funcRefsUncached(funcStart, funcEnd int) ([]ComponentRef,
 		tp.extractLinks = true
 		tp.argumentTypes = pr.argumentTypeLookup()
 		tp.parse()
+		tp.componentRefs, tp.funcRefs = pr.typeBodyPendingCalls(tp.componentRefs, tp.funcRefs, tp.pendingCalls)
 		refs = tp.componentRefs
 
 		links = tp.links

@@ -523,10 +523,18 @@ the *formatter*, not the parser.
   call's component while parsing (`lookupComponentRef`), from the refs it has
   so far, so it leaves it empty when an assignment only `resolvePendingCalls`
   can type sits between that ref and the call.
-  `TestACallInAnAssignmentReadsTheValueBeforeIt`. Not fixed: a script function
-  with no local refs is re-parsed lazily by `FuncRefs`, and that parse
-  resolves no pending calls, so `variables.y = variables.y.next()` leaves
-  `variables.y` its first type there.
+  `TestACallInAnAssignmentReadsTheValueBeforeIt`.
+- **A function body `FuncRefs` parses on its own is typed as the full parse
+  types it** (`typeBodyPendingCalls`). That parse runs for a function the parse
+  filed no ref under, and for every function after an edit invalidates it, and
+  it resolved no pending calls, so `x = make()` and `variables.y =
+  variables.y.next()` added nothing and the variable kept its first type. It
+  now types them (`typePendingCalls`, the first pass of `resolvePendingCalls`)
+  and settles chained refs (`applyChainedReturnLookup`), reading a receiver
+  from the file's refs as they stand; `funcReturnsFor` builds only the return
+  types the body's calls name. An unscoped argument or local is not read from
+  the component's refs (`pendingCall.baseLocal`), or the answer depended on
+  which of the two parses ran first. `TestLazyFuncRefsAreTypedAsTheParseTypesThem`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.

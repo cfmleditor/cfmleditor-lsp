@@ -25,6 +25,12 @@ function scoped(){
 	variables.y = variables.y.next();
 	variables.y.onlyB();
 }
+// No local of its own, so FuncRefs parses the body itself.
+function noLocals(){
+	variables.w = new models.A();
+	variables.w = variables.w.next();
+	variables.w.onlyB();
+}
 }`,
 		"Tag.cfc": `<cfcomponent>
 <cffunction name="f">
@@ -40,6 +46,8 @@ function scoped(){
 		"x.onlyB":           "",
 		"variables.y.next":  "",
 		"variables.y.onlyB": "",
+		"variables.w.next":  "",
+		"variables.w.onlyB": "",
 	})
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Tag.cfc"), map[string]string{
 		"z.next":  "",

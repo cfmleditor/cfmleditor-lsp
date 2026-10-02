@@ -783,6 +783,16 @@ those two lines, reported again against the `MuraScope` they are called on;
 the removals are calls after a reassignment that the tag parser had fixed to
 the type before it while parsing. Every other corpus scan is unchanged.
 
+The lazy body parse `FuncRefs` falls back to now types its pending calls as
+the full parse does, so the editor, after an edit, and a scan agree. With it,
+an unscoped argument or local receiver is read only from the function's refs.
+Corpus against the commit above: ColdBox 0 removed / 10 added, every other
+scan unchanged. All ten are `oBean.getFname()`/`getLname()` in
+`FrameworkSuperTypeTest.cfc`: `oBean = target.populate( … )` where `target` is
+the closure's own `var target = getInterceptor( "Test1" )`, which nothing
+types. They had passed because the component-level `target`, a `$any` mock,
+was read in its place.
+
 Not done: assignments on different branches are not compared, so the one
 reaching the return by line wins even where another branch assigns something
 else. `buildBinder()` is `$any` only because its later branch is.

@@ -79,7 +79,7 @@ type pendingCall struct {
 	global     bool
 	returnExpr bool // a return expression, grouped by function for factory-chain inference
 	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
-	baseArgs   bool // baseVar was read through arguments.; see baseVarComponent
+	baseLocal  bool // baseVar is the function's own, an argument or a local; see baseVarComponent
 	rebinds    bool // the call is made on varName itself; see ComponentRef.Rebinds
 	baseScope  RefScope
 
@@ -3342,7 +3342,7 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 		refThis:    p.refThis,
 		global:     p.forceGlobal,
 		baseScope:  ReceiverRefScope(recv),
-		baseArgs:   readThroughArguments(recv),
+		baseLocal:  readThroughLocal(recv) || recv == prevIdent && p.inFunc != "" && p.isVarDeclaredLocal(prevIdent),
 		rebinds:    rebinds(varName, recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
