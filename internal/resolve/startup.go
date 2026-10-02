@@ -330,29 +330,73 @@ func (r *Resolver) typeOfShared(key string, assigns []startupAssign, visiting ma
 // typeOfExpr types a startup assignment's right-hand side: a created
 // component, another shared variable, or a chain of calls on either, walked
 // through each hop's return type. Anything else is not typed.
+//
+// A call on a receiver (`REQUEST.kernel.getContextObject()`) is walked from
+// the receiver before any resolver is tried on the call: a broad `get$1()`
+// matches the tail of every getter, and tassweb's REQUEST.context was typed
+// as a `tass.contextobject` that does not exist, when kernel2 says what
+// getContextObject returns. The factory resolvers answer what the walk
+// cannot, and a dynamicIfMissing one naming no file types nothing.
 func (r *Resolver) typeOfExpr(rhs, dir string, assigns []startupAssign, visiting map[string]bool) string {
-	if root, methods := parser.FactoryCallChain(rhs); root != "" {
-		if comp, _, _ := r.matchResolver(root, nil, nil); comp != "" {
-			for _, method := range methods {
-				if strings.EqualFold(method, "init") {
-					continue
-				}
+	root, methods := parser.FactoryCallChain(rhs)
 
-				def := r.ResolveFunc(comp, method, dir)
-				if def == nil {
-					return ""
-				}
-
-				comp = r.ReturnComponentOf(def)
-				if comp == "" || strings.HasPrefix(comp, "$") {
-					return ""
-				}
-			}
-
-			return r.staticPath(comp)
+	if root != "" && hasReceiver(root) {
+		if comp := r.typeOfChain(rhs, dir, assigns, visiting); comp != "" {
+			return comp
 		}
 	}
 
+	if root != "" {
+		if comp, ok := r.typeOfFactory(root, methods, dir); ok {
+			return comp
+		}
+	}
+
+	return r.typeOfChain(rhs, dir, assigns, visiting)
+}
+
+// hasReceiver reports whether a call is made on something: `a.b()` rather
+// than `b()`. Only the text before the argument list counts.
+func hasReceiver(call string) bool {
+	head, _, _ := strings.Cut(call, "(")
+
+	return strings.Contains(head, ".")
+}
+
+// typeOfFactory types a configured factory call and the methods chained on
+// it. ok is false when no resolver claims the call.
+func (r *Resolver) typeOfFactory(root string, methods []string, dir string) (string, bool) {
+	comp, _, soft := r.matchResolver(root, nil, nil)
+	if comp == "" {
+		return "", false
+	}
+
+	if soft && !r.componentExists(comp, dir) {
+		return "", true
+	}
+
+	for _, method := range methods {
+		if strings.EqualFold(method, "init") {
+			continue
+		}
+
+		def := r.ResolveFunc(comp, method, dir)
+		if def == nil {
+			return "", true
+		}
+
+		comp = r.ReturnComponentOf(def)
+		if comp == "" || strings.HasPrefix(comp, "$") {
+			return "", true
+		}
+	}
+
+	return r.staticPath(comp), true
+}
+
+// typeOfChain types a created component, or a chain of calls on a shared
+// variable or a resolver-matched receiver.
+func (r *Resolver) typeOfChain(rhs, dir string, assigns []startupAssign, visiting map[string]bool) string {
 	if m := createdComponent.FindStringSubmatch(rhs); m != nil {
 		return r.staticPath(m[1])
 	}
