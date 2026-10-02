@@ -48,14 +48,12 @@ func TestAPropertyHopIsTypedByAResolver(t *testing.T) {
 }`,
 	})
 
-	property := parser.Resolver{Match: "getSubServices().$1", Resolve: "subservices.${1:lower}.service", Prefix: "getSubServices"}
-
 	without := reasonsWith(t, &Resolver{}, dir, "pages/Page.cfc")
 	if !strings.Contains(without["variables.kernel.getSubServices.$property:lookups.selectAll"], "has no component type") {
 		t.Fatalf("without the resolver the property is untyped, got %q", without["variables.kernel.getSubServices.$property:lookups.selectAll"])
 	}
 
-	got := reasonsWith(t, &Resolver{Resolvers: []parser.Resolver{property}}, dir, "pages/Page.cfc")
+	got := reasonsWith(t, &Resolver{Resolvers: []parser.Resolver{{Match: "getSubServices().$1", Resolve: "subservices.${1:lower}.service", Prefix: "getSubServices"}}}, dir, "pages/Page.cfc")
 	if got["variables.kernel.getSubServices.$property:lookups.selectAll"] != "" {
 		t.Errorf("selectAll on the resolved subservice did not resolve: %s", got["variables.kernel.getSubServices.$property:lookups.selectAll"])
 	}
@@ -79,9 +77,7 @@ func TestAPropertyHopIgnoresAResolverForTheCallBeforeIt(t *testing.T) {
 }`,
 	})
 
-	catchAll := parser.Resolver{Match: `get([A-Za-z]+)\(\)`, Resolve: "app.${1:lower}", Prefix: "get"}
-
-	got := reasonsWith(t, &Resolver{Resolvers: []parser.Resolver{catchAll}}, dir, "pages/Page.cfc")
+	got := reasonsWith(t, &Resolver{Resolvers: []parser.Resolver{{Match: `get([A-Za-z]+)\(\)`, Resolve: "app.${1:lower}", Prefix: "get"}}}, dir, "pages/Page.cfc")
 	if reason := got["variables.kernel.getBar.$property:baz.qux"]; !strings.Contains(reason, "has no component type") {
 		t.Errorf("baz was typed by the resolver for getBar(): %q", reason)
 	}
