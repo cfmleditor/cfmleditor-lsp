@@ -595,3 +595,34 @@ What remains is mostly unprovable from source:
 | `getCurrentUser()` | ~54 | Lazily fills `request.currentUser`; any `request` write can replace it |
 | `getBean(...)` with a computed name | ~46 | The bean is chosen at run time |
 | `loadBy` on beans | ~38 | Polymorphic by its options, as category 5 says |
+
+## Unqualified lookups: directory-listing includes
+
+489 findings on MuraCMS (with `scripts/corpus/masacms.json`) are bare calls
+that nothing in reach declares. About 114 were `getDbType`, `dbTableColumns`
+and `dbCreateIndex` in the `dbUpdates/*.cfm` scripts. `configBean.applyDbUpdates`
+lists the directory beside itself
+(`<cfdirectory action="list" directory="#getDirectoryFromPath(getCurrentTemplatePath())#dbUpdates" filter="*.cfm" name="rsUpdates">`)
+and includes each file it finds (`<cfinclude template="dbUpdates/#rsUpdates.name#">`),
+so every update script runs in `configBean`'s variables scope. That shape is now
+an include edge to each listed template (`parser.directoryIncludes`,
+`Resolver.includeTargets`). A recursive listing, a computed directory or filter,
+a parent directory, an include prefix naming another directory, and a listing
+inside a comment are not.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| MuraCMS, configured | 11,171 | 11,032 | 141 / 2 |
+| MuraCMS, no config | 20,745 | 20,626 | 121 / 2 |
+| Five other corpus projects | | | 0 / 0 each |
+
+The additions are `getClassExtensionManager()` chains in `dbUpdates/5.2.2655.cfm`,
+the lazy-field group under unknown returns.
+
+Most of what remains is `rbKey` (253) and `buildURL` (37) in the admin views.
+Mura's admin embeds FW/1 1.x: `framework.view()` includes each view through a
+computed path inside the framework object, and `admin/Application.cfc` is that
+object (it extends `framework`), so a view calls its functions unqualified.
+Typing it needs the FW/1 preset to take a view's implicit base as the governing
+`Application.cfc` rather than the `framework.one` stub, and the project config
+to opt into `fw1`; the second shifts the documented Masa baseline.

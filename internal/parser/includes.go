@@ -76,7 +76,7 @@ func ExtractIncludes(content string) []string {
 		}
 	}
 
-	return out
+	return append(out, directoryIncludes(content)...)
 }
 
 // includeFormAt decides which form the "include" found at i begins, and where
@@ -172,4 +172,78 @@ func inSpan(spans [][2]int, pos int) bool {
 	})
 
 	return k < len(spans) && spans[k][0] <= pos && pos < spans[k][1]
+}
+
+// directoryListing is a <cfdirectory action="list"> of a directory beside the
+// listing file: `directory="#getDirectoryFromPath(getCurrentTemplatePath())#sub"`.
+var directoryListing = regexp.MustCompile(`(?is)<cfdirectory\b[^>]*>`)
+
+var (
+	listingAttr = regexp.MustCompile(`(?i)\b([a-z]+)\s*=\s*["']([^"']*)["']`)
+	listingDir  = regexp.MustCompile(`(?i)^#\s*getDirectoryFromPath\s*\(\s*getCurrentTemplatePath\s*\(\s*\)\s*\)\s*#([\w./-]+?)/?$`)
+)
+
+// includeFromListing is <cfinclude template="sub/#q.name#">, the include of a
+// file a listing named q found.
+var includeFromListing = regexp.MustCompile(`(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([\w./-]*)#\s*([\w$]+)\.name\s*#["']`)
+
+// directoryIncludes is the glob includes of a file that lists a directory of
+// templates beside itself and includes each one it finds. Mura applies its
+// database updates this way: configBean lists dbUpdates/*.cfm and includes
+// every one, so each runs in configBean's variables scope.
+//
+// The include is a glob, `sub/*.cfm`, which the resolver expands. It is only
+// recorded when the listing is literal, not recursive, filtered to templates,
+// and names the directory the include's prefix does; anything computed is not
+// a static answer.
+func directoryIncludes(content string) []string {
+	if indexFold(content, "cfdirectory") < 0 {
+		return nil
+	}
+
+	comments := tagCommentSpans(content)
+	listed := map[string]string{} // query name → directory, lowercased name
+
+	for _, at := range directoryListing.FindAllStringIndex(content, -1) {
+		if inSpan(comments, at[0]) {
+			continue
+		}
+
+		attrs := map[string]string{}
+
+		for _, m := range listingAttr.FindAllStringSubmatch(content[at[0]:at[1]], -1) {
+			attrs[strings.ToLower(m[1])] = m[2]
+		}
+
+		dir := listingDir.FindStringSubmatch(attrs["directory"])
+		if !strings.EqualFold(attrs["action"], "list") || dir == nil || attrs["name"] == "" ||
+			strings.EqualFold(attrs["recurse"], "true") || strings.EqualFold(attrs["recurse"], "yes") ||
+			!strings.EqualFold(attrs["filter"], "*.cfm") || strings.Contains(dir[1], "..") {
+			continue
+		}
+
+		listed[strings.ToLower(attrs["name"])] = dir[1]
+	}
+
+	var out []string
+
+	for _, at := range includeFromListing.FindAllStringSubmatchIndex(content, -1) {
+		if inSpan(comments, at[0]) {
+			continue
+		}
+
+		m := []string{"", content[at[2]:at[3]], content[at[4]:at[5]]}
+
+		dir, ok := listed[strings.ToLower(m[2])]
+		if !ok || !strings.EqualFold(strings.TrimSuffix(m[1], "/"), dir) {
+			continue
+		}
+
+		glob := dir + "/*.cfm"
+		if !slices.ContainsFunc(out, func(s string) bool { return strings.EqualFold(s, glob) }) {
+			out = append(out, glob)
+		}
+	}
+
+	return out
 }
