@@ -560,9 +560,11 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 
 		// Closure-local collection bindings need their own lexical identities.
 		// Withhold collection inference rather than attributing them to the parent.
+		// The marker carries the function the closure is written in, which is
+		// what applyMemberBindings narrows its withholding to.
 		if ((t.Kind == TokEquals || t.Kind == TokMinus) && sc.PeekSkipComments().Kind == TokGT) ||
 			(t.Kind == TokIdent && identEq(t.Value, "function") && sc.PeekSkipComments().Kind == TokLParen) {
-			writes = append(writes, collectionWrite{unknown: true})
+			writes = append(writes, collectionWrite{function: functionAt(offset + t.Offset), unknown: true})
 		}
 
 		if t.Kind != TokIdent || before == TokDot || before == TokDoubleColon {

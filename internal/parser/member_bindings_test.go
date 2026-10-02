@@ -107,3 +107,39 @@ func TestMemberBindingsRefreshAfterBodyEdit(t *testing.T) {
 	pr.ApplyFullReplace(strings.ReplaceAll(source, "new models.Scope()", "arguments.value"))
 	check("")
 }
+
+// A closure withholds the members it could write: its own function's, and
+// the component's. It used to withhold every member in the file, so a
+// ContentBox handler with one closure left `prc.author = authorService.get()`
+// untyped in every other action.
+func TestAClosureWithholdsOnlyTheMembersItCanWrite(t *testing.T) {
+	for _, tc := range []struct{ name, member, run, other, want string }{
+		{"closure in another function", "rc.$", `rc.$=new models.Scope();`, `arguments.items.each(function(i){ i.x = 1; });`, "models.Scope"},
+		{"arrow in another function", "rc.$", `rc.$=new models.Scope();`, `arguments.items.each((i) => i.x);`, "models.Scope"},
+		{"closure in the same function", "rc.$", `rc.$=new models.Scope();arguments.items.each(function(rc){ rc.$ = 1; });`, ``, ""},
+		{"component member, closure elsewhere", "variables.svc.$", `variables.svc.$=new models.Scope();`, `arguments.items.each(function(i){ variables.svc.$ = i; });`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := "component {\n function run(rc,items) {\n" + tc.run + "\n" + tc.member + ".work();\n }\n function other(items) {\n" + tc.other + "\n }\n}"
+			pr := ParseWithOptions(testURI, source, &ParseOptions{ExtractCalls: true})
+
+			s := pr.Scopes[0]
+			found := false
+
+			name, _, _ := MemberReceiverName(tc.member)
+			for _, ref := range append(pr.FuncComponentRefsAt(s.Start, s.End, uint32(s.End)), pr.ComponentRefs...) {
+				if ref.Variable == name {
+					found = true
+
+					if ref.Component != tc.want {
+						t.Errorf("member=%q want=%q", ref.Component, tc.want)
+					}
+				}
+			}
+
+			if !found {
+				t.Fatal("member binding not recorded")
+			}
+		})
+	}
+}
