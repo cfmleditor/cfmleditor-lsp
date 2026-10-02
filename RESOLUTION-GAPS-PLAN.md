@@ -564,3 +564,34 @@ Typing the first group means letting the agreement of a public method's
 workspace callers decide its parameter's type, which this plan's rule keeps
 shared signatures independent of. If it is done, it belongs behind an explicit,
 default-off closed-workspace setting, measured on its own.
+
+## Unknown returns on MuraCMS
+
+Measured with `scripts/corpus/masacms.json`: 552 findings say a method has no
+component return type. Two shapes were provable and are fixed here:
+
+- **A getter of a startup-typed shared variable.** `getPluginManager()` and
+  `getServiceFactory()` in `mura.cfobject` are `return application.pluginManager`
+  and `return application.serviceFactory`. A function whose whole body is a
+  return of a shared-scope variable now returns what the startup templates
+  assign it, the same lookup and policy that already type the variable as a
+  receiver. Only that shape: a call anywhere in the body can write the scope,
+  so a guarded or computed body (`TestAbsentOptionalArgumentBoundaries`) still
+  has no answer. Reading shared variables anywhere in a body was tried first
+  and broke those boundaries.
+- **A parenthesised return.** `return( this );` is how `mura.jsonSerializer`
+  ends every fluent definer, so `asString()`, `asInteger()` and the rest had no
+  return type. A fully parenthesised expression is now read as the expression.
+
+Together: 11,290 → 11,186 (104 removed, none added); the six other corpus
+projects are unchanged.
+
+What remains is mostly unprovable from source:
+
+| Group | Findings | Why it stays |
+|---|---:|---|
+| Lazy getters on a bean's `variables.instance` struct: `configBean.getClassExtensionManager` (47), `settingsBean.getContentRenderer` (22), `settingsBean.getRBFactory` (22) | ~90 | The bean's generic `setValue` writes `variables.instance["#arguments.property#"]`, and any caller can name the field |
+| `servletEvent.getValue` and `MuraScope.event` | ~52 | An event slot, as in the MuraScope section above |
+| `getCurrentUser()` | ~54 | Lazily fills `request.currentUser`; any `request` write can replace it |
+| `getBean(...)` with a computed name | ~46 | The bean is chosen at run time |
+| `loadBy` on beans | ~38 | Polymorphic by its options, as category 5 says |

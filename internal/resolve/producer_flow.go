@@ -508,7 +508,7 @@ func (e *producerEvaluation) read(path string, env producerEnvironment) producer
 }
 
 func (e *producerEvaluation) expression(expression string, env producerEnvironment) producerValue {
-	tokens := producerTokens(expression)
+	tokens := producerUnwrap(producerTokens(expression))
 	if len(tokens) == 0 {
 		return producerUnknown()
 	}
