@@ -524,6 +524,10 @@ var engineImports = map[string]bool{
 const (
 	luceeComponents = "org.lucee.cfml."
 	adobeComponents = "com.adobe.coldfusion."
+	// adobeAdminAPI is Adobe ColdFusion's administrator API, which the engine
+	// ships in its CFIDE directory: Mura's database setup creates datasources
+	// through cfide.adminapi.datasource on Adobe ColdFusion.
+	adobeAdminAPI = "cfide.adminapi."
 )
 
 // engineComponent reports whether component names one the engine provides,
@@ -542,7 +546,7 @@ func engineComponent(component string) (qualified string, ok bool) {
 		return luceeComponents + component, true
 	case strings.HasPrefix(lower, luceeComponents) && len(lower) > len(luceeComponents):
 		return component, true
-	case strings.HasPrefix(lower, adobeComponents):
+	case strings.HasPrefix(lower, adobeComponents), strings.HasPrefix(lower, adobeAdminAPI):
 		return "", true
 	}
 

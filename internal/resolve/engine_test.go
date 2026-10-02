@@ -102,6 +102,8 @@ func TestAnEngineComponentWithoutItsSourceIsDynamic(t *testing.T) {
 		h.send();
 		var a = new com.adobe.coldfusion.mail();
 		a.send();
+		var ds = createObject( "component", "cfide.adminapi.datasource" );
+		ds.setMSSQL();
 		var o = new org.lucee.cfml.Administrator( "web", "pw" );
 		o.getMappings();
 		var m = new Missing();
@@ -114,6 +116,7 @@ func TestAnEngineComponentWithoutItsSourceIsDynamic(t *testing.T) {
 		"q.execute":     "",
 		"h.send":        "",
 		"a.send":        "",
+		"ds.setMSSQL":   "",
 		"o.getMappings": "",
 		"m.go":          "component 'Missing' does not exist (calling 'go')",
 	})

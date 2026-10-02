@@ -658,3 +658,51 @@ means a configured scan of Masa or MuraCMS now runs the FW/1 preset: compare a
 later configured measurement against 10,652 on MuraCMS, not 11,032, and rescan
 Masa's configured baseline before comparing to the figures earlier in this
 plan.
+
+## Lazy-field getters: why they stay unknown
+
+`configBean.getClassExtensionManager()`, `settingsBean.getRBFactory()` and
+`settingsBean.getContentRenderer()` each fill a `variables.instance` field when
+it is not yet an object and return it. Every one of those fields can be written
+with any value from outside the getter, so the field's type is not in the
+source:
+
+- `configBean.setValue` writes `variables.instance[property]` directly; `init`
+  copies the whole config struct through it (`setValue(prop, arguments.config[prop])`,
+  line 261), so field names come from the site's settings, and its
+  `onMissingMethod` turns any `setX(value)` into `setValue("x", value)`.
+- `settingsBean.set()` copies every column of a query or key of a struct
+  through `setValue`, and `setRBFactory()` is a public setter.
+
+This is the plan's rule for dynamic writes, and they stay unknown.
+
+## Missing components on MuraCMS
+
+With `scripts/corpus/masacms.json`, 125 findings name a component that does
+not exist. Two causes were fixable:
+
+- **A registration that depends on the engine.** Mura aliases `contentGateway`
+  to `contentGatewayAdobe` on Adobe ColdFusion and to `contentGatewayLucee`,
+  which extends it, otherwise. Registrations of one id that disagree used to
+  cancel out; when one target is extended by every other, the id now has that
+  common base's type (`Resolver.commonBase`). A method the base declares exists
+  under either engine, and one only a subclass declares is still reported.
+  Unrelated targets still give no type.
+- **Adobe's administrator API.** `cfide.adminapi.*` ships in the engine's CFIDE
+  directory, never in a project, so it is treated as an engine component, as
+  `com.adobe.coldfusion.*` already was: accepted as dynamic once nothing on
+  disk resolves it.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| MuraCMS, configured | 10,652 | 10,587 | 65 / 0 |
+| MuraCMS, no config | 20,626 | 20,615 | 11 / 0 |
+| Five other corpus projects | | | 0 / 0 each |
+
+The configured removals are the 31 `contentGateway` findings, 23 calls on
+`application.contentGateway` (which the service loop types now that the alias
+resolves) and 11 `cfide.adminapi` ones. Most of what remains is `testWidget`
+(64): `core/tests/specs/mura/core/entities.cfc` registers a model directory at
+run time (`configBean.registerModelDir(dir="/muraWRM/core/tests/resources/model")`)
+and Mura registers each bean there by its `entityName`. That is one test
+spec's run-time registration, not modelled.
