@@ -509,3 +509,40 @@ user package does not declare.
 `unresolved.NewResolver` and `unresolved.Parse`. It used to build its own
 without `beanPaths` or the setter and constructor policies, and reported these
 receivers unresolved while the scan accepted them.
+
+## MuraScope: why `$` stays unknown
+
+Measured on MuraCMS with `scripts/corpus/masacms.json`, after the service-loop
+fix above. `variables.$`, `$` and `rc.$` are 2,910 of 10,070 unknown-receiver
+findings: 1,344 in display modules under `core/modules/v1`, 889 in admin views,
+and most of the rest in `standardEventsHandler.cfc` and
+`contentRendererUtility.cfc`. Typing them soundly needs three links, and none
+is provable from source:
+
+1. **The value.** Both bulk origins read an event slot:
+   `request.context.$=request.event.getValue('MuraScope')`
+   (`admin/Application.cfc:384`) and
+   `variables.$=variables.event.getValue("muraScope")` (`contentRenderer.init`).
+   `servletEvent.getValue` reads the global `request` scope and returns `""`
+   for an unset key, and any dynamic-key write to `request` can replace the
+   slot. The provable origin, `getBean('$').init()` (`$` is a literal alias of
+   `MuraScope`), covers a handful of locals.
+2. **Into the display modules.** The renderer includes them through computed
+   paths (`#filePath#themes/#theme#/…`, `#theIncludePath#/modules/…`), so there
+   is no static include edge to carry `variables.$` along.
+3. **Into the admin views.** FW/1 renders views through computed includes too,
+   so `rc.$` never reaches a view statically.
+
+Two project contracts were measured on a scratch copy of the config, not committed:
+
+| Contract | Findings | Removed / added |
+|---|---|---|
+| `getValue("muraScope")` is `mura.MuraScope` | 11,290 → 11,251 | 113 / 74 |
+| A receiver named `$`, `variables.$` or `rc.$` is `mura.MuraScope` | 11,290 → 8,365 | 3,126 / 201 |
+
+The name contract's drop is mostly not proof. `MuraScope` defines
+`onMissingMethod`, so most calls on it are accepted as dynamic once `$` is
+typed, and the additions are deeper unknown returns (`$.currentUser()` 86,
+`$.content()` 34). It is also what this plan's rule forbids as inference.
+Either contract is a project's own decision to make in its config; the
+resolver does not make it.
