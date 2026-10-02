@@ -530,9 +530,17 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 		}
 	}
 
+	seededReturn := seed >= 0 && tp.funcs[0].returnVar != ""
+
 	tp.parse()
 
 	if seed >= 0 {
+		// A return this region found for the function it continues is at a
+		// line within the region, like everything else it recorded.
+		if !seededReturn && tp.funcs[0].returnVar != "" {
+			tp.funcs[0].returnLine += conv.Uint32(r.StartLine)
+		}
+
 		pr.Funcs[seed] = tp.funcs[0]
 		tp.funcs = tp.funcs[1:]
 	}
@@ -544,6 +552,7 @@ func (pr *ParseResult) mergeTagRegion(r *Region, tagScopes []FuncScope, open *op
 
 	for i := range tp.funcs {
 		tp.funcs[i].Line += conv.Uint32(r.StartLine)
+		tp.funcs[i].returnLine += conv.Uint32(r.StartLine)
 	}
 
 	for i := range tp.componentRefs {
