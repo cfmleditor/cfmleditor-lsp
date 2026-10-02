@@ -2177,6 +2177,17 @@ func (r *Resolver) besideDeclaring(fd *parser.FunctionDef, t string) string {
 	return cfpath.ResolvePathCached(t, filepath.Dir(file), nil, r.dirs())
 }
 
+// bareArgumentComponent is the component a bare argument type names beside
+// the declaring file, as a bare return type is read (besideDeclaring). A CFML
+// type name, and a word naming no file there, is not one.
+func (r *Resolver) bareArgumentComponent(t string, pr *parser.ParseResult) string {
+	if t == "" || cfmlTypes[strings.ToLower(t)] {
+		return ""
+	}
+
+	return r.besideDeclaring(&parser.FunctionDef{URI: pr.URI}, t)
+}
+
 // checkMethodOn is canResolveCall's last step: whether the component the
 // receiver resolved to defines the method, with the dynamic, builtin,
 // member-method, onMissingMethod and altComp fallbacks.
@@ -2469,6 +2480,15 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 				tr.addf("resolved %q via enclosing function argument", variable)
 
 				return arg.Type, false
+			}
+
+			// A bare type is read as a bare return type is: a component
+			// beside the declaring file. `required Duration otherDuration`
+			// was left untyped, so every call on the argument was unresolved.
+			if path := r.bareArgumentComponent(arg.Type, pr); path != "" {
+				tr.addf("resolved %q to %q via its declared type %q, a component beside the declaring file", variable, path, arg.Type)
+
+				return path, false
 			}
 
 			if parser.IsMemberMethod(funcName) {
