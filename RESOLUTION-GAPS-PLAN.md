@@ -803,6 +803,58 @@ engine, three components with no common base that each declare
 `addCustomTagPath()`. It had been typed as the last. Answering it needs a
 return type that is a set of components, which nothing holds yet.
 
+### Braceless bodies are not blocks
+
+Open. `flowBlocks` sees a block only where a brace opens one, so a body
+written without braces runs "always" as far as a return is concerned:
+
+```cfml
+var x = new models.A();
+if ( c ) x = new models.B();
+return x;            // typed models.B; should be no type (A or B)
+```
+
+The same holds for a braceless `else` (including `if ( c ) { … } else x = …`),
+`for` and `while`. A braceless branch followed by an assignment that always
+runs is already right (`if ( c ) x = new B(); x = new C();` returns `C`).
+`TestKnownBracelessBodyGaps` in `internal/parser/return_branches_test.go`
+lists each shape with today's answer and the wanted one, and fails when a case
+starts giving the wanted one: move it to
+`TestReturnTypeComparesTheBranchesReachingIt` then.
+
+Not measured on the corpus: the branch comparison changed one entry there, so
+the braceless share of it is likely small, but nothing has counted it. Count it
+first (a scan for `if`/`else`/`for`/`while` heads not followed by `{` in
+functions with a variable return) before deciding the fix is worth its cost.
+
+Where the fix goes: the function-body loop in `scriptParser.parseFunction`
+(`internal/parser/script_parser.go`, the `for depth > 0` loop that opens and
+closes a block on each brace) and `handleBodyToken`. After the head of an
+`if (…)`, `else`, `for (…)` or `while (…)` that is not followed by `{`, open
+a block for the next statement and close it when that statement ends.
+`stampFlow` already stamps per handled token, so a block opened and closed
+around one statement gets its assignment stamped correctly.
+
+What makes it more than a token check:
+
+- **The statement's end.** CFScript does not require the semicolon, and
+  cfwheels omits it throughout. The rule the folding pass uses
+  (`parser.StructureSpans`: a newline ends a statement when the last token
+  could end an expression and the next is a word that is not an operator) is
+  the one to reuse, not a second copy of it.
+- **Chains.** `else if ( d ) x = …` is a braceless `else` holding a braceless
+  `if`; both blocks end with the same statement. `if ( a ) if ( b ) x = …`
+  nests the same way.
+- **The head's own parentheses.** The condition is consumed by the loop as
+  ordinary tokens today, and the block must open after its closing `)`, not at
+  the keyword.
+- **Tag syntax has no braceless form**, so `tagParser.trackBlock` needs
+  nothing.
+
+Verify as for the branch comparison: the known-gaps test, the corpus diff per
+entry against the commit before, and the parse benchmarks alternated against
+the old binary, since the loop runs on every token of a full parse.
+
 ## ContentBox: measurement and relationship getters
 
 **Measure ContentBox with `cfmigrations` on.** The checkout has no root

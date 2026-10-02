@@ -1,6 +1,9 @@
 package parser
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // A return reads what every assignment that may reach it says. One in a block
 // the return is outside of (a branch, a case, a loop body, a try or a catch)
@@ -183,6 +186,51 @@ function f( c ) {
 				if f := &pr.Funcs[i]; f.Name == "f" && f.ReturnComponent != tc.want {
 					t.Errorf("f returns %q, want %q", f.ReturnComponent, tc.want)
 				}
+			}
+		})
+	}
+}
+
+// bracelessBodyGaps are the braceless bodies flowBlocks does not see as
+// blocks, each with the return type the parse gives today and the one it
+// should. A body written without braces (`if ( c ) x = new B();`, and the
+// same after else, for and while) opens no block, so its assignment reads as
+// one that always runs and replaces what came before, where it should join
+// it. RESOLUTION-GAPS-PLAN.md, "Braceless bodies are not blocks", has where
+// the fix goes.
+var bracelessBodyGaps = []struct {
+	name, body, today, want string
+}{
+	{"if", "var x = new models.A();\n\tif ( c ) x = new models.B();", "models.B", ""},
+	{"if else", "if ( c ) var x = new models.A();\n\telse x = new models.B();", "models.B", ""},
+	{"braced if, braceless else", "var x = new models.A();\n\tif ( c ) { x = new models.B(); } else x = new models.C();", "models.C", ""},
+	{"for", "var x = new models.A();\n\tfor ( var i in c ) x = new models.B();", "models.B", ""},
+	{"while", "var x = new models.A();\n\twhile ( c ) x = new models.B();", "models.B", ""},
+}
+
+// TestKnownBracelessBodyGaps pins today's answer for each braceless body, so
+// fixing one fails here: move the case to
+// TestReturnTypeComparesTheBranchesReachingIt with its want, and remove it.
+// The control case is a braceless branch followed by an assignment that
+// always runs, which is right today and must stay right.
+func TestKnownBracelessBodyGaps(t *testing.T) {
+	cases := append(slices.Clone(bracelessBodyGaps), struct{ name, body, today, want string }{
+		"control: overwritten after", "var x = new models.A();\n\tif ( c ) x = new models.B(); x = new models.C();", "models.C", "models.C",
+	})
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pr := Parse(testURI, "component {\nfunction f( c ) {\n\t"+tc.body+"\n\treturn x;\n}\n}")
+			if len(pr.Funcs) != 1 {
+				t.Fatalf("got %d functions, want 1", len(pr.Funcs))
+			}
+
+			switch got := pr.Funcs[0].ReturnComponent; got {
+			case tc.today:
+			case tc.want:
+				t.Errorf("gap closed: f returns %q; move %q to TestReturnTypeComparesTheBranchesReachingIt and drop it from bracelessBodyGaps", got, tc.name)
+			default:
+				t.Errorf("f returns %q, neither today's %q nor the wanted %q", got, tc.today, tc.want)
 			}
 		})
 	}
