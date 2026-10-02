@@ -219,14 +219,16 @@ type producerScript struct {
 }
 
 func (p *producerScript) valid() bool { return !p.failed && p.position == len(p.tokens) }
-func (p *producerScript) takeGroup(open, closing parser.TokenKind) []parser.Token {
-	if p.position >= len(p.tokens) || p.tokens[p.position].Kind != open {
+
+// takeParens consumes a parenthesised group and returns what it holds.
+func (p *producerScript) takeParens() []parser.Token {
+	if p.position >= len(p.tokens) || p.tokens[p.position].Kind != parser.TokLParen {
 		p.failed = true
 
 		return nil
 	}
 
-	end := producerGroupEnd(p.tokens, p.position, open, closing)
+	end := producerGroupEnd(p.tokens, p.position, parser.TokLParen, parser.TokRParen)
 	if end < 0 {
 		p.failed = true
 		p.position = len(p.tokens)
@@ -272,7 +274,7 @@ func (p *producerScript) statement() producerNode {
 
 	switch strings.ToLower(tok.Value) {
 	case "if":
-		condition := producerText(p.takeGroup(parser.TokLParen, parser.TokRParen))
+		condition := producerText(p.takeParens())
 		if p.position >= len(p.tokens) {
 			p.failed = true
 
@@ -296,7 +298,7 @@ func (p *producerScript) statement() producerNode {
 
 		return producerNode{kind: "if", expression: condition, body: body, alternative: alternative}
 	case "for", "while":
-		header := p.takeGroup(parser.TokLParen, parser.TokRParen)
+		header := p.takeParens()
 		target := ""
 
 		if len(header) > 0 && strings.EqualFold(header[0].Value, "var") {
@@ -335,7 +337,7 @@ func (p *producerScript) statement() producerNode {
 		}
 
 		p.position++
-		p.takeGroup(parser.TokLParen, parser.TokRParen)
+		p.takeParens()
 
 		if p.position >= len(p.tokens) {
 			p.failed = true
@@ -343,12 +345,30 @@ func (p *producerScript) statement() producerNode {
 			return producerNode{}
 		}
 
-		alternative := []producerNode{p.statement()}
+		catches := [][]producerNode{{p.statement()}}
+
+		// Every further catch clause is another handler the same failure can
+		// reach. Read as one, the second was an expression statement that ran
+		// on into the statement after it, so ColdBox's execute() lost its
+		// `requestContext = getRequestContext();` and kept a stale value.
+		for p.position < len(p.tokens) && strings.EqualFold(p.tokens[p.position].Value, "catch") {
+			p.position++
+			p.takeParens()
+
+			if p.position >= len(p.tokens) {
+				p.failed = true
+
+				return producerNode{}
+			}
+
+			catches = append(catches, []producerNode{p.statement()})
+		}
+
 		if p.position < len(p.tokens) && strings.EqualFold(p.tokens[p.position].Value, "finally") {
 			p.failed = true
 		}
 
-		return producerNode{kind: "try", body: body, alternative: alternative}
+		return producerNode{kind: "try", body: body, alternative: producerHandlers(catches)}
 	case "function", "switch", "do", "finally", "break", "continue":
 		p.failed = true
 
@@ -356,6 +376,105 @@ func (p *producerScript) statement() producerNode {
 	}
 
 	return p.expressionStatement()
+}
+
+// producerStatementBreak reports whether a line break between prev and next
+// ends a statement. CFScript does not require the semicolon, and ColdBox's
+// request() omits it throughout; read as one statement, its body lost its
+// return. The break is a new line whose first token is a word that is not an
+// operator, after a token that can end an expression. A line starting with
+// `.`, an operator or an operator word continues the statement, so a chain
+// written one call per line stays one.
+func producerStatementBreak(prev, next parser.Token) bool {
+	if next.Line <= prev.Line || next.Kind != parser.TokIdent || producerOperatorWord(next.Value) {
+		return false
+	}
+
+	switch prev.Kind {
+	case parser.TokString, parser.TokNumber, parser.TokRParen, parser.TokRBracket:
+		return true
+	case parser.TokIdent:
+		// A word that wants what follows it does not end an expression:
+		// `return` with its value on the next line, `var`, `new`, an operator.
+		return !producerOperatorWord(prev.Value) && !producerLeadingKeyword(prev.Value)
+	default:
+		return false
+	}
+}
+
+func producerOperatorWord(word string) bool {
+	switch strings.ToLower(word) {
+	case "and", "or", "not", "xor", "eqv", "imp", "eq", "neq", "is", "gt", "lt", "gte", "lte", "ge", "le", "contains", "mod":
+		return true
+	default:
+		return false
+	}
+}
+
+func producerLeadingKeyword(word string) bool {
+	switch strings.ToLower(word) {
+	case "return", "var", "new", "throw", "in", "case", "else":
+		return true
+	default:
+		return false
+	}
+}
+
+// producerAugmentsReturn reports whether the plan writes a member onto a
+// variable it returns: `requestContext.getRenderedContent = …; return
+// requestContext;`. The value returned then has members its component does not
+// declare, and typed as the plain component every call to one would be
+// reported missing. ColdBox's execute() adds three test helpers this way.
+func producerAugmentsReturn(nodes []producerNode) bool {
+	returned := map[string]bool{}
+
+	var collect func([]producerNode)
+
+	collect = func(nodes []producerNode) {
+		for i := range nodes {
+			if nodes[i].kind == "return" {
+				if path := producerPath(producerUnwrap(producerTokens(nodes[i].expression))); path != "" {
+					returned[normalizeProducerPath(path)] = true
+				}
+			}
+
+			collect(nodes[i].body)
+			collect(nodes[i].alternative)
+		}
+	}
+	collect(nodes)
+
+	var writes func([]producerNode) bool
+
+	writes = func(nodes []producerNode) bool {
+		for i := range nodes {
+			if nodes[i].kind == "set" {
+				if root, _, member := strings.Cut(normalizeProducerPath(nodes[i].target), "."); member && returned[root] {
+					return true
+				}
+			}
+
+			if writes(nodes[i].body) || writes(nodes[i].alternative) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	return writes(nodes)
+}
+
+// producerHandlers is a try's catch clauses as one alternative: each starts
+// from the state the failure left, and which one runs is not in the source,
+// so they are the branches of an if whose condition is unknown.
+func producerHandlers(catches [][]producerNode) []producerNode {
+	alternative := catches[len(catches)-1]
+	for i := len(catches) - 2; i >= 0; i-- {
+		alternative = []producerNode{{kind: "if", body: catches[i], alternative: alternative}}
+	}
+
+	return alternative
 }
 
 func (p *producerScript) expressionStatement() producerNode {
@@ -366,6 +485,10 @@ func (p *producerScript) expressionStatement() producerNode {
 	for p.position < len(p.tokens) {
 		t := p.tokens[p.position]
 		if depth == 0 && (t.Kind == parser.TokSemicolon || t.Kind == parser.TokRBrace) {
+			break
+		}
+
+		if depth == 0 && p.position > start+1 && producerStatementBreak(p.tokens[p.position-1], t) {
 			break
 		}
 

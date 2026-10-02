@@ -1578,6 +1578,13 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 	}
 
 	ret, noFollow, soft := r.chainHopReturn("this component", first, def, tr)
+
+	// A method returning the class declaring it, called on this subclass,
+	// returns the subclass: as hopReturn does for a qualified call.
+	if sub := r.selfTyped(pr.URI.Path(), baseDir, def, ret); sub != "" {
+		ret = sub
+	}
+
 	if ret == "" && expression != "" {
 		ret = r.expressionReturn(def, expression, baseDir, pr.URI.Path())
 	}
@@ -2074,11 +2081,26 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 		}
 
 		method := r.producerFor(fd)
+
+		// A value the function adds members to before returning it is not
+		// its component, documented or inferred: ColdBox's execute() returns a
+		// RequestContext with getRenderedContent() and two more attached.
+		if method != nil && producerAugmentsReturn(method.body) {
+			return ""
+		}
+
 		if method != nil && (producerNeedsSpecialization(method, fd) || (fd.ReturnComponent == "" || fd.ReturnComponent == "$any") && len(fd.ReturnSources) == 0 && fd.DocReturn == "") {
 			eval := producerEvaluation{resolver: r, fd: fd, baseDir: filepath.Dir(fd.URI.Path()), depth: depth, budget: budget}
 
 			ret := eval.call(fd, "", nil, false).component()
-			if ret != "" || producerNeedsSpecialization(method, fd) {
+
+			// An unproven answer withholds the declared contracts below only
+			// when the body guards on its arguments (producerSensitive): then
+			// the return depends on the call. A return merely derived from a
+			// call does not say that, and a documented @return still applies.
+			// ColdBox's getContext() has no semicolons; read as a plan, its
+			// lock block hid the returns, and it lost its documented type.
+			if ret != "" || producerNeedsSpecialization(method, fd) && (fd.DocReturn == "" || producerSensitive(method.body)) {
 				return ret
 			}
 		}

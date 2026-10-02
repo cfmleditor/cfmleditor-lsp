@@ -706,3 +706,48 @@ resolves) and 11 `cfide.adminapi` ones. Most of what remains is `testWidget`
 run time (`configBean.registerModelDir(dir="/muraWRM/core/tests/resources/model")`)
 and Mura registers each bean there by its `entityName`. That is one test
 spec's run-time registration, not modelled.
+
+## ColdBox: the BaseTestCase loose end
+
+Measured on ColdBox with the `coldbox` and `testbox` presets and the checkout
+mapped as `coldbox` (a scratch config; without the mapping `coldbox.system.*`
+resolves to the bundled stubs and none of this is exercised): 1,469 findings,
+the scale of the 1,403 recorded above.
+
+The receivers lost in the producer batch (`event1`, `event2`, `e`, `this.event`)
+come from `BaseTestCase`'s `get()` → `request()` → `execute()` and
+`getMockRequestContext()`. Reading those functions turned up four ways a plan
+misread its source, each fixed:
+
+- **A second `catch` clause** became an expression statement that ran on into
+  the statement after it, so `execute()` lost `requestContext = getRequestContext();`
+  and the interpreter kept a stale value. Every catch is now a handler.
+- **A missing semicolon** made `request()`'s whole body one statement and lost
+  its return. A line break now ends a statement when the next line starts with
+  a word that is not an operator, after a token that can end an expression.
+- **`this.f()` and `variables.f()`** inside a body read their receiver as a
+  variable, unknown without a receiver; they now call the component's own `f()`,
+  as a bare `f()` does.
+- **A bare chain on a self-returning method** (`set(data).setValidations()`) now
+  takes the calling subclass, as a qualified call already did.
+
+Two precedence rules came with them, each needed to keep the corpus from
+regressing once plans read more source:
+
+- **A documented `@return` applies** unless the body guards on its arguments.
+  `RequestService.getContext()` now has a plan, which hides its returns in a
+  `lock` block; the doc type had answered before, while the plan was invalid.
+- **A value given members before it is returned is not its component.**
+  `execute()` attaches `getRenderedContent()`, `getHandlerResults()` and
+  `getRenderData()` to the context it returns; typed as a plain
+  `RequestContext`, 13 calls to them were reported missing.
+
+Result: 1,469 → 1,453 (16 removed, none added), every one a `this.event` call in
+`InterceptorStateTest`; every other corpus scan is unchanged per entry.
+`execute()`'s callers (`event1`, `event2`, `e`) stay unknown, as before: typing
+them needs a component type that carries the members `execute()` attaches. The
+five no-preset `getRenderer` additions are the lazy WireBox field and remain.
+
+Found on the way, not fixed: the parser types a returned local by its *first*
+assignment, so `var x = new A(); x = new B(); return x;` is declared to return
+`A`. It decides before the interpreter runs.
