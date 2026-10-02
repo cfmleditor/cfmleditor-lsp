@@ -66,12 +66,14 @@ type Resolver struct {
 	beanPathsCache map[string]string   // merged application/configured bean roots
 	fw1Scopes      map[string]fw1Scope // nearest application's source-defined injection scope
 	diOnce         sync.Once
-	diPolicies     []diPolicy                 // source-backed DI/1 injection contracts
-	discoveringDI  bool                       // private policy discovery never re-enters injection lookup
-	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
-	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
-	returnCache    returnCache                // ReturnComponentOf answers, for one index generation
-	loopCache      map[string][]loopSpan      // file URI and content hash → every loop it holds (loopsOf)
+	diPolicies     []diPolicy                     // source-backed DI/1 injection contracts
+	discoveringDI  bool                           // private policy discovery never re-enters injection lookup
+	startupCache   map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
+	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
+	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
+	loopCache      map[string][]loopSpan          // file URI and content hash → every loop it holds (loopsOf)
+	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)
+	handoffs       handoffIndex                   // handler actions by the view each renders (viewActions)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and
@@ -1277,6 +1279,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 	if comp == "" {
 		comp = r.loopElement(call, pr, baseDir, tr)
+	}
+
+	if comp == "" {
+		comp = r.viewPrc(variable, funcName, pr, tr)
 	}
 
 	if comp == "" {
