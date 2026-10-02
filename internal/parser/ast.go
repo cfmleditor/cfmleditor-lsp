@@ -35,11 +35,20 @@ type FunctionDef struct {
 	ReturnType      string         // declared return type (e.g. "query", "models.User")
 	ReturnSources   []ReturnSource // uniform collection element sources, resolved on demand
 	ReturnComponent string         // inferred component from return statements (e.g. "services.Foo")
+	// ElementComponent is the entity each element of the collection a
+	// generated getter returns holds: a persistent entity's one-to-many or
+	// many-to-many property names it in its cfc attribute. The getter itself
+	// returns an array or struct, so it has no ReturnComponent.
+	ElementComponent string
 	// DocReturn is the dotted component the doc comment's @return names —
 	// ColdBox documents most return types and declares few. It is a claim,
 	// not a declaration: the resolver takes it only where it names a file.
 	DocReturn string
 	returnVar string // unexported: variable name from "return varName" for deferred resolution
+	// returnLine is the line of the return returnVar came from. The
+	// variable's type is what its latest assignment at or before that line
+	// gave it, not its first.
+	returnLine uint32
 	// returnsStruct: some return is a struct literal or structNew(). A
 	// function declared struct that also returns a component returns
 	// either, so it is not typed by the component — see componentReturnFor.
@@ -181,6 +190,11 @@ type ComponentRef struct {
 	// with either qualifier is looked up among its own scope's refs only; an
 	// unqualified one still sees both.
 	This bool
+	// Rebinds is set when the assignment's right-hand side is a call on the
+	// variable it assigns: `x = x.next()`. That call is made on what x held
+	// before the line, so a receiver on the ref's own line does not read
+	// this ref; see resolve's funcScopedRef.
+	Rebinds bool
 	// New factory chains require a concrete result, not dynamic acceptance
 	// when a suffix method has an unknown return.
 	strictChain bool

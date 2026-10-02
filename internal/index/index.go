@@ -1116,6 +1116,34 @@ func (idx *Index) ExtendsForFile(fileURI uri.URI) (string, bool) {
 	return ext, ok
 }
 
+// FilesExtendingName returns the files whose recorded extends ends in name,
+// dotted or bare and case-insensitively, sorted. The caller decides whether
+// each extends really names the component it means: this is a filter on the
+// spelling, so that question is asked of a few files rather than every one.
+func (idx *Index) FilesExtendingName(name string) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	var out []string
+
+	for key, ext := range idx.extends {
+		last := ext
+		if _, after, ok := strings.CutLast(ext, "."); ok {
+			last = after
+		}
+
+		if ext != "" && strings.EqualFold(last, name) {
+			if u, ok := idx.fileURIs[key]; ok {
+				out = append(out, string(u))
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
 // SetExtends records what a file extends, for a reader that had to work it out.
 // The value is cloned: see IndexFile.
 func (idx *Index) SetExtends(fileURI uri.URI, extends string) {

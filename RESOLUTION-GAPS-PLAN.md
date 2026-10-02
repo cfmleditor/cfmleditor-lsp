@@ -748,9 +748,44 @@ Result: 1,469 → 1,453 (16 removed, none added), every one a `this.event` call 
 them needs a component type that carries the members `execute()` attaches. The
 five no-preset `getRenderer` additions are the lazy WireBox field and remain.
 
-Found on the way, not fixed: the parser types a returned local by its *first*
-assignment, so `var x = new A(); x = new B(); return x;` is declared to return
-`A`. It decides before the interpreter runs.
+Found on the way, and since fixed: the parser typed a returned local by its
+*first* assignment, so `var x = new A(); x = new B(); return x;` was declared to
+return `A`, deciding before the interpreter ran. The return now takes the ref
+reaching its line (`refReaching`: the latest at or before it, as
+`funcScopedRef` reads a receiver), and `catches()`/`noSemicolons()` are back in
+`TestProducerPlansReadTheSourceAsWritten`. Three neighbours had hidden the same
+bias and came with it:
+
+- **`hasRefFor` skipped any pending call whose variable already had a ref**, so
+  `var x = new A(); x = make();` never recorded the second assignment. It now
+  skips only a ref for the same line, which is what `appendResolverRefs`
+  duplicates.
+- **A qualified call took the file's own function of that name**:
+  `x = arguments.binder.init()` was the Injector's `init()`, which returns
+  `this`. Only a bare, `this.`, `variables.` or `super.` call does now
+  (`callsOwnFunction`), and `arguments.x` is not read from the component's
+  refs (`baseArgs`).
+- **A return settled in the later pass never typed the calls on it**:
+  `variables.binder = buildBinder()` had been looked at first. Untyped calls
+  are looked at again while returns keep settling (`maxReturnRounds`).
+
+Corpus, per entry: ColdBox 19 removed / 1 added, Mura 20 / 0, ContentBox 2 / 0,
+cfwheels 3 / 0, fw1 and Lucee unchanged. The addition, `Future.cfc:66`
+(`variables.executor = variables.executor.getNative()`), had been accepted
+because the file's own `getNative()` typed it. Two of Mura's removals
+(`contentManager.cfc:966`, `trashManager.cfc:14`, both
+`pluginEvent = pluginEvent.init(…).getEvent()`) are the receiver reading the
+ref its own assignment makes, since `funcScopedRef` admits a ref on the call's
+line: pre-existing, and the same effect `Future.cfc:66` relied on before.
+Since fixed: such a ref carries `Rebinds` and does not reach a call on its own
+line. Mura, against the branch above: 25 removed, 2 added. The additions are
+those two lines, reported again against the `MuraScope` they are called on;
+the removals are calls after a reassignment that the tag parser had fixed to
+the type before it while parsing. Every other corpus scan is unchanged.
+
+Not done: assignments on different branches are not compared, so the one
+reaching the return by line wins even where another branch assigns something
+else. `buildBinder()` is `$any` only because its later branch is.
 
 ## ContentBox: measurement and relationship getters
 
@@ -790,3 +825,37 @@ calls on Mura's `site` beans report a component that does not exist.
   collection or a loop variable to carry it: the next feature here.
 - Closure parameters such as `c` in `newCriteria().…( function( c ) { … } )` and
   arguments typed only by their callers, as on MuraCMS.
+
+## ContentBox: loop variables over entity collections
+
+590 of ContentBox's unknown receivers are loop variables. 421 iterate a `prc.*`
+collection in an admin view, which a handler fills: that is the request/view
+handoff, unprovable without the framework's routing, and left alone. The rest
+iterate a local collection, and a loop variable now holds the collection's
+element when the source states it (`Resolver.loopElement`):
+
+- a persistent entity's `one-to-many` or `many-to-many` property, whose
+  generated getter carries the element entity (`FunctionDef.ElementComponent`),
+  whether the loop calls the getter or reads the property;
+- a cborm service bound to an entity, whose `getAll()` returns an array of it,
+  except with `properties`, when it returns structs;
+- a local variable assigned from either, by its nearest preceding assignment.
+
+Both `for ( [var] x in collection ) { … }` and `<cfloop array="#collection#"
+index|item="x">` count, and only for a call inside the loop's body. The element
+is the entity *and every component extending it*, as alternatives: an ORM
+collection holds subclasses, and ContentBox's subscriber calls
+`getRelatedContent()`, a `CommentSubscription` method, on the comment ones.
+Loops are found once per file version and cached, since the lookup runs for
+every untyped receiver; the scan's cost is within noise.
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| ContentBox, presets | 2,870 | 2,821 | 62 / 13 |
+| ContentBox, no config | 7,764 | 7,715 | 62 / 13 |
+| MuraCMS (both), ColdBox (both), cfwheels, fw1, Lucee | | | 0 / 0 each |
+
+All 13 additions are calls that were already findings, now naming the method
+the entity lacks instead of an untyped variable: `build/patches/3.7.0`–`4.2.1`
+call `Author.getAPIToken()`/`generateAPIToken()` and `1-0-4` calls
+`Page.getRecursiveSlug()`, none of which today's model declares.

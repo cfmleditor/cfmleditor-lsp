@@ -71,6 +71,7 @@ type Resolver struct {
 	startupCache   map[string][]startupAssign // app root → its startup templates' shared-scope assignments
 	wheelsSources  map[string]wheelsSource    // source-checked method bodies; refreshed when bytes change
 	returnCache    returnCache                // ReturnComponentOf answers, for one index generation
+	loopCache      map[string][]loopSpan      // file URI and content hash → every loop it holds (loopsOf)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and
@@ -1275,6 +1276,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	}
 
 	if comp == "" {
+		comp = r.loopElement(call, pr, baseDir, tr)
+	}
+
+	if comp == "" {
 		tr.addf("no ComponentRef and no componentResolver matched %q", variable)
 	}
 
@@ -1330,36 +1335,13 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if property, ok := parser.PropertyName(hop); ok {
-			ret := r.publicPropertyComponent(comp, property, baseDir)
-			if ret == "" {
-				var noFollow, soft bool
-
-				// The parse may have folded the calls before the property
-				// into call.Component, so the source line is asked too.
-				for _, text := range []string{propertyHopText(call, i, property), propertyReadText(lineOfContent(pr.Content, int(call.Line)), property)} {
-					if text == "" {
-						continue
-					}
-
-					ret, noFollow, soft = r.propertyResolver(text, property, tr)
-					if ret != "" {
-						break
-					}
-				}
-
-				if noFollow && ret != "" {
-					tr.hit(TargetDynamic, ret, nil)
-
-					return comp, softComp, "", true
-				}
-
-				if soft {
-					softComp = ret
-				}
+			ret, soft, reason, done := r.propertyHop(comp, property, call, i, pr, baseDir, tr)
+			if done {
+				return comp, softComp, reason, true
 			}
 
-			if ret == "" {
-				return comp, softComp, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + funcName + "')", true
+			if soft {
+				softComp = ret
 			}
 
 			comp = ret
@@ -1423,6 +1405,41 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 	}
 
 	return comp, softComp, "", false
+}
+
+// propertyHop is walkHops for a property hop: what the property holds, from
+// the component's typed properties or else a componentResolver matched
+// against the property read, or done with the answer when that settles the
+// call.
+func (r *Resolver) propertyHop(comp, property string, call *parser.CallSite, i int, pr *parser.ParseResult, baseDir string, tr *callTrace) (ret string, soft bool, reason string, done bool) {
+	if ret = r.publicPropertyComponent(comp, property, baseDir); ret != "" {
+		return ret, false, "", false
+	}
+
+	var noFollow bool
+
+	// The parse may have folded the calls before the property into
+	// call.Component, so the source line is asked too.
+	for _, text := range []string{propertyHopText(call, i, property), propertyReadText(lineOfContent(pr.Content, int(call.Line)), property)} {
+		if text == "" {
+			continue
+		}
+
+		if ret, noFollow, soft = r.propertyResolver(text, property, tr); ret != "" {
+			break
+		}
+	}
+
+	switch {
+	case ret == "":
+		return "", false, "property '" + property + "' in " + displayComponent(comp) + " has no component type (chain to '" + call.FuncName + "')", true
+	case noFollow:
+		tr.hit(TargetDynamic, ret, nil)
+
+		return "", false, "", true
+	}
+
+	return ret, soft, "", false
 }
 
 // propertyHopText is a property hop as a resolver sees it: the call or
@@ -2907,7 +2924,7 @@ func funcScopedRef(pr *parser.ParseResult, line uint32, name string, in parser.R
 
 		for i := range refs {
 			ref := &refs[i]
-			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) {
+			if !strings.EqualFold(ref.Variable, name) || !ref.VisibleAt(line) || !in.Admits(ref) || assignedByCallAt(ref, line) {
 				continue
 			}
 
@@ -2946,7 +2963,7 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser
 
 	for i := range pr.ComponentRefs {
 		ref := &pr.ComponentRefs[i]
-		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) {
+		if !strings.EqualFold(ref.Variable, name) || ref.Line > line || !scope.Admits(ref) || assignedByCallAt(ref, line) {
 			continue
 		}
 
@@ -2960,12 +2977,21 @@ func fileLevelRef(pr *parser.ParseResult, line uint32, name string, scope parser
 	}
 
 	for i := range pr.ComponentRefs {
-		if strings.EqualFold(pr.ComponentRefs[i].Variable, name) && scope.Admits(&pr.ComponentRefs[i]) {
-			return &pr.ComponentRefs[i]
+		if ref := &pr.ComponentRefs[i]; strings.EqualFold(ref.Variable, name) && scope.Admits(ref) && !assignedByCallAt(ref, line) {
+			return ref
 		}
 	}
 
 	return nil
+}
+
+// assignedByCallAt reports whether ref is the result of a call on line made
+// on the variable ref assigns, `x = x.next()`: a receiver on that line is
+// what the variable held before it. Mura writes
+// `pluginEvent = pluginEvent.init( data ).getEvent()`, and init() was looked
+// for in what getEvent() returns.
+func assignedByCallAt(ref *parser.ComponentRef, line uint32) bool {
+	return ref.Rebinds && ref.Line == line
 }
 
 // appRef is a ref for a name in one of the Application files.

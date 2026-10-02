@@ -35,12 +35,23 @@ function fromScope(){ return request.cached; }
 // A value given members its component does not declare is not that component.
 function augmented(){ var x = new models.A(); x.extra = variables.make; return x; }
 function onlySub(){}
+
+// The assignment reaching the return is what is returned: after a second
+// catch clause, and with no semicolons.
+function catches(){ var x = new models.A(); try { x = new models.A(); } catch ( Foo e ) { x = new models.A(); } catch ( any e ) { } x = new models.B(); return x; }
+function noSemicolons(){
+	var x = new models.A()
+	x = new models.B()
+	return x
+}
 function run(){
 	viaThis().onlyA();
 	viaVariables().onlyA();
 	documented().onlyA();
 	augmented().extra();
 	set().onlySub();
+	catches().onlyB();
+	noSemicolons().onlyB();
 }
 }`,
 	})
@@ -51,6 +62,8 @@ function run(){
 		"documented.onlyA":   "",
 		"augmented.extra":    "method 'augmented' has no component return type (chain to 'extra')",
 		"set.onlySub":        "",
+		"catches.onlyB":      "",
+		"noSemicolons.onlyB": "",
 	})
 }
 

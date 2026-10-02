@@ -36,7 +36,6 @@ type scriptParser struct {
 	baseLine            int
 	resolvers           []Resolver
 	resolverSet         *ResolverSet
-	argNesting          int               // recursion depth of skipParenBody's scan, bounded by maxArgNesting
 	imports             map[string]string // last segment (lowercased) → full dot-path, from `import`
 	builtinReturnLookup func(string) string
 	argumentTypes       func(string, string, []Argument)
@@ -55,6 +54,10 @@ type scriptParser struct {
 	forceGlobal  bool // when true, addRef routes to componentRefs
 	inClosure    bool // scanning a closure's body as statements — see scanClosureBody
 	refThis      bool // the assignment being parsed is through `this.` — see ComponentRef.This
+
+	// Two four-byte fields share the eight bytes after the flags.
+	argNesting int32  // recursion depth of skipParenBody's scan, bounded by maxArgNesting
+	returnLine uint32 // the line of the return returnVar came from
 }
 
 // pendingCall records an unresolved assignment from a function call.
@@ -76,6 +79,8 @@ type pendingCall struct {
 	global     bool
 	returnExpr bool // a return expression, grouped by function for factory-chain inference
 	memberSet  bool // not a call: `varName.funcName = …`; see checkMemberSet
+	baseArgs   bool // baseVar was read through arguments.; see baseVarComponent
+	rebinds    bool // the call is made on varName itself; see ComponentRef.Rebinds
 	baseScope  RefScope
 
 	funcKey string   // scope key, empty if global
@@ -848,6 +853,7 @@ func (p *scriptParser) checkVarRHS(varName string, line int) {
 				Variable: varName, Component: comp,
 				ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 				URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+				Rebinds: rebinds(varName, receiverOf(fullChain.String())),
 			})
 		} else if comp, ext := p.tryExtendChain(fullChain.String()); comp != "" {
 			rest := p.continueExtendedChain(receiverOf(fullChain.String()), lastIdent, ext, line)
@@ -2129,7 +2135,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	// Enter function scope with a temporary key (will fix up after finding end)
 	prevInFunc := p.inFunc
 	prevLocalVarSet := p.localVarSet
-	prevReturnVar := p.returnVar
+	prevReturnVar, prevReturnLine := p.returnVar, p.returnLine
 
 	// Use a placeholder funcKey; we'll remap after finding the real end
 	tempKey := funcKey(funcLine, funcLine)
@@ -2161,7 +2167,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 		if t.Kind == TokEOF {
 			p.inFunc = prevInFunc
 			p.localVarSet = prevLocalVarSet
-			p.returnVar = prevReturnVar
+			p.returnVar, p.returnLine = prevReturnVar, prevReturnLine
 
 			return t.Line
 		}
@@ -2203,7 +2209,7 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	// Exit function scope
 	p.inFunc = prevInFunc
 	p.localVarSet = prevLocalVarSet
-	p.returnVar = prevReturnVar
+	p.returnVar, p.returnLine = prevReturnVar, prevReturnLine
 
 	return endLine
 }
@@ -2246,47 +2252,40 @@ func (p *scriptParser) settleReturnComponent(f *FunctionDef) {
 
 	// Look up returnVar in this function's refs, then in componentRefs. A
 	// name read through variables. or this. is the component's alone, and
-	// only a ref made through that scope holds it.
+	// only a ref made through that scope holds it. Of the refs for it, the
+	// one reaching the return decides; a closure's local of the same name is
+	// another variable.
 	name, called, scope := returnedVar(p.returnVar)
 
-	// In the function's own refs the latest assignment is the one in force
-	// at the return, as settleReturnVars reads it; a component's variable is
-	// assigned from many functions, so there the first one stands, as it
-	// always has.
-	if scope == RefAny {
-		if ref := lastReturnableRef(p.funcRefs[p.inFunc], name, scope); ref != nil {
-			if f.ReturnComponent = returnedComponent(ref.Component, called); f.ReturnComponent != "" {
-				return
-			}
-		}
+	lookIn := [][]ComponentRef{p.funcRefs[p.inFunc], p.componentRefs}
+	admit := func(ref *ComponentRef) bool { return ref.VisibleTo == 0 }
+
+	if scope != RefAny {
+		lookIn = lookIn[1:]
+		admit = scope.Admits
 	}
 
-	for i := range p.componentRefs {
-		ref := &p.componentRefs[i]
-		if strings.EqualFold(ref.Variable, name) && scope.Admits(ref) && !chainPending(ref) {
-			if f.ReturnComponent = returnedComponent(ref.Component, called); f.ReturnComponent != "" {
-				return
-			}
-
-			break
+	for _, refs := range lookIn {
+		ref := refReaching(refs, name, p.returnLine, admit)
+		if ref == nil {
+			continue
 		}
+
+		// A ref still to be typed, or an assignment between it and the
+		// return that only resolvePendingCalls can type, is settled there.
+		if !chainPending(ref) && !assignedBetween(p.pendingCalls, name, ref.Line, p.returnLine) {
+			f.ReturnComponent = returnedComponent(ref.Component, called)
+		}
+
+		break
+	}
+
+	if f.ReturnComponent != "" {
+		return
 	}
 
 	// If still unresolved, store for deferred resolution
-	f.returnVar = p.returnVar
-}
-
-// lastReturnableRef is the latest ref to name a function's return can read.
-func lastReturnableRef(refs []ComponentRef, name string, scope RefScope) *ComponentRef {
-	var last *ComponentRef
-
-	for i := range refs {
-		if strings.EqualFold(refs[i].Variable, name) && scope.Admits(&refs[i]) && !chainPending(&refs[i]) && (last == nil || refs[i].Line >= last.Line) {
-			last = &refs[i]
-		}
-	}
-
-	return last
+	f.returnVar, f.returnLine = p.returnVar, p.returnLine
 }
 
 // handleBodyToken processes an identifier inside a function body.
@@ -2421,6 +2420,7 @@ func (p *scriptParser) checkReturnComponent() {
 		// function a Shell. A call on a dynamic value is dynamic, though,
 		// which returnsCallOn keeps.
 		p.returnVar = peek.Value
+		p.returnLine = conv.Uint32(p.baseLine + peek.Line)
 
 		bare, call := p.returnCall(peek)
 		if !bare {
@@ -3364,6 +3364,8 @@ func (p *scriptParser) addPendingCall(varName, prevIdent, lastIdent, chain strin
 		refThis:    p.refThis,
 		global:     p.forceGlobal,
 		baseScope:  ReceiverRefScope(recv),
+		baseArgs:   readThroughArguments(recv),
+		rebinds:    rebinds(varName, recv),
 	})
 	p.pendingCalls[len(p.pendingCalls)-1].rest = p.continueChainCalls(receiverOf(chain), lastIdent, line)
 }
@@ -3441,6 +3443,7 @@ func (p *scriptParser) assignFromChain(varName string, c *chainBuilder, prevIden
 			Variable: varName, Component: comp,
 			ChainBase: prevIdent, ChainMethod: lastIdent, ChainRest: rest,
 			URI: uriFromString(p.fileURI), Line: conv.Uint32(p.baseLine + line),
+			Rebinds: rebinds(varName, receiverOf(c.String())),
 		})
 
 		return

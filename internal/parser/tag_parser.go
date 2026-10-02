@@ -1111,6 +1111,8 @@ func (p *tagParser) parseCFReturn(tag string, line int) {
 		return // already set from an earlier return
 	}
 
+	f.returnLine = conv.Uint32(line)
+
 	if inner == "" {
 		return
 	}
@@ -1562,6 +1564,8 @@ func (p *tagParser) methodCallRHS(rhs, baseVar, varName string, line int) {
 		// varChain is the receiver: `variables.a.m()` reads a from
 		// variables scope only.
 		baseScope: ReceiverRefScope(varChain),
+		baseArgs:  readThroughArguments(varChain),
+		rebinds:   rebinds(varName, varChain),
 	})
 }
 
@@ -2029,19 +2033,32 @@ func (p *tagParser) lookupComponentRef(varName string, atLine int) string {
 		lookupVar = lookupVar[dot+1:]
 	}
 
+	ref := (*ComponentRef)(nil)
 	if p.inFunc != "" {
-		if comp := nearestComponentRef(p.funcRefs[p.inFunc], lookupVar, atLine); comp != "" {
-			return comp
-		}
+		ref = nearestComponentRef(p.funcRefs[p.inFunc], lookupVar, atLine)
 	}
 
-	return nearestComponentRef(p.componentRefs, lookupVar, atLine)
+	if ref == nil {
+		ref = nearestComponentRef(p.componentRefs, lookupVar, atLine)
+	}
+
+	// An assignment between the ref and atLine that only resolvePendingCalls
+	// can type replaces what the ref says, and the parse cannot know with
+	// what yet: `<cfset z = z.next()>` before `<cfset z.onlyB()>` left onlyB
+	// checked against what z held before. Left empty, the resolver reads the
+	// refs at check time, once that assignment has its own. One on atLine
+	// itself is the statement the call is in, which runs first.
+	if ref == nil || atLine > 0 && assignedBetween(p.pendingCalls, lookupVar, ref.Line, conv.Uint32(atLine-1)) {
+		return ""
+	}
+
+	return ref.Component
 }
 
-// nearestComponentRef returns the Component of the ref matching lookupVar whose
-// Line is the largest value <= atLine, or the first matching ref in slice order
-// if none precede atLine.
-func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) string {
+// nearestComponentRef returns the ref matching lookupVar whose Line is the
+// largest value <= atLine, or the first matching ref in slice order if none
+// precede atLine.
+func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) *ComponentRef {
 	var best *ComponentRef
 
 	for i := range refs {
@@ -2060,16 +2077,16 @@ func nearestComponentRef(refs []ComponentRef, lookupVar string, atLine int) stri
 	}
 
 	if best != nil {
-		return best.Component
+		return best
 	}
 
 	for i := range refs {
 		if strings.EqualFold(refs[i].Variable, lookupVar) && !chainPending(&refs[i]) {
-			return refs[i].Component
+			return &refs[i]
 		}
 	}
 
-	return ""
+	return nil
 }
 
 func (p *tagParser) addCall(call *CallSite) {
