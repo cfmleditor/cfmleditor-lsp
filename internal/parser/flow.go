@@ -30,8 +30,14 @@ type flowBlocks struct {
 	// kinds names the tag that opened each block on stack, for a tag parser
 	// matching a close tag to its opener. A script parser leaves it empty.
 	kinds []string
-	rec   *flowRecord
+	// ends is, for each braceless body open on stack (one in kinds marked
+	// kindBraceless), the offset of the semicolon that closes it, innermost last.
+	ends []int
+	rec  *flowRecord
 }
+
+// kindBraceless marks a block opened by a statement written without braces.
+const kindBraceless = "{;"
 
 // flowRecord is what the parsers of one file's regions record between them.
 type flowRecord struct {
@@ -95,6 +101,34 @@ func (fb *flowBlocks) close(kind string) {
 	}
 
 	fb.stack, fb.kinds = fb.stack[:i], fb.kinds[:i]
+}
+
+// openBraceless pushes the block of the one statement an `if`, `else`, `for` or
+// `while` governs when it is written without braces, closed by the semicolon
+// at offset end.
+func (fb *flowBlocks) openBraceless(offset, end int) {
+	fb.open(offset, kindBraceless)
+	fb.ends = append(fb.ends, end)
+}
+
+// closeEnded closes every braceless body whose semicolon is at or before
+// offset, the offset of the token about to be read: a statement parser may
+// have consumed the semicolon itself, and a chain
+// (`if ( a ) if ( b ) x = …;`) ends all its bodies at once.
+func (fb *flowBlocks) closeEnded(offset int) {
+	for len(fb.ends) > 0 && offset >= fb.ends[len(fb.ends)-1] {
+		fb.ends = fb.ends[:len(fb.ends)-1]
+		fb.stack, fb.kinds = fb.stack[:len(fb.stack)-1], fb.kinds[:len(fb.kinds)-1]
+	}
+}
+
+// dropBraceless discards braceless bodies still open, for a body that ended
+// before their semicolon was reached.
+func (fb *flowBlocks) dropBraceless() {
+	for len(fb.ends) > 0 {
+		fb.ends = fb.ends[:len(fb.ends)-1]
+		fb.stack, fb.kinds = fb.stack[:len(fb.stack)-1], fb.kinds[:len(fb.kinds)-1]
+	}
 }
 
 // innermost is the block statements are being made in, 0 outside any.

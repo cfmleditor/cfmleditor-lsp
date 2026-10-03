@@ -2181,7 +2181,15 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			p.localVarSet = prevLocalVarSet
 			p.returnVar, p.returnLine = prevReturnVar, prevReturnLine
 
+			if p.flow != nil {
+				p.flow.dropBraceless()
+			}
+
 			return t.Line
+		}
+
+		if p.flow != nil && len(p.flow.ends) > 0 {
+			p.flow.closeEnded(t.Offset)
 		}
 
 		afterLT := p.afterLT
@@ -2203,6 +2211,10 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 			}
 		case TokIdent:
 			if depth > 0 {
+				if p.flow != nil {
+					p.openBracelessBody(t)
+				}
+
 				mark := p.flowMark()
 				p.handleBodyToken(t, depth, afterLT)
 				p.stampFlow(mark)
@@ -2234,6 +2246,86 @@ func (p *scriptParser) parseBody(funcLine int, args []Argument) int {
 	p.returnVar, p.returnLine = prevReturnVar, prevReturnLine
 
 	return endLine
+}
+
+// openBracelessBody opens a block for the statement a braceless `if`, `else`,
+// `for` or `while` governs, so an assignment in it is read as one that may not
+// run. It acts only when the whole statement is one line ending in a
+// semicolon with no brace in it: CFScript needs neither, and a statement it
+// cannot bound is left as it was read before, as one that always runs. A
+// lookahead on a saved scanner state; the tokens are read again.
+func (p *scriptParser) openBracelessBody(t Token) {
+	if len(t.Value) < 2 || len(t.Value) > 5 {
+		return
+	}
+
+	var buf foldScratch
+
+	withCondition := false
+
+	switch string(buf.lowerFold(t.Value)) {
+	case "if", "for", "while":
+		withCondition = true
+	case "else":
+	default:
+		return
+	}
+
+	saved := p.sc.Save()
+	defer p.sc.Restore(saved)
+
+	if withCondition {
+		if p.sc.NextSkipComments().Kind != TokLParen {
+			return
+		}
+
+		for depth := 1; depth > 0; {
+			switch p.sc.NextSkipComments().Kind {
+			case TokLParen:
+				depth++
+			case TokRParen:
+				depth--
+			case TokEOF:
+				return
+			default:
+			}
+		}
+	}
+
+	first := p.sc.NextSkipComments()
+	switch first.Kind {
+	case TokLBrace, TokRBrace, TokSemicolon, TokEOF:
+		return
+	default:
+	}
+
+	if !withCondition && first.Kind == TokIdent && strings.EqualFold(first.Value, "if") {
+		return // `else if` is the if's block
+	}
+
+	for tok, depth := first, 0; ; tok = p.sc.NextSkipComments() {
+		if tok.Line != first.Line {
+			return
+		}
+
+		switch tok.Kind {
+		case TokLParen, TokLBracket:
+			depth++
+		case TokRParen, TokRBracket:
+			depth--
+		case TokLBrace, TokRBrace, TokEOF:
+			if depth <= 0 {
+				return
+			}
+		case TokSemicolon:
+			if depth == 0 {
+				p.flow.openBraceless(t.Offset, tok.Offset)
+
+				return
+			}
+		default:
+		}
+	}
 }
 
 // flowMark is how many pending calls there were before a statement, so

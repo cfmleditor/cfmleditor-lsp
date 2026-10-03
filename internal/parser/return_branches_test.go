@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"slices"
 	"testing"
 )
 
@@ -191,46 +190,39 @@ function f( c ) {
 	}
 }
 
-// bracelessBodyGaps are the braceless bodies flowBlocks does not see as
-// blocks, each with the return type the parse gives today and the one it
-// should. A body written without braces (`if ( c ) x = new B();`, and the
-// same after else, for and while) opens no block, so its assignment reads as
-// one that always runs and replaces what came before, where it should join
-// it. RESOLUTION-GAPS-PLAN.md, "Braceless bodies are not blocks", has where
-// the fix goes.
-var bracelessBodyGaps = []struct {
-	name, body, today, want string
-}{
-	{"if", "var x = new models.A();\n\tif ( c ) x = new models.B();", "models.B", ""},
-	{"if else", "if ( c ) var x = new models.A();\n\telse x = new models.B();", "models.B", ""},
-	{"braced if, braceless else", "var x = new models.A();\n\tif ( c ) { x = new models.B(); } else x = new models.C();", "models.C", ""},
-	{"for", "var x = new models.A();\n\tfor ( var i in c ) x = new models.B();", "models.B", ""},
-	{"while", "var x = new models.A();\n\twhile ( c ) x = new models.B();", "models.B", ""},
-}
-
-// TestKnownBracelessBodyGaps pins today's answer for each braceless body, so
-// fixing one fails here: move the case to
-// TestReturnTypeComparesTheBranchesReachingIt with its want, and remove it.
-// The control case is a braceless branch followed by an assignment that
-// always runs, which is right today and must stay right.
-func TestKnownBracelessBodyGaps(t *testing.T) {
-	cases := append(slices.Clone(bracelessBodyGaps), struct{ name, body, today, want string }{
-		"control: overwritten after", "var x = new models.A();\n\tif ( c ) x = new models.B(); x = new models.C();", "models.C", "models.C",
-	})
+// TestBracelessBodiesAreBlocks: a body written without braces
+// (`if ( c ) x = new B();`, and the same after else, for and while) is a block
+// of its own, so its assignment joins what came before rather than replacing
+// it. Only a statement that is one line ending in a semicolon is bounded; any
+// other braceless body is read as before, as one that always runs, which the
+// last two cases pin so that a change to the rule shows.
+func TestBracelessBodiesAreBlocks(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"if", "var x = new models.A();\n\tif ( c ) x = new models.B();", ""},
+		{"if else", "if ( c ) var x = new models.A();\n\telse x = new models.B();", ""},
+		{"braced if, braceless else", "var x = new models.A();\n\tif ( c ) {\n\t\tx = new models.B();\n\t} else x = new models.C();", ""},
+		{"for", "var x = new models.A();\n\tfor ( var i in c ) x = new models.B();", ""},
+		{"for with semicolons in its head", "var x = new models.A();\n\tfor ( var i = 0; i < 3; i++ ) x = new models.B();", ""},
+		{"while", "var x = new models.A();\n\twhile ( c ) x = new models.B();", ""},
+		{"else if chain, as a braced one: no exhaustiveness", "var x = new models.A();\n\tif ( c ) x = new models.B();\n\telse if ( d ) x = new models.B();\n\telse x = new models.B();", ""},
+		{"nested", "var x = new models.A();\n\tif ( c ) if ( d ) x = new models.B();", ""},
+		{"agreeing", "var x = new models.B();\n\tif ( c ) x = new models.B();", "models.B"},
+		{"overwritten after", "var x = new models.A();\n\tif ( c ) x = new models.B(); x = new models.C();", "models.C"},
+		{"overwritten on the next statement", "var x = new models.A();\n\tif ( c ) x = new models.B();\n\tx = new models.C();", "models.C"},
+		// Not bounded: the statement runs over two lines, or has no semicolon.
+		{"unbounded: two lines", "var x = new models.A();\n\tif ( c ) x =\n\t\tnew models.B();", "models.B"},
+		{"unbounded: no semicolon", "var x = new models.A();\n\tif ( c ) x = new models.B()", "models.B"},
+	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pr := Parse(testURI, "component {\nfunction f( c ) {\n\t"+tc.body+"\n\treturn x;\n}\n}")
+			pr := Parse(testURI, "component {\nfunction f( c, d ) {\n\t"+tc.body+"\n\treturn x;\n}\n}")
 			if len(pr.Funcs) != 1 {
 				t.Fatalf("got %d functions, want 1", len(pr.Funcs))
 			}
 
-			switch got := pr.Funcs[0].ReturnComponent; got {
-			case tc.today:
-			case tc.want:
-				t.Errorf("gap closed: f returns %q; move %q to TestReturnTypeComparesTheBranchesReachingIt and drop it from bracelessBodyGaps", got, tc.name)
-			default:
-				t.Errorf("f returns %q, neither today's %q nor the wanted %q", got, tc.today, tc.want)
+			if got := pr.Funcs[0].ReturnComponent; got != tc.want {
+				t.Errorf("f returns %q, want %q", got, tc.want)
 			}
 		})
 	}
