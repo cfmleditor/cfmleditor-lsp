@@ -85,6 +85,7 @@ type Server struct {
 	Features                 config.ResolvedFeatures   // per-capability off switches (all default on)
 	Linting                  bool                      // enable cflint diagnostics
 	LintMinSeverity          string                    // CFLint severity floor ("" reports everything)
+	DocBlock                 config.ResolvedDocBlock   // what a `/**` expands to (see config.DocBlock)
 	References               bool                      // answer textDocument/references (opt-in; see config.References)
 	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
 	TagSnippets              bool                      // insert snippets for tags
@@ -137,6 +138,7 @@ func NewServer(conn jsonrpc2.Conn, log cflog.Logger, sharedIndex ...*index.Index
 		conn:                     conn,
 		log:                      log,
 		FS:                       vfs.OS{},
+		DocBlock:                 config.ResolveDocBlock(nil),
 		TagSnippets:              comp.TagSnippets,
 		FunctionSnippets:         comp.FunctionSnippets,
 		GlobalFunctionResolution: comp.GlobalFunctionResolution,
@@ -169,7 +171,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 			Save:      &protocol.SaveOptions{},
 		},
 		CompletionProvider: &protocol.CompletionOptions{
-			TriggerCharacters: []string{"<", "/", ".", ">"},
+			TriggerCharacters: []string{"<", "/", ".", ">", "*", "@"},
 			// Only when something was deferred: a client told it may resolve
 			// sends a request for every item it highlights, which is a round
 			// trip for nothing when the list already carries everything.

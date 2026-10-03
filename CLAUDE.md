@@ -1181,17 +1181,26 @@ match.
 It was four. Variable definitions were the largest, and they are closed — the
 conformance suite below is what made that a measured change rather than a claim.
 `textDocument/typeDefinition` is closed too, behind `features.typeDefinition`; see the LSP
-surface.
+surface. Docblock completion is closed (`internal/server/docblock.go`): `/**` expands to a
+comment block for the function, property, component or interface that follows it, with a
+tag line per argument and a blank line after the hint; inside a `/** … */`, `@` offers the
+attributes of the tag it documents (from `internal/docs`) and a function's argument names,
+and `@arg.` a cfargument's attributes. `capabilities()` advertises `*` and `@` as well. The
+extension's `cfml.docBlock.gap` and `.extra` settings are the `docBlock` config block
+(`config.DocBlock`, default a gap and no extras), carried through every config hop like
+`completions`. Differences from the extension, both deliberate: tag completion needs the
+cursor inside a doc block (the extension offered it anywhere in a component file), and the
+function's arguments are read from the declaration text rather than the document's parse,
+because the comment being typed is usually unclosed and hides the rest of the file from it.
+`TestSlashStarStarExpandsToADocBlock`, `TestAtInADocBlockOffersTheTagsAttributes`.
 
 | Missing here | Extension's implementation | Notes |
 |---|---|---|
-| Docblock completion | `DocBlockCompletions`, triggered on `*`, `@` and `.` | `@param`, `@return` and friends inside a `/** */` block. Note the trigger characters: `capabilities()` advertises `<`, `/`, `.` and `>`, so adding this means widening that list as well as handling the context. |
 | `textDocument/documentColor` | `CFMLDocumentColorProvider` | Colour swatches and the picker for colour literals. Wholly absent here; nothing in the parser records them. |
 
-`documentColor` is the one with no foundation at all; docblock completion has
-most of its machinery already. Until they land, a user who enables the server
-loses them — which is worth remembering when one is reported as a regression
-rather than a gap.
+`documentColor` is the one with no foundation at all. Until it lands, a user who enables the
+server loses it — which is worth remembering when one is reported as a regression rather than
+a gap.
 
 **The list is measured, not maintained by hand.**
 `internal/server/definition_conformance_test.go` replays the extension's own

@@ -42,6 +42,7 @@ func TestSettingsApplyCoversEveryField(t *testing.T) {
 		TagSnippets:              true,
 		FunctionSnippets:         true,
 		GlobalFunctionResolution: true,
+		DocBlock:                 config.ResolvedDocBlock{Gap: true, Extra: []config.DocBlockExtra{{Name: "author", Default: "me"}}},
 		Routes: route.Config{
 			Attributes:  []string{"data-view"},
 			Controllers: []route.ControllerRule{{Component: "c.${1}", Method: "${2+:concat}"}},

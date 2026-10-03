@@ -114,6 +114,7 @@ type optionalBlockState struct {
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
+	DocBlock                 config.ResolvedDocBlock
 	KnownIssues              []config.KnownIssues
 }
 
@@ -127,6 +128,7 @@ func (s *Server) optionalBlocks() optionalBlockState {
 		TagSnippets:              s.TagSnippets,
 		FunctionSnippets:         s.FunctionSnippets,
 		GlobalFunctionResolution: s.GlobalFunctionResolution,
+		DocBlock:                 s.DocBlock,
 		KnownIssues:              s.KnownIssues,
 	}
 }
@@ -161,6 +163,10 @@ func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev *optionalBlo
 	// there is only something to put back when the session had its own list.
 	if merged.KnownIssues == nil && len(prev.KnownIssues) > 0 {
 		s.KnownIssues = prev.KnownIssues
+	}
+
+	if merged.DocBlock == nil {
+		s.DocBlock = prev.DocBlock
 	}
 
 	if merged.Completions == nil {
@@ -311,5 +317,6 @@ func (s *Server) applyConfig(r *config.Resolved) {
 	s.TagSnippets = r.TagSnippets
 	s.FunctionSnippets = r.FunctionSnippets
 	s.GlobalFunctionResolution = r.GlobalFunctionResolution
+	s.DocBlock = r.DocBlock
 	s.Formatting = r.Formatting
 }
