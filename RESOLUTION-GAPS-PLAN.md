@@ -1498,5 +1498,32 @@ fail closed.
 `TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
 `TestGuardedLazyFieldsReturnTheirInitializedType` cover the positive paths;
 `TestGuardedLazyFieldsFailClosed` covers the rejection boundaries. No corpus
-count is claimed here because the external corpus checkout is unavailable in
-this environment.
+count was initially claimed because the external corpus checkout was
+unavailable in that environment.
+
+The pinned projects were subsequently checked out and scanned at PR head
+`d7ee340`, with `85f330b` as the pre-PR baseline. The reports are identical per
+entry in every mode measured: **0 removed, 0 added**. The changes therefore add
+coverage for the regression fixtures without changing these pinned corpus
+findings.
+
+| Scan | Files | Unresolved | Accepted | Removed / added vs `85f330b` |
+|---|---:|---:|---:|---:|
+| ContentBox, presets | 724 | 1,628 | 15,519 | 0 / 0 |
+| ContentBox, no presets | 724 | 7,049 | 9,721 | 0 / 0 |
+| Lucee | 3,786 | 1,975 | 37,134 | 0 / 0 |
+| TestBox, presets | 146 | 291 | 3,848 | 0 / 0 |
+| TestBox, no presets | 146 | 751 | 3,364 | 0 / 0 |
+| ColdBox, presets | 664 | 1,364 | 20,019 | 0 / 0 |
+| ColdBox, no presets | 664 | 3,365 | 17,700 | 0 / 0 |
+| FW/1, presets | 305 | 410 | 1,642 | 0 / 0 |
+| FW/1, no presets | 305 | 682 | 1,362 | 0 / 0 |
+| cfwheels, presets, explicit vendor root | 1,882 | 4,916 | 69,559 | 0 / 0 |
+| cfwheels, no presets, explicit vendor root | 1,882 | 11,241 | 60,382 | 0 / 0 |
+| Masa, configured | 897 | 11,981 | 26,791 | 0 / 0 |
+| Masa, automatic mappings | 897 | 13,498 | 21,979 | 0 / 0 |
+
+The cfwheels invocation indexed 1,882 files in this checkout, rather than the
+older canonical report's 1,195, so it is recorded separately and is not folded
+into the historical six-project totals above. All comparisons used the same
+roots and configuration for the baseline and PR-head binaries.
