@@ -805,7 +805,15 @@ return type that is a set of components, which nothing holds yet.
 
 ### Braceless bodies are not blocks
 
-Open. `flowBlocks` sees a block only where a brace opens one, so a body
+Partly fixed: a braceless body that is one line ending in a semicolon is now a
+block (`openBracelessBody`, `TestBracelessBodiesAreBlocks`). Still open: a body
+over several lines or without a semicolon, which needs the folding pass's
+statement-end rule, and braceless bodies inside closures. The text below is the
+original analysis. Not corpus-measured (none available when it was written);
+the parse benchmark alternated against the old binary showed no difference
+beyond noise, on a fixture with few braceless bodies.
+
+Originally open. `flowBlocks` sees a block only where a brace opens one, so a body
 written without braces runs "always" as far as a return is concerned:
 
 ```cfml

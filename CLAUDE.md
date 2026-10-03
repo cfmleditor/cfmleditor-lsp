@@ -526,15 +526,17 @@ the *formatter*, not the parser.
   (`agreedComponent`). `<cflock>`, `<cftransaction>` and `<cfoutput>` run their
   body once and are not blocks. A ref notes its block in `addRef`, and a
   pending call is stamped by the body loop (`stampFlow`), so a ref appended
-  anywhere else reads as always running, as every ref did before. **A
-  braceless body is not a block**: `var x = new A(); if ( c ) x = new B();
-  return x;` returns `B`, and so do braceless `else`, `for` and `while`
-  bodies, because their assignment reads as one that always runs.
-  `TestKnownBracelessBodyGaps` pins each and fails when one is fixed;
-  RESOLUTION-GAPS-PLAN.md, "Braceless bodies are not blocks", has the fix's
-  outline. It costs a full parse about 4% (script) and 6%
-  (tag), and a shallow or lazy parse nothing, since neither records blocks.
-  `TestReturnTypeComparesTheBranchesReachingIt`.
+  anywhere else reads as always running, as every ref did before. **A braceless body is a block when it can be bounded**
+  (`openBracelessBody`): `var x = new A(); if ( c ) x = new B(); return x;` has
+  no type, and so do braceless `else`, `for` and `while` bodies. The body opens a
+  block when the whole statement is one line ending in a semicolon with no brace
+  in it, found by a lookahead on a saved scanner state at the keyword; it closes
+  at that semicolon, or at the first token past it when a statement parser
+  consumed it. Anything else (a statement over two lines, or without the
+  semicolon CFScript does not require) is still read as an assignment that
+  always runs, since bounding it needs the folding pass's newline rule.
+  `TestBracelessBodiesAreBlocks` pins both halves. Only the function-body loop
+  does this, not a closure body's `handleBodyToken` scan. `TestReturnTypeComparesTheBranchesReachingIt`.
 - **A call in `x = x.m()` is made on what x held before the line.** The ref
   the assignment makes carries `ComponentRef.Rebinds`, and the resolver's
   latest-at-or-before rule (`funcScopedRef`, `fileLevelRef`) skips it on its
