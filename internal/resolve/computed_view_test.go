@@ -38,6 +38,11 @@ function index( event, rc, prc ){
 	prc.content = results[ variables.entityPlural ];
 	event.setView( "#variables.handler#/index" );
 }
+function pager( event, rc, prc ){
+	var results = variables.svc.search();
+	prc.pagerContent = results[ variables.entityPlural ];
+	event.setView( "content/pager" );
+}
 }`,
 		"admin/handlers/pages.cfc": `component extends="baseThing" {
 variables.handler = "pages";
@@ -49,10 +54,37 @@ variables.handler = "entries";
 variables.entityPlural = "items";
 function init(){ variables.svc = new svc.EntrySvc(); return this; }
 }`,
+		"admin/views/content/pager.cfm": `<cfloop array="#prc.pagerContent#" index="q"><cfoutput>#q.pageOnly()# #q.entryOnly()# #q.nope()#</cfoutput></cfloop>`,
+
+		// A leaf that sets no literal leaves a literal-named view untyped.
+		"admin/handlers/baseOther.cfc": `component {
+variables.entityPlural = "";
+function pager( event, rc, prc ){
+	var results = variables.svc.search();
+	prc.pagerContent = results[ variables.entityPlural ];
+	event.setView( "other/pager" );
+}
+}`,
+		"admin/handlers/otherA.cfc": `component extends="baseOther" {
+variables.entityPlural = "pages";
+function init(){ variables.svc = new svc.PageSvc(); return this; }
+}`,
+		"admin/handlers/otherB.cfc": `component extends="baseOther" {
+function init(){ variables.svc = new svc.EntrySvc(); return this; }
+}`,
+		"admin/views/other/pager.cfm":   `<cfloop array="#prc.pagerContent#" index="z"><cfoutput>#z.pageOnly()#</cfoutput></cfloop>`,
 		"admin/views/pages/index.cfm":   `<cfloop array="#prc.content#" index="p"><cfoutput>#p.pageOnly()# #p.entryOnly()#</cfoutput></cfloop>`,
 		"admin/views/entries/index.cfm": `<cfloop array="#prc.content#" index="e"><cfoutput>#e.entryOnly()# #e.pageOnly()#</cfoutput></cfloop>`,
 	})
 
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/content/pager.cfm"), map[string]string{
+		"q.pageOnly":  "",
+		"q.entryOnly": "",
+		"q.nope":      "method 'nope' not found in Page",
+	})
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/other/pager.cfm"), map[string]string{
+		"z.pageOnly": "variable 'z' has no component ref",
+	})
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/pages/index.cfm"), map[string]string{
 		"p.pageOnly":  "",
 		"p.entryOnly": "method 'entryOnly' not found in Page",

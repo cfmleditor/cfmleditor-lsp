@@ -315,8 +315,15 @@ func (r *Resolver) viewPrc(variable, funcName string, pr *parser.ParseResult, tr
 		// An action that never assigns prc.X answers nothing here: prc is
 		// its argument, and recordReceiver gives an argument's member only
 		// the assignments the function makes to it.
-		comp, _ := r.receiverComponentD("prc."+name, conv.Uint32(a.setView), a.name, funcName, hpr, filepath.Dir(a.handler), nil, lookupCtx{leaf: a.leaf})
-		if comp == "" || strings.HasPrefix(comp, "$") {
+		comp := r.perLeaf(a, func(leaf string) string {
+			comp, _ := r.receiverComponentD("prc."+name, conv.Uint32(a.setView), a.name, funcName, hpr, filepath.Dir(a.handler), nil, lookupCtx{leaf: leaf})
+			if strings.HasPrefix(comp, "$") {
+				return ""
+			}
+
+			return comp
+		})
+		if comp == "" {
 			return ""
 		}
 
@@ -360,7 +367,9 @@ func (r *Resolver) viewPrcElement(name string, pr *parser.ParseResult, depth int
 			return ""
 		}
 
-		element := r.elementOf(rhs, a.setView, a.start, a.name, hpr, filepath.Dir(a.handler), depth+1, a.leaf)
+		element := r.perLeaf(a, func(leaf string) string {
+			return r.elementOf(rhs, a.setView, a.start, a.name, hpr, filepath.Dir(a.handler), depth+1, leaf)
+		})
 		if element == "" || answer != "" && answer != element {
 			return ""
 		}
@@ -440,4 +449,37 @@ func (r *Resolver) pathsOf(comp, baseDir string) string {
 	}
 
 	return strings.Join(alts, "|")
+}
+
+// perLeaf is what f answers for the action a. A leaf-less action of a handler
+// that has subclasses (a literal view name its base renders) is asked as it is
+// first, and when that gives nothing, once per leaf subclass: the answer is the
+// union of theirs as alternatives, and only when every leaf gives one, since a
+// leaf that does not leaves the value to something the view cannot see.
+func (r *Resolver) perLeaf(a *handoffAction, f func(leaf string) string) string {
+	if answer := f(a.leaf); answer != "" || a.leaf != "" {
+		return answer
+	}
+
+	leaves := r.leafSubclasses(a.handler)
+	if len(leaves) == 0 {
+		return ""
+	}
+
+	var union []string
+
+	for _, leaf := range leaves {
+		answer := f(leaf)
+		if answer == "" {
+			return ""
+		}
+
+		for alt := range strings.SplitSeq(answer, "|") {
+			if !containsFold(union, alt) {
+				union = append(union, alt)
+			}
+		}
+	}
+
+	return strings.Join(union, "|")
 }

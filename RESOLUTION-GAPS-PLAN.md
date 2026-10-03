@@ -1395,3 +1395,37 @@ three `index.cfm`); the other five projects 0 / 0.
 1,958, **684 removed, 5 added** (2 reason changes, 3 genuine); the other five
 projects, with and without presets, unchanged at every step.
 
+### A literal-named view its base handler renders, read per leaf (1,958 -> 1,927)
+
+`perLeaf`: a leaf-less action of a handler that has subclasses (a literal
+`view( "content/pager" )` its base renders) is asked as it is, and when that
+answers nothing, once per leaf subclass; the answer is the union as
+alternatives, and only when **every** leaf gives one. Measured on ContentBox
+with presets: **32 removed, 1 added** (`content/pager.cfm` 19,
+`editorSelectorEntries.cfm` 13); the added is genuine, `getActiveContent()` being
+declared `any`, so the chain from it was hidden by the untyped receiver. The
+other five projects 0 / 0. `TestAComputedViewAndKeyAreReadPerSubclass` has the
+union and the leaf that sets no literal.
+
+**Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,927, **716 removed, 6
+added** (2 reason changes, 4 genuine).
+
+### What is left, and why it stays (1,927)
+
+- **`print` 204, `getCWD`/`command`/`getSystemSetting` 25**: the files are run
+  as CommandBox tasks, but nothing in them says so. Only `BuildDocs.cfc` is named
+  (by `box.json` scripts, 4 findings); the patch updaters and archived seeds are
+  run from outside the source. Not derivable; it would be a convention.
+- **`oRole` `addPermission`/`removePermission` 70**: genuine.
+- **`coldbox.system.orm.hibernate.util.ORMUtilFactory` 80**: genuine, the class
+  moved to `cborm.models.util`.
+- **`new dbinfo(…).columns()` 26**: a name collision decided at run time. The
+  non-Lucee branch means Adobe's built-in component; a `DBInfo.cfc` beside the
+  file shadows it for the resolver and, on a case-insensitive file system, for the
+  engine.
+- **`getBeanPopulator()`, `site()` etc. 43**: declared and documented nowhere.
+- **Arguments typed only by their callers** (`arguments.content` 48,
+  `arguments.site` 32, `arguments.setup` 31, `arguments.original` 27, …) and
+  the loop variables over what they hold: a feature of its own (infer an
+  argument from every caller when they agree), not a gap in a rule.
+
