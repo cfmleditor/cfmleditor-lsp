@@ -408,6 +408,14 @@ var localAssignRe = regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:var\s+)?(?:loc
 // ContentBox's `var results = svc.search(` …) is joined, up to the line
 // before header and at most maxAssignmentLines of them.
 func localAssignment(content, name string, start, header int) (string, bool) {
+	rhs, _, ok := localAssignmentAt(content, name, start, header)
+
+	return rhs, ok
+}
+
+// localAssignmentAt is localAssignment with the source line retained for
+// consumers that must prove the assignment reaches a particular use.
+func localAssignmentAt(content, name string, start, header int) (string, int, bool) {
 	lines := strings.Split(content, "\n")
 
 	for i := min(header, len(lines)) - 1; i >= start && i >= 0; i-- {
@@ -424,13 +432,13 @@ func localAssignment(content, name string, start, header int) (string, bool) {
 		}
 
 		if strings.Count(rhs, "(") != strings.Count(rhs, ")") {
-			return "", false
+			return "", 0, false
 		}
 
-		return rhs, true
+		return rhs, i, true
 	}
 
-	return "", false
+	return "", 0, false
 }
 
 const maxAssignmentLines = 24

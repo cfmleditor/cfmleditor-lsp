@@ -578,8 +578,8 @@ func producerSensitive(nodes []producerNode) bool {
 		n := &nodes[i]
 		if n.kind == "if" || n.kind == "unsafe" {
 			tokens := producerTokens(n.expression)
-			for j, t := range tokens {
-				if j+1 < len(tokens) && tokens[j+1].Kind == parser.TokLParen && (strings.EqualFold(t.Value, "isObject") || strings.EqualFold(t.Value, "structKeyExists") && j+3 < len(tokens) && strings.EqualFold(tokens[j+2].Value, "arguments") && tokens[j+3].Kind == parser.TokComma) {
+			for j := range tokens {
+				if producerGuardSensitive(tokens, j) {
 					return true
 				}
 			}
@@ -591,6 +591,32 @@ func producerSensitive(nodes []producerNode) bool {
 	}
 
 	return false
+}
+
+func producerGuardSensitive(tokens []parser.Token, i int) bool {
+	if i+1 >= len(tokens) || tokens[i+1].Kind != parser.TokLParen {
+		return false
+	}
+
+	name := tokens[i].Value
+	if strings.EqualFold(name, "isObject") {
+		return true
+	}
+
+	shared := i+4 < len(tokens) && tokens[i+2].Kind == parser.TokIdent && (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && tokens[i+3].Kind == parser.TokDot
+	if strings.EqualFold(name, "isSimpleValue") || strings.EqualFold(name, "isNull") {
+		return shared
+	}
+
+	if !strings.EqualFold(name, "structKeyExists") || i+3 >= len(tokens) || tokens[i+2].Kind != parser.TokIdent {
+		return false
+	}
+
+	if strings.EqualFold(tokens[i+2].Value, "arguments") {
+		return true
+	}
+
+	return (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && i+4 < len(tokens) && tokens[i+3].Kind == parser.TokComma && tokens[i+4].Kind == parser.TokString && !strings.Contains(tokens[i+4].Value, "#")
 }
 
 type producerTag struct{ name, body string }

@@ -1481,3 +1481,21 @@ whose expression is a framework result (`populate( "Setup@cbi" )`). The
 **Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,890, **747 removed, 6
 added** (2 reason changes, 4 genuine).
 
+### Straight-line caller aliases and guarded shared fields
+
+Caller inference now follows a plain local through its last assignment when
+the assignment precedes the call at the same lexical brace depth. Conditional,
+nested, self-referential and after-call assignments remain unknown.
+
+Producer flow also recognizes builtin `structKeyExists`, `isSimpleValue` and
+`isNull` guards around `variables`/`this` fields. A guarded field is concrete
+only when every lexical write in the component agrees on one component;
+primitive sentinels are accepted only for `isSimpleValue`. Conflicting object
+writes, primitive replacements, whole-scope replacements and component-defined
+overrides of the guard builtins fail closed.
+
+`TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
+`TestGuardedLazyFieldsReturnTheirInitializedType` cover the positive paths;
+`TestGuardedLazyFieldsFailClosed` covers the rejection boundaries. No corpus
+count is claimed here because the external corpus checkout is unavailable in
+this environment.
