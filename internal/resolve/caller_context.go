@@ -25,7 +25,7 @@ func (r *Resolver) forCaller(baseDir string) *Resolver {
 		BeanPaths: r.BeanPaths, StartupFiles: r.StartupFiles,
 		ExpressionMappings: r.ExpressionMappings, Index: r.Index,
 		Resolvers: r.Resolvers, ImplicitExtends: r.ImplicitExtends,
-		HelperScope: r.HelperScope, Stubs: r.Stubs, stubFS: r.fs(),
+		HelperScope: r.HelperScope, Stubs: r.Stubs, InferArgsFiles: r.InferArgsFiles, stubFS: r.fs(),
 		callerMappings: r.effectiveMappings(baseDir), indexer: r,
 	}
 	// Source indexing is deliberately delegated to the original resolver. Shared

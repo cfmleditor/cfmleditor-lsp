@@ -1,0 +1,86 @@
+package resolve
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func cfmlFilesIn(t *testing.T, dir string) []string {
+	t.Helper()
+
+	var out []string
+
+	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
+		if err == nil && (strings.HasSuffix(p, ".cfc") || strings.HasSuffix(p, ".cfm")) {
+			out = append(out, p)
+		}
+
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return out
+}
+
+// TestAnUntypedArgumentHoldsWhatEveryCallerPasses: an argument with no type is
+// the component every call of its function passes, as alternatives when they
+// differ. A caller that omits it says nothing; one whose receiver or expression
+// cannot be typed leaves it untyped. Without the files to search it is off.
+func TestAnUntypedArgumentHoldsWhatEveryCallerPasses(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} }`,
+		"models/Other.cfc": `component { function mixedOther(){} }`,
+		"svc/Base.cfc":     `component { function inherited( required thing ){ arguments.thing.inheritedM(); } }`,
+		"svc/Svc.cfc": `component extends="Base" {
+function useIt( required thing ){ arguments.thing.useItM(); arguments.thing.nope(); }
+function useMixed( required thing ){ arguments.thing.mixedItem(); arguments.thing.mixedOther(); }
+function useOpen( required thing ){ arguments.thing.openM(); }
+function useSkip( required thing, extra ){ arguments.thing.skipM(); }
+function callers(){
+	var a = new models.Item();
+	useIt( a );
+	useIt(
+		thing = new models.Item()
+	);
+	useMixed( new models.Item() );
+	useMixed( thing = new models.Other() );
+	useSkip( a );
+	useSkip();
+	useOpen( a );
+	super.inherited( a );
+}
+}`,
+		"callers/Elsewhere.cfc": `component { function go( x ){ x.useOpen( new models.Other() ); } }`,
+	})
+
+	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "svc/Svc.cfc")
+
+	for _, k := range []string{"arguments.thing.useItM", "arguments.thing.mixedItem", "arguments.thing.mixedOther", "arguments.thing.skipM"} {
+		if got[k] != "" {
+			t.Errorf("%s: %q, want it resolved", k, got[k])
+		}
+	}
+
+	if !strings.Contains(got["arguments.thing.nope"], "method 'nope' not found in") {
+		t.Errorf("useIt's argument is not an Item: %q", got["arguments.thing.nope"])
+	}
+
+	if !strings.Contains(got["arguments.thing.openM"], "no component ref") {
+		t.Errorf("useOpen was typed despite a caller on an untyped receiver: %q", got["arguments.thing.openM"])
+	}
+
+	inherited := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "svc/Base.cfc")
+	if inherited["arguments.thing.inheritedM"] != "" {
+		t.Errorf("a super. call is not a caller: %q", inherited["arguments.thing.inheritedM"])
+	}
+
+	off := reasonsWith(t, &Resolver{}, dir, "svc/Svc.cfc")
+	if !strings.Contains(off["arguments.thing.useItM"], "no component ref") {
+		t.Errorf("inference ran with no files to search: %q", off["arguments.thing.useItM"])
+	}
+}

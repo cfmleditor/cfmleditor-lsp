@@ -74,17 +74,35 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
+	if m := loopCallRe.FindStringSubmatch(rhs); m == nil || m[1] == "" || strings.EqualFold(m[1], variable) ||
+		strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
+		return ""
+	}
+
+	answer := r.typeCallExpr(rhs, line, caller, pr, baseDir, ctx)
+	if answer != "" {
+		tr.addf("resolved %q to %q: the last assignment to it is %s", variable, answer, rhs)
+	}
+
+	return answer
+}
+
+// typeCallExpr is the component(s) the single call rhs (`receiver.method( … )`)
+// returns, written in pr at line, with the receiver typed as any receiver is
+// and the method's return taken per alternative: every one must return a
+// component, or there is none.
+func (r *Resolver) typeCallExpr(rhs string, line uint32, caller string, pr *parser.ParseResult, baseDir string, ctx lookupCtx) string {
 	m := loopCallRe.FindStringSubmatch(rhs)
 	if m == nil {
 		return ""
 	}
 
 	receiver, method := m[1], m[2]
-	if receiver == "" || strings.EqualFold(receiver, variable) || strings.EqualFold(strings.TrimPrefix(strings.ToLower(receiver), "variables."), strings.ToLower(name)) {
+	if receiver == "" {
 		return ""
 	}
 
-	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, lookupCtx{depth: depth + 1, leaf: ctx.leaf})
+	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, lookupCtx{depth: ctx.depth + 1, leaf: ctx.leaf})
 	if comp == "" || strings.HasPrefix(comp, "$") {
 		return ""
 	}
@@ -104,11 +122,7 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		}
 	}
 
-	answer := strings.Join(returns, "|")
-
-	tr.addf("resolved %q to %q: what %s.%s() returns, the last assignment to it", variable, answer, receiver, method)
-
-	return answer
+	return strings.Join(returns, "|")
 }
 
 func containsFold(list []string, s string) bool {

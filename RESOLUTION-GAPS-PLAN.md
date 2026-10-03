@@ -1429,3 +1429,55 @@ added** (2 reason changes, 4 genuine).
   the loop variables over what they hold: a feature of its own (infer an
   argument from every caller when they agree), not a gap in a rule.
 
+### Arguments typed by their callers (1,927 -> 1,890)
+
+`arg_callers.go`. An argument with no type is the component every call of its
+function passes, as alternatives when they differ. For each caller found in the
+workspace: the call must be the function's own (a bare, `this.` or `variables.`
+call in its file or a subclass, a `super.` call from a descendant, or a call on a
+receiver whose function of that name *is* it, compared by definition, not by
+name); the argument's expression is read from the **tokens**, so a call split
+over lines reads, by position or by name; and it is typed as a receiver is
+(`new X()`, a name or dotted name — through the receiver lookup and then the
+configured resolvers — an argument passed on, typed by its own callers, or a
+single call). The argument is typed only when **every** caller that passes it
+gets one. A caller that omits it says nothing; a receiver nothing can place, or
+an expression nothing can type, leaves it untyped (fail closed: the others'
+answer would be a guess). Callers the workspace does not hold are unseen, so
+this is an inference from the code present.
+
+Three decisions, each measured:
+
+- **Opt-in.** `Resolver.InferArgsFiles` holds the files to search; only a batch
+  scan sets it (`unresolved.Options.InferArgs`, on by default in `unresolved` and
+  `explain`, `--no-infer-args` off), once its index is complete. The caller index
+  (name -> files whose text calls it) is built once from those files. The editor
+  never pays for it.
+- **Last.** The step is the end of `canResolveCall`, after every other answer.
+  Placed inside `receiverComponent`, it ran ahead of the dynamic rules and the
+  name resolvers and turned three accepted calls in coldbox-platform into
+  findings.
+- **Fail closed on an unplaced receiver.** Treating it as "not this function's"
+  would type `clone( original )` from one caller and ignore the others.
+
+`TestAnUntypedArgumentHoldsWhatEveryCallerPasses` has agreeing callers, a union,
+a multi-line call, a caller that omits it, an unplaced caller, a `super.` call
+and the feature off; each piece fails without it.
+
+Measured against the same build with `--no-infer-args` (the whole effect of this
+step): ContentBox with presets **37 removed, 0 added**. The other five projects,
+with and without presets, **no call is newly a finding**: every difference is a
+removal or a changed reason on a call already reported (TestBox `exposeMixin`
+on `makePublic`'s argument became "not found in test1", true of the fixture
+callers pass and false of the MockBox-decorated object it is at run time;
+Lucee's `MailSpool` argument became "component 'GreenMail' does not exist").
+Cost: +0.1 to +0.4s per scan (Lucee, 22s, +0.3s).
+
+What stays: functions nothing calls (handler actions, migrations: the framework
+invokes them), and callers whose own receiver is untyped (`newChild.clone(…)`) or
+whose expression is a framework result (`populate( "Setup@cbi" )`). The
+`createSite( arguments.setup )` chain ends there.
+
+**Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,890, **747 removed, 6
+added** (2 reason changes, 4 genuine).
+

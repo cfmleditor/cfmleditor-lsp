@@ -1160,6 +1160,15 @@ the handoff then reads the action *on behalf of that leaf* (`lookupCtx.leaf`):
 the field its literal names (`keyedFieldRe`). The same base file read without a
 leaf still answers the union of its subclasses. `TestAComputedViewAndKeyAreReadPerSubclass`.
 
+**An untyped argument is what every caller passes it** (`argumentFromCallers`,
+`arg_callers.go`), in a batch scan only: `Resolver.InferArgsFiles` is the file set to
+search, set by `unresolved.NewResolver` when `Options.InferArgs` is (the CLI's
+default; `--no-infer-args` turns it off). Every caller that passes it must type
+it, from the argument's tokens (a multi-line call reads), and one that cannot be
+placed or typed leaves it untyped. It is the **last** step of `canResolveCall`:
+inside `receiverComponent` it ran before the dynamic rules and turned accepted
+calls into findings. `TestAnUntypedArgumentHoldsWhatEveryCallerPasses`.
+
 ## Capabilities the VS Code extension has and this server does not
 
 The `cfmleditor` extension stands its own language providers down whenever this

@@ -58,6 +58,7 @@ type Options struct {
 	Stubs                    *frameworkapi.Set        // frameworks' API when their source is absent; see internal/frameworkapi
 	InterpolateAll           bool                     // features.outputContextInterpolation off
 	GlobalDefs               bool                     // accept a bare call any indexed file defines
+	InferArgs                bool                     // type an untyped argument from what every caller passes it (resolve.Resolver.InferArgsFiles)
 	Verbose                  io.Writer
 }
 
@@ -154,6 +155,10 @@ func NewResolver(fsys vfs.FS, files []string, opt *Options) *resolve.Resolver {
 		ImplicitExtends:    opt.ImplicitExtends,
 		HelperScope:        opt.HelperScope,
 		Stubs:              opt.Stubs,
+	}
+
+	if opt.InferArgs {
+		resolver.InferArgsFiles = files
 	}
 
 	resolver.Resolvers = resolver.BeanResolvers(opt.BeanPaths)
