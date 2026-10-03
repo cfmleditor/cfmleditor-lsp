@@ -1039,8 +1039,8 @@ fixed; see there.
 
 ## ContentBox: a base handler's variable its subclasses inject
 
-Implemented (`subclass_refs.go`) but not yet measured: run the Measure step below
-before relying on it. Originally open; measured after PR #216. Known for short as **the quickLook ormService
+Implemented (`subclass_refs.go`) and measured, see the end of the struct-field
+section. Originally open; measured after PR #216. Known for short as **the quickLook ormService
 gap**, after the view it empties. The largest single cause left in
 `contentbox-admin`'s handlers. Listed as gap 11 in RESOLUTION-GAPS.md.
 
@@ -1134,7 +1134,7 @@ ContentBox, and `quickLook.cfm` to 0 if the handoff picks up the alternatives;
 any added entry is a method one subclass's entity lacks, which is either a real
 finding or a reason to prefer the common base.
 
-## Search-result struct fields (implemented, not yet corpus-measured)
+## Search-result struct fields (implemented and measured)
 
 The largest group of loop findings left in ContentBox's admin views, ready to
 pick up. Measured on `main` at 6e3771f (after #212, #214–#217) with the
@@ -1255,10 +1255,33 @@ default, still to be verified against 4.12.1). Tag-syntax producers are
 declined. `TestAStructFieldHoldsTheCriteriaListItsFunctionAssignsIt` has the
 positive and each negative; each fails with its piece removed.
 
-**Not done: the corpus measurement.** No ContentBox, MuraCMS, ColdBox, cfwheels,
-fw1 or Lucee checkout was available where this was written, so the expected
-~250 removed loop findings and the absence of added entries are unverified.
-Run the per-entry diff described under Validation before relying on it. Still
-open from this section: `results[ variables.entityPlural ]` (computed key) and
-`cache.get( … )`.
+**Measured** (ContentBox at 312f182, config `coldbox`, `contentbox`, `testbox`,
+`cfmigrations`; per-entry diff against the commit before this work, from
+`unresolved --json` on a scratch copy): 2,637 -> 2,486, **153 removed, 2 added**.
+Without config: 7,543 -> 7,394, 151 removed, 2 added. The two added are
+`baseContentHandler.cfc:424` `addJoinedExpiredTime` / `addJoinedPublishedtime`,
+"variable has no component ref" before and now "method 'populate' in
+contentStoreService@contentbox|entryService@contentbox|pageService@contentbox has
+no component return type": the same calls with a more specific reason, from the
+subclass step (gap 11, below). TestBox, cfwheels, coldbox-platform, fw1 and Lucee,
+each with presets and without: 0 removed, 0 added. Largest removals:
+`comments/index.cfm` 27, `authors/indexTable.cfm` 25, `comments/pager.cfm` 25,
+`versions/pager.cfm` 22. That is 153 where about 250 were expected; the
+`results[ entityPlural ]` content views and the `cache.get( … )` settings are
+among what is left.
 
+Two things the first version missed, found only by running it on the corpus:
+ContentBox writes `var c = newCriteria().isEq( … )` (a chain of builder methods,
+`builderMethods`), and its handlers write the `search(` call with its arguments one
+to a line, which `localAssignment` now joins (up to 24 lines), for loops and struct
+fields alike. The first run removed 26; these two took it to 153.
+
+**Gap 11 (`subclass_refs.go`), measured in the same runs:** 14 of the removals are
+calls on `variables.ormService` in `baseContentHandler.cfc`. **Not fixed:** a value
+read from it (`oContent = variables.ormService.get( … )`, `prc.content = …`, about 50
+more in the base handler) is still untyped, so `views/content/quickLook.cfm` is
+unchanged at 31. The step answers a receiver lookup; the type an assignment gives its
+variable is decided at parse time by a different path (pending calls typed from the
+file's own refs and its bases), which does not ask the subclasses. That is the next
+piece. Still open from the struct-field section: `results[ variables.entityPlural ]`
+(computed key) and `cache.get( … )`.

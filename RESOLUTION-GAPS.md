@@ -389,16 +389,17 @@ types from its `@see` links or conditional factory assignments.
 The separate Wheels vendor reports are 6,910 → 6,901 with presets (nine
 removed), and 13,262 → 13,262 without (13 removed, 13 added).
 
-### 11. A base component's variable only its subclasses assign — implemented, not corpus-measured (the quickLook ormService gap)
+### 11. A base component's variable only its subclasses assign — partly fixed (the quickLook ormService gap)
 
 Implemented as `subclassComponent` (`internal/resolve/subclass_refs.go`), a step in
 `receiverComponent` after the extends chain: a `variables.x` or unscoped receiver the
 file never types is the alternatives every leaf subclass holds for it, and nothing
-when any leaf does not. `TestABaseComponentsVariableIsWhatItsSubclassesHold`. **Not
-run against ContentBox** (no corpus where it was written): the ~80 expected removals,
-the quickLook view picking the answer up through the prc handoff, and the other five
-projects' 0 / 0 are unverified, as is a chain hop on the alternatives
-(`variables.ormService.get( id ).getSlug()`). The description below is the original.
+when any leaf does not. `TestABaseComponentsVariableIsWhatItsSubclassesHold`. **Measured on
+ContentBox** (RESOLUTION-GAPS-PLAN.md): 14 direct calls on `variables.ormService` in
+`baseContentHandler.cfc` removed, the other five projects 0 / 0. **Not fixed:** a value read
+from it (`oContent = variables.ormService.get( … )`, `prc.content = …`) is still untyped, so
+`quickLook.cfm` is unchanged; parse-time assignment typing does not ask the subclasses.
+The description below is the original.
 
 
 ContentBox's `contentbox-admin/handlers/baseContentHandler.cfc` calls
