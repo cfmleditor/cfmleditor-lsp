@@ -73,5 +73,33 @@ var Sources = []Source{
 		"cborm.models.criterion.CriteriaBuilder",
 		"cborm.models.criterion.DetachedCriteriaBuilder",
 	}},
+	// cbmessagebox is a ColdBox module ContentBox depends on and does not ship in
+	// its checkout (it installs into contentbox-deps). Its cbMessageBox() helper
+	// reaches every handler and view; Helpers carries it.
+	{"cbmessagebox", "https://github.com/coldbox-modules/cbmessagebox", "4bbbf8c84c53540332158b01fa39f0153faceee8", "cbmessagebox", "", []string{
+		"cbmessagebox.models.MessageBox",
+	}},
 	{"fw1", "https://github.com/framework-one/fw1", "d7fb9add9b82be4d7c884ebb2d0f88ffb59ed8c9", "framework", "framework", nil},
+}
+
+// Helper is a template a module mixes into every handler and view
+// (this.applicationHelper), generated as a stub component of its functions so
+// they resolve without the module checked out. Returns gives a function the
+// component it returns, lowercased name to dot-path, when its source says it
+// only by the body.
+type Helper struct {
+	Template string // relative to the repository root
+	Returns  map[string]string
+}
+
+// Helpers lists the helper templates to stub, by the framework whose source
+// holds them.
+var Helpers = map[string][]Helper{
+	"cbmessagebox": {{"helpers/mixins.cfm", map[string]string{"cbmessagebox": "cbmessagebox.models.MessageBox"}}},
+}
+
+// implied are the frameworks whose stubs a preset brings with it: ContentBox
+// depends on cbmessagebox.
+var implied = map[string][]string{
+	"contentbox": {"cbmessagebox"},
 }

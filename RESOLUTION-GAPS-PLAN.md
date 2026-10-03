@@ -1308,3 +1308,19 @@ Order by cost and value: cbmessagebox (275, one new source and one helper
 hook), then the builder rules (116), then gap 11's assignment typing. The 204
 `print` group needs a decision on whether a directory convention may imply a
 base, since nothing in the source says so.
+
+### cbmessagebox: done (275 -> 2)
+
+`frameworkapi.Sources` has a `cbmessagebox` entry (pinned 4bbbf8c, the commit
+the clone's HEAD was at), `frameworkapi.Helpers` names the template to stub
+(`helpers/mixins.cfm`, with `cbMessageBox()` returning
+`cbmessagebox.models.MessageBox`, which its source states only in the body), and
+`cmd/cfstubgen` writes it as `stubs/cbmessagebox/cbmessagebox/helpers/mixins.cfc`
+beside `models/MessageBox.cfc`. The contentbox preset implies the stubs
+(`implied`), and `helperTemplates` offers the stub helper **last**, after the
+workspace's own, so a checkout of the module outranks it.
+`TestAModulesHelperComesFromItsStubWhenTheModuleIsAbsent`, which fails without
+the hook. Measured on ContentBox with presets: 2,486 -> 2,213, **273 removed, 0
+added**. Only the contentbox preset brings it, so the other projects are not
+affected.
+

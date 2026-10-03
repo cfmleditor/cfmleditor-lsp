@@ -76,7 +76,11 @@ func (r *Resolver) helperTemplates(file string) []string {
 
 	out = append(out, r.wheelsGlobals(file)...)
 
-	return append(out, r.applicationHelpers()...)
+	out = append(out, r.applicationHelpers()...)
+
+	// A module the preset names but the workspace lacks: its stub, last, so a
+	// checkout of the module outranks it.
+	return append(out, r.Stubs.HelperPaths()...)
 }
 
 // wheelsGlobals are the templates Wheels mixes into every controller, model

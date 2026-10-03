@@ -98,9 +98,10 @@ func For(frameworks []string) *Set {
 	var names []string
 
 	for _, f := range frameworks {
-		f = strings.ToLower(f)
-		if _, ok := index()[f]; ok && !slices.Contains(names, f) {
-			names = append(names, f)
+		for _, f := range append([]string{strings.ToLower(f)}, implied[strings.ToLower(f)]...) {
+			if _, ok := index()[f]; ok && !slices.Contains(names, f) {
+				names = append(names, f)
+			}
 		}
 	}
 
@@ -155,6 +156,32 @@ func (s *Set) Packages() []string {
 	return out
 }
 
+// HelperPaths are the stubs of the helper templates the set's frameworks mix
+// into handlers and views (Helpers), which the resolver offers last.
+func (s *Set) HelperPaths() []string {
+	if s == nil {
+		return nil
+	}
+
+	var out []string
+
+	for _, fw := range s.frameworks {
+		i := slices.IndexFunc(Sources, func(src Source) bool { return src.Framework == fw })
+		if i < 0 {
+			continue
+		}
+
+		for _, h := range Helpers[fw] {
+			name := strings.TrimSuffix(path.Base(h.Template), path.Ext(h.Template))
+			if rel, ok := index()[fw][strings.ToLower(Sources[i].Prefix)+"/helpers/"+strings.ToLower(name)+".cfc"]; ok {
+				out = append(out, filepath.Join(Root, fw, filepath.FromSlash(rel)))
+			}
+		}
+	}
+
+	return out
+}
+
 // IDPackages lists the packages the set's frameworks map by file name, in
 // which a bare WireBox id is looked for (idPackages).
 func (s *Set) IDPackages() []string {
@@ -180,6 +207,7 @@ var namespaces = []struct{ prefix, framework string }{
 	{"qb.models.", "cfmigrations"},
 	{"contentbox.models.", "contentbox"},
 	{"cborm.models.", "cborm"},
+	{"cbmessagebox.models.", "cbmessagebox"},
 }
 
 // Namespaced is the stub for a dot-path in one of namespaces, whatever the
