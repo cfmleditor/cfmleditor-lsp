@@ -24,6 +24,18 @@ struct function search( boolean asQuery = false ){
 	results.dyn = c.resultTransformer( c.DISTINCT_ROOT_ENTITY ).list( asQuery = arguments.asQuery );
 	return results;
 }
+struct function chained(){
+	var results = {};
+	var c = newCriteria().isEq( "a", 1 ).createAlias( "b", "b" );
+	results.rows = c.list( asQuery = false );
+	return results;
+}
+struct function chainedOther(){
+	var results = {};
+	var c = newCriteria().whatever( 1 );
+	results.rows = c.list( asQuery = false );
+	return results;
+}
 struct function omitted(){
 	var results = { "comments": [] };
 	var c = newCriteria();
@@ -49,6 +61,21 @@ function index( event, rc, prc ){
 	prc.count = found.count;
 	event.setView( "comments/index" );
 }
+function chained( event, rc, prc ){
+	var svc = new models.CommentService();
+	var found = svc.chained(
+		1,
+		2
+	);
+	prc.rows = found.rows;
+	event.setView( "comments/chained" );
+}
+function chainedOther( event, rc, prc ){
+	var svc = new models.CommentService();
+	var found = svc.chainedOther();
+	prc.rows = found.rows;
+	event.setView( "comments/chainedOther" );
+}
 function forced( event, rc, prc ){
 	var svc = new models.CommentService();
 	var found = svc.search( asQuery = true );
@@ -72,9 +99,11 @@ function escapes( event, rc, prc ){
 <cfloop array="#prc.queried#" index="b"><cfoutput>#b.getText()#</cfoutput></cfloop>
 <cfloop array="#prc.twice#" index="c"><cfoutput>#c.getText()#</cfoutput></cfloop>
 <cfloop array="#prc.dyn#" index="d"><cfoutput>#d.getText()#</cfoutput></cfloop>`,
-		"admin/views/comments/forced.cfm":  `<cfloop array="#prc.dyn#" index="d"><cfoutput>#d.getText()#</cfoutput></cfloop>`,
-		"admin/views/comments/omitted.cfm": `<cfloop array="#prc.comments#" index="e"><cfoutput>#e.getText()#</cfoutput></cfloop>`,
-		"admin/views/comments/escapes.cfm": `<cfloop array="#prc.comments#" index="f"><cfoutput>#f.getText()#</cfoutput></cfloop>`,
+		"admin/views/comments/chained.cfm":      `<cfloop array="#prc.rows#" index="g"><cfoutput>#g.getText()#</cfoutput></cfloop>`,
+		"admin/views/comments/chainedOther.cfm": `<cfloop array="#prc.rows#" index="h"><cfoutput>#h.getText()#</cfoutput></cfloop>`,
+		"admin/views/comments/forced.cfm":       `<cfloop array="#prc.dyn#" index="d"><cfoutput>#d.getText()#</cfoutput></cfloop>`,
+		"admin/views/comments/omitted.cfm":      `<cfloop array="#prc.comments#" index="e"><cfoutput>#e.getText()#</cfoutput></cfloop>`,
+		"admin/views/comments/escapes.cfm":      `<cfloop array="#prc.comments#" index="f"><cfoutput>#f.getText()#</cfoutput></cfloop>`,
 	})
 
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/comments/index.cfm"), map[string]string{
@@ -83,6 +112,11 @@ function escapes( event, rc, prc ){
 		"b.getText": "variable 'b' has no component ref",
 		"c.getText": "variable 'c' has no component ref",
 		"d.getText": "", // asQuery is a parameter defaulting to false, and search() leaves it
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/comments/chained.cfm"), map[string]string{"g.getText": ""})
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "admin/views/comments/chainedOther.cfm"), map[string]string{
+		"h.getText": "variable 'h' has no component ref",
 	})
 
 	for page, variable := range map[string]string{"forced": "d", "omitted": "e", "escapes": "f"} {

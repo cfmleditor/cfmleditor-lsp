@@ -433,7 +433,7 @@ func builderIsNewCriteria(name string, statements [][]parser.Token) bool {
 			rhs = rhs[2:]
 		}
 
-		if len(rhs) < 3 || !strings.EqualFold(rhs[0].Value, "newCriteria") || rhs[1].Kind != parser.TokLParen || producerGroupEnd(rhs, 1, parser.TokLParen, parser.TokRParen) != len(rhs)-1 {
+		if !isNewCriteriaChain(rhs) {
 			return false
 		}
 
@@ -521,6 +521,57 @@ func callPassesFalseOrNothing(callArgs, name string) bool {
 		if len(piece) > 0 {
 			return false
 		}
+	}
+
+	return true
+}
+
+// builderMethods are the cborm criteria methods that return the builder, so a
+// chain of them on newCriteria() is still the builder. Restrictions are
+// missing-method calls and the stub declares none of them; the rest it
+// declares as returning the builder.
+var builderMethods = map[string]bool{
+	"eq": true, "ne": true, "gt": true, "ge": true, "lt": true, "le": true,
+	"isEq": true, "isNe": true, "isGT": true, "isGE": true, "isLT": true, "isLE": true,
+	"like": true, "ilike": true, "between": true, "in": true, "isIn": true,
+	"isNull": true, "isNotNull": true, "isEmpty": true, "isNotEmpty": true, "idEq": true,
+	"$or": true, "$and": true, "$not": true, "joinTo": true, "createAlias": true,
+	"maxResults": true, "firstResult": true, "resultTransformer": true,
+}
+
+// isNewCriteriaChain reports whether tokens are `newCriteria( … )` followed by
+// calls of builderMethods only.
+func isNewCriteriaChain(tokens []parser.Token) bool {
+	if len(tokens) < 3 || !strings.EqualFold(tokens[0].Value, "newCriteria") || tokens[1].Kind != parser.TokLParen {
+		return false
+	}
+
+	pos := producerGroupEnd(tokens, 1, parser.TokLParen, parser.TokRParen) + 1
+	if pos == 0 {
+		return false
+	}
+
+	for pos < len(tokens) {
+		if pos+2 >= len(tokens) || tokens[pos].Kind != parser.TokDot || tokens[pos+1].Kind != parser.TokIdent || tokens[pos+2].Kind != parser.TokLParen {
+			return false
+		}
+
+		found := false
+
+		for name := range builderMethods {
+			if strings.EqualFold(name, tokens[pos+1].Value) {
+				found = true
+
+				break
+			}
+		}
+
+		end := producerGroupEnd(tokens, pos+2, parser.TokLParen, parser.TokRParen)
+		if !found || end < 0 {
+			return false
+		}
+
+		pos = end + 1
 	}
 
 	return true

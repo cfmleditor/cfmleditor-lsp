@@ -388,8 +388,10 @@ func (r *Resolver) withSubclasses(path string) string {
 var localAssignRe = regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:var\s+)?(?:local\.)?(\w+)\s*=\s*([^=].*?)\s*/?>?\s*;?\s*$`)
 
 // localAssignment is the right-hand side of the last assignment to name on a
-// line from start to before header, when it is written on one line and its
-// parentheses balance.
+// line from start to before header, when its parentheses balance. A statement
+// that runs on over the next lines (a call with its arguments one to a line,
+// ContentBox's `var results = svc.search(` …) is joined, up to the line
+// before header and at most maxAssignmentLines of them.
 func localAssignment(content, name string, start, header int) (string, bool) {
 	lines := strings.Split(content, "\n")
 
@@ -400,6 +402,12 @@ func localAssignment(content, name string, start, header int) (string, bool) {
 		}
 
 		rhs := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(m[2]), ";"), "/"))
+
+		for j := i + 1; strings.Count(rhs, "(") > strings.Count(rhs, ")") && j < min(header, len(lines)) && j <= i+maxAssignmentLines; j++ {
+			rhs += " " + strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(lines[j]), ";"), "/"))
+			rhs = strings.TrimSpace(rhs)
+		}
+
 		if strings.Count(rhs, "(") != strings.Count(rhs, ")") {
 			return "", false
 		}
@@ -409,6 +417,8 @@ func localAssignment(content, name string, start, header int) (string, bool) {
 
 	return "", false
 }
+
+const maxAssignmentLines = 24
 
 func isScopeWord(s string) bool {
 	switch strings.ToLower(s) {
