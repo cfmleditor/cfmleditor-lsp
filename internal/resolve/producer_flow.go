@@ -497,10 +497,29 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 		return producerUnknown()
 	}
 
-	methods := e.resolver.wheelsSource(e.fd.URI.Path()).producers
+	source := e.resolver.wheelsSource(e.fd.URI.Path())
+	methods := source.producers
 	component := ""
 	found := false
 	valid := true
+	write := func(expression string) {
+		value := e.expression(expression, producerEnvironment{})
+		switch {
+		case value.unknown, value.fields != nil, value.primitive && !allowPrimitive, len(value.components) > 1:
+			valid = false
+		case value.primitive:
+			found = true
+		case len(value.components) == 1:
+			found = true
+			if component == "" {
+				component = value.components[0]
+			} else if component != value.components[0] {
+				valid = false
+			}
+		default:
+			valid = false
+		}
+	}
 
 	var visit func([]producerNode)
 	visit = func(nodes []producerNode) {
@@ -515,22 +534,7 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 				}
 
 				if target == path {
-					value := e.expression(node.expression, producerEnvironment{})
-					switch {
-					case value.unknown, value.fields != nil, value.primitive && !allowPrimitive, len(value.components) > 1:
-						valid = false
-					case value.primitive:
-						found = true
-					case len(value.components) == 1:
-						found = true
-						if component == "" {
-							component = value.components[0]
-						} else if component != value.components[0] {
-							valid = false
-						}
-					default:
-						valid = false
-					}
+					write(node.expression)
 				}
 			}
 
@@ -541,6 +545,22 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 
 	for _, method := range methods {
 		visit(method.body)
+	}
+
+	// Function plans deliberately exclude component-body initialization. It is
+	// still an explicit write to the field and must participate in the same
+	// contract; otherwise a conflicting startup value would be ignored.
+	startup := parser.Parse(e.fd.URI, source.content)
+	for _, assignment := range startup.StartupVariableAssignments() {
+		if normalizeProducerPath(assignment.Variable) != path {
+			continue
+		}
+
+		if assignment.Expression == "" {
+			valid = false
+		} else {
+			write(assignment.Expression)
+		}
 	}
 
 	if !valid || !found || component == "" {

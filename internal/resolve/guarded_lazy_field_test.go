@@ -29,12 +29,14 @@ func TestGuardedLazyFieldsReturnTheirInitializedType(t *testing.T) {
 
 func TestGuardedLazyFieldsFailClosed(t *testing.T) {
 	tests := []struct {
-		name, extra string
+		name, extra, initial string
 	}{
-		{"conflicting component", `function replace(){variables.service=new Other();}`},
-		{"primitive replacement", `function replace(){variables.service="bad";}`},
-		{"whole scope replacement", `function replace(){variables={};}`},
-		{"overridden guard", `function isNull(value){return false;}`},
+		{"conflicting component", `function replace(){variables.service=new Other();}`, ``},
+		{"primitive replacement", `function replace(){variables.service="bad";}`, ``},
+		{"conflicting startup component", ``, `variables.service=new Other();`},
+		{"primitive startup for null guard", ``, `variables.service="bad";`},
+		{"whole scope replacement", `function replace(){variables={};}`, ``},
+		{"overridden guard", `function isNull(value){return false;}`, ``},
 	}
 
 	for _, tc := range tests {
@@ -43,7 +45,7 @@ func TestGuardedLazyFieldsFailClosed(t *testing.T) {
 			writeFiles(t, dir, map[string]string{
 				"Service.cfc": `component { function ready(){} }`,
 				"Other.cfc":   `component { function ready(){} }`,
-				"Owner.cfc":   `component { function getService(){if(isNull(variables.service)){variables.service=new Service();}return variables.service;}` + tc.extra + ` }`,
+				"Owner.cfc":   `component {` + tc.initial + ` function getService(){if(isNull(variables.service)){variables.service=new Service();}return variables.service;}` + tc.extra + ` }`,
 				"Page.cfc":    `component {function run(){new Owner().getService().ready();}}`,
 			})
 

@@ -1491,8 +1491,9 @@ Producer flow also recognizes builtin `structKeyExists`, `isSimpleValue` and
 `isNull` guards around `variables`/`this` fields. A guarded field is concrete
 only when every lexical write in the component agrees on one component;
 primitive sentinels are accepted only for `isSimpleValue`. Conflicting object
-writes, primitive replacements, whole-scope replacements and component-defined
-overrides of the guard builtins fail closed.
+writes, including component-body initialization, primitive replacements,
+whole-scope replacements and component-defined overrides of the guard builtins
+fail closed.
 
 `TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
 `TestGuardedLazyFieldsReturnTheirInitializedType` cover the positive paths;
