@@ -282,9 +282,7 @@ func (r *Resolver) viewPrc(variable, funcName string, pr *parser.ParseResult, tr
 			return ""
 		}
 
-		if p := r.ComponentPath(comp, filepath.Dir(a.handler)); p != "" {
-			comp = p
-		}
+		comp = r.pathsOf(comp, filepath.Dir(a.handler))
 
 		if answer != "" && !cfpath.SamePath(answer, comp) {
 			return ""
@@ -379,4 +377,29 @@ func lastPrcAssignment(body, name string) (string, bool) {
 	}
 
 	return rhs, true
+}
+
+// pathsOf is comp with each alternative (a|b) replaced by its file where one
+// resolves: ComponentPath answers for one component, and handed a list would
+// answer for its first.
+func (r *Resolver) pathsOf(comp, baseDir string) string {
+	if !strings.Contains(comp, "|") {
+		if p := r.ComponentPath(comp, baseDir); p != "" {
+			return p
+		}
+
+		return comp
+	}
+
+	var alts []string
+
+	for alt := range strings.SplitSeq(comp, "|") {
+		if p := r.ComponentPath(alt, baseDir); p != "" {
+			alt = p
+		}
+
+		alts = append(alts, alt)
+	}
+
+	return strings.Join(alts, "|")
 }

@@ -1143,6 +1143,15 @@ since the others' answer would be a guess. `this.x` and other scopes are not
 asked. The walk costs a scan of the index's extends map per untyped receiver and
 is capped at 16 components. `TestABaseComponentsVariableIsWhatItsSubclassesHold`.
 
+**A variable the parse left untyped is read from its last assignment at lookup**
+(`assignedFromCall`, `assigned_call.go`): `x = receiver.method( … )` or
+`prc.x = …` on one line, the receiver typed as any is, the method's return per
+alternative (`a|b` receivers), every one of which must return a component. It is
+the last step of `receiverComponent`, bounded by `receiverComponentD`. It exists
+because the parse types an assignment from its own file's refs, and an abstract
+handler's `variables.ormService` is held only by subclasses.
+`TestAVariableAssignedFromASubclassHeldReceiverIsTyped`.
+
 ## Capabilities the VS Code extension has and this server does not
 
 The `cfmleditor` extension stands its own language providers down whenever this

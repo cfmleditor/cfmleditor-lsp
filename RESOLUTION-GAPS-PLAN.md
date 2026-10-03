@@ -1344,3 +1344,29 @@ Left (43): a local `c` assigned from an untyped call, `variables.ormService.
 newCriteria()` in an abstract base (gap 11's assignment typing), and
 `arguments.criteria.when( … )` where the builder is a parameter.
 
+### Gap 11's assignment typing: done (2,140 -> 2,046)
+
+`assigned_call.go`: a variable the parse left untyped is typed at lookup from its
+last assignment, `x = receiver.method( … )` (one line, a bare or `local.` name or
+`prc.name`), with the receiver typed as any receiver is (the subclass step
+among them) and the method's return taken **per alternative**; every alternative
+must return a component. It is the last step of `receiverComponent`, so it
+never overrides one, and `receiverComponentD` bounds `x = y.f()` through
+`y = z.g()` at three. The parse-time path was left alone: threading a hook
+through the seven sites that build `ParseOptions` was not needed to answer a
+lookup. `view_handoff.go` kept only the first alternative of `prc.x` (it
+passed the list to `ComponentPath`); `pathsOf` resolves each.
+`TestAVariableAssignedFromASubclassHeldReceiverIsTyped`; each piece fails
+without it.
+
+Measured on ContentBox with presets: 2,140 -> 2,046, **97 removed, 3 added**
+(`quickLook.cfm` 30 removed, `baseContentHandler.cfc` 28, `sites/editor.cfm` 23).
+The 3 added are genuine and were hidden by the untyped receiver:
+`prc.content.getDisplayExpiredDate()` (declared nowhere in ContentBox's models)
+and two `getActiveContent().getChangelog()` chains, where `getActiveContent()`
+is declared `any`. The other five projects 0 / 0.
+
+**Cumulative since this work began** (ContentBox 312f182, presets): 2,637 ->
+2,046, 596 removed, 5 added (2 reason changes, 3 genuine); the other five
+projects, with and without presets, unchanged.
+

@@ -2792,10 +2792,21 @@ func (r *Resolver) recordReceiver(variable, name string, scope parser.RefScope, 
 // of primitive type calling a known member method, which canResolveCall
 // accepts outright. It needs funcName; ComponentOf passes none.
 func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
+	return r.receiverComponentD(variable, line, caller, funcName, pr, baseDir, tr, 0)
+}
+
+// receiverComponentD is receiverComponent with the depth of assignments read
+// to type a variable (assignedFromCall), which bounds `x = y.f()` through
+// `y = z.g()`.
+func (r *Resolver) receiverComponentD(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace, depth int) (comp string, member bool) {
 	if name, scope, record := parser.MemberReceiverName(variable); record {
 		comp := r.recordReceiver(variable, name, scope, line, caller, pr)
 		if comp == "" {
 			comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
+		}
+
+		if comp == "" {
+			comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, depth)
 		}
 
 		return comp, false
@@ -2915,6 +2926,11 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	// An abstract component's variable that only its subclasses set.
 	if comp == "" {
 		comp = r.subclassComponent(variable, line, pr, tr)
+	}
+
+	// A variable the parse could not type, from the call it was last assigned.
+	if comp == "" {
+		comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, depth)
 	}
 
 	// Last, a shared-scope variable set up by a template the application's
