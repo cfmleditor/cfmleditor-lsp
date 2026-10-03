@@ -1125,7 +1125,7 @@ ContentBox, and `quickLook.cfm` to 0 if the handoff picks up the alternatives;
 any added entry is a method one subclass's entity lacks, which is either a real
 finding or a reason to prefer the common base.
 
-## Next: search-result struct fields (not started)
+## Search-result struct fields (implemented, not yet corpus-measured)
 
 The largest group of loop findings left in ContentBox's admin views, ready to
 pick up. Measured on `main` at 6e3771f (after #212, #214–#217) with the
@@ -1229,3 +1229,27 @@ plans' file reads.
 **Also open in the same views**, recorded rather than planned: `cache.get( … )`
 for `results.settings` in one action (a cache entry is dynamic), and the
 partials rendered through `cbAdminComponent( … )`'s computed view name.
+
+**Status.** Links 2 to 4 are implemented in `internal/resolve/struct_field_element.go`,
+hooked into `elementOf` for `name.field` (a local assigned from a call). It is
+a token analysis of the producing function, **not** the producer-interpreter
+extension sketched above: the interpreter's `assign` discards a struct literal's
+fields once a member is written, and widening it to carry element types was
+not attempted without a corpus to measure against. The analysis is
+deliberately narrower: one script function; every return returns one local
+struct; that local is used only as `x.field` (passed, indexed or rebuilt, it is
+declined); every value of the field is `[]` or a criteria `list()`; the builder
+is a local whose every assignment is `newCriteria()`; and `asQuery = false` is
+written literally, or is a parameter defaulting to `false` that the call site
+does not override. An omitted `asQuery` is declined (the stubs drop cborm's
+default, still to be verified against 4.12.1). Tag-syntax producers are
+declined. `TestAStructFieldHoldsTheCriteriaListItsFunctionAssignsIt` has the
+positive and each negative; each fails with its piece removed.
+
+**Not done: the corpus measurement.** No ContentBox, MuraCMS, ColdBox, cfwheels,
+fw1 or Lucee checkout was available where this was written, so the expected
+~250 removed loop findings and the absence of added entries are unverified.
+Run the per-entry diff described under Validation before relying on it. Still
+open from this section: `results[ variables.entityPlural ]` (computed key) and
+`cache.get( … )`.
+

@@ -290,6 +290,15 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 		return r.viewPrcElement(name, pr, depth)
 	}
 
+	// A field of the struct a local's call returned: results.comments.
+	if f := structFieldRe.FindStringSubmatch(expression); f != nil && !isScopeWord(f[1]) {
+		if rhs, ok := localAssignment(pr.Content, f[1], start, header); ok {
+			return r.fieldElement(rhs, f[2], header, caller, pr, baseDir)
+		}
+
+		return ""
+	}
+
 	m := loopPathRe.FindStringSubmatch(expression)
 	if m == nil {
 		return ""
@@ -399,4 +408,13 @@ func localAssignment(content, name string, start, header int) (string, bool) {
 	}
 
 	return "", false
+}
+
+func isScopeWord(s string) bool {
+	switch strings.ToLower(s) {
+	case "local", "variables", "this", "arguments", "prc", "rc", "session", "application", "request":
+		return true
+	default:
+		return false
+	}
 }
