@@ -1285,3 +1285,26 @@ variable is decided at parse time by a different path (pending calls typed from 
 file's own refs and its bases), which does not ask the subclasses. That is the next
 piece. Still open from the struct-field section: `results[ variables.entityPlural ]`
 (computed key) and `cache.get( … )`.
+
+## ContentBox: what is left after the struct-field work (2,486 findings)
+
+Measured at ContentBox 312f182 with presets `coldbox`, `contentbox`, `testbox`,
+`cfmigrations`, after the work above. Each group names the definition that settles
+it, found in the corpus or in a pinned dependency; none is implemented yet.
+
+| Findings | Group | The definition that is missing, and the fix |
+|---:|---|---|
+| 275 | **cbmessagebox is not installed.** `cbMessageBox()` bare (157) and `.error()`, `.warn()`, `.setMessage()`, `.renderit()` chained on it | `coldbox-modules/cbmessagebox` @ 4bbbf8c: `ModuleConfig.cfc` has `this.applicationHelper = [ "helpers/mixins.cfm" ]`, and `mixins.cfm` declares `cbMessageBox()` returning `wirebox.getInstance( "messagebox@cbmessagebox" )`, i.e. `models/MessageBox.cfc`. `helpers.go` already finds a module's helper when the module is in the workspace; ContentBox lists the module in its box.json but ships it under `contentbox-deps` (not in the checkout). Fix: a `cbmessagebox` entry in `frameworkapi.Sources` (stubs for `models.MessageBox`, plus the helper template served from the stub root) and `applicationHelpers()` offering the stub helper last, after the workspace's own |
+| 204 | `print` (CommandBox task runners, `build/patches/*/Updater.cfc`) | known: nothing in the source says a file is a task. `BaseTask` is in the commandbox stubs; the missing part is a rule that a component in `build/patches` run by CommandBox extends it |
+| 116 | **cborm builder members and closure parameters.** `c.restrictions` (47), the `c` of `.when( test, function( c ){ … } )` (54), `arguments.c` (15) | `cborm/models/criterion/BaseBuilder.cfc` @ a888246: `when( required boolean test, required target )` hands its closure the current builder (`@target … receives the current criteria as the argument`), and a builder's `this.restrictions` is `cborm.models.criterion.Restrictions` (CriteriaBuilder.cfc header). Neither is in the stub: `restrictions` is assigned from an argument, and a closure parameter has no declared type. Fix: a rule typing `x.restrictions` on a builder component, and typing a function literal's first parameter from the callee's documented closure argument (`when`, `list( criteria = function( c ) )`) |
+| 80 | `new coldbox.system.orm.hibernate.util.ORMUtilFactory()` in `build/patches/*` | the class moved: it is `cborm/models/util/ORMUtilFactory.cfc`. The patches name ColdBox's old path, so this is a **genuine finding** unless a legacy alias is wanted |
+| 70 | `addPermission`/`removePermission` not found in `cbRole` | genuine (the entity's property has no singular name, so CFML generates `addPermissions`); already listed under "Genuine findings" |
+| 365 | loop and prc variables in admin views (`thisContent`, `entry`, `page`, `content`, `item`, `author`, `thisPerm`, …) | mostly `results[ variables.entityPlural ]` (computed key, set per subclass) feeding `contentViewlet`, `pager` and the `*/indexTable` views, and `cbAdminComponent( … )`'s computed view name; plus the `oContent = variables.ormService.get( … )` assignment typing gap 11 left |
+| 43 | `getBeanPopulator()` / `site()` have no return type | cborm and ContentBox declare and document none (see "Untyped, but correctly so") |
+| 41 | bare `getInstance( … )` in `email_templates/*.cfm`, `command( … )`, `getCWD()`, `getSystemSetting()` | email templates are rendered by a ContentBox service, so they have no base; `command()` and the others are CommandBox task helpers |
+| 26 | `new dbinfo( … ).columns()` | `dbinfo` is an engine component; `columns()` is a Lucee member the engine rule does not know |
+
+Order by cost and value: cbmessagebox (275, one new source and one helper
+hook), then the builder rules (116), then gap 11's assignment typing. The 204
+`print` group needs a decision on whether a directory convention may imply a
+base, since nothing in the source says so.
