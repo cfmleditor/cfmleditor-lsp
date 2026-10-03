@@ -2901,6 +2901,11 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 		})
 	}
 
+	// An abstract component's variable that only its subclasses set.
+	if comp == "" {
+		comp = r.subclassComponent(variable, line, pr, tr)
+	}
+
 	// Last, a shared-scope variable set up by a template the application's
 	// Application.cfc includes (see startup.go).
 	if comp == "" {

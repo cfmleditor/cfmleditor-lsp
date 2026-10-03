@@ -1039,7 +1039,8 @@ fixed; see there.
 
 ## ContentBox: a base handler's variable its subclasses inject
 
-Open; measured after PR #216. Known for short as **the quickLook ormService
+Implemented (`subclass_refs.go`) but not yet measured: run the Measure step below
+before relying on it. Originally open; measured after PR #216. Known for short as **the quickLook ormService
 gap**, after the view it empties. The largest single cause left in
 `contentbox-admin`'s handlers. Listed as gap 11 in RESOLUTION-GAPS.md.
 

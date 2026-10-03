@@ -1133,6 +1133,16 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   outside the workspace: the arguments come from whatever asked the editor to run
   the command.
 
+**A base component's variable only its subclasses set** (`subclassComponent`,
+`subclass_refs.go`): after the extends chain, a `variables.x` or unscoped receiver
+the file never types, and no function of it declares, is what the leaf subclasses
+under the file hold for it, as `a|b` alternatives (the spelling `withSubclasses`
+uses). **Every leaf must type it**, by a ref of its own or of a component between
+it and the file; one that does not, or a file nothing extends, gives nothing,
+since the others' answer would be a guess. `this.x` and other scopes are not
+asked. The walk costs a scan of the index's extends map per untyped receiver and
+is capped at 16 components. `TestABaseComponentsVariableIsWhatItsSubclassesHold`.
+
 ## Capabilities the VS Code extension has and this server does not
 
 The `cfmleditor` extension stands its own language providers down whenever this
