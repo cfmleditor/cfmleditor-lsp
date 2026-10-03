@@ -160,3 +160,35 @@ func TestAtInADocBlockOffersTheTagsAttributes(t *testing.T) {
 		t.Errorf("a line comment offered tag attributes: %v", labels(items))
 	}
 }
+
+// TestAnAutoClosedCommentIsReplacedWhole: an editor that closes the comment as
+// it opens it leaves `/** */` on the line, and the snippet carries its own
+// closer, so the edit must cover the one that is there or the block ends twice.
+// A bodiless declaration (an interface's) reads its own arguments, not the next
+// one's.
+func TestAnAutoClosedCommentIsReplacedWhole(t *testing.T) {
+	items := docCompletion(t, newTestServer(), "component {\n\t/** */\n\tfunction save( required user ){}\n}", 1, 4)
+	if len(items) != 1 {
+		t.Fatalf("items %v", labels(items))
+	}
+
+	edit := textEdit(t, items[0].TextEdit)
+	if edit.Range.Start.Character != 1 || edit.Range.End.Character != 7 {
+		t.Errorf("the edit covers columns %d to %d of \"\\t/** */\", want 1 to 7", edit.Range.Start.Character, edit.Range.End.Character)
+	}
+
+	if !strings.Contains(edit.NewText, "@user") {
+		t.Errorf("the function after the closed comment was not read: %q", edit.NewText)
+	}
+
+	// Without a closer on the line only the opener is replaced.
+	open := textEdit(t, docCompletion(t, newTestServer(), "component {\n\t/**\n\tfunction save(){}\n}", 1, 4)[0].TextEdit)
+	if open.Range.End.Character-open.Range.Start.Character != 3 {
+		t.Errorf("an unclosed /** replaced %d characters", open.Range.End.Character-open.Range.Start.Character)
+	}
+
+	// An interface's bodiless functions: the first one's arguments.
+	if got := docFunctionArguments("\nfunction a( required x, y );\nfunction b( required z );\n}"); !slices.Equal(got, []string{"x", "y"}) {
+		t.Errorf("bodiless declarations: %v", got)
+	}
+}
