@@ -211,7 +211,14 @@ func (s *Server) handleCompletion(_ context.Context, rawParams []byte) (any, err
 		cflog.Uint32("char", params.Position.Character),
 	)
 
+	docItems, inDocBlock := []protocol.CompletionItem(nil), false
+	if hasDoc {
+		docItems, inDocBlock = s.docBlockItems(content, &params)
+	}
+
 	switch {
+	case inDocBlock:
+		items = docItems
 	case cc.inHashExpr:
 		items = s.completionFromCache(params.TextDocument.URI, int(params.Position.Line))
 	case cc.inAttrValue:

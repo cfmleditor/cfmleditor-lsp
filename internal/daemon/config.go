@@ -516,6 +516,16 @@ func (c *Config) ResolvedCompletions() config.ResolvedCompletions {
 	return config.ResolveCompletions(raw.Completions)
 }
 
+// ResolvedDocBlock returns the doc block settings with defaults applied.
+func (c *Config) ResolvedDocBlock() config.ResolvedDocBlock {
+	raw := c.raw()
+	if raw == nil {
+		return config.ResolveDocBlock(nil)
+	}
+
+	return config.ResolveDocBlock(raw.DocBlock)
+}
+
 // SettingsFrom builds the per-session settings for every daemon session from a
 // config.
 //
@@ -558,6 +568,7 @@ func SettingsFrom(c *Config) server.Settings {
 		TagSnippets:              comp.TagSnippets,
 		FunctionSnippets:         comp.FunctionSnippets,
 		GlobalFunctionResolution: comp.GlobalFunctionResolution,
+		DocBlock:                 c.ResolvedDocBlock(),
 	}
 }
 

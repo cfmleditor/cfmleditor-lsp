@@ -75,3 +75,16 @@ func TestSettingsFromDefaultsFeaturesOn(t *testing.T) {
 		t.Fatal("daemon took the zero value of ResolvedFeatures — every switch off")
 	}
 }
+
+// TestSettingsFromCarriesDocBlock: the docBlock block reaches every daemon
+// session, and an absent one resolves to its defaults rather than zero.
+func TestSettingsFromCarriesDocBlock(t *testing.T) {
+	set := SettingsFrom(configWith(t, `{"workspaceName": "w", "docBlock": {"gap": false, "extra": [{"name": "author", "default": "me"}]}}`))
+	if set.DocBlock.Gap || len(set.DocBlock.Extra) != 1 || set.DocBlock.Extra[0].Name != "author" {
+		t.Errorf("docBlock did not reach Settings: %+v", set.DocBlock)
+	}
+
+	if bare := SettingsFrom(configWith(t, `{"workspaceName": "w"}`)); !bare.DocBlock.Gap {
+		t.Error("an absent docBlock block did not resolve to its default gap")
+	}
+}

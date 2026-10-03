@@ -96,6 +96,7 @@ type JSON struct {
 	Completions   *Completions `json:"completions"`
 	References    *References  `json:"references"`
 	Features      *Features    `json:"features"`
+	DocBlock      *DocBlock    `json:"docBlock"`
 	Debug         bool         `json:"debug"`
 }
 
@@ -537,6 +538,43 @@ func ResolveCompletions(c *Completions) ResolvedCompletions {
 	}
 }
 
+// DocBlock configures the doc block a `/**` expands to, as the extension's
+// cfml.docBlock.* settings do.
+//
+// Gap is a pointer for the reason every flag here is: it defaults to true, so
+// a plain bool cannot tell "turned off" from "not mentioned".
+type DocBlock struct {
+	// Gap puts a blank ` *` line between the hint and the tags (default true).
+	Gap *bool `json:"gap"`
+	// Extra are tags added to every block, for the structures in Types (all
+	// of them when Types is empty): component, interface, function, property.
+	Extra []DocBlockExtra `json:"extra"`
+}
+
+// DocBlockExtra is one extra tag of a doc block.
+type DocBlockExtra struct {
+	Name    string   `json:"name"`
+	Default string   `json:"default"`
+	Types   []string `json:"types"`
+}
+
+// ResolvedDocBlock holds the doc block settings with defaults applied.
+type ResolvedDocBlock struct {
+	Gap   bool
+	Extra []DocBlockExtra
+}
+
+// ResolveDocBlock applies the defaults for a `docBlock` block: a gap, no
+// extra tags. Like ResolveCompletions it is written once, so a session that
+// never runs Resolve gets the documented defaults and not the zero value.
+func ResolveDocBlock(d *DocBlock) ResolvedDocBlock {
+	if d == nil {
+		d = &DocBlock{}
+	}
+
+	return ResolvedDocBlock{Gap: BoolDefault(d.Gap, true), Extra: d.Extra}
+}
+
 // Formatting holds formatter configuration.
 type Formatting struct {
 	// Enabled and Debug are pointers for the same reason every other flag here
@@ -623,6 +661,7 @@ type Resolved struct {
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
+	DocBlock                 ResolvedDocBlock
 }
 
 // ResolvedFormatting holds formatting settings with defaults applied.
@@ -711,6 +750,7 @@ func Resolve(cfg *JSON, dir string) *Resolved {
 	}
 
 	r.Features = ResolveFeatures(cfg.Features)
+	r.DocBlock = ResolveDocBlock(cfg.DocBlock)
 
 	comp := ResolveCompletions(cfg.Completions)
 	r.TagSnippets = comp.TagSnippets
@@ -869,6 +909,7 @@ func Merge(base, over *JSON) *JSON {
 	out.Linting = mergeLinting(base.Linting, over.Linting)
 
 	out.Completions = mergeCompletions(base.Completions, over.Completions)
+	out.DocBlock = mergeDocBlock(base.DocBlock, over.DocBlock)
 
 	if over.References != nil {
 		out.References = over.References
@@ -1029,6 +1070,35 @@ func mergeCompletions(base, over *Completions) *Completions {
 	} {
 		if *f.src != nil {
 			*f.dst = *f.src
+		}
+	}
+
+	return &out
+}
+
+// mergeDocBlock unions two docBlock blocks: the gap by key, and the extra tags
+// by name, a child's replacing the base's of the same name.
+func mergeDocBlock(base, over *DocBlock) *DocBlock {
+	if base == nil {
+		return over
+	}
+
+	if over == nil {
+		return base
+	}
+
+	out := *base
+	if over.Gap != nil {
+		out.Gap = over.Gap
+	}
+
+	out.Extra = slices.Clone(base.Extra)
+
+	for _, e := range over.Extra {
+		if i := slices.IndexFunc(out.Extra, func(x DocBlockExtra) bool { return x.Name == e.Name }); i >= 0 {
+			out.Extra[i] = e
+		} else {
+			out.Extra = append(out.Extra, e)
 		}
 	}
 

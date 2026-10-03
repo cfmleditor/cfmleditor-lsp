@@ -523,6 +523,7 @@ The same settings can also be supplied by your editor as LSP `initializationOpti
 | `frameworks` | No | Framework presets the project uses, e.g. `["coldbox"]`. Each adds the resolvers and implicit base components that framework implies. See [Frameworks](#frameworks). |
 | `formatting` | No | Formatter configuration object. See below. |
 | `completions` | No | `tagSnippets`, `functionSnippets`, `globalFunctionResolution`. All three default to `true`; set the block only to turn one off. |
+| `docBlock` | No | What `/**` expands to: `gap` (default `true`) puts a blank ` *` line between the hint and the tags, and `extra` is a list of `{ "name", "default", "types" }` tags added to every block (`types` limits them to `component`, `interface`, `function` or `property`). Inside a doc block, `@` completes the attributes of the tag being documented and a function's argument names. |
 | `references` | No | `textDocument/references` support, off by default. See below. |
 | `features` | No | Per-capability switches. `documentHighlight`, `watchedFiles` and `rangeFormatting` default to `true`; `folding` and `typeDefinition` default to `false` and are opt-in. See below. |
 | `debug` | No | Enable debug logging (`zap.NewDevelopment`). Outputs verbose logs to stderr. |

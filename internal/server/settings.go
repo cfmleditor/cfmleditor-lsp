@@ -46,6 +46,7 @@ type Settings struct {
 	TagSnippets              bool
 	FunctionSnippets         bool
 	GlobalFunctionResolution bool
+	DocBlock                 config.ResolvedDocBlock
 }
 
 // Apply copies the settings onto a freshly created Server.
@@ -72,4 +73,5 @@ func (set *Settings) Apply(s *Server) {
 	s.TagSnippets = set.TagSnippets
 	s.FunctionSnippets = set.FunctionSnippets
 	s.GlobalFunctionResolution = set.GlobalFunctionResolution
+	s.DocBlock = set.DocBlock
 }
