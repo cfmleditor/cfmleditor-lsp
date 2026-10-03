@@ -2355,9 +2355,9 @@ func (p *tagParser) scanInterpolatedText(text string, offset int) {
 // <cfscript> body already does. One implementation of "what is a call" then
 // serves both syntaxes, and a fix to it reaches tag files for free.
 //
-// Only calls are merged. The refs and vars a sub-parse also produces belong to
-// whatever the tag handler already recorded for them, and taking them here
-// would record each one twice.
+// Calls and dynamic member assignments are merged. The refs and vars a
+// sub-parse also produces belong to whatever the tag handler already recorded
+// for them, and taking them here would record each one twice.
 func (p *tagParser) scanExpressionCalls(expr string, line int) {
 	p.mergeExpressionCalls(expr, line, false)
 }
@@ -2384,9 +2384,10 @@ func (p *tagParser) scanSetExpressionCalls(expr string, line int) {
 // a <cfscript> body already does. One implementation of "what is a call" then
 // serves both syntaxes, and a fix to it reaches tag files for free.
 //
-// Only calls are merged. The refs and vars a sub-parse also produces belong to
-// whatever the tag handler already recorded for them, and taking them here
-// would record each one twice.
+// Calls are merged, plus the member assignments that affect call resolution.
+// The refs and vars a sub-parse also produces belong to whatever the tag
+// handler already recorded for them, and taking them here would record each
+// one twice.
 //
 // With topUp, the count already recorded on the starting line for each name is
 // subtracted and only the excess is added, so a <cfset> keeps the component its
@@ -2394,7 +2395,15 @@ func (p *tagParser) scanSetExpressionCalls(expr string, line int) {
 // calls that path never matched. Counting rather than testing presence is what
 // keeps `<cfset x = f() + f()>` at two.
 func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
-	if !p.extractCalls || strings.IndexByte(expr, '(') < 0 {
+	if !p.extractCalls {
+		return
+	}
+
+	if topUp {
+		p.mergeExpressionMemberSets(expr, line)
+	}
+
+	if strings.IndexByte(expr, '(') < 0 {
 		return
 	}
 
@@ -2438,6 +2447,29 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 
 			emit(*c)
 		}
+	}
+}
+
+// mergeExpressionMemberSets records a member assignment held by <cfset>.
+// Wrapping the expression in a function deliberately sends it through the
+// script parser's body path, the one implementation that distinguishes
+// `a.m = value` from `a.m == value` and indexed receivers.
+func (p *tagParser) mergeExpressionMemberSets(expr string, line int) {
+	if !strings.Contains(expr, ".") || !strings.Contains(expr, "=") {
+		return
+	}
+
+	sub := newScriptParser("function __cfset(){"+expr+"}", p.fileURI, line, p.resolvers).asCFScript()
+	sub.parse()
+
+	for i := range sub.pendingCalls {
+		c := sub.pendingCalls[i]
+		if !c.memberSet {
+			continue
+		}
+
+		c.funcKey = p.inFunc
+		p.pendingCalls = append(p.pendingCalls, c)
 	}
 }
 
