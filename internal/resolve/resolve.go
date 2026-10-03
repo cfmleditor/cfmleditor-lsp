@@ -72,6 +72,7 @@ type Resolver struct {
 	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
 	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
 	loopCache      map[string][]loopSpan          // file URI and content hash → every loop it holds (loopsOf)
+	closureCache   map[string][]closureSpan       // file URI and content hash → every function literal it holds (closuresOf)
 	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)
 	handoffs       handoffIndex                   // handler actions by the view each renders (viewActions)
 }
@@ -2792,7 +2793,12 @@ func (r *Resolver) recordReceiver(variable, name string, scope parser.RefScope, 
 // accepts outright. It needs funcName; ComponentOf passes none.
 func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
 	if name, scope, record := parser.MemberReceiverName(variable); record {
-		return r.recordReceiver(variable, name, scope, line, caller, pr), false
+		comp := r.recordReceiver(variable, name, scope, line, caller, pr)
+		if comp == "" {
+			comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
+		}
+
+		return comp, false
 	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
@@ -2899,6 +2905,11 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 
 			return comp != ""
 		})
+	}
+
+	// A closure's builder parameter, and a builder's restrictions member.
+	if comp == "" {
+		comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
 	}
 
 	// An abstract component's variable that only its subclasses set.

@@ -397,7 +397,7 @@ func (r *Resolver) criteriaListEntity(value []parser.Token, statements [][]parse
 		return ""
 	}
 
-	if !asQueryFalse(value[i+3:end], params, callArgs) || !builderIsNewCriteria(builder, statements) {
+	if !asQueryFalse(value[i+3:end], params, callArgs) || !r.builderIsNewCriteria(builder, statements) {
 		return ""
 	}
 
@@ -411,7 +411,7 @@ func (r *Resolver) criteriaListEntity(value []parser.Token, statements [][]parse
 
 // builderIsNewCriteria reports whether every assignment to the local name in
 // statements is `newCriteria( … )`, and there is one.
-func builderIsNewCriteria(name string, statements [][]parser.Token) bool {
+func (r *Resolver) builderIsNewCriteria(name string, statements [][]parser.Token) bool {
 	seen := false
 
 	for _, s := range statements {
@@ -433,7 +433,7 @@ func builderIsNewCriteria(name string, statements [][]parser.Token) bool {
 			rhs = rhs[2:]
 		}
 
-		if !isNewCriteriaChain(rhs) {
+		if !isNewCriteriaChain(rhs, r.isBuilderMethod) {
 			return false
 		}
 
@@ -526,10 +526,10 @@ func callPassesFalseOrNothing(callArgs, name string) bool {
 	return true
 }
 
-// builderMethods are the cborm criteria methods that return the builder, so a
-// chain of them on newCriteria() is still the builder. Restrictions are
-// missing-method calls and the stub declares none of them; the rest it
-// declares as returning the builder.
+// builderMethods are cborm criteria methods known to return the builder, so a
+// chain of them on newCriteria() is still the builder. isBuilderMethod adds
+// every method the Restrictions stub declares, since the builder answers each
+// as a restriction and returns itself.
 var builderMethods = map[string]bool{
 	"eq": true, "ne": true, "gt": true, "ge": true, "lt": true, "le": true,
 	"isEq": true, "isNe": true, "isGT": true, "isGE": true, "isLT": true, "isLE": true,
@@ -541,7 +541,7 @@ var builderMethods = map[string]bool{
 
 // isNewCriteriaChain reports whether tokens are `newCriteria( … )` followed by
 // calls of builderMethods only.
-func isNewCriteriaChain(tokens []parser.Token) bool {
+func isNewCriteriaChain(tokens []parser.Token, isBuilderMethod func(string) bool) bool {
 	if len(tokens) < 3 || !strings.EqualFold(tokens[0].Value, "newCriteria") || tokens[1].Kind != parser.TokLParen {
 		return false
 	}
@@ -556,18 +556,8 @@ func isNewCriteriaChain(tokens []parser.Token) bool {
 			return false
 		}
 
-		found := false
-
-		for name := range builderMethods {
-			if strings.EqualFold(name, tokens[pos+1].Value) {
-				found = true
-
-				break
-			}
-		}
-
 		end := producerGroupEnd(tokens, pos+2, parser.TokLParen, parser.TokRParen)
-		if !found || end < 0 {
+		if !isBuilderMethod(tokens[pos+1].Value) || end < 0 {
 			return false
 		}
 
@@ -575,4 +565,26 @@ func isNewCriteriaChain(tokens []parser.Token) bool {
 	}
 
 	return true
+}
+
+// isBuilderMethod reports whether calling name on a criteria builder returns
+// the builder: one of builderMethods, a restriction (the builder forwards each
+// method of cborm's Restrictions to it), or a method the builder declares to
+// return a builder.
+func (r *Resolver) isBuilderMethod(name string) bool {
+	for m := range builderMethods {
+		if strings.EqualFold(m, name) {
+			return true
+		}
+	}
+
+	if r.ResolveFunc(restrictionsComponent, name, "") != nil {
+		return true
+	}
+
+	if fd := r.ResolveFunc(builderComponent, name, ""); fd != nil {
+		return strings.HasSuffix(strings.ToLower(fd.ReturnType), "builder")
+	}
+
+	return false
 }

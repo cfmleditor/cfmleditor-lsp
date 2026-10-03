@@ -1324,3 +1324,23 @@ the hook. Measured on ContentBox with presets: 2,486 -> 2,213, **273 removed, 0
 added**. Only the contentbox preset brings it, so the other projects are not
 affected.
 
+### cborm builder members: done in part (116 -> 43)
+
+`builder_members.go`: a closure written as an argument of `when( test, target )`
+on a builder chain (`newCriteria()` followed by builder methods, or a local
+assigned one) has the builder as its first parameter, and `<builder>.restrictions`
+is a `cborm.models.criterion.Restrictions`. A method is a builder method when it is
+in `builderMethods`, when the Restrictions stub declares it (the builder forwards
+each to Restrictions and returns itself), or when the builder declares it to
+return a builder; `isNewCriteriaChain` and the struct-field analysis now share
+that rule. `TestACriteriaBuildersClosureAndRestrictionsAreTyped` has the
+negatives (a chain that is not a builder, a closure that is not `when`'s, a
+typed non-builder with a `restrictions` member); each rule fails without its
+piece. The first version removed 18; the early record-member branch in
+`receiverComponent` returned before the rule ran, and the chains use many more
+restriction methods than a fixed list. Measured on ContentBox with presets:
+2,213 -> 2,140, **73 removed, 0 added**; the other five projects 0 / 0.
+Left (43): a local `c` assigned from an untyped call, `variables.ormService.
+newCriteria()` in an abstract base (gap 11's assignment typing), and
+`arguments.criteria.when( … )` where the builder is a parameter.
+
