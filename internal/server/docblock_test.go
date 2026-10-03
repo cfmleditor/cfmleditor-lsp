@@ -52,6 +52,9 @@ func labels(items []protocol.CompletionItem) []string {
 func TestSlashStarStarExpandsToADocBlock(t *testing.T) {
 	for _, tc := range []struct{ name, doc, want string }{
 		{"function", "component {\n\t/**\n\tfunction save( required user, flag = false ){}\n}", "/**\n * ${1:Undocumented function}\n *\n * @user ${2:}\n * @flag ${3:}\n */"},
+		{"function with modifiers", "component {\n\t/**\n\tpublic static final string function save( required user ){}\n}", "/**\n * ${1:Undocumented function}\n *\n * @user ${2:}\n */"},
+		{"tag function", "<cfcomponent>\n\t/**\n\t<cffunction name=\"save\"><cfargument name=\"user\" required=\"true\"></cffunction>\n</cfcomponent>", "/**\n * ${1:Undocumented function}\n *\n * @user ${2:}\n */"},
+		{"tag property", "<cfcomponent>\n\t/**\n\t<cfproperty name=\"x\">\n</cfcomponent>", "/**\n * ${1:Undocumented property}\n */"},
 		{"function without arguments", "component {\n\t/**\n\tfunction save(){}\n}", "/**\n * ${1:Undocumented function}\n */"},
 		{"property", "component {\n\t/**\n\tproperty name=\"x\";\n}", "/**\n * ${1:Undocumented property}\n */"},
 		{"component", "/**\ncomponent {\n}", "/**\n * ${1:Undocumented component}\n */"},
@@ -123,7 +126,7 @@ func TestAtInADocBlockOffersTheTagsAttributes(t *testing.T) {
 		t.Errorf("name is the tag's own and is not offered: %v", got)
 	}
 
-	sub := labels(docCompletion(t, newTestServer(), strings.Replace(fn, "@\n", "@user.\n", 1), 3, 10))
+	sub := labels(docCompletion(t, newTestServer(), strings.Replace(strings.Replace(fn, "required user", "required User", 1), "@\n", "@user.\n", 1), 3, 10))
 	if !slices.Contains(sub, "required") || !slices.Contains(sub, "type") || slices.Contains(sub, "access") {
 		t.Errorf("@user. should offer cfargument's attributes: %v", sub)
 	}
@@ -136,6 +139,13 @@ func TestAtInADocBlockOffersTheTagsAttributes(t *testing.T) {
 	prop := labels(docCompletion(t, newTestServer(), "component {\n\t/**\n\t * @\n\t */\n\tproperty name=\"x\";\n}", 2, 5))
 	if !slices.Contains(prop, "type") || !slices.Contains(prop, "default") || slices.Contains(prop, "returnType") {
 		t.Errorf("property doc block: %v", prop)
+	}
+
+	tagFn := labels(docCompletion(t, newTestServer(), "<cfcomponent>\n\t/**\n\t * @\n\t */\n\t<cffunction name=\"save\"><cfargument name=\"user\"></cffunction>\n</cfcomponent>", 2, 5))
+	for _, want := range []string{"access", "returnType", "user"} {
+		if !slices.Contains(tagFn, want) {
+			t.Errorf("tag function doc block lacks %q: %v", want, tagFn)
+		}
 	}
 
 	comp := labels(docCompletion(t, newTestServer(), "/**\n * @\n */\ncomponent {\n}", 1, 4))

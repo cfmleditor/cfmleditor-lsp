@@ -326,6 +326,10 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 			comp = r.argumentFromCallers(name, caller, pr, next)
 		}
 
+		if comp == "" {
+			comp = r.argumentAliasComponent(name, line, caller, pr, dir, next)
+		}
+
 		if comp == "" || strings.HasPrefix(comp, "$") {
 			return ""
 		}
@@ -350,4 +354,52 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 	text := strings.ReplaceAll(strings.ReplaceAll(producerText(expr), " . ", "."), " (", "(")
 
 	return r.typeCallExpr(text, line, caller, pr, dir, next)
+}
+
+// argumentAliasComponent follows a plain local passed by a caller to the last
+// straight-line assignment before that call. Requiring equal lexical brace
+// depth keeps assignments in a conditional or nested closure from becoming a
+// reaching definition; an assignment after the call is excluded by the
+// bounded lookup itself.
+func (r *Resolver) argumentAliasComponent(name string, line uint32, caller string, pr *parser.ParseResult, dir string, ctx lookupCtx) string {
+	if pr == nil || ctx.depth >= maxAssignedDepth {
+		return ""
+	}
+
+	lower := strings.ToLower(name)
+	lower = strings.TrimPrefix(lower, "local.")
+	if lower == "" || strings.Contains(lower, ".") || isScopeWord(lower) {
+		return ""
+	}
+
+	start := 0
+	if scope, ok := enclosingScope(pr, line); ok {
+		start = scope.Start
+	}
+
+	rhs, assignedLine, ok := localAssignmentAt(pr.Content, lower, start, int(line))
+	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) || producerBraceDepth(pr.Content, assignedLine) != producerBraceDepth(pr.Content, int(line)) {
+		return ""
+	}
+
+	return r.argumentExprComponent(producerTokens(rhs), uint32(assignedLine), caller, pr, dir, ctx)
+}
+
+func producerBraceDepth(content string, line int) int {
+	depth := 0
+	for _, token := range producerTokens(content) {
+		if token.Line >= line {
+			break
+		}
+
+		switch token.Kind {
+		case parser.TokLBrace:
+			depth++
+		case parser.TokRBrace:
+			depth--
+		default:
+		}
+	}
+
+	return depth
 }

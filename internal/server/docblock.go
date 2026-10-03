@@ -28,9 +28,10 @@ import (
 // inside a doc block, which is the only place a `@tag` line means anything.
 
 var (
-	docFunctionRe  = regexp.MustCompile(`(?i)^(\s*)(?:\b(?:private|package|public|remote|static|final|abstract|default)\s+)?(?:\b(?:private|package|public|remote|static|final|abstract|default)\s+)?(?:\b(?:[A-Za-z0-9_.$]+)\s+)?function\s+([_$a-zA-Z][$\w]*)\s*(?:\((?:=\s*\{|[^{])*)[{;]`)
+	docFunctionRe  = regexp.MustCompile(`(?i)^(\s*)(?:\b(?:private|package|public|remote|static|final|abstract|default)\s+)*(?:\b(?:[A-Za-z0-9_.$]+)\s+)?function\s+([_$a-zA-Z][$\w]*)\s*(?:\((?:=\s*\{|[^{])*)[{;]`)
 	docPropertyRe  = regexp.MustCompile(`(?i)^(\s*property)\s+`)
 	docComponentRe = regexp.MustCompile(`(?i)^(\s*(component|interface))\b[^{]*\{`)
+	docCFTagRe     = regexp.MustCompile(`(?i)^\s*<cf(function|property|component|interface)\b`)
 	docTagWordRe   = regexp.MustCompile(`@([\w$]*)(?:\.([\w$]*))?$`)
 )
 
@@ -55,6 +56,19 @@ func docTarget(after string) docKind {
 		return docFunction
 	case docPropertyRe.MatchString(after):
 		return docProperty
+	}
+
+	if m := docCFTagRe.FindStringSubmatch(after); m != nil {
+		switch strings.ToLower(m[1]) {
+		case "function":
+			return docFunction
+		case "property":
+			return docProperty
+		case "component":
+			return docComponent
+		case "interface":
+			return docInterface
+		}
 	}
 
 	if m := docComponentRe.FindStringSubmatch(after); m != nil {
@@ -198,13 +212,19 @@ func escapeSnippet(s string) string {
 // comment hides the rest of the file from the document's own parse.
 func docFunctionArguments(after string) []string {
 	loc := docFunctionRe.FindStringIndex(after)
-	if loc == nil {
+
+	var content string
+
+	if loc != nil {
+		decl := strings.TrimRight(after[:loc[1]], "{;") + "{}"
+		content = "component {\n" + decl + "\n}"
+	} else if m := docCFTagRe.FindStringSubmatch(after); m != nil && strings.EqualFold(m[1], "function") {
+		content = "<cfcomponent>\n" + after + "\n</cfcomponent>"
+	} else {
 		return nil
 	}
 
-	decl := strings.TrimRight(after[:loc[1]], "{;") + "{}"
-
-	pr := parser.Parse("file:///docblock.cfc", "component {\n"+decl+"\n}")
+	pr := parser.Parse("file:///docblock.cfc", content)
 	if len(pr.Funcs) == 0 {
 		return nil
 	}
@@ -264,7 +284,7 @@ func (s *Server) docTagItems(content string, params *protocol.CompletionParams, 
 
 		arg := before[m[2]:m[3]]
 
-		if !slices.Contains(docFunctionArguments(following), arg) {
+		if !containsFold(docFunctionArguments(following), arg) {
 			return nil, true
 		}
 
@@ -290,6 +310,16 @@ func (s *Server) docTagItems(content string, params *protocol.CompletionParams, 
 	}
 
 	return items, true
+}
+
+func containsFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // lineStartOffset is the byte offset of the start of line in content.

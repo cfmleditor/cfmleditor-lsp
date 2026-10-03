@@ -33,7 +33,7 @@ func cfmlFilesIn(t *testing.T, dir string) []string {
 func TestAnUntypedArgumentHoldsWhatEveryCallerPasses(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} }`,
+		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} function forwardedM(){} function conditionalM(){} function afterM(){} }`,
 		"models/Other.cfc": `component { function mixedOther(){} }`,
 		"svc/Base.cfc":     `component { function inherited( required thing ){ arguments.thing.inheritedM(); } }`,
 		"svc/Svc.cfc": `component extends="Base" {
@@ -41,9 +41,20 @@ function useIt( required thing ){ arguments.thing.useItM(); arguments.thing.nope
 function useMixed( required thing ){ arguments.thing.mixedItem(); arguments.thing.mixedOther(); }
 function useOpen( required thing ){ arguments.thing.openM(); }
 function useSkip( required thing, extra ){ arguments.thing.skipM(); }
+function useForwarded( required thing ){ arguments.thing.forwardedM(); }
+function useConditional( required thing ){ arguments.thing.conditionalM(); }
+function useAfter( required thing ){ arguments.thing.afterM(); }
 function callers(){
 	var a = new models.Item();
+	var forwarded = a;
 	useIt( a );
+	useForwarded( forwarded );
+	if (runtime()) {
+		var conditional = a;
+	}
+	useConditional( conditional );
+	useAfter( after );
+	var after = a;
 	useIt(
 		thing = new models.Item()
 	);
@@ -60,9 +71,15 @@ function callers(){
 
 	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "svc/Svc.cfc")
 
-	for _, k := range []string{"arguments.thing.useItM", "arguments.thing.mixedItem", "arguments.thing.mixedOther", "arguments.thing.skipM"} {
+	for _, k := range []string{"arguments.thing.useItM", "arguments.thing.mixedItem", "arguments.thing.mixedOther", "arguments.thing.skipM", "arguments.thing.forwardedM"} {
 		if got[k] != "" {
 			t.Errorf("%s: %q, want it resolved", k, got[k])
+		}
+	}
+
+	for _, k := range []string{"arguments.thing.conditionalM", "arguments.thing.afterM"} {
+		if !strings.Contains(got[k], "no component ref") {
+			t.Errorf("%s was typed without a reaching straight-line assignment: %q", k, got[k])
 		}
 	}
 

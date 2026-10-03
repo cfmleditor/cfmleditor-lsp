@@ -261,7 +261,12 @@ The gaps below explain the largest of these.
   reach other files through the index, and ContentBox's `prc.author` came
   out untyped in five places. The list is dropped when an edit moves lines,
   since a call is only checked on a fresh parse.
-- **Not done:** tag syntax (`<cfset a.m = f>`). No corpus entry needs it.
+- **Tag syntax follow-up:** `<cfset a.m = f>` now goes through the script
+  expression parser's member-assignment path, so a later `<cfset a.m()>` is
+  dynamic under the same-function, earlier-line rules. Comparisons and
+  assignments after the call remain checked normally. The original corpus had
+  no entry in this shape, so this closes syntax parity without changing the
+  recorded totals.
 - **Measured:** presets 9,020 → 9,001, no presets 17,439 → 17,429, no entry
   added.
 
