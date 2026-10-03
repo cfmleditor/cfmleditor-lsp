@@ -139,11 +139,52 @@ func tagEndIndex(s string) int {
 	// the call is most of the cost — and a tag whose attributes are all
 	// ordinarily quoted is nearly every tag in a file. Parity is exact rather
 	// than a heuristic: CFML escapes a quote by doubling it, which adds two.
+	//
+	// A comment between attributes is the other way that '>' is not the end,
+	// and parity says nothing about it: the comment's text may hold no quote.
+	// It is rare enough that its test is one Contains over the short prefix.
+	if strings.Contains(s[:gt], "<!--") {
+		return tagEndWithComments(s)
+	}
+
 	if strings.Count(s[:gt], `"`)%2 == 0 && strings.Count(s[:gt], "'")%2 == 0 {
 		return gt
 	}
 
 	return tagEndWalk(s)
+}
+
+// tagEndWithComments is the '>' closing a tag whose attribute list holds
+// `<!--- … --->` comments, which are not string-aware (a `--->` inside a quote
+// still ends one, as in an engine) and hide what they hold. A quoted string is
+// stepped over, and one that never closes or a comment left open falls back to
+// the plain scan, as tagEndIndex's other paths do.
+func tagEndWithComments(s string) int {
+	for pos := 0; pos < len(s); pos++ {
+		switch s[pos] {
+		case '>':
+			return pos
+		case '"', '\'':
+			j := skipQuotedIn(s, pos)
+			if j < 0 {
+				return strings.IndexByte(s, '>')
+			}
+
+			pos = j
+		case '<':
+			if strings.HasPrefix(s[pos:], "<!---") {
+				c := strings.Index(s[pos+5:], "--->")
+				if c < 0 {
+					return strings.IndexByte(s, '>')
+				}
+
+				pos += 5 + c + 3
+			}
+		default:
+		}
+	}
+
+	return -1
 }
 
 // tagEndWalk is the quote-by-quote scan tagEndIndex falls back to. It is a
@@ -875,7 +916,7 @@ func (p *tagParser) parseCFArguments(block string, blockStart int) []Argument {
 
 		idx += pos
 
-		end := strings.IndexByte(block[idx:], '>')
+		end := tagEndIndex(block[idx:])
 		if end < 0 {
 			break
 		}

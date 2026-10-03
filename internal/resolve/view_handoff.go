@@ -35,12 +35,18 @@ var (
 	renderCallRe  = regexp.MustCompile(`(?i)\b(?:setView|renderView|view)\s*\(\s*(?:view\s*=\s*)?["']/?([\w./-]+)["']([^)]*)`)
 	renderModRe   = regexp.MustCompile(`(?i)\bmodule\s*=\s*["']([^"']*)["']`)
 	actionStartRe = regexp.MustCompile(`(?i)\bfunction\s+(\w+)\s*\(`)
+
+	// A view named from a variable a subclass sets: ContentBox's base handler
+	// renders "#variables.handler#/indexTable", handler being "pages" in one
+	// subclass and "entries" in another.
+	computedRenderRe = regexp.MustCompile(`(?i)\b(?:setView|renderView|view)\s*\(\s*(?:view\s*=\s*)?["']#variables\.(\w+)#(/[\w./-]*)["']([^)]*)`)
 )
 
 // handoffAction is one handler action that renders a view, directly or
 // through the views that render it as a partial.
 type handoffAction struct {
 	handler, name  string   // the handler's path and the action's name
+	leaf           string   // the subclass whose literals gave the view its name, or "" for a literal one
 	start, setView int      // the lines the action starts on and renders on
 	body           string   // the action's source up to the render call
 	through        []string // the views between the action and this one, which must not assign the prc member
@@ -143,6 +149,38 @@ func (r *Resolver) moduleActions(dir string) map[string]renderers {
 		}
 
 		content := string(data)
+
+		for _, m := range computedRenderRe.FindAllStringSubmatchIndex(content, -1) {
+			if mod := renderModRe.FindStringSubmatch(content[m[6]:m[7]]); mod != nil && !strings.EqualFold(mod[1], name) {
+				continue
+			}
+
+			starts := actionStartRe.FindAllStringSubmatchIndex(content[:m[0]], -1)
+			if len(starts) == 0 {
+				continue
+			}
+
+			last := starts[len(starts)-1]
+
+			for _, leaf := range r.leafSubclasses(handler) {
+				lit := r.leafLiteral(leaf, handler, content[m[2]:m[3]])
+				if lit == "" {
+					continue
+				}
+
+				view := strings.ToLower(lit + content[m[4]:m[5]])
+				entry := out[view]
+				entry.actions = append(entry.actions, handoffAction{
+					handler: handler,
+					leaf:    leaf,
+					name:    content[last[2]:last[3]],
+					start:   strings.Count(content[:last[0]], "\n"),
+					setView: strings.Count(content[:m[0]], "\n"),
+					body:    content[last[0]:m[0]],
+				})
+				out[view] = entry
+			}
+		}
 
 		calls(content, func(view string, m []int) {
 			starts := actionStartRe.FindAllStringSubmatchIndex(content[:m[0]], -1)
@@ -277,14 +315,19 @@ func (r *Resolver) viewPrc(variable, funcName string, pr *parser.ParseResult, tr
 		// An action that never assigns prc.X answers nothing here: prc is
 		// its argument, and recordReceiver gives an argument's member only
 		// the assignments the function makes to it.
-		comp, _ := r.receiverComponent("prc."+name, conv.Uint32(a.setView), a.name, funcName, hpr, filepath.Dir(a.handler), nil)
-		if comp == "" || strings.HasPrefix(comp, "$") {
+		comp := r.perLeaf(a, func(leaf string) string {
+			comp, _ := r.receiverComponentD("prc."+name, conv.Uint32(a.setView), a.name, funcName, hpr, filepath.Dir(a.handler), nil, lookupCtx{leaf: leaf})
+			if strings.HasPrefix(comp, "$") {
+				return ""
+			}
+
+			return comp
+		})
+		if comp == "" {
 			return ""
 		}
 
-		if p := r.ComponentPath(comp, filepath.Dir(a.handler)); p != "" {
-			comp = p
-		}
+		comp = r.pathsOf(comp, filepath.Dir(a.handler))
 
 		if answer != "" && !cfpath.SamePath(answer, comp) {
 			return ""
@@ -324,7 +367,9 @@ func (r *Resolver) viewPrcElement(name string, pr *parser.ParseResult, depth int
 			return ""
 		}
 
-		element := r.elementOf(rhs, a.setView, a.start, a.name, hpr, filepath.Dir(a.handler), depth+1)
+		element := r.perLeaf(a, func(leaf string) string {
+			return r.elementOf(rhs, a.setView, a.start, a.name, hpr, filepath.Dir(a.handler), depth+1, leaf)
+		})
 		if element == "" || answer != "" && answer != element {
 			return ""
 		}
@@ -379,4 +424,62 @@ func lastPrcAssignment(body, name string) (string, bool) {
 	}
 
 	return rhs, true
+}
+
+// pathsOf is comp with each alternative (a|b) replaced by its file where one
+// resolves: ComponentPath answers for one component, and handed a list would
+// answer for its first.
+func (r *Resolver) pathsOf(comp, baseDir string) string {
+	if !strings.Contains(comp, "|") {
+		if p := r.ComponentPath(comp, baseDir); p != "" {
+			return p
+		}
+
+		return comp
+	}
+
+	var alts []string
+
+	for alt := range strings.SplitSeq(comp, "|") {
+		if p := r.ComponentPath(alt, baseDir); p != "" {
+			alt = p
+		}
+
+		alts = append(alts, alt)
+	}
+
+	return strings.Join(alts, "|")
+}
+
+// perLeaf is what f answers for the action a. A leaf-less action of a handler
+// that has subclasses (a literal view name its base renders) is asked as it is
+// first, and when that gives nothing, once per leaf subclass: the answer is the
+// union of theirs as alternatives, and only when every leaf gives one, since a
+// leaf that does not leaves the value to something the view cannot see.
+func (r *Resolver) perLeaf(a *handoffAction, f func(leaf string) string) string {
+	if answer := f(a.leaf); answer != "" || a.leaf != "" {
+		return answer
+	}
+
+	leaves := r.leafSubclasses(a.handler)
+	if len(leaves) == 0 {
+		return ""
+	}
+
+	var union []string
+
+	for _, leaf := range leaves {
+		answer := f(leaf)
+		if answer == "" {
+			return ""
+		}
+
+		for alt := range strings.SplitSeq(answer, "|") {
+			if !containsFold(union, alt) {
+				union = append(union, alt)
+			}
+		}
+	}
+
+	return strings.Join(union, "|")
 }

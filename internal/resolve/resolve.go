@@ -49,7 +49,11 @@ type Resolver struct {
 	// a framework component nothing on disk does: calls on it are checked,
 	// and completion and hover see its methods. Nil for none. See
 	// internal/frameworkapi.
-	Stubs          *frameworkapi.Set
+	Stubs *frameworkapi.Set
+	// InferArgsFiles are the files to search for the callers of a function, to
+	// type an argument from what they pass (argumentFromCallers). Nil switches
+	// it off: a batch scan sets it once its index is complete.
+	InferArgsFiles []string
 	stubFS         vfs.FS
 	mu             sync.RWMutex
 	appRootCache   map[string]string   // dir → Application.cfc root
@@ -72,6 +76,9 @@ type Resolver struct {
 	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
 	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
 	loopCache      map[string][]loopSpan          // file URI and content hash → every loop it holds (loopsOf)
+	closureCache   map[string][]closureSpan       // file URI and content hash → every function literal it holds (closuresOf)
+	callerIdx      *callerIndex                   // name → files calling it, built once for argumentFromCallers
+	argCache       map[string]string              // an argument → what its callers pass (argumentFromCallers)
 	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)
 	handoffs       handoffIndex                   // handler actions by the view each renders (viewActions)
 }
@@ -1283,6 +1290,15 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 
 	if comp == "" {
 		comp = r.viewPrc(variable, funcName, pr, tr)
+	}
+
+	// Last, an untyped argument is what every caller passes it, when the scan
+	// was given the files to look through. After every other answer, so an
+	// inference never turns a call something else accepted into a finding.
+	if comp == "" {
+		if comp = r.argumentFromCallers(variable, call.Caller, pr, lookupCtx{}); comp != "" {
+			tr.addf("resolved %q to %q: what every caller of %s passes it", variable, comp, call.Caller)
+		}
 	}
 
 	if comp == "" {
@@ -2791,8 +2807,40 @@ func (r *Resolver) recordReceiver(variable, name string, scope parser.RefScope, 
 // of primitive type calling a known member method, which canResolveCall
 // accepts outright. It needs funcName; ComponentOf passes none.
 func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace) (comp string, member bool) {
+	return r.receiverComponentD(variable, line, caller, funcName, pr, baseDir, tr, lookupCtx{})
+}
+
+// inferredReceiver is the receiver steps that read something other than a ref
+// the file holds: a closure's builder parameter and a builder's restrictions, what
+// every subclass of an abstract file holds, and the call a variable was last
+// assigned from.
+func (r *Resolver) inferredReceiver(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace, ctx lookupCtx) string {
+	if comp := r.builderMember(variable, line, caller, funcName, pr, baseDir, tr); comp != "" {
+		return comp
+	}
+
+	if comp := r.subclassComponent(variable, line, pr, tr, ctx.leaf); comp != "" {
+		return comp
+	}
+
+	return r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
+}
+
+// receiverComponentD is receiverComponent with a lookupCtx: the depth of
+// assignments read to type a variable, which bounds `x = y.f()` through
+// `y = z.g()`, and the subclass a handoff reads on behalf of.
+func (r *Resolver) receiverComponentD(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace, ctx lookupCtx) (comp string, member bool) {
 	if name, scope, record := parser.MemberReceiverName(variable); record {
-		return r.recordReceiver(variable, name, scope, line, caller, pr), false
+		comp := r.recordReceiver(variable, name, scope, line, caller, pr)
+		if comp == "" {
+			comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
+		}
+
+		if comp == "" {
+			comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
+		}
+
+		return comp, false
 	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
@@ -2813,6 +2861,7 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 	// An argument shadows a same-named component field. In particular, an
 	// untyped parameter in a sibling method must not borrow an injected field.
 	argumentReceiver := !strings.Contains(variable, ".") || strings.HasPrefix(strings.ToLower(variable), "arguments.")
+
 	if comp == "" && argumentReceiver {
 		if arg := argumentOf(pr, caller, lookupVar); arg != nil {
 			if arg.Component != "" {
@@ -2899,6 +2948,10 @@ func (r *Resolver) receiverComponent(variable string, line uint32, caller, funcN
 
 			return comp != ""
 		})
+	}
+
+	if comp == "" {
+		comp = r.inferredReceiver(variable, line, caller, funcName, pr, baseDir, tr, ctx)
 	}
 
 	// Last, a shared-scope variable set up by a template the application's

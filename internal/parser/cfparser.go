@@ -664,7 +664,7 @@ func findScriptSkipSpans(content string) []scriptSkipSpan {
 			continue
 		}
 
-		gt := strings.IndexByte(content[i:], '>')
+		gt := tagEndIndex(content[i:])
 		if gt < 0 {
 			break
 		}

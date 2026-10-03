@@ -805,7 +805,15 @@ return type that is a set of components, which nothing holds yet.
 
 ### Braceless bodies are not blocks
 
-Open. `flowBlocks` sees a block only where a brace opens one, so a body
+Partly fixed: a braceless body that is one line ending in a semicolon is now a
+block (`openBracelessBody`, `TestBracelessBodiesAreBlocks`). Still open: a body
+over several lines or without a semicolon, which needs the folding pass's
+statement-end rule, and braceless bodies inside closures. The text below is the
+original analysis. Not corpus-measured (none available when it was written);
+the parse benchmark alternated against the old binary showed no difference
+beyond noise, on a fixture with few braceless bodies.
+
+Originally open. `flowBlocks` sees a block only where a brace opens one, so a body
 written without braces runs "always" as far as a return is concerned:
 
 ```cfml
@@ -1031,7 +1039,8 @@ fixed; see there.
 
 ## ContentBox: a base handler's variable its subclasses inject
 
-Open; measured after PR #216. Known for short as **the quickLook ormService
+Implemented (`subclass_refs.go`) and measured, see the end of the struct-field
+section. Originally open; measured after PR #216. Known for short as **the quickLook ormService
 gap**, after the view it empties. The largest single cause left in
 `contentbox-admin`'s handlers. Listed as gap 11 in RESOLUTION-GAPS.md.
 
@@ -1125,7 +1134,7 @@ ContentBox, and `quickLook.cfm` to 0 if the handoff picks up the alternatives;
 any added entry is a method one subclass's entity lacks, which is either a real
 finding or a reason to prefer the common base.
 
-## Next: search-result struct fields (not started)
+## Search-result struct fields (implemented and measured)
 
 The largest group of loop findings left in ContentBox's admin views, ready to
 pick up. Measured on `main` at 6e3771f (after #212, #214–#217) with the
@@ -1229,3 +1238,246 @@ plans' file reads.
 **Also open in the same views**, recorded rather than planned: `cache.get( … )`
 for `results.settings` in one action (a cache entry is dynamic), and the
 partials rendered through `cbAdminComponent( … )`'s computed view name.
+
+**Status.** Links 2 to 4 are implemented in `internal/resolve/struct_field_element.go`,
+hooked into `elementOf` for `name.field` (a local assigned from a call). It is
+a token analysis of the producing function, **not** the producer-interpreter
+extension sketched above: the interpreter's `assign` discards a struct literal's
+fields once a member is written, and widening it to carry element types was
+not attempted without a corpus to measure against. The analysis is
+deliberately narrower: one script function; every return returns one local
+struct; that local is used only as `x.field` (passed, indexed or rebuilt, it is
+declined); every value of the field is `[]` or a criteria `list()`; the builder
+is a local whose every assignment is `newCriteria()`; and `asQuery = false` is
+written literally, or is a parameter defaulting to `false` that the call site
+does not override. An omitted `asQuery` is declined (the stubs drop cborm's
+default, still to be verified against 4.12.1). Tag-syntax producers are
+declined. `TestAStructFieldHoldsTheCriteriaListItsFunctionAssignsIt` has the
+positive and each negative; each fails with its piece removed.
+
+**Measured** (ContentBox at 312f182, config `coldbox`, `contentbox`, `testbox`,
+`cfmigrations`; per-entry diff against the commit before this work, from
+`unresolved --json` on a scratch copy): 2,637 -> 2,486, **153 removed, 2 added**.
+Without config: 7,543 -> 7,394, 151 removed, 2 added. The two added are
+`baseContentHandler.cfc:424` `addJoinedExpiredTime` / `addJoinedPublishedtime`,
+"variable has no component ref" before and now "method 'populate' in
+contentStoreService@contentbox|entryService@contentbox|pageService@contentbox has
+no component return type": the same calls with a more specific reason, from the
+subclass step (gap 11, below). TestBox, cfwheels, coldbox-platform, fw1 and Lucee,
+each with presets and without: 0 removed, 0 added. Largest removals:
+`comments/index.cfm` 27, `authors/indexTable.cfm` 25, `comments/pager.cfm` 25,
+`versions/pager.cfm` 22. That is 153 where about 250 were expected; the
+`results[ entityPlural ]` content views and the `cache.get( … )` settings are
+among what is left.
+
+Two things the first version missed, found only by running it on the corpus:
+ContentBox writes `var c = newCriteria().isEq( … )` (a chain of builder methods,
+`builderMethods`), and its handlers write the `search(` call with its arguments one
+to a line, which `localAssignment` now joins (up to 24 lines), for loops and struct
+fields alike. The first run removed 26; these two took it to 153.
+
+**Gap 11 (`subclass_refs.go`), measured in the same runs:** 14 of the removals are
+calls on `variables.ormService` in `baseContentHandler.cfc`. **Not fixed:** a value
+read from it (`oContent = variables.ormService.get( … )`, `prc.content = …`, about 50
+more in the base handler) is still untyped, so `views/content/quickLook.cfm` is
+unchanged at 31. The step answers a receiver lookup; the type an assignment gives its
+variable is decided at parse time by a different path (pending calls typed from the
+file's own refs and its bases), which does not ask the subclasses. That is the next
+piece. Still open from the struct-field section: `results[ variables.entityPlural ]`
+(computed key) and `cache.get( … )`.
+
+## ContentBox: what is left after the struct-field work (2,486 findings)
+
+Measured at ContentBox 312f182 with presets `coldbox`, `contentbox`, `testbox`,
+`cfmigrations`, after the work above. Each group names the definition that settles
+it, found in the corpus or in a pinned dependency; none is implemented yet.
+
+| Findings | Group | The definition that is missing, and the fix |
+|---:|---|---|
+| 275 | **cbmessagebox is not installed.** `cbMessageBox()` bare (157) and `.error()`, `.warn()`, `.setMessage()`, `.renderit()` chained on it | `coldbox-modules/cbmessagebox` @ 4bbbf8c: `ModuleConfig.cfc` has `this.applicationHelper = [ "helpers/mixins.cfm" ]`, and `mixins.cfm` declares `cbMessageBox()` returning `wirebox.getInstance( "messagebox@cbmessagebox" )`, i.e. `models/MessageBox.cfc`. `helpers.go` already finds a module's helper when the module is in the workspace; ContentBox lists the module in its box.json but ships it under `contentbox-deps` (not in the checkout). Fix: a `cbmessagebox` entry in `frameworkapi.Sources` (stubs for `models.MessageBox`, plus the helper template served from the stub root) and `applicationHelpers()` offering the stub helper last, after the workspace's own |
+| 204 | `print` (CommandBox task runners, `build/patches/*/Updater.cfc`) | known: nothing in the source says a file is a task. `BaseTask` is in the commandbox stubs; the missing part is a rule that a component in `build/patches` run by CommandBox extends it |
+| 116 | **cborm builder members and closure parameters.** `c.restrictions` (47), the `c` of `.when( test, function( c ){ … } )` (54), `arguments.c` (15) | `cborm/models/criterion/BaseBuilder.cfc` @ a888246: `when( required boolean test, required target )` hands its closure the current builder (`@target … receives the current criteria as the argument`), and a builder's `this.restrictions` is `cborm.models.criterion.Restrictions` (CriteriaBuilder.cfc header). Neither is in the stub: `restrictions` is assigned from an argument, and a closure parameter has no declared type. Fix: a rule typing `x.restrictions` on a builder component, and typing a function literal's first parameter from the callee's documented closure argument (`when`, `list( criteria = function( c ) )`) |
+| 80 | `new coldbox.system.orm.hibernate.util.ORMUtilFactory()` in `build/patches/*` | the class moved: it is `cborm/models/util/ORMUtilFactory.cfc`. The patches name ColdBox's old path, so this is a **genuine finding** unless a legacy alias is wanted |
+| 70 | `addPermission`/`removePermission` not found in `cbRole` | genuine (the entity's property has no singular name, so CFML generates `addPermissions`); already listed under "Genuine findings" |
+| 365 | loop and prc variables in admin views (`thisContent`, `entry`, `page`, `content`, `item`, `author`, `thisPerm`, …) | mostly `results[ variables.entityPlural ]` (computed key, set per subclass) feeding `contentViewlet`, `pager` and the `*/indexTable` views, and `cbAdminComponent( … )`'s computed view name; plus the `oContent = variables.ormService.get( … )` assignment typing gap 11 left |
+| 43 | `getBeanPopulator()` / `site()` have no return type | cborm and ContentBox declare and document none (see "Untyped, but correctly so") |
+| 41 | bare `getInstance( … )` in `email_templates/*.cfm`, `command( … )`, `getCWD()`, `getSystemSetting()` | email templates are rendered by a ContentBox service, so they have no base; `command()` and the others are CommandBox task helpers |
+| 26 | `new dbinfo( … ).columns()` | `dbinfo` is an engine component; `columns()` is a Lucee member the engine rule does not know |
+
+Order by cost and value: cbmessagebox (275, one new source and one helper
+hook), then the builder rules (116), then gap 11's assignment typing. The 204
+`print` group needs a decision on whether a directory convention may imply a
+base, since nothing in the source says so.
+
+### cbmessagebox: done (275 -> 2)
+
+`frameworkapi.Sources` has a `cbmessagebox` entry (pinned 4bbbf8c, the commit
+the clone's HEAD was at), `frameworkapi.Helpers` names the template to stub
+(`helpers/mixins.cfm`, with `cbMessageBox()` returning
+`cbmessagebox.models.MessageBox`, which its source states only in the body), and
+`cmd/cfstubgen` writes it as `stubs/cbmessagebox/cbmessagebox/helpers/mixins.cfc`
+beside `models/MessageBox.cfc`. The contentbox preset implies the stubs
+(`implied`), and `helperTemplates` offers the stub helper **last**, after the
+workspace's own, so a checkout of the module outranks it.
+`TestAModulesHelperComesFromItsStubWhenTheModuleIsAbsent`, which fails without
+the hook. Measured on ContentBox with presets: 2,486 -> 2,213, **273 removed, 0
+added**. Only the contentbox preset brings it, so the other projects are not
+affected.
+
+### cborm builder members: done in part (116 -> 43)
+
+`builder_members.go`: a closure written as an argument of `when( test, target )`
+on a builder chain (`newCriteria()` followed by builder methods, or a local
+assigned one) has the builder as its first parameter, and `<builder>.restrictions`
+is a `cborm.models.criterion.Restrictions`. A method is a builder method when it is
+in `builderMethods`, when the Restrictions stub declares it (the builder forwards
+each to Restrictions and returns itself), or when the builder declares it to
+return a builder; `isNewCriteriaChain` and the struct-field analysis now share
+that rule. `TestACriteriaBuildersClosureAndRestrictionsAreTyped` has the
+negatives (a chain that is not a builder, a closure that is not `when`'s, a
+typed non-builder with a `restrictions` member); each rule fails without its
+piece. The first version removed 18; the early record-member branch in
+`receiverComponent` returned before the rule ran, and the chains use many more
+restriction methods than a fixed list. Measured on ContentBox with presets:
+2,213 -> 2,140, **73 removed, 0 added**; the other five projects 0 / 0.
+Left (43): a local `c` assigned from an untyped call, `variables.ormService.
+newCriteria()` in an abstract base (gap 11's assignment typing), and
+`arguments.criteria.when( … )` where the builder is a parameter.
+
+### Gap 11's assignment typing: done (2,140 -> 2,046)
+
+`assigned_call.go`: a variable the parse left untyped is typed at lookup from its
+last assignment, `x = receiver.method( … )` (one line, a bare or `local.` name or
+`prc.name`), with the receiver typed as any receiver is (the subclass step
+among them) and the method's return taken **per alternative**; every alternative
+must return a component. It is the last step of `receiverComponent`, so it
+never overrides one, and `receiverComponentD` bounds `x = y.f()` through
+`y = z.g()` at three. The parse-time path was left alone: threading a hook
+through the seven sites that build `ParseOptions` was not needed to answer a
+lookup. `view_handoff.go` kept only the first alternative of `prc.x` (it
+passed the list to `ComponentPath`); `pathsOf` resolves each.
+`TestAVariableAssignedFromASubclassHeldReceiverIsTyped`; each piece fails
+without it.
+
+Measured on ContentBox with presets: 2,140 -> 2,046, **97 removed, 3 added**
+(`quickLook.cfm` 30 removed, `baseContentHandler.cfc` 28, `sites/editor.cfm` 23).
+The 3 added are genuine and were hidden by the untyped receiver:
+`prc.content.getDisplayExpiredDate()` (declared nowhere in ContentBox's models)
+and two `getActiveContent().getChangelog()` chains, where `getActiveContent()`
+is declared `any`. The other five projects 0 / 0.
+
+**Cumulative since this work began** (ContentBox 312f182, presets): 2,637 ->
+2,046, 596 removed, 5 added (2 reason changes, 3 genuine); the other five
+projects, with and without presets, unchanged.
+
+### Computed view names and keys, read per subclass (2,046 -> 1,958)
+
+ContentBox's base handler renders `"#variables.handler#/indexTable"` and hands
+the view `results[ variables.entityPlural ]`; each subclass sets both to its own
+literals (`pages`, `entries`, `content`) and holds its own service, whose
+`search()` struct names its field the same way. Three pieces, one per
+subclass:
+
+- `moduleActions` expands a `#variables.x#` view name for each leaf subclass
+  (`leafLiteral` reads the literal the leaf, or a component between it and the
+  base, assigns), and the action carries that `leaf`;
+- the handoff evaluates the action on the leaf's behalf (`lookupCtx.leaf`,
+  threaded through `receiverComponentD`, `elementOf` and `fieldElement`), so
+  `variables.ormService` is that subclass's service and not the union;
+- `elementOf` reads `name[ variables.x ]` as the field the leaf's literal names.
+
+`TestAComputedViewAndKeyAreReadPerSubclass`; each piece fails without it.
+Measured on ContentBox with presets: **88 removed, 0 added** (`pages/indexTable.cfm`
+31, `contentStore/indexTable.cfm` 24, `entries/indexTable.cfm` 21, and the
+three `index.cfm`); the other five projects 0 / 0.
+
+**Cumulative since this work began** (ContentBox 312f182, presets): 2,637 ->
+1,958, **684 removed, 5 added** (2 reason changes, 3 genuine); the other five
+projects, with and without presets, unchanged at every step.
+
+### A literal-named view its base handler renders, read per leaf (1,958 -> 1,927)
+
+`perLeaf`: a leaf-less action of a handler that has subclasses (a literal
+`view( "content/pager" )` its base renders) is asked as it is, and when that
+answers nothing, once per leaf subclass; the answer is the union as
+alternatives, and only when **every** leaf gives one. Measured on ContentBox
+with presets: **32 removed, 1 added** (`content/pager.cfm` 19,
+`editorSelectorEntries.cfm` 13); the added is genuine, `getActiveContent()` being
+declared `any`, so the chain from it was hidden by the untyped receiver. The
+other five projects 0 / 0. `TestAComputedViewAndKeyAreReadPerSubclass` has the
+union and the leaf that sets no literal.
+
+**Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,927, **716 removed, 6
+added** (2 reason changes, 4 genuine).
+
+### What is left, and why it stays (1,927)
+
+- **`print` 204, `getCWD`/`command`/`getSystemSetting` 25**: the files are run
+  as CommandBox tasks, but nothing in them says so. Only `BuildDocs.cfc` is named
+  (by `box.json` scripts, 4 findings); the patch updaters and archived seeds are
+  run from outside the source. Not derivable; it would be a convention.
+- **`oRole` `addPermission`/`removePermission` 70**: genuine.
+- **`coldbox.system.orm.hibernate.util.ORMUtilFactory` 80**: genuine, the class
+  moved to `cborm.models.util`.
+- **`new dbinfo(…).columns()` 26**: a name collision decided at run time. The
+  non-Lucee branch means Adobe's built-in component; a `DBInfo.cfc` beside the
+  file shadows it for the resolver and, on a case-insensitive file system, for the
+  engine.
+- **`getBeanPopulator()`, `site()` etc. 43**: declared and documented nowhere.
+- **Arguments typed only by their callers** (`arguments.content` 48,
+  `arguments.site` 32, `arguments.setup` 31, `arguments.original` 27, …) and
+  the loop variables over what they hold: a feature of its own (infer an
+  argument from every caller when they agree), not a gap in a rule.
+
+### Arguments typed by their callers (1,927 -> 1,890)
+
+`arg_callers.go`. An argument with no type is the component every call of its
+function passes, as alternatives when they differ. For each caller found in the
+workspace: the call must be the function's own (a bare, `this.` or `variables.`
+call in its file or a subclass, a `super.` call from a descendant, or a call on a
+receiver whose function of that name *is* it, compared by definition, not by
+name); the argument's expression is read from the **tokens**, so a call split
+over lines reads, by position or by name; and it is typed as a receiver is
+(`new X()`, a name or dotted name — through the receiver lookup and then the
+configured resolvers — an argument passed on, typed by its own callers, or a
+single call). The argument is typed only when **every** caller that passes it
+gets one. A caller that omits it says nothing; a receiver nothing can place, or
+an expression nothing can type, leaves it untyped (fail closed: the others'
+answer would be a guess). Callers the workspace does not hold are unseen, so
+this is an inference from the code present.
+
+Three decisions, each measured:
+
+- **Opt-in.** `Resolver.InferArgsFiles` holds the files to search; only a batch
+  scan sets it (`unresolved.Options.InferArgs`, on by default in `unresolved` and
+  `explain`, `--no-infer-args` off), once its index is complete. The caller index
+  (name -> files whose text calls it) is built once from those files. The editor
+  never pays for it.
+- **Last.** The step is the end of `canResolveCall`, after every other answer.
+  Placed inside `receiverComponent`, it ran ahead of the dynamic rules and the
+  name resolvers and turned three accepted calls in coldbox-platform into
+  findings.
+- **Fail closed on an unplaced receiver.** Treating it as "not this function's"
+  would type `clone( original )` from one caller and ignore the others.
+
+`TestAnUntypedArgumentHoldsWhatEveryCallerPasses` has agreeing callers, a union,
+a multi-line call, a caller that omits it, an unplaced caller, a `super.` call
+and the feature off; each piece fails without it.
+
+Measured against the same build with `--no-infer-args` (the whole effect of this
+step): ContentBox with presets **37 removed, 0 added**. The other five projects,
+with and without presets, **no call is newly a finding**: every difference is a
+removal or a changed reason on a call already reported (TestBox `exposeMixin`
+on `makePublic`'s argument became "not found in test1", true of the fixture
+callers pass and false of the MockBox-decorated object it is at run time;
+Lucee's `MailSpool` argument became "component 'GreenMail' does not exist").
+Cost: +0.1 to +0.4s per scan (Lucee, 22s, +0.3s).
+
+What stays: functions nothing calls (handler actions, migrations: the framework
+invokes them), and callers whose own receiver is untyped (`newChild.clone(…)`) or
+whose expression is a framework result (`populate( "Setup@cbi" )`). The
+`createSite( arguments.setup )` chain ends there.
+
+**Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,890, **747 removed, 6
+added** (2 reason changes, 4 genuine).
+
