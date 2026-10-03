@@ -1679,55 +1679,20 @@ marker, e.g. `{"match": "^REQUEST\\[\\]$", "resolve": "nocheck", "prefix": "REQU
 "noFollow": true}` — the parser deliberately does not do this automatically, since suppressing
 vs. surfacing "genuinely dynamic" is a project-level judgment call.
 
-**Known parser limitation: a CFML comment inside a tag's attribute list**
-
-This note used to say the tag parser "does not fully skip `<!--- ... --->` comment blocks that
-contain embedded CFScript or `<cfset>` tags", which reads as a broad problem and is not one.
-Re-probed across seventeen shapes, fifteen are handled correctly — a tag comment holding
-`<cfset>` or a whole `<cfscript>`, a comment inside `<cffunction>` or `<cfoutput>`, `/* */` and
-`//` in cfscript, a CFML comment inside `<cfscript>`, a use-in-comment with a live declaration,
-nested comments, a comment holding an entire `<cffunction>`, an unterminated comment at EOF, an
-unbalanced quote, a tag-syntax `.cfc`, a four-dash opener, and CRLF.
-
-One shape looks like a bug and is not: a `--->` inside a quoted string ends the comment early.
-tree-sitter puts the `cf_comment` end at the same place, because CFML comments are not
-string-aware — an engine does the same. Do not "fix" it.
-
-What genuinely diverges is a comment **between a tag's attributes**:
-
-```cfml
-<cffunction name="real" <!--- <cfset p = getThing()><cfset p.gone()> ---> output="false">
-```
-
-tree-sitter parses that properly (`cf_attribute`, `cf_comment`, `cf_attribute`). The tag parser
-does not: roughly eight sites locate a tag's closing `>` with a bare
-`strings.IndexByte(src, '>')`, and the first `>` here is the one inside the comment, so the tag
-is treated as ended and the rest of the comment is scanned as live tags — reporting `p.gone()`
-as an unresolved call. Quoted attribute values *are* handled (`<cfset s = "a > b">`,
-`hint="returns a > b"` and `<a title="x > y">` all parse correctly); only comments are missed.
-
-**The `>`-in-a-string half of this is fixed.** `tagEndIndex` is the shared
-quote-skipping scan that note asked for, and the walk's one tag-end site goes
-through it: `<cfset x = array( f( "a<br>b" ), g( "c" ) )>` no longer ends at the
-`<br>`. Comments between attributes are still missed, and the other sites that
-locate a `>` by hand still do.
-
-It answers on a **two-count fast path**, because it runs over every tag in the
-file: a `>` with an even number of each quote before it has every string closed,
-so it is the tag's end. That is exact rather than a heuristic — CFML escapes a
-quote by doubling it, which adds two — and it must count *both* kinds, or
-`<cfset x = "a" & 'b>c'>` ends inside the single-quoted string. The
-quote-by-quote walk it falls back to is `tagEndWalk`, a function of its own so
-`TestTheTagEndFastPathAgreesWithTheWalk` can compare the two rather than restate
-either's answer. Walking every tag quote by quote was 5% of a plain tag parse.
-
-**It is close to unreachable.** One file in the 5,624-file corpus contains the shape —
-`Lucee/test/jira/Jira3190/index.cfm`, a regression test whose comment holds no code — so the
-corpus produces zero false positives from it. Fixing it means one shared `tagEndIndex` helper
-that skips quotes *and* comments, routed through all eight sites. That consolidation is worth
-doing whenever someone next works in that area, since eight independent copies of the same scan
-are the parallel-list hazard this file warns about elsewhere; it is not worth doing for this
-bug alone.
+**A CFML comment inside a tag's attribute list** is skipped when the tag's end is
+found: `<cffunction name="real" <!--- <cfset p = getThing()><cfset p.gone()> --->
+output="false">` once ended at the `>` inside the comment, and the rest of it was
+scanned as live tags. `tagEndIndex` is the one scan for a tag's closing `>`; it
+steps over quoted strings, and when `<!--` appears before the first `>` it
+walks byte by byte (`tagEndWithComments`), skipping comments and quotes. The
+test is one `Contains` over the short prefix, so the common tag keeps its
+two-count fast path. A `--->` inside a quoted string still ends a comment
+early, on purpose: tree-sitter and an engine do the same, so do not "fix" it.
+`TestACommentBetweenTagAttributesDoesNotEndTheTag` and `TestTagEndSkipsComments`
+pin it. Routed through it: the walk, `<cfargument>` and the `<cfscript>` open
+tag. Still by a bare `IndexByte`: the `</cffunction>` close in `cfparser.go`
+and the cursor lookups in `edit_parser.go`/`tags.go`, where the text is a
+closer or a position inside an edit rather than a tag being read.
 
 ## `noFollow` flag
 
@@ -2056,11 +2021,9 @@ one. **A unit test on one span could not have caught that; the corpus did.**
 "what is a call", so where they disagree one of them is wrong. Every call-losing
 defect fixed here so far was found by hand-probing constructs one at a time;
 this asks the question over a corpus instead. It found, in minutes on the repo's
-own 40 fixtures, a class nobody had probed: in **tag syntax** a call in a
-`<cfif>`/`<cfelseif>` condition, in a `<cfreturn>`, or chained onto an
-instantiation (`<cfset d = createObject(…).init("ds")>`) is recorded nowhere,
-while the same code in script syntax is. `TestKnownTagSyntaxGaps` states each
-shape and fails when one starts working.
+own 40 fixtures, a class nobody had probed: in tag syntax a call in a `<cfif>` condition, a `<cfreturn>` or chained onto an
+instantiation was once recorded nowhere; those are closed, and `make gapcheck` now
+holds the fixtures to the deliberate differences alone.
 
 Three things about it, each of which cost a wrong conclusion first:
 
