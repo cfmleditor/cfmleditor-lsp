@@ -1370,3 +1370,28 @@ is declared `any`. The other five projects 0 / 0.
 2,046, 596 removed, 5 added (2 reason changes, 3 genuine); the other five
 projects, with and without presets, unchanged.
 
+### Computed view names and keys, read per subclass (2,046 -> 1,958)
+
+ContentBox's base handler renders `"#variables.handler#/indexTable"` and hands
+the view `results[ variables.entityPlural ]`; each subclass sets both to its own
+literals (`pages`, `entries`, `content`) and holds its own service, whose
+`search()` struct names its field the same way. Three pieces, one per
+subclass:
+
+- `moduleActions` expands a `#variables.x#` view name for each leaf subclass
+  (`leafLiteral` reads the literal the leaf, or a component between it and the
+  base, assigns), and the action carries that `leaf`;
+- the handoff evaluates the action on the leaf's behalf (`lookupCtx.leaf`,
+  threaded through `receiverComponentD`, `elementOf` and `fieldElement`), so
+  `variables.ormService` is that subclass's service and not the union;
+- `elementOf` reads `name[ variables.x ]` as the field the leaf's literal names.
+
+`TestAComputedViewAndKeyAreReadPerSubclass`; each piece fails without it.
+Measured on ContentBox with presets: **88 removed, 0 added** (`pages/indexTable.cfm`
+31, `contentStore/indexTable.cfm` 24, `entries/indexTable.cfm` 21, and the
+three `index.cfm`); the other five projects 0 / 0.
+
+**Cumulative since this work began** (ContentBox 312f182, presets): 2,637 ->
+1,958, **684 removed, 5 added** (2 reason changes, 3 genuine); the other five
+projects, with and without presets, unchanged at every step.
+

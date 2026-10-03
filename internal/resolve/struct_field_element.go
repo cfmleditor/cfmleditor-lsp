@@ -35,11 +35,14 @@ import (
 // An omitted asQuery is not read as an array: cborm's default is not in the
 // stubs, which drop defaults.
 
-var structFieldRe = regexp.MustCompile(`^(?:local\.)?(\w+)\.(\w+)$`)
+var (
+	structFieldRe = regexp.MustCompile(`^(?:local\.)?(\w+)\.(\w+)$`)
+	keyedFieldRe  = regexp.MustCompile(`(?i)^(?:local\s*\.\s*)?(\w+)\s*\[\s*variables\s*\.\s*(\w+)\s*\]$`)
+)
 
 // fieldElement is the element of the collection field of the struct the call
 // expression returns, or "".
-func (r *Resolver) fieldElement(call, field string, header int, caller string, pr *parser.ParseResult, baseDir string) string {
+func (r *Resolver) fieldElement(call, field string, header int, caller string, pr *parser.ParseResult, baseDir, leaf string) string {
 	m := loopCallRe.FindStringSubmatch(call)
 	if m == nil {
 		return ""
@@ -50,7 +53,7 @@ func (r *Resolver) fieldElement(call, field string, header int, caller string, p
 	target := pr.URI.Path()
 
 	if receiver != "" && !strings.EqualFold(receiver, "this") && !strings.EqualFold(receiver, "variables") {
-		comp, _ := r.receiverComponent(receiver, conv.Uint32(header), caller, method, pr, baseDir, nil)
+		comp, _ := r.receiverComponentD(receiver, conv.Uint32(header), caller, method, pr, baseDir, nil, lookupCtx{leaf: leaf})
 		target = comp
 	}
 

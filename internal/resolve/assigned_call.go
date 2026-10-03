@@ -25,7 +25,17 @@ import (
 
 const maxAssignedDepth = 3
 
-func (r *Resolver) assignedFromCall(variable string, line uint32, caller string, pr *parser.ParseResult, baseDir string, tr *callTrace, depth int) string {
+// lookupCtx is what a receiver lookup carries beyond the variable: how many
+// assignments deep it is (assignedFromCall), and, when the view handoff is
+// reading a handler action on behalf of one subclass, that leaf: the base's
+// own receivers are then what that subclass holds, not what every one does.
+type lookupCtx struct {
+	depth int
+	leaf  string
+}
+
+func (r *Resolver) assignedFromCall(variable string, line uint32, caller string, pr *parser.ParseResult, baseDir string, tr *callTrace, ctx lookupCtx) string {
+	depth := ctx.depth
 	if pr == nil || depth >= maxAssignedDepth || variable == "" || strings.ContainsAny(variable, "[(") {
 		return ""
 	}
@@ -74,7 +84,7 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
-	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, depth+1)
+	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, lookupCtx{depth: depth + 1, leaf: ctx.leaf})
 	if comp == "" || strings.HasPrefix(comp, "$") {
 		return ""
 	}

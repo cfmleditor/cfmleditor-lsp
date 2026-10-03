@@ -57,7 +57,7 @@ func (r *Resolver) loopElement(call *parser.CallSite, pr *parser.ParseResult, ba
 		return ""
 	}
 
-	comp := r.elementOf(collection, header, start, caller, pr, baseDir, 0)
+	comp := r.elementOf(collection, header, start, caller, pr, baseDir, 0, "")
 	if comp != "" {
 		tr.addf("%q is the variable of a loop over %q, whose elements are %q", call.Variable, collection, comp)
 	}
@@ -262,7 +262,7 @@ func allTokens(content string) []parser.Token {
 
 // elementOf is the component each element of the collection expression holds,
 // as written on line header of the function between start and header, or "".
-func (r *Resolver) elementOf(expression string, header, start int, caller string, pr *parser.ParseResult, baseDir string, depth int) string {
+func (r *Resolver) elementOf(expression string, header, start int, caller string, pr *parser.ParseResult, baseDir string, depth int, leaf string) string {
 	expression = strings.TrimSpace(producerText(producerTokens(expression)))
 	expression = strings.ReplaceAll(strings.ReplaceAll(expression, " . ", "."), " (", "(")
 
@@ -278,7 +278,7 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 		target := self
 
 		if receiver != "" && !strings.EqualFold(receiver, "this") && !strings.EqualFold(receiver, "variables") {
-			comp, _ := r.receiverComponent(receiver, conv.Uint32(header), caller, method, pr, baseDir, nil)
+			comp, _ := r.receiverComponentD(receiver, conv.Uint32(header), caller, method, pr, baseDir, nil, lookupCtx{leaf: leaf})
 			target = comp
 		}
 
@@ -293,7 +293,22 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 	// A field of the struct a local's call returned: results.comments.
 	if f := structFieldRe.FindStringSubmatch(expression); f != nil && !isScopeWord(f[1]) {
 		if rhs, ok := localAssignment(pr.Content, f[1], start, header); ok {
-			return r.fieldElement(rhs, f[2], header, caller, pr, baseDir)
+			return r.fieldElement(rhs, f[2], header, caller, pr, baseDir, leaf)
+		}
+
+		return ""
+	}
+
+	// The same through a key the subclass spells: results[ variables.entityPlural ],
+	// where each subclass sets entityPlural to the name its service's struct uses.
+	if f := keyedFieldRe.FindStringSubmatch(expression); f != nil && !isScopeWord(f[1]) && leaf != "" {
+		key := r.leafLiteral(leaf, pr.URI.Path(), f[2])
+		if key == "" {
+			return ""
+		}
+
+		if rhs, ok := localAssignment(pr.Content, f[1], start, header); ok {
+			return r.fieldElement(rhs, key, header, caller, pr, baseDir, leaf)
 		}
 
 		return ""
@@ -308,7 +323,7 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 
 	if scope == "" || scope == "local" {
 		if rhs, ok := localAssignment(pr.Content, name, start, header); ok {
-			return r.elementOf(rhs, header, start, caller, pr, baseDir, depth+1)
+			return r.elementOf(rhs, header, start, caller, pr, baseDir, depth+1, leaf)
 		}
 
 		if scope == "local" {

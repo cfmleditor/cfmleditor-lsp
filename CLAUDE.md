@@ -1152,6 +1152,14 @@ because the parse types an assignment from its own file's refs, and an abstract
 handler's `variables.ormService` is held only by subclasses.
 `TestAVariableAssignedFromASubclassHeldReceiverIsTyped`.
 
+**A base handler's computed view name and key are read per subclass.**
+`moduleActions` expands `view( "#variables.handler#/x" )` for each leaf subclass
+under the handler, with the literal the leaf (or a component between) assigns, and
+the handoff then reads the action *on behalf of that leaf* (`lookupCtx.leaf`):
+`variables.ormService` is its service, and `results[ variables.entityPlural ]` is
+the field its literal names (`keyedFieldRe`). The same base file read without a
+leaf still answers the union of its subclasses. `TestAComputedViewAndKeyAreReadPerSubclass`.
+
 ## Capabilities the VS Code extension has and this server does not
 
 The `cfmleditor` extension stands its own language providers down whenever this

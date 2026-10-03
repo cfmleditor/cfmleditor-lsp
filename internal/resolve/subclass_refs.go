@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -29,7 +30,7 @@ import (
 
 const maxSubclasses = 16
 
-func (r *Resolver) subclassComponent(variable string, line uint32, pr *parser.ParseResult, tr *callTrace) string {
+func (r *Resolver) subclassComponent(variable string, line uint32, pr *parser.ParseResult, tr *callTrace, leaf string) string {
 	if r.Index == nil || pr == nil || variable == "" || strings.ContainsAny(variable, "[(") {
 		return ""
 	}
@@ -57,6 +58,10 @@ func (r *Resolver) subclassComponent(variable string, line uint32, pr *parser.Pa
 
 	base := pr.URI.Path()
 	leaves := r.leafSubclasses(base)
+
+	if leaf != "" {
+		leaves = slices.DeleteFunc(leaves, func(l string) bool { return !cfpath.SamePath(l, leaf) })
+	}
 
 	if len(leaves) == 0 {
 		return ""
@@ -91,6 +96,10 @@ func (r *Resolver) subclassComponent(variable string, line uint32, pr *parser.Pa
 // leafSubclasses are the components under base, directly or not, that nothing
 // extends, in path order.
 func (r *Resolver) leafSubclasses(base string) []string {
+	if r.Index == nil {
+		return nil
+	}
+
 	all := []string{base}
 
 	for i := 0; i < len(all) && len(all) <= maxSubclasses; i++ {
@@ -159,6 +168,37 @@ func (r *Resolver) subclassRef(path, base, name string, scope parser.RefScope) s
 		if path == "" {
 			return ""
 		}
+	}
+
+	return ""
+}
+
+// leafLiteral is the literal string a component assigns `variables.name` in
+// its own source, or in the nearest component it extends below base: the
+// value a subclass gives a variable its base reads, as ContentBox's handlers
+// give entityPlural and handler. "" when none writes one.
+func (r *Resolver) leafLiteral(leaf, base, name string) string {
+	re := regexp.MustCompile(`(?i)\bvariables\.` + regexp.QuoteMeta(name) + `\s*=\s*["']([^"'#]*)["']`)
+
+	path := leaf
+
+	for range 16 {
+		if path == "" || cfpath.SamePath(path, base) {
+			return ""
+		}
+
+		if data, err := r.fs().ReadFile(path); err == nil {
+			if m := re.FindSubmatch(data); m != nil && len(m[1]) > 0 {
+				return string(m[1])
+			}
+		}
+
+		ext, ok := r.extendsOf(path, cfpath.ToURI(path))
+		if !ok || ext == "" {
+			return ""
+		}
+
+		path = r.ComponentPath(ext, filepath.Dir(path))
 	}
 
 	return ""
