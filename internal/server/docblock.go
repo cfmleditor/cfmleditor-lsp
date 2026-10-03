@@ -111,6 +111,13 @@ func (s *Server) docBlockExpansion(content string, params *protocol.CompletionPa
 	snippet := buildDocBlock(kind, args, s.DocBlock)
 	startChar := lineCol(text, start)
 
+	// An editor that closed the comment as it opened it (`/** */`) leaves its
+	// closer after the cursor, and the snippet brings its own.
+	end := start + 3
+	if rest := text[end:]; strings.HasPrefix(strings.TrimLeft(rest, " \t"), "*/") {
+		end += len(rest) - len(strings.TrimLeft(rest, " \t")) + 2
+	}
+
 	return []protocol.CompletionItem{{
 		Label:            "/** */",
 		Kind:             protocol.CompletionItemKindSnippet,
@@ -118,7 +125,7 @@ func (s *Server) docBlockExpansion(content string, params *protocol.CompletionPa
 		Documentation:    tooltip("Docblock completion"),
 		InsertTextFormat: protocol.InsertTextFormatSnippet,
 		TextEdit: &protocol.TextEdit{
-			Range:   protocol.Range{Start: protocol.Position{Line: params.Position.Line, Character: startChar}, End: protocol.Position{Line: params.Position.Line, Character: lineCol(text, start+3)}},
+			Range:   protocol.Range{Start: protocol.Position{Line: params.Position.Line, Character: startChar}, End: protocol.Position{Line: params.Position.Line, Character: lineCol(text, end)}},
 			NewText: snippet,
 		},
 	}}
