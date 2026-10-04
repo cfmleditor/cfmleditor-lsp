@@ -14,6 +14,7 @@ func TestGuardedLazyFieldsReturnTheirInitializedType(t *testing.T) {
 		{"presence", `!structKeyExists(variables,"service")`, ""},
 		{"primitive sentinel", `isSimpleValue(variables.service)`, `variables.service="";`},
 		{"null", `isNull(variables.service)`, ""},
+		{"unrelated unsupported method", `isNull(variables.service)`, `function unrelated(flag){switch(flag){case 1:var temp="x";break;}}`},
 	}
 
 	for _, tc := range tests {
@@ -142,20 +143,40 @@ func TestGuardedLazyTagFieldsRejectUnsupportedWriters(t *testing.T) {
 		"Other.cfc":   `component {}`,
 		"Owner.cfc": `<cfcomponent>
 <cffunction name="getService">
-<cfif isNull(variables.service)><cfset variables.service=new Service()></cfif>
-<cfreturn variables.service>
+<cfif isNull(this.service)><cfset this.service=new Service()></cfif>
+<cfreturn this.service>
 </cffunction>
 <cffunction name="replace">
 <cfswitch expression="#runtime()#">
-<cfcase value="1"><cfset variables.service=new Other()></cfcase>
+<cfcase value="1"><cfset this.service=new Other()></cfcase>
 </cfswitch>
 </cffunction>
 </cfcomponent>`,
-		"Page.cfc":    `component {function run(){new Owner().getService().ready();}}`,
+		"Page.cfc": `component {function run(){new Owner().getService().ready();}}`,
 	})
 
 	got := reasonsWith(t, &Resolver{}, dir, "Page.cfc")
 	if reason, exists := got["getService.ready"]; !exists || reason == "" {
 		t.Fatalf("unsupported tag writer did not invalidate the guarded field: %v", got)
+	}
+}
+
+func TestGuardedThisFieldsRejectUnsupportedWriters(t *testing.T) {
+	for _, writer := range []string{
+		`function replace(flag){switch(flag){case 1:this.service=new Other();break;}}`,
+		`function replace(){` + strings.Repeat(`work();`, 1100) + `this.service=new Other();}`,
+	} {
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string]string{
+			"Service.cfc": `component { function ready(){} }`,
+			"Other.cfc":   `component {}`,
+			"Owner.cfc":   `component {function getService(){if(isNull(this.service)){this.service=new Service();}return this.service;}` + writer + `}`,
+			"Page.cfc":    `component {function run(){new Owner().getService().ready();}}`,
+		})
+
+		got := reasonsWith(t, &Resolver{}, dir, "Page.cfc")
+		if reason, exists := got["getService.ready"]; !exists || reason == "" {
+			t.Fatalf("unsupported writer did not invalidate the guarded this field: %v", got)
+		}
 	}
 }
