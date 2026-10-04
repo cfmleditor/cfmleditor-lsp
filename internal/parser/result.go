@@ -1833,7 +1833,7 @@ func (pr *ParseResult) propertyComponent(prop *propertyDef) string {
 
 	if related != "" {
 		resolved := ResolveFromCall(`getBean("`+related+`")`, pr.Resolvers)
-		if !strings.EqualFold(resolved, related) {
+		if resolved != "" && !strings.EqualFold(resolved, related) {
 			return resolved
 		}
 	}

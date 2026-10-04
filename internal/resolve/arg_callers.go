@@ -487,15 +487,15 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 	}
 
 	rhs, assignedLine, ok := localAssignmentAt(pr.Content, lower, start, int(line))
-	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) || producerBraceDepth(pr.Content, assignedLine) != producerBraceDepth(pr.Content, int(line)) {
+	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) || !slices.Equal(producerBlockPath(pr.Content, assignedLine), producerBlockPath(pr.Content, int(line))) {
 		return ""
 	}
 
 	return r.argumentExprComponent(producerTokens(rhs), conv.Uint32(assignedLine), caller, pr, dir, ctx)
 }
 
-func producerBraceDepth(content string, line int) int {
-	depth := 0
+func producerBlockPath(content string, line int) []int {
+	var path []int
 
 	for _, token := range producerTokens(content) {
 		if token.Line >= line {
@@ -504,12 +504,14 @@ func producerBraceDepth(content string, line int) int {
 
 		switch token.Kind {
 		case parser.TokLBrace:
-			depth++
+			path = append(path, token.Offset)
 		case parser.TokRBrace:
-			depth--
+			if len(path) > 0 {
+				path = path[:len(path)-1]
+			}
 		default:
 		}
 	}
 
-	return depth
+	return path
 }

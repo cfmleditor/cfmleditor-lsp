@@ -1587,3 +1587,16 @@ untyped.
 `TestANonPersistentCollectionRelationshipUsesAProvenBean` covers both
 cardinalities and both loop syntaxes. No corpus delta is claimed for this
 batch because the pinned external corpus checkout is unavailable here.
+
+### Review corrections for aliases and relationship fallback
+
+Straight-line alias provenance now compares the complete lexical brace path,
+not only brace depth. Assignments and calls in sibling conditional blocks have
+the same depth but no reaching relationship, so they remain unknown.
+
+A nonpersistent single-valued relationship whose `cfc` bean id has no exact
+factory match now continues through ordinary property injection evidence. An
+unmatched relationship id no longer suppresses a separately proven `inject`
+target. `TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
+`TestRelationshipWithoutFactoryMatchFallsThroughToPropertyBean` pin both
+review findings.

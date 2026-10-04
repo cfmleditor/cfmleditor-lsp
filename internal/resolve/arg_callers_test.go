@@ -33,7 +33,7 @@ func cfmlFilesIn(t *testing.T, dir string) []string {
 func TestAnUntypedArgumentHoldsWhatEveryCallerPasses(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} function forwardedM(){} function conditionalM(){} function afterM(){} }`,
+		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} function forwardedM(){} function conditionalM(){} function siblingM(){} function afterM(){} }`,
 		"models/Other.cfc": `component { function mixedOther(){} }`,
 		"svc/Base.cfc":     `component { function inherited( required thing ){ arguments.thing.inheritedM(); } }`,
 		"svc/Svc.cfc": `component extends="Base" {
@@ -43,6 +43,7 @@ function useOpen( required thing ){ arguments.thing.openM(); }
 function useSkip( required thing, extra ){ arguments.thing.skipM(); }
 function useForwarded( required thing ){ arguments.thing.forwardedM(); }
 function useConditional( required thing ){ arguments.thing.conditionalM(); }
+function useSibling( required thing ){ arguments.thing.siblingM(); }
 function useAfter( required thing ){ arguments.thing.afterM(); }
 function callers(){
 	var a = new models.Item();
@@ -53,6 +54,12 @@ function callers(){
 		var conditional = a;
 	}
 	useConditional( conditional );
+	if (first()) {
+		var sibling = a;
+	}
+	if (second()) {
+		useSibling( sibling );
+	}
 	useAfter( after );
 	var after = a;
 	useIt(
@@ -77,7 +84,7 @@ function callers(){
 		}
 	}
 
-	for _, k := range []string{"arguments.thing.conditionalM", "arguments.thing.afterM"} {
+	for _, k := range []string{"arguments.thing.conditionalM", "arguments.thing.siblingM", "arguments.thing.afterM"} {
 		if !strings.Contains(got[k], "no component ref") {
 			t.Errorf("%s was typed without a reaching straight-line assignment: %q", k, got[k])
 		}
