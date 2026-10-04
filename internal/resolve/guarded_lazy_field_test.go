@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -82,6 +83,12 @@ func TestDefaultSelfReturnParameterRequiresALiteralFinalDispatch(t *testing.T) {
 		{"different default", `function f(mode="query"){if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
 		{"self has another return", `function f(mode="self"){if(arguments.mode eq "self"){return q;}else{return this;}}`, ""},
 		{"interpolated mode", `function f(mode="self"){if(arguments.mode eq "#runtime#"){return q;}else{return this;}}`, ""},
+		{"earlier return", `function f(mode="self"){return new Other();if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"conditional earlier return", `function f(mode="self"){if(runtime()){return new Other();}if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"parameter mutation", `function f(mode="self"){arguments.mode="query";if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"unscoped parameter mutation", `function f(mode="self"){mode="query";if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"arguments escape", `function f(mode="self"){mutate(arguments);if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"unbraced enclosing condition", `function f(mode="self"){if(runtime()) if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
 		{"trailing work", `function f(mode="self"){if(arguments.mode eq "query"){return q;}else{return this;}work();}`, ""},
 		{"different fallback", `function f(mode="self"){if(arguments.mode eq "query"){return q;}else{return other;}}`, ""},
 	}
@@ -101,6 +108,8 @@ func TestGuardedLazyFieldsFailClosed(t *testing.T) {
 		name, extra, initial string
 	}{
 		{"conflicting component", `function replace(){variables.service=new Other();}`, ``},
+		{"switch writer", `function replace(flag){switch(flag){case 1:variables.service=new Other();break;}}`, ``},
+		{"oversized writer", `function replace(){` + strings.Repeat(`work();`, 1100) + `variables.service=new Other();}`, ``},
 		{"primitive replacement", `function replace(){variables.service="bad";}`, ``},
 		{"conflicting startup component", ``, `variables.service=new Other();`},
 		{"primitive startup for null guard", ``, `variables.service="bad";`},
@@ -123,5 +132,30 @@ func TestGuardedLazyFieldsFailClosed(t *testing.T) {
 				t.Fatalf("guarded field resolved without an all-writes-agree contract: %v", got)
 			}
 		})
+	}
+}
+
+func TestGuardedLazyTagFieldsRejectUnsupportedWriters(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Service.cfc": `component { function ready(){} }`,
+		"Other.cfc":   `component {}`,
+		"Owner.cfc": `<cfcomponent>
+<cffunction name="getService">
+<cfif isNull(variables.service)><cfset variables.service=new Service()></cfif>
+<cfreturn variables.service>
+</cffunction>
+<cffunction name="replace">
+<cfswitch expression="#runtime()#">
+<cfcase value="1"><cfset variables.service=new Other()></cfcase>
+</cfswitch>
+</cffunction>
+</cfcomponent>`,
+		"Page.cfc":    `component {function run(){new Owner().getService().ready();}}`,
+	})
+
+	got := reasonsWith(t, &Resolver{}, dir, "Page.cfc")
+	if reason, exists := got["getService.ready"]; !exists || reason == "" {
+		t.Fatalf("unsupported tag writer did not invalidate the guarded field: %v", got)
 	}
 }

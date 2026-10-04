@@ -108,3 +108,33 @@ function callers(){
 		t.Errorf("inference ran with no files to search: %q", off["arguments.thing.useItM"])
 	}
 }
+
+func TestCallerAliasesRequireCompleteStraightLineProof(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, padding string
+	}{
+		{"unbraced if", "if (runtime())\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"unbraced loop", "while (runtime())\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"unbraced else", "if (runtime()) {} else\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"exhausted sibling paths", "if (first()) {\nvar forwarded = a;\n}\nif (second()) {\nuseForwarded(forwarded);\n}", strings.Repeat("work();\n", 1100)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{
+				"Item.cfc": `component { function ready(){} }`,
+				"Svc.cfc": `component {
+function useForwarded(thing) { arguments.thing.ready(); }
+function callers() {
+var a = new Item();
+` + tc.body + "\n" + tc.padding + `
+}
+}`,
+			})
+
+			got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc")
+			if reason, exists := got["arguments.thing.ready"]; !exists || !strings.Contains(reason, "no component ref") {
+				t.Fatalf("alias resolved without complete straight-line proof: %v", got)
+			}
+		})
+	}
+}
