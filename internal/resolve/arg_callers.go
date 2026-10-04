@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,8 +38,6 @@ const (
 	maxArgCallSites   = 40
 )
 
-var identCallRe = regexp.MustCompile(`(\w+)\s*\(`)
-
 // callerIndex is, for each name followed by an open parenthesis anywhere in
 // the files, the files it appears in.
 type callerIndex struct {
@@ -72,11 +69,81 @@ func (r *Resolver) IndexCallerFile(path, content string) {
 func callerNames(content string) map[string]bool {
 	seen := map[string]bool{}
 
-	for _, m := range identCallRe.FindAllStringSubmatch(content, -1) {
-		seen[strings.ToLower(m[1])] = true
+	for open := strings.IndexByte(content, '('); open >= 0; {
+		end := open
+		for end > 0 && callerSpace(content[end-1]) {
+			end--
+		}
+
+		start := end
+		for start > 0 && callerWord(content[start-1]) {
+			start--
+		}
+
+		if start < end {
+			addCallerName(seen, content[start:end])
+		}
+
+		next := open + 1
+
+		rel := strings.IndexByte(content[next:], '(')
+		if rel < 0 {
+			break
+		}
+
+		open = next + rel
 	}
 
 	return seen
+}
+
+func addCallerName(seen map[string]bool, name string) {
+	const stackName = 128
+
+	var folded [stackName]byte
+
+	if len(name) > len(folded) {
+		name = strings.ToLower(name)
+		if !seen[name] {
+			seen[strings.Clone(name)] = true
+		}
+
+		return
+	}
+
+	changed := false
+
+	for i := range len(name) {
+		c := name[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+			changed = true
+		}
+
+		folded[i] = c
+	}
+
+	if !changed {
+		if !seen[name] {
+			seen[strings.Clone(name)] = true
+		}
+
+		return
+	}
+
+	if seen[string(folded[:len(name)])] {
+		return
+	}
+
+	seen[string(folded[:len(name)])] = true
+}
+
+func callerSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+}
+
+func callerWord(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
 }
 
 // owner is the resolver that holds the shared caches: a per-caller view

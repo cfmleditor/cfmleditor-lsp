@@ -295,3 +295,12 @@ the existing bounded policy.
 `TestBatchCallerIndexReusesBytesFromWorkspaceIndexing` pins the eliminated
 second read pass. `TestBatchHandlerParseCacheDoesNotThrashAtEditorLimit` crosses
 the old 512-entry boundary twice and requires exactly one read per handler.
+
+The caller-name pass itself no longer runs a regular expression that allocates
+one submatch slice per call. A single linear scan finds `(` and walks backward
+over the same ASCII whitespace and word characters; only distinct normalized
+names are cloned, so the index cannot retain a complete source string through
+one substring. On `BenchmarkCallerNames` with 10,000 calls and 100 distinct
+names, five baseline runs took 27.6–28.9 ms and allocated 1.30 MB in 10,031–
+10,032 allocations. Three optimized runs took 0.50–0.52 ms and allocated 7.8 KB
+in 111 allocations: about 56x faster and over 99% less allocation.
