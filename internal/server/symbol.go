@@ -1,8 +1,11 @@
 package server
 
 import (
+	"cmp"
+	"container/heap"
 	"context"
 	"encoding/json/v2"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
@@ -10,6 +13,11 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	"go.lsp.dev/protocol"
 )
+
+// The symbol picker sends each prefix while the user types. Keep those broad,
+// transient one- and two-character responses bounded; once the query is
+// specific enough, return the complete match set again.
+const workspaceSymbolShortQueryLimit = 1000
 
 func (s *Server) handleDocumentSymbol(_ context.Context, rawParams []byte) (any, error) {
 	var params protocol.DocumentSymbolParams
@@ -72,16 +80,15 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 	defs := s.index.FunctionsMatching(func(name string) bool {
 		return query == "" || containsFoldStr(name, query)
 	})
+	defs = browsableWorkspaceSymbols(defs)
+
+	if len(query) < 3 && len(defs) > workspaceSymbolShortQueryLimit {
+		defs = bestWorkspaceSymbols(defs, query, workspaceSymbolShortQueryLimit)
+	}
 
 	symbols := make([]protocol.SymbolInformation, 0, len(defs))
 
 	for _, d := range defs {
-		// A framework's bundled API is looked up, not browsed: it is in the
-		// index only because a call reached it, and it has nowhere to open.
-		if frameworkapi.IsStubURI(string(d.URI)) {
-			continue
-		}
-
 		symbols = append(symbols, protocol.SymbolInformation{
 			Name: d.Name,
 			Kind: protocol.SymbolKindFunction,
@@ -96,6 +103,92 @@ func (s *Server) handleWorkspaceSymbol(_ context.Context, rawParams []byte) (any
 	}
 
 	return symbols, nil
+}
+
+func compareWorkspaceSymbols(a, b *parser.FunctionDef, query string) int {
+	if d := cmp.Compare(symbolMatchRank(a.Name, query), symbolMatchRank(b.Name, query)); d != 0 {
+		return d
+	}
+
+	if d := strings.Compare(a.Name, b.Name); d != 0 {
+		return d
+	}
+
+	if d := cmp.Compare(a.URI, b.URI); d != 0 {
+		return d
+	}
+
+	return cmp.Compare(a.Line, b.Line)
+}
+
+type workspaceSymbolHeap struct {
+	defs  []*parser.FunctionDef
+	query string
+}
+
+func (h *workspaceSymbolHeap) Len() int { return len(h.defs) }
+func (h *workspaceSymbolHeap) Less(i, j int) bool {
+	return compareWorkspaceSymbols(h.defs[i], h.defs[j], h.query) > 0
+}
+func (h *workspaceSymbolHeap) Swap(i, j int) { h.defs[i], h.defs[j] = h.defs[j], h.defs[i] }
+func (h *workspaceSymbolHeap) Push(value any) {
+	def, ok := value.(*parser.FunctionDef)
+	if !ok {
+		return
+	}
+
+	h.defs = append(h.defs, def)
+}
+
+func (h *workspaceSymbolHeap) Pop() any {
+	last := len(h.defs) - 1
+	value := h.defs[last]
+	h.defs = h.defs[:last]
+
+	return value
+}
+
+func bestWorkspaceSymbols(defs []*parser.FunctionDef, query string, limit int) []*parser.FunctionDef {
+	h := &workspaceSymbolHeap{defs: append([]*parser.FunctionDef(nil), defs[:limit]...), query: query}
+	heap.Init(h)
+
+	for _, d := range defs[limit:] {
+		if compareWorkspaceSymbols(d, h.defs[0], query) < 0 {
+			h.defs[0] = d
+			heap.Fix(h, 0)
+		}
+	}
+
+	slices.SortFunc(h.defs, func(a, b *parser.FunctionDef) int {
+		return compareWorkspaceSymbols(a, b, query)
+	})
+
+	return h.defs
+}
+
+func browsableWorkspaceSymbols(defs []*parser.FunctionDef) []*parser.FunctionDef {
+	out := defs[:0]
+
+	for _, d := range defs {
+		// A framework's bundled API is looked up, not browsed: it is in the
+		// index only because a call reached it, and it has nowhere to open.
+		if !frameworkapi.IsStubURI(string(d.URI)) {
+			out = append(out, d)
+		}
+	}
+
+	return out
+}
+
+func symbolMatchRank(name, query string) int {
+	switch {
+	case strings.EqualFold(name, query):
+		return 0
+	case len(name) >= len(query) && strings.EqualFold(name[:len(query)], query):
+		return 1
+	default:
+		return 2
+	}
 }
 
 // containsFoldStr reports whether s contains substr (case-insensitive, ASCII).

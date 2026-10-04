@@ -59,16 +59,28 @@ shape is what carries over, not the multiplier: matching is a case-folded
 *substring* test over every distinct name, so short queries match a large share
 of a real workspace too, and short queries are the ones always sent.
 
-## 2. `workspace/symbol` sends the whole match set — deferred
+## 2. `workspace/symbol` bounds transient short-query results — done
 
-**This is the largest cost on this page by an order of magnitude, and it is
-not being worked on: other things come first.** That is the whole of the
-reason, and it is worth stating plainly rather than dressing as a technical
-judgement — nothing below argues the cap is wrong, only what a reader should
-know before picking it up.
+Done with a 1,000-result bound for zero-, one- and two-character queries. Those
+are transient prefixes sent on the way to a specific search; queries of three
+or more characters remain complete. Before applying the bound, candidates are
+ranked by exact match, prefix match, name, URI and line. A bounded max-heap
+retains the best 1,000 without sorting the complete match set, so results do
+not depend on parallel indexing order.
 
-The measurements are kept in full because the cost is real and has not gone
-anywhere.
+Measured end to end on `BenchmarkWorkspaceSymbolWithMarshal/query_m`, three
+runs before and after:
+
+| | symbols | JSON | time/op | allocated/op | allocations/op |
+|---|---:|---:|---:|---:|---:|
+| unbounded | 40,000 | 6,211,121 B | 32.0–32.6 ms | 11.3–13.3 MB | 40,010–40,013 |
+| bounded | 1,000 | 155,279 B | 5.5–5.9 ms | 600–607 KB | 1,009 |
+
+That is a 97.5% payload reduction, about 5.8x lower end-to-end latency and
+about 95% less allocation in the synthetic worst case. The remaining text in
+this section records the design analysis that led to the bound.
+
+The earlier measurements are kept in full for comparison.
 
 `handleWorkspaceSymbol` (`internal/server/symbol.go`) turns every matching
 definition into a `protocol.SymbolInformation` and returns all of them. The
@@ -254,11 +266,9 @@ not to make the scan 18% faster.
 
 ## 5. What would change these decisions
 
-- **Section 2** — room to do it. It is deferred on priority, not on evidence,
-  so nothing has to happen first. What would move it up the list: a report of
-  the symbol picker being felt as slow, or a measurement on a real workspace
-  showing what a one- or two-character query matches there — the cheap step
-  that would say whether the synthetic 26ms is anywhere near the real one.
+- **Section 2** — done for the dominant short-query payload. A real-workspace
+  measurement can still inform whether 1,000 is the right bound; queries of
+  three or more characters intentionally remain complete.
 - **Section 3** — done; see the section.
 - **Section 4** — a profile showing `nearestTo` mattering on a real workspace
   rather than on a bucket built to be worst-case. Then cache the answer rather
