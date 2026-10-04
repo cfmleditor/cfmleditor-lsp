@@ -1574,3 +1574,16 @@ removed, 0 added). The configured removals are `oauthClient.getUser().login()`
 and `file.getSite().getWebPath()`; the latter also resolves in automatic mode.
 `TestANonPersistentRelationshipGetterUsesAProvenBean` pins the required factory
 evidence.
+
+### Bean-backed collection relationships outside CFML ORM
+
+Nonpersistent bean-ORM `one-to-many` and `many-to-many` relationships now use
+the same exact bean-factory evidence as single-valued relationships, but retain
+that component as the generated getter's element contract rather than typing
+the collection itself as one entity. This covers both cardinalities in script
+loops and tag `<cfloop>` consumers. Unknown bean ids and broad resolvers remain
+untyped.
+
+`TestANonPersistentCollectionRelationshipUsesAProvenBean` covers both
+cardinalities and both loop syntaxes. No corpus delta is claimed for this
+batch because the pinned external corpus checkout is unavailable here.

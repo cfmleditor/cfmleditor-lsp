@@ -40,7 +40,9 @@ func reasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string 
 			return err
 		}
 
-		r.Index.IndexFile(cfpath.ToURI(p), string(data))
+		r.Index.IndexFileWithOptions(cfpath.ToURI(p), string(data), &parser.ParseOptions{
+			BeanLookup: r.Index.LookupBean,
+		})
 
 		return nil
 	})
