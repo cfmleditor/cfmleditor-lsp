@@ -5,6 +5,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -134,7 +135,7 @@ func (h *workspaceSymbolHeap) Swap(i, j int) { h.defs[i], h.defs[j] = h.defs[j],
 func (h *workspaceSymbolHeap) Push(value any) {
 	def, ok := value.(*parser.FunctionDef)
 	if !ok {
-		return
+		panic(fmt.Sprintf("workspace symbol heap received %T", value))
 	}
 
 	h.defs = append(h.defs, def)

@@ -103,9 +103,13 @@ func addCallerName(seen map[string]bool, name string) {
 	var folded [stackName]byte
 
 	if len(name) > len(folded) {
-		name = strings.ToLower(name)
-		if !seen[name] {
-			seen[strings.Clone(name)] = true
+		normalized := strings.ToLower(name)
+		if !seen[normalized] {
+			if normalized == name {
+				normalized = strings.Clone(normalized)
+			}
+
+			seen[normalized] = true
 		}
 
 		return
@@ -167,7 +171,17 @@ func (r *Resolver) callerFiles(name string) []string {
 		idx = o.buildCallerIndex()
 	}
 
-	return idx.byName[strings.ToLower(name)]
+	key := strings.ToLower(name)
+
+	o.mu.Lock()
+	files := idx.byName[key]
+	slices.Sort(files)
+	files = slices.Compact(files)
+	idx.byName[key] = files
+	files = slices.Clone(files)
+	o.mu.Unlock()
+
+	return files
 }
 
 func (r *Resolver) buildCallerIndex() *callerIndex {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,12 +82,14 @@ func TestBatchCallerIndexReusesBytesFromWorkspaceIndexing(t *testing.T) {
 	cfs := newCountingFS()
 	r := &Resolver{FS: cfs, InferArgsFiles: []string{"a.cfc", "b.cfc"}}
 
-	r.IndexCallerFile("a.cfc", `component { function run(){ save(user); save(user); } }`)
 	r.IndexCallerFile("b.cfc", `component { function run(){ other(user); } }`)
+	r.IndexCallerFile("a.cfc", `component { function run(){ save(user); save(user); } }`)
+	r.IndexCallerFile("z.cfc", `component { function run(){ save(user); } }`)
+	r.IndexCallerFile("a.cfc", `component { function run(){ save(user); } }`)
 
 	files := r.callerFiles("save")
-	if len(files) != 1 || files[0] != "a.cfc" {
-		t.Fatalf("save callers = %v, want [a.cfc]", files)
+	if !slices.Equal(files, []string{"a.cfc", "z.cfc"}) {
+		t.Fatalf("save callers = %v, want stable unique files [a.cfc z.cfc]", files)
 	}
 
 	if cfs.count("a.cfc") != 0 || cfs.count("b.cfc") != 0 {

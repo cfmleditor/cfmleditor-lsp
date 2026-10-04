@@ -304,3 +304,9 @@ one substring. On `BenchmarkCallerNames` with 10,000 calls and 100 distinct
 names, five baseline runs took 27.6–28.9 ms and allocated 1.30 MB in 10,031–
 10,032 allocations. Three optimized runs took 0.50–0.52 ms and allocated 7.8 KB
 in 111 allocations: about 56x faster and over 99% less allocation.
+
+Parallel workspace indexing can encounter the same caller name in an arbitrary
+file order. Caller lookup therefore sorts and compacts its small candidate list
+before inference, preserving stable alternative ordering and preventing a file
+re-indexed during setup from being counted twice. The returned slice is a copy,
+so later index updates cannot race a caller walking it.
