@@ -1,11 +1,9 @@
 # Performance gaps: costs identified and not acted on
 
-Three costs found while profiling the per-keystroke paths for
-[#101](https://github.com/cfmleditor/cfmleditor-lsp/pull/101). Two change what a
-client receives and so are not tune-ups; the third is not worth what it costs to
-write. Section 3 has since been done, and records what it measured. Section 4 is
-settled; section 2 is deferred, and records what a reader should know before
-picking it up.
+Costs found while profiling the per-keystroke and batch-analysis paths. Sections
+2, 3 and 6 are done and record their measurements. Section 4 is settled as not
+worth doing without a real-workspace profile; the remaining follow-ups are
+called out in sections 3 and 5.
 
 This file exists so they are not rediscovered from scratch, and so the reasons
 are on record rather than remembered. Every number below is measured, and the

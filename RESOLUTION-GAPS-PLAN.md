@@ -1,6 +1,7 @@
 # Remaining resolver gaps: coverage and proposed fixes
 
-Updated 2026-10-01, after merged [PR #190](https://github.com/cfmleditor/cfmleditor-lsp/pull/190).
+Updated 2026-10-04 through the current resolution/performance branch. Historical
+measurements below retain the commit or PR against which they were made.
 
 ## Baseline and measurement boundaries
 
@@ -400,8 +401,9 @@ mappings from Application.cfc and CFConfig. It does not close every category.
 | Application mappings | Literal root defaults, named/relative precedence and application overrides now resolve. Unknown root writes suppress stale defaults, including struct-literal replacement. | Automatic mode still misses source/runtime aliases and external mappings. Reproduce each missing base in its nearest Application context; do not map `mura` from a folder-name guess. |
 | DI ownership | Previously supported registrations, aliases and caller isolation remain. | Automatic DI roots and subsystem ownership need explicit source/configuration proof and separate application fixtures. This batch does not add them. |
 | Request/view propagation | Proven member producers and self-updates carry their concrete returns. | Controller-to-view `rc.$`, event slots, callback records and cross-request values still lack a proven origin. Track documented framework boundaries before propagating them. |
-| Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, object/presence guards and supported branch flow now specialize a call. | Arbitrary caller identifiers, dynamic argument bags, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. Add call-site reaching-definition proof before carrying caller variables. |
-| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. `settingsManager.getSite`'s try/catch cache is proven (see below); `settingsBean.getRazunaSettings`'s shared-field cache is the remaining concrete fixture. Do not restore a receiver-class guess to silence these findings. |
+| Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, straight-line caller aliases, object/presence guards and supported branch flow now specialize a call. Literal default modes may return the receiver when the source proves the final dispatch. | Dynamic argument bags, branch-dependent caller aliases, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. The next proof needs reaching definitions across control flow where every path agrees. |
+| Lazy/shared caches | Existing collection contracts, guarded `variables`/`this` fields and the Masa `settingsBean.getRazunaSettings` shape now resolve when every lexical write agrees. Presence, primitive-sentinel and null guards are covered. | Rich keyed caches, aliases, external mutation and unsupported control flow still need all writer/initialization paths to agree. Do not restore a receiver-class guess to silence these findings. |
+| Relationship getters | Persistent ORM getters and factory-proven nonpersistent bean relationships now carry single-valued targets and collection element contracts into script and tag loops. | Unknown bean ids, broad id-echoing factories, dynamic relationship metadata and collection operations other than proven iteration remain unknown. Add each consumer only with exact factory and cardinality evidence. |
 | Tags/control flow | Tag and mixed cfscript method plans now remain connected. Query output names can invalidate a returned local through finite attribute bags. | Unsupported controls/tags, computed output names, record aliases, uncertain mutation and exhausted bounds withhold inference. Extend one source shape at a time with negative tests. |
 | Callback/parameter contracts | Declared component types and existing framework contracts continue to work. | Untyped bean/feed/event parameters require verified registration/call-site contracts; arbitrary TestBox actual/target values should remain dynamic. |
 | Includes and unqualified calls | Existing static include/helper discovery remains. | Scope ownership for runtime includes and helpers needs a provenance fixture; a matching method name alone is insufficient. |
@@ -434,10 +436,12 @@ and source `target/dev-env/env.sh`. Sandbox proxy reachability must be checked i
 the approved execution context, as described in AGENTS.md; cached local tests
 and exact-head CI remain separate evidence.
 
-The next focused batch should start with the two lazy-cache fixtures above and
-call-site variable provenance. Those are concrete producer gaps that can unblock
-existing member flow. Request/view and callback propagation follows once its
-framework handoff is proven; receiver-frequency totals alone are not a fix plan.
+The next focused work should target a current corpus entry rather than another
+synthetic generalization. The highest-priority open proofs are same-type branch
+flow for record members, verified request/view handoffs, automatic application
+mapping and DI ownership, and framework callback registration/dispatch. Runtime
+includes and Wheels factories follow. Receiver-frequency totals alone are not a
+fix plan; every batch still needs a source fixture and per-entry comparison.
 
 ### Final measurements for this batch
 
