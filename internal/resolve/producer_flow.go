@@ -565,6 +565,7 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 			if node.kind == "unsafe" && producerMayTouchField(node.expression, path) {
 				valid = false
 			}
+
 			if node.kind == "set" {
 				target := normalizeProducerPath(node.target)
 				if target == "variables" || target == "this" {

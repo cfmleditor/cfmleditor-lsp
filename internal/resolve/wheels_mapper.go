@@ -416,6 +416,7 @@ func selfDispatchPrefixSafe(prefix, name string) bool {
 	}
 
 	depth := 0
+
 	for i, token := range tokens {
 		if producerUnbracedControl(tokens, i) {
 			return false

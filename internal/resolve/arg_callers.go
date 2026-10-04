@@ -492,6 +492,7 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 
 	assignedPath, assignedOK := producerBlockPath(pr.Content, start, assignedLine)
 	callPath, callOK := producerBlockPath(pr.Content, start, int(line))
+
 	if !assignedOK || !callOK || !slices.Equal(assignedPath, callPath) {
 		return ""
 	}

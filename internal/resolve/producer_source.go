@@ -777,12 +777,15 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 			for _, tag := range tags[i+1 : end] {
 				source.WriteString(tag.body)
 				source.WriteByte('\n')
+
 				if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
 					method.sensitive = true
 				}
 			}
+
 			method.body = []producerNode{{kind: "unsafe", expression: source.String()}}
 		}
+
 		methods[strings.ToLower(name)] = method
 
 		i = end
