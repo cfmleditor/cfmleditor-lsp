@@ -1558,3 +1558,19 @@ return type before their following `isSuperUser()` / `login()` calls. All six
 other pinned projects, with and without presets, are unchanged per entry.
 `TestAGuardedLazyFieldAcceptsAnInheritedArgumentSensitiveSelfReturn` covers the
 Masa shape and rejects an explicit non-self mode.
+
+### Bean-backed relationship getters outside CFML ORM
+
+Masa declares bean-ORM relationships with CFML's `fieldtype` and `cfc`
+metadata but does not mark those components `persistent`. A single-valued
+relationship getter now uses the `cfc` value only when an exact configured or
+source-discovered `getBean()` resolver proves that bean id's component. A broad
+resolver that merely echoes the id provides no evidence, and ordinary
+nonpersistent properties remain untyped.
+
+Measured per entry against `7dee48d` on Masa 7.6.1: configured **11,784 ->
+11,782** (2 removed, 0 added), automatic mappings **13,377 -> 13,376** (1
+removed, 0 added). The configured removals are `oauthClient.getUser().login()`
+and `file.getSite().getWebPath()`; the latter also resolves in automatic mode.
+`TestANonPersistentRelationshipGetterUsesAProvenBean` pins the required factory
+evidence.

@@ -1800,6 +1800,24 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			comp = prop.relatedEntity()
 		}
 
+		// Mura's bean ORM uses the same relationship metadata without marking
+		// components persistent. Its cfc attribute is a bean id, so accept it
+		// only when the configured bean map proves the target.
+		if comp == "" && pr.BeanLookup != nil {
+			if related := prop.relatedEntity(); related != "" {
+				comp = pr.BeanLookup(related)
+			}
+		}
+
+		if comp == "" {
+			if related := prop.relatedEntity(); related != "" {
+				resolved := ResolveFromCall(`getBean("`+related+`")`, pr.Resolvers)
+				if !strings.EqualFold(resolved, related) {
+					comp = resolved
+				}
+			}
+		}
+
 		if comp == "" {
 			comp = pr.propertyBeanComponent(&prop)
 		}
