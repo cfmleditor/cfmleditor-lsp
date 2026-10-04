@@ -562,6 +562,9 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	visit = func(nodes []producerNode) {
 		for i := range nodes {
 			node := &nodes[i]
+			if node.kind == "unsafe" && producerMayTouchField(node.expression, path) {
+				valid = false
+			}
 			if node.kind == "set" {
 				target := normalizeProducerPath(node.target)
 				if target == "variables" || target == "this" {
@@ -605,6 +608,25 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	}
 
 	return e.concrete(component, e.baseDir)
+}
+
+// Unsupported plans cannot supply an all-writes-agree proof. A scope or field
+// reference may hide a write, an indexed assignment, or a scope escape. An
+// exhausted scan likewise withholds the contract.
+func producerMayTouchField(expression, path string) bool {
+	tokens := producerTokens(expression)
+	if len(tokens) == 0 {
+		return true
+	}
+
+	scope, field, _ := strings.Cut(path, ".")
+	for _, token := range tokens {
+		if token.Kind == parser.TokIdent && (strings.EqualFold(token.Value, scope) || strings.EqualFold(token.Value, field)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (e *producerEvaluation) read(path string, env producerEnvironment) producerValue {

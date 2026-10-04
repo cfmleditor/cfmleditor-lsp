@@ -379,7 +379,8 @@ func wheelsReadMethod(scanner *parser.Scanner, header []parser.Token) (string, w
 // defaultSelfReturnParameter recognizes a final literal-mode dispatch whose
 // default parameter value selects `return this`. Work before the final dispatch
 // may be too dynamic for a producer plan (beanORM.loadBy builds SQL with
-// savecontent), but it cannot change which final return the literal mode takes.
+// savecontent). The prefix must still exclude earlier returns and uses of the
+// selected parameter or arguments scope that could change the final dispatch.
 func defaultSelfReturnParameter(params [][]parser.Token, body string) string {
 	for _, param := range params {
 		eq := slices.IndexFunc(param, func(t parser.Token) bool { return t.Kind == parser.TokEquals })
@@ -391,13 +392,53 @@ func defaultSelfReturnParameter(params [][]parser.Token, body string) string {
 		condition := `if\t\(\targuments\t\.\t` + regexp.QuoteMeta(name) + `\t(?:eq|=\t=)\t"[^"#]*"\t\)\t\{\treturn\t[^;{}]+\t;\t\}`
 		pattern := regexp.MustCompile(condition + `(?:\telse\t` + condition + `)*\telse\t\{\treturn\tthis\t;\t\}\t$`)
 
-		match := pattern.FindString(body)
-		if match != "" && !strings.Contains(match, name+"\teq\t\"self\"") && !strings.Contains(match, name+"\t=\t=\t\"self\"") {
+		loc := pattern.FindStringIndex(body)
+		if loc == nil || !selfDispatchPrefixSafe(body[:loc[0]], name) {
+			continue
+		}
+
+		match := body[loc[0]:loc[1]]
+		if !strings.Contains(match, name+"\teq\t\"self\"") && !strings.Contains(match, name+"\t=\t=\t\"self\"") {
 			return name
 		}
 	}
 
 	return ""
+}
+
+// A suffix match alone says nothing about the code that precedes it. Keep the
+// dispatch at method scope and reject returns and any parameter/scope use in
+// the prefix, including passing the arguments scope to another function.
+func selfDispatchPrefixSafe(prefix, name string) bool {
+	tokens := producerTokens(prefix)
+	if tokens == nil {
+		return false
+	}
+
+	depth := 0
+	for i, token := range tokens {
+		if producerUnbracedControl(tokens, i) {
+			return false
+		}
+
+		if token.Kind == parser.TokIdent && (strings.EqualFold(token.Value, "return") || strings.EqualFold(token.Value, "arguments") || strings.EqualFold(token.Value, name)) {
+			return false
+		}
+
+		switch token.Kind {
+		case parser.TokLBrace:
+			depth++
+		case parser.TokRBrace:
+			depth--
+		default:
+		}
+
+		if depth < 0 {
+			return false
+		}
+	}
+
+	return depth == 0
 }
 
 func wheelsTokens(source string) string {

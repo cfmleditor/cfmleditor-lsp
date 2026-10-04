@@ -180,3 +180,30 @@ func TestGuardedThisFieldsRejectUnsupportedWriters(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultSelfDispatchDoesNotHideAnotherReturn(t *testing.T) {
+	for _, tc := range []struct{ name, prefix string }{
+		{"earlier return", `return new Other();`},
+		{"changed mode", `arguments.mode="query";`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{
+				"Other.cfc": `component {}`,
+				"Owner.cfc": `component {
+function ready(){}
+function loadBy(mode="self"){
+` + tc.prefix + `
+if(arguments.mode eq "query"){return new Other();}else{return this;}
+}
+}`,
+				"Page.cfc": `component {function run(){new Owner().loadBy().ready();}}`,
+			})
+
+			got := reasonsWith(t, &Resolver{}, dir, "Page.cfc")
+			if reason, exists := got["loadBy.ready"]; !exists || reason == "" {
+				t.Fatalf("self shortcut hid another return: %v", got)
+			}
+		})
+	}
+}

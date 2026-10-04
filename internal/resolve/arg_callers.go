@@ -465,10 +465,9 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 }
 
 // argumentAliasComponent follows a plain local passed by a caller to the last
-// straight-line assignment before that call. Requiring equal lexical brace
-// depth keeps assignments in a conditional or nested closure from becoming a
-// reaching definition; an assignment after the call is excluded by the
-// bounded lookup itself.
+// straight-line assignment before that call. Equal lexical brace paths and
+// the absence of unbraced controls are required; exhausted scans withhold
+// inference. An assignment after the call is excluded by the bounded lookup.
 func (r *Resolver) argumentAliasComponent(name string, line uint32, caller string, pr *parser.ParseResult, dir string, ctx lookupCtx) string {
 	if pr == nil || ctx.depth >= maxAssignedDepth {
 		return ""
@@ -487,19 +486,34 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 	}
 
 	rhs, assignedLine, ok := localAssignmentAt(pr.Content, lower, start, int(line))
-	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) || !slices.Equal(producerBlockPath(pr.Content, assignedLine), producerBlockPath(pr.Content, int(line))) {
+	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) {
+		return ""
+	}
+
+	assignedPath, assignedOK := producerBlockPath(pr.Content, start, assignedLine)
+	callPath, callOK := producerBlockPath(pr.Content, start, int(line))
+	if !assignedOK || !callOK || !slices.Equal(assignedPath, callPath) {
 		return ""
 	}
 
 	return r.argumentExprComponent(producerTokens(rhs), conv.Uint32(assignedLine), caller, pr, dir, ctx)
 }
 
-func producerBlockPath(content string, line int) []int {
+func producerBlockPath(content string, start, line int) ([]int, bool) {
+	tokens := producerTokens(content)
+	if tokens == nil {
+		return nil, false
+	}
+
 	var path []int
 
-	for _, token := range producerTokens(content) {
+	for i, token := range tokens {
 		if token.Line >= line {
 			break
+		}
+
+		if token.Line >= start && producerUnbracedControl(tokens, i) {
+			return nil, false
 		}
 
 		switch token.Kind {
@@ -513,5 +527,38 @@ func producerBlockPath(content string, line int) []int {
 		}
 	}
 
-	return path
+	return path, true
+}
+
+// Brace paths cannot distinguish a conditional single statement from an
+// unconditional one. Conservatively reject such controls earlier in the
+// enclosing function, rather than claim that their assignments reach the call.
+func producerUnbracedControl(tokens []parser.Token, i int) bool {
+	if tokens[i].Kind != parser.TokIdent {
+		return false
+	}
+
+	next := i + 1
+	switch strings.ToLower(tokens[i].Value) {
+	case "if", "for", "while", "switch", "catch":
+		if next >= len(tokens) || tokens[next].Kind != parser.TokLParen {
+			return true
+		}
+
+		end := producerGroupEnd(tokens, next, parser.TokLParen, parser.TokRParen)
+		if end < 0 {
+			return true
+		}
+
+		next = end + 1
+	case "else":
+		if next < len(tokens) && strings.EqualFold(tokens[next].Value, "if") {
+			return false
+		}
+	case "do", "try", "finally":
+	default:
+		return false
+	}
+
+	return next >= len(tokens) || tokens[next].Kind != parser.TokLBrace
 }

@@ -115,6 +115,7 @@ func scriptProducerMethods(source string, methods map[string]*producerMethod) {
 		}
 
 		if finish-start > 4096 {
+			methods[name] = &producerMethod{body: []producerNode{{kind: "unsafe", expression: producerText(tokens[start+1 : finish])}}}
 			i = finish
 
 			continue
@@ -161,9 +162,10 @@ func scriptProducerMethods(source string, methods map[string]*producerMethod) {
 			method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
 			method.wanted = producerWanted(method.body)
 			methods[name] = method
-		} else if producerSensitive([]producerNode{{kind: "if", expression: producerText(tokens[start+1 : finish])}}) {
-			method.body = []producerNode{{kind: "unsafe", expression: producerText(tokens[start+1 : finish])}}
-			method.sensitive = true
+		} else {
+			expression := producerText(tokens[start+1 : finish])
+			method.body = []producerNode{{kind: "unsafe", expression: expression}}
+			method.sensitive = producerSensitive([]producerNode{{kind: "if", expression: expression}})
 			methods[name] = method
 		}
 
@@ -738,12 +740,6 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 			continue
 		}
 
-		if end-i > 4096 {
-			i = end
-
-			continue
-		}
-
 		method := &producerMethod{defaults: map[string]string{}}
 
 		for _, tag := range tags[i+1 : end] {
@@ -767,22 +763,27 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 
 		p := producerTagParser{tags: tags[i+1 : end]}
 
-		method.body = p.block()
+		if end-i <= 4096 {
+			method.body = p.block()
+		} else {
+			p.failed = true
+		}
+
 		if !p.failed && p.position == len(p.tags) {
 			method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
 			method.wanted = producerWanted(method.body)
-			methods[strings.ToLower(name)] = method
 		} else {
+			var source strings.Builder
 			for _, tag := range tags[i+1 : end] {
+				source.WriteString(tag.body)
+				source.WriteByte('\n')
 				if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
-					method.body = []producerNode{{kind: "unsafe", expression: tag.body}}
 					method.sensitive = true
-					methods[strings.ToLower(name)] = method
-
-					break
 				}
 			}
+			method.body = []producerNode{{kind: "unsafe", expression: source.String()}}
 		}
+		methods[strings.ToLower(name)] = method
 
 		i = end
 	}

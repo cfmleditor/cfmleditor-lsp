@@ -1604,3 +1604,22 @@ unmatched relationship id no longer suppresses a separately proven `inject`
 target. `TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
 `TestRelationshipWithoutFactoryMatchFallsThroughToPropertyBean` pin both
 review findings.
+
+### PR 222 review: fail closed when provenance is incomplete
+
+The default-self final-dispatch shortcut now rejects earlier returns, uses of
+its mode parameter or `arguments` scope, and a dispatch nested in preceding
+control flow. Unsupported and oversized producer methods remain represented
+as unsafe plans, so a possible shared-field write cannot disappear from the
+all-writes-agree check. Unrelated unsupported methods without a reference to
+the field or its scope do not invalidate the field contract.
+
+Caller alias inference now rejects unbraced control bodies and explicitly
+withholds inference when the lexical token bound is exhausted. Equal empty
+brace paths from failed scans are no longer treated as scope evidence.
+
+Regression fixtures cover early returns, parameter mutation/scope escape,
+script and tag switch writers, oversized writers, unbraced conditionals/loops,
+and sibling branches in an oversized file. The existing positive fixtures
+continue to pin supported straight-line aliases and guarded cache getters.
+No new corpus delta is claimed for these review corrections.
