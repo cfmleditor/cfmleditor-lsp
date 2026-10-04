@@ -276,3 +276,22 @@ not to make the scan 18% faster.
 
 Anything here that gets done should re-measure end to end, with the marshal,
 on the benchmark named in section 1 — not on a handler benchmark.
+
+## 6. Unresolved caller inference reread and reparsed the workspace — done
+
+Batch `unresolved` already reads every file while building its definition
+index. Caller inference used to read every file a second time when its lazy
+name-to-caller index was first needed. The workspace-index pass now records
+those call-shaped names from the bytes it already holds, so caller lookup adds
+no filesystem pass.
+
+The parsed-handler cache also used the editor's 512-entry reset policy during
+batch scans. On a workspace with more than 512 possible callers, filling the
+cache cleared every earlier parse; later arguments then reread and reparsed the
+same handlers. Batch inference has a finite `InferArgsFiles` set and now retains
+those parses for the scan's lifetime, while interactive resolver instances keep
+the existing bounded policy.
+
+`TestBatchCallerIndexReusesBytesFromWorkspaceIndexing` pins the eliminated
+second read pass. `TestBatchHandlerParseCacheDoesNotThrashAtEditorLimit` crosses
+the old 512-entry boundary twice and requires exactly one read per handler.

@@ -1,6 +1,8 @@
 package resolve
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -20,5 +22,51 @@ func TestReviewAppLessCallersShareView(t *testing.T) {
 
 	if r.forCaller(a).ResolveFunc("Helper", "a", a) == nil || r.forCaller(b).ResolveFunc("Helper", "b", b) == nil {
 		t.Fatal("sharing a view lost physical relative lookup")
+	}
+}
+
+func TestBatchCallerIndexReusesBytesFromWorkspaceIndexing(t *testing.T) {
+	cfs := newCountingFS()
+	r := &Resolver{FS: cfs, InferArgsFiles: []string{"a.cfc", "b.cfc"}}
+
+	r.IndexCallerFile("a.cfc", `component { function run(){ save(user); save(user); } }`)
+	r.IndexCallerFile("b.cfc", `component { function run(){ other(user); } }`)
+
+	files := r.callerFiles("save")
+	if len(files) != 1 || files[0] != "a.cfc" {
+		t.Fatalf("save callers = %v, want [a.cfc]", files)
+	}
+
+	if cfs.count("a.cfc") != 0 || cfs.count("b.cfc") != 0 {
+		t.Fatal("building the caller index reread files already indexed")
+	}
+}
+
+func TestBatchHandlerParseCacheDoesNotThrashAtEditorLimit(t *testing.T) {
+	dir := t.TempDir()
+	paths := make([]string, 513)
+
+	for i := range paths {
+		paths[i] = filepath.Join(dir, fmt.Sprintf("Handler%03d.cfc", i))
+		if err := os.WriteFile(paths[i], []byte(`component { function run(){ work(); } }`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfs := newCountingFS()
+	r := &Resolver{FS: cfs, Index: index.New(), InferArgsFiles: paths}
+
+	for range 2 {
+		for _, path := range paths {
+			if r.handlerParse(path) == nil {
+				t.Fatalf("failed to parse %s", path)
+			}
+		}
+	}
+
+	for _, path := range paths {
+		if reads := cfs.count(path); reads != 1 {
+			t.Fatalf("%s read %d times, want once", path, reads)
+		}
 	}
 }

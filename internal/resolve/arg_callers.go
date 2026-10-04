@@ -47,6 +47,38 @@ type callerIndex struct {
 	byName map[string][]string
 }
 
+// IndexCallerFile adds the call-shaped names in content to the batch caller
+// index while the unresolved scan already has the file bytes in hand. It
+// avoids reading every workspace file again when the first untyped argument
+// asks for its callers.
+func (r *Resolver) IndexCallerFile(path, content string) {
+	if len(r.InferArgsFiles) == 0 {
+		return
+	}
+
+	seen := callerNames(content)
+
+	r.mu.Lock()
+	if r.callerIdx == nil {
+		r.callerIdx = &callerIndex{byName: map[string][]string{}}
+	}
+
+	for name := range seen {
+		r.callerIdx.byName[name] = append(r.callerIdx.byName[name], path)
+	}
+	r.mu.Unlock()
+}
+
+func callerNames(content string) map[string]bool {
+	seen := map[string]bool{}
+
+	for _, m := range identCallRe.FindAllStringSubmatch(content, -1) {
+		seen[strings.ToLower(m[1])] = true
+	}
+
+	return seen
+}
+
 // owner is the resolver that holds the shared caches: a per-caller view
 // delegates to the one it was made from.
 func (r *Resolver) owner() *Resolver {
@@ -80,14 +112,8 @@ func (r *Resolver) buildCallerIndex() *callerIndex {
 			continue
 		}
 
-		seen := map[string]bool{}
-
-		for _, m := range identCallRe.FindAllSubmatch(data, -1) {
-			name := strings.ToLower(string(m[1]))
-			if !seen[name] {
-				seen[name] = true
-				idx.byName[name] = append(idx.byName[name], path)
-			}
+		for name := range callerNames(string(data)) {
+			idx.byName[name] = append(idx.byName[name], path)
 		}
 	}
 
