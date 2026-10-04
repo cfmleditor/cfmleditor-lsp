@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
@@ -367,6 +368,7 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 	}
 
 	lower := strings.ToLower(name)
+
 	lower = strings.TrimPrefix(lower, "local.")
 	if lower == "" || strings.Contains(lower, ".") || isScopeWord(lower) {
 		return ""
@@ -382,11 +384,12 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 		return ""
 	}
 
-	return r.argumentExprComponent(producerTokens(rhs), uint32(assignedLine), caller, pr, dir, ctx)
+	return r.argumentExprComponent(producerTokens(rhs), conv.Uint32(assignedLine), caller, pr, dir, ctx)
 }
 
 func producerBraceDepth(content string, line int) int {
 	depth := 0
+
 	for _, token := range producerTokens(content) {
 		if token.Line >= line {
 			break

@@ -1,6 +1,10 @@
 package resolve
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+)
 
 func TestGuardedLazyFieldsReturnTheirInitializedType(t *testing.T) {
 	tests := []struct {
@@ -23,6 +27,71 @@ func TestGuardedLazyFieldsReturnTheirInitializedType(t *testing.T) {
 			expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Page.cfc"), map[string]string{
 				"getService.ready": "",
 			})
+		})
+	}
+}
+
+// TestAGuardedLazyFieldAcceptsAnInheritedArgumentSensitiveSelfReturn reproduces
+// settingsBean.getRazunaSettings: a bean factory returns a concrete ORM bean,
+// whose inherited loadBy method returns the receiver for its default mode.
+func TestAGuardedLazyFieldAcceptsAnInheritedArgumentSensitiveSelfReturn(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Base.cfc": `component {
+function loadBy(returnFormat="self") {
+	savecontent variable="sql" { writeOutput("select 1"); }
+	if (arguments.returnFormat == "query") { return new QueryResult(); }
+	else if (arguments.returnFormat == "iterator") { return new Iterator(); }
+	else { return this; }
+}
+}`,
+		"RazunaSettings.cfc": `component extends="Base" { function getAPIKey(){} }`,
+		"QueryResult.cfc":    `component {}`,
+		"Iterator.cfc":       `component {}`,
+		"Settings.cfc": `component {
+function getRazunaSettings() {
+	if (!structKeyExists(variables, "razunaSettings")) {
+		variables.razunaSettings = getBean("razunaSettings").loadBy(siteid=getValue("siteid"));
+	}
+	return variables.razunaSettings;
+}
+}`,
+		"Page.cfc": `component {function run(){
+new Settings().getRazunaSettings().getAPIKey();
+new RazunaSettings().loadBy(returnFormat="self").getAPIKey();
+new RazunaSettings().loadBy(returnFormat="query").getAPIKey();
+}}`,
+	})
+
+	r := &Resolver{Resolvers: []parser.Resolver{{Match: `(?i)getBean\(\s*["']razunaSettings["']\s*\)`, Resolve: "RazunaSettings", Prefix: "getBean"}}}
+	got := reasonsWith(t, r, dir, "Page.cfc")
+	expectReasons(t, got, map[string]string{
+		"getRazunaSettings.getAPIKey": "",
+	})
+
+	if got["loadBy.getAPIKey"] == "" {
+		t.Fatal("an explicit non-self mode inherited the receiver type")
+	}
+}
+
+func TestDefaultSelfReturnParameterRequiresALiteralFinalDispatch(t *testing.T) {
+	tests := []struct {
+		name, source, want string
+	}{
+		{"supported", `function f(mode="self"){work();if(arguments.mode eq "query"){return q;}else{return this;}}`, "mode"},
+		{"different default", `function f(mode="query"){if(arguments.mode eq "query"){return q;}else{return this;}}`, ""},
+		{"self has another return", `function f(mode="self"){if(arguments.mode eq "self"){return q;}else{return this;}}`, ""},
+		{"interpolated mode", `function f(mode="self"){if(arguments.mode eq "#runtime#"){return q;}else{return this;}}`, ""},
+		{"trailing work", `function f(mode="self"){if(arguments.mode eq "query"){return q;}else{return this;}work();}`, ""},
+		{"different fallback", `function f(mode="self"){if(arguments.mode eq "query"){return q;}else{return other;}}`, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := wheelsMethods("component{" + tc.source + `}`)["f"].selfDefaultParam
+			if got != tc.want {
+				t.Fatalf("self-default parameter = %q, want %q", got, tc.want)
+			}
 		})
 	}
 }

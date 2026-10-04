@@ -1527,3 +1527,34 @@ The cfwheels invocation indexed 1,882 files in this checkout, rather than the
 older canonical report's 1,195, so it is recorded separately and is not folded
 into the historical six-project totals above. All comparisons used the same
 roots and configuration for the baseline and PR-head binaries.
+
+### Literal default modes that return the receiver
+
+Masa's `beanORM.loadBy(returnFormat="self")` finishes with a literal mode
+dispatch: `query` and `iterator` return other values, while the final `else`
+returns `this`. Its earlier SQL construction is intentionally outside producer
+flow's supported language, so interpreting the whole method withheld the
+default self contract used by `settingsBean.getRazunaSettings` and many other
+ORM beans.
+
+A source-backed method contract now recognizes only that final dispatch when
+the selected parameter has the literal default `self`. An omitted argument or
+an explicit literal `self` returns the actual receiver, including a subclass;
+another literal or an unknown value does not. An interpolated mode, a branch
+for `self`, work after the dispatch, or a final return other than `this`
+withholds the contract. This is argument-sensitive rather than a blanket
+`loadBy` rule.
+
+Measured per entry against `d799add` on Masa 7.6.1:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 11,981 | 11,784 | 199 / 2 |
+| Masa, automatic mappings | 13,498 | 13,377 | 121 / 0 |
+
+The two configured additions are newly exposed downstream contracts:
+`beanEntity.getCurrentUser()` and `oauthClientBean.getUser()` have no component
+return type before their following `isSuperUser()` / `login()` calls. All six
+other pinned projects, with and without presets, are unchanged per entry.
+`TestAGuardedLazyFieldAcceptsAnInheritedArgumentSensitiveSelfReturn` covers the
+Masa shape and rejects an explicit non-self mode.

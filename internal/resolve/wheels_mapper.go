@@ -3,6 +3,8 @@ package resolve
 import (
 	"maps"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -193,9 +195,10 @@ func (r *Resolver) wheelsPlanFunc(global, name string) *parser.FunctionDef {
 }
 
 type wheelsMethod struct {
-	body         string
-	public       bool
-	noArgsReturn string
+	body             string
+	public           bool
+	noArgsReturn     string
+	selfDefaultParam string
 }
 
 type wheelsSource struct {
@@ -365,7 +368,36 @@ func wheelsReadMethod(scanner *parser.Scanner, header []parser.Token) (string, w
 		}
 	}
 
-	return strings.ToLower(name.Value), wheelsMethod{body: body.String(), public: public, noArgsReturn: absentArgumentReturn(params, tokens)}
+	text := body.String()
+
+	return strings.ToLower(name.Value), wheelsMethod{
+		body: text, public: public, noArgsReturn: absentArgumentReturn(params, tokens),
+		selfDefaultParam: defaultSelfReturnParameter(params, text),
+	}
+}
+
+// defaultSelfReturnParameter recognizes a final literal-mode dispatch whose
+// default parameter value selects `return this`. Work before the final dispatch
+// may be too dynamic for a producer plan (beanORM.loadBy builds SQL with
+// savecontent), but it cannot change which final return the literal mode takes.
+func defaultSelfReturnParameter(params [][]parser.Token, body string) string {
+	for _, param := range params {
+		eq := slices.IndexFunc(param, func(t parser.Token) bool { return t.Kind == parser.TokEquals })
+		if eq < 1 || eq+2 != len(param) || param[eq-1].Kind != parser.TokIdent || param[eq+1].Kind != parser.TokString || !strings.EqualFold(strings.Trim(param[eq+1].Value, "\"'"), "self") {
+			continue
+		}
+
+		name := strings.ToLower(param[eq-1].Value)
+		condition := `if\t\(\targuments\t\.\t` + regexp.QuoteMeta(name) + `\t(?:eq|=\t=)\t"[^"#]*"\t\)\t\{\treturn\t[^;{}]+\t;\t\}`
+		pattern := regexp.MustCompile(condition + `(?:\telse\t` + condition + `)*\telse\t\{\treturn\tthis\t;\t\}\t$`)
+
+		match := pattern.FindString(body)
+		if match != "" && !strings.Contains(match, name+"\teq\t\"self\"") && !strings.Contains(match, name+"\t=\t=\t\"self\"") {
+			return name
+		}
+	}
+
+	return ""
 }
 
 func wheelsTokens(source string) string {

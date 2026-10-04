@@ -145,6 +145,13 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 
 	*e.budget--
 
+	if specific && receiver != "" {
+		source := e.resolver.wheelsSource(fd.URI.Path()).methods[strings.ToLower(fd.Name)]
+		if source.selfDefaultParam != "" && e.selfModeSelected(fd, source.selfDefaultParam, arguments) {
+			return e.concrete(receiver, e.baseDir)
+		}
+	}
+
 	switch strings.ToLower(fd.ReturnType) {
 	case "", "any", "object", "component":
 	default:
@@ -207,6 +214,21 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 	}
 
 	return value
+}
+
+func (e *producerEvaluation) selfModeSelected(fd *parser.FunctionDef, name string, arguments map[string]producerValue) bool {
+	value, supplied := arguments[name]
+	if !supplied {
+		for i := range fd.Arguments {
+			if strings.EqualFold(fd.Arguments[i].Name, name) {
+				value, supplied = arguments[producerPosition(i)]
+
+				break
+			}
+		}
+	}
+
+	return !supplied || value.literalKnown && strings.EqualFold(value.literal, "self")
 }
 
 // producerFor is fd's source plan. The plan is read from the file while fd
@@ -351,77 +373,8 @@ func (e *producerEvaluation) condition(expression string, env producerEnvironmen
 		}
 	}
 
-	if path, ok := e.structKeyCondition(tokens); ok {
-		value, known := env[path]
-		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
-			value = e.sharedFieldContract(path, false)
-			known = !value.unknown
-		} else if !known {
-			value = producerUnknown()
-		}
-
-		choice = 0
-		if !known && e.argumentsKnown && strings.HasPrefix(path, "arguments.") {
-			choice = -1
-		}
-
-		if known && value.presenceKnown {
-			if value.absent {
-				choice = -1
-			} else {
-				choice = 1
-			}
-		}
-
-		if known {
-			present := value
-			present.presenceKnown = true
-			present.absent = false
-			yes[path] = present
-			no[path] = producerValue{unknown: true, absent: true, presenceKnown: true}
-		}
-
-		if negate {
-			return no, yes, -choice
-		}
-
-		return yes, no, choice
-	}
-
-	if path, ok := e.unaryGuardCondition(tokens, "isSimpleValue"); ok {
-		value := e.read(path, env)
-		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
-			value = e.sharedFieldContract(path, true)
-		}
-
-		object := value
-		object.primitive = false
-		primitive := producerValue{primitive: true}
-		yes[normalizeProducerPath(path)] = primitive
-		no[normalizeProducerPath(path)] = object
-		if negate {
-			return no, yes, 0
-		}
-
-		return yes, no, 0
-	}
-
-	if path, ok := e.unaryGuardCondition(tokens, "isNull"); ok {
-		value := e.read(path, env)
-		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
-			value = e.sharedFieldContract(path, false)
-		}
-
-		missing := producerValue{unknown: true, absent: true, presenceKnown: true}
-		value.presenceKnown = true
-		value.absent = false
-		yes[normalizeProducerPath(path)] = missing
-		no[normalizeProducerPath(path)] = value
-		if negate {
-			return no, yes, 0
-		}
-
-		return yes, no, 0
+	if specialYes, specialNo, specialChoice, ok := e.specialCondition(tokens, env, negate); ok {
+		return specialYes, specialNo, specialChoice
 	}
 
 	if len(tokens) < 4 || !strings.EqualFold(tokens[0].Value, "isObject") || tokens[1].Kind != parser.TokLParen || tokens[len(tokens)-1].Kind != parser.TokRParen || e.resolver.ResolveFunc(e.methodOwner(), "isObject", e.baseDir) != nil {
@@ -461,6 +414,87 @@ func (e *producerEvaluation) condition(expression string, env producerEnvironmen
 	return yes, no, choice
 }
 
+func (e *producerEvaluation) specialCondition(tokens []parser.Token, env producerEnvironment, negate bool) (yes, no producerEnvironment, choice int, ok bool) {
+	yes, no = maps.Clone(env), maps.Clone(env)
+
+	if path, matched := e.structKeyCondition(tokens); matched {
+		value, known := env[path]
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, false)
+			known = !value.unknown
+		} else if !known {
+			value = producerUnknown()
+		}
+
+		choice = 0
+		if !known && e.argumentsKnown && strings.HasPrefix(path, "arguments.") {
+			choice = -1
+		}
+
+		if known && value.presenceKnown {
+			if value.absent {
+				choice = -1
+			} else {
+				choice = 1
+			}
+		}
+
+		if known {
+			present := value
+			present.presenceKnown = true
+			present.absent = false
+			yes[path] = present
+			no[path] = producerValue{unknown: true, absent: true, presenceKnown: true}
+		}
+
+		if negate {
+			return no, yes, -choice, true
+		}
+
+		return yes, no, choice, true
+	}
+
+	if path, matched := e.unaryGuardCondition(tokens, "isSimpleValue"); matched {
+		value := e.read(path, env)
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, true)
+		}
+
+		object := value
+		object.primitive = false
+		primitive := producerValue{primitive: true}
+		yes[normalizeProducerPath(path)] = primitive
+		no[normalizeProducerPath(path)] = object
+
+		if negate {
+			return no, yes, 0, true
+		}
+
+		return yes, no, 0, true
+	}
+
+	if path, matched := e.unaryGuardCondition(tokens, "isNull"); matched {
+		value := e.read(path, env)
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, false)
+		}
+
+		missing := producerValue{unknown: true, absent: true, presenceKnown: true}
+		value.presenceKnown = true
+		value.absent = false
+		yes[normalizeProducerPath(path)] = missing
+		no[normalizeProducerPath(path)] = value
+
+		if negate {
+			return no, yes, 0, true
+		}
+
+		return yes, no, 0, true
+	}
+
+	return nil, nil, 0, false
+}
+
 func (e *producerEvaluation) unaryGuardCondition(tokens []parser.Token, name string) (string, bool) {
 	if len(tokens) < 4 || !strings.EqualFold(tokens[0].Value, name) || tokens[1].Kind != parser.TokLParen || tokens[len(tokens)-1].Kind != parser.TokRParen || e.resolver.ResolveFunc(e.methodOwner(), name, e.baseDir) != nil {
 		return "", false
@@ -480,6 +514,7 @@ func (e *producerEvaluation) structKeyCondition(tokens []parser.Token) (string, 
 	}
 
 	scope := producerPath(tokens[2:3])
+
 	name := strings.ToLower(strings.Trim(tokens[4].Value, "\"'"))
 	if scope == "" || name == "" || strings.Contains(name, ".") {
 		return "", false
@@ -511,6 +546,7 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 			found = true
 		case len(value.components) == 1:
 			found = true
+
 			if component == "" {
 				component = value.components[0]
 			} else if component != value.components[0] {
@@ -522,6 +558,7 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	}
 
 	var visit func([]producerNode)
+
 	visit = func(nodes []producerNode) {
 		for i := range nodes {
 			node := &nodes[i]
