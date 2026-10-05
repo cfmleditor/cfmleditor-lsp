@@ -1347,6 +1347,13 @@ against all of them; which one ran is not in the source.
   them there moved the counter on every re-index of an unchanged file, rebuilding the graph —
   thousands of stats — on each lazy index during a scan and each edit in the editor. Removal
   goes through `setIncludesLocked(uri, nil)` in `RemoveFile`, which compares before it bumps.
+- **A template reads what its includer holds at the include** (`includerHeld`,
+  `internal/resolve/included_locals.go`): an unscoped name the template never sets is, at
+  each `<cfinclude>` that reaches it (`parser.IncludeSites`, which keeps each statement's
+  offset), whatever the includer's receiver lookup gives at that line — a local or argument
+  when the include is inside a function. Every site must type it; their union is the answer.
+  It is the last step of `inferredReceiver`, cached per template, name and include generation.
+  `TestATemplateReadsWhatItsIncluderHoldsAtTheInclude`.
 - A writer that indexes from a parse result calls `Index.SetIncludes` beside `SetThisVars`;
   `IndexFile` sets them itself. The `unresolved` command records a template's includes without
   indexing its functions, since a page that includes a helper can call what the helper declares.

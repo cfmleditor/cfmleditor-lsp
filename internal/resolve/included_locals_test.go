@@ -1,0 +1,119 @@
+package resolve
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+)
+
+// templateReasons resolves the calls in a .cfm template, with every CFML file
+// under dir indexed and its includes recorded, as the unresolved scan does.
+func templateReasons(t *testing.T, dir, page string) map[string]string {
+	t.Helper()
+
+	r := &Resolver{FS: vfs.OS{}, WorkspaceFolders: []string{dir}, Index: index.New()}
+
+	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
+		if err != nil || !cfpath.IsCFMLFile(p) {
+			return err
+		}
+
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+
+		r.Index.IndexFileWithOptions(cfpath.ToURI(p), string(data), &parser.ParseOptions{})
+		r.Index.SetIncludes(cfpath.ToURI(p), parser.ExtractIncludes(string(data)))
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(dir, filepath.FromSlash(page))
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr := parser.ParseWithOptions(cfpath.ToURI(file), string(data), &parser.ParseOptions{ExtractCalls: true, FuncLookup: r.FuncLookup(filepath.Dir(file))})
+	got := map[string]string{}
+
+	calls := pr.AllCalls()
+	for i := range calls {
+		c := &calls[i]
+		got[strings.TrimPrefix(c.Variable+"."+c.FuncName, ".")] = r.CanResolveCall(c, pr, filepath.Dir(file))
+	}
+
+	return got
+}
+
+// TestATemplateReadsWhatItsIncluderHoldsAtTheInclude: Mura's
+// configBean.applyDbUpdates declares a local and includes every
+// dbUpdates/*.cfm, each of which calls methods on that local. A template
+// included inside a function reads the function's locals and arguments.
+func TestATemplateReadsWhatItsIncluderHoldsAtTheInclude(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Util.cfc":  `component { function setTable(){ return this; } }`,
+		"Other.cfc": `component { function otherOnly(){} }`,
+		"Config.cfc": `<cfcomponent>
+<cffunction name="apply">
+	<cfset var util = new Util()>
+	<cfdirectory action="list" directory="#getDirectoryFromPath(getCurrentTemplatePath())#updates" name="rsUpdates" filter="*.cfm">
+	<cfloop query="rsUpdates">
+		<cfinclude template="updates/#rsUpdates.name#">
+	</cfloop>
+</cffunction>
+</cfcomponent>`,
+		"updates/1.cfm": `<cfscript>util.setTable(); util.missing();</cfscript>`,
+		"Report.cfc": `component {
+	function run( required Util results ) { include "assets/report.cfm"; }
+}`,
+		"Report2.cfc": `component {
+	function run( required Other results ) { include "assets/report.cfm"; }
+}`,
+		"assets/report.cfm": `<cfoutput>#results.setTable()#</cfoutput>`,
+		"Owner.cfc": `component {
+	function run() { var own = new Util(); include "own.cfm"; }
+}`,
+		"own.cfm": `<cfscript>own = makeOne(); own.setTable();</cfscript>`,
+		"Loose.cfc": `component {
+	function run( loose ) { include "loose.cfm"; }
+}`,
+		"Loose2.cfc": `component {
+	function run() { var loose = new Util(); include "loose.cfm"; }
+}`,
+		"loose.cfm": `<cfscript>loose.setTable();</cfscript>`,
+	})
+
+	expectReasons(t, templateReasons(t, dir, "updates/1.cfm"), map[string]string{
+		"util.setTable": "",
+		"util.missing":  "method 'missing' not found in Util",
+	})
+
+	// Two includers holding different components: either may have run.
+	expectReasons(t, templateReasons(t, dir, "assets/report.cfm"), map[string]string{
+		"results.setTable": "",
+	})
+
+	// A template that assigns the name reads its own value, not the includer's.
+	if got := templateReasons(t, dir, "own.cfm")["own.setTable"]; got == "" {
+		t.Errorf("own.setTable: resolved through the includer although the template assigns own")
+	}
+
+	// One includer that cannot type the name leaves it untyped, whatever the
+	// others hold.
+	expectReasons(t, templateReasons(t, dir, "loose.cfm"), map[string]string{
+		"loose.setTable": "variable 'loose' has no component ref",
+	})
+}

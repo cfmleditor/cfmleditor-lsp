@@ -1728,3 +1728,37 @@ assignments; the one addition is the known automatic-mode `mura.bean.beanFeed`
 mapping gap. Cost, alternating binaries: the Wheels scan 12.2s -> 13.0s,
 Masa and Lucee unchanged. Without presets nothing types `application.wo`, so
 the no-preset Wheels scan is unchanged; the model half of gap 8 is not done.
+
+### A template reads what its includer holds at the include (Masa 10,590 -> 10,324)
+
+An included template runs inside its includer, and inside the includer's function when the
+`<cfinclude>` is written in one, so an unscoped name the template reads but never sets is
+whatever the includer holds by that name at that line. Masa's `configBean.applyDbUpdates`
+declares `var dbUtility = getBean("dbUtility")` and includes every `dbUpdates/*.cfm`, and all
+248 `dbUtility` findings there were that name. TestBox's reporters include `assets/*.cfm` inside
+`runReport( results, testbox )`, and `CoverageService.renderStats` includes `coverageStats.cfm`
+after `var codeBrowser = new browser.CodeBrowser(…)`.
+
+`includerHeld` (`included_locals.go`) asks each include site that reaches the template
+(`parser.IncludeSites`, which is `ExtractIncludes` keeping each statement's offset; a
+directory listing's glob sits at its `<cfinclude>`) what the includer's receiver lookup gives
+for the name at that line. Every site must type it, and the answer is their union. A template
+that assigns or declares the name itself (`setsName`) is not asked about. The answer is cached
+per template, name, depth and include generation; computed per call, it cost the Masa scan 20%.
+`TestATemplateReadsWhatItsIncluderHoldsAtTheInclude` (each guard fails without it),
+`TestIncludeSitesSayWhereEachIncludeIs`.
+
+Measured per entry against `2cd21b6`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 10,590 | 10,324 | 266 / 0 |
+| Masa, automatic mappings | 11,924 | 11,658 | 266 / 0 |
+| TestBox, no presets | 759 | 652 | 107 / 0 |
+| TestBox, presets | 299 | 296 | 3 / 0 |
+| The other nine modes | | | 0 / 0 each |
+
+Masa's removals are `dbUtility` (248), `contentRendererUtility` in the legacy object-class views
+(16) and two locals of admin pages. Cost, alternating binaries: Masa 14.5s -> 14.8s, Lucee
+unchanged. Templates FW/1 or Mura include through a computed path (the admin views' `rc.$`, the
+display modules' `$`) have no include edge, so this does not reach them.

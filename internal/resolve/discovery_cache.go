@@ -107,6 +107,7 @@ func (r *Resolver) InvalidatePaths() {
 	r.startupCache = nil
 	r.wheelsSources = nil
 	r.ctlPathCache = nil
+	r.includerCache = nil
 	r.returnCache = returnCache{}
 	r.fw1Scopes = nil
 	r.mu.Unlock()

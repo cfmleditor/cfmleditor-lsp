@@ -2,6 +2,7 @@ package parser
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -27,9 +28,33 @@ func TestADirectoryListingIncludeIsAGlob(t *testing.T) {
 		{"parent directory", `<cfdirectory action="list" directory="#getDirectoryFromPath(getCurrentTemplatePath())#../x" name="rsUpdates" filter="*.cfm"><cfinclude template="../x/#rsUpdates.name#">`, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := directoryIncludes(tc.source); !slices.Equal(got, tc.want) {
+			if got := ExtractIncludes(tc.source); !slices.Equal(got, tc.want) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestIncludeSitesSayWhereEachIncludeIs: one site per statement, repeats
+// included, each at the offset its statement starts, the directory listing's
+// glob at its <cfinclude>. ExtractIncludes is the same paths without repeats.
+func TestIncludeSitesSayWhereEachIncludeIs(t *testing.T) {
+	src := `<cfinclude template="a.cfm">x<cfscript>include "a.cfm";</cfscript>` +
+		`<cfdirectory action="list" directory="#getDirectoryFromPath(getCurrentTemplatePath())#up" name="q" filter="*.cfm">` +
+		`<cfinclude template="up/#q.name#">`
+
+	got := IncludeSites(src)
+
+	want := []IncludeSite{
+		{Path: "a.cfm", Offset: 0},
+		{Path: "a.cfm", Offset: strings.Index(src, `include "a.cfm"`)},
+		{Path: "up/*.cfm", Offset: strings.Index(src, `<cfinclude template="up/`)},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+
+	if paths := ExtractIncludes(src); !slices.Equal(paths, []string{"a.cfm", "up/*.cfm"}) {
+		t.Fatalf("ExtractIncludes: %q", paths)
 	}
 }
