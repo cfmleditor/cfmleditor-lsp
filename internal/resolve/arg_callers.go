@@ -349,6 +349,14 @@ func (r *Resolver) inferArgument(fd *parser.FunctionDef, pos int, file string, c
 // name is fd. known is false when the receiver cannot be placed at all, so
 // the call may or may not be fd's.
 func (r *Resolver) callIsTo(call *parser.CallSite, hpr *parser.ParseResult, path string, fd *parser.FunctionDef, file, dir string, ctx lookupCtx) (ours, known bool) {
+	// The parse may already have placed the receiver, as canResolveCall reads
+	// first: a chained call on what a factory returns
+	// (`$.getBean( "userManager" ).update( … )`) or on `new X()`, whose
+	// variable is untyped or empty.
+	if comp := call.Component; comp != "" && !strings.HasPrefix(comp, "$") {
+		return r.componentCallIs(comp, call.FuncName, fd, dir), true
+	}
+
 	if call.Variable == "" || strings.EqualFold(call.Variable, "this") || strings.EqualFold(call.Variable, "variables") || call.This {
 		return cfpath.SamePath(path, file) || r.descendsFrom(path, file), true
 	}
@@ -363,13 +371,19 @@ func (r *Resolver) callIsTo(call *parser.CallSite, hpr *parser.ParseResult, path
 		return false, false
 	}
 
+	return r.componentCallIs(comp, call.FuncName, fd, dir), true
+}
+
+// componentCallIs reports whether funcName called on comp (or any of its
+// alternatives) is fd.
+func (r *Resolver) componentCallIs(comp, funcName string, fd *parser.FunctionDef, dir string) bool {
 	for alt := range strings.SplitSeq(comp, "|") {
-		if other := r.ResolveFunc(alt, call.FuncName, dir); other != nil && other.URI.Path() == fd.URI.Path() && other.Line == fd.Line {
-			return true, true
+		if other := r.ResolveFunc(alt, funcName, dir); other != nil && other.URI.Path() == fd.URI.Path() && other.Line == fd.Line {
+			return true
 		}
 	}
 
-	return false, true
+	return false
 }
 
 // callArgument is the tokens of the argument a call of name on line passes at

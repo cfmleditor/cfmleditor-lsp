@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
 func cfmlFilesIn(t *testing.T, dir string) []string {
@@ -158,5 +160,37 @@ useForwarded(forwarded);
 	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc")
 	if reason := got["arguments.thing.ready"]; reason != "" {
 		t.Fatalf("a large function elsewhere in the file withheld the alias: %q", reason)
+	}
+}
+
+// TestACallerPlacedByTheParseIsACaller: Masa's
+// `$.getBean( "userManager" ).update( … )` has an untyped variable and a
+// receiver the parse already resolved through the getBean resolver, as a
+// chained `new Svc()` has none at all. Reading only the variable left such a
+// caller unplaced, which withheld the argument for every function sharing
+// its name; a caller placed on another component was dismissed although it
+// is a call of this one.
+func TestACallerPlacedByTheParseIsACaller(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Item.cfc": `component { function ready(){} }`,
+		"Svc.cfc":  `component { function use( thing ){ arguments.thing.ready(); } }`,
+		"A.cfc":    `component { function run(){ $.getBean( "Svc" ).use( new Item() ); } }`,
+		"B.cfc":    `component { function run(){ new Svc().use( new Item() ); } }`,
+	})
+
+	getBean := func() []parser.Resolver {
+		return []parser.Resolver{{Match: `(?i)(?:^|\.)getBean\(\s*["']([A-Za-z_][\w.]*)["']\s*\)$`, Resolve: "$1", Prefix: "getBean"}}
+	}
+
+	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir), Resolvers: getBean()}, dir, "Svc.cfc")
+	expectReasons(t, got, map[string]string{"arguments.thing.ready": ""})
+
+	// The same caller passing something untyped still withholds it.
+	writeFiles(t, dir, map[string]string{"C.cfc": `component { function run( x ){ $.getBean( "Svc" ).use( x ); } }`})
+
+	got = reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir), Resolvers: getBean()}, dir, "Svc.cfc")
+	if !strings.Contains(got["arguments.thing.ready"], "no component ref") {
+		t.Errorf("a placed caller passing an untyped value was ignored: %q", got["arguments.thing.ready"])
 	}
 }

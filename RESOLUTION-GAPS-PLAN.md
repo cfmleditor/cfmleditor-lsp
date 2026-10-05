@@ -1762,3 +1762,41 @@ Masa's removals are `dbUtility` (248), `contentRendererUtility` in the legacy ob
 (16) and two locals of admin pages. Cost, alternating binaries: Masa 14.5s -> 14.8s, Lucee
 unchanged. Templates FW/1 or Mura include through a computed path (the admin views' `rc.$`, the
 display modules' `$`) have no include edge, so this does not reach them.
+
+### Masa's DAO arguments: callers the parse placed, and members kept through `.update()` (10,324 -> 9,677)
+
+Masa's DAOs take their bean as an untyped argument (`settingsDAO.update( bean )`,
+`contentDAO.create( contentBean )`, …), 2,372 untyped-argument findings in all. Logging why
+`argumentFromCallers` withheld each showed every DAO blocked by the same two callers, each a
+defect of its own rather than a limit of the rule:
+
+- **A caller the parse had already placed was read from its variable alone.**
+  `$.getBean( "userManager" ).update( … )` (`jsonApiUtility.cfc`) carries `Component`
+  `userManager` from the configured getBean resolver, but `callIsTo` typed only `$`, could not,
+  and failed every function named `update` in the workspace. It now reads `call.Component`
+  first, as `canResolveCall` does; that also stops dismissing a call like
+  `application.serviceFactory.getBean( "contentUtility" ).setUniqueFilename( … )` because its
+  bare variable is the bean factory. `TestACallerPlacedByTheParseIsACaller`.
+- **A member a method named like a collection mutator was called on lost its type.**
+  `x.update( … )`, `x.append( … )` and the rest were recorded as an unknown write *of* `x`, so
+  `variables.instance.DAO.update( reminderBean )` withheld the member `reminderManager` sets from
+  its DI constructor argument — and with it every DAO's caller list. Such a call changes what `x`
+  holds, never which object it is, so it is now a content write: `x`'s own members are
+  invalidated as before, `x` keeps its type. `TestExplicitMemberBindings` (two new cases).
+
+Measured per entry against `b8a47f1`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 10,324 | 9,677 | 647 / 0 |
+| Masa, automatic mappings | 11,658 | 11,577 | 105 / 24 |
+| The other eleven modes | | | 0 / 0 each |
+
+Configured removals are the DAOs' arguments: `contentDAO` 161, `settingsDAO` 149, `feedDAO` 75,
+`userDAO` 100, `categoryDAO` 39, `emailDAO` 29, plus `contentUtility` 55 and the member/mailing
+list/reminder DAOs. In automatic mode most of those arguments now name beans whose chain breaks
+at the unmapped `mura.bean.beanExtendable`, so they collapse into that per-file summary; the
+additions are those summaries (2) and 21 `contentUtility` `arguments.contentBean` findings the
+rule had typed while dismissing the `getBean( "contentUtility" )` caller above, which passes an
+untyped `variables.item`. Cost, alternating binaries: Masa 14.4s -> 15.1s, from the calls on
+arguments that are now typed and checked.
