@@ -207,3 +207,37 @@ if(arguments.mode eq "query"){return new Other();}else{return this;}
 		})
 	}
 }
+
+// TestAMembersPresenceIsNotAnArgumentGuard reproduces Masa's configBean.set:
+// structKeyExists( arguments.config, "x" ) tests a member of an argument,
+// which the producer interpreter does not read as a guard. Counting it as one
+// sent the method's `return this` through a plan that cannot answer (the body
+// holds an unsupported tag), so `new Config().set( … )` became untyped and
+// every bean constructed with it lost its type: configured Masa went from
+// 86 findings on variables.configBean to 1,128, and from 10,651 to 11,980.
+func TestAMembersPresenceIsNotAnArgumentGuard(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Config.cfc": `<cfcomponent>
+<cffunction name="set">
+	<cfargument name="config">
+	<cfif structKeyExists(arguments.config,"assetDir")>
+		<cfset variables.assetDir = arguments.config.assetDir>
+	</cfif>
+	<cfswitch expression="#arguments.config.mode#">
+		<cfcase value="a"><cfset variables.mode = "a"></cfcase>
+	</cfswitch>
+	<cfreturn this>
+</cffunction>
+<cffunction name="ready"></cffunction>
+</cfcomponent>`,
+		"Page.cfc": `component {function run(){new Config().set({}).ready(); new Config().set({}).missing();}}`,
+	})
+
+	got := reasonsWith(t, &Resolver{}, dir, "Page.cfc")
+	expectReasons(t, got, map[string]string{"set.ready": ""})
+
+	if !strings.Contains(got["set.missing"], "not found") {
+		t.Errorf("set.missing: %q, want a missing method on Config", got["set.missing"])
+	}
+}

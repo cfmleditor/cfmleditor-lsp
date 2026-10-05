@@ -1623,3 +1623,56 @@ script and tag switch writers, oversized writers, unbraced conditionals/loops,
 and sibling branches in an oversized file. The existing positive fixtures
 continue to pin supported straight-line aliases and guarded cache getters.
 No new corpus delta is claimed for these review corrections.
+
+### Regression from PR 222: a member's presence counted as an argument guard
+
+PR 222 raised configured Masa from **10,645 to 11,980** findings. It was not
+caught because the corpus comparison recorded under "Straight-line caller
+aliases" used a Masa run that already included the regression, so it read as
+0 / 0. Each commit was measured again on a fresh checkout of the pinned corpus:
+
+| Commit | Masa configured | `variables.configBean` |
+|---|---:|---:|
+| `85f330b` (before PR 222) | 10,645 | 86 |
+| `10b0a2c` Infer guarded lazy shared-field returns | 11,981 | 1,128 |
+| `87dcf90` Infer literal default self-return modes | 11,784 | 1,128 |
+| `ffd6a37` Withhold resolver inference … | 11,980 | 1,128 |
+
+**`10b0a2c` (+1,336), fixed.** `producerGuardSensitive` replaced the check for
+`structKeyExists(arguments, …)` and dropped its test for the comma after the
+scope, so `structKeyExists(arguments.config, "assetDir")` counted as a guard
+too. A guard marks a method as needing a call-specific plan, and that plan
+outranks the method's declared or inferred return. `configBean.set()` has
+such a test and a body the tag plan cannot follow, so its plan is one
+unsafe node and answers unknown. The `return this` the parser had found was
+discarded, `application.configBean = new mura.configBean().set(…)` became
+`$any`, and the DI/1 registration `addBean("configBean",
+application.configBean)` lost its component. Every managed bean taking
+`configBean` in its constructor then had an untyped field. The interpreter's
+`structKeyCondition` reads only a bare scope, so the wider trigger could never
+succeed. The comma test is back. `TestAMembersPresenceIsNotAnArgumentGuard`
+fails without it.
+
+Measured per entry against `ee888f6`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 11,980 | 10,651 | 1,363 / 34 |
+| Masa, automatic mappings | 13,497 | 11,981 | 1,565 / 49 |
+| The other thirteen modes | | | 0 / 0 each |
+
+The additions are the loose ends that a typed `configBean` exposes, already
+recorded above: `getClassExtensionManager()` chains (a lazy `variables.instance`
+getter), two `contentBean` wrapper returns, and in automatic mode chains that
+break at an unmapped `mura.bean.*` base.
+
+**`ffd6a37` (+198), left as it is, for a decision.** It made
+`selfDispatchPrefixSafe` reject any `arguments` token before
+`loadBy(returnFormat="self")`'s final dispatch. Most of Masa's uses are reads,
+which are safe, but one is not: `set(arguments)` passes the whole scope by
+reference to `set()`, which hands it to `super.set(argumentCollection=arguments)`.
+Accepting it means proving no callee rewrites `returnFormat`, which needs
+analysis across calls that does not exist. Allowing reads alone recovers none
+of the 198, because `set(arguments)` is in every `loadBy` prefix. Choose between
+the fail-closed rule as it stands and an explicit exception for passing the
+scope to the component's own `set`.
