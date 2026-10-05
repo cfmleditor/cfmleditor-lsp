@@ -138,3 +138,25 @@ var a = new Item();
 		})
 	}
 }
+
+func TestCallerAliasesAreNotLimitedByTheRestOfTheFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Item.cfc": `component { function ready(){} }`,
+		"Svc.cfc": `component {
+function unrelated() {
+` + strings.Repeat("work();\n", 1100) + `}
+function useForwarded(thing) { arguments.thing.ready(); }
+function callers() {
+var a = new Item();
+var forwarded = a;
+useForwarded(forwarded);
+}
+}`,
+	})
+
+	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc")
+	if reason := got["arguments.thing.ready"]; reason != "" {
+		t.Fatalf("a large function elsewhere in the file withheld the alias: %q", reason)
+	}
+}

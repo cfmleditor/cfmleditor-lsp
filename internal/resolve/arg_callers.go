@@ -500,8 +500,12 @@ func (r *Resolver) argumentAliasComponent(name string, line uint32, caller strin
 	return r.argumentExprComponent(producerTokens(rhs), conv.Uint32(assignedLine), caller, pr, dir, ctx)
 }
 
+// producerBlockPath scans only from the enclosing function's first line to
+// the target line, so the token budget is spent on the function rather than
+// on whatever precedes it in the file. Offsets are relative to that start,
+// which is shared by every path compared against this one.
 func producerBlockPath(content string, start, line int) ([]int, bool) {
-	tokens := producerTokens(content)
+	tokens := producerTokens(lineSpan(content, start, line))
 	if tokens == nil {
 		return nil, false
 	}
@@ -509,11 +513,7 @@ func producerBlockPath(content string, start, line int) ([]int, bool) {
 	var path []int
 
 	for i, token := range tokens {
-		if token.Line >= line {
-			break
-		}
-
-		if token.Line >= start && producerUnbracedControl(tokens, i) {
+		if producerUnbracedControl(tokens, i) {
 			return nil, false
 		}
 
@@ -529,6 +529,31 @@ func producerBlockPath(content string, start, line int) ([]int, bool) {
 	}
 
 	return path, true
+}
+
+// lineSpan returns content's 0-based lines [from, to).
+func lineSpan(content string, from, to int) string {
+	begin := 0
+	for range from {
+		i := strings.IndexByte(content[begin:], '\n')
+		if i < 0 {
+			return ""
+		}
+
+		begin += i + 1
+	}
+
+	end := begin
+	for range to - from {
+		i := strings.IndexByte(content[end:], '\n')
+		if i < 0 {
+			return content[begin:]
+		}
+
+		end += i + 1
+	}
+
+	return content[begin:end]
 }
 
 // Brace paths cannot distinguish a conditional single statement from an
