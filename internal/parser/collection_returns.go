@@ -594,9 +594,13 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 			continue
 		}
 
+		// x.append( v ), x.update( k, v ): an in-place change to what x holds,
+		// never a new value for x. Read as replacing x, it withheld the type
+		// of every member a component calls such a method on —
+		// variables.instance.DAO.update( bean ) on Masa's DAOs.
 		if cursor.PeekSkipComments().Kind == TokLParen {
 			if base, method, ok := strings.CutLast(root, "."); ok && collectionMemberMutator(method) {
-				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: base, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: base, function: functionAt(offset + t.Offset), element: true, unknown: true})
 			}
 		}
 

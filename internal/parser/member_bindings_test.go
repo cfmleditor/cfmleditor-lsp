@@ -16,6 +16,10 @@ func TestExplicitMemberBindings(t *testing.T) {
 			{"dynamic member write", `rc.$=new models.Scope();rc[arguments.key]=arguments.value;`, ""},
 			{"scope write", `variables.rc.$=new models.Scope();variables[arguments.key]=arguments.value;`, ""},
 			{"parent overwrite", `rc.$=new models.Scope();rc=arguments.value;`, ""},
+			// x.update( … ) changes what x holds, never which object x is:
+			// Masa's variables.instance.DAO.update( bean ) on its DAOs.
+			{"mutator-named method on the member", `rc.$=new models.Scope();rc.$.update(value);`, "models.Scope"},
+			{"mutator on the container", `rc.$=new models.Scope();rc.update(value);`, ""},
 		} {
 			t.Run(syntax+"/"+tc.name, func(t *testing.T) {
 				source := "component {\n function run(rc,value) {\n" + tc.writes + "\nrc.$.work();\n }\n}"
