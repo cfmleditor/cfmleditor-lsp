@@ -60,6 +60,10 @@ func (r *Resolver) wheelsFactoryReturn(def *parser.FunctionDef, expression, base
 	original := r.wheelsPlanFunc(global, def.Name)
 	if original != nil && original.URI == def.URI {
 		kind := strings.ToLower(def.Name)
+		if kind == "controller" {
+			return r.wheelsControllerReturn(global, def, args, baseDir)
+		}
+
 		if kind == "$createobjectfromroot" {
 			if source.body != wheelsTokens(wheelsRootFactory) {
 				return ""

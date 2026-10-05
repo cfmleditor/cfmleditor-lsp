@@ -1581,7 +1581,11 @@ module the workspace lacks is dynamic (`uninstalledModule`). **`injectedComponen
 `lastResortPath`; a cborm `VirtualEntityService` bound by `super.init( entityName = … )`
 returns its entity from `new`/`get`/`getOrFail`/`findWhere`. `resolve/wheels.go`: a Wheels
 model's finders return the receiver, and `hasMany`/`belongsTo`/`hasOne` generate typed
-methods. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
+methods. `resolve/wheels_controller_paths.go`: `controller( "name" )` is the class
+Global's `$createControllerClass` (checked against its pinned body) instantiates —
+`<path>/<name>.cfc`, else the last path's `Controller.cfc` — under the literal
+`controllerPath` the nearest directory above the caller writes (a test runner's), else
+the framework default; a computed write there withholds it. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
 and cbi18n/cbfs/HTMLHelper helpers on a component whose chain reaches `coldbox.system.` —
 the lists are read from each module's source at the commit named there.
 `resolve/missing_method.go`: `this.x()` on a component with `onMissingMethod` is dynamic (an

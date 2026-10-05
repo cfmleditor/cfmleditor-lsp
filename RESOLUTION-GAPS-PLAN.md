@@ -1676,3 +1676,55 @@ analysis across calls that does not exist. Allowing reads alone recovers none
 of the 198, because `set(arguments)` is in every `loadBy` prefix. Choose between
 the fail-closed rule as it stands and an explicit exception for passing the
 scope to the component's own `set`.
+
+### Wheels `controller( "name" )` (gap 8, controller half): done (4,934 -> 3,879)
+
+Wheels' own test specs build their controller under test with
+`application.wo.controller( "dummy", params )`, and every call on it was
+`variable '_controller' has no component ref`: 1,000 of the vendor-included
+scan's findings. Three pieces, each with a test that fails without it:
+
+- **The rule** (`wheels_controller_paths.go`, reached from `wheelsFactoryReturn`
+  once the call is Global's own `controller`): the class
+  `$createControllerClass` instantiates, checked against its pinned body —
+  the first path in the `controllerPath` list holding `<name>.cfc`, or the
+  last path's `Controller.cfc`. The list is the literal written by the nearest
+  directory above the calling file (`vendor/wheels/tests/runner.cfm`'s
+  `set( controllerPath = AssetPath & "controllers" )` for its specs), else the
+  framework default (`events/init/views.cfm`). A computed write there, a
+  computed name, or a candidate with no file withholds the type; several
+  literal writes in one place give each candidate as an alternative.
+  The conditional browser-fixture path `$lockedLoadRoutes` appends is not read
+  (the runner switches it off). `TestAWheelsControllerIsTheClassItsPathHolds`,
+  `TestAWheelsControllerNeedsThePinnedClassLookup`.
+- **Assignment typing passes the call's arguments.** `typeCallExpr` asked
+  `FuncLookup` for the method by name only, which no argument-sensitive return
+  can answer; it now asks again with the call (`parser.CallHop`), as the parse
+  does. It also reads a receiver only a configured resolver names (the
+  preset's `application.wo`), as `ComponentOf` does.
+- **A variables-scope assignment in another function** (`variablesAssignment`):
+  TestBox's `beforeAll()` assigns what `run()` reads. When the enclosing
+  function has no assignment, the nearest one above it counts — the parse's
+  own rule for such a name (`fileLevelRef`) — unless the function declares the
+  name as a local or argument, or the assignment found is a `var`/`local.` one.
+  `TestAVariableAssignedInAnotherFunctionIsTypedByThatAssignment`.
+
+Measured per entry against `a6b92a5`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| cfwheels, presets, vendor root | 4,934 | 3,879 | 1,058 / 3 |
+| Masa, configured | 10,651 | 10,590 | 61 / 0 |
+| Masa, automatic mappings | 11,981 | 11,924 | 58 / 1 |
+| The other ten modes | | | 0 / 0 each |
+
+All 1,000 `_controller` findings resolve. The three Wheels additions are
+gaps the typed controller exposes: two plugin mixins (`$helper01`,
+`$$pluginOnlyMethod`, injected from a test plugin at run time) and an
+untyped `policyScope()` return. Masa's removals come from the receiver
+fallback: `application.changesetManager` / `application.feedManager`, which
+the startup templates type, read through `x = application.y.read( … )`
+assignments; the one addition is the known automatic-mode `mura.bean.beanFeed`
+mapping gap. Cost, alternating binaries: the Wheels scan 12.2s -> 13.0s,
+Masa and Lucee unchanged. Without presets nothing types `application.wo`, so
+the no-preset Wheels scan is unchanged; the model half of gap 8 is not done.
