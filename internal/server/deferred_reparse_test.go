@@ -23,6 +23,28 @@ func openDoc(t *testing.T, srv *Server, docURI uri.URI, text string) {
 	if _, err := srv.handleDidOpen(context.Background(), open); err != nil {
 		t.Fatal(err)
 	}
+
+	waitForOpenCacheBuild(t, srv, docURI)
+}
+
+// waitForOpenCacheBuild waits out the completion cache build didOpen starts.
+// It takes lockDoc, which runs any owed reparse, so a test that edits right
+// after opening and then asks whether a reparse is pending would race it.
+// The build stores the file scope before it returns, and holds the document's
+// lock until then, so seeing the scope and then taking the lock is the end.
+func waitForOpenCacheBuild(t *testing.T, srv *Server, docURI uri.URI) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for srv.compCache.GetFile(docURI) == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("didOpen's completion cache build never ran")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	srv.lockDocOnly(docURI)()
 }
 
 func editDoc(t *testing.T, srv *Server, docURI uri.URI, at protocol.Position, text string) {
@@ -195,11 +217,6 @@ func TestKeystrokeOutsideAFunctionIsCheapInALargeFile(t *testing.T) {
 	srv := newTestServer()
 	docURI := uri.URI("file:///large.cfc")
 	openDoc(t, srv, docURI, b.String())
-
-	// didOpen starts a completion cache build that holds the document's lock;
-	// wait it out so the timing is the keystroke's own.
-	time.Sleep(50 * time.Millisecond)
-	srv.lockDoc(docURI)()
 
 	start := time.Now()
 

@@ -115,6 +115,7 @@ func scriptProducerMethods(source string, methods map[string]*producerMethod) {
 		}
 
 		if finish-start > 4096 {
+			methods[name] = &producerMethod{body: []producerNode{{kind: "unsafe", expression: producerText(tokens[start+1 : finish])}}}
 			i = finish
 
 			continue
@@ -161,9 +162,10 @@ func scriptProducerMethods(source string, methods map[string]*producerMethod) {
 			method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
 			method.wanted = producerWanted(method.body)
 			methods[name] = method
-		} else if producerSensitive([]producerNode{{kind: "if", expression: producerText(tokens[start+1 : finish])}}) {
-			method.body = []producerNode{{kind: "unsafe", expression: producerText(tokens[start+1 : finish])}}
-			method.sensitive = true
+		} else {
+			expression := producerText(tokens[start+1 : finish])
+			method.body = []producerNode{{kind: "unsafe", expression: expression}}
+			method.sensitive = producerSensitive([]producerNode{{kind: "if", expression: expression}})
 			methods[name] = method
 		}
 
@@ -578,8 +580,8 @@ func producerSensitive(nodes []producerNode) bool {
 		n := &nodes[i]
 		if n.kind == "if" || n.kind == "unsafe" {
 			tokens := producerTokens(n.expression)
-			for j, t := range tokens {
-				if j+1 < len(tokens) && tokens[j+1].Kind == parser.TokLParen && (strings.EqualFold(t.Value, "isObject") || strings.EqualFold(t.Value, "structKeyExists") && j+3 < len(tokens) && strings.EqualFold(tokens[j+2].Value, "arguments") && tokens[j+3].Kind == parser.TokComma) {
+			for j := range tokens {
+				if producerGuardSensitive(tokens, j) {
 					return true
 				}
 			}
@@ -591,6 +593,32 @@ func producerSensitive(nodes []producerNode) bool {
 	}
 
 	return false
+}
+
+func producerGuardSensitive(tokens []parser.Token, i int) bool {
+	if i+1 >= len(tokens) || tokens[i+1].Kind != parser.TokLParen {
+		return false
+	}
+
+	name := tokens[i].Value
+	if strings.EqualFold(name, "isObject") {
+		return true
+	}
+
+	shared := i+4 < len(tokens) && tokens[i+2].Kind == parser.TokIdent && (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && tokens[i+3].Kind == parser.TokDot
+	if strings.EqualFold(name, "isSimpleValue") || strings.EqualFold(name, "isNull") {
+		return shared
+	}
+
+	if !strings.EqualFold(name, "structKeyExists") || i+3 >= len(tokens) || tokens[i+2].Kind != parser.TokIdent {
+		return false
+	}
+
+	if strings.EqualFold(tokens[i+2].Value, "arguments") {
+		return true
+	}
+
+	return (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && i+4 < len(tokens) && tokens[i+3].Kind == parser.TokComma && tokens[i+4].Kind == parser.TokString && !strings.Contains(tokens[i+4].Value, "#")
 }
 
 type producerTag struct{ name, body string }
@@ -712,12 +740,6 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 			continue
 		}
 
-		if end-i > 4096 {
-			i = end
-
-			continue
-		}
-
 		method := &producerMethod{defaults: map[string]string{}}
 
 		for _, tag := range tags[i+1 : end] {
@@ -741,22 +763,30 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 
 		p := producerTagParser{tags: tags[i+1 : end]}
 
-		method.body = p.block()
+		if end-i <= 4096 {
+			method.body = p.block()
+		} else {
+			p.failed = true
+		}
+
 		if !p.failed && p.position == len(p.tags) {
 			method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
 			method.wanted = producerWanted(method.body)
-			methods[strings.ToLower(name)] = method
 		} else {
+			var source strings.Builder
 			for _, tag := range tags[i+1 : end] {
-				if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
-					method.body = []producerNode{{kind: "unsafe", expression: tag.body}}
-					method.sensitive = true
-					methods[strings.ToLower(name)] = method
+				source.WriteString(tag.body)
+				source.WriteByte('\n')
 
-					break
+				if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
+					method.sensitive = true
 				}
 			}
+
+			method.body = []producerNode{{kind: "unsafe", expression: source.String()}}
 		}
+
+		methods[strings.ToLower(name)] = method
 
 		i = end
 	}

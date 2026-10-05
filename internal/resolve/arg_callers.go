@@ -2,11 +2,11 @@ package resolve
 
 import (
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
@@ -38,12 +38,116 @@ const (
 	maxArgCallSites   = 40
 )
 
-var identCallRe = regexp.MustCompile(`(\w+)\s*\(`)
-
 // callerIndex is, for each name followed by an open parenthesis anywhere in
 // the files, the files it appears in.
 type callerIndex struct {
 	byName map[string][]string
+}
+
+// IndexCallerFile adds the call-shaped names in content to the batch caller
+// index while the unresolved scan already has the file bytes in hand. It
+// avoids reading every workspace file again when the first untyped argument
+// asks for its callers.
+func (r *Resolver) IndexCallerFile(path, content string) {
+	if len(r.InferArgsFiles) == 0 {
+		return
+	}
+
+	seen := callerNames(content)
+
+	r.mu.Lock()
+	if r.callerIdx == nil {
+		r.callerIdx = &callerIndex{byName: map[string][]string{}}
+	}
+
+	for name := range seen {
+		r.callerIdx.byName[name] = append(r.callerIdx.byName[name], path)
+	}
+	r.mu.Unlock()
+}
+
+func callerNames(content string) map[string]bool {
+	seen := map[string]bool{}
+
+	for open := strings.IndexByte(content, '('); open >= 0; {
+		end := open
+		for end > 0 && callerSpace(content[end-1]) {
+			end--
+		}
+
+		start := end
+		for start > 0 && callerWord(content[start-1]) {
+			start--
+		}
+
+		if start < end {
+			addCallerName(seen, content[start:end])
+		}
+
+		next := open + 1
+
+		rel := strings.IndexByte(content[next:], '(')
+		if rel < 0 {
+			break
+		}
+
+		open = next + rel
+	}
+
+	return seen
+}
+
+func addCallerName(seen map[string]bool, name string) {
+	const stackName = 128
+
+	var folded [stackName]byte
+
+	if len(name) > len(folded) {
+		normalized := strings.ToLower(name)
+		if !seen[normalized] {
+			if normalized == name {
+				normalized = strings.Clone(normalized)
+			}
+
+			seen[normalized] = true
+		}
+
+		return
+	}
+
+	changed := false
+
+	for i := range len(name) {
+		c := name[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+			changed = true
+		}
+
+		folded[i] = c
+	}
+
+	if !changed {
+		if !seen[name] {
+			seen[strings.Clone(name)] = true
+		}
+
+		return
+	}
+
+	if seen[string(folded[:len(name)])] {
+		return
+	}
+
+	seen[string(folded[:len(name)])] = true
+}
+
+func callerSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+}
+
+func callerWord(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
 }
 
 // owner is the resolver that holds the shared caches: a per-caller view
@@ -67,7 +171,17 @@ func (r *Resolver) callerFiles(name string) []string {
 		idx = o.buildCallerIndex()
 	}
 
-	return idx.byName[strings.ToLower(name)]
+	key := strings.ToLower(name)
+
+	o.mu.Lock()
+	files := idx.byName[key]
+	slices.Sort(files)
+	files = slices.Compact(files)
+	idx.byName[key] = files
+	files = slices.Clone(files)
+	o.mu.Unlock()
+
+	return files
 }
 
 func (r *Resolver) buildCallerIndex() *callerIndex {
@@ -79,14 +193,8 @@ func (r *Resolver) buildCallerIndex() *callerIndex {
 			continue
 		}
 
-		seen := map[string]bool{}
-
-		for _, m := range identCallRe.FindAllSubmatch(data, -1) {
-			name := strings.ToLower(string(m[1]))
-			if !seen[name] {
-				seen[name] = true
-				idx.byName[name] = append(idx.byName[name], path)
-			}
+		for name := range callerNames(string(data)) {
+			idx.byName[name] = append(idx.byName[name], path)
 		}
 	}
 
@@ -326,6 +434,10 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 			comp = r.argumentFromCallers(name, caller, pr, next)
 		}
 
+		if comp == "" {
+			comp = r.argumentAliasComponent(name, line, caller, pr, dir, next)
+		}
+
 		if comp == "" || strings.HasPrefix(comp, "$") {
 			return ""
 		}
@@ -350,4 +462,129 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 	text := strings.ReplaceAll(strings.ReplaceAll(producerText(expr), " . ", "."), " (", "(")
 
 	return r.typeCallExpr(text, line, caller, pr, dir, next)
+}
+
+// argumentAliasComponent follows a plain local passed by a caller to the last
+// straight-line assignment before that call. Equal lexical brace paths and
+// the absence of unbraced controls are required; exhausted scans withhold
+// inference. An assignment after the call is excluded by the bounded lookup.
+func (r *Resolver) argumentAliasComponent(name string, line uint32, caller string, pr *parser.ParseResult, dir string, ctx lookupCtx) string {
+	if pr == nil || ctx.depth >= maxAssignedDepth {
+		return ""
+	}
+
+	lower := strings.ToLower(name)
+
+	lower = strings.TrimPrefix(lower, "local.")
+	if lower == "" || strings.Contains(lower, ".") || isScopeWord(lower) {
+		return ""
+	}
+
+	start := 0
+	if scope, ok := enclosingScope(pr, line); ok {
+		start = scope.Start
+	}
+
+	rhs, assignedLine, ok := localAssignmentAt(pr.Content, lower, start, int(line))
+	if !ok || strings.EqualFold(strings.TrimSpace(rhs), name) {
+		return ""
+	}
+
+	assignedPath, assignedOK := producerBlockPath(pr.Content, start, assignedLine)
+	callPath, callOK := producerBlockPath(pr.Content, start, int(line))
+
+	if !assignedOK || !callOK || !slices.Equal(assignedPath, callPath) {
+		return ""
+	}
+
+	return r.argumentExprComponent(producerTokens(rhs), conv.Uint32(assignedLine), caller, pr, dir, ctx)
+}
+
+// producerBlockPath scans only from the enclosing function's first line to
+// the target line, so the token budget is spent on the function rather than
+// on whatever precedes it in the file. Offsets are relative to that start,
+// which is shared by every path compared against this one.
+func producerBlockPath(content string, start, line int) ([]int, bool) {
+	tokens := producerTokens(lineSpan(content, start, line))
+	if tokens == nil {
+		return nil, false
+	}
+
+	var path []int
+
+	for i, token := range tokens {
+		if producerUnbracedControl(tokens, i) {
+			return nil, false
+		}
+
+		switch token.Kind {
+		case parser.TokLBrace:
+			path = append(path, token.Offset)
+		case parser.TokRBrace:
+			if len(path) > 0 {
+				path = path[:len(path)-1]
+			}
+		default:
+		}
+	}
+
+	return path, true
+}
+
+// lineSpan returns content's 0-based lines [from, to).
+func lineSpan(content string, from, to int) string {
+	begin := 0
+	for range from {
+		i := strings.IndexByte(content[begin:], '\n')
+		if i < 0 {
+			return ""
+		}
+
+		begin += i + 1
+	}
+
+	end := begin
+	for range to - from {
+		i := strings.IndexByte(content[end:], '\n')
+		if i < 0 {
+			return content[begin:]
+		}
+
+		end += i + 1
+	}
+
+	return content[begin:end]
+}
+
+// Brace paths cannot distinguish a conditional single statement from an
+// unconditional one. Conservatively reject such controls earlier in the
+// enclosing function, rather than claim that their assignments reach the call.
+func producerUnbracedControl(tokens []parser.Token, i int) bool {
+	if tokens[i].Kind != parser.TokIdent {
+		return false
+	}
+
+	next := i + 1
+	switch strings.ToLower(tokens[i].Value) {
+	case "if", "for", "while", "switch", "catch":
+		if next >= len(tokens) || tokens[next].Kind != parser.TokLParen {
+			return true
+		}
+
+		end := producerGroupEnd(tokens, next, parser.TokLParen, parser.TokRParen)
+		if end < 0 {
+			return true
+		}
+
+		next = end + 1
+	case "else":
+		if next < len(tokens) && strings.EqualFold(tokens[next].Value, "if") {
+			return false
+		}
+	case "do", "try", "finally":
+	default:
+		return false
+	}
+
+	return next >= len(tokens) || tokens[next].Kind != parser.TokLBrace
 }

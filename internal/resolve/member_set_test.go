@@ -48,3 +48,34 @@ func TestAMethodAssignedOntoAnObjectIsDynamic(t *testing.T) {
 		"c.getVariables": "method 'getVariables' not found in Bean",
 	})
 }
+
+// TestAMethodAssignedOntoAnObjectByCFSetIsDynamic keeps tag syntax equivalent
+// to cfscript: the expression parser sees the assignment even though it has no
+// call of its own, and a comparison or a later assignment does not hide a
+// missing method.
+func TestAMethodAssignedOntoAnObjectByCFSetIsDynamic(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Bean.cfc": `<cfcomponent><cffunction name="own"></cffunction></cfcomponent>`,
+		"Spec.cfc": `<cfcomponent>
+<cffunction name="f">
+	<cfset a = new Bean()>
+	<cfset b = new Bean()>
+	<cfset c = new Bean()>
+	<cfset a.getVariables = getVariables>
+	<cfset b.getVariables == getVariables>
+	<cfset a.getVariables()>
+	<cfset b.getVariables()>
+	<cfset c.missing()>
+	<cfset c.missing = getVariables>
+</cffunction>
+<cffunction name="getVariables" access="private"><cfreturn variables></cffunction>
+</cfcomponent>`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "Spec.cfc"), map[string]string{
+		"a.getVariables": "",
+		"b.getVariables": "method 'getVariables' not found in Bean",
+		"c.missing":      "method 'missing' not found in Bean",
+	})
+}

@@ -1,6 +1,7 @@
 # Remaining resolver gaps: coverage and proposed fixes
 
-Updated 2026-10-01, after merged [PR #190](https://github.com/cfmleditor/cfmleditor-lsp/pull/190).
+Updated 2026-10-04 through the current resolution/performance branch. Historical
+measurements below retain the commit or PR against which they were made.
 
 ## Baseline and measurement boundaries
 
@@ -400,8 +401,9 @@ mappings from Application.cfc and CFConfig. It does not close every category.
 | Application mappings | Literal root defaults, named/relative precedence and application overrides now resolve. Unknown root writes suppress stale defaults, including struct-literal replacement. | Automatic mode still misses source/runtime aliases and external mappings. Reproduce each missing base in its nearest Application context; do not map `mura` from a folder-name guess. |
 | DI ownership | Previously supported registrations, aliases and caller isolation remain. | Automatic DI roots and subsystem ownership need explicit source/configuration proof and separate application fixtures. This batch does not add them. |
 | Request/view propagation | Proven member producers and self-updates carry their concrete returns. | Controller-to-view `rc.$`, event slots, callback records and cross-request values still lack a proven origin. Track documented framework boundaries before propagating them. |
-| Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, object/presence guards and supported branch flow now specialize a call. | Arbitrary caller identifiers, dynamic argument bags, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. Add call-site reaching-definition proof before carrying caller variables. |
-| Lazy/shared caches | Existing proven collection contracts remain supported; owned arrays and structs share element checks. | Rich keyed/lazy getters still need all writer/initialization paths to agree. `settingsManager.getSite`'s try/catch cache is proven (see below); `settingsBean.getRazunaSettings`'s shared-field cache is the remaining concrete fixture. Do not restore a receiver-class guess to silence these findings. |
+| Argument-sensitive producers | Omitted defaults, literal/supplied constructors, `this`, finite argument forwarding, straight-line caller aliases, object/presence guards and supported branch flow now specialize a call. Literal default modes may return the receiver when the source proves the final dispatch. | Dynamic argument bags, branch-dependent caller aliases, computed defaults of unknown value, conflicting returns and escaped scopes remain unknown. The next proof needs reaching definitions across control flow where every path agrees. |
+| Lazy/shared caches | Existing collection contracts, guarded `variables`/`this` fields and the Masa `settingsBean.getRazunaSettings` shape now resolve when every lexical write agrees. Presence, primitive-sentinel and null guards are covered. | Rich keyed caches, aliases, external mutation and unsupported control flow still need all writer/initialization paths to agree. Do not restore a receiver-class guess to silence these findings. |
+| Relationship getters | Persistent ORM getters and factory-proven nonpersistent bean relationships now carry single-valued targets and collection element contracts into script and tag loops. | Unknown bean ids, broad id-echoing factories, dynamic relationship metadata and collection operations other than proven iteration remain unknown. Add each consumer only with exact factory and cardinality evidence. |
 | Tags/control flow | Tag and mixed cfscript method plans now remain connected. Query output names can invalidate a returned local through finite attribute bags. | Unsupported controls/tags, computed output names, record aliases, uncertain mutation and exhausted bounds withhold inference. Extend one source shape at a time with negative tests. |
 | Callback/parameter contracts | Declared component types and existing framework contracts continue to work. | Untyped bean/feed/event parameters require verified registration/call-site contracts; arbitrary TestBox actual/target values should remain dynamic. |
 | Includes and unqualified calls | Existing static include/helper discovery remains. | Scope ownership for runtime includes and helpers needs a provenance fixture; a matching method name alone is insufficient. |
@@ -434,10 +436,12 @@ and source `target/dev-env/env.sh`. Sandbox proxy reachability must be checked i
 the approved execution context, as described in AGENTS.md; cached local tests
 and exact-head CI remain separate evidence.
 
-The next focused batch should start with the two lazy-cache fixtures above and
-call-site variable provenance. Those are concrete producer gaps that can unblock
-existing member flow. Request/view and callback propagation follows once its
-framework handoff is proven; receiver-frequency totals alone are not a fix plan.
+The next focused work should target a current corpus entry rather than another
+synthetic generalization. The highest-priority open proofs are same-type branch
+flow for record members, verified request/view handoffs, automatic application
+mapping and DI ownership, and framework callback registration/dispatch. Runtime
+includes and Wheels factories follow. Receiver-frequency totals alone are not a
+fix plan; every batch still needs a source fixture and per-entry comparison.
 
 ### Final measurements for this batch
 
@@ -1481,3 +1485,141 @@ whose expression is a framework result (`populate( "Setup@cbi" )`). The
 **Cumulative** (ContentBox 312f182, presets): 2,637 -> 1,890, **747 removed, 6
 added** (2 reason changes, 4 genuine).
 
+### Straight-line caller aliases and guarded shared fields
+
+Caller inference now follows a plain local through its last assignment when
+the assignment precedes the call at the same lexical brace depth. Conditional,
+nested, self-referential and after-call assignments remain unknown.
+
+Producer flow also recognizes builtin `structKeyExists`, `isSimpleValue` and
+`isNull` guards around `variables`/`this` fields. A guarded field is concrete
+only when every lexical write in the component agrees on one component;
+primitive sentinels are accepted only for `isSimpleValue`. Conflicting object
+writes, including component-body initialization, primitive replacements,
+whole-scope replacements and component-defined overrides of the guard builtins
+fail closed.
+
+`TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
+`TestGuardedLazyFieldsReturnTheirInitializedType` cover the positive paths;
+`TestGuardedLazyFieldsFailClosed` covers the rejection boundaries. No corpus
+count was initially claimed because the external corpus checkout was
+unavailable in that environment.
+
+The pinned projects were subsequently checked out and scanned at PR head
+`d7ee340`, with `85f330b` as the pre-PR baseline. The reports are identical per
+entry in every mode measured: **0 removed, 0 added**. The changes therefore add
+coverage for the regression fixtures without changing these pinned corpus
+findings.
+
+| Scan | Files | Unresolved | Accepted | Removed / added vs `85f330b` |
+|---|---:|---:|---:|---:|
+| ContentBox, presets | 724 | 1,628 | 15,519 | 0 / 0 |
+| ContentBox, no presets | 724 | 7,049 | 9,721 | 0 / 0 |
+| Lucee | 3,786 | 1,975 | 37,134 | 0 / 0 |
+| TestBox, presets | 146 | 291 | 3,848 | 0 / 0 |
+| TestBox, no presets | 146 | 751 | 3,364 | 0 / 0 |
+| ColdBox, presets | 664 | 1,364 | 20,019 | 0 / 0 |
+| ColdBox, no presets | 664 | 3,365 | 17,700 | 0 / 0 |
+| FW/1, presets | 305 | 410 | 1,642 | 0 / 0 |
+| FW/1, no presets | 305 | 682 | 1,362 | 0 / 0 |
+| cfwheels, presets, explicit vendor root | 1,882 | 4,916 | 69,559 | 0 / 0 |
+| cfwheels, no presets, explicit vendor root | 1,882 | 11,241 | 60,382 | 0 / 0 |
+| Masa, configured | 897 | 11,981 | 26,791 | 0 / 0 |
+| Masa, automatic mappings | 897 | 13,498 | 21,979 | 0 / 0 |
+
+The cfwheels invocation indexed 1,882 files in this checkout, rather than the
+older canonical report's 1,195, so it is recorded separately and is not folded
+into the historical six-project totals above. All comparisons used the same
+roots and configuration for the baseline and PR-head binaries.
+
+### Literal default modes that return the receiver
+
+Masa's `beanORM.loadBy(returnFormat="self")` finishes with a literal mode
+dispatch: `query` and `iterator` return other values, while the final `else`
+returns `this`. Its earlier SQL construction is intentionally outside producer
+flow's supported language, so interpreting the whole method withheld the
+default self contract used by `settingsBean.getRazunaSettings` and many other
+ORM beans.
+
+A source-backed method contract now recognizes only that final dispatch when
+the selected parameter has the literal default `self`. An omitted argument or
+an explicit literal `self` returns the actual receiver, including a subclass;
+another literal or an unknown value does not. An interpolated mode, a branch
+for `self`, work after the dispatch, or a final return other than `this`
+withholds the contract. This is argument-sensitive rather than a blanket
+`loadBy` rule.
+
+Measured per entry against `d799add` on Masa 7.6.1:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 11,981 | 11,784 | 199 / 2 |
+| Masa, automatic mappings | 13,498 | 13,377 | 121 / 0 |
+
+The two configured additions are newly exposed downstream contracts:
+`beanEntity.getCurrentUser()` and `oauthClientBean.getUser()` have no component
+return type before their following `isSuperUser()` / `login()` calls. All six
+other pinned projects, with and without presets, are unchanged per entry.
+`TestAGuardedLazyFieldAcceptsAnInheritedArgumentSensitiveSelfReturn` covers the
+Masa shape and rejects an explicit non-self mode.
+
+### Bean-backed relationship getters outside CFML ORM
+
+Masa declares bean-ORM relationships with CFML's `fieldtype` and `cfc`
+metadata but does not mark those components `persistent`. A single-valued
+relationship getter now uses the `cfc` value only when an exact configured or
+source-discovered `getBean()` resolver proves that bean id's component. A broad
+resolver that merely echoes the id provides no evidence, and ordinary
+nonpersistent properties remain untyped.
+
+Measured per entry against `7dee48d` on Masa 7.6.1: configured **11,784 ->
+11,782** (2 removed, 0 added), automatic mappings **13,377 -> 13,376** (1
+removed, 0 added). The configured removals are `oauthClient.getUser().login()`
+and `file.getSite().getWebPath()`; the latter also resolves in automatic mode.
+`TestANonPersistentRelationshipGetterUsesAProvenBean` pins the required factory
+evidence.
+
+### Bean-backed collection relationships outside CFML ORM
+
+Nonpersistent bean-ORM `one-to-many` and `many-to-many` relationships now use
+the same exact bean-factory evidence as single-valued relationships, but retain
+that component as the generated getter's element contract rather than typing
+the collection itself as one entity. This covers both cardinalities in script
+loops and tag `<cfloop>` consumers. Unknown bean ids and broad resolvers remain
+untyped.
+
+`TestANonPersistentCollectionRelationshipUsesAProvenBean` covers both
+cardinalities and both loop syntaxes. No corpus delta is claimed for this
+batch because the pinned external corpus checkout is unavailable here.
+
+### Review corrections for aliases and relationship fallback
+
+Straight-line alias provenance now compares the complete lexical brace path,
+not only brace depth. Assignments and calls in sibling conditional blocks have
+the same depth but no reaching relationship, so they remain unknown.
+
+A nonpersistent single-valued relationship whose `cfc` bean id has no exact
+factory match now continues through ordinary property injection evidence. An
+unmatched relationship id no longer suppresses a separately proven `inject`
+target. `TestAnUntypedArgumentHoldsWhatEveryCallerPasses` and
+`TestRelationshipWithoutFactoryMatchFallsThroughToPropertyBean` pin both
+review findings.
+
+### PR 222 review: fail closed when provenance is incomplete
+
+The default-self final-dispatch shortcut now rejects earlier returns, uses of
+its mode parameter or `arguments` scope, and a dispatch nested in preceding
+control flow. Unsupported and oversized producer methods remain represented
+as unsafe plans, so a possible shared-field write cannot disappear from the
+all-writes-agree check. Unrelated unsupported methods without a reference to
+the field or its scope do not invalidate the field contract.
+
+Caller alias inference now rejects unbraced control bodies and explicitly
+withholds inference when the lexical token bound is exhausted. Equal empty
+brace paths from failed scans are no longer treated as scope evidence.
+
+Regression fixtures cover early returns, parameter mutation/scope escape,
+script and tag switch writers, oversized writers, unbraced conditionals/loops,
+and sibling branches in an oversized file. The existing positive fixtures
+continue to pin supported straight-line aliases and guarded cache getters.
+No new corpus delta is claimed for these review corrections.

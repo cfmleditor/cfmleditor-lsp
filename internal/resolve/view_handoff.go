@@ -276,7 +276,7 @@ func (r *Resolver) handlerParse(path string) *parser.ParseResult {
 	pr.FuncLookup = r.FuncLookup(filepath.Dir(path))
 
 	r.mu.Lock()
-	if r.handlerCache == nil || len(r.handlerCache) >= 512 {
+	if r.handlerCache == nil || len(r.handlerCache) >= 512 && len(r.InferArgsFiles) == 0 {
 		r.handlerCache = make(map[string]*parser.ParseResult)
 	}
 

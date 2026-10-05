@@ -1780,29 +1780,14 @@ func (pr *ParseResult) generatePropertyAccessors() {
 				pr.Funcs = append(pr.Funcs, FunctionDef{Name: m, URI: u, Line: prop.line})
 			}
 		}
-		// Resolve component path: try property resolvers first, then type, then bean map
-		comp := ""
-		if len(pr.PropertyResolvers) > 0 && len(prop.attrs) > 0 {
-			comp = ResolveProperty(prop.attrs, pr.PropertyResolvers)
-		}
 
-		if comp == "" && prop.typeName != "" && looksLikeCFCType(prop.typeName) {
-			comp = prop.typeName
-		}
+		comp := pr.propertyComponent(&prop)
 
-		if comp == "" {
-			comp = prop.documentedComponent()
-		}
-
-		// Only a CFML ORM entity: Mura's own beans declare relationships the
-		// same way, but their cfc names a bean id ("site"), not a component.
-		if comp == "" && pr.Persistent {
-			comp = prop.relatedEntity()
-		}
-
-		if comp == "" {
-			comp = pr.propertyBeanComponent(&prop)
-		}
+		// Bean-ORM collection relationships use the same cfc bean id as their
+		// single-valued counterparts, but the generated getter returns the
+		// collection rather than that component. Keep the proven component as
+		// the collection's element contract instead of a receiver contract.
+		pr.setRelationshipElement(getterIdx, &prop)
 
 		if comp != "" {
 			pr.ComponentRefs = append(pr.ComponentRefs, ComponentRef{
@@ -1818,6 +1803,70 @@ func (pr *ParseResult) generatePropertyAccessors() {
 			pr.Funcs[getterIdx].ReturnComponent = fieldComponents[strings.ToLower(prop.name)]
 		}
 	}
+}
+
+func (pr *ParseResult) propertyComponent(prop *propertyDef) string {
+	if len(pr.PropertyResolvers) > 0 && len(prop.attrs) > 0 {
+		if comp := ResolveProperty(prop.attrs, pr.PropertyResolvers); comp != "" {
+			return comp
+		}
+	}
+
+	if prop.typeName != "" && looksLikeCFCType(prop.typeName) {
+		return prop.typeName
+	}
+
+	if comp := prop.documentedComponent(); comp != "" {
+		return comp
+	}
+
+	related := prop.relatedEntity()
+	if pr.Persistent && related != "" {
+		return related
+	}
+
+	if related != "" && pr.BeanLookup != nil {
+		if comp := pr.BeanLookup(related); comp != "" {
+			return comp
+		}
+	}
+
+	if related != "" {
+		resolved := ResolveFromCall(`getBean("`+related+`")`, pr.Resolvers)
+		if resolved != "" && !strings.EqualFold(resolved, related) {
+			return resolved
+		}
+	}
+
+	return pr.propertyBeanComponent(prop)
+}
+
+func (pr *ParseResult) setRelationshipElement(getterIdx int, prop *propertyDef) {
+	if getterIdx < 0 || pr.Persistent || prop.collectionEntity() == "" {
+		return
+	}
+
+	pr.Funcs[getterIdx].ElementComponent = pr.relationshipBeanComponent(prop)
+}
+
+func (pr *ParseResult) relationshipBeanComponent(prop *propertyDef) string {
+	related := prop.collectionEntity()
+	if related == "" {
+		return ""
+	}
+
+	if pr.BeanLookup != nil {
+		if comp := pr.BeanLookup(related); comp != "" {
+			return comp
+		}
+	}
+
+	resolved := ResolveFromCall(`getBean("`+related+`")`, pr.Resolvers)
+	if strings.EqualFold(resolved, related) {
+		return ""
+	}
+
+	return resolved
 }
 
 // collectionEntity is the entity each element of a collection ORM

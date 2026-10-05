@@ -199,18 +199,21 @@ func indexOne(fsys vfs.FS, resolver *resolve.Resolver, f string, opt *Options) {
 		return
 	}
 
+	content := string(data)
+	resolver.IndexCallerFile(f, content)
+
 	fileURI := uri.URI("file://" + f)
 
 	// A template is not indexed for its functions here, but what it
 	// includes is part of the include graph a bare call resolves through:
 	// a page that includes a helper can call what the helper declares.
 	if !cfpath.IsCFCFile(f) {
-		resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(string(data)))
+		resolver.Index.SetIncludes(fileURI, parser.ExtractIncludes(content))
 
 		return
 	}
 
-	resolver.Index.IndexFileWithOptions(fileURI, string(data), &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
+	resolver.Index.IndexFileWithOptions(fileURI, content, &parser.ParseOptions{Resolvers: resolver.Resolvers, SetterLookup: resolver.SetterLookup(f), ConstructorLookup: resolver.ConstructorLookup(f), BeanLookup: resolver.InjectionBeanLookup(f), PropertyBeanLookup: resolver.InjectionPropertyLookup(f), PropertyResolvers: opt.PropertyResolvers})
 }
 
 // loadBeans gives the resolver's index the bean map the server would build

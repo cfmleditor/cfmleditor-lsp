@@ -33,7 +33,7 @@ func cfmlFilesIn(t *testing.T, dir string) []string {
 func TestAnUntypedArgumentHoldsWhatEveryCallerPasses(t *testing.T) {
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} }`,
+		"models/Item.cfc":  `component { function useItM(){} function mixedItem(){} function openM(){} function skipM(){} function inheritedM(){} function forwardedM(){} function conditionalM(){} function siblingM(){} function afterM(){} }`,
 		"models/Other.cfc": `component { function mixedOther(){} }`,
 		"svc/Base.cfc":     `component { function inherited( required thing ){ arguments.thing.inheritedM(); } }`,
 		"svc/Svc.cfc": `component extends="Base" {
@@ -41,9 +41,27 @@ function useIt( required thing ){ arguments.thing.useItM(); arguments.thing.nope
 function useMixed( required thing ){ arguments.thing.mixedItem(); arguments.thing.mixedOther(); }
 function useOpen( required thing ){ arguments.thing.openM(); }
 function useSkip( required thing, extra ){ arguments.thing.skipM(); }
+function useForwarded( required thing ){ arguments.thing.forwardedM(); }
+function useConditional( required thing ){ arguments.thing.conditionalM(); }
+function useSibling( required thing ){ arguments.thing.siblingM(); }
+function useAfter( required thing ){ arguments.thing.afterM(); }
 function callers(){
 	var a = new models.Item();
+	var forwarded = a;
 	useIt( a );
+	useForwarded( forwarded );
+	if (runtime()) {
+		var conditional = a;
+	}
+	useConditional( conditional );
+	if (first()) {
+		var sibling = a;
+	}
+	if (second()) {
+		useSibling( sibling );
+	}
+	useAfter( after );
+	var after = a;
 	useIt(
 		thing = new models.Item()
 	);
@@ -60,9 +78,15 @@ function callers(){
 
 	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "svc/Svc.cfc")
 
-	for _, k := range []string{"arguments.thing.useItM", "arguments.thing.mixedItem", "arguments.thing.mixedOther", "arguments.thing.skipM"} {
+	for _, k := range []string{"arguments.thing.useItM", "arguments.thing.mixedItem", "arguments.thing.mixedOther", "arguments.thing.skipM", "arguments.thing.forwardedM"} {
 		if got[k] != "" {
 			t.Errorf("%s: %q, want it resolved", k, got[k])
+		}
+	}
+
+	for _, k := range []string{"arguments.thing.conditionalM", "arguments.thing.siblingM", "arguments.thing.afterM"} {
+		if !strings.Contains(got[k], "no component ref") {
+			t.Errorf("%s was typed without a reaching straight-line assignment: %q", k, got[k])
 		}
 	}
 
@@ -82,5 +106,57 @@ function callers(){
 	off := reasonsWith(t, &Resolver{}, dir, "svc/Svc.cfc")
 	if !strings.Contains(off["arguments.thing.useItM"], "no component ref") {
 		t.Errorf("inference ran with no files to search: %q", off["arguments.thing.useItM"])
+	}
+}
+
+func TestCallerAliasesRequireCompleteStraightLineProof(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, padding string
+	}{
+		{"unbraced if", "if (runtime())\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"unbraced loop", "while (runtime())\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"unbraced else", "if (runtime()) {} else\nvar forwarded = a;\nuseForwarded(forwarded);", ""},
+		{"exhausted sibling paths", "if (first()) {\nvar forwarded = a;\n}\nif (second()) {\nuseForwarded(forwarded);\n}", strings.Repeat("work();\n", 1100)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{
+				"Item.cfc": `component { function ready(){} }`,
+				"Svc.cfc": `component {
+function useForwarded(thing) { arguments.thing.ready(); }
+function callers() {
+var a = new Item();
+` + tc.body + "\n" + tc.padding + `
+}
+}`,
+			})
+
+			got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc")
+			if reason, exists := got["arguments.thing.ready"]; !exists || !strings.Contains(reason, "no component ref") {
+				t.Fatalf("alias resolved without complete straight-line proof: %v", got)
+			}
+		})
+	}
+}
+
+func TestCallerAliasesAreNotLimitedByTheRestOfTheFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Item.cfc": `component { function ready(){} }`,
+		"Svc.cfc": `component {
+function unrelated() {
+` + strings.Repeat("work();\n", 1100) + `}
+function useForwarded(thing) { arguments.thing.ready(); }
+function callers() {
+var a = new Item();
+var forwarded = a;
+useForwarded(forwarded);
+}
+}`,
+	})
+
+	got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc")
+	if reason := got["arguments.thing.ready"]; reason != "" {
+		t.Fatalf("a large function elsewhere in the file withheld the alias: %q", reason)
 	}
 }

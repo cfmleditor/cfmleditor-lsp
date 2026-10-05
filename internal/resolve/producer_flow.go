@@ -145,6 +145,13 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 
 	*e.budget--
 
+	if specific && receiver != "" {
+		source := e.resolver.wheelsSource(fd.URI.Path()).methods[strings.ToLower(fd.Name)]
+		if source.selfDefaultParam != "" && e.selfModeSelected(fd, source.selfDefaultParam, arguments) {
+			return e.concrete(receiver, e.baseDir)
+		}
+	}
+
 	switch strings.ToLower(fd.ReturnType) {
 	case "", "any", "object", "component":
 	default:
@@ -207,6 +214,21 @@ func (e *producerEvaluation) call(fd *parser.FunctionDef, receiver string, argum
 	}
 
 	return value
+}
+
+func (e *producerEvaluation) selfModeSelected(fd *parser.FunctionDef, name string, arguments map[string]producerValue) bool {
+	value, supplied := arguments[name]
+	if !supplied {
+		for i := range fd.Arguments {
+			if strings.EqualFold(fd.Arguments[i].Name, name) {
+				value, supplied = arguments[producerPosition(i)]
+
+				break
+			}
+		}
+	}
+
+	return !supplied || value.literalKnown && strings.EqualFold(value.literal, "self")
 }
 
 // producerFor is fd's source plan. The plan is read from the file while fd
@@ -351,28 +373,8 @@ func (e *producerEvaluation) condition(expression string, env producerEnvironmen
 		}
 	}
 
-	if len(tokens) == 6 && strings.EqualFold(tokens[0].Value, "structKeyExists") && tokens[1].Kind == parser.TokLParen && strings.EqualFold(tokens[2].Value, "arguments") && tokens[3].Kind == parser.TokComma && tokens[4].Kind == parser.TokString && tokens[5].Kind == parser.TokRParen && e.resolver.ResolveFunc(e.methodOwner(), "structKeyExists", e.baseDir) == nil {
-		name := strings.ToLower(strings.Trim(tokens[4].Value, "\"'"))
-		value, known := env["arguments."+name]
-
-		choice = 0
-		if !known && e.argumentsKnown {
-			choice = -1
-		}
-
-		if known && value.presenceKnown {
-			if value.absent {
-				choice = -1
-			} else {
-				choice = 1
-			}
-		}
-
-		if negate {
-			choice = -choice
-		}
-
-		return yes, no, choice
+	if specialYes, specialNo, specialChoice, ok := e.specialCondition(tokens, env, negate); ok {
+		return specialYes, specialNo, specialChoice
 	}
 
 	if len(tokens) < 4 || !strings.EqualFold(tokens[0].Value, "isObject") || tokens[1].Kind != parser.TokLParen || tokens[len(tokens)-1].Kind != parser.TokRParen || e.resolver.ResolveFunc(e.methodOwner(), "isObject", e.baseDir) != nil {
@@ -410,6 +412,222 @@ func (e *producerEvaluation) condition(expression string, env producerEnvironmen
 	}
 
 	return yes, no, choice
+}
+
+func (e *producerEvaluation) specialCondition(tokens []parser.Token, env producerEnvironment, negate bool) (yes, no producerEnvironment, choice int, ok bool) {
+	yes, no = maps.Clone(env), maps.Clone(env)
+
+	if path, matched := e.structKeyCondition(tokens); matched {
+		value, known := env[path]
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, false)
+			known = !value.unknown
+		} else if !known {
+			value = producerUnknown()
+		}
+
+		choice = 0
+		if !known && e.argumentsKnown && strings.HasPrefix(path, "arguments.") {
+			choice = -1
+		}
+
+		if known && value.presenceKnown {
+			if value.absent {
+				choice = -1
+			} else {
+				choice = 1
+			}
+		}
+
+		if known {
+			present := value
+			present.presenceKnown = true
+			present.absent = false
+			yes[path] = present
+			no[path] = producerValue{unknown: true, absent: true, presenceKnown: true}
+		}
+
+		if negate {
+			return no, yes, -choice, true
+		}
+
+		return yes, no, choice, true
+	}
+
+	if path, matched := e.unaryGuardCondition(tokens, "isSimpleValue"); matched {
+		value := e.read(path, env)
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, true)
+		}
+
+		object := value
+		object.primitive = false
+		primitive := producerValue{primitive: true}
+		yes[normalizeProducerPath(path)] = primitive
+		no[normalizeProducerPath(path)] = object
+
+		if negate {
+			return no, yes, 0, true
+		}
+
+		return yes, no, 0, true
+	}
+
+	if path, matched := e.unaryGuardCondition(tokens, "isNull"); matched {
+		value := e.read(path, env)
+		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+			value = e.sharedFieldContract(path, false)
+		}
+
+		missing := producerValue{unknown: true, absent: true, presenceKnown: true}
+		value.presenceKnown = true
+		value.absent = false
+		yes[normalizeProducerPath(path)] = missing
+		no[normalizeProducerPath(path)] = value
+
+		if negate {
+			return no, yes, 0, true
+		}
+
+		return yes, no, 0, true
+	}
+
+	return nil, nil, 0, false
+}
+
+func (e *producerEvaluation) unaryGuardCondition(tokens []parser.Token, name string) (string, bool) {
+	if len(tokens) < 4 || !strings.EqualFold(tokens[0].Value, name) || tokens[1].Kind != parser.TokLParen || tokens[len(tokens)-1].Kind != parser.TokRParen || e.resolver.ResolveFunc(e.methodOwner(), name, e.baseDir) != nil {
+		return "", false
+	}
+
+	path := producerPath(tokens[2 : len(tokens)-1])
+	if path == "" {
+		return "", false
+	}
+
+	return normalizeProducerPath(path), true
+}
+
+func (e *producerEvaluation) structKeyCondition(tokens []parser.Token) (string, bool) {
+	if len(tokens) != 6 || !strings.EqualFold(tokens[0].Value, "structKeyExists") || tokens[1].Kind != parser.TokLParen || tokens[3].Kind != parser.TokComma || tokens[4].Kind != parser.TokString || tokens[5].Kind != parser.TokRParen || e.resolver.ResolveFunc(e.methodOwner(), "structKeyExists", e.baseDir) != nil {
+		return "", false
+	}
+
+	scope := producerPath(tokens[2:3])
+
+	name := strings.ToLower(strings.Trim(tokens[4].Value, "\"'"))
+	if scope == "" || name == "" || strings.Contains(name, ".") {
+		return "", false
+	}
+
+	return normalizeProducerPath(scope + "." + name), true
+}
+
+// sharedFieldContract returns the one component assigned to a guarded shared
+// field anywhere in its component. Every explicit write must agree. Primitive
+// writes are admitted only for isSimpleValue's sentinel pattern.
+func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive bool) producerValue {
+	path = normalizeProducerPath(path)
+	if !strings.HasPrefix(path, "variables.") && !strings.HasPrefix(path, "this.") {
+		return producerUnknown()
+	}
+
+	source := e.resolver.wheelsSource(e.fd.URI.Path())
+	methods := source.producers
+	component := ""
+	found := false
+	valid := true
+	write := func(expression string) {
+		value := e.expression(expression, producerEnvironment{})
+		switch {
+		case value.unknown, value.fields != nil, value.primitive && !allowPrimitive, len(value.components) > 1:
+			valid = false
+		case value.primitive:
+			found = true
+		case len(value.components) == 1:
+			found = true
+
+			if component == "" {
+				component = value.components[0]
+			} else if component != value.components[0] {
+				valid = false
+			}
+		default:
+			valid = false
+		}
+	}
+
+	var visit func([]producerNode)
+
+	visit = func(nodes []producerNode) {
+		for i := range nodes {
+			node := &nodes[i]
+			if node.kind == "unsafe" && producerMayTouchField(node.expression, path) {
+				valid = false
+			}
+
+			if node.kind == "set" {
+				target := normalizeProducerPath(node.target)
+				if target == "variables" || target == "this" {
+					valid = false
+				} else if !strings.Contains(node.target, ".") {
+					target = "variables." + target
+				}
+
+				if target == path {
+					write(node.expression)
+				}
+			}
+
+			visit(node.body)
+			visit(node.alternative)
+		}
+	}
+
+	for _, method := range methods {
+		visit(method.body)
+	}
+
+	// Function plans deliberately exclude component-body initialization. It is
+	// still an explicit write to the field and must participate in the same
+	// contract; otherwise a conflicting startup value would be ignored.
+	startup := parser.Parse(e.fd.URI, source.content)
+	for _, assignment := range startup.StartupVariableAssignments() {
+		if normalizeProducerPath(assignment.Variable) != path {
+			continue
+		}
+
+		if assignment.Expression == "" {
+			valid = false
+		} else {
+			write(assignment.Expression)
+		}
+	}
+
+	if !valid || !found || component == "" {
+		return producerUnknown()
+	}
+
+	return e.concrete(component, e.baseDir)
+}
+
+// Unsupported plans cannot supply an all-writes-agree proof. A scope or field
+// reference may hide a write, an indexed assignment, or a scope escape. An
+// exhausted scan likewise withholds the contract.
+func producerMayTouchField(expression, path string) bool {
+	tokens := producerTokens(expression)
+	if len(tokens) == 0 {
+		return true
+	}
+
+	scope, field, _ := strings.Cut(path, ".")
+	for _, token := range tokens {
+		if token.Kind == parser.TokIdent && (strings.EqualFold(token.Value, scope) || strings.EqualFold(token.Value, field)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (e *producerEvaluation) read(path string, env producerEnvironment) producerValue {

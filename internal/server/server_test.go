@@ -840,6 +840,58 @@ func TestWorkspaceSymbolEmptyQuery(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolBoundsAndRanksShortQueries(t *testing.T) {
+	srv := newTestServer()
+
+	for i := workspaceSymbolShortQueryLimit; i >= 0; i-- {
+		u := uri.File(fmt.Sprintf("/app/File%04d.cfc", i))
+		srv.index.IndexFileFromResult(u, []parser.FunctionDef{{
+			Name: "someMethod", URI: u, Line: uint32(i),
+		}}, nil)
+	}
+
+	exactURI := uri.File("/app/Exact.cfc")
+	srv.index.IndexFileFromResult(exactURI, []parser.FunctionDef{{Name: "m", URI: exactURI}}, nil)
+
+	req := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "m"})
+
+	result, err := srv.handleWorkspaceSymbol(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	symbols, ok := result.([]protocol.SymbolInformation)
+	if !ok {
+		t.Fatalf("result is %T", result)
+	}
+
+	if len(symbols) != workspaceSymbolShortQueryLimit {
+		t.Fatalf("short query returned %d symbols, want %d", len(symbols), workspaceSymbolShortQueryLimit)
+	}
+
+	if symbols[0].Name != "m" || symbols[0].Location.URI != exactURI {
+		t.Errorf("first symbol = %q at %q, want exact match at %q", symbols[0].Name, symbols[0].Location.URI, exactURI)
+	}
+
+	for i := 2; i < len(symbols); i++ {
+		if symbols[i-1].Location.URI > symbols[i].Location.URI {
+			t.Fatalf("symbols are not stable by URI at %d: %q before %q", i, symbols[i-1].Location.URI, symbols[i].Location.URI)
+		}
+	}
+
+	longReq := makeCall(t, protocol.MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: "some"})
+
+	longResult, err := srv.handleWorkspaceSymbol(context.Background(), longReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	longSymbols, ok := longResult.([]protocol.SymbolInformation)
+	if !ok || len(longSymbols) != workspaceSymbolShortQueryLimit+1 {
+		t.Fatalf("specific query returned %d symbols, want the complete %d", len(longSymbols), workspaceSymbolShortQueryLimit+1)
+	}
+}
+
 func TestHoverFunction(t *testing.T) {
 	srv := newTestServer()
 	srv.setDocument(uri.URI("file:///test.cfm"), "<cfset x = Len(y)>")

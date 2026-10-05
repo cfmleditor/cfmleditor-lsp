@@ -1,11 +1,9 @@
 # Performance gaps: costs identified and not acted on
 
-Three costs found while profiling the per-keystroke paths for
-[#101](https://github.com/cfmleditor/cfmleditor-lsp/pull/101). Two change what a
-client receives and so are not tune-ups; the third is not worth what it costs to
-write. Section 3 has since been done, and records what it measured. Section 4 is
-settled; section 2 is deferred, and records what a reader should know before
-picking it up.
+Costs found while profiling the per-keystroke and batch-analysis paths. Sections
+2, 3 and 6 are done and record their measurements. Section 4 is settled as not
+worth doing without a real-workspace profile; the remaining follow-ups are
+called out in sections 3 and 5.
 
 This file exists so they are not rediscovered from scratch, and so the reasons
 are on record rather than remembered. Every number below is measured, and the
@@ -59,16 +57,28 @@ shape is what carries over, not the multiplier: matching is a case-folded
 *substring* test over every distinct name, so short queries match a large share
 of a real workspace too, and short queries are the ones always sent.
 
-## 2. `workspace/symbol` sends the whole match set — deferred
+## 2. `workspace/symbol` bounds transient short-query results — done
 
-**This is the largest cost on this page by an order of magnitude, and it is
-not being worked on: other things come first.** That is the whole of the
-reason, and it is worth stating plainly rather than dressing as a technical
-judgement — nothing below argues the cap is wrong, only what a reader should
-know before picking it up.
+Done with a 1,000-result bound for zero-, one- and two-character queries. Those
+are transient prefixes sent on the way to a specific search; queries of three
+or more characters remain complete. Before applying the bound, candidates are
+ranked by exact match, prefix match, name, URI and line. A bounded max-heap
+retains the best 1,000 without sorting the complete match set, so results do
+not depend on parallel indexing order.
 
-The measurements are kept in full because the cost is real and has not gone
-anywhere.
+Measured end to end on `BenchmarkWorkspaceSymbolWithMarshal/query_m`, three
+runs before and after:
+
+| | symbols | JSON | time/op | allocated/op | allocations/op |
+|---|---:|---:|---:|---:|---:|
+| unbounded | 40,000 | 6,211,121 B | 32.0–32.6 ms | 11.3–13.3 MB | 40,010–40,013 |
+| bounded | 1,000 | 155,279 B | 5.5–5.9 ms | 600–607 KB | 1,009 |
+
+That is a 97.5% payload reduction, about 5.8x lower end-to-end latency and
+about 95% less allocation in the synthetic worst case. The remaining text in
+this section records the design analysis that led to the bound.
+
+The earlier measurements are kept in full for comparison.
 
 `handleWorkspaceSymbol` (`internal/server/symbol.go`) turns every matching
 definition into a `protocol.SymbolInformation` and returns all of them. The
@@ -254,11 +264,9 @@ not to make the scan 18% faster.
 
 ## 5. What would change these decisions
 
-- **Section 2** — room to do it. It is deferred on priority, not on evidence,
-  so nothing has to happen first. What would move it up the list: a report of
-  the symbol picker being felt as slow, or a measurement on a real workspace
-  showing what a one- or two-character query matches there — the cheap step
-  that would say whether the synthetic 26ms is anywhere near the real one.
+- **Section 2** — done for the dominant short-query payload. A real-workspace
+  measurement can still inform whether 1,000 is the right bound; queries of
+  three or more characters intentionally remain complete.
 - **Section 3** — done; see the section.
 - **Section 4** — a profile showing `nearestTo` mattering on a real workspace
   rather than on a bucket built to be worst-case. Then cache the answer rather
@@ -266,3 +274,37 @@ not to make the scan 18% faster.
 
 Anything here that gets done should re-measure end to end, with the marshal,
 on the benchmark named in section 1 — not on a handler benchmark.
+
+## 6. Unresolved caller inference reread and reparsed the workspace — done
+
+Batch `unresolved` already reads every file while building its definition
+index. Caller inference used to read every file a second time when its lazy
+name-to-caller index was first needed. The workspace-index pass now records
+those call-shaped names from the bytes it already holds, so caller lookup adds
+no filesystem pass.
+
+The parsed-handler cache also used the editor's 512-entry reset policy during
+batch scans. On a workspace with more than 512 possible callers, filling the
+cache cleared every earlier parse; later arguments then reread and reparsed the
+same handlers. Batch inference has a finite `InferArgsFiles` set and now retains
+those parses for the scan's lifetime, while interactive resolver instances keep
+the existing bounded policy.
+
+`TestBatchCallerIndexReusesBytesFromWorkspaceIndexing` pins the eliminated
+second read pass. `TestBatchHandlerParseCacheDoesNotThrashAtEditorLimit` crosses
+the old 512-entry boundary twice and requires exactly one read per handler.
+
+The caller-name pass itself no longer runs a regular expression that allocates
+one submatch slice per call. A single linear scan finds `(` and walks backward
+over the same ASCII whitespace and word characters; only distinct normalized
+names are cloned, so the index cannot retain a complete source string through
+one substring. On `BenchmarkCallerNames` with 10,000 calls and 100 distinct
+names, five baseline runs took 27.6–28.9 ms and allocated 1.30 MB in 10,031–
+10,032 allocations. Three optimized runs took 0.50–0.52 ms and allocated 7.8 KB
+in 111 allocations: about 56x faster and over 99% less allocation.
+
+Parallel workspace indexing can encounter the same caller name in an arbitrary
+file order. Caller lookup therefore sorts and compacts its small candidate list
+before inference, preserving stable alternative ordering and preventing a file
+re-indexed during setup from being counted twice. The returned slice is a copy,
+so later index updates cannot race a caller walking it.

@@ -253,6 +253,33 @@ func TestPropertyAccessors_BeanLookup(t *testing.T) {
 	}
 }
 
+func TestRelationshipWithoutFactoryMatchFallsThroughToPropertyBean(t *testing.T) {
+	content := `component accessors="true" {
+	property name="service" fieldtype="many-to-one" cfc="unmapped" inject="actual";
+}`
+	pr := ParseWithOptions(uri.URI("file:///test.cfc"), content, &ParseOptions{
+		BeanLookup: func(name string) string {
+			if name == "actual" {
+				return "services.Actual"
+			}
+
+			return ""
+		},
+	})
+
+	for _, ref := range pr.ComponentRefs {
+		if ref.Variable == "service" {
+			if ref.Component != "services.Actual" {
+				t.Fatalf("service component = %q, want services.Actual", ref.Component)
+			}
+
+			return
+		}
+	}
+
+	t.Fatal("service component ref not generated")
+}
+
 func TestPropertyResolvers(t *testing.T) {
 	content := `component {
 	property name="userDAO" inject="model.UserDAO";
