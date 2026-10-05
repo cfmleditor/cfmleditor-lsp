@@ -1347,6 +1347,13 @@ against all of them; which one ran is not in the source.
   them there moved the counter on every re-index of an unchanged file, rebuilding the graph —
   thousands of stats — on each lazy index during a scan and each edit in the editor. Removal
   goes through `setIncludesLocked(uri, nil)` in `RemoveFile`, which compares before it bumps.
+- **A template reads what its includer holds at the include** (`includerHeld`,
+  `internal/resolve/included_locals.go`): an unscoped name the template never sets is, at
+  each `<cfinclude>` that reaches it (`parser.IncludeSites`, which keeps each statement's
+  offset), whatever the includer's receiver lookup gives at that line — a local or argument
+  when the include is inside a function. Every site must type it; their union is the answer.
+  It is the last step of `inferredReceiver`, cached per template, name and include generation.
+  `TestATemplateReadsWhatItsIncluderHoldsAtTheInclude`.
 - A writer that indexes from a parse result calls `Index.SetIncludes` beside `SetThisVars`;
   `IndexFile` sets them itself. The `unresolved` command records a template's includes without
   indexing its functions, since a page that includes a helper can call what the helper declares.
@@ -1581,7 +1588,11 @@ module the workspace lacks is dynamic (`uninstalledModule`). **`injectedComponen
 `lastResortPath`; a cborm `VirtualEntityService` bound by `super.init( entityName = … )`
 returns its entity from `new`/`get`/`getOrFail`/`findWhere`. `resolve/wheels.go`: a Wheels
 model's finders return the receiver, and `hasMany`/`belongsTo`/`hasOne` generate typed
-methods. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
+methods. `resolve/wheels_controller_paths.go`: `controller( "name" )` is the class
+Global's `$createControllerClass` (checked against its pinned body) instantiates —
+`<path>/<name>.cfc`, else the last path's `Controller.cfc` — under the literal
+`controllerPath` the nearest directory above the caller writes (a test runner's), else
+the framework default; a computed write there withholds it. `resolve/modules.go`: mementifier's `getMemento()` on a `this.memento` component,
 and cbi18n/cbfs/HTMLHelper helpers on a component whose chain reaches `coldbox.system.` —
 the lists are read from each module's source at the commit named there.
 `resolve/missing_method.go`: `this.x()` on a component with `onMissingMethod` is dynamic (an

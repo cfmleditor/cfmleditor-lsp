@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -68,6 +69,9 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		rhs, ok = lastPrcAssignment(strings.Join(lines[min(start, len(lines)):min(int(line), len(lines))], "\n"), name)
 	} else {
 		rhs, ok = localAssignment(pr.Content, name, start, int(line))
+		if !ok && start > 0 && variable == name {
+			rhs, ok = variablesAssignment(pr, name, caller, start, int(line))
+		}
 	}
 
 	if !ok {
@@ -103,6 +107,12 @@ func (r *Resolver) typeCallExpr(rhs string, line uint32, caller string, pr *pars
 	}
 
 	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, lookupCtx{depth: ctx.depth + 1, leaf: ctx.leaf})
+	if comp == "" {
+		// A receiver only a configured resolver names (a preset's
+		// application.wo), as ComponentOf reads it.
+		comp, _, _ = parser.ResolveFromCallMatch(receiver, r.Resolvers)
+	}
+
 	if comp == "" || strings.HasPrefix(comp, "$") {
 		return ""
 	}
@@ -113,6 +123,12 @@ func (r *Resolver) typeCallExpr(rhs string, line uint32, caller string, pr *pars
 
 	for alt := range strings.SplitSeq(comp, "|") {
 		ret := lookup(alt, method)
+		if ret == "" {
+			// What some methods return depends on what they are handed
+			// (Wheels' controller( "name" )); the parse asks the same way.
+			ret = lookup(alt, parser.CallHop(method+"("+m[3]+")"))
+		}
+
 		if ret == "" || strings.HasPrefix(ret, "$") {
 			return ""
 		}
@@ -133,4 +149,28 @@ func containsFold(list []string, s string) bool {
 	}
 
 	return false
+}
+
+// variablesAssignment is the last assignment to an unscoped name above the
+// function the lookup is in, which CFML makes a variables-scope write:
+// TestBox's `_controller = …` in beforeAll(), read by every spec in run().
+// It is the parse's own rule for such a name (fileLevelRef: the nearest
+// preceding assignment in the file). Not when the function declares name as
+// a local or an argument, which hides the variable, nor when the assignment
+// found is a `var` or local. one, which never left its function.
+func variablesAssignment(pr *parser.ParseResult, name, caller string, start, line int) (string, bool) {
+	lines := strings.Split(pr.Content, "\n")
+	end := min(line, len(lines))
+
+	declared := regexp.MustCompile(`(?i)(?:\bvar\s+|\blocal\.|<cfargument\s[^>]*name\s*=\s*["'])` + regexp.QuoteMeta(name) + `\b`)
+	if argumentOf(pr, caller, name) != nil || declared.MatchString(strings.Join(lines[min(start, end):end], "\n")) {
+		return "", false
+	}
+
+	rhs, at, ok := localAssignmentAt(pr.Content, name, 0, start)
+	if !ok || declared.MatchString(lines[at]) {
+		return "", false
+	}
+
+	return rhs, true
 }

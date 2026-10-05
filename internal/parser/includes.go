@@ -40,8 +40,32 @@ const includeWindow = 512
 // the whole file and copied it to blank its comments, which on tassweb took the
 // index pass from 1.5s to 5.5s.
 func ExtractIncludes(content string) []string {
+	var out []string
+
+	for _, site := range IncludeSites(content) {
+		if !slices.ContainsFunc(out, func(s string) bool { return strings.EqualFold(s, site.Path) }) {
+			out = append(out, site.Path)
+		}
+	}
+
+	return out
+}
+
+// IncludeSite is one include statement: the path as ExtractIncludes reports
+// it, and the byte offset the statement starts at.
+type IncludeSite struct {
+	Path   string
+	Offset int
+}
+
+// IncludeSites is every include ExtractIncludes reads, one per statement and
+// with where it is, so a template can be read as its includer sees it at
+// that line: a template included inside a function sees the function's locals.
+// The script and tag forms come first, in source order, then the directory
+// listings' globs.
+func IncludeSites(content string) []IncludeSite {
 	var (
-		out      []string
+		out      []IncludeSite
 		comments [][2]int
 		scanned  bool
 	)
@@ -71,9 +95,7 @@ func ExtractIncludes(content string) []string {
 			continue
 		}
 
-		if !slices.ContainsFunc(out, func(s string) bool { return strings.EqualFold(s, p) }) {
-			out = append(out, p)
-		}
+		out = append(out, IncludeSite{Path: p, Offset: start})
 	}
 
 	return append(out, directoryIncludes(content)...)
@@ -196,7 +218,7 @@ var includeFromListing = regexp.MustCompile(`(?i)<cfinclude\b[^>]*?\btemplate\s*
 // recorded when the listing is literal, not recursive, filtered to templates,
 // and names the directory the include's prefix does; anything computed is not
 // a static answer.
-func directoryIncludes(content string) []string {
+func directoryIncludes(content string) []IncludeSite {
 	if indexFold(content, "cfdirectory") < 0 {
 		return nil
 	}
@@ -225,7 +247,7 @@ func directoryIncludes(content string) []string {
 		listed[strings.ToLower(attrs["name"])] = dir[1]
 	}
 
-	var out []string
+	var out []IncludeSite
 
 	for _, at := range includeFromListing.FindAllStringSubmatchIndex(content, -1) {
 		if inSpan(comments, at[0]) {
@@ -239,10 +261,7 @@ func directoryIncludes(content string) []string {
 			continue
 		}
 
-		glob := dir + "/*.cfm"
-		if !slices.ContainsFunc(out, func(s string) bool { return strings.EqualFold(s, glob) }) {
-			out = append(out, glob)
-		}
+		out = append(out, IncludeSite{Path: dir + "/*.cfm", Offset: at[0]})
 	}
 
 	return out

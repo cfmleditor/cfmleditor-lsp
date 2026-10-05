@@ -1623,3 +1623,142 @@ script and tag switch writers, oversized writers, unbraced conditionals/loops,
 and sibling branches in an oversized file. The existing positive fixtures
 continue to pin supported straight-line aliases and guarded cache getters.
 No new corpus delta is claimed for these review corrections.
+
+### Regression from PR 222: a member's presence counted as an argument guard
+
+PR 222 raised configured Masa from **10,645 to 11,980** findings. It was not
+caught because the corpus comparison recorded under "Straight-line caller
+aliases" used a Masa run that already included the regression, so it read as
+0 / 0. Each commit was measured again on a fresh checkout of the pinned corpus:
+
+| Commit | Masa configured | `variables.configBean` |
+|---|---:|---:|
+| `85f330b` (before PR 222) | 10,645 | 86 |
+| `10b0a2c` Infer guarded lazy shared-field returns | 11,981 | 1,128 |
+| `87dcf90` Infer literal default self-return modes | 11,784 | 1,128 |
+| `ffd6a37` Withhold resolver inference … | 11,980 | 1,128 |
+
+**`10b0a2c` (+1,336), fixed.** `producerGuardSensitive` replaced the check for
+`structKeyExists(arguments, …)` and dropped its test for the comma after the
+scope, so `structKeyExists(arguments.config, "assetDir")` counted as a guard
+too. A guard marks a method as needing a call-specific plan, and that plan
+outranks the method's declared or inferred return. `configBean.set()` has
+such a test and a body the tag plan cannot follow, so its plan is one
+unsafe node and answers unknown. The `return this` the parser had found was
+discarded, `application.configBean = new mura.configBean().set(…)` became
+`$any`, and the DI/1 registration `addBean("configBean",
+application.configBean)` lost its component. Every managed bean taking
+`configBean` in its constructor then had an untyped field. The interpreter's
+`structKeyCondition` reads only a bare scope, so the wider trigger could never
+succeed. The comma test is back. `TestAMembersPresenceIsNotAnArgumentGuard`
+fails without it.
+
+Measured per entry against `ee888f6`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 11,980 | 10,651 | 1,363 / 34 |
+| Masa, automatic mappings | 13,497 | 11,981 | 1,565 / 49 |
+| The other thirteen modes | | | 0 / 0 each |
+
+The additions are the loose ends that a typed `configBean` exposes, already
+recorded above: `getClassExtensionManager()` chains (a lazy `variables.instance`
+getter), two `contentBean` wrapper returns, and in automatic mode chains that
+break at an unmapped `mura.bean.*` base.
+
+**`ffd6a37` (+198), left as it is, for a decision.** It made
+`selfDispatchPrefixSafe` reject any `arguments` token before
+`loadBy(returnFormat="self")`'s final dispatch. Most of Masa's uses are reads,
+which are safe, but one is not: `set(arguments)` passes the whole scope by
+reference to `set()`, which hands it to `super.set(argumentCollection=arguments)`.
+Accepting it means proving no callee rewrites `returnFormat`, which needs
+analysis across calls that does not exist. Allowing reads alone recovers none
+of the 198, because `set(arguments)` is in every `loadBy` prefix. Choose between
+the fail-closed rule as it stands and an explicit exception for passing the
+scope to the component's own `set`.
+
+### Wheels `controller( "name" )` (gap 8, controller half): done (4,934 -> 3,879)
+
+Wheels' own test specs build their controller under test with
+`application.wo.controller( "dummy", params )`, and every call on it was
+`variable '_controller' has no component ref`: 1,000 of the vendor-included
+scan's findings. Three pieces, each with a test that fails without it:
+
+- **The rule** (`wheels_controller_paths.go`, reached from `wheelsFactoryReturn`
+  once the call is Global's own `controller`): the class
+  `$createControllerClass` instantiates, checked against its pinned body —
+  the first path in the `controllerPath` list holding `<name>.cfc`, or the
+  last path's `Controller.cfc`. The list is the literal written by the nearest
+  directory above the calling file (`vendor/wheels/tests/runner.cfm`'s
+  `set( controllerPath = AssetPath & "controllers" )` for its specs), else the
+  framework default (`events/init/views.cfm`). A computed write there, a
+  computed name, or a candidate with no file withholds the type; several
+  literal writes in one place give each candidate as an alternative.
+  The conditional browser-fixture path `$lockedLoadRoutes` appends is not read
+  (the runner switches it off). `TestAWheelsControllerIsTheClassItsPathHolds`,
+  `TestAWheelsControllerNeedsThePinnedClassLookup`.
+- **Assignment typing passes the call's arguments.** `typeCallExpr` asked
+  `FuncLookup` for the method by name only, which no argument-sensitive return
+  can answer; it now asks again with the call (`parser.CallHop`), as the parse
+  does. It also reads a receiver only a configured resolver names (the
+  preset's `application.wo`), as `ComponentOf` does.
+- **A variables-scope assignment in another function** (`variablesAssignment`):
+  TestBox's `beforeAll()` assigns what `run()` reads. When the enclosing
+  function has no assignment, the nearest one above it counts — the parse's
+  own rule for such a name (`fileLevelRef`) — unless the function declares the
+  name as a local or argument, or the assignment found is a `var`/`local.` one.
+  `TestAVariableAssignedInAnotherFunctionIsTypedByThatAssignment`.
+
+Measured per entry against `a6b92a5`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| cfwheels, presets, vendor root | 4,934 | 3,879 | 1,058 / 3 |
+| Masa, configured | 10,651 | 10,590 | 61 / 0 |
+| Masa, automatic mappings | 11,981 | 11,924 | 58 / 1 |
+| The other ten modes | | | 0 / 0 each |
+
+All 1,000 `_controller` findings resolve. The three Wheels additions are
+gaps the typed controller exposes: two plugin mixins (`$helper01`,
+`$$pluginOnlyMethod`, injected from a test plugin at run time) and an
+untyped `policyScope()` return. Masa's removals come from the receiver
+fallback: `application.changesetManager` / `application.feedManager`, which
+the startup templates type, read through `x = application.y.read( … )`
+assignments; the one addition is the known automatic-mode `mura.bean.beanFeed`
+mapping gap. Cost, alternating binaries: the Wheels scan 12.2s -> 13.0s,
+Masa and Lucee unchanged. Without presets nothing types `application.wo`, so
+the no-preset Wheels scan is unchanged; the model half of gap 8 is not done.
+
+### A template reads what its includer holds at the include (Masa 10,590 -> 10,324)
+
+An included template runs inside its includer, and inside the includer's function when the
+`<cfinclude>` is written in one, so an unscoped name the template reads but never sets is
+whatever the includer holds by that name at that line. Masa's `configBean.applyDbUpdates`
+declares `var dbUtility = getBean("dbUtility")` and includes every `dbUpdates/*.cfm`, and all
+248 `dbUtility` findings there were that name. TestBox's reporters include `assets/*.cfm` inside
+`runReport( results, testbox )`, and `CoverageService.renderStats` includes `coverageStats.cfm`
+after `var codeBrowser = new browser.CodeBrowser(…)`.
+
+`includerHeld` (`included_locals.go`) asks each include site that reaches the template
+(`parser.IncludeSites`, which is `ExtractIncludes` keeping each statement's offset; a
+directory listing's glob sits at its `<cfinclude>`) what the includer's receiver lookup gives
+for the name at that line. Every site must type it, and the answer is their union. A template
+that assigns or declares the name itself (`setsName`) is not asked about. The answer is cached
+per template, name, depth and include generation; computed per call, it cost the Masa scan 20%.
+`TestATemplateReadsWhatItsIncluderHoldsAtTheInclude` (each guard fails without it),
+`TestIncludeSitesSayWhereEachIncludeIs`.
+
+Measured per entry against `2cd21b6`:
+
+| Scan | Before | After | Removed / added |
+|---|---:|---:|---:|
+| Masa, configured | 10,590 | 10,324 | 266 / 0 |
+| Masa, automatic mappings | 11,924 | 11,658 | 266 / 0 |
+| TestBox, no presets | 759 | 652 | 107 / 0 |
+| TestBox, presets | 299 | 296 | 3 / 0 |
+| The other nine modes | | | 0 / 0 each |
+
+Masa's removals are `dbUtility` (248), `contentRendererUtility` in the legacy object-class views
+(16) and two locals of admin pages. Cost, alternating binaries: Masa 14.5s -> 14.8s, Lucee
+unchanged. Templates FW/1 or Mura include through a computed path (the admin views' `rc.$`, the
+display modules' `$`) have no include edge, so this does not reach them.

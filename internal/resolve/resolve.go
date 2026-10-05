@@ -74,6 +74,8 @@ type Resolver struct {
 	discoveringDI  bool                           // private policy discovery never re-enters injection lookup
 	startupCache   map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
 	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
+	ctlPathCache   map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
+	includerCache  map[string]string              // template, name, depth and include generation → includerHeld's answer
 	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
 	loopCache      map[string][]loopSpan          // file URI and content hash → every loop it holds (loopsOf)
 	closureCache   map[string][]closureSpan       // file URI and content hash → every function literal it holds (closuresOf)
@@ -2823,7 +2825,11 @@ func (r *Resolver) inferredReceiver(variable string, line uint32, caller, funcNa
 		return comp
 	}
 
-	return r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
+	if comp := r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx); comp != "" {
+		return comp
+	}
+
+	return r.includerHeld(variable, pr, tr, ctx)
 }
 
 // receiverComponentD is receiverComponent with a lookupCtx: the depth of

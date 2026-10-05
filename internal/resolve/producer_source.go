@@ -614,11 +614,19 @@ func producerGuardSensitive(tokens []parser.Token, i int) bool {
 		return false
 	}
 
+	// Only a bare scope is a guard the interpreter reads (structKeyCondition):
+	// structKeyExists(arguments.config, "x") tests a member of an argument,
+	// and treating it as one sends a method's declared return through a plan
+	// that cannot answer.
+	if tokens[i+3].Kind != parser.TokComma {
+		return false
+	}
+
 	if strings.EqualFold(tokens[i+2].Value, "arguments") {
 		return true
 	}
 
-	return (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && i+4 < len(tokens) && tokens[i+3].Kind == parser.TokComma && tokens[i+4].Kind == parser.TokString && !strings.Contains(tokens[i+4].Value, "#")
+	return (strings.EqualFold(tokens[i+2].Value, "variables") || strings.EqualFold(tokens[i+2].Value, "this")) && i+4 < len(tokens) && tokens[i+4].Kind == parser.TokString && !strings.Contains(tokens[i+4].Value, "#")
 }
 
 type producerTag struct{ name, body string }
