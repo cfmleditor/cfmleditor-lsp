@@ -147,3 +147,36 @@ func TestAClosureWithholdsOnlyTheMembersItCanWrite(t *testing.T) {
 		})
 	}
 }
+
+// Member refs come out in the order the members are first written. They were
+// emitted by ranging over a map, so a function's refs came out in a different
+// order on each parse of the same text.
+func TestMemberRefsAreInSourceOrder(t *testing.T) {
+	var writes, want []string
+
+	for i := range 12 {
+		name := "rc.m" + string(rune('a'+(i*7)%12))
+		writes = append(writes, name+"=new models.Scope();")
+		want = append(want, name)
+	}
+
+	source := "component {\n function run(rc) {\n" + strings.Join(writes, "\n") + "\n }\n}"
+
+	for range 20 {
+		pr := ParseWithOptions(testURI, source, &ParseOptions{FuncLookup: func(string, string) string { return "" }, ExtractCalls: true})
+
+		var got []string
+
+		for _, s := range pr.Scopes {
+			for _, ref := range pr.FuncComponentRefs(s.Start, s.End) {
+				if strings.HasPrefix(ref.Variable, "rc.m") {
+					got = append(got, ref.Variable)
+				}
+			}
+		}
+
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Fatalf("member refs %v, want them in source order %v", got, want)
+		}
+	}
+}

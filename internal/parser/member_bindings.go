@@ -1,6 +1,9 @@
 package parser
 
 import (
+	"cmp"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
@@ -112,7 +115,13 @@ func (pr *ParseResult) applyMemberBindings(hasBindings bool) {
 
 	components := pr.settleMemberDependencies(nodes, dependencies)
 
-	for identity := range nodes {
+	// In the order the members are first written. Ranging over nodes put a
+	// function's refs in a different order on every parse of the same text.
+	order := slices.SortedFunc(maps.Keys(nodes), func(a, b string) int {
+		return cmp.Or(cmp.Compare(identities[a].offset, identities[b].offset), strings.Compare(a, b))
+	})
+
+	for _, identity := range order {
 		w := identities[identity]
 		name, scope, _ := MemberReceiverName(w.target)
 		component := components[identity]
