@@ -118,6 +118,7 @@ func (r *Resolver) wheelsViewHelpers(file string) []string {
 	slash := filepath.ToSlash(file)
 	if before, after, ok := strings.CutLast(slash, "/views/"); ok && strings.EqualFold(filepath.Ext(file), ".cfm") {
 		views = filepath.FromSlash(before + "/views")
+
 		if dir := filepath.ToSlash(filepath.Dir(after)); dir != "." {
 			folder = dir
 		}

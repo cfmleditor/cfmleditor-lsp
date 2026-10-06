@@ -137,7 +137,7 @@ func TestAStubReturnsAnotherFrameworksDocumentedClass(t *testing.T) {
 	}
 
 	service := filepath.Join(root, "BaseORMService.cfc")
-	if err := os.WriteFile(service, []byte(`component {
+	source := `component {
 	/**
 	 * @deprecated Use getObjectPopulator()
 	 */
@@ -160,7 +160,9 @@ func TestAStubReturnsAnotherFrameworksDocumentedClass(t *testing.T) {
 	function getMissing(){
 		return variables.missing;
 	}
-}`), 0o600); err != nil {
+}`
+
+	if err := os.WriteFile(service, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

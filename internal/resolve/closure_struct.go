@@ -150,6 +150,7 @@ func returnKind(tokens []parser.Token, from, end int, pr *parser.ParseResult) re
 			if depth == 0 && question >= 0 && colon < 0 {
 				colon = stop
 			}
+		default:
 		}
 
 		if depth == 0 && tokens[stop].Kind == parser.TokSemicolon {
@@ -263,6 +264,7 @@ func matchingBrace(tokens []parser.Token, open int) int {
 			if depth == 0 {
 				return i
 			}
+		default:
 		}
 	}
 
@@ -319,6 +321,7 @@ func closureBody(tokens []parser.Token, i int) bool {
 			if depth == 0 {
 				return j > 0 && tokens[j-1].Kind == parser.TokIdent && strings.EqualFold(tokens[j-1].Value, "function")
 			}
+		default:
 		}
 	}
 
@@ -408,6 +411,7 @@ func skipGroup(tokens []parser.Token, i int) int {
 			if depth == 0 {
 				return j
 			}
+		default:
 		}
 	}
 

@@ -2779,6 +2779,7 @@ func (p *scriptParser) readNewComponent() string {
 			if p.skipInlineComponentAttrs() {
 				return "$any"
 			}
+		default:
 		}
 	}
 

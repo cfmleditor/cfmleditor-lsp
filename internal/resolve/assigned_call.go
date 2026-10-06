@@ -247,6 +247,7 @@ func inlineStructArg(content, name string, start, line int) string {
 
 				set(tokens[i].Value, value)
 			}
+		default:
 		}
 	}
 
