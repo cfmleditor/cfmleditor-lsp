@@ -6,8 +6,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 |---|---:|---:|---:|---:|---:|---:|
 | variable | 1061 | 55 | 32 | 111 | 863 | 635 |
 | return-type | 17 | 0 | 3 | 2 | 12 | 12 |
-| method | 355 | 0 | 106 | 75 | 174 | 167 |
-| object | 74 | 0 | 3 | 12 | 59 | 38 |
+| method | 303 | 0 | 80 | 57 | 166 | 161 |
+| object | 72 | 0 | 3 | 12 | 57 | 38 |
 
 ## Variable definitions — a receiver whose component is unknown
 
@@ -657,27 +657,19 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 11 | `tojson` | 0 | none |  | `test/_testFilter.cfc:108` no qualifier, not in file |
 | 9 | `categorizeversions` | 1 | medium | declares categorizeVersions | `test/tickets/LDEV6068.cfc:314` not found in extends chain |
 | 9 | `mongodbconnect` | 0 | none |  | `test/_setupTestServices.cfc:320` no qualifier, not in file |
-| 7 | `getmyarray` | 1 | medium | declares getMyArray | `test/tickets/LDEV801.cfc:20` method 'getMyArray' not found in component |
 | 6 | `isstableversion` | 1 | medium | declares isStableVersion | `test/tickets/LDEV6068.cfc:11` not found in extends chain |
 | 6 | `mongodbid` | 0 | none |  | `test/a_debug_build/_MongoDB.cfc:125` not found in extends chain |
-| 5 | `getdata` | 13 | low | declares getData; beside the calling file (13 candidates) | `test/tickets/LDEV1221/test1.cfm:6` no qualifier, not in file |
-| 5 | `getpara` | 1 | medium | declares getPara; beside the calling file | `test/tickets/LDEV5610.cfc:29` method 'getPara' not found in component |
 | 5 | `typeof` | 1 | none |  | `test/tickets/LDEV6377_regression.cfm:17` no qualifier, not in file |
 | 4 | `action` | 1 | medium | declares action | `core/src/main/cfml/context/admin/plugin/DDNS/overview.cfm:4` no qualifier, not in file |
-| 4 | `getid` | 96 | low | declares getId (96 candidates) | `test/tickets/LDEV801.cfc:57` method 'getId' not found in component |
-| 4 | `getluceerocks` | 1 | medium | declares getLuceeRocks | `test/tickets/LDEV801.cfc:60` method 'getLuceeRocks' not found in component |
+| 4 | `getdata` | 13 | low | declares getData; beside the calling file (13 candidates) | `test/tickets/LDEV1221/test1.cfm:6` no qualifier, not in file |
 | 4 | `getred` | 3 | low | declares getRed (3 candidates) | `test/tickets/LDEV0554.cfc:27` not found in extends chain |
 | 4 | `luceeaihas` | 0 | none |  | `core/src/main/cfml/context/debug/modern/error.cfm:5` no qualifier, not in file |
 | 3 | `cf_dollar` | 0 | none |  | `test/tickets/LDEV3689.cfc:68` not found in extends chain |
 | 3 | `elseif` | 0 | none |  | `core/src/main/java/resource/component/org/lucee/cfml/Query.cfc:77` not found in extends chain |
-| 3 | `getclassname` | 3 | low | declares getClassName; beside the calling file (3 candidates) | `test/tickets/LDEV6250.cfc:19` method 'getClassName' not found in component |
 | 3 | `getupdateformajorversion` | 1 | medium | declares getUpdateForMajorVersion | `test/tickets/LDEV6068.cfc:93` not found in extends chain |
-| 3 | `getuser` | 1 | medium | declares getUser | `test/tickets/LDEV5816.cfc:39` method 'getUser' not found in component |
-| 3 | `getversion` | 4 | low | declares getVersion; beside the calling file (3 candidates) | `test/tickets/LDEV5601.cfc:48` method 'getVersion' not found in component |
 | 3 | `luceeaigetmetadata` | 0 | none |  | `core/src/main/cfml/context/debug/modern/error.cfm:44` no qualifier, not in file |
 | 3 | `toosgiversion` | 1 | medium | declares toOSGiVersion | `test/tickets/LDEV6069.cfc:14` not found in extends chain |
 | 2 | `a` | 5 | low | declares a; beside the calling file (5 candidates) | `test/general/SafeNavigator.cfc:6` not found in extends chain |
-| 2 | `expect` | 1 | none |  | `test/tickets/LDEV4694.cfc:18` no qualifier, not in file |
 | 2 | `getmessage` | 1 | medium | declares getMessage | `test/tickets/LDEV1962.cfc:28` method 'getMessage' not found in LDEV1962.component2 |
 | 2 | `getmessage2` | 1 | medium | declares getMessage2 | `test/tickets/LDEV1962.cfc:33` method 'getMessage2' not found in LDEV1962.component2 |
 | 2 | `getmode` | 0 | none |  | `test/functions/FileOpen.cfc:10` method 'getMode' not found on builtin fileopen |
@@ -685,7 +677,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `getsize` | 0 | none |  | `test/functions/FileOpen.cfc:57` method 'getSize' not found on builtin fileopen |
 | 2 | `getsql` | 0 | none |  | `test/tickets/LDEV3863.cfc:12` method 'getSql' not found on builtin queryexecute |
 | 2 | `getstatus` | 1 | medium | declares getStatus | `test/functions/FileOpen.cfc:11` method 'getStatus' not found on builtin fileopen |
-| 2 | `gettika` | 3 | low | declares getTika; beside the calling file (3 candidates) | `test/tickets/LDEV5600.cfc:38` method 'getTika' not found in component |
 | 2 | `luceeinquiryaisession` | 0 | none |  | `core/src/main/cfml/context/debug/modern/error.cfm:55` no qualifier, not in file |
 | 2 | `mixin` | 0 | none |  | `test/tickets/LDEV3473/test.cfm:7` method 'mixin' not found in User |
 | 2 | `notexisting` | 0 | none |  | `test/tickets/LDEV1201.cfc:70` not found in extends chain |
@@ -709,52 +700,34 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `cf_mytag` | 0 | none |  | `test/tickets/LDEV3722.cfc:8` not found in extends chain |
 | 1 | `cf_redden` | 0 | none |  | `test/tickets/LDEV1276/test.cfm:6` no qualifier, not in file |
 | 1 | `closure` | 0 | none |  | `test/jira/Jira2902/AbsAbs.cfc:25` no qualifier, not in file |
-| 1 | `constructor` | 2 | low | declares constructor; beside the calling file (2 candidates) | `test/tickets/LDEV0296/child.cfc:10` super used but no extends |
 | 1 | `container` | 4 | low | declares container; beside the calling file (4 candidates) | `test/tickets/LDEV0285/App4.cfc:6` no qualifier, not in file |
 | 1 | `createid` | 1 | medium | declares createId | `core/src/main/cfml/context/admin/ext.applications.upload.cfm:159` no qualifier, not in file |
 | 1 | `current` | 0 | none |  | `test/tickets/LDEV5632.cfc:50` not found in extends chain |
-| 1 | `describe` | 2 | medium | declares describe | `test/tickets/LDEV4694.cfc:16` no qualifier, not in file |
 | 1 | `elemnew` | 0 | none |  | `test/tickets/LDEV2936.cfc:15` method 'elemNew' not found on builtin xmlnew |
 | 1 | `emoji_test` | 0 | none |  | `test/datasource/MySQL.cfc:73` not found in extends chain |
 | 1 | `foo` | 12 | low | declares foo; beside the calling file (12 candidates) | `test/tickets/LDEV0441.cfc:16` not found in extends chain |
-| 1 | `getage` | 4 | low | declares getAge (4 candidates) | `test/tickets/LDEV5816.cfc:41` method 'getUser' not found in component (chain to 'getAge') |
-| 1 | `getappclassname` | 1 | medium | declares getAppClassName; beside the calling file | `test/tickets/LDEV6084.cfc:27` method 'getAppClassName' not found in component |
-| 1 | `getarr` | 0 | none |  | `test/tickets/LDEV5816.cfc:31` method 'getArr' not found in component |
 | 1 | `getbase64string` | 0 | none |  | `test/tickets/LDEV5640.cfc:16` method 'getBase64String' not found on builtin imagenew |
 | 1 | `getdatasourcename` | 0 | none |  | `test/tickets/LDEV3070/LDEV3070.cfm:13` method 'getDatasourceName' not found on builtin queryexecute |
 | 1 | `getimagebytes` | 0 | none |  | `test/tickets/LDEV1576/test.cfm:4` method 'getImageBytes' not found on builtin imagenew |
-| 1 | `getinstance` | 6 | low | declares getInstance; beside the calling file (6 candidates) | `test/tickets/LDEV801.cfc:15` method 'getInstance' not found in component |
 | 1 | `getlistener` | 0 | none |  | `core/src/main/cfml/context/gateway/AsynchronousEvents.cfc:66` no qualifier, not in file |
 | 1 | `getmessage2x` | 0 | none |  | `test/tickets/LDEV1962/component2.cfc:17` no qualifier, not in file |
 | 1 | `getmessagex` | 0 | none |  | `test/tickets/LDEV1962/component2.cfc:9` no qualifier, not in file |
-| 1 | `getpddocument` | 1 | medium | declares getPDDocument; beside the calling file | `test/tickets/LDEV5625.cfc:25` method 'getPDDocument' not found in component |
 | 1 | `getproviderdata` | 0 | none |  | `core/src/main/cfml/context/admin/ext.applications.list.cfm:79` no qualifier, not in file |
-| 1 | `getqry` | 0 | none |  | `test/tickets/LDEV5816.cfc:32` method 'getQry' not found in component |
-| 1 | `getst` | 0 | none |  | `test/tickets/LDEV5816.cfc:30` method 'getSt' not found in component |
 | 1 | `getstr` | 1 | medium | declares getStr; beside the calling file | `test/tickets/LDEV4156.cfc:15` method 'getStr' not found in Component |
-| 1 | `getusername` | 6 | low | declares getUserName (6 candidates) | `test/tickets/LDEV5816.cfc:40` method 'getUser' not found in component (chain to 'getUsername') |
 | 1 | `invokestatic` | 0 | none |  | `test/tickets/_LDEV1706.cfc:23` not found in extends chain |
 | 1 | `isstring` | 0 | none |  | `test/tickets/LDEV6377_regression.cfm:82` no qualifier, not in file |
-| 1 | `it` | 2 | medium | declares it | `test/tickets/LDEV4694.cfc:17` no qualifier, not in file |
 | 1 | `listener[]` | 0 | none |  | `core/src/main/cfml/context/gateway/MailWatcher.cfc:56` no qualifier, not in file |
 | 1 | `ljklkju` | 0 | none |  | `test/general/Elvis.cfc:60` not found in extends chain |
 | 1 | `loadprovidersdata` | 0 | none |  | `core/src/main/cfml/context/admin/ext.applications.upload.cfm:140` no qualifier, not in file |
-| 1 | `methodwhichcallsecho` | 1 | medium | declares methodWhichCallsEcho; beside the calling file | `test/tickets/LDEV5792/ldev5792_echo_only.cfm:10` method 'methodWhichCallsEcho' not found in component |
-| 1 | `methodwhichcallswritedump` | 2 | low | declares methodWhichCallsWriteDump; beside the calling file (2 candidates) | `test/tickets/LDEV5792/ldev5792_simple.cfm:12` method 'methodWhichCallsWriteDump' not found in component |
 | 1 | `myfunc` | 1 | medium | declares myFunc | `test/tickets/LDEV1995/test.cfm:1` no qualifier, not in file |
 | 1 | `myfunc2` | 1 | medium | declares myFunc2 | `test/tickets/LDEV1995/test.cfm:1` no qualifier, not in file |
 | 1 | `nonexistentmethod` | 0 | none |  | `test/tickets/LDEV6055/Child.cfc:4` not found in parent component |
 | 1 | `oncomplete` | 0 | none |  | `test/tickets/LDEV2213/test.cfm:5` no qualifier, not in file |
-| 1 | `outer` | 1 | medium | declares outer; beside the calling file | `test/tickets/LDEV5792/ldev5792_nested_call.cfm:17` method 'outer' not found in component |
 | 1 | `reportservicefailed` | 1 | medium | declares reportServiceFailed; beside the calling file | `test/run-tests.cfm:617` no qualifier, not in file |
 | 1 | `returnsany` | 2 | low | declares returnsAny (2 candidates) | `test/tickets/_LDEV1835.cfc:6` method 'returnsany' not found in LDEV1835.Comp |
 | 1 | `rluceemonoblock` | 0 | none |  | `core/src/main/cfml/context/templates/error/error.cfm:252` no qualifier, not in file |
 | 1 | `setentityid` | 7 | low | declares setEntityId (7 candidates) | `test/tickets/LDEV0405/index.cfm:25` method 'setEntityId' not found in Comp |
 | 1 | `setentitytypeid` | 7 | low | declares setEntityTypeId (7 candidates) | `test/tickets/LDEV0405/index.cfm:26` method 'setEntityTypeId' not found in Comp |
-| 1 | `setmyarray` | 1 | medium | declares setMyArray | `test/tickets/LDEV801.cfc:24` method 'setMyArray' not found in component |
-| 1 | `setnumid` | 0 | none |  | `test/tickets/LDEV5610.cfc:29` method 'getPara' not found in component (chain to 'setNumID') |
-| 1 | `setspacingafter` | 0 | none |  | `test/tickets/LDEV5610.cfc:35` method 'getPara' not found in component (chain to 'setSpacingAfter') |
-| 1 | `setspacingbetween` | 0 | none |  | `test/tickets/LDEV5610.cfc:41` method 'getPara' not found in component (chain to 'setSpacingBetween') |
 | 1 | `setunitid` | 7 | low | declares setUnitId (7 candidates) | `test/tickets/LDEV0405/index.cfm:24` method 'setUnitId' not found in Comp |
 | 1 | `setyear` | 0 | none |  | `test/tickets/LDEV1041.cfc:41` not found in extends chain |
 | 1 | `sleeo` | 0 | none |  | `test/tickets/LDEV4967.cfc:11` not found in extends chain |
@@ -769,7 +742,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `toversionsortable` — 38 finding(s), 2 candidate(s):
   - low `core/src/main/cfml/context/admin/Jira.cfc:933` — declares toVersionSortable
   - low `core/src/main/cfml/context/admin/ext.functions.cfm:645` — declares toVersionSortable
-- `getdata` — 5 finding(s), 13 candidate(s):
+- `getdata` — 4 finding(s), 13 candidate(s):
   - low `test/tickets/LDEV1221/static.cfc:10` — declares getData; beside the calling file
   - low `test/tickets/LDEV0835/A.cfc:7` — declares getData
   - low `test/tickets/LDEV0835/B.cfc:6` — declares getData
@@ -779,46 +752,21 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `core/src/main/java/resource/context/admin/aidriver/Field.cfc:51` — declares getData
   - low `core/src/main/java/resource/context/admin/cdriver/Field.cfc:51` — declares getData
   - … 5 more
-- `getid` — 4 finding(s), 96 candidate(s):
-  - low `test/tickets/LDEV0078/Test.cfc:3` — declares getId
-  - low `test/tickets/LDEV0087/Entity.cfc:2` — declares getID
-  - low `test/tickets/LDEV0096/Entity.cfc:3` — declares getID
-  - low `test/tickets/LDEV0374/users.cfc:2` — declares getId
-  - low `test/tickets/LDEV0421/test.cfc:2` — declares getId
-  - low `test/tickets/LDEV0423/BasketEntity.cfc:2` — declares getId
-  - low `test/tickets/LDEV0423/FruitEntity.cfc:2` — declares getId
-  - low `test/tickets/LDEV0490/haspersistent.cfc:3` — declares getID
-  - … 88 more
 - `getred` — 4 finding(s), 3 candidate(s):
   - low `test/tickets/LDEV0554/Color.cfc:33` — declares getRed
   - low `test/tickets/LDEV0554/Color3.cfc:31` — declares getRed
   - low `test/tickets/LDEV0554/Color4.cfc:28` — declares getRed
-- `getclassname` — 3 finding(s), 3 candidate(s):
-  - low `test/tickets/LDEV6250.cfc:15` — declares getClassName; beside the calling file
-  - low `test/tickets/LDEV6250.cfc:26` — declares getClassName; beside the calling file
-  - low `test/tickets/LDEV6251.cfc:11` — declares getClassName; beside the calling file
-- `getversion` — 3 finding(s), 3 candidate(s):
-  - low `test/tickets/LDEV5601.cfc:43` — declares getVersion; beside the calling file
-  - low `test/tickets/LDEV5601.cfc:59` — declares getVersion; beside the calling file
-  - low `test/tickets/LDEV5601.cfc:72` — declares getVersion; beside the calling file
 - `a` — 2 finding(s), 5 candidate(s):
   - low `test/general/InlineComponent.cfc:29` — declares a; beside the calling file
   - low `test/general/subComponent/TestSubScript.cfc:6` — declares a
   - low `test/functions/_SerializeJSON2.cfc:220` — declares a
   - low `test/jira/Jira1460.cfc:83` — declares a
   - low `test/jira/Jira2726.cfc:34` — declares a
-- `gettika` — 2 finding(s), 3 candidate(s):
-  - low `test/tickets/LDEV5600.cfc:33` — declares getTika; beside the calling file
-  - low `test/tickets/LDEV5708.cfc:39` — declares getTika; beside the calling file
-  - low `test/tickets/LDEV5708.cfc:45` — declares getTika; beside the calling file
 - `valueequals` — 2 finding(s), 4 candidate(s):
   - low `test/functions/DateConvert.cfc:36` — declares valueEquals; beside the calling file
   - low `test/functions/Decrypt.cfc:34` — declares valueEquals; beside the calling file
   - low `test/functions/DeleteClientVariable.cfc:44` — declares valueEquals; beside the calling file
   - low `test/functions/EncodeForCSS.cfc:35` — declares valueEquals; beside the calling file
-- `constructor` — 1 finding(s), 2 candidate(s):
-  - low `test/tickets/LDEV0296/child.cfc:9` — declares constructor; beside the calling file
-  - low `test/tickets/LDEV0296/parent.cfc:4` — declares constructor; beside the calling file
 - `container` — 1 finding(s), 4 candidate(s):
   - low `test/tickets/LDEV0285/App1.cfc:8` — declares container; beside the calling file
   - low `test/tickets/LDEV0285/App2.cfc:8` — declares container; beside the calling file
@@ -834,28 +782,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `test/tickets/LDEV2390/Test.cfc:6` — declares foo
   - low `test/tickets/LDEV3184/LDEV3184.cfc:3` — declares foo
   - … 4 more
-- `getage` — 1 finding(s), 4 candidate(s):
-  - low `test/tickets/LDEV5324/student.cfc:4` — declares getAge
-  - low `test/tickets/LDEV5816/User.cfc:11` — declares getAge
-  - low `test/tickets/LDEV3652_1/objects/objectComponent.cfc:4` — declares getAge
-  - low `test/tickets/LDEV3652_2/objects/objectComponent.cfc:4` — declares getAge
-- `getinstance` — 1 finding(s), 6 candidate(s):
-  - low `test/tickets/LDEV801.cfc:10` — declares getInstance; beside the calling file
-  - low `test/tickets/LDEV801.cfc:48` — declares getInstance; beside the calling file
-  - low `test/tickets/LDEV801.cfc:74` — declares getInstance; beside the calling file
-  - low `test/tickets/LDEV3604/child.cfc:7` — declares getInstance
-  - low `test/tickets/LDEV801/ComponentWithComplexDefaultProperty.cfc:3` — declares getInstance
-  - low `test/tickets/LDEV801/ComponentWithSimpleDefaultProperties.cfc:5` — declares getInstance
-- `getusername` — 1 finding(s), 6 candidate(s):
-  - low `test/tickets/LDEV1102/test.cfc:4` — declares getUserName
-  - low `test/tickets/LDEV1102/test1.cfc:3` — declares getUserName
-  - low `test/tickets/LDEV1102/test2.cfc:4` — declares getUserName
-  - low `test/tickets/LDEV1428/ActiveUser.cfc:5` — declares getUserName
-  - low `test/tickets/LDEV5816/User.cfc:10` — declares getUsername
-  - low `test/tickets/LDEV5930/SessionComponent.cfc:3` — declares getUsername
-- `methodwhichcallswritedump` — 1 finding(s), 2 candidate(s):
-  - low `test/tickets/LDEV5792/ldev5792_safe_variable.cfm:4` — declares methodWhichCallsWriteDump; beside the calling file
-  - low `test/tickets/LDEV5792/ldev5792_simple.cfm:5` — declares methodWhichCallsWriteDump; beside the calling file
 - `returnsany` — 1 finding(s), 2 candidate(s):
   - low `test/tickets/LDEV1812/ReturnsString.cfc:3` — declares returnsAny
   - low `test/tickets/LDEV1835/interface.cfc:2` — declares returnsany
@@ -910,8 +836,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `chained on 'a', which is not found (calling 'c')` | 5 | none |  | `test/general/SafeNavigator.cfc:11` chained on 'a', which is not found (calling 'c') |
 | 1 | `chained on 'a', which is not found (calling 'd')` | 2 | none |  | `test/general/SafeNavigator.cfc:11` chained on 'a', which is not found (calling 'd') |
 | 1 | `chained on 'authority', which is not found (calling 'build')` | 3 | none |  | `test/tickets/LDEV6084.cfc:17` chained on 'authority', which is not found (calling 'build') |
-| 1 | `chained on 'expect', which is not found (calling 'toBeFalse')` | 1 | none |  | `test/tickets/LDEV4694.cfc:21` chained on 'expect', which is not found (calling 'toBeFalse') |
-| 1 | `chained on 'expect', which is not found (calling 'toThrow')` | 1 | none |  | `test/tickets/LDEV4694.cfc:18` chained on 'expect', which is not found (calling 'toThrow') |
 | 1 | `chained on 'getListener', which is not found (calling 'onIncomingMessage')` | 1 | none |  | `core/src/main/cfml/context/gateway/AsynchronousEvents.cfc:66` chained on 'getListener', which is not found (calling 'onIncomingMessage') |
 | 1 | `chained on 'susi', which is not found (calling 'sorglos')` | 0 | none |  | `test/tickets/LDEV4826.cfc:54` chained on 'susi', which is not found (calling 'sorglos') |
 | 1 | `component 'ArchiveGreeter' does not exist (calling 'greet')` | 0 | none |  | `test/general/archives/componentPaths/index.cfm:2` component 'ArchiveGreeter' does not exist (calling 'greet') |

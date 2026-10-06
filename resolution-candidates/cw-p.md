@@ -4,17 +4,15 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 1995 | 555 | 331 | 609 | 500 | 306 |
-| return-type | 154 | 18 | 43 | 75 | 18 | 16 |
-| method | 351 | 0 | 216 | 100 | 35 | 32 |
+| variable | 1800 | 392 | 305 | 603 | 500 | 306 |
+| return-type | 148 | 18 | 43 | 74 | 13 | 11 |
+| method | 210 | 0 | 100 | 75 | 35 | 32 |
 | object | 218 | 0 | 1 | 2 | 215 | 3 |
 
 ## Variable definitions — a receiver whose component is unknown
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 94 | `pluginobj → vendor/wheels/Plugins.cfc` | 1 | high | declares getPlugins(), getMixins(), getMethodProviders(), getMixinCollisions(), getPluginMeta(), $invokeOnPluginActivate() | `vendor/wheels/tests/specs/hardener/PluginsHardenerShouldSpec.cfc:161` variable 'pluginObj' has no component ref |
-| 85 | `d → vendor/wheels/Dispatch.cfc` | 1 | medium | declares $findMatchingRoute() | `vendor/wheels/tests/specs/dispatch/RoutePrecedenceSpec.cfc:49` variable 'd' has no component ref |
 | 66 | `variables.helpers → cli/lucli/services/Helpers.cfc` | 7 | low | declares pluralize(), capitalize(); named like the receiver 'helpers' (3 candidates) | `cli/lucli/services/Admin.cfc:31` variable 'variables.helpers' has no component ref |
 | 55 | `application.wheels.engineadapter → vendor/wheels/engineAdapters/Base.cfc` | 2 | low | declares parseFormKey() (2 candidates) | `vendor/wheels/Dispatch.cfc:150` variable 'application.wheels.engineAdapter' has no component ref |
 | 53 | `details → cli/src/models/DetailOutputService.cfc` | 1 | high | declares header(), skip() | `cli/src/commands/wheels/generate/app-wizard.cfc:109` variable 'details' has no component ref |
@@ -37,7 +35,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 18 | `role → cli/lucli/services/deploy/config/Role.cfc` | 9 | medium | declares name(), hosts(); named like the receiver 'role' (2 candidates) | `cli/lucli/services/deploy/cli/DeployAppCli.cfc:143` variable 'role' has no component ref |
 | 17 | `arguments.accessory → cli/lucli/services/deploy/config/Accessory.cfc` | 1 | high | declares containerName(), image(), cmd(); named like the receiver 'accessory' | `cli/lucli/services/deploy/commands/AccessoryCommands.cfc:21` variable 'arguments.accessory' has no component ref |
 | 17 | `ssh → cli/lucli/services/TestRunner.cfc` | 706 | low | declares run() (702 candidates) | `cli/lucli/services/deploy/cli/DeployAccessoryCli.cfc:119` variable 'ssh' has no component ref |
-| 16 | `_dispatch → vendor/wheels/Dispatch.cfc` | 1 | high | declares $resolveRouteModelBinding(); named like the receiver 'dispatch' | `vendor/wheels/tests/specs/dispatch/routeModelBindingSpec.cfc:49` variable '_dispatch' has no component ref |
 | 16 | `binder → vendor/wheels/Injector.cfc` | 4 | low | declares to() (4 candidates) | `cli/src/ModuleConfig.cfc:44` variable 'binder' has no component ref |
 | 16 | `object` | 1 | none |  | `vendor/wheels/tests/specs/internal/model/validationsSpec.cfc:21` variable 'object' has no component ref |
 | 15 | `application.wheelsdi → vendor/wheels/Injector.cfc` | 3 | low | declares getInstance() (2 candidates) | `vendor/wheels/Test.cfc:546` variable 'application.wheelsdi' has no component ref |
@@ -1126,8 +1123,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 4 | `method 'getUtility' has no component return type → vendor/wheels/wheelstest/system/util/Util.cfc` | 2 | medium | declares getAnnotatedMethods() | `vendor/wheels/wheelstest/system/BaseSpec.cfc:1171` method 'getUtility' has no component return type (chain to 'getAnnotatedMethods') |
 | 3 | `method '$engineCapabilities' in wheels.wheelstest.BrowserLauncher has no component return type → vendor/wheels/wheelstest/EngineCapabilities.cfc` | 1 | medium | declares hasJvmClassLoading() | `vendor/wheels/tests/specs/wheelstest/BrowserIntegrationSpec.cfc:10` method '$engineCapabilities' in wheels.wheelstest.BrowserLauncher has no component return type (chain to 'hasJvmClassLoading') |
 | 3 | `method 'getJavaSystem' has no component return type → vendor/wheels/wheelstest/system/BaseSpec.cfc` | 2 | high | declares getProperty(), getEnv() | `vendor/wheels/wheelstest/system/util/Env.cfc:15` method 'getJavaSystem' has no component return type (chain to 'getProperty') |
-| 3 | `method 'getPageContextResponse' has no component return type` | 0 | none |  | `vendor/wheels/wheelstest/system/reports/ANTJUnitReporter.cfc:34` method 'getPageContextResponse' has no component return type (chain to 'setContentType') |
-| 2 | `method 'getResponse' has no component return type` | 0 | none |  | `vendor/wheels/engineAdapters/Base.cfc:105` method 'getResponse' has no component return type (chain to 'getWriter') |
 | 2 | `method 'getService' has no component return type → cli/lucli/services/PortProbe.cfc` | 1 | medium | declares portInUse() | `cli/lucli/Module.cfc:1608` method 'getService' has no component return type (chain to 'portInUse') |
 | 2 | `method 'model' has no component return type` | 1 | none |  | `vendor/wheels/model/onmissingmethod.cfm:358` method 'model' has no component return type (chain to '$expandedAssociations') |
 | 1 | `method '$classData' in author has no component return type → vendor/wheels/databaseAdapters/Base.cfc` | 6 | low | declares $supportsAdvisoryLocks() (6 candidates) | `vendor/wheels/tests/specs/model/lockingSpec.cfc:20` method '$classData' in author has no component return type (chain to '$supportsAdvisoryLocks') |
@@ -1140,7 +1135,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `method 'getClassLoader' in wheels.wheelstest.BrowserLauncher has no component return type → cli/lucli/services/deploy/lib/JarLoader.cfc` | 1 | medium | declares loadClass() | `vendor/wheels/tests/specs/wheelstest/BrowserLauncherSpec.cfc:134` method 'getClassLoader' in wheels.wheelstest.BrowserLauncher has no component return type (chain to 'loadClass') |
 | 1 | `method 'getJavaSystem' has no component return type → vendor/wheels/wheelstest/system/util/Env.cfc` | 7 | low | declares getEnv() (4 candidates) | `vendor/wheels/wheelstest/system/util/Env.cfc:68` method 'getJavaSystem' has no component return type (chain to 'getEnv') |
 | 1 | `method 'getLauncher' in wheels.wheelstest.BrowserClient has no component return type → vendor/wheels/tests/_assets/dispatch/InvokeMethodFixture.cfc` | 2 | low | declares getState() (2 candidates) | `vendor/wheels/tests/specs/wheelstest/BrowserIntegrationSpec.cfc:99` method 'getLauncher' in wheels.wheelstest.BrowserClient has no component return type (chain to 'getState') |
-| 1 | `method 'getPageContextResponse' has no component return type → cli/lucli/services/deploy/lib/FakeSshPool.cfc` | 3 | low | declares reset() (2 candidates) | `vendor/wheels/wheelstest/system/reports/BaseReporter.cfc:58` method 'getPageContextResponse' has no component return type (chain to 'reset') |
 | 1 | `method 'getService' has no component return type → cli/lucli/services/ServerRegistry.cfc` | 1 | medium | declares ownServerPort() | `cli/lucli/Module.cfc:9732` method 'getService' has no component return type (chain to 'ownServerPort') |
 | 1 | `method 'getUtility' has no component return type → vendor/wheels/wheelstest/system/util/MixerUtil.cfc` | 10 | medium | declares start(); named like the receiver 'MixerUtil' (9 candidates) | `vendor/wheels/wheelstest/system/BaseSpec.cfc:1576` method 'getUtility' has no component return type (chain to 'start') |
 | 1 | `method 'model' has no component return type → vendor/wheels/Model.cfc` | 1 | high | declares $classData(); named like the receiver 'model' | `vendor/wheels/Seeder.cfc:456` method 'model' has no component return type (chain to '$classData') |
@@ -1189,9 +1183,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `method 'getLauncher' in wheels.wheelstest.BrowserClient has no component return type → vendor/wheels/tests/_assets/dispatch/InvokeMethodFixture.cfc` — 1 finding(s), 2 candidate(s):
   - low `vendor/wheels/tests/_assets/dispatch/InvokeMethodFixture.cfc` — declares getState()
   - low `vendor/wheels/wheelstest/BrowserLauncher.cfc` — declares getState()
-- `method 'getPageContextResponse' has no component return type → cli/lucli/services/deploy/lib/FakeSshPool.cfc` — 1 finding(s), 2 candidate(s):
-  - low `cli/lucli/services/deploy/lib/FakeSshPool.cfc` — declares reset()
-  - low `examples/starter-app/app/controllers/admin/Users.cfc` — declares reset()
 - `method 'getUtility' has no component return type → vendor/wheels/wheelstest/system/util/MixerUtil.cfc` — 1 finding(s), 9 candidate(s):
   - medium `vendor/wheels/wheelstest/system/util/MixerUtil.cfc` — declares start(); named like the receiver 'MixerUtil'
   - low `cli/lucli/Module.cfc` — declares start()
@@ -1212,44 +1203,32 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 57 | `model` | 1 | medium | declares model | `docs/presentations/cfug-2026-09-15/demo-app/seeds-with-comments.cfm:17` no qualifier, not in file |
-| 34 | `e` | 1 | medium | declares e | `examples/starter-app/app/views/accounts/show.cfm:21` not found in extends chain |
-| 20 | `panel` | 1 | medium | declares panel | `examples/starter-app/app/views/accounts/edit.cfm:8` not found in extends chain |
-| 19 | `panelend` | 1 | medium | declares panelEnd | `examples/starter-app/app/views/accounts/edit.cfm:33` not found in extends chain |
-| 18 | `pageheader` | 2 | low | declares pageHeader (2 candidates) | `examples/starter-app/app/views/accounts/edit.cfm:6` not found in extends chain |
-| 13 | `seedonce` | 1 | medium | declares seedOnce | `docs/presentations/cfug-2026-09-15/demo-app/seeds-with-comments.cfm:5` no qualifier, not in file |
+| 49 | `model` | 1 | medium | declares model | `docs/presentations/cfug-2026-09-15/demo-app/seeds-with-comments.cfm:17` no qualifier, not in file |
 | 12 | `flashinsert` | 2 | low | declares flashInsert (2 candidates) | `examples/starter-app/plugins/FlashMessagesBootstrap/index.cfm:6` no qualifier, not in file |
 | 8 | `linkto` | 5 | low | declares linkTo (5 candidates) | `app/snippets/bootstrap/layout.cfm:50` no qualifier, not in file |
 | 7 | `$appkey` | 1 | medium | declares $appKey | `vendor/wheels/Mapper.cfc:259` no qualifier, not in file |
-| 7 | `formatdate` | 1 | medium | declares formatDate | `examples/starter-app/app/views/accounts/show.cfm:30` not found in extends chain |
-| 6 | `card` | 1 | medium | declares card | `examples/starter-app/app/views/admin/users/show.cfm:68` not found in extends chain |
 | 6 | `csrfmetatags` | 1 | medium | declares csrfMetaTags | `app/snippets/bootstrap/layout.cfm:9` no qualifier, not in file |
 | 6 | `flashmessages` | 2 | low | declares flashMessages (2 candidates) | `app/snippets/bootstrap/layout.cfm:55` no qualifier, not in file |
 | 5 | `body` | 0 | none |  | `tools/article-tests/edge-cases.cfm:9` no qualifier, not in file |
-| 5 | `gravatar` | 1 | medium | declares gravatar | `examples/starter-app/app/views/accounts/show.cfm:16` not found in extends chain |
 | 5 | `includecontent` | 2 | low | declares includeContent (2 candidates) | `app/snippets/bootstrap/layout.cfm:57` no qualifier, not in file |
 | 5 | `javascriptincludetag` | 1 | medium | declares javaScriptIncludeTag | `app/snippets/bootstrap/layout.cfm:65` no qualifier, not in file |
 | 4 | `load` | 2 | low | declares load (2 candidates) | `cli/lucli/tests/specs/deploy/cli/DeployRegistryCliSpec.cfc:51` not found in extends chain |
 | 4 | `mapper` | 1 | medium | declares mapper | `cli/lucli/templates/app/config/routes.cfm:7` no qualifier, not in file |
 | 4 | `req` | 0 | none |  | `tools/article-tests/run.cfm:378` no qualifier, not in file |
+| 4 | `seedonce` | 1 | medium | declares seedOnce | `docs/presentations/cfug-2026-09-15/demo-app/seeds-with-comments.cfm:5` no qualifier, not in file |
 | 3 | `isdev` | 1 | medium | declares isDev | `vendor/wheels/tests/specs/buildInfoSpec.cfc:122` not found in extends chain |
 | 3 | `issnapshot` | 1 | medium | declares isSnapshot | `vendor/wheels/tests/specs/buildInfoSpec.cfc:155` not found in extends chain |
 | 3 | `mergescopemiddleware` | 0 | none |  | `tools/article-tests/run.cfm:332` no qualifier, not in file |
 | 3 | `next` | 0 | none |  | `vendor/wheels/tests/_assets/middleware/TestMiddlewareA.cfc:16` no qualifier, not in file |
-| 3 | `property` | 1 | medium | declares property | `vendor/wheels/tests/_assets/models/SampleModel.cfc:5` no qualifier, not in file |
 | 3 | `redirectto` | 2 | low | declares redirectTo (2 candidates) | `tools/vscode-ext/assets/templates/controller.cfc:36` not found in extends chain |
-| 3 | `tickorcross` | 1 | medium | declares tickorcross | `examples/starter-app/app/views/admin/permissions/index.cfm:53` not found in extends chain |
-| 3 | `validatespresenceof` | 2 | low | declares validatesPresenceOf (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:36` no qualifier, not in file |
 | 2 | `adaptername` | 7 | low | declares adapterName (7 candidates) | `vendor/wheels/tests/specs/migrator/MigratorOuterTransactionSpec.cfc:17` not found in extends chain |
 | 2 | `authenticatethis` | 1 | medium | declares authenticateThis | `examples/starter-app/app/models/User.cfc:34` not found in extends chain |
 | 2 | `config` | 164 | low | declares config; beside the calling file (164 candidates) | `vendor/wheels/Controller.cfc:61` not found in extends chain |
-| 2 | `controllerhelperfunction` | 2 | low | declares controllerHelperFunction; beside the calling file (2 candidates) | `vendor/wheels/rocketunit_tests/_assets/views/test/helpercaller.cfm:3` not found in extends chain |
 | 2 | `endformtag` | 2 | low | declares endFormTag (2 candidates) | `tools/vscode-ext/assets/templates/view-edit.cfm:9` no qualifier, not in file |
 | 2 | `env` | 4 | low | declares env (4 candidates) | `cli/lucli/templates/app/config/settings.cfm:26` no qualifier, not in file |
 | 2 | `errormessagesfor` | 1 | medium | declares errorMessagesFor | `tools/vscode-ext/assets/templates/view-edit.cfm:5` no qualifier, not in file |
 | 2 | `getclassmetadata` | 0 | none |  | `vendor/wheels/wheelstest/system/TestBox.cfc:457` no qualifier, not in file |
 | 2 | `getserverinfojson` | 0 | none |  | `cli/src/commands/wheels/benchmark.cfc:156` method 'getServerInfoJSON' not found in ServerService |
-| 2 | `globalhelperfunction` | 2 | low | declares globalHelperFunction (2 candidates) | `vendor/wheels/rocketunit_tests/_assets/views/test/helpercaller.cfm:2` not found in extends chain |
 | 2 | `humanize` | 2 | low | declares humanize (2 candidates) | `cli/src/models/AdminIntrospectionService.cfc:333` method 'humanize' not found in helpers@wheels-cli |
 | 2 | `includepartial` | 4 | low | declares includePartial (4 candidates) | `tools/vscode-ext/assets/templates/view-edit.cfm:7` no qualifier, not in file |
 | 2 | `key` | 4 | low | declares key (3 candidates) | `tools/vscode-ext/assets/templates/controller.cfc:36` not found in extends chain |
@@ -1258,14 +1237,14 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `structvalues` | 0 | none |  | `vendor/wheels/public/mcp/SessionManager.cfc:103` no qualifier, not in file |
 | 2 | `submittag` | 2 | low | declares submitTag (2 candidates) | `tools/vscode-ext/assets/templates/view-edit.cfm:8` no qualifier, not in file |
 | 2 | `urlfor` | 6 | low | declares URLFor (6 candidates) | `vendor/wheels/public/layout/_navigation.cfm:28` no qualifier, not in file |
-| 2 | `validatesconfirmationof` | 2 | low | declares validatesConfirmationOf (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:40` no qualifier, not in file |
+| 2 | `validatespresenceof` | 2 | low | declares validatesPresenceOf (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:36` no qualifier, not in file |
 | 1 | `$$findmatchingroutes` | 1 | medium | declares $$findMatchingRoutes | `vendor/wheels/public/views/routetesterprocess.cfm:7` not found in extends chain |
 | 1 | `$$pluginonlymethod` | 2 | low | declares $$pluginOnlyMethod (2 candidates) | `vendor/wheels/tests/specs/pluginsSpec.cfc:257` method '$$pluginOnlyMethod' not found in Test |
 | 1 | `$componentintegrationplan` | 1 | medium | declares $componentIntegrationPlan | `vendor/wheels/Mapper.cfc:396` no qualifier, not in file |
 | 1 | `$createobjectfromroot` | 1 | medium | declares $createObjectFromRoot | `cli/lucli/services/TestRunner.cfc:64` no qualifier, not in file |
 | 1 | `$dbinfo` | 1 | medium | declares $dbinfo | `vendor/wheels/rocketunit_tests/env.cfm:67` no qualifier, not in file |
 | 1 | `$encodefordisplaytext` | 1 | medium | declares $encodeForDisplayText | `vendor/wheels/events/onrequestend/complexity-panel.cfm:49` no qualifier, not in file |
-| 1 | `$getdbtype` | 1 | medium | declares $getDBType | `vendor/wheels/global/strings.cfm:350` no qualifier, not in file |
+| 1 | `$getdbtype` | 1 | medium | declares $getDBType | `vendor/wheels/global/strings.cfm:350` not found in extends chain |
 | 1 | `$header` | 2 | low | declares $header (2 candidates) | `vendor/wheels/rocketunit_tests/env.cfm:28` no qualifier, not in file |
 | 1 | `$helper01` | 2 | low | declares $helper01 (2 candidates) | `vendor/wheels/tests/specs/pluginsSpec.cfc:207` method '$helper01' not found in Test |
 | 1 | `$resolveinjectedservices` | 1 | medium | declares $resolveInjectedServices | `vendor/wheels/Controller.cfc:118` not found in extends chain |
@@ -1274,7 +1253,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `beforevalidation` | 2 | low | declares beforeValidation (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:41` no qualifier, not in file |
 | 1 | `binarymid` | 0 | none |  | `cli/tests/specs/e2e/ProjectScaffoldTest.cfc:261` not found in extends chain |
 | 1 | `buttonto` | 3 | low | declares buttonTo (3 candidates) | `tools/vscode-ext/assets/templates/view-index.cfm:28` no qualifier, not in file |
-| 1 | `cardend` | 1 | medium | declares cardEnd | `examples/starter-app/app/views/main/index.cfm:23` not found in extends chain |
 | 1 | `columnnames` | 3 | low | declares columnNames (3 candidates) | `vendor/wheels/tests/specs/controller/SuperOverrideSpec.cfc:42` method 'columnNames' not found in superOverride |
 | 1 | `command` | 1 | none |  | `cli/src/models/TestService.cfc:53` no qualifier, not in file |
 | 1 | `controller` | 3 | low | declares controller (3 candidates) | `vendor/wheels/rocketunit_tests/env.cfm:57` no qualifier, not in file |
@@ -1291,24 +1269,20 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `getnoninteractiveflag` | 0 | none |  | `cli/src/commands/wheels/base.cfc:168` method 'getNonInteractiveFlag' not found in commandbox.system.Shell |
 | 1 | `haschanged` | 1 | medium | declares hasChanged | `vendor/wheels/tests/specs/model/callbacksSpec.cfc:554` not found in extends chain |
 | 1 | `isauthenticated` | 1 | medium | declares isAuthenticated | `examples/starter-app/app/events/onrequeststart.cfm:7` no qualifier, not in file |
-| 1 | `logfilebadge` | 1 | medium | declares logFileBadge | `examples/starter-app/app/views/admin/auditlogs/index.cfm:23` not found in extends chain |
 | 1 | `memoprobeinjected` | 0 | none |  | `vendor/wheels/tests/specs/global/promoteIncludedGlobalsMemoSpec.cfc:172` method 'memoProbeInjected' not found in wheels.tests._assets.global.PromoteMemoFixture |
 | 1 | `println` | 2 | medium | declares println | `vendor/wheels/wheelstest/BrowserClient.cfc:417` no qualifier, not in file |
 | 1 | `save` | 2 | low | declares save (2 candidates) | `tools/vscode-ext/assets/templates/controller.cfc:34` not found in extends chain |
 | 1 | `setup` | 17 | low | declares setup (17 candidates) | `vendor/wheels/Test.cfc:323` not found in extends chain |
 | 1 | `supercolumnnames` | 0 | none |  | `vendor/wheels/tests/_assets/models/SuperOverride.cfc:13` not found in extends chain |
-| 1 | `table` | 4 | low | declares table (2 candidates) | `vendor/wheels/tests/_assets/models/SampleModel.cfc:4` no qualifier, not in file |
 | 1 | `teardown` | 13 | low | declares teardown (13 candidates) | `vendor/wheels/Test.cfc:362` not found in extends chain |
 | 1 | `toargv` | 1 | medium | declares toArgv | `cli/lucli/tests/specs/services/ArgSpecSpec.cfc:195` not found in extends chain |
 | 1 | `toconsole` | 1 | none |  | `cli/src/commands/wheels/docker/push.cfc:393` method 'toConsole' not found in DetailOutputService |
+| 1 | `validatesconfirmationof` | 2 | low | declares validatesConfirmationOf (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:40` no qualifier, not in file |
 | 1 | `validatesformatof` | 2 | low | declares validatesFormatOf (2 candidates) | `examples/starter-app/plugins/authenticateThis/authenticateThis.cfc:39` no qualifier, not in file |
 | 1 | `variables[]` | 0 | none |  | `vendor/wheels/Test.cfc:788` not found in extends chain |
 
 <details><summary>Groups with several candidates</summary>
 
-- `pageheader` — 18 finding(s), 2 candidate(s):
-  - low `examples/starter-app/app/views/helpers.cfm:135` — declares pageHeader
-  - low `vendor/wheels/public/helpers.cfm:8` — declares pageHeader
 - `flashinsert` — 12 finding(s), 2 candidate(s):
   - low `vendor/wheels/controller/flash.cfc:69` — declares flashInsert
   - low `vendor/wheels/interfaces/controller/ControllerFlashInterface.cfc:26` — declares flashInsert
@@ -1330,9 +1304,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `redirectto` — 3 finding(s), 2 candidate(s):
   - low `vendor/wheels/controller/redirection.cfc:27` — declares redirectTo
   - low `vendor/wheels/interfaces/controller/ControllerRenderingInterface.cfc:115` — declares redirectTo
-- `validatespresenceof` — 3 finding(s), 2 candidate(s):
-  - low `vendor/wheels/model/validations.cfm:276` — declares validatesPresenceOf
-  - low `vendor/wheels/interfaces/model/ModelValidationInterface.cfc:59` — declares validatesPresenceOf
 - `adaptername` — 2 finding(s), 7 candidate(s):
   - low `vendor/wheels/databaseAdapters/CockroachDB/CockroachDBMigrator.cfc:22` — declares adapterName
   - low `vendor/wheels/databaseAdapters/H2/H2Migrator.cfc:21` — declares adapterName
@@ -1351,9 +1322,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `vendor/wheels/rocketunit_tests/_assets/controllers/CsrfProtectedWithException.cfc:3` — declares config
   - low `vendor/wheels/rocketunit_tests/_assets/controllers/Filtering.cfc:3` — declares config
   - … 156 more
-- `controllerhelperfunction` — 2 finding(s), 2 candidate(s):
-  - low `vendor/wheels/rocketunit_tests/_assets/views/test/helpers.cfm:2` — declares controllerHelperFunction; beside the calling file
-  - low `vendor/wheels/tests/_assets/views/test/helpers.cfm:2` — declares controllerHelperFunction
 - `endformtag` — 2 finding(s), 2 candidate(s):
   - low `vendor/wheels/view/forms.cfc:12` — declares endFormTag
   - low `vendor/wheels/interfaces/view/ViewFormInterface.cfc:60` — declares endFormTag
@@ -1362,9 +1330,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `cli/lucli/services/deploy/config/Config.cfc:38` — declares env
   - low `cli/lucli/services/deploy/config/Role.cfc:25` — declares env
   - low `vendor/wheels/global/settings.cfm:39` — declares env
-- `globalhelperfunction` — 2 finding(s), 2 candidate(s):
-  - low `vendor/wheels/rocketunit_tests/_assets/views/helpers.cfm:2` — declares globalHelperFunction
-  - low `vendor/wheels/tests/_assets/views/helpers.cfm:2` — declares globalHelperFunction
 - `humanize` — 2 finding(s), 2 candidate(s):
   - low `cli/src/commands/wheels/generate/helper.cfc:407` — declares humanize
   - low `vendor/wheels/global/strings.cfm:134` — declares humanize
@@ -1393,9 +1358,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `vendor/wheels/rocketunit_tests/_assets/plugins/runner/runner02/Runner02.cfc:7` — declares URLFor
   - low `vendor/wheels/tests/_assets/plugins/runner/runner01/Runner01.cfc:7` — declares URLFor
   - low `vendor/wheels/tests/_assets/plugins/runner/runner02/Runner02.cfc:7` — declares URLFor
-- `validatesconfirmationof` — 2 finding(s), 2 candidate(s):
-  - low `vendor/wheels/model/validations.cfm:74` — declares validatesConfirmationOf
-  - low `vendor/wheels/interfaces/model/ModelValidationInterface.cfc:221` — declares validatesConfirmationOf
+- `validatespresenceof` — 2 finding(s), 2 candidate(s):
+  - low `vendor/wheels/model/validations.cfm:276` — declares validatesPresenceOf
+  - low `vendor/wheels/interfaces/model/ModelValidationInterface.cfc:59` — declares validatesPresenceOf
 - `$$pluginonlymethod` — 1 finding(s), 2 candidate(s):
   - low `vendor/wheels/tests/_assets/plugins/runner/runner01/Runner01.cfc:17` — declares $$pluginOnlyMethod
   - low `vendor/wheels/rocketunit_tests/_assets/plugins/runner/runner01/Runner01.cfc:17` — declares $$pluginOnlyMethod
@@ -1438,9 +1403,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `examples/starter-app/plugins/authenticateThis/tests/AuthenticateTest.cfc:2` — declares setup
   - low `examples/starter-app/tests/RocketUnit/functions/Auth.cfc:4` — declares setup
   - … 9 more
-- `table` — 1 finding(s), 2 candidate(s):
-  - low `vendor/wheels/model/miscellaneous.cfm:66` — declares table
-  - low `vendor/wheels/interfaces/model/ModelPropertyInterface.cfc:36` — declares table
 - `teardown` — 1 finding(s), 13 candidate(s):
   - low `vendor/wheels/tests/specs/wheelstest/XUnitStyleLegacyTest.cfc:20` — declares teardown
   - low `examples/starter-app/tests/RocketUnit/Test.cfc:45` — declares teardown
@@ -1451,6 +1413,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `examples/starter-app/tests/RocketUnit/requests/Accounts.cfc:7` — declares teardown
   - low `examples/starter-app/tests/RocketUnit/requests/Main.cfc:7` — declares teardown
   - … 5 more
+- `validatesconfirmationof` — 1 finding(s), 2 candidate(s):
+  - low `vendor/wheels/model/validations.cfm:74` — declares validatesConfirmationOf
+  - low `vendor/wheels/interfaces/model/ModelValidationInterface.cfc:221` — declares validatesConfirmationOf
 - `validatesformatof` — 1 finding(s), 2 candidate(s):
   - low `vendor/wheels/model/validations.cfm:129` — declares validatesFormatOf
   - low `vendor/wheels/interfaces/model/ModelValidationInterface.cfc:123` — declares validatesFormatOf

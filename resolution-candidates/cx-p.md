@@ -5,7 +5,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
 | variable | 1016 | 472 | 186 | 98 | 260 | 117 |
-| return-type | 166 | 4 | 54 | 60 | 48 | 41 |
+| return-type | 157 | 4 | 52 | 60 | 41 | 37 |
 | method | 92 | 0 | 47 | 17 | 28 | 20 |
 | object | 51 | 0 | 0 | 5 | 46 | 15 |
 
@@ -607,7 +607,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 17 | `method 'getCacheProvider' has no component return type → system/cache/providers/BoxLangProvider.cfc` | 12 | low | declares getCache() (12 candidates) | `system/cache/providers/stats/BoxLangStats.cfc:29` method 'getCacheProvider' has no component return type (chain to 'getCache') |
 | 14 | `method 'getEventManager' has no component return type → system/FrameworkSupertype.cfc` | 5 | low | declares announce() (5 candidates) | `system/cache/providers/BoxLangProvider.cfc:370` method 'getEventManager' has no component return type (chain to 'announce') |
 | 8 | `method 'getCacheProvider' has no component return type` | 0 | none |  | `system/cache/providers/stats/BoxLangStats.cfc:29` method 'getCacheProvider' has no component return type (chain to 'hitRate') |
-| 7 | `method 'getPageContextResponse' has no component return type` | 1 | none |  | `system/Bootstrap.cfc:349` method 'getPageContextResponse' has no component return type (chain to 'setContentType') |
 | 6 | `method 'getScheduler' has no component return type → system/async/tasks/Scheduler.cfc` | 3 | low | declares beforeAnyTask(), afterAnyTask(), onAnyTaskSuccess(), onAnyTaskError(); named like the receiver 'Scheduler' (3 candidates) | `system/async/tasks/ScheduledTask.cfc:705` method 'getScheduler' has no component return type (chain to 'beforeAnyTask') |
 | 6 | `method 'toLocalDateTime' has no component return type` | 0 | none |  | `system/async/time/DateTimeHelper.cfc:230` method 'toLocalDateTime' has no component return type (chain to 'withHour') |
 | 5 | `method 'getJavaNow' in ScheduledTask has no component return type` | 0 | none |  | `tests/specs/async/tasks/ScheduledTaskSpec.cfc:329` method 'getJavaNow' in ScheduledTask has no component return type (chain to 'getDayOfMonth') |
@@ -623,7 +622,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 3 | `method 'getTaskScheduler' in coldbox.system.logging.LogBox has no component return type → system/async/tasks/ScheduledTask.cfc` | 1 | medium | declares delay() | `system/logging/appenders/RollingFileAppender.cfc:79` method 'getTaskScheduler' in coldbox.system.logging.LogBox has no component return type (chain to 'delay') |
 | 2 | `method 'get' in coldbox.system.async.time.TimeUnit has no component return type → system/async/time/Duration.cfc` | 1 | medium | declares toSeconds() | `system/async/tasks/ScheduledTask.cfc:1557` method 'get' in coldbox.system.async.time.TimeUnit has no component return type (chain to 'toSeconds') |
 | 2 | `method 'getInterceptors' has no component return type` | 0 | none |  | `system/web/context/InterceptorState.cfc:488` method 'getInterceptors' has no component return type (chain to 'entrySet') |
-| 2 | `method 'getPageContextResponse' has no component return type → system/web/context/Response.cfc` | 1 | medium | declares setStatus() | `system/Bootstrap.cfc:731` method 'getPageContextResponse' has no component return type (chain to 'setStatus') |
 | 2 | `method 'getTaskScheduler' in coldbox.system.logging.LogBox has no component return type → system/async/executors/ScheduledExecutor.cfc` | 1 | medium | declares schedule() | `system/logging/AbstractAppender.cfc:319` method 'getTaskScheduler' in coldbox.system.logging.LogBox has no component return type (chain to 'schedule') |
 | 2 | `method 'toInstant' has no component return type` | 0 | none |  | `system/async/time/DateTimeHelper.cfc:93` method 'toInstant' has no component return type (chain to 'atZone') |
 | 2 | `method 'toInstant' has no component return type → system/async/time/DateTimeHelper.cfc` | 1 | medium | declares toLocalDateTime() | `system/async/time/DateTimeHelper.cfc:93` method 'toInstant' has no component return type (chain to 'toLocalDateTime') |

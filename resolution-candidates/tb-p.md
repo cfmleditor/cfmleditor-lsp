@@ -5,8 +5,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
 | variable | 158 | 19 | 39 | 9 | 91 | 67 |
-| return-type | 40 | 5 | 18 | 1 | 16 | 15 |
-| method | 84 | 0 | 68 | 5 | 11 | 11 |
+| return-type | 27 | 5 | 18 | 1 | 3 | 3 |
+| method | 63 | 0 | 48 | 4 | 11 | 11 |
 | object | 10 | 0 | 0 | 0 | 10 | 8 |
 
 ## Variable definitions — a receiver whose component is unknown
@@ -81,7 +81,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 13 | `method 'getPageContextResponse' has no component return type` | 0 | none |  | `system/reports/ANTJUnitReporter.cfc:34` method 'getPageContextResponse' has no component return type (chain to 'setContentType') |
 | 8 | `method 'getConsoleUtil' has no component return type → system/util/ConsoleUtil.cfc` | 2 | medium | declares color(); named like the receiver 'ConsoleUtil' (2 candidates) | `system/reports/BaseReporter.cfc:37` method 'getConsoleUtil' has no component return type (chain to 'color') |
 | 4 | `method 'getUtility' has no component return type → system/util/Util.cfc` | 1 | medium | declares getAnnotatedMethods() | `system/BaseSpec.cfc:1238` method 'getUtility' has no component return type (chain to 'getAnnotatedMethods') |
 | 4 | `method 'withContext' in testbox.system.Expectation has no component return type → system/Expectation.cfc` | 1 | medium | declares toBe() | `tests/specs/BDDTest.cfc:366` method 'withContext' in testbox.system.Expectation has no component return type (chain to 'toBe') |
@@ -112,13 +111,10 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
 | 41 | `getstringname` | 1 | medium | declares getStringName; beside the calling file | `system/Expectation.cfc:421` no qualifier, not in file |
-| 10 | `expect` | 1 | medium | declares expect | `tests/specs/BetweenTests.cfc:6` no qualifier, not in file |
-| 8 | `it` | 1 | medium | declares it | `tests/specs/BetweenTests.cfc:5` no qualifier, not in file |
 | 3 | `assertisfunky` | 1 | medium | declares assertIsFunky | `tests/specs/CustomAssertions.cfc:30` method 'assertIsFunky' not found in testbox.system.Assertion |
-| 3 | `fail` | 4 | low | declares fail (4 candidates) | `tests/resources/CustomAsserts.cfc:4` no qualifier, not in file |
 | 3 | `getclassmetadata` | 0 | none |  | `system/TestBox.cfc:460` no qualifier, not in file |
 | 2 | `assertisawesome` | 1 | medium | declares assertIsAwesome | `tests/specs/CustomAssertions.cfc:26` method 'assertIsAwesome' not found in testbox.system.Assertion |
-| 2 | `describe` | 1 | medium | declares describe | `tests/specs/BetweenTests.cfc:4` no qualifier, not in file |
+| 2 | `fail` | 4 | low | declares fail (4 candidates) | `tests/resources/CustomAsserts.cfc:4` no qualifier, not in file |
 | 1 | `body` | 0 | none |  | `system/Expectation.cfc:48` no qualifier, not in file |
 | 1 | `datanavigate` | 0 | none |  | `system/Assertion.cfc:2242` no qualifier, not in file |
 | 1 | `exposemixin` | 1 | medium | declares exposeMixin | `system/BaseSpec.cfc:1645` method 'exposeMixin' not found in test1 |
@@ -134,7 +130,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 <details><summary>Groups with several candidates</summary>
 
-- `fail` — 3 finding(s), 4 candidate(s):
+- `fail` — 2 finding(s), 4 candidate(s):
   - low `system/Assertion.cfc:15` — declares fail
   - low `system/BaseSpec.cfc:75` — declares fail
   - low `system/Expectation.cfc:60` — declares fail

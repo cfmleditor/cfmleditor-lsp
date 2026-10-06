@@ -4,17 +4,17 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 4561 | 1833 | 851 | 767 | 1110 | 88 |
-| return-type | 637 | 125 | 269 | 235 | 8 | 2 |
-| method | 103 | 0 | 30 | 58 | 15 | 15 |
-| object | 100 | 0 | 0 | 0 | 100 | 12 |
+| variable | 4547 | 1829 | 843 | 765 | 1110 | 88 |
+| return-type | 649 | 130 | 270 | 237 | 12 | 2 |
+| method | 62 | 0 | 12 | 35 | 15 | 15 |
+| object | 89 | 0 | 0 | 0 | 89 | 12 |
 
 ## Variable definitions — a receiver whose component is unknown
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
 | 304 | `arguments.event → core/mura/event.cfc` | 13 | medium | declares getValue(); named like the receiver 'event' (13 candidates) | `core/modules/v1/deprecation/model/handlers/handler.cfc:20` variable 'arguments.event' has no component ref |
-| 183 | `event → core/mura/event.cfc` | 7 | medium | declares getContentRenderer(); named like the receiver 'event' (7 candidates) | `core/modules/v1/comments/index.cfm:188` variable 'event' has no component ref |
+| 181 | `event → core/mura/event.cfc` | 13 | medium | declares getValue(); named like the receiver 'event' (13 candidates) | `core/mura/Handler/standardEventsHandler.cfc:161` variable 'event' has no component ref |
 | 146 | `rc.sitebean` | 1 | none |  | `admin/core/views/csettings/editsite.cfm:75` variable 'rc.siteBean' has no component ref |
 | 144 | `mmrbf → core/mura/resourceBundle/resourceBundle.cfc` | 2 | low | declares getKeyValue() (2 candidates) | `admin/core/utilities/formbuilder/templates/dataset-create.cfm:79` variable 'mmRBF' has no component ref |
 | 139 | `arguments.renderer → core/mura/content/contentRenderer.cfc` | 2 | low | declares renderIcon() (2 candidates) | `core/mura/content/contentRendererUtility.cfc:48` variable 'arguments.renderer' has no component ref |
@@ -70,7 +70,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 20 | `arguments.entity` | 9 | none |  | `core/mura/client/api/json/v1/jsonApiUtility.cfc:2101` variable 'arguments.entity' has no component ref |
 | 19 | `rc.changeset → core/mura/content/changeset/changesetBean.cfc` | 1 | high | declares getPublished(), getIsNew(), getChangesetID(); named like the receiver 'changeset' | `admin/core/views/cchangesets/dsp_secondary_menu.cfm:84` variable 'rc.changeset' has no component ref |
 | 18 | `arguments.event → core/mura/plugin/pluginStandardEventWrapper.cfc` | 1 | medium | declares handle() | `core/mura/Handler/standardEventsHandler.cfc:246` variable 'arguments.event' has no component ref |
-| 18 | `event → core/mura/content/contentBean.cfc` | 7 | medium | declares getNextN(); named like the receiver 'ContentBean' (7 candidates) | `core/modules/v1/gallery/index.cfm:116` variable 'event' has no component ref |
 | 18 | `request.servletevent → core/mura/servletEvent.cfc` | 13 | medium | declares getValue(); named like the receiver 'servletEvent' (13 candidates) | `core/modules/v1/nav/dsp_tag_line.cfm:77` variable 'request.servletEvent' has no component ref |
 | 17 | `arguments.event → core/mura/MasaScope.cfc` | 13 | low | declares getValue(), setValue(), getContentBean() (3 candidates) | `core/mura/Handler/standardEventsHandler.cfc:463` variable 'arguments.event' has no component ref |
 | 17 | `arguments.iterator → core/mura/iterator/queryIterator.cfc` | 1 | high | declares next(), hasPrevious(), hasNext(), getRecordIndex() | `core/modules/v1/collection/includes/dsp_content_list.cfm:145` variable 'arguments.iterator' has no component ref |
@@ -78,6 +77,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 16 | `arguments.renderer` | 3 | none |  | `core/mura/content/contentRendererUtility.cfc:84` variable 'arguments.renderer' has no component ref |
 | 16 | `iterator → core/mura/iterator/queryIterator.cfc` | 1 | medium | declares setPage() | `core/modules/v1/collection/includes/dsp_pagination.cfm:100` variable 'iterator' has no component ref |
 | 15 | `approvalrequest` | 3 | none |  | `admin/core/views/carch/approvalaction.cfm:5` variable 'approvalRequest' has no component ref |
+| 15 | `event → core/mura/content/contentBean.cfc` | 4 | high | declares getContentID(), getDisplayStop(), getDisplayStart() | `core/mura/content/contentIntervalManager.cfc:106` variable 'event' has no component ref |
 | 15 | `it → core/mura/iterator/queryIterator.cfc` | 1 | medium | declares next() | `admin/core/views/cchain/edit.cfm:61` variable 'it' has no component ref |
 | 15 | `pluginconfig → core/mura/plugin/pluginConfig.cfc` | 1 | high | declares getDirectory(), setSetting(); named like the receiver 'pluginConfig' | `core/mura/plugin/pluginExecutor.cfc:141` variable 'pluginConfig' has no component ref |
 | 14 | `arguments.event` | 2 | none |  | `core/mura/Handler/standardEventsHandler.cfc:214` variable 'arguments.event' has no component ref |
@@ -177,7 +177,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 4 | `conflictdetail → core/mura/content/contentBean.cfc` | 1 | medium | declares getDisplayStart() | `admin/core/views/carch/dsp_status.cfm:182` variable 'conflictdetail' has no component ref |
 | 4 | `contentrendererutility → core/mura/content/contentRendererUtility.cfc` | 1 | high | declares renderObjectClassOption(); named like the receiver 'contentRendererUtility' | `admin/core/views/carch/objectclass/legacy/dsp_folders.cfm:112` variable 'contentRendererUtility' has no component ref |
 | 4 | `draftversion → core/mura/content/contentBean.cfc` | 1 | high | declares getMenuTitle(), getLastUpdate(), getLastUpdateBy() | `admin/core/views/carch/draftpromptdata.cfm:156` variable 'draftVersion' has no component ref |
-| 4 | `event → core/mura/servletEvent.cfc` | 3 | high | declares getContentBean(), getSite() | `core/modules/v1/gallery/index.cfm:116` variable 'event' has no component ref |
 | 4 | `image → core/mura/settings/settingsImageSizeBean.cfc` | 26 | high | declares getSiteID(), getSizeID(), getName() | `admin/core/views/csettings/loadcustomimages.cfm:36` variable 'image' has no component ref |
 | 4 | `iterator → core/mura/bean/bean.cfc` | 9 | low | declares getEntityName() (9 candidates) | `core/mura/client/api/json/v1/jsonApiUtility.cfc:313` variable 'iterator' has no component ref |
 | 4 | `rc.feedbean → core/mura/content/feed/feedBean.cfc` | 15 | high | declares getIsNew(), getType(), getfeedID(), getChannelLink(); named like the receiver 'feedBean' | `admin/core/views/cfeed/dsp_secondary_menu.cfm:91` variable 'rc.feedBean' has no component ref |
@@ -241,7 +240,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 3 | `variables.archive → core/mura/content/contentBean.cfc` | 4 | high | declares getCrumbIterator(), getContentID(), getFilename() | `core/modules/v1/nav/dsp_archive.cfm:85` variable 'variables.archive' has no component ref |
 | 3 | `variables.contentgateway → core/mura/dashboard/dashboardManager.cfc` | 2 | low | declares getRecentUpdates() (2 candidates) | `core/mura/dashboard/dashboardManager.cfc:147` variable 'variables.contentGateway' has no component ref |
 | 3 | `variables.crumb → core/mura/content/contentBean.cfc` | 14 | low | declares getType(), getContentID() (2 candidates) | `core/modules/v1/nav/calendarNav/index.cfm:100` variable 'variables.crumb' has no component ref |
-| 3 | `variables.event → core/mura/event.cfc` | 13 | medium | declares setValue(); named like the receiver 'event' (13 candidates) | `core/modules/v1/component/index.cfm:84` variable 'variables.event' has no component ref |
 | 2 | `actions → core/mura/iterator/queryIterator.cfc` | 1 | high | declares hasNext(), next() | `admin/core/views/carch/statusmodal.cfm:183` variable 'actions' has no component ref |
 | 2 | `address → core/mura/content/contentBean.cfc` | 45 | low | declares save(), getAllValues() (6 candidates) | `core/mura/client/api/soap/v1/user.cfc:149` variable 'address' has no component ref |
 | 2 | `adminuseriterator → core/mura/iterator/queryIterator.cfc` | 1 | high | declares hasNext(), next() | `core/modules/v1/login/model/oauthLoginUtility.cfc:29` variable 'adminUserIterator' has no component ref |
@@ -275,7 +273,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `content → core/mura/client/api/soap/v1/content.cfc` | 4 | low | declares deleteVersion(); named like the receiver 'content' (4 candidates) | `core/mura/client/api/soap/v1/content.cfc:189` variable 'content' has no component ref |
 | 2 | `current → core/mura/bean/beanFeed.cfc` | 8 | low | declares setSortBy(), setSortDirection() (8 candidates) | `admin/core/views/carch/list.cfm:597` variable 'current' has no component ref |
 | 2 | `databean → core/mura/bean/beanORM.cfc` | 10 | low | declares getPrimaryKey(), loadby() (8 candidates) | `core/mura/formBuilder/formBuilderManager.cfc:311` variable 'dataBean' has no component ref |
-| 2 | `event → core/mura/configBean.cfc` | 2 | low | declares getAssetPath() (2 candidates) | `core/modules/v1/feedslideshow/index.cfm:80` variable 'event' has no component ref |
 | 2 | `extendset → core/mura/extend/extendSet.cfc` | 1 | high | declares getAttributes(), getName(), getAttributeBean(); named like the receiver 'extendSet' | `admin/core/views/cextend/editattributes.cfm:80` variable 'extendSet' has no component ref |
 | 2 | `filemetadata → core/mura/MasaScope.cfc` | 3 | low | declares generateCSRFTokens(), renderCSRFTokens() (2 candidates) | `core/mura/customtags/filetools.cfm:80` variable 'fileMetaData' has no component ref |
 | 2 | `form` | 0 | none |  | `core/mura/content/dataCollection/dataCollectionBean.cfc:119` variable 'form' has no component ref |
@@ -464,14 +461,16 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `core/mura/content/contentNavBean.cfc` — declares getValue()
   - low `core/mura/formBuilder/datarecordBean.cfc` — declares getValue()
   - … 5 more
-- `event → core/mura/event.cfc` — 183 finding(s), 7 candidate(s):
-  - medium `core/mura/event.cfc` — declares getContentRenderer(); named like the receiver 'event'
-  - low `core/mura/MasaScope.cfc` — declares getContentRenderer()
-  - low `core/mura/queryParam.cfc` — declares getContentRenderer()
-  - low `core/mura/servletEvent.cfc` — declares getContentRenderer()
-  - low `core/mura/extend/extendData.cfc` — declares getContentRenderer()
-  - low `core/mura/extend/extendSubType.cfc` — declares getContentRenderer()
-  - low `core/mura/settings/settingsBean.cfc` — declares getContentRenderer()
+- `event → core/mura/event.cfc` — 181 finding(s), 13 candidate(s):
+  - medium `core/mura/event.cfc` — declares getValue(); named like the receiver 'event'
+  - low `core/mura/cfobject.cfc` — declares getValue()
+  - low `core/mura/configBean.cfc` — declares getValue()
+  - low `core/mura/servletEvent.cfc` — declares getValue()
+  - low `core/mura/bean/bean.cfc` — declares getValue()
+  - low `core/mura/bean/beanExtendable.cfc` — declares getValue()
+  - low `core/mura/content/contentNavBean.cfc` — declares getValue()
+  - low `core/mura/formBuilder/datarecordBean.cfc` — declares getValue()
+  - … 5 more
 - `mmrbf → core/mura/resourceBundle/resourceBundle.cfc` — 144 finding(s), 2 candidate(s):
   - low `core/mura/resourceBundle/resourceBundle.cfc` — declares getKeyValue()
   - low `core/mura/resourceBundle/resourceBundleFactory.cfc` — declares getKeyValue()
@@ -532,14 +531,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `arguments.bundle → core/mura/settings/settingsBundle.cfc` — 22 finding(s), 2 candidate(s):
   - low `core/mura/settings/settingsBundle.cfc` — declares getValue(), unpackFiles(), renameFiles(), cleanUp()
   - low `core/mura/settings/settingsBundleBean.cfc` — declares getValue(), unpackFiles(), renameFiles(), cleanUp()
-- `event → core/mura/content/contentBean.cfc` — 18 finding(s), 7 candidate(s):
-  - medium `core/mura/content/contentBean.cfc` — declares getNextN(); named like the receiver 'ContentBean'
-  - low `core/mura/utility.cfc` — declares getNextN()
-  - low `core/mura/bean/beanFeed.cfc` — declares getNextN()
-  - low `core/mura/extend/extendObjectFeedBean.cfc` — declares getNextN()
-  - low `core/mura/iterator/queryIterator.cfc` — declares getNextN()
-  - low `core/mura/settings/settingsBean.cfc` — declares getNextN()
-  - low `core/mura/content/feed/feedBean.cfc` — declares getNextN()
 - `request.servletevent → core/mura/servletEvent.cfc` — 18 finding(s), 13 candidate(s):
   - medium `core/mura/servletEvent.cfc` — declares getValue(); named like the receiver 'servletEvent'
   - low `core/mura/cfobject.cfc` — declares getValue()
@@ -878,16 +869,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `variables.crumb → core/mura/content/contentBean.cfc` — 3 finding(s), 2 candidate(s):
   - low `core/mura/content/contentBean.cfc` — declares getType(), getContentID()
   - low `core/mura/content/feed/feedBean.cfc` — declares getType(), getContentID()
-- `variables.event → core/mura/event.cfc` — 3 finding(s), 13 candidate(s):
-  - medium `core/mura/event.cfc` — declares setValue(); named like the receiver 'event'
-  - low `core/mura/cfobject.cfc` — declares setValue()
-  - low `core/mura/configBean.cfc` — declares setValue()
-  - low `core/mura/servletEvent.cfc` — declares setValue()
-  - low `core/mura/bean/bean.cfc` — declares setValue()
-  - low `core/mura/bean/beanExtendable.cfc` — declares setValue()
-  - low `core/mura/content/contentNavBean.cfc` — declares setValue()
-  - low `core/mura/formBuilder/datarecordBean.cfc` — declares setValue()
-  - … 5 more
 - `address → core/mura/content/contentBean.cfc` — 2 finding(s), 6 candidate(s):
   - low `core/mura/content/contentBean.cfc` — declares save(), getAllValues()
   - low `core/mura/content/contentCommentBean.cfc` — declares save(), getAllValues()
@@ -1030,9 +1011,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `core/mura/content/changeset/changesetBean.cfc` — declares getPrimaryKey(), loadby()
   - low `core/mura/content/favorite/favoriteBean.cfc` — declares getPrimaryKey(), loadby()
   - low `core/mura/content/feed/feedBean.cfc` — declares getPrimaryKey(), loadby()
-- `event → core/mura/configBean.cfc` — 2 finding(s), 2 candidate(s):
-  - low `core/mura/configBean.cfc` — declares getAssetPath()
-  - low `core/mura/settings/settingsBean.cfc` — declares getAssetPath()
 - `filemetadata → core/mura/MasaScope.cfc` — 2 finding(s), 2 candidate(s):
   - low `core/mura/MasaScope.cfc` — declares generateCSRFTokens(), renderCSRFTokens()
   - low `core/mura/user/sessionUserFacade.cfc` — declares generateCSRFTokens(), renderCSRFTokens()
@@ -1720,6 +1698,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 16 | `method 'content' in mura.MuraScope has no component return type → core/mura/bean/beanExtendable.cfc` | 6 | low | declares getSubType(), getType() (6 candidates) | `core/mura/content/contentRendererUtility.cfc:1986` method 'content' in mura.MuraScope has no component return type (chain to 'getSubType') |
 | 16 | `method 'getFormBean' has no component return type → core/mura/content/contentBean.cfc` | 1 | medium | declares getBody() | `core/mura/content/dataCollection/dataCollectionBean.cfc:223` method 'getFormBean' has no component return type (chain to 'getBody') |
 | 15 | `method 'getRBFactory' in settingsBean has no component return type → core/mura/googleAuth.cfc` | 2 | low | declares getKey() (2 candidates) | `core/mura/bean/beanValidator.cfc:245` method 'getRBFactory' in settingsBean has no component return type (chain to 'getKey') |
+| 12 | `method 'getSite' has no component return type → core/mura/settings/settingsBean.cfc` | 1 | high | declares getTemplateIncludeDir(), getTemplateIncludePath() | `core/modules/v1/component/index.cfm:123` method 'getSite' has no component return type (chain to 'getTemplateIncludeDir') |
 | 11 | `method 'getFeed' has no component return type → core/mura/bean/beanFeed.cfc` | 1 | medium | declares isEQ() | `core/mura/user/userDAO.cfc:365` method 'getFeed' has no component return type (chain to 'isEQ') |
 | 10 | `method 'event' in MuraScope has no component return type → core/mura/event.cfc` | 13 | medium | declares setValue(); named like the receiver 'event' (13 candidates) | `core/appcfc/onRequestEnd_include.cfm:90` method 'event' in MuraScope has no component return type (chain to 'setValue') |
 | 10 | `method 'getApi' in settingsBean has no component return type → core/mura/settings/settingsBean.cfc` | 3 | low | declares getEndpoint() (3 candidates) | `admin/core/views/cfeed/edit.cfm:215` method 'getApi' in settingsBean has no component return type (chain to 'getEndpoint') |
@@ -1735,7 +1714,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 7 | `method 'getSite' in mura.servletEvent has no component return type → core/mura/settings/settingsBean.cfc` | 1 | medium | declares getIncludePath() | `core/mura/content/contentRenderer.cfc:1480` method 'getSite' in mura.servletEvent has no component return type (chain to 'getIncludePath') |
 | 6 | `method 'event' in mura.MuraScope has no component return type → core/mura/plugin/pluginStandardEventWrapper.cfc` | 1 | medium | declares handle() | `core/mura/Handler/standardEventsHandler.cfc:724` method 'event' in mura.MuraScope has no component return type (chain to 'handle') |
 | 6 | `method 'getContentBean' has no component return type → core/mura/content/contentNavBean.cfc` | 13 | low | declares getValue() (13 candidates) | `core/mura/content/contentNavBean.cfc:150` method 'getContentBean' has no component return type (chain to 'getValue') |
-| 6 | `method 'getSite' has no component return type → core/mura/settings/settingsBean.cfc` | 1 | medium | declares getRbFactory() | `core/modules/v1/nav/dsp_tag_cloud.cfm:103` method 'getSite' has no component return type (chain to 'getRbFactory') |
 | 6 | `method 'loadBy' in approvalActionBean has no component return type → core/mura/content/approval/approvalActionBean.cfc` | 1 | medium | declares setActionType() | `core/mura/content/approval/approvalRequestBean.cfc:21` method 'loadBy' in approvalActionBean has no component return type (chain to 'setActionType') |
 | 6 | `method 'loadBy' in approvalActionBean has no component return type → core/mura/content/approval/approvalChainBean.cfc` | 45 | low | declares save() (45 candidates) | `core/mura/content/approval/approvalRequestBean.cfc:21` method 'loadBy' in approvalActionBean has no component return type (chain to 'save') |
 | 6 | `method 'loadBy' in contentBean has no component return type → core/mura/content/contentBean.cfc` | 2 | low | declares getCrumbArray() (2 candidates) | `admin/core/views/carch/import.cfm:131` method 'loadBy' in contentBean has no component return type (chain to 'getCrumbArray') |
@@ -1752,6 +1730,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 4 | `method 'getCacheFactory' in settingsBean has no component return type → core/mura/cache/cacheAbstract.cfc` | 4 | low | declares purgeAll() (4 candidates) | `core/mura/settings/settingsManager.cfc:584` method 'getCacheFactory' in settingsBean has no component return type (chain to 'purgeAll') |
 | 4 | `method 'getClassExtensionManager' in configBean has no component return type → core/mura/extend/extendSubType.cfc` | 1 | medium | declares getHasConfigurator() | `core/modules/v1/calendar/configurator.cfm:110` method 'getClassExtensionManager' in configBean has no component return type (chain to 'getHasConfigurator') |
 | 4 | `method 'getExtendedData' has no component return type → core/mura/extend/extendData.cfc` | 1 | medium | declares getAllExtendSetData() | `core/mura/bean/beanExtendable.cfc:174` method 'getExtendedData' has no component return type (chain to 'getAllExtendSetData') |
+| 4 | `method 'getSite' has no component return type` | 34 | none |  | `core/modules/v1/editprofile/index.cfm:362` method 'getSite' has no component return type (chain to 'getSite') |
 | 4 | `method 'loadBy' in extendRelatedContentSetBean has no component return type → core/mura/bean/beanRemotePointer.cfc` | 2 | low | declares getEntityType() (2 candidates) | `core/mura/content/contentManager.cfc:2233` method 'loadBy' in extendRelatedContentSetBean has no component return type (chain to 'getEntityType') |
 | 3 | `method 'event' in MuraScope has no component return type → core/mura/user/userBean.cfc` | 6 | high | declares getEmail(), getMembersIterator() | `core/mura/content/approval/approvalRequestBean.cfc:210` method 'event' in MuraScope has no component return type (chain to 'getEmail') |
 | 3 | `method 'getBean' in MuraScope has no component return type → core/mura/bean/beanEntity.cfc` | 45 | low | declares save() (45 candidates) | `core/tests/specs/mura/core/contentOrdering.cfc:74` method 'getBean' in MuraScope has no component return type (chain to 'save') |
@@ -1782,6 +1761,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `method 'getRazunaSettings' in settingsBean has no component return type → core/mura/settings/settingsBean.cfc` | 45 | low | declares save() (45 candidates) | `core/mura/settings/settingsManager.cfc:271` method 'getRazunaSettings' in settingsBean has no component return type (chain to 'save') |
 | 2 | `method 'getRelatedFeed' has no component return type → core/mura/bean/beanFeed.cfc` | 15 | low | declares getQuery() (15 candidates) | `admin/core/views/carch/loadrelatedcontent.cfm:407` method 'getRelatedFeed' has no component return type (chain to 'getQuery') |
 | 2 | `method 'getSite' has no component return type → core/mura/googleAuth.cfc` | 2 | low | declares getKey() (2 candidates) | `core/mura/content/contentRenderer.cfc:1389` method 'getSite' has no component return type (chain to 'getKey') |
+| 2 | `method 'getSite' in event has no component return type → core/mura/configBean.cfc` | 2 | low | declares getAssetPath() (2 candidates) | `core/modules/v1/feedslideshow/index.cfm:80` method 'getSite' in event has no component return type (chain to 'getAssetPath') |
 | 2 | `method 'getSite' in mura.servletEvent has no component return type → core/mura/configBean.cfc` | 2 | low | declares getAssetPath() (2 candidates) | `core/mura/content/contentRenderer.cfc:2831` method 'getSite' in mura.servletEvent has no component return type (chain to 'getAssetPath') |
 | 2 | `method 'getSubsystemBeanFactory' has no component return type → core/mura/bean/beanFactory.cfc` | 4 | low | declares containsBean(), getBean() (3 candidates) | `admin/framework.cfc:1375` method 'getSubsystemBeanFactory' has no component return type (chain to 'containsBean') |
 | 2 | `method 'getUserBean' has no component return type → core/mura/user/sessionUserFacade.cfc` | 13 | low | declares getValue() (13 candidates) | `core/mura/user/sessionUserFacade.cfc:54` method 'getUserBean' has no component return type (chain to 'getValue') |
@@ -2147,6 +2127,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `method 'getSite' has no component return type → core/mura/googleAuth.cfc` — 2 finding(s), 2 candidate(s):
   - low `core/mura/googleAuth.cfc` — declares getKey()
   - low `core/mura/resourceBundle/resourceBundleFactory.cfc` — declares getKey()
+- `method 'getSite' in event has no component return type → core/mura/configBean.cfc` — 2 finding(s), 2 candidate(s):
+  - low `core/mura/configBean.cfc` — declares getAssetPath()
+  - low `core/mura/settings/settingsBean.cfc` — declares getAssetPath()
 - `method 'getSite' in mura.servletEvent has no component return type → core/mura/configBean.cfc` — 2 finding(s), 2 candidate(s):
   - low `core/mura/configBean.cfc` — declares getAssetPath()
   - low `core/mura/settings/settingsBean.cfc` — declares getAssetPath()
@@ -2563,33 +2546,20 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
 | 15 | `parsexml` | 2 | low | declares parseXML (2 candidates) | `admin/core/controllers/cextend.cfc:110` not found in extends chain |
-| 10 | `getsite` | 34 | low | declares getSite (34 candidates) | `core/modules/v1/component/index.cfm:123` no qualifier, not in file |
-| 8 | `showitemmeta` | 1 | medium | declares showItemMeta | `core/modules/v1/collection/includes/dsp_content_list.cfm:285` no qualifier, not in file |
-| 5 | `geturlstem` | 2 | low | declares getURLStem (2 candidates) | `core/modules/v1/category_summary/index.cfm:100` no qualifier, not in file |
-| 4 | `dspobject` | 2 | low | declares dspObject (2 candidates) | `core/modules/v1/calendar/index.cfm:124` no qualifier, not in file |
 | 4 | `event` | 1 | medium | declares event | `core/mura/plugin/pluginManager.cfc:1422` method 'event' not found in mura.event |
-| 4 | `getpersonalizationid` | 2 | low | declares getPersonalizationID (2 candidates) | `core/modules/v1/favorites/index.cfm:16` no qualifier, not in file |
-| 3 | `dspfoldernav` | 1 | medium | declares dspFolderNav | `core/modules/v1/nav/dsp_folder.cfm:78` no qualifier, not in file |
+| 3 | `getcontentbean` | 3 | low | declares getContentBean (3 candidates) | `core/modules/v1/gallery/index.cfm:116` method 'getContentBean' not found in event |
+| 3 | `getnextn` | 7 | low | declares getNextN (7 candidates) | `core/modules/v1/gallery/index.cfm:116` method 'getContentBean' not found in event (chain to 'getNextN') |
 | 3 | `getshowinlineeditor` | 1 | medium | declares getShowInlineEditor | `admin/core/utilities/modal/toolbar.cfm:100` no qualifier, not in file |
-| 2 | `dspobject_include` | 1 | medium | declares dspObject_Include | `core/modules/v1/collection/index.cfm:283` no qualifier, not in file |
-| 2 | `getbean` | 21 | low | declares getBean (20 candidates) | `core/appcfc/onRequestStart_include.cfm:163` no qualifier, not in file |
-| 2 | `getcurrenturl` | 2 | low | declares getCurrentURL (2 candidates) | `core/modules/v1/comments/index.cfm:404` no qualifier, not in file |
 | 2 | `getformservice` | 0 | none |  | `core/mura/formBuilder/formBean.cfc:249` not found in extends chain |
 | 2 | `getservicefactory` | 2 | low | declares getServiceFactory (2 candidates) | `core/appcfc/onApplicationStart_include.cfm:486` no qualifier, not in file |
 | 2 | `uselayoutmanager` | 1 | medium | declares useLayoutManager | `admin/core/utilities/modal/toolbar.cfm:382` no qualifier, not in file |
 | 1 | `buildindexmetatdata` | 0 | none |  | `core/mura/dbUtility.cfc:1278` not found in extends chain |
 | 1 | `callwithstructargs` | 0 | none |  | `core/mura/client/api/soap/v1/muraProxy.cfc:275` not found in extends chain |
-| 1 | `createcssid` | 2 | low | declares createCSSID (2 candidates) | `core/modules/v1/mailing_list/index.cfm:101` no qualifier, not in file |
-| 1 | `createhref` | 4 | low | declares createHREF (4 candidates) | `core/modules/v1/favorites/index.cfm:29` no qualifier, not in file |
-| 1 | `dspnestednav` | 1 | medium | declares dspNestedNav | `core/modules/v1/nav/dsp_multilevel.cfm:78` no qualifier, not in file |
-| 1 | `dsppeernav` | 1 | medium | declares dspPeerNav | `core/modules/v1/nav/dsp_peer.cfm:76` no qualifier, not in file |
-| 1 | `dspstandardnav` | 1 | medium | declares dspStandardNav | `core/modules/v1/nav/dsp_standard.cfm:78` no qualifier, not in file |
-| 1 | `dspsubnav` | 1 | medium | declares dspSubNav | `core/modules/v1/nav/dsp_sub.cfm:76` no qualifier, not in file |
-| 1 | `dsptopnav` | 0 | none |  | `core/modules/v1/nav/dsp_top.cfm:78` no qualifier, not in file |
+| 1 | `dsptopnav` | 0 | none |  | `core/modules/v1/nav/dsp_top.cfm:78` not found in extends chain |
 | 1 | `generateeditablehook` | 2 | low | declares generateEditableHook (2 candidates) | `admin/core/utilities/modal/toolbar.cfm:157` no qualifier, not in file |
 | 1 | `getallvalues` | 25 | low | declares getAllValues; beside the calling file (25 candidates) | `core/mura/cfobject.cfc:213` no qualifier, not in file |
+| 1 | `getbean` | 21 | low | declares getBean (20 candidates) | `core/appcfc/onRequestStart_include.cfm:163` no qualifier, not in file |
 | 1 | `getclassfullname` | 0 | none |  | `core/mura/cfobject.cfc:267` no qualifier, not in file |
-| 1 | `getcurrentuser` | 1 | medium | declares getCurrentUser | `core/modules/v1/gotofirstchild/index.cfm:86` no qualifier, not in file |
 | 1 | `getdbtype` | 3 | low | declares getDbType; beside the calling file (3 candidates) | `core/mura/bean/beanORM.cfc:221` method 'getDbType' not found in dbUtility |
 | 1 | `getfieldservice` | 0 | none |  | `core/mura/formBuilder/fieldBean.cfc:443` not found in extends chain |
 | 1 | `getreportdata` | 1 | medium | declares getReportData; beside the calling file | `core/mura/content/contentManager.cfc:2021` method 'getReportData' not found in contentUtility |
@@ -2598,7 +2568,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `hasdiscriminatorvalue` | 0 | none |  | `core/mura/bean/beanFeed.cfc:839` not found in extends chain |
 | 1 | `hasvalue` | 0 | none |  | `core/mura/publisherKeys.cfc:99` method 'hasValue' not found in mura.cfobject |
 | 1 | `logerror` | 2 | low | declares logError (2 candidates) | `core/mura/client/api/feed/v1/feedApiUtility.cfc:174` not found in extends chain |
-| 1 | `newresultquery` | 2 | low | declares newResultQuery (2 candidates) | `core/modules/v1/search/index.cfm:115` no qualifier, not in file |
 | 1 | `pathformat` | 2 | low | declares PathFormat; beside the calling file (2 candidates) | `core/mura/utility.cfc:867` not found in extends chain |
 | 1 | `readaddress` | 3 | low | declares readAddress (3 candidates) | `core/mura/client/api/soap/v1/user.cfc:114` not found in parent component |
 | 1 | `readbyemail` | 0 | none |  | `core/mura/client/api/soap/v1/user.cfc:102` method 'readByEmail' not found in userManager |
@@ -2609,7 +2578,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `setinactive` | 2 | low | declares setInActive (2 candidates) | `core/mura/extend/extendObjectFeedBean.cfc:68` not found in extends chain |
 | 1 | `setispublic` | 4 | low | declares setIsPublic (4 candidates) | `core/mura/extend/extendObjectFeedBean.cfc:72` not found in extends chain |
 | 1 | `settranslator` | 0 | none |  | `core/mura/trash/trashIterator.cfc:86` method 'setTranslator' not found in trashItemBean |
-| 1 | `siteconfig` | 1 | medium | declares siteConfig | `core/modules/v1/related_section_content/index.cfm:127` no qualifier, not in file |
+| 1 | `siteconfig` | 1 | medium | declares siteConfig | `core/modules/v1/related_section_content/index.cfm:127` not found in extends chain |
 | 1 | `valueexist` | 0 | none |  | `core/mura/bean/beanORM.cfc:604` not found in extends chain |
 | 1 | `valueslist` | 0 | none |  | `core/mura/publisher.cfc:1559` not found in extends chain |
 
@@ -2618,49 +2587,21 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `parsexml` — 15 finding(s), 2 candidate(s):
   - low `core/mura/backport/acf.cfm:6` — declares parseXML
   - low `core/mura/backport/lucee.cfm:6` — declares parseXML
-- `getsite` — 10 finding(s), 34 candidate(s):
-  - low `core/mura/event.cfc:182` — declares getSite
-  - low `core/mura/servletEvent.cfc:219` — declares getSite
-  - low `core/mura/bean/beanORM.cfc:267` — declares getSite
-  - low `core/mura/bean/beanORMVersioned.cfc:80` — declares getSite
-  - low `core/mura/bean/beanRemotePointer.cfc:3` — declares getSite
-  - low `core/mura/category/categoryBean.cfc:84` — declares getSite
-  - low `core/mura/content/contentBean.cfc:84` — declares getSite
-  - low `core/mura/content/contentCategoryAssignBean.cfc:84` — declares getSite
-  - … 26 more
-- `geturlstem` — 5 finding(s), 2 candidate(s):
-  - low `core/mura/content/contentRenderer.cfc:2495` — declares getURLStem
-  - low `core/mura/content/contentServer.cfc:946` — declares getURLStem
-- `dspobject` — 4 finding(s), 2 candidate(s):
-  - low `core/mura/content/contentRenderer.cfc:2388` — declares dspObject
-  - low `core/mura/content/contentRendererUtility.cfc:1024` — declares dspObject
-- `getpersonalizationid` — 4 finding(s), 2 candidate(s):
-  - low `core/mura/content/contentRenderer.cfc:2440` — declares getPersonalizationID
-  - low `core/mura/content/contentRendererUtility.cfc:470` — declares getPersonalizationID
-- `getbean` — 2 finding(s), 20 candidate(s):
-  - low `core/mura/MasaScope.cfc:389` — declares getBean
-  - low `core/mura/cfobject.cfc:138` — declares getBean
-  - low `core/mura/event.cfc:203` — declares getBean
-  - low `core/mura/servletEvent.cfc:227` — declares getBean
-  - low `core/mura/bean/ioc.cfc:199` — declares getBean
-  - low `core/mura/category/categoryFeedBean.cfc:80` — declares getBean
-  - low `core/mura/content/contentManager.cfc:142` — declares getBean
-  - low `core/mura/email/emailManager.cfc:108` — declares getBean
-  - … 12 more
-- `getcurrenturl` — 2 finding(s), 2 candidate(s):
-  - low `core/mura/content/contentRenderer.cfc:2672` — declares getCurrentURL
-  - low `core/mura/content/contentRendererUtility.cfc:424` — declares getCurrentURL
+- `getcontentbean` — 3 finding(s), 3 candidate(s):
+  - low `core/mura/MasaScope.cfc:209` — declares getContentBean
+  - low `core/mura/servletEvent.cfc:211` — declares getContentBean
+  - low `core/mura/content/contentNavBean.cfc:168` — declares getContentBean
+- `getnextn` — 3 finding(s), 7 candidate(s):
+  - low `core/mura/utility.cfc:126` — declares getNextN
+  - low `core/mura/bean/beanFeed.cfc:81` — declares getNextN
+  - low `core/mura/content/contentBean.cfc:129` — declares getNextN
+  - low `core/mura/extend/extendObjectFeedBean.cfc:191` — declares getNextN
+  - low `core/mura/iterator/queryIterator.cfc:247` — declares getNextN
+  - low `core/mura/settings/settingsBean.cfc:106` — declares getNextN
+  - low `core/mura/content/feed/feedBean.cfc:109` — declares getNextN
 - `getservicefactory` — 2 finding(s), 2 candidate(s):
   - low `core/mura/cfobject.cfc:134` — declares getServiceFactory
   - low `core/mura/event.cfc:190` — declares getServiceFactory
-- `createcssid` — 1 finding(s), 2 candidate(s):
-  - low `core/mura/content/contentRenderer.cfc:2602` — declares createCSSID
-  - low `core/mura/content/contentRendererUtility.cfc:810` — declares createCSSID
-- `createhref` — 1 finding(s), 4 candidate(s):
-  - low `core/mura/MasaScope.cfc:412` — declares createHREF
-  - low `core/mura/content/contentRenderer.cfc:2504` — declares createHREF
-  - low `core/mura/content/contentRendererUtility.cfc:1563` — declares createHREF
-  - low `core/mura/content/staticContentRenderer.cfc:81` — declares createHREF
 - `generateeditablehook` — 1 finding(s), 2 candidate(s):
   - low `core/mura/content/contentRenderer.cfc:2997` — declares generateEditableHook
   - low `core/mura/content/contentRendererUtility.cfc:357` — declares generateEditableHook
@@ -2674,6 +2615,16 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `core/mura/content/contentBean.cfc:528` — declares getAllValues
   - low `core/mura/content/contentCommentBean.cfc:247` — declares getAllValues
   - … 17 more
+- `getbean` — 1 finding(s), 20 candidate(s):
+  - low `core/mura/MasaScope.cfc:389` — declares getBean
+  - low `core/mura/cfobject.cfc:138` — declares getBean
+  - low `core/mura/event.cfc:203` — declares getBean
+  - low `core/mura/servletEvent.cfc:227` — declares getBean
+  - low `core/mura/bean/ioc.cfc:199` — declares getBean
+  - low `core/mura/category/categoryFeedBean.cfc:80` — declares getBean
+  - low `core/mura/content/contentManager.cfc:142` — declares getBean
+  - low `core/mura/email/emailManager.cfc:108` — declares getBean
+  - … 12 more
 - `getdbtype` — 1 finding(s), 3 candidate(s):
   - low `core/mura/bean/beanFeed.cfc:395` — declares getDbType; beside the calling file
   - low `core/mura/bean/beanORM.cfc:220` — declares getDbType; beside the calling file
@@ -2684,9 +2635,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `logerror` — 1 finding(s), 2 candidate(s):
   - low `core/mura/backport/acf.cfm:2` — declares logError
   - low `core/mura/backport/lucee.cfm:2` — declares logError
-- `newresultquery` — 1 finding(s), 2 candidate(s):
-  - low `core/mura/permission.cfc:756` — declares newResultQuery
-  - low `core/mura/content/contentRenderer.cfc:2592` — declares newResultQuery
 - `pathformat` — 1 finding(s), 2 candidate(s):
   - low `core/mura/Zip.cfc:764` — declares PathFormat; beside the calling file
   - low `core/mura/fileWriter.cfc:454` — declares PathFormat; beside the calling file
@@ -2722,12 +2670,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 |---:|---|---:|---|---|---|
 | 8 | `component 'testWidget' does not exist (calling 'getErrors')` | 4 | none |  | `core/tests/specs/mura/core/entities.cfc:92` component 'testWidget' does not exist (calling 'getErrors') |
 | 5 | `component 'javaLoader' does not exist (calling 'create')` | 18 | none |  | `core/mura/diffMatchPatch.cfc:6` component 'javaLoader' does not exist (calling 'create') |
-| 4 | `chained on 'getSite', which is not found (calling 'getSite')` | 34 | none |  | `core/modules/v1/editprofile/index.cfm:362` chained on 'getSite', which is not found (calling 'getSite') |
 | 4 | `component 'testWidget' does not exist (calling 'validate')` | 20 | none |  | `core/tests/specs/mura/core/entities.cfc:77` component 'testWidget' does not exist (calling 'validate') |
 | 3 | `component 'marketingManager' does not exist (calling 'getDefaults')` | 0 | none |  | `core/mura/content/contentGatewayAdobe.cfc:441` component 'marketingManager' does not exist (calling 'getDefaults') |
 | 3 | `component 'testWidget' does not exist (chain hop 'validate' to 'hasErrors')` | 1 | none |  | `core/tests/specs/mura/core/entities.cfc:260` component 'testWidget' does not exist (chain hop 'validate' to 'hasErrors') |
-| 2 | `chained on 'getSite', which is not found (calling 'getExtranetPublicRegNotify')` | 1 | none |  | `core/modules/v1/editprofile/index.cfm:360` chained on 'getSite', which is not found (calling 'getExtranetPublicRegNotify') |
-| 2 | `chained on 'getSite', which is not found (calling 'getTemplateIncludeDir')` | 1 | none |  | `core/modules/v1/component/index.cfm:123` chained on 'getSite', which is not found (calling 'getTemplateIncludeDir') |
 | 2 | `component 'marketingManager' does not exist (calling 'getTrackingid')` | 0 | none |  | `core/mura/client/api/resource/variation.js.cfm:206` component 'marketingManager' does not exist (calling 'getTrackingid') |
 | 2 | `component 'siteManager' does not exist (calling 'getSite')` | 34 | none |  | `core/mura/settings/settingsBundle.cfc:1680` component 'siteManager' does not exist (calling 'getSite') |
 | 2 | `component 'siteManager' does not exist (chain hop 'getSite' to 'getFilePoolID')` | 1 | none |  | `core/mura/settings/settingsBundle.cfc:1680` component 'siteManager' does not exist (chain hop 'getSite' to 'getFilePoolID') |
@@ -2747,7 +2692,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `component 'testWidget' does not exist (chain hop 'setSmallIntVar' to 'validate')` | 20 | none |  | `core/tests/specs/mura/core/entities.cfc:172` component 'testWidget' does not exist (chain hop 'setSmallIntVar' to 'validate') |
 | 2 | `component 'testWidget' does not exist (chain hop 'setfloatVar' to 'getErrors')` | 4 | none |  | `core/tests/specs/mura/core/entities.cfc:196` component 'testWidget' does not exist (chain hop 'setfloatVar' to 'getErrors') |
 | 2 | `component 'testWidget' does not exist (chain hop 'setfloatVar' to 'validate')` | 20 | none |  | `core/tests/specs/mura/core/entities.cfc:196` component 'testWidget' does not exist (chain hop 'setfloatVar' to 'validate') |
-| 1 | `chained on 'getCurrentUser', which is not found (calling 'isSuperUser')` | 1 | none |  | `core/modules/v1/gotofirstchild/index.cfm:86` chained on 'getCurrentUser', which is not found (calling 'isSuperUser') |
 | 1 | `chained on 'getFieldService', which is not found (calling 'getBeanByAttributes')` | 0 | none |  | `core/mura/formBuilder/fieldBean.cfc:443` chained on 'getFieldService', which is not found (calling 'getBeanByAttributes') |
 | 1 | `chained on 'getFieldService', which is not found (calling 'getFieldTypeService')` | 0 | none |  | `core/mura/formBuilder/fieldBean.cfc:443` chained on 'getFieldService', which is not found (calling 'getFieldTypeService') |
 | 1 | `chained on 'getFormService', which is not found (calling 'getFieldService')` | 0 | none |  | `core/mura/formBuilder/formBean.cfc:262` chained on 'getFormService', which is not found (calling 'getFieldService') |
@@ -2755,8 +2699,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `chained on 'getFormService', which is not found (calling 'getFormAttributeservice')` | 0 | none |  | `core/mura/formBuilder/formBean.cfc:249` chained on 'getFormService', which is not found (calling 'getFormAttributeservice') |
 | 1 | `chained on 'getServiceFactory', which is not found (calling 'containsBean')` | 4 | none |  | `core/mura/client/api/resource/variation.js.cfm:196` chained on 'getServiceFactory', which is not found (calling 'containsBean') |
 | 1 | `chained on 'getServiceFactory', which is not found (calling 'declareBean')` | 3 | none |  | `core/appcfc/onApplicationStart_include.cfm:486` chained on 'getServiceFactory', which is not found (calling 'declareBean') |
-| 1 | `chained on 'getSite', which is not found (calling 'getExtranet')` | 1 | none |  | `core/modules/v1/search/index.cfm:108` chained on 'getSite', which is not found (calling 'getExtranet') |
-| 1 | `chained on 'getSite', which is not found (calling 'getTemplateIncludePath')` | 1 | none |  | `core/modules/v1/component/index.cfm:125` chained on 'getSite', which is not found (calling 'getTemplateIncludePath') |
 | 1 | `component 'fb2Utility' does not exist (calling 'queryToArray')` | 1 | none |  | `core/mura/formBuilder/formBuilderManager.cfc:844` component 'fb2Utility' does not exist (calling 'queryToArray') |
 | 1 | `component 'geoCoding' does not exist (calling 'geocode')` | 1 | none |  | `core/mura/user/addressBean.cfc:203` component 'geoCoding' does not exist (calling 'geocode') |
 | 1 | `component 'loginProvider' does not exist (calling 'validateResult')` | 5 | none |  | `core/modules/v1/login/model/handlers/authHandler.cfc:39` component 'loginProvider' does not exist (calling 'validateResult') |

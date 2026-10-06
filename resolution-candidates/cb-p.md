@@ -4,9 +4,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 1228 | 560 | 171 | 130 | 367 | 75 |
-| return-type | 84 | 9 | 34 | 17 | 24 | 20 |
-| method | 167 | 0 | 0 | 86 | 81 | 41 |
+| variable | 1223 | 560 | 171 | 127 | 365 | 73 |
+| return-type | 69 | 9 | 34 | 18 | 8 | 4 |
+| method | 155 | 0 | 0 | 75 | 80 | 40 |
 | object | 97 | 0 | 0 | 0 | 97 | 82 |
 
 ## Variable definitions — a receiver whose component is unknown
@@ -163,7 +163,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `orule → modules/contentbox/models/BaseEntityMethods.cfc` | 2 | low | declares isLoaded() (2 candidates) | `modules/contentbox/models/security/SecurityRuleService.cfc:185` variable 'oRule' has no component ref |
 | 2 | `osite → modules/contentbox/models/BaseEntityMethods.cfc` | 2 | low | declares isLoaded() (2 candidates) | `modules/contentbox/models/system/SiteService.cfc:392` variable 'oSite' has no component ref |
 | 2 | `pageresults.content[] → modules/contentbox/models/content/BaseContent.cfc` | 2 | low | declares hasChild() (2 candidates) | `modules/contentbox/models/system/CBHelper.cfc:2536` variable 'pageResults.content[]' has no component ref |
-| 2 | `populator` | 0 | none |  | `modules/contentbox/models/system/SiteService.cfc:463` variable 'populator' has no component ref |
 | 2 | `prc.oblockbyip → modules/contentbox/models/security/LoginAttempt.cfc` | 1 | high | declares getAttempts(), setAttempts(), setCreatedDate() | `modules/contentbox/models/security/LoginTracker.cfc:135` variable 'prc.oBlockByIP' has no component ref |
 | 2 | `prc.oblockbyusername → modules/contentbox/models/security/LoginAttempt.cfc` | 1 | high | declares getAttempts(), setAttempts(), setCreatedDate() | `modules/contentbox/models/security/LoginTracker.cfc:145` variable 'prc.oBlockByUsername' has no component ref |
 | 2 | `prc.oentity → modules/contentbox/models/search/SearchResults.cfc` | 10 | medium | declares getMemento() | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:107` variable 'prc.oEntity' has no component ref |
@@ -225,13 +224,10 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `originalservice → modules/contentbox/models/content/BaseContent.cfc` | 3 | low | declares setParent() (2 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1412` variable 'originalService' has no component ref |
 | 1 | `otheme → modules/contentbox/themes/default/Theme.cfc` | 1 | high | declares onActivation(); named like the receiver 'oTheme' | `modules/contentbox/models/ui/ThemeService.cfc:270` variable 'oTheme' has no component ref |
 | 1 | `outputstream` | 0 | none |  | `modules/contentbox/models/media/ForwardMediaProvider.cfc:69` variable 'outputStream' has no component ref |
-| 1 | `oversion → modules/contentbox/models/content/BaseContent.cfc` | 7 | low | declares setRelatedContent() (7 candidates) | `modules/contentbox/models/content/ContentService.cfc:1278` variable 'oVersion' has no component ref |
-| 1 | `oversion → modules/contentbox/models/content/ContentVersion.cfc` | 5 | low | declares setAuthor() (5 candidates) | `modules/contentbox/models/content/ContentService.cfc:1278` variable 'oVersion' has no component ref |
 | 1 | `page → modules/contentbox/models/comments/Comment.cfc` | 4 | low | declares getContent() (4 candidates) | `modules/contentbox/models/system/NotificationService.cfc:320` variable 'page' has no component ref |
 | 1 | `page → modules/contentbox/models/content/BaseContent.cfc` | 3 | low | declares renderContent() (2 candidates) | `modules/contentbox/widgets/PageInclude.cfc:39` variable 'page' has no component ref |
 | 1 | `pages[] → modules/contentbox/models/comments/Comment.cfc` | 6 | low | declares getAuthor() (6 candidates) | `tests/specs/contentbox-web/contentbox/unit/content/PageServiceTest.cfc:45` variable 'pages[]' has no component ref |
 | 1 | `pages[] → modules/contentbox/models/security/Author.cfc` | 1 | high | declares getAuthorID(); named like the receiver 'Author' | `tests/specs/contentbox-web/contentbox/unit/content/PageServiceTest.cfc:45` variable 'pages[]' has no component ref |
-| 1 | `populator → modules/contentbox/models/system/Setting.cfc` | 6 | low | declares setSite() (6 candidates) | `modules/contentbox/models/system/SiteService.cfc:487` variable 'populator' has no component ref |
 | 1 | `prc` | 0 | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseContentHandler.cfc:140` variable 'prc' has no component ref |
 | 1 | `prc → modules/contentbox/models/security/Author.cfc` | 3 | low | declares hasPermission() (3 candidates) | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseContentHandler.cfc:140` variable 'prc' has no component ref |
 | 1 | `prc.activedisk → modules/contentbox/modules/contentbox-admin/modules/contentbox-filebrowser/handlers/Home.cfc` | 1 | medium | declares download() | `modules/contentbox/modules/contentbox-admin/modules/contentbox-filebrowser/handlers/Home.cfc:351` variable 'prc.activeDisk' has no component ref |
@@ -567,20 +563,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `originalservice → modules/contentbox/models/content/BaseContent.cfc` — 1 finding(s), 2 candidate(s):
   - low `modules/contentbox/models/content/BaseContent.cfc` — declares setParent()
   - low `modules/contentbox/models/menu/item/BaseMenuItem.cfc` — declares setParent()
-- `oversion → modules/contentbox/models/content/BaseContent.cfc` — 1 finding(s), 7 candidate(s):
-  - low `modules/contentbox/models/content/BaseContent.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/ContentVersion.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/CustomField.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/Relocation.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/Stats.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/comments/Comment.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/subscriptions/CommentSubscription.cfc` — declares setRelatedContent()
-- `oversion → modules/contentbox/models/content/ContentVersion.cfc` — 1 finding(s), 5 candidate(s):
-  - low `modules/contentbox/models/content/ContentVersion.cfc` — declares setAuthor()
-  - low `modules/contentbox/models/comments/Comment.cfc` — declares setAuthor()
-  - low `modules/contentbox/models/modules/Module.cfc` — declares setAuthor()
-  - low `modules/contentbox/models/ui/BaseWidget.cfc` — declares setAuthor()
-  - low `modules/contentbox/models/ui/Widget.cfc` — declares setAuthor()
 - `page → modules/contentbox/models/comments/Comment.cfc` — 1 finding(s), 4 candidate(s):
   - low `modules/contentbox/models/comments/Comment.cfc` — declares getContent()
   - low `modules/contentbox/models/content/BaseContent.cfc` — declares getContent()
@@ -596,13 +578,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `modules/contentbox/models/modules/Module.cfc` — declares getAuthor()
   - low `modules/contentbox/models/ui/BaseWidget.cfc` — declares getAuthor()
   - low `modules/contentbox/models/ui/Widget.cfc` — declares getAuthor()
-- `populator → modules/contentbox/models/system/Setting.cfc` — 1 finding(s), 6 candidate(s):
-  - low `modules/contentbox/models/system/Setting.cfc` — declares setSite()
-  - low `modules/contentbox/models/content/BaseContent.cfc` — declares setSite()
-  - low `modules/contentbox/models/content/Category.cfc` — declares setSite()
-  - low `modules/contentbox/models/content/ContentTemplate.cfc` — declares setSite()
-  - low `modules/contentbox/models/content/Relocation.cfc` — declares setSite()
-  - low `modules/contentbox/models/menu/Menu.cfc` — declares setSite()
 - `prc → modules/contentbox/models/security/Author.cfc` — 1 finding(s), 3 candidate(s):
   - low `modules/contentbox/models/security/Author.cfc` — declares hasPermission()
   - low `modules/contentbox/models/security/PermissionGroup.cfc` — declares hasPermission()
@@ -686,7 +661,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 16 | `method 'getBeanPopulator' has no component return type` | 0 | none |  | `modules/contentbox/models/content/CategoryService.cfc:454` method 'getBeanPopulator' has no component return type (chain to 'populateFromStruct') |
 | 16 | `method 'site' has no component return type → modules/contentbox/models/system/Site.cfc` | 5 | medium | declares getsiteID(); named like the receiver 'site' (5 candidates) | `modules/contentbox/models/system/CBHelper.cfc:222` method 'site' has no component return type (chain to 'getsiteID') |
 | 7 | `method 'getSite' has no component return type → modules/contentbox/models/system/Site.cfc` | 5 | medium | declares getSiteId(); named like the receiver 'Site' (5 candidates) | `modules/contentbox/widgets/Categories.cfc:45` method 'getSite' has no component return type (chain to 'getSiteId') |
 | 4 | `method 'getGrammar' in qb.models.Query.QueryBuilder has no component return type` | 0 | none |  | `modules/contentbox/migrations/2022_11_23_142439_v_6_0_0_Convert-Featured-cbfs.cfc:14` method 'getGrammar' in qb.models.Query.QueryBuilder has no component return type (chain to 'convertToBooleanType') |
@@ -703,7 +677,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `method 'site' in contentbox.models.system.CBHelper has no component return type → modules/contentbox/models/BaseEntityMethods.cfc` | 1 | medium | declares getId() | `modules/contentbox/modules/contentbox-admin/views/contentTemplates/indexHelper.cfm:23` method 'site' in contentbox.models.system.CBHelper has no component return type (chain to 'getId') |
 | 1 | `method 'getActiveContent' has no component return type → modules/contentbox/models/content/ContentVersion.cfc` | 4 | low | declares getIsActive() (4 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1178` method 'getActiveContent' has no component return type (chain to 'getIsActive') |
 | 1 | `method 'getActiveContent' in Page has no component return type → modules/contentbox/models/BaseEntityMethods.cfc` | 1 | medium | declares getDisplayCreatedDate() | `modules/contentbox/modules/contentbox-admin/views/content/pager.cfm:54` method 'getActiveContent' in Page has no component return type (chain to 'getDisplayCreatedDate') |
-| 1 | `method 'getBeanPopulator' has no component return type → modules/contentbox/models/content/BaseContent.cfc` | 7 | low | declares setRelatedContent() (7 candidates) | `modules/contentbox/models/content/ContentService.cfc:1204` method 'getBeanPopulator' has no component return type (chain to 'setRelatedContent') |
 | 1 | `method 'getCache' has no component return type` | 4 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/dashboard.cfc:275` method 'getCache' has no component return type (chain to 'clearAll') |
 | 1 | `method 'getContentTemplate' in contentbox.models.content.BaseContent\|contentbox.models.content.Entry\|contentbox.models.content.Page\|contentbox.models.cont…` | 1 | high | declares getTemplateID(); named like the receiver 'ContentTemplate' | `modules/contentbox/modules/contentbox-admin/views/_components/editor/sidebar/Modifiers.cfm:33` method 'getContentTemplate' in contentbox.models.content.BaseContent\|contentbox.models.content.Entry\|contentbox.models.content.Page\|contentbox.models.cont… |
 | 1 | `method 'getContentTemplate' in contentbox.models.content.BaseContent\|contentbox.models.content.Entry\|contentbox.models.content.Page\|contentbox.models.cont…` | 10 | medium | declares getMemento() | `modules/contentbox/modules/contentbox-admin/views/content/editorHelper.cfm:4` method 'getContentTemplate' in contentbox.models.content.BaseContent\|contentbox.models.content.Entry\|contentbox.models.content.Page\|contentbox.models.cont… |
@@ -715,6 +688,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `method 'getResults' in SearchResults@contentbox has no component return type` | 1 | none |  | `tests/specs/contentbox-web/contentbox/unit/search/DBSearchTest.cfc:42` method 'getResults' in SearchResults@contentbox has no component return type (chain to 'size') |
 | 1 | `method 'getWidget' has no component return type → modules/contentbox/models/ui/BaseWidget.cfc` | 26 | low | declares renderit() (25 candidates) | `modules/contentbox/models/system/CBHelper.cfc:1814` method 'getWidget' has no component return type (chain to 'renderit') |
 | 1 | `method 'populate' has no component return type → modules/contentbox/models/content/BaseContent.cfc` | 6 | low | declares setSite() (6 candidates) | `modules/contentbox/modules/contentbox-admin/handlers/categories.cfc:96` method 'populate' has no component return type (chain to 'setSite') |
+| 1 | `method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type → modules/contentbox/models/content/BaseContent.cfc` | 7 | low | declares setRelatedContent() (7 candidates) | `modules/contentbox/models/content/ContentService.cfc:1204` method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type (chain to 'setRelatedContent') |
+| 1 | `method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type → modules/contentbox/models/system/Setting.cfc` | 6 | low | declares setSite() (6 candidates) | `modules/contentbox/models/system/SiteService.cfc:487` method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type (chain to 'setSite') |
 
 <details><summary>Groups with several candidates</summary>
 
@@ -770,14 +745,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `modules/contentbox/models/modules/Module.cfc` — declares getIsActive()
   - low `modules/contentbox/models/security/Author.cfc` — declares getIsActive()
   - low `modules/contentbox/models/system/Site.cfc` — declares getIsActive()
-- `method 'getBeanPopulator' has no component return type → modules/contentbox/models/content/BaseContent.cfc` — 1 finding(s), 7 candidate(s):
-  - low `modules/contentbox/models/content/BaseContent.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/ContentVersion.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/CustomField.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/Relocation.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/content/Stats.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/comments/Comment.cfc` — declares setRelatedContent()
-  - low `modules/contentbox/models/subscriptions/CommentSubscription.cfc` — declares setRelatedContent()
 - `method 'getCurrentPage' has no component return type → modules/contentbox/models/system/Site.cfc` — 1 finding(s), 5 candidate(s):
   - low `modules/contentbox/models/system/Site.cfc` — declares getSlug()
   - low `modules/contentbox/models/content/BaseContent.cfc` — declares getSlug()
@@ -801,6 +768,21 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `modules/contentbox/models/content/Relocation.cfc` — declares setSite()
   - low `modules/contentbox/models/menu/Menu.cfc` — declares setSite()
   - low `modules/contentbox/models/system/Setting.cfc` — declares setSite()
+- `method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type → modules/contentbox/models/content/BaseContent.cfc` — 1 finding(s), 7 candidate(s):
+  - low `modules/contentbox/models/content/BaseContent.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/content/ContentVersion.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/content/CustomField.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/content/Relocation.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/content/Stats.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/comments/Comment.cfc` — declares setRelatedContent()
+  - low `modules/contentbox/models/subscriptions/CommentSubscription.cfc` — declares setRelatedContent()
+- `method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type → modules/contentbox/models/system/Setting.cfc` — 1 finding(s), 6 candidate(s):
+  - low `modules/contentbox/models/system/Setting.cfc` — declares setSite()
+  - low `modules/contentbox/models/content/BaseContent.cfc` — declares setSite()
+  - low `modules/contentbox/models/content/Category.cfc` — declares setSite()
+  - low `modules/contentbox/models/content/ContentTemplate.cfc` — declares setSite()
+  - low `modules/contentbox/models/content/Relocation.cfc` — declares setSite()
+  - low `modules/contentbox/models/menu/Menu.cfc` — declares setSite()
 
 </details>
 
@@ -812,7 +794,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 16 | `getinstance` | 4 | none |  | `modules/contentbox/email_templates/author_new.cfm:2` no qualifier, not in file |
 | 13 | `columns` | 2 | none |  | `build/patches/3.0.0-beta/Update.cfc:497` method 'columns' not found in dbinfo |
 | 13 | `version` | 0 | none |  | `build/patches/3.0.0-beta/Update.cfc:505` method 'version' not found in dbinfo |
-| 12 | `validate` | 5 | low | declares validate; beside the calling file (5 candidates) | `modules/contentbox/models/exporters/BaseExporter.cfc:60` no qualifier, not in file |
 | 6 | `generateapitoken` | 0 | none |  | `build/patches/3.7.0/Update.cfc:194` method 'generateAPIToken' not found in Author |
 | 6 | `getapitoken` | 0 | none |  | `build/patches/3.7.0/Update.cfc:193` method 'getAPIToken' not found in Author |
 | 5 | `getsystemsetting` | 2 | none |  | `config/Coldbox.cfc:23` no qualifier, not in file |
@@ -829,9 +810,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `getcache` | 9 | low | declares getCache (3 candidates) | `modules/contentbox/modules/contentbox-admin/helpers/Mixins.cfm:33` no qualifier, not in file |
 | 1 | `getdisplayexpireddate` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/views/content/quickLook.cfm:15` method 'getDisplayExpiredDate' not found in Page |
 | 1 | `getrecursiveslug` | 0 | none |  | `build/patches/1-0-4/Update.cfc:107` method 'getRecursiveSlug' not found in Page |
-| 1 | `jwtauth` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/baseContentHandler.cfc:331` not found in extends chain |
 | 1 | `renderexcerpt` | 2 | low | declares renderExcerpt; beside the calling file (2 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1624` not found in extends chain |
 | 1 | `run` | 55 | low | declares run (49 candidates) | `tests/index.cfm:29` no qualifier, not in file |
+| 1 | `validate` | 5 | low | declares validate; beside the calling file (5 candidates) | `modules/contentbox/models/exporters/BaseExporter.cfc:60` no qualifier, not in file |
 | 1 | `view` | 2 | none |  | `modules/contentbox/modules/contentbox-admin/helpers/Mixins.cfm:11` no qualifier, not in file |
 
 <details><summary>Groups with several candidates</summary>
@@ -846,12 +827,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `build/patches/3.6.0/Update.cfc:260` — declares addPermission
   - low `build/patches/3.7.0/Update.cfc:302` — declares addPermission
   - … 5 more
-- `validate` — 12 finding(s), 5 candidate(s):
-  - low `modules/contentbox/models/exporters/DataExporter.cfc:47` — declares validate; beside the calling file
-  - low `modules/contentbox/models/exporters/FileExporter.cfc:56` — declares validate; beside the calling file
-  - low `modules/contentbox/models/exporters/ICBExporter.cfc:13` — declares validate; beside the calling file
-  - low `modules/contentbox/models/ui/Widget.cfc:37` — declares validate
-  - low `modules/contentbox/models/validators/UniqueSiteFieldValidator.cfc:32` — declares validate
 - `removepermission` — 4 finding(s), 2 candidate(s):
   - low `modules/contentbox/migrations/util/MigrationUtils.cfm:178` — declares removePermission
   - low `modules/contentbox/modules/contentbox-admin/handlers/authors.cfc:747` — declares removePermission
@@ -876,6 +851,12 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `tests/specs/contentbox-api/EchoSpec.cfc:19` — declares run
   - low `tests/specs/contentbox-api/EntriesSpec.cfc:28` — declares run
   - … 41 more
+- `validate` — 1 finding(s), 5 candidate(s):
+  - low `modules/contentbox/models/exporters/DataExporter.cfc:47` — declares validate; beside the calling file
+  - low `modules/contentbox/models/exporters/FileExporter.cfc:56` — declares validate; beside the calling file
+  - low `modules/contentbox/models/exporters/ICBExporter.cfc:13` — declares validate; beside the calling file
+  - low `modules/contentbox/models/ui/Widget.cfc:37` — declares validate
+  - low `modules/contentbox/models/validators/UniqueSiteFieldValidator.cfc:32` — declares validate
 
 </details>
 
