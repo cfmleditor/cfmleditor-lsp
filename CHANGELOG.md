@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1]
+
 ### Added
 
 - **Doc block completion.** `/**` expands to a comment block for the declaration that follows it, and `@` offers the tags it documents, in script and tag syntax. The new `docBlock` config block sets the layout.
