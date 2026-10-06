@@ -2068,3 +2068,17 @@ Not fixed, recorded: cb-p's `build/patches` (193 findings) are upgrade scripts
 written against old ContentBox and ColdBox APIs. `addPermission` (66) is the
 ORM method of an older `Role` that had `singularName="permission"`, and
 `coldbox.system.orm.hibernate.util.ORMUtilFactory` (54) is ColdBox 3/4.
+
+### A struct of closures answers its members
+
+DI/1's `declare()` returns a local struct built from literals whose members are
+closures, each returning the struct again, and FW/1 applications chain them:
+`declare( "x" ).instanceOf( "y" ).asSingleton()`. A chain hop whose function
+declares no component now reads its body (`closure_struct.go`). When every
+top-level return returns one local, and that local is assigned a struct literal
+or `structAppend()`ed one, the closure members of those literals are the methods
+the next hops may call. A member returning the local keeps the chain on it; one
+returning anything else ends what is checked. A name that is not a member is
+reported as such, and a function returning a struct with no closures is
+reported as before. Measured: fw-p −73, nothing added; other scans unchanged.
+`TestAStructOfClosuresAnswersItsMembers`.

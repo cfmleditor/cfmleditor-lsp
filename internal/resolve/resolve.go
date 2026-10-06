@@ -1507,6 +1507,10 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 				return comp, softComp, "", true
 			}
 
+			if reason, done := r.closureStructHops(fd, comp, hop, call, i, tr); done {
+				return comp, softComp, reason, true
+			}
+
 			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
 		}
 
