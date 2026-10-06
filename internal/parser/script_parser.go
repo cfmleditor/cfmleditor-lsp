@@ -1359,8 +1359,16 @@ func (p *scriptParser) parseComponentAttrs() {
 
 		switch {
 		case strings.EqualFold(tok.Value, "extends"):
-			if val, ok := p.attrValue(); ok && val.Kind == TokString {
-				p.extends = unquote(val.Value)
+			if val, ok := p.attrValue(); ok {
+				switch val.Kind {
+				case TokString:
+					p.extends = unquote(val.Value)
+				case TokIdent:
+					// CFML lets an attribute value go unquoted:
+					// `component extends=testbox.system.BaseSpec {`.
+					p.extends = dottedRest(p.sc, val.Value)
+				default:
+				}
 			}
 		case strings.EqualFold(tok.Value, "accessors"):
 			if val, ok := p.attrValue(); ok {
@@ -1373,6 +1381,27 @@ func (p *scriptParser) parseComponentAttrs() {
 			}
 		}
 	}
+}
+
+// dottedRest is first followed by every `.name` the scanner holds next: an
+// unquoted dotted attribute value.
+func dottedRest(sc *Scanner, first string) string {
+	var b chainBuilder
+	b.reset(first)
+
+	for sc.PeekSkipComments().Kind == TokDot {
+		sc.NextSkipComments()
+
+		next := sc.NextSkipComments()
+		if next.Kind != TokIdent {
+			break
+		}
+
+		b.writeDot()
+		b.writeString(next.Value)
+	}
+
+	return b.String()
 }
 
 // attrValue reads `= value` after an attribute name, returning the value

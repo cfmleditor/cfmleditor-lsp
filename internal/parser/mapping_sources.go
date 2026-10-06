@@ -49,6 +49,10 @@ func mappingParentName(content string) string {
 						return value
 					}
 				}
+
+				if t.Kind == TokIdent {
+					return dottedRest(sc, t.Value)
+				}
 			}
 		}
 	}

@@ -2015,3 +2015,15 @@ for a controller file its own name. `TestWheelsViewHelpersReachTheViewsAndContro
 
 Measured with `make resolution-report` against the previous run: cfwheels 118 removed, 0 added;
 the other six configured scans unchanged.
+
+### An unquoted `extends` (TestBox 292 -> 271, fw1 409 -> 387, Lucee -7, cfwheels -6)
+
+Working back from `describe()`, defined in TestBox's BaseSpec: the specs calling it bare declared
+`component extends=testbox.system.BaseSpec {` — an unquoted attribute value, which CFML allows.
+The script parser read `extends` only from a quoted string, so the spec had no base. It now
+takes an unquoted dotted name (`dottedRest`), as does the `Application.cfc` mapping reader; tag
+syntax already did. `TestAnUnquotedExtendsIsRead`.
+
+Measured against the previous run: TestBox 21 removed, fw1 23 removed and 1 added (a spec whose
+unquoted base is `mxunit.framework.TestCase`, not installed, now reports that once), Lucee 7 and
+cfwheels 6 removed.
