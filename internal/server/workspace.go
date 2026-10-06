@@ -17,6 +17,8 @@ import (
 )
 
 func (s *Server) indexWorkspace() {
+	defer indexingGC()()
+
 	// Collect all .cfc files to index.
 	var files []string
 
@@ -254,6 +256,8 @@ func expandGlob(pattern string) []string {
 }
 
 func (s *Server) indexRoot(root string) {
+	defer indexingGC()()
+
 	s.log.Info("indexing workspace", cflog.String("root", root))
 
 	err := s.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -298,5 +302,49 @@ func (s *Server) indexRoot(root string) {
 	})
 	if err != nil {
 		s.log.Error("failed to walk directory", cflog.String("root", root), cflog.Err(err))
+	}
+}
+
+// indexingGCPercent is the GOGC an indexing scan runs under. A scan holds a
+// file and its parse per worker, and the heap the runtime grows to for that
+// is what the process keeps resident afterwards: macOS counts memory handed
+// back as resident until the system needs it, so the peak is what a user sees
+// for the rest of the session. Collecting at 50% growth rather than 100% took
+// tassweb's peak from ~154MB to ~130MB, for ~6% more indexing time.
+const indexingGCPercent = 50
+
+// indexingGCState counts the scans running, so that the GOGC the first one
+// replaced is restored when the last one ends: the setting is the process's,
+// and a daemon serves several sessions from one process.
+var indexingGCState struct {
+	sync.Mutex
+	running int
+	prev    int
+}
+
+// indexingGC lowers GOGC for an indexing scan and returns the function that
+// restores it. A lower setting, or the collector switched off, is left alone.
+func indexingGC() func() {
+	indexingGCState.Lock()
+	if indexingGCState.running == 0 {
+		indexingGCState.prev = debug.SetGCPercent(indexingGCPercent)
+		// A lower setting, or -1 for the collector off, is the user's.
+		if indexingGCState.prev < indexingGCPercent {
+			debug.SetGCPercent(indexingGCState.prev)
+		}
+	}
+
+	indexingGCState.running++
+	indexingGCState.Unlock()
+
+	return func() {
+		indexingGCState.Lock()
+		indexingGCState.running--
+
+		if indexingGCState.running == 0 {
+			debug.SetGCPercent(indexingGCState.prev)
+		}
+
+		indexingGCState.Unlock()
 	}
 }
