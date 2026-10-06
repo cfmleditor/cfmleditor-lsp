@@ -148,6 +148,17 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"wheels", `model( "User" )`, "User"},
 		{"fw1", `getBeanFactory().getBean( "userService" )`, "userService"},
 		{"wheels", `model( "User" ).findAll()`, ""},
+		{"mura", "$", "mura.MuraScope"},
+		{"mura", "variables.$", "mura.MuraScope"},
+		{"mura", "arguments.m", "mura.MuraScope"},
+		{"mura", "rc.$", "mura.MuraScope"},
+		{"mura", "mura", "mura.MuraScope"},
+		{"mura", "$x", ""},
+		{"mura", "item", ""},
+		{"mura", `variables.event.getValue("muraScope")`, "mura.MuraScope"},
+		{"mura", `event.getValue( 'MuraScope' )`, "mura.MuraScope"},
+		{"mura", `event.getValue("other")`, ""},
+		{"mura", "getMuraScope()", "mura.MuraScope"},
 	} {
 		var rs []parser.Resolver
 		for _, r := range FrameworkResolvers([]string{tc.framework}) {

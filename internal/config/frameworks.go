@@ -276,6 +276,22 @@ var frameworkPresets = map[string]frameworkPreset{
 		helperDirs: []string{"controllers", "models", "views", "layouts"},
 	},
 
+	// Mura / Masa CMS: the Mura scope, which Mura's documentation spells $, m
+	// and mura and hands every display object, view and event handler, and
+	// which an admin view reads as rc.$. getMuraScope() and the event's
+	// getValue( "muraScope" ) return it.
+	"mura": {
+		resolvers: append([]Resolver{
+			variableResolver("mura.MuraScope", "$", "m", "mura", "rc.$", "rc.m"),
+			{
+				Match:            `(?i)(?:^|\.)getValue\(\s*["']muraScope["']\s*\)$`,
+				Resolve:          "mura.MuraScope",
+				Prefix:           "getValue",
+				DynamicIfMissing: true,
+			},
+		}, returnResolver("mura.MuraScope", "getMuraScope")...),
+	},
+
 	// FW/1: the framework object controllers are handed, its bean factory, and
 	// views and layouts, which framework.one includes.
 	"fw1": {

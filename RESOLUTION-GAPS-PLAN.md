@@ -1955,3 +1955,30 @@ Measured per entry: Masa configured 21 removed, 3 added; automatic 21 removed, 4
 coldbox-platform 2 removed; TestBox 4 removed. The additions are honest: `getMuraScope` now has
 no return type ("has no component return type" instead of "not found in event"), and
 `arguments.content` typed as contentBean exposes `getDisplayInterval()` with none.
+
+### A Mura preset, and a lazy request field's only writer (Masa 9,201 -> 6,072; automatic 11,452 -> 8,436)
+
+- **`frameworks: ["mura"]`** types the Mura scope, which Mura's documentation spells `$`, `m`
+  and `mura` and which an admin view reads as `rc.$`: those names in any scope,
+  `getMuraScope()` and an event's `getValue( "muraScope" )` are `mura.MuraScope`. Every resolver
+  is `dynamicIfMissing`, as presets are, and the stubs (`MuraScope`, `MasaScope`, `cfobject`,
+  `event`, `sessionUserFacade`) are generated from MasaCMS at the commit the corpus pins. The
+  scope's `OnMissingMethod` forwards to the content renderer, so calls it does not declare are
+  accepted as the runtime answers them. The source never states what `$` holds in a view — the
+  admin framework copies `rc.$` into a local before a computed include, and `rc.$` is
+  `request.event.getValue('MuraScope')` — which is what makes it a preset and not a rule.
+  `scripts/corpus/masacms.json` now enables it, so both Masa baselines move with this commit.
+  `TestEveryPresetResolverMatchesItsOwnNames` has its cases.
+- **A lazily created request field** is what its only writer stores: `getCurrentUser()` creates
+  `request.currentUser` when absent and returns it, and no other file writes the key, so it
+  returns `sessionUserFacade` — which types `$.currentUser()` and the rest of the chains the
+  preset exposed. `sharedFieldContract` reads it for `request.` as for `variables.`, in a batch
+  scan only (`onlyFileWritesRequest` checks every file for an assignment, a bracketed write,
+  `structInsert` or `cfparam`), and the file's own writes counted in its text must equal the
+  ones the plan read, since a statement the planner cannot read may hold one.
+  `TestALazyRequestFieldIsWhatItsOnlyWriterStores`.
+
+Measured per entry against the previous commit: Masa configured 3,326 removed and 197 added,
+automatic 3,474 removed and 458 added; every other mode unchanged. The additions are calls
+chained on the scope's dual-mode accessors (`$.event()`, `$.content()`, `$.getFeed()`), now
+reported as "has no component return type" where the receiver was untyped before.

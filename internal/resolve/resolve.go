@@ -60,36 +60,37 @@ type Resolver struct {
 	// InferArgsFiles are the files to search for the callers of a function, to
 	// type an argument from what they pass (argumentFromCallers). Nil switches
 	// it off: a batch scan sets it once its index is complete.
-	InferArgsFiles []string
-	stubFS         vfs.FS
-	mu             sync.RWMutex
-	appRootCache   map[string]string   // dir → Application.cfc root
-	slugCache      map[string]string   // dir → its box.json slug, "" for none
-	resolveCache   map[string]string   // component+"\t"+baseDir → file path
-	includeCache   map[string]string   // include path+"\t"+including directory → template
-	interfaceCache map[string]bool     // component file → whether it declares an interface
-	dirCache       *cfpath.DirCache    // directory listings behind those resolutions
-	incGraph       *includeGraph       // the index's cfincludes, rebuilt when they change
-	exprKeys       []string            // ExpressionMappings' keys in the order they apply
-	implicitCache  map[string]string   // path → ImplicitExtends(path)
-	helpers        *helperSet          // application helper templates, per set of config files
-	wb             *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
-	beanPathsCache map[string]string   // merged application/configured bean roots
-	fw1Scopes      map[string]fw1Scope // nearest application's source-defined injection scope
-	diOnce         sync.Once
-	diPolicies     []diPolicy                     // source-backed DI/1 injection contracts
-	discoveringDI  bool                           // private policy discovery never re-enters injection lookup
-	startupCache   map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
-	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
-	ctlPathCache   map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
-	includerCache  map[string]string              // template, name, depth and include generation → includerHeld's answer
-	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
-	loopCache      spanCache[loopSpan]            // file URI → every loop its current text holds (loopsOf)
-	closureCache   spanCache[closureSpan]         // file URI → every function literal its current text holds (closuresOf)
-	callerIdx      *callerIndex                   // name → files calling it, built once for argumentFromCallers
-	argCache       map[string]string              // an argument → what its callers pass (argumentFromCallers)
-	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)
-	handoffs       handoffIndex                   // handler actions by the view each renders (viewActions)
+	InferArgsFiles    []string
+	stubFS            vfs.FS
+	mu                sync.RWMutex
+	appRootCache      map[string]string   // dir → Application.cfc root
+	slugCache         map[string]string   // dir → its box.json slug, "" for none
+	resolveCache      map[string]string   // component+"\t"+baseDir → file path
+	includeCache      map[string]string   // include path+"\t"+including directory → template
+	interfaceCache    map[string]bool     // component file → whether it declares an interface
+	dirCache          *cfpath.DirCache    // directory listings behind those resolutions
+	incGraph          *includeGraph       // the index's cfincludes, rebuilt when they change
+	exprKeys          []string            // ExpressionMappings' keys in the order they apply
+	implicitCache     map[string]string   // path → ImplicitExtends(path)
+	helpers           *helperSet          // application helper templates, per set of config files
+	wb                *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
+	beanPathsCache    map[string]string   // merged application/configured bean roots
+	fw1Scopes         map[string]fw1Scope // nearest application's source-defined injection scope
+	diOnce            sync.Once
+	diPolicies        []diPolicy                     // source-backed DI/1 injection contracts
+	discoveringDI     bool                           // private policy discovery never re-enters injection lookup
+	startupCache      map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
+	wheelsSources     map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
+	ctlPathCache      map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
+	includerCache     map[string]string              // template, name, depth and include generation → includerHeld's answer
+	returnCache       returnCache                    // ReturnComponentOf answers, for one index generation
+	loopCache         spanCache[loopSpan]            // file URI → every loop its current text holds (loopsOf)
+	closureCache      spanCache[closureSpan]         // file URI → every function literal its current text holds (closuresOf)
+	callerIdx         *callerIndex                   // name → files calling it, built once for argumentFromCallers
+	argCache          map[string]string              // an argument → what its callers pass (argumentFromCallers)
+	requestWriteCache map[string]bool                // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
+	handlerCache      map[string]*parser.ParseResult // handler path → its parse (handlerParse)
+	handoffs          handoffIndex                   // handler actions by the view each renders (viewActions)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and

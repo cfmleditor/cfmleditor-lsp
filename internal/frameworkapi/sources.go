@@ -80,6 +80,7 @@ var Sources = []Source{
 		"cbmessagebox.models.MessageBox",
 	}},
 	{"fw1", "https://github.com/framework-one/fw1", "d7fb9add9b82be4d7c884ebb2d0f88ffb59ed8c9", "framework", "framework", nil},
+	{"mura", "https://github.com/MasaCMS/MasaCMS", "696383140578f8dea3ece26f80cd7bfb370ddf0f", "mura", "core/mura", nil},
 }
 
 // Helper is a template a module mixes into every handler and view
