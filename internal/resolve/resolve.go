@@ -37,6 +37,13 @@ type Resolver struct {
 	ExpressionMappings map[string]string
 	Index              *index.Index
 	Resolvers          []parser.Resolver
+	// IndexTracksFiles says a change to a file on disk reaches Index as a
+	// write, which moves its generation: the LSP re-indexes a saved or
+	// watched file. Source-backed caches then trust the generation rather
+	// than stat the file on every lookup, which on a large component was the
+	// largest flat cost of a reparse. A batch scan, which reads the disk
+	// as it goes, leaves it false.
+	IndexTracksFiles bool
 	// ImplicitExtends names the component a file extends when it names none,
 	// from its path: a framework preset's rule that a ColdBox handler is an
 	// EventHandler without saying so. Nil for none. See config.ImplicitExtends.
@@ -128,8 +135,10 @@ func (r *Resolver) returnStamp(gen uint64, path string) fileStamp {
 		return stamp
 	}
 
-	if info, err := r.fs().Stat(path); err == nil {
-		stamp = fileStamp{size: info.Size(), modTime: info.ModTime()}
+	if !r.IndexTracksFiles {
+		if info, err := r.fs().Stat(path); err == nil {
+			stamp = fileStamp{size: info.Size(), modTime: info.ModTime()}
+		}
 	}
 
 	r.mu.Lock()

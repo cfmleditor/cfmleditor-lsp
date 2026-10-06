@@ -462,10 +462,12 @@ func (s *Server) getResolver() *resolve.Resolver {
 			BeanPaths:          s.BeanPaths,
 			ExpressionMappings: s.ExpressionMappings,
 			Index:              s.index,
-			Resolvers:          s.buildResolvers(),
-			ImplicitExtends:    config.ImplicitExtends(s.Frameworks),
-			HelperScope:        config.HelperScope(s.Frameworks),
-			Stubs:              frameworkapi.For(s.Frameworks),
+			// Saves, watched-file events and edits all reach the index.
+			IndexTracksFiles: true,
+			Resolvers:        s.buildResolvers(),
+			ImplicitExtends:  config.ImplicitExtends(s.Frameworks),
+			HelperScope:      config.HelperScope(s.Frameworks),
+			Stubs:            frameworkapi.For(s.Frameworks),
 		}
 	}
 

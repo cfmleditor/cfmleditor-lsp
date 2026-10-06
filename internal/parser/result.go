@@ -247,6 +247,13 @@ func (pr *ParseResult) extractSignatures() {
 
 	pr.prepareManagedSetterLookup()
 
+	if pr.FuncLookup != nil {
+		lookup := pr.FuncLookup
+		pr.FuncLookup = memoFuncLookup(lookup)
+
+		defer func() { pr.FuncLookup = lookup }()
+	}
+
 	var allPendingCalls []pendingCall
 
 	if !pr.shallow {
@@ -3765,4 +3772,38 @@ func callHopName(hop string) string {
 	}
 
 	return hop
+}
+
+// memoFuncLookup answers each (component, method) pair once for the length of
+// one signature pass. A component's methods are asked about once per call site,
+// and a large file names the same few thousands of times: on a 65,000-line
+// component the repeats were most of what a reparse cost. The answer depends on
+// the index and the filesystem, which the pass does not change, so it is held
+// only while the pass runs and never across an edit.
+func memoFuncLookup(lookup func(component, funcName string) string) func(component, funcName string) string {
+	type key struct{ component, funcName string }
+
+	var mu sync.Mutex
+
+	seen := make(map[key]string)
+
+	return func(component, funcName string) string {
+		k := key{component, funcName}
+
+		mu.Lock()
+		answer, ok := seen[k]
+		mu.Unlock()
+
+		if ok {
+			return answer
+		}
+
+		answer = lookup(component, funcName)
+
+		mu.Lock()
+		seen[k] = answer
+		mu.Unlock()
+
+		return answer
+	}
 }

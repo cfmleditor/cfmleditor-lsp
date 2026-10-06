@@ -2460,6 +2460,7 @@ func (p *tagParser) mergeExpressionMemberSets(expr string, line int) {
 	}
 
 	sub := newScriptParser("function __cfset(){"+expr+"}", p.fileURI, line, p.resolvers).asCFScript()
+	sub.resolverSet = p.resolverSet
 	sub.parse()
 
 	for i := range sub.pendingCalls {

@@ -128,6 +128,10 @@ func (r *Resolver) producerExpressionValue(fd *parser.FunctionDef, expression, b
 		return producerUnknown()
 	}
 
+	if r.producerIgnoresArguments(fd) {
+		return producerUnknown()
+	}
+
 	eval := producerEvaluation{resolver: r, fd: fd, receiver: component, baseDir: baseDir, budget: budget, depth: depth, callerArguments: true}
 
 	arguments, known := eval.arguments(tokens[open+1:len(tokens)-1], nil)
@@ -1341,4 +1345,32 @@ func (e *producerEvaluation) assign(node *producerNode, env producerEnvironment)
 	}
 
 	return true
+}
+
+// producerIgnoresArguments reports that call would answer unknown for fd
+// whatever arguments it were given: a generic return type, no declared or
+// inferred return, no source plan and no self-mode parameter. Evaluating the
+// arguments first resolves every call inside them, and a parse asks this
+// once per call site with its own argument text, so on a large component
+// that evaluation was most of what a return lookup cost.
+func (r *Resolver) producerIgnoresArguments(fd *parser.FunctionDef) bool {
+	if fd == nil || !fd.URI.IsFile() {
+		return false
+	}
+
+	switch strings.ToLower(fd.ReturnType) {
+	case "", "any", "object", "component":
+	default:
+		return false
+	}
+
+	if fd.ReturnComponent != "" && fd.ReturnComponent != "$any" || len(fd.ReturnSources) > 0 || fd.DocReturn != "" {
+		return false
+	}
+
+	if r.wheelsSource(fd.URI.Path()).methods[strings.ToLower(fd.Name)].selfDefaultParam != "" {
+		return false
+	}
+
+	return r.producerFor(fd) == nil
 }

@@ -108,10 +108,11 @@ func (s *mappingSourceState) content(content, file string, depth int) {
 		}
 
 		if index := indexFold(t.Value, "include"); index >= 0 && s.read != nil {
-			start, re := includeFormAt(content, t.Offset+index)
-			if re != nil {
-				if m := re.FindStringSubmatch(content[start:min(len(content), start+includeWindow)]); m != nil && isIncludable(m[1]) {
-					s.file(s.includePath(m[1], file), depth+1)
+			start, form := includeFormAt(content, t.Offset+index)
+			if form != nil {
+				window := content[start:min(len(content), start+includeWindow)]
+				if from, to, ok := form(window); ok && isIncludable(window[from:to]) {
+					s.file(s.includePath(window[from:to], file), depth+1)
 					s.env["@template"] = file
 				}
 			}
