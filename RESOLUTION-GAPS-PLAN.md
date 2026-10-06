@@ -2117,3 +2117,13 @@ the `event` bean (`mura.event`), while Mura passes a `servletEvent` at render
 time. That is the same question as the held-back `event` preset
 (`resolution-candidates/held-back/mura-event-preset.patch`), so it is left for
 that decision. `TestAMuraDisplayObjectRunsInTheContentRenderer`.
+
+### A Wheels global template reads Global's functions
+
+`app/global/*.cfm` is mixed into every Wheels controller, model and view, and
+`vendor/wheels/global/*.cfm` into `Global`. The wheels preset gives a `.cfm` under
+a `global` directory the implied base `wheels.Global`, which all of those hosts
+have, so `model()` in `install.cfm` is found while a view-only helper there would
+still be reported. Measured: cw-p −9/+1, where the added one is `$getDBType`
+moving from "no qualifier" to "not found in extends chain".
+`TestAWheelsGlobalTemplateRunsInGlobal`.

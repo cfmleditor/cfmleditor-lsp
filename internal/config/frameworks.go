@@ -270,6 +270,10 @@ var frameworkPresets = map[string]frameworkPreset{
 		bases: []implicitBase{
 			{dir: "views", ext: ".cfm", component: wheelsView},
 			{dir: "layouts", ext: ".cfm", component: wheelsView},
+			// app/global/*.cfm is mixed into every controller, model and
+			// view, and vendor/wheels/global/*.cfm into Global; Global is
+			// what all of them have, so model() in a global helper is its.
+			{dir: "global", ext: ".cfm", component: "wheels.Global"},
 		},
 		// The application's global/functions.cfm reaches every controller,
 		// model and view (resolve.wheelsGlobals).

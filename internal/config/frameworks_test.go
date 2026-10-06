@@ -205,6 +205,22 @@ func TestAMuraDisplayObjectRunsInTheContentRenderer(t *testing.T) {
 	}
 }
 
+// TestAWheelsGlobalTemplateRunsInGlobal: app/global/*.cfm is mixed into
+// every controller, model and view, and vendor/wheels/global/*.cfm into
+// Global, so both read Global's functions.
+func TestAWheelsGlobalTemplateRunsInGlobal(t *testing.T) {
+	implicit := ImplicitExtends([]string{"wheels"})
+	for path, want := range map[string]string{
+		"/p/app/global/auth.cfm":              "wheels.Global",
+		"/p/vendor/wheels/global/strings.cfm": "wheels.Global",
+		"/p/app/global/Helper.cfc":            "",
+	} {
+		if got := implicit(path); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+}
+
 // TestSuggestFrameworksFromBoxJSON: a project finds out a preset exists from
 // its own box.json — a dependency, a dev dependency or the package's own slug
 // (coldbox-platform is the package named coldbox) — minus the presets the
