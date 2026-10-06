@@ -2149,3 +2149,22 @@ component". `readNewComponent` now consumes `name` and `name=value` attributes
 up to the body's `{` (`skipInlineComponentAttrs`) and gives `$any`, restoring
 the scanner when no body follows. Measured: lucee −47, nothing added; gapcheck
 unchanged. `TestAnInlineComponentWithAttributesIsDynamic`.
+
+### What Wheels' $createObjectFromRoot builds, through a spec's wrapper
+
+`assignedFromCall` reads `x = receiver.method( … )` at lookup time, with a regex
+that did not allow `$` in names. So every
+`d = application.wo.$createObjectFromRoot( path = "wheels", fileName = "Dispatch", method = "$init" )`
+in cfwheels' specs was untyped, although the factory with literal arguments was
+already answered (`wheelsConstructedFactory`). It now uses `assignedCallRe`,
+which allows `$`. A bare `x = f( args )` is read too (`typeBareCallExpr`): when
+`f` declares no component, its argument-dependent return is asked
+(`expressionReturn`), and a local holding a literal struct is written into the
+call in its place (`inlineStructArg`: the last `name = { … }` in the function,
+with later `name.key = …` applied, keeping string literals only).
+`wheelsFactoryReturn` recognises one more wrapper shape,
+`return g.$createObjectFromRoot( argumentCollection = arguments.config )`
+(`wheelsArgCollectionParam`), and hands the factory the struct's fields.
+Measured: cw-p −195 (`d` 85, `PluginObj`/`pluginObj` 94, `_dispatch` 16),
+nothing added. `TestAWrapperHandsTheFactoryItsArgumentsStruct`, whose
+computed-`fileName` case stays untyped.

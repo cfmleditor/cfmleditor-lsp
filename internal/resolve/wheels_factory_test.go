@@ -123,3 +123,47 @@ func TestWheelsFactoryWrapperWithoutSemicolons(t *testing.T) {
 	got := reasonsWith(t, r, dir, "Spec.cfc")
 	expectReasons(t, got, map[string]string{"$mapper.route.end": "", "b.route": ""})
 }
+
+// TestAWrapperHandsTheFactoryItsArgumentsStruct: cfwheels' plugin specs build
+// a literal config and pass it to a wrapper,
+// `return g.$createObjectFromRoot( argumentCollection = arguments.config )`.
+// The factory Invoke()s Plugins' $init(), which returns this, so the result
+// is a Plugins. A config whose fileName is not a literal gives nothing.
+func TestAWrapperHandsTheFactoryItsArgumentsStruct(t *testing.T) {
+	dir := t.TempDir()
+	files := wheelsFactoryFiles()
+	files["wheels/Plugins.cfc"] = `component {function $init(required string pluginPath){return this;} function getPlugins(){}}`
+	files["PluginSpec.cfc"] = `component extends="wheels.WheelsTest" {
+ function run(){
+ it("loads", function(){
+ var config = {
+ path = "wheels",
+ fileName = "Plugins",
+ method = "$init",
+ pluginPath = "/a"
+ };
+ config.pluginPath = "/b";
+ PluginObj = $pluginObj(config);
+ PluginObj.getPlugins();
+ PluginObj.nope();
+ });
+ it("computed", function(){
+ var config = {path = "wheels", fileName = "Plugins", method = "$init"};
+ config.fileName = selected;
+ other = $pluginObj(config);
+ other.getPlugins();
+ });
+ }
+ function $pluginObj(required struct config) {
+ return g.$createObjectFromRoot(argumentCollection = arguments.config)
+ }
+ }`
+	writeFiles(t, dir, files)
+
+	got := reasonsWith(t, &Resolver{}, dir, "PluginSpec.cfc")
+	expectReasons(t, got, map[string]string{
+		"PluginObj.getPlugins": "",
+		"PluginObj.nope":       "method 'nope' not found in Plugins",
+		"other.getPlugins":     "variable 'other' has no component ref",
+	})
+}
