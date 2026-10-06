@@ -2198,5 +2198,7 @@ declares a return, on the assumption that the parse had already typed it; it
 now returns that declared component. Measured: cb-p −23 (`vResults` 22, plus one
 argument typed by caller inference), cw-p −2 (`local.bridge = $cliBridge()`, a
 `CliBridge`), nothing added. `TestAValidationResultIsTypedFromTheStubbedHelper`.
-cbsecurity and cbauth remain unstubbed: their helpers are accepted
-(`moduleHelpers`), and nothing in the corpus calls a method on what they return.
+cbsecurity and cbauth remain unstubbed. Their helpers are accepted
+(`moduleHelpers`), and one call in the corpus chains on what they return:
+ContentBox's `jwtAuth().fromUser()`, still reported. Stubbing cbsecurity the
+same way would answer it.
