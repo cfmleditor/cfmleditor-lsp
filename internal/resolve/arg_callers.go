@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -368,10 +369,65 @@ func (r *Resolver) callIsTo(call *parser.CallSite, hpr *parser.ParseResult, path
 
 	comp, _ := r.receiverComponentD(call.Variable, call.Line, call.Caller, call.FuncName, hpr, dir, nil, lookupCtx{depth: ctx.depth + 1})
 	if comp == "" || strings.HasPrefix(comp, "$") {
-		return false, false
+		// A receiver that cannot hold fd's component is known not to call fd:
+		// MessageDigest's md.update() is not a DAO's update().
+		return false, r.cannotHold(call, hpr, fd)
 	}
 
 	return r.componentCallIs(comp, call.FuncName, fd, dir), true
+}
+
+// javaObjectRe is an expression that makes a Java object: createObject with
+// the java type, or Lucee's new java:, whatever is chained on it.
+var javaObjectRe = regexp.MustCompile(`(?is)^(?:createObject\s*\(\s*["']java["']|new\s+java:)`)
+
+// computedComponentRe is createObject of a component whose path is computed
+// but whose last segment, the file's name, is literal.
+var computedComponentRe = regexp.MustCompile(`(?is)^createObject\s*\(\s*["']component["']\s*,\s*["'][^"']*#[^"']*\.(\w+)["']\s*\)$`)
+
+// cannotHold reports whether the variable call is made on is, at the call, a
+// local assigned something that cannot be fd's component: a Java object, or a
+// component whose computed path names a file of another name — Mura's
+// createObject("component","plugins.#dir#.plugin.plugin") is a plugin.cfc,
+// unless a file of that name in the workspace extends fd's component.
+func (r *Resolver) cannotHold(call *parser.CallSite, pr *parser.ParseResult, fd *parser.FunctionDef) bool {
+	name := strings.TrimPrefix(strings.ToLower(call.Variable), "local.")
+	if name == "" || strings.ContainsAny(name, ".[(") || pr == nil {
+		return false
+	}
+
+	start := 0
+	if scope, ok := enclosingScope(pr, call.Line); ok {
+		start = scope.Start
+	}
+
+	rhs, ok := localAssignment(pr.Content, name, start, int(call.Line))
+	if !ok {
+		return false
+	}
+
+	rhs = strings.TrimSpace(rhs)
+	if javaObjectRe.MatchString(rhs) {
+		return true
+	}
+
+	m := computedComponentRe.FindStringSubmatch(rhs)
+	if m == nil || !fd.URI.IsFile() {
+		return false
+	}
+
+	file := fd.URI.Path()
+	if strings.EqualFold(m[1], strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))) || r.Index == nil {
+		return false
+	}
+
+	for _, p := range r.Index.FindFilesByBasename(m[1]) {
+		if r.descendsFrom(p, file) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // componentCallIs reports whether funcName called on comp (or any of its

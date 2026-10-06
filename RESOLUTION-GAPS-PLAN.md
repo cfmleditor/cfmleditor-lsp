@@ -1918,3 +1918,19 @@ additions are `$engineAdapter().globRegex()` and a sibling, whose head is now fo
 
 Measured per entry on cfwheels with presets: 97 removed, 0 added (55 through the wrappers, 42
 `$`-named functions' arguments).
+
+### A caller whose receiver cannot be the component (Masa 9,586 -> 9,219)
+
+Caller inference gives up on an argument when any call of the function's name cannot be placed,
+and Mura's DAOs name their writers `update` and `create`: `settingsDAO.update( bean )` shared its
+name with `cryptUtility`'s `md.update()` on a `java.security.MessageDigest` and with
+`pluginManager`'s `pluginCFC.update()` on `createObject("component",
+"plugins.#dir#.plugin.plugin")`. Neither receiver types, so no DAO's `arguments.bean` ever did.
+`cannotHold` places such a call as "not this function" when the receiver's assignment reaching
+the call makes a Java object (`createObject("java", …)`, `new java:`), or a component whose
+computed path ends in a literal file name other than the declaring file's — unless a workspace
+file of that name extends the declaring component. `TestACallOnWhatCannotBeTheComponentIsNotACaller`,
+which fails without each of the three.
+
+Measured per entry: Masa configured 367 removed, 0 added (`arguments.bean` 133, `userBean` 75,
+`feedBean` 72, `categoryBean` 35, …); every other mode unchanged.

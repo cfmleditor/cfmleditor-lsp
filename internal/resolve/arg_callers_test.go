@@ -214,3 +214,43 @@ function callers(){ $use( new Item() ); }
 		"$use":                 "",
 	})
 }
+
+// TestACallOnWhatCannotBeTheComponentIsNotACaller: Mura's settingsDAO.update(bean)
+// shares its name with MessageDigest's md.update() and with a plugin's
+// pluginCFC.update(), and neither receiver could be typed, so the DAO's
+// argument was never inferred. A Java object is never a component, and a
+// component built from a computed path ending in a literal file name is that
+// file — unless a file of that name extends the declaring component.
+func TestACallOnWhatCannotBeTheComponentIsNotACaller(t *testing.T) {
+	files := map[string]string{
+		"Item.cfc": `component { function go(){} }`,
+		"DAO.cfc":  `component { function update( required bean ){ arguments.bean.go(); } }`,
+		"Mgr.cfc": `component {
+function save(){ var d = new DAO(); d.update( new Item() ); }
+function sha(){
+	var md = createObject("java", "java.security.MessageDigest").getInstance("SHA-1");
+	md.update( 1 );
+}
+function plugins( dir ){
+	var p = createObject("component", "plugins.#dir#.plugin");
+	p.update( 1 );
+}
+}`,
+	}
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "DAO.cfc"), map[string]string{
+		"arguments.bean.go": "",
+	})
+
+	// A plugin.cfc that extends the DAO could be the receiver.
+	files["plugins/x/plugin.cfc"] = `component extends="DAO" {}`
+
+	dir = t.TempDir()
+	writeFiles(t, dir, files)
+
+	if got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "DAO.cfc")["arguments.bean.go"]; got == "" {
+		t.Errorf("typed although a plugin.cfc extending the DAO may be the receiver")
+	}
+}
