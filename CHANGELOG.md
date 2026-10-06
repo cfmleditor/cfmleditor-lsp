@@ -2,8 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Doc block completion.** `/**` expands to a comment block for the declaration that follows it, and `@` offers the tags it documents, in script and tag syntax. The new `docBlock` config block sets the layout.
+
+### Performance
+
+- **Typing in a large file is 2–3× faster.** On a 65,000-line tag component, an edit outside a function costs ~220ms, from ~580ms, and the file opens in ~0.6s, from ~1.2s. An edit inside a function no longer forces a full reparse every sixth keystroke of a held-down key, and a 1,700-line component handles an edit in ~4ms, from ~11ms.
+- **Less memory.** A reparse kept the previous one's document alive, so the heap grew ~2.8MB per edit in a large file; it no longer grows. Source plans are made per method on demand, and indexing collects more often while it runs: ~25% less resident memory over a session.
+- **`unresolved` over tassweb takes 8s, from 37s.**
+
 ### Fixed
 
+- **Calls were recorded twice** in the arguments of a top-level assignment when a componentResolver was configured, in a `<cfset>` member assignment, and after each reparse.
+- **Member refs come out in source order**, the same on every run.
+- **Fewer unresolved calls.** ContentBox's go from 2,637 to 1,890, and Mura, Wheels and tassweb gain typing from:
+  - returns: the assignment reaching the return, the branches that reach it, struct return types, `cfinvoke returnvariable`, parenthesised and shared-scope returns, and argument-sensitive factories;
+  - receivers: loop variables by their collection's entity, `x = x.m()` read as what `x` held, bare component argument types, property hops through a componentResolver, and an argument by what its callers pass;
+  - frameworks: ColdBox `prc` handed from handler to view and partials, FW/1 views based on the Application, Wheels `controller( "name" )` and included templates, ORM relationship getters, `VirtualEntityService` bindings and directory-listing includes.
+- **Declared return types are honoured**: a primitive declaration rejects an inferred component.
 - **A shared-scope variable set by a multi-line startup assignment is typed.** `REQUEST.tassui = REQUEST.kernel.getPageTools().getTassUI( companyCode = …, currencySymbol = REQUEST.kernel.getObjInit().getCurrencySymbol() )` was never read: the startup scan took one line at a time and never reached the closing `>`, and the chain check refused a call inside an argument list. A right-hand side now runs to the tag's `>` or the statement's `;`, outside quotes and parentheses.
 - **The folder holding `.cfmleditor.json` maps under its own name.** A config in a folder called `myapp` now resolves `myapp.models.User` to `<config dir>/models/User.cfc` even when `workspacePaths` names only other folders. It was implied only for folders listed there. A mapping of the same name in the config wins.
 - **An `Application.cfc` mapping written `getDirectoryFromPath(getCurrentTemplatePath())` is read.** `this.mappings["/myapp"] = getDirectoryFromPath(getCurrentTemplatePath())`, the usual way to say "this folder", was ignored: only `expandPath("…")` and a plain string were understood. It maps to the `Application.cfc`'s folder, or to a folder under it with `& "sub/dir"` appended.
