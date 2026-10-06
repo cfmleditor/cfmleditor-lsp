@@ -2168,3 +2168,20 @@ with later `name.key = …` applied, keeping string literals only).
 Measured: cw-p −195 (`d` 85, `PluginObj`/`pluginObj` 94, `_dispatch` 16),
 nothing added. `TestAWrapperHandsTheFactoryItsArgumentsStruct`, whose
 computed-`fileName` case stays untyped.
+
+### MXUnit is TestBox's compatibility layer
+
+TestBox documents running MXUnit tests by mapping `/mxunit` to
+`testbox/system/compat`, and its stubs already hold
+`testbox.system.compat.framework.TestCase`. `frameworkapi.Namespaced` now reads
+`mxunit.` as `testbox.system.compat.`, so no MXUnit source is stubbed.
+Measured: fw-p −36/+5. The 5 are methods FW/1's tests inject into the framework
+object (`selectLayoutTwo()` calling `setLayout()`/`view()`), previously hidden
+behind the unresolved base. `TestMXUnitIsTestBoxsCompatibilityLayer`.
+
+Not done, for decision: cbvalidation, cbsecurity and cbauth are not stubbed.
+Their helpers are accepted (`moduleHelpers`), but nothing types what they
+return. In ContentBox, `vResults = validate( … )` then `vResults.hasErrors()`
+is about 24 findings. Typing those needs cbvalidation's models stubbed, plus a
+stated return for `validate()`, whose documented type is the
+`IValidationResult` interface, which `docReturn` deliberately skips.

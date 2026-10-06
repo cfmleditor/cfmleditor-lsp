@@ -210,10 +210,19 @@ var namespaces = []struct{ prefix, framework string }{
 	{"cbmessagebox.models.", "cbmessagebox"},
 }
 
+const mxunitPrefix = "mxunit."
+
 // Namespaced is the stub for a dot-path in one of namespaces, whatever the
 // configuration names, or "". The resolver asks it after the preset's own
 // set, and after everything on disk.
 func Namespaced(dotted string) string {
+	// MXUnit is TestBox's compatibility layer: TestBox documents mapping
+	// /mxunit to testbox/system/compat, so mxunit.framework.TestCase is
+	// testbox.system.compat.framework.TestCase.
+	if len(dotted) > len(mxunitPrefix) && strings.EqualFold(dotted[:len(mxunitPrefix)], mxunitPrefix) {
+		dotted = "testbox.system.compat." + dotted[len(mxunitPrefix):]
+	}
+
 	for _, n := range namespaces {
 		if len(dotted) > len(n.prefix) && strings.EqualFold(dotted[:len(n.prefix)], n.prefix) {
 			return (&Set{frameworks: []string{n.framework}}).Path(dotted)
