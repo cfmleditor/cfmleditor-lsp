@@ -1375,6 +1375,10 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 		comp = r.viewPrc(variable, funcName, pr, tr)
 	}
 
+	if comp == "" {
+		comp = r.fw1ViewRc(variable, funcName, pr, tr)
+	}
+
 	// Last, an untyped argument is what every caller passes it, when the scan
 	// was given the files to look through. After every other answer, so an
 	// inference never turns a call something else accepted into a finding.
@@ -2945,6 +2949,16 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 
 		if comp == "" {
 			comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
+		}
+
+		// A view's rc member is what its controller left there, and a
+		// template's what the file including it holds.
+		if comp == "" {
+			comp = r.fw1ViewRc(variable, "", pr, tr)
+		}
+
+		if comp == "" {
+			comp = r.includerHeld(variable, pr, tr, ctx)
 		}
 
 		return comp, false

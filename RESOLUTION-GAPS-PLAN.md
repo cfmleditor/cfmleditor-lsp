@@ -1982,3 +1982,23 @@ Measured per entry against the previous commit: Masa configured 3,326 removed an
 automatic 3,474 removed and 458 added; every other mode unchanged. The additions are calls
 chained on the scope's dual-mode accessors (`$.event()`, `$.content()`, `$.getFeed()`), now
 reported as "has no component return type" where the receiver was untyped before.
+
+### An FW/1 view's rc, and a partial reads its view's members (Masa 6,072 -> 5,401)
+
+- **`rc.X` in an FW/1 view** is what the controller action rendering it leaves there
+  (`fw1ViewRc`): `views/<section>/<item>.cfm` runs after `controllers/<section>.cfc`'s
+  `<item>( rc )`, which runs after `before( rc )`, and an action calling
+  `setView( "section.item" )` renders it too. The item action's assignment at its end, else
+  `before()`'s, typed with the controller's own rules; every action must agree, and a view no
+  action renders gives nothing. Applied only where a preset gives views a base (the fw1
+  preset), so the convention is not guessed elsewhere. Mura's admin views read
+  `rc.contentBean`, `rc.siteBean`, `rc.feedBean` and the rest this way.
+- **A partial reads its includer's members** (`includerHeld`): `rc.contentBean` in
+  `views/carch/form/*.cfm` is what the view including it holds. `includerHeld` took plain names
+  only, and refused `rc` and `prc` with the rest of `isScopeWord`'s list; it now takes one member
+  of a variable that is not a CFML scope (`isCFMLScope`), and the member branch of
+  `receiverComponentD` asks it, and the FW/1 rule, last.
+  `TestAnFW1ViewsRcIsWhatItsControllerAssigns`, failing without each of the five pieces.
+
+Measured per entry: Masa configured and automatic 673 removed and 2 added each; every other mode
+unchanged. The additions are calls chained on `contentBean` methods that declare no type.

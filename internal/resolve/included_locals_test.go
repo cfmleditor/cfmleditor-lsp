@@ -17,7 +17,14 @@ import (
 func templateReasons(t *testing.T, dir, page string) map[string]string {
 	t.Helper()
 
-	r := &Resolver{FS: vfs.OS{}, WorkspaceFolders: []string{dir}, Index: index.New()}
+	return templateReasonsWith(t, &Resolver{}, dir, page)
+}
+
+// templateReasonsWith is templateReasons with r's own settings kept.
+func templateReasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string {
+	t.Helper()
+
+	r.FS, r.WorkspaceFolders, r.Index = vfs.OS{}, []string{dir}, index.New()
 
 	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
 		if err != nil || !cfpath.IsCFMLFile(p) {

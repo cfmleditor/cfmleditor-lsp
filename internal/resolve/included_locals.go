@@ -35,7 +35,10 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 		name = variable[len(variable)-len(rest):]
 	}
 
-	if name == "" || strings.ContainsAny(name, ".[(") || isScopeWord(strings.ToLower(name)) {
+	// A name, or a member of one: an FW/1 view's partial reads rc.contentBean
+	// as the view including it holds it.
+	base, member, dotted := strings.Cut(name, ".")
+	if base == "" || strings.ContainsAny(name, "[(") || isCFMLScope(base) || dotted && (member == "" || strings.Contains(member, ".")) {
 		return ""
 	}
 
@@ -153,4 +156,16 @@ func setsName(content, name string) bool {
 		`|\b(?:item|index|name|returnvariable|variable|result)\s*=\s*["']` + q + `["']`)
 
 	return re.MatchString(content)
+}
+
+// isCFMLScope reports whether s names one of CFML's own scopes. An FW/1 or
+// ColdBox view's rc and prc are not among them: they are variables the view
+// holds, and a template it includes reads them.
+func isCFMLScope(s string) bool {
+	switch strings.ToLower(s) {
+	case "local", "variables", "this", "arguments", "session", "application", "request", "server", "url", "form", "cgi", "cookie", "client":
+		return true
+	default:
+		return false
+	}
 }
