@@ -194,3 +194,23 @@ func TestACallerPlacedByTheParseIsACaller(t *testing.T) {
 		t.Errorf("a placed caller passing an untyped value was ignored: %q", got["arguments.thing.ready"])
 	}
 }
+
+// TestADollarNamedFunctionsCallersAreFound: Wheels names its internals with a
+// leading $, and the caller index read `$build(` as a call to build, so such a
+// function's untyped argument was never typed by what its callers pass.
+func TestADollarNamedFunctionsCallersAreFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Item.cfc": `component { function go(){} }`,
+		"Svc.cfc": `component {
+function $use( required thing ){ arguments.thing.go(); arguments.thing.nope(); }
+function callers(){ $use( new Item() ); }
+}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc"), map[string]string{
+		"arguments.thing.go":   "",
+		"arguments.thing.nope": "method 'nope' not found in Item",
+		"$use":                 "",
+	})
+}

@@ -147,7 +147,7 @@ func callerSpace(c byte) bool {
 }
 
 func callerWord(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$'
 }
 
 // owner is the resolver that holds the shared caches: a per-caller view

@@ -1902,3 +1902,19 @@ loading as the negative case.
 Measured per entry: cfwheels 57 removed and 2 added in each mode, every other mode 0 / 0. The
 additions are `$engineAdapter().globRegex()` and a sibling, whose head is now found and declares
 `any`, as in the controller case.
+
+### Templates Wheels includes through Global's wrappers; `$`-named callers (cfwheels 2,815 -> 2,718)
+
+- `public/Application.cfc` runs `application.wo.$includeAndOutput( template =
+  "/wheels/events/onrequestend/debug.cfm" )`, and the template calls Global's methods bare
+  (`$get`, `urlFor`, `capitalize`). `wheelsWrappedTemplateFunc` finds every call to `$include`,
+  `$includeAndOutput` or `$includeAndReturnOutput` naming the template by a literal
+  mapping-absolute path, takes the component it runs in (Global for `application.wo`, the
+  calling component for a bare call), checks the wrapper and the two methods it calls against
+  Global's pinned bodies, and looks the name up there; every such include must agree. Batch
+  only, through the caller index. `TestATemplateAWheelsWrapperIncludesIsItsIncluders`.
+- The caller index read `$build(` as a call to `build`, so no `$`-named function's argument was
+  ever typed from its callers; `callerWord` now takes `$`. `TestADollarNamedFunctionsCallersAreFound`.
+
+Measured per entry on cfwheels with presets: 97 removed, 0 added (55 through the wrappers, 42
+`$`-named functions' arguments).
