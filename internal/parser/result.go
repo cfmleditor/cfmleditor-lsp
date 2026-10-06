@@ -105,6 +105,10 @@ type ParseResult struct {
 	// in extractSignatures that share it.
 	writesMemo *writesMemo
 
+	// tagWrites keeps the collection writes read from each <cfset> from one
+	// signature pass to the next; see expressionWriteCache.
+	tagWrites *expressionWriteCache
+
 	// lineStarts holds the byte offset of each line of lineStartsContent, so
 	// a function body is sliced without walking the file from its start.
 	lineStartsMu      sync.Mutex
@@ -354,7 +358,8 @@ func (pr *ParseResult) extractSignatures() {
 		// Both passes read the same writes, and nothing between them changes
 		// the regions or scopes those are read from.
 		pr.writesMemo = &writesMemo{}
-		pr.applyMemberBindings()
+		hasBindings := pr.hasMemberBinding(pr.Content)
+		pr.applyMemberBindings(hasBindings)
 		pr.applyFactoryReturnCalls(allPendingCalls)
 		pr.applyCollectionReturns(allPendingCalls)
 		pr.writesMemo = nil
@@ -362,7 +367,7 @@ func (pr *ParseResult) extractSignatures() {
 		pr.flow = nil
 		pr.applyChainedReturnLookup()
 
-		if pr.hasMemberBinding(pr.Content) {
+		if hasBindings {
 			pr.memberSnapshot = &ParseResult{funcRefsMap: maps.Clone(pr.funcRefsMap)}
 			pr.memberSnapshotContent = pr.Content
 		}

@@ -65,8 +65,11 @@ func collectionTarget(sc *Scanner) (root string, element bool) {
 }
 
 func collectionRead(expression string) (root string, element bool) {
-	sc := NewScanner(expression)
+	return collectionReadAt(NewScanner(expression))
+}
 
+// collectionReadAt is collectionRead on a scanner at the expression's start.
+func collectionReadAt(sc *Scanner) (root string, element bool) {
 	root, element = collectionTarget(sc)
 	if sc.NextSkipComments().Kind != TokEOF {
 		return "", false
@@ -399,8 +402,11 @@ func (pr *ParseResult) applyCollectionFunction(f *FunctionDef, expressions []str
 }
 
 func emptyCollection(expression string) bool {
-	sc := NewScanner(expression)
+	return emptyCollectionAt(NewScanner(expression))
+}
 
+// emptyCollectionAt is emptyCollection on a scanner at the expression's start.
+func emptyCollectionAt(sc *Scanner) bool {
 	t := sc.NextSkipComments()
 	switch {
 	case t.Kind == TokLBrace || t.Kind == TokLBracket:
@@ -499,16 +505,23 @@ type writesMemo struct {
 func (pr *ParseResult) collectionWrites() []collectionWrite {
 	if m := pr.writesMemo; m != nil {
 		if !m.done {
-			m.writes, m.done = pr.collectWrites(), true
+			if pr.tagWrites == nil {
+				pr.tagWrites = &expressionWriteCache{}
+			}
+
+			pr.tagWrites.begin()
+			m.writes, m.done = pr.collectWrites(pr.tagWrites), true
 		}
 
 		return m.writes
 	}
 
-	return pr.collectWrites()
+	return pr.collectWrites(nil)
 }
 
-func (pr *ParseResult) collectWrites() []collectionWrite {
+// collectWrites reads every collection write in the file. cache, when not
+// nil, answers a <cfset> whose text an earlier pass already read.
+func (pr *ParseResult) collectWrites(cache *expressionWriteCache) []collectionWrite {
 	var writes []collectionWrite
 
 	lines := pr.contentLineIdx
@@ -538,13 +551,49 @@ func (pr *ParseResult) collectWrites() []collectionWrite {
 			continue
 		}
 
-		writes = collectCollectionTags(r.Text, r.Offset, functionAt, writes)
+		writes = collectCollectionTags(r.Text, r.Offset, functionAt, writes, cache)
 	}
 
 	return writes
 }
 
 func collectCollectionExpression(expression string, offset int, functionAt func(int) string, writes []collectionWrite) []collectionWrite {
+	return placeWrites(scanExpressionWrites(expression), offset, functionAt, writes)
+}
+
+// expressionWrite is a collection write as scanExpressionWrites reads it,
+// before it is placed in the file: at is the offset in the expression of the
+// token the write's function is read at, and placed says the write carries
+// that offset as its own. A write read this way depends on nothing but the
+// expression's text, which is what lets expressionWriteCache keep it.
+type expressionWrite struct {
+	write  collectionWrite
+	at     int
+	placed bool
+}
+
+// placeWrites places writes read from an expression starting at offset.
+func placeWrites(scanned []expressionWrite, offset int, functionAt func(int) string, writes []collectionWrite) []collectionWrite {
+	for i := range scanned {
+		e := &scanned[i]
+
+		w := e.write
+		w.function = functionAt(offset + e.at)
+
+		if e.placed {
+			w.offset = offset + e.at
+		}
+
+		writes = append(writes, w)
+	}
+
+	return writes
+}
+
+// scanExpressionWrites reads the collection writes in an expression.
+func scanExpressionWrites(expression string) []expressionWrite {
+	var writes []expressionWrite
+
 	sc := NewScanner(expression)
 	sc.interpStrings = true
 	previous := TokEOF
@@ -564,7 +613,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 		// what applyMemberBindings narrows its withholding to.
 		if ((t.Kind == TokEquals || t.Kind == TokMinus) && sc.PeekSkipComments().Kind == TokGT) ||
 			(t.Kind == TokIdent && identEq(t.Value, "function") && sc.PeekSkipComments().Kind == TokLParen) {
-			writes = append(writes, collectionWrite{function: functionAt(offset + t.Offset), unknown: true})
+			writes = append(writes, expressionWrite{write: collectionWrite{unknown: true}, at: t.Offset})
 		}
 
 		if t.Kind != TokIdent || before == TokDot || before == TokDoubleColon {
@@ -577,7 +626,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 
 			root, element := collectionTarget(&cursor)
 			if root != "" && !element {
-				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, expressionWrite{write: collectionWrite{target: root, unknown: true}, at: t.Offset, placed: true})
 			}
 		}
 
@@ -600,7 +649,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 		// variables.instance.DAO.update( bean ) on Masa's DAOs.
 		if cursor.PeekSkipComments().Kind == TokLParen {
 			if base, method, ok := strings.CutLast(root, "."); ok && collectionMemberMutator(method) {
-				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: base, function: functionAt(offset + t.Offset), element: true, unknown: true})
+				writes = append(writes, expressionWrite{write: collectionWrite{target: base, element: true, unknown: true}, at: t.Offset, placed: true})
 			}
 		}
 
@@ -608,7 +657,7 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 		if operator.Kind == TokPlus || operator.Kind == TokMinus || operator.Kind == TokStar || operator.Kind == TokSlash || operator.Kind == TokAmpersand || operator.Kind == TokPercent || operator.Kind == TokCaret {
 			next := cursor.PeekSkipComments().Kind
 			if next == TokEquals || next == operator.Kind {
-				writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, element: element, function: functionAt(offset + t.Offset), unknown: true})
+				writes = append(writes, expressionWrite{write: collectionWrite{target: root, element: element, unknown: true}, at: t.Offset, placed: true})
 			}
 
 			continue
@@ -618,13 +667,13 @@ func collectCollectionExpression(expression string, offset int, functionAt func(
 			continue
 		}
 
-		writes = append(writes, collectionWrite{offset: offset + t.Offset, target: root, expression: scriptReturnExpression(&cursor), function: functionAt(offset + t.Offset), element: element, local: local || hasPrefixFold(root, "local.")})
+		writes = append(writes, expressionWrite{write: collectionWrite{target: root, expression: scriptReturnExpression(&cursor), element: element, local: local || hasPrefixFold(root, "local.")}, at: t.Offset, placed: true})
 	}
 
 	return writes
 }
 
-func collectCollectionTags(text string, offset int, functionAt func(int) string, writes []collectionWrite) []collectionWrite {
+func collectCollectionTags(text string, offset int, functionAt func(int) string, writes []collectionWrite, cache *expressionWriteCache) []collectionWrite {
 	for pos := 0; pos < len(text); {
 		idx := nextTagStart(text[pos:])
 		if idx < 0 {
@@ -650,7 +699,7 @@ func collectCollectionTags(text string, offset int, functionAt func(int) string,
 		name := extractIdent(tag[1:])
 		if strings.EqualFold(name, "cfset") {
 			body := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(tag[1+len(name):], ">"), "/"))
-			writes = collectCollectionExpression(body, offset+idx+strings.Index(tag, body), functionAt, writes)
+			writes = placeWrites(cache.scan(body), offset+idx+strings.Index(tag, body), functionAt, writes)
 		}
 
 		for _, attribute := range collectionOutputAttributes(name) {
@@ -842,4 +891,42 @@ func collectionCallHop(c *pendingCall) string {
 	}
 
 	return c.funcName
+}
+
+// expressionWriteCache keeps what scanExpressionWrites read from each <cfset>
+// body, from one signature pass to the next. A reparse reads every <cfset> in
+// the file again, and an edit changes one of them: on a 65,000-line tag
+// component the rest were a tenth of the reparse. Only the bodies the last
+// pass read are kept, so the cache is never larger than the file's <cfset>s.
+type expressionWriteCache struct {
+	prev, next map[string][]expressionWrite
+}
+
+// begin starts a pass: what the last one read is kept for this one to take.
+func (c *expressionWriteCache) begin() {
+	c.prev, c.next = c.next, map[string][]expressionWrite{}
+}
+
+// scan is scanExpressionWrites, answered from the last pass when it read the
+// same text. A nil cache scans.
+func (c *expressionWriteCache) scan(expression string) []expressionWrite {
+	if c == nil {
+		return scanExpressionWrites(expression)
+	}
+
+	if ws, ok := c.next[expression]; ok {
+		return ws
+	}
+
+	ws, ok := c.prev[expression]
+	if !ok {
+		// Read from a copy, so the strings kept refer to it and not to the
+		// whole of this pass's content.
+		expression = strings.Clone(expression)
+		ws = scanExpressionWrites(expression)
+	}
+
+	c.next[expression] = ws
+
+	return ws
 }
