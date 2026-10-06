@@ -240,7 +240,7 @@ func (e *producerEvaluation) selfModeSelected(fd *parser.FunctionDef, name strin
 // plan whose parameters are not fd's describes another version of the
 // function, and binding arguments by position through it would misplace them.
 func (r *Resolver) producerFor(fd *parser.FunctionDef) *producerMethod {
-	method := r.wheelsSource(fd.URI.Path()).producers[strings.ToLower(fd.Name)]
+	method := r.wheelsSource(fd.URI.Path()).producers.get(strings.ToLower(fd.Name))
 	if method == nil || len(method.parameters) != len(fd.Arguments) {
 		return nil
 	}
@@ -537,7 +537,7 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	}
 
 	source := e.resolver.wheelsSource(e.fd.URI.Path())
-	methods := source.producers
+	methods := source.producers.all()
 	component := ""
 	found := false
 	valid := true

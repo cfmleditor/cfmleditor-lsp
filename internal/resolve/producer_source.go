@@ -1,7 +1,9 @@
 package resolve
 
 import (
+	"maps"
 	"strings"
+	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
@@ -24,21 +26,78 @@ type producerMethod struct {
 // own arguments and application context; the byte-checked lexical cache owns
 // the plans and refreshes them when a method changes.
 func producerMethods(content string) map[string]*producerMethod {
-	methods := map[string]*producerMethod{}
-	tags := []producerTag{}
+	return newProducerPlans(content).all()
+}
+
+// producerPlans is the source plans of a file's methods, made as they are
+// asked for. A file's plans were all made the first time any method of it was
+// looked up, and a lookup asks about a few: on a 65,000-line tag component,
+// 1,183 plans and ~13MB kept for as long as the file was open. A script
+// function's plan is still made with the rest, since finding its boundaries
+// is most of making it; a tag function's is made on first request.
+type producerPlans struct {
+	mu     sync.Mutex
+	script map[string]*producerMethod // made when the file is read
+	tags   []producerTag              // the file's tags, which the tag plans are made from
+	spans  map[string][2]int          // tag function → its tags; see tagProducerSpans
+	made   map[string]*producerMethod // tag plans made so far
+}
+
+func newProducerPlans(content string) *producerPlans {
+	p := &producerPlans{script: map[string]*producerMethod{}, made: map[string]*producerMethod{}}
 
 	for _, region := range parser.ClassifyRegions(content) {
 		if region.Kind == parser.RegionScript {
-			scriptProducerMethods(region.Text, methods)
-			tags = append(tags, producerTag{name: "cfscript", body: region.Text})
+			scriptProducerMethods(region.Text, p.script)
+			p.tags = append(p.tags, producerTag{name: "cfscript", body: region.Text})
 		}
 
 		if region.Kind == parser.RegionTag {
-			tags = append(tags, producerTags(region.Text)...)
+			p.tags = append(p.tags, producerTags(region.Text)...)
 		}
 	}
 
-	tagProducerMethods(tags, methods)
+	p.spans = tagProducerSpans(p.tags)
+
+	return p
+}
+
+// get is the plan of the method name, lowercased; nil when there is none. A
+// tag function outranks a script function of the same name, as it always has.
+func (p *producerPlans) get(name string) *producerMethod {
+	if p == nil {
+		return nil
+	}
+
+	span, ok := p.spans[name]
+	if !ok {
+		return p.script[name]
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	method, made := p.made[name]
+	if !made {
+		method = tagProducerPlan(p.tags[span[0]+1 : span[1]])
+		p.made[name] = method
+	}
+
+	return method
+}
+
+// all is every plan in the file, for a reader that must see them all.
+func (p *producerPlans) all() map[string]*producerMethod {
+	if p == nil {
+		return nil
+	}
+
+	methods := make(map[string]*producerMethod, len(p.script)+len(p.spans))
+	maps.Copy(methods, p.script)
+
+	for name := range p.spans {
+		methods[name] = p.get(name)
+	}
 
 	return methods
 }
@@ -724,7 +783,13 @@ func producerAttr(body, key string) (string, bool) {
 	return "", false
 }
 
-func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) {
+// tagProducerSpans locates each tag function a plan can be made for: its
+// lowercased name → the indexes in tags of its <cffunction> and </cffunction>.
+// A name declared twice is its last declaration, as a map of plans filled in
+// order kept it.
+func tagProducerSpans(tags []producerTag) map[string][2]int {
+	spans := map[string][2]int{}
+
 	for i := 0; i < len(tags); i++ {
 		if tags[i].name != "cffunction" {
 			continue
@@ -748,56 +813,64 @@ func tagProducerMethods(tags []producerTag, methods map[string]*producerMethod) 
 			continue
 		}
 
-		method := &producerMethod{defaults: map[string]string{}}
-
-		for _, tag := range tags[i+1 : end] {
-			if tag.name != "cfargument" {
-				continue
-			}
-
-			arg, found := producerAttr(tag.body, "name")
-			if !found {
-				continue
-			}
-
-			arg = strings.ToLower(arg)
-			method.parameters = append(method.parameters, arg)
-
-			if def, found := producerAttr(tag.body, "default"); found {
-				// A computed default is present even though its value is unknown.
-				method.defaults[arg] = "'" + strings.ReplaceAll(def, "'", "''") + "'"
-			}
-		}
-
-		p := producerTagParser{tags: tags[i+1 : end]}
-
-		if end-i <= 4096 {
-			method.body = p.block()
-		} else {
-			p.failed = true
-		}
-
-		if !p.failed && p.position == len(p.tags) {
-			method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
-			method.wanted = producerWanted(method.body)
-		} else {
-			var source strings.Builder
-			for _, tag := range tags[i+1 : end] {
-				source.WriteString(tag.body)
-				source.WriteByte('\n')
-
-				if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
-					method.sensitive = true
-				}
-			}
-
-			method.body = []producerNode{{kind: "unsafe", expression: source.String()}}
-		}
-
-		methods[strings.ToLower(name)] = method
+		spans[strings.ToLower(name)] = [2]int{i, end}
 
 		i = end
 	}
+
+	return spans
+}
+
+// tagProducerPlan is the plan of the tag function whose tags, between its
+// <cffunction> and </cffunction>, are body.
+func tagProducerPlan(body []producerTag) *producerMethod {
+	method := &producerMethod{defaults: map[string]string{}}
+
+	for _, tag := range body {
+		if tag.name != "cfargument" {
+			continue
+		}
+
+		arg, found := producerAttr(tag.body, "name")
+		if !found {
+			continue
+		}
+
+		arg = strings.ToLower(arg)
+		method.parameters = append(method.parameters, arg)
+
+		if def, found := producerAttr(tag.body, "default"); found {
+			// A computed default is present even though its value is unknown.
+			method.defaults[arg] = "'" + strings.ReplaceAll(def, "'", "''") + "'"
+		}
+	}
+
+	p := producerTagParser{tags: body}
+
+	if len(body)+1 <= 4096 {
+		method.body = p.block()
+	} else {
+		p.failed = true
+	}
+
+	if !p.failed && p.position == len(p.tags) {
+		method.sensitive = (producerSensitive(method.body) || producerCallBinding(method.body)) && !producerReturnsThis(method.body)
+		method.wanted = producerWanted(method.body)
+	} else {
+		var source strings.Builder
+		for _, tag := range body {
+			source.WriteString(tag.body)
+			source.WriteByte('\n')
+
+			if (tag.name == "cfif" || tag.name == "cfscript") && producerSensitive([]producerNode{{kind: "if", expression: tag.body}}) {
+				method.sensitive = true
+			}
+		}
+
+		method.body = []producerNode{{kind: "unsafe", expression: source.String()}}
+	}
+
+	return method
 }
 
 type producerTagParser struct {
