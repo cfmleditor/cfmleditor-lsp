@@ -63,6 +63,9 @@ var Sources = []Source{
 		"wheels.Test",
 		"wheels.WheelsTest",
 		"wheels.migrator.Migration",
+		// Includes app/db/seeds.cfm and seeds/<env>.cfm (config's wheels
+		// preset gives them this base).
+		"wheels.Seeder",
 	}},
 	// cborm has no preset: a service written `extends="cborm.models.
 	// VirtualEntityService"` names it, and Namespaced answers that path.

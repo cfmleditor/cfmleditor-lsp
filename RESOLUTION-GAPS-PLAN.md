@@ -2127,3 +2127,14 @@ have, so `model()` in `install.cfm` is found while a view-only helper there woul
 still be reported. Measured: cw-p −9/+1, where the added one is `$getDBType`
 moving from "no qualifier" to "not found in extends chain".
 `TestAWheelsGlobalTemplateRunsInGlobal`.
+
+### Wheels seed files run in the Seeder
+
+`wheels.Seeder` includes `app/db/seeds.cfm` and `app/db/seeds/<env>.cfm`
+through a computed path, so `seedOnce()` there is the seeder's. The wheels
+preset now gives `seeds.cfm` (by name) and `.cfm` files under a `seeds`
+directory the implied base `wheels.Seeder`, and `wheels.Seeder` is added to
+the Wheels stubs' `Extra` list for apps without the framework checked out.
+Regenerating also stubbed Mura's `contentRenderer`, which the mura preset now
+names as a base. Measured: cw-p −9, nothing added; masa-c unchanged, since its
+own source outranks the stub.

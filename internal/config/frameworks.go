@@ -274,6 +274,10 @@ var frameworkPresets = map[string]frameworkPreset{
 			// view, and vendor/wheels/global/*.cfm into Global; Global is
 			// what all of them have, so model() in a global helper is its.
 			{dir: "global", ext: ".cfm", component: "wheels.Global"},
+			// wheels.Seeder includes app/db/seeds.cfm and seeds/<env>.cfm, so
+			// seedOnce() in either is the seeder's.
+			{file: "seeds.cfm", ext: ".cfm", component: "wheels.Seeder"},
+			{dir: "seeds", ext: ".cfm", component: "wheels.Seeder"},
 		},
 		// The application's global/functions.cfm reaches every controller,
 		// model and view (resolve.wheelsGlobals).

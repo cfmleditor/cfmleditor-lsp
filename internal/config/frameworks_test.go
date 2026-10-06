@@ -207,13 +207,17 @@ func TestAMuraDisplayObjectRunsInTheContentRenderer(t *testing.T) {
 
 // TestAWheelsGlobalTemplateRunsInGlobal: app/global/*.cfm is mixed into
 // every controller, model and view, and vendor/wheels/global/*.cfm into
-// Global, so both read Global's functions.
+// Global, so both read Global's functions; the Seeder includes seeds.cfm
+// and seeds/<env>.cfm.
 func TestAWheelsGlobalTemplateRunsInGlobal(t *testing.T) {
 	implicit := ImplicitExtends([]string{"wheels"})
 	for path, want := range map[string]string{
 		"/p/app/global/auth.cfm":              "wheels.Global",
 		"/p/vendor/wheels/global/strings.cfm": "wheels.Global",
 		"/p/app/global/Helper.cfc":            "",
+		"/p/app/db/seeds.cfm":                 "wheels.Seeder",
+		"/p/app/db/seeds/testing.cfm":         "wheels.Seeder",
+		"/p/app/db/seed-notes.cfm":            "",
 	} {
 		if got := implicit(path); got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)
