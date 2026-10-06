@@ -2766,11 +2766,56 @@ func (p *scriptParser) readNewComponent() string {
 	// name: its type is the body that follows. It was read as a path, a
 	// component literally called "component", which then failed every
 	// method check against it.
-	if identEq(tok.Value, "component") && p.sc.PeekSkipComments().Kind == TokLBrace {
-		return "$any"
+	//
+	// It may carry attributes before the body (`new component accessors=true
+	// { … }`, `javaSettings='…'`), which are consumed here: left to the
+	// statement scan, `accessors=true` declared a variable called accessors.
+	// A path would continue with a dot or a parenthesis, never a name.
+	if identEq(tok.Value, "component") {
+		switch p.sc.PeekSkipComments().Kind {
+		case TokLBrace:
+			return "$any"
+		case TokIdent:
+			if p.skipInlineComponentAttrs() {
+				return "$any"
+			}
+		}
 	}
 
 	return p.applyImport(p.readDottedPath(tok))
+}
+
+// skipInlineComponentAttrs consumes the attributes between `new component`
+// and its body, `name` or `name=value` pairs, and reports whether the body's
+// `{` follows them. The scanner is restored when it does not.
+func (p *scriptParser) skipInlineComponentAttrs() bool {
+	saved := p.sc.Save()
+
+	for p.sc.PeekSkipComments().Kind == TokIdent {
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokEquals {
+			continue
+		}
+
+		p.sc.NextSkipComments()
+
+		switch p.sc.NextSkipComments().Kind {
+		case TokString, TokIdent, TokNumber:
+		default:
+			p.sc.Restore(saved)
+
+			return false
+		}
+	}
+
+	if p.sc.PeekSkipComments().Kind == TokLBrace {
+		return true
+	}
+
+	p.sc.Restore(saved)
+
+	return false
 }
 
 // parseImport records `import models.User;`, so a later `new User()` resolves

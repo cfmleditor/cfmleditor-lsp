@@ -2138,3 +2138,14 @@ the Wheels stubs' `Extra` list for apps without the framework checked out.
 Regenerating also stubbed Mura's `contentRenderer`, which the mura preset now
 names as a base. Measured: cw-p −9, nothing added; masa-c unchanged, since its
 own source outranks the stub.
+
+### An inline component with attributes is dynamic
+
+Lucee's tests write `new component accessors=true { … }` and
+`new component javaSettings='…' { … }`. The parser handled `new component { … }`
+as `$any` only when the brace came straight after, so these were read as a
+component literally named `component`, and every call on them was "not found in
+component". `readNewComponent` now consumes `name` and `name=value` attributes
+up to the body's `{` (`skipInlineComponentAttrs`) and gives `$any`, restoring
+the scanner when no body follows. Measured: lucee −47, nothing added; gapcheck
+unchanged. `TestAnInlineComponentWithAttributesIsDynamic`.
