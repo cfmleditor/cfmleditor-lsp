@@ -2,19 +2,9 @@ package parser
 
 import (
 	"path"
-	"regexp"
 	"slices"
 	"strings"
 )
-
-// includeTagAt matches <cfinclude template="…"> starting at the '<'. A path
-// holding a # is dynamic and has no static answer, so the class excludes it
-// rather than a caller having to.
-var includeTagAt = regexp.MustCompile(`^(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([^"'#]+)["']`)
-
-// includeScriptAt matches the script forms starting at the keyword: include
-// "x.cfm", include template="x.cfm" and cfinclude(template="x.cfm").
-var includeScriptAt = regexp.MustCompile(`^(?i)(?:cf)?include\s*\(?\s*(?:template\s*=\s*)?["']([^"'#]+)["']`)
 
 // includeWindow bounds how far past the keyword a match may reach. A tag with
 // its attributes or a script include with its path is far shorter; the bound
@@ -67,45 +57,144 @@ func IncludeSites(content string) []IncludeSite {
 	var (
 		out      []IncludeSite
 		comments [][2]int
-		scanned  bool
+		listed   map[string]string // query name → directory, lowercased name
+		dirEnd   int               // where the last listing tag ended
 	)
 
-	for i := indexFold(content, "include"); i >= 0; i = indexFoldFrom(content, "include", i+len("include")) {
-		start, re := includeFormAt(content, i)
-		if re == nil {
+	// One walk over the text finds the three things the scan needs: each
+	// include keyword, each <cfdirectory, and each <!--- comment, which is
+	// stepped over whole as soon as it is met, so nothing inside one is ever
+	// read. It was three searches over the whole text, and on a 65,000-line
+	// component they ran on every edit that changed a signature.
+	for i := 0; i < len(content); {
+		// A tight loop to the next byte that can start anything, then the
+		// byte after it tested inline before any prefix is compared: an 'i'
+		// starts one identifier in three, and a '<' every tag.
+		for i < len(content) && !includeScanByte[content[i]] {
+			i++
+		}
+
+		if i+1 >= len(content) {
+			break
+		}
+
+		c := content[i]
+		if !includeScanNext(c, content[i+1]) {
+			i++
+
 			continue
 		}
 
-		m := re.FindStringSubmatchIndex(content[start:min(len(content), start+includeWindow)])
-		if m == nil {
+		if c == '<' {
+			if strings.HasPrefix(content[i:], "<!---") {
+				end := commentEnd(content, i)
+				comments = append(comments, [2]int{i, end})
+				i = end
+
+				continue
+			}
+
+			if i >= dirEnd {
+				end, dir, name, ok := listingAt(content, i)
+				dirEnd = max(dirEnd, end)
+
+				if ok {
+					listed = withListing(listed, name, dir)
+				}
+			}
+
+			i++
+
 			continue
 		}
 
-		p := strings.TrimSpace(content[start+m[2] : start+m[3]])
-		if p == "" || strings.Contains(p, "://") || !isIncludable(p) {
+		// c is 'i' or 'I'.
+		if !hasPrefixFold(content[i:], "include") {
+			i++
+
 			continue
 		}
 
-		if !scanned {
-			comments = tagCommentSpans(content)
-			scanned = true
+		if site, ok := includeSiteAt(content, i); ok {
+			out = append(out, site)
 		}
 
-		if inSpan(comments, start) {
-			continue
-		}
-
-		out = append(out, IncludeSite{Path: p, Offset: start})
+		i += len("include")
 	}
 
-	return append(out, directoryIncludes(content)...)
+	if len(listed) > 0 {
+		out = append(out, listingIncludes(content, listed, comments)...)
+	}
+
+	return out
+}
+
+// includeScanByte marks the bytes IncludeSites stops at: the '<' that opens a
+// comment or a <cfdirectory, and the first letter of an include keyword.
+var includeScanByte = [256]bool{'<': true, 'i': true, 'I': true}
+
+// includeScanNext reports whether next can follow c in what IncludeSites
+// looks for: "<!---", "<cfdirectory" or "include".
+func includeScanNext(c, next byte) bool {
+	if c == '<' {
+		return next == '!' || next|0x20 == 'c'
+	}
+
+	return next|0x20 == 'n'
+}
+
+// listingAt reads a <cfdirectory> tag at i, returning where it ends — a tag
+// that begins inside it is read as part of it, as a whole-file match would —
+// or 0 when none starts there, and the directory and query name when it is a
+// listing listingIncludes can follow.
+func listingAt(content string, i int) (end int, dir, name string, ok bool) {
+	n, found := directoryTagEnd(content[i:])
+	if !found {
+		return 0, "", "", false
+	}
+
+	dir, name, ok = qualifyingListing(content[i : i+n])
+
+	return i + n, dir, name, ok
+}
+
+// withListing records a listing, making the map on first use: most files have
+// none.
+func withListing(listed map[string]string, name, dir string) map[string]string {
+	if listed == nil {
+		listed = map[string]string{}
+	}
+
+	listed[name] = dir
+
+	return listed
+}
+
+// includeSiteAt reads the include whose keyword starts at i, if it is one.
+func includeSiteAt(content string, i int) (IncludeSite, bool) {
+	start, form := includeFormAt(content, i)
+	if form == nil {
+		return IncludeSite{}, false
+	}
+
+	from, to, ok := form(content[start:min(len(content), start+includeWindow)])
+	if !ok {
+		return IncludeSite{}, false
+	}
+
+	p := strings.TrimSpace(content[start+from : start+to])
+	if p == "" || strings.Contains(p, "://") || !isIncludable(p) {
+		return IncludeSite{}, false
+	}
+
+	return IncludeSite{Path: p, Offset: start}, true
 }
 
 // includeFormAt decides which form the "include" found at i begins, and where
 // that form starts: "<cfinclude" at the '<', "cfinclude" or "include" at the
-// keyword. It returns a nil pattern for an occurrence that is neither — the
+// keyword. It returns a nil reader for an occurrence that is neither — the
 // tail of a longer identifier or a member call such as arr.include(…).
-func includeFormAt(content string, i int) (int, *regexp.Regexp) {
+func includeFormAt(content string, i int) (int, func(string) (int, int, bool)) {
 	start := i
 	if i >= 2 && strings.EqualFold(content[i-2:i], "cf") {
 		start = i - 2
@@ -140,43 +229,36 @@ func isIncludable(p string) bool {
 	return ext == ".cfm" || ext == ".cfml"
 }
 
-// tagCommentSpans returns the outermost <!--- … ---> comments, which nest, as
-// [start, end) offsets in source order. An unclosed one runs to the end.
-func tagCommentSpans(s string) [][2]int {
-	var spans [][2]int
+// commentEnd is the offset past the ---> that closes the <!--- at open,
+// counting the comments nested in it; the end of s when it is never closed.
+func commentEnd(s string, open int) int {
+	depth := 1
+	j := open + len("<!---")
 
-	for i := 0; ; {
-		open := strings.Index(s[i:], "<!---")
-		if open < 0 {
-			return spans
+	for depth > 0 {
+		nextClose := strings.Index(s[j:], "--->")
+		if nextClose < 0 {
+			return len(s)
 		}
 
-		open += i
-		depth := 1
-		j := open + len("<!---")
+		// A nested open matters only if it starts before the close, so the
+		// search for one stops there — it may still run into the close, as
+		// in "<!--->". Unbounded, it read on to the next comment in the file,
+		// a second pass over the text for every comment in it.
+		nextOpen := strings.Index(s[j:min(len(s), j+nextClose+len("<!---")-1)], "<!---")
 
-		for depth > 0 {
-			nextOpen := strings.Index(s[j:], "<!---")
-			nextClose := strings.Index(s[j:], "--->")
+		if nextOpen >= 0 && nextOpen < nextClose {
+			depth++
+			j += nextOpen + len("<!---")
 
-			if nextClose < 0 {
-				return append(spans, [2]int{open, len(s)})
-			}
-
-			if nextOpen >= 0 && nextOpen < nextClose {
-				depth++
-				j += nextOpen + len("<!---")
-
-				continue
-			}
-
-			depth--
-			j += nextClose + len("--->")
+			continue
 		}
 
-		spans = append(spans, [2]int{open, j})
-		i = j
+		depth--
+		j += nextClose + len("--->")
 	}
+
+	return j
 }
 
 // inSpan reports whether pos falls inside one of spans, which are sorted and
@@ -196,72 +278,59 @@ func inSpan(spans [][2]int, pos int) bool {
 	return k < len(spans) && spans[k][0] <= pos && pos < spans[k][1]
 }
 
-// directoryListing is a <cfdirectory action="list"> of a directory beside the
-// listing file: `directory="#getDirectoryFromPath(getCurrentTemplatePath())#sub"`.
-var directoryListing = regexp.MustCompile(`(?is)<cfdirectory\b[^>]*>`)
+// qualifyingListing reads one <cfdirectory> tag and reports the directory
+// and lowercased query name of a listing listingIncludes can follow: a
+// literal directory beside the listing file, not recursive, and filtered to
+// templates. Anything computed is not a static answer.
+func qualifyingListing(tag string) (dir, name string, ok bool) {
+	attrs := listingAttrs(tag)
 
-var (
-	listingAttr = regexp.MustCompile(`(?i)\b([a-z]+)\s*=\s*["']([^"']*)["']`)
-	listingDir  = regexp.MustCompile(`(?i)^#\s*getDirectoryFromPath\s*\(\s*getCurrentTemplatePath\s*\(\s*\)\s*\)\s*#([\w./-]+?)/?$`)
-)
+	dir, ok = listingDir(attrs["directory"])
+	if !strings.EqualFold(attrs["action"], "list") || !ok || attrs["name"] == "" ||
+		strings.EqualFold(attrs["recurse"], "true") || strings.EqualFold(attrs["recurse"], "yes") ||
+		!strings.EqualFold(attrs["filter"], "*.cfm") || strings.Contains(dir, "..") {
+		return "", "", false
+	}
 
-// includeFromListing is <cfinclude template="sub/#q.name#">, the include of a
-// file a listing named q found.
-var includeFromListing = regexp.MustCompile(`(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([\w./-]*)#\s*([\w$]+)\.name\s*#["']`)
+	return dir, strings.ToLower(attrs["name"]), true
+}
 
-// directoryIncludes is the glob includes of a file that lists a directory of
+// listingIncludes is the glob includes of a file that lists a directory of
 // templates beside itself and includes each one it finds. Mura applies its
 // database updates this way: configBean lists dbUpdates/*.cfm and includes
 // every one, so each runs in configBean's variables scope.
 //
-// The include is a glob, `sub/*.cfm`, which the resolver expands. It is only
-// recorded when the listing is literal, not recursive, filtered to templates,
-// and names the directory the include's prefix does; anything computed is not
-// a static answer.
-func directoryIncludes(content string) []IncludeSite {
-	if indexFold(content, "cfdirectory") < 0 {
-		return nil
-	}
-
-	comments := tagCommentSpans(content)
-	listed := map[string]string{} // query name → directory, lowercased name
-
-	for _, at := range directoryListing.FindAllStringIndex(content, -1) {
-		if inSpan(comments, at[0]) {
-			continue
-		}
-
-		attrs := map[string]string{}
-
-		for _, m := range listingAttr.FindAllStringSubmatch(content[at[0]:at[1]], -1) {
-			attrs[strings.ToLower(m[1])] = m[2]
-		}
-
-		dir := listingDir.FindStringSubmatch(attrs["directory"])
-		if !strings.EqualFold(attrs["action"], "list") || dir == nil || attrs["name"] == "" ||
-			strings.EqualFold(attrs["recurse"], "true") || strings.EqualFold(attrs["recurse"], "yes") ||
-			!strings.EqualFold(attrs["filter"], "*.cfm") || strings.Contains(dir[1], "..") {
-			continue
-		}
-
-		listed[strings.ToLower(attrs["name"])] = dir[1]
-	}
-
+// The include is a glob, `sub/*.cfm`, which the resolver expands. listed is
+// the qualifying listings by query name, and comments the file's comments.
+func listingIncludes(content string, listed map[string]string, comments [][2]int) []IncludeSite {
 	var out []IncludeSite
 
-	for _, at := range includeFromListing.FindAllStringSubmatchIndex(content, -1) {
-		if inSpan(comments, at[0]) {
+	const include = "<cfinclude"
+
+	end := 0
+
+	for i := indexFold(content, include); i >= 0; i = indexFoldFrom(content, include, i+len(include)) {
+		if i < end {
 			continue
 		}
 
-		m := []string{"", content[at[2]:at[3]], content[at[4]:at[5]]}
-
-		dir, ok := listed[strings.ToLower(m[2])]
-		if !ok || !strings.EqualFold(strings.TrimSuffix(m[1], "/"), dir) {
+		prefix, query, n, ok := listingIncludeAt(content[i:])
+		if !ok {
 			continue
 		}
 
-		out = append(out, IncludeSite{Path: dir + "/*.cfm", Offset: at[0]})
+		end = i + n
+
+		if inSpan(comments, i) {
+			continue
+		}
+
+		dir, ok := listed[strings.ToLower(query)]
+		if !ok || !strings.EqualFold(strings.TrimSuffix(prefix, "/"), dir) {
+			continue
+		}
+
+		out = append(out, IncludeSite{Path: dir + "/*.cfm", Offset: i})
 	}
 
 	return out

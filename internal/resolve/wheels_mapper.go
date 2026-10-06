@@ -211,6 +211,10 @@ type wheelsSource struct {
 	// is asked for every untyped return lookup, on the keystroke path.
 	size    int64
 	modTime time.Time
+
+	// gen is the index generation the stamp was last checked at, when the
+	// index tracks the disk.
+	gen uint64
 }
 
 // Cache lexical work, not definitions or directory listings. Re-read bytes
@@ -222,16 +226,32 @@ func (r *Resolver) wheelsSource(path string) wheelsSource {
 		return r.indexer.wheelsSource(path)
 	}
 
-	info, err := r.fs().Stat(path)
-	if err != nil {
-		return wheelsSource{}
+	var gen uint64
+	if r.IndexTracksFiles && r.Index != nil {
+		gen = r.Index.Generation()
 	}
 
 	r.mu.RLock()
 	cached, ok := r.wheelsSources[path]
 	r.mu.RUnlock()
 
+	// Nothing the index has seen has changed since the stamp was checked, and
+	// the index sees every change: see IndexTracksFiles.
+	if ok && r.IndexTracksFiles && r.Index != nil && cached.gen == gen {
+		return cached
+	}
+
+	info, err := r.fs().Stat(path)
+	if err != nil {
+		return wheelsSource{}
+	}
+
 	if ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+		if r.IndexTracksFiles {
+			cached.gen = gen
+			r.storeWheelsSource(path, cached)
+		}
+
 		return cached
 	}
 
@@ -247,17 +267,20 @@ func (r *Resolver) wheelsSource(path string) wheelsSource {
 		result = wheelsSource{content: content, methods: wheelsMethods(content), producers: producerMethods(content)}
 	}
 
-	result.size, result.modTime = info.Size(), info.ModTime()
+	result.size, result.modTime, result.gen = info.Size(), info.ModTime(), gen
+	r.storeWheelsSource(path, result)
 
+	return result
+}
+
+func (r *Resolver) storeWheelsSource(path string, src wheelsSource) {
 	r.mu.Lock()
 	if r.wheelsSources == nil {
 		r.wheelsSources = make(map[string]wheelsSource)
 	}
 
-	r.wheelsSources[path] = result
+	r.wheelsSources[path] = src
 	r.mu.Unlock()
-
-	return result
 }
 
 func wheelsMethods(content string) map[string]wheelsMethod {

@@ -23,7 +23,7 @@ func (r *Resolver) forCaller(baseDir string) *Resolver {
 	view = &Resolver{
 		FS: r.FS, WorkspaceFolders: r.WorkspaceFolders, Mappings: r.Mappings,
 		BeanPaths: r.BeanPaths, StartupFiles: r.StartupFiles,
-		ExpressionMappings: r.ExpressionMappings, Index: r.Index,
+		ExpressionMappings: r.ExpressionMappings, Index: r.Index, IndexTracksFiles: r.IndexTracksFiles,
 		Resolvers: r.Resolvers, ImplicitExtends: r.ImplicitExtends,
 		HelperScope: r.HelperScope, Stubs: r.Stubs, InferArgsFiles: r.InferArgsFiles, stubFS: r.fs(),
 		callerMappings: r.effectiveMappings(baseDir), indexer: r,

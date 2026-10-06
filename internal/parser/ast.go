@@ -449,7 +449,23 @@ type ResolverSet struct {
 	// resolve step, which can, decides.
 	softMu sync.Mutex
 	soft   map[string]bool
+
+	// answers holds what Resolve gave each expression. The answer is a pure
+	// function of the expression and the resolvers, and a reparse asks the
+	// same set about every assignment and call in the file again; on a
+	// 65,000-line component that search was a fifth of a reparse. It is
+	// emptied when it reaches maxResolverAnswers, so text typed and deleted
+	// cannot grow it without bound.
+	answersMu sync.Mutex
+	answers   map[string]resolverAnswer
 }
+
+type resolverAnswer struct {
+	component string
+	resolver  *Resolver
+}
+
+const maxResolverAnswers = 1 << 16
 
 // noteSoft records comp as produced by r, when r is DynamicIfMissing.
 func (rs *ResolverSet) noteSoft(r *Resolver, comp string) {
@@ -529,7 +545,7 @@ func splitPrefix(prefix string) []string {
 // alternatives as a case-insensitive substring. Used by the quick-rejection checks
 // that don't need the match position, only a yes/no signal.
 func prefixContainsFold(expr, prefix string) bool {
-	for _, alt := range splitPrefix(prefix) {
+	for alt := range strings.SplitSeq(prefix, "|") {
 		if alt != "" && containsFold(expr, alt) {
 			return true
 		}
@@ -541,7 +557,7 @@ func prefixContainsFold(expr, prefix string) bool {
 // prefixEqualFold reports whether expr case-insensitively equals any of prefix's
 // pipe-delimited alternatives.
 func prefixEqualFold(expr, prefix string) bool {
-	for _, alt := range splitPrefix(prefix) {
+	for alt := range strings.SplitSeq(prefix, "|") {
 		if alt != "" && strings.EqualFold(expr, alt) {
 			return true
 		}
@@ -566,7 +582,7 @@ func prefixEqualFold(expr, prefix string) bool {
 // pipe-delimited alternatives irrelevant: every alternative that matches matches at 0,
 // so a shorter alternative can no longer fix the slice position ahead of a longer one.
 func findPrefixPos(expr, prefix string, anchored bool) int {
-	for _, alt := range splitPrefix(prefix) {
+	for alt := range strings.SplitSeq(prefix, "|") {
 		if alt == "" {
 			continue
 		}
@@ -656,10 +672,39 @@ func (rs *ResolverSet) Resolve(expr string) string {
 		return ""
 	}
 
-	// Collect unique resolver indices whose prefix first-byte appears in expr
+	rs.answersMu.Lock()
+	a, ok := rs.answers[expr]
+	rs.answersMu.Unlock()
+
+	if !ok {
+		a = rs.resolve(expr)
+
+		rs.answersMu.Lock()
+		if rs.answers == nil || len(rs.answers) >= maxResolverAnswers {
+			rs.answers = make(map[string]resolverAnswer)
+		}
+
+		rs.answers[strings.Clone(expr)] = a
+		rs.answersMu.Unlock()
+	}
+
+	// Noted on every answer, not only the first: the soft set belongs to the
+	// parse that asked.
+	rs.noteSoft(a.resolver, a.component)
+
+	return a.component
+}
+
+// resolve is Resolve without the memo.
+func (rs *ResolverSet) resolve(expr string) resolverAnswer {
+	// Collect unique resolver indices whose prefix first-byte appears in expr.
+	// candidates stays on the stack for the usual few dozen: Resolve runs for
+	// every assignment and call a parse meets, and growing a slice per call was
+	// a fifth of what a reparse of a large tag component allocated.
 	var (
 		seen       [256]bool
-		candidates []int
+		buf        [64]int
+		candidates = buf[:0]
 	)
 
 	for i := range len(expr) {
@@ -718,13 +763,11 @@ func (rs *ResolverSet) Resolve(expr string) string {
 		}
 
 		if resolved := matchResolverWithCache(sub, r); resolved != "" {
-			rs.noteSoft(r, resolved)
-
-			return resolved
+			return resolverAnswer{component: resolved, resolver: r}
 		}
 	}
 
-	return ""
+	return resolverAnswer{}
 }
 
 func indexFold(s, substr string) int {
@@ -744,19 +787,126 @@ func indexFoldFrom(s, substr string, from int) int {
 		return max(from, 0)
 	}
 
-	first := lowerASCII(substr[0])
+	from = max(from, 0)
 
-	for i := max(from, 0); i+len(substr) <= len(s); i++ {
-		if lowerASCII(s[i]) != first {
-			continue
+	last := len(s) - len(substr) // the last start a match fits at
+	if last < from {
+		return -1
+	}
+
+	// Candidates are found with IndexByte, which is vectorised, rather than by
+	// testing every byte, and on the needle's rarest byte rather than its
+	// first: "include" is searched for by its 'u', since an 'i' is in every
+	// other identifier and each one cost an EqualFold. That is only sound for
+	// an ASCII needle, whose case-insensitive matches are byte for byte — a
+	// rune folding to an ASCII letter is longer than one byte, so it cannot
+	// stand in a slice the needle's length. Any other needle is searched for
+	// by its first byte, as lowerASCII always matched it.
+	k := 0
+	if isASCII(substr) {
+		k = rarestByte(substr)
+	}
+
+	lo := lowerASCII(substr[k])
+	up := lo
+
+	if lo >= 'a' && lo <= 'z' {
+		up = lo - 32
+	}
+
+	hay := s[:last+k+1] // where the anchor byte of a fitting start can be
+	nextLo, nextUp := -1, -1
+
+	// For an ASCII needle the first and last bytes are compared inline before
+	// EqualFold is called: an anchor byte is common enough in code that the
+	// call per candidate was most of the search.
+	ascii := k > 0 || isASCII(substr)
+	first, final := lowerASCII(substr[0]), lowerASCII(substr[len(substr)-1])
+
+	for p := from + k; p <= last+k; {
+		if nextLo < p {
+			nextLo = indexByteFrom(hay, lo, p)
 		}
 
-		if strings.EqualFold(s[i:i+len(substr)], substr) {
-			return i
+		j := nextLo
+
+		if up != lo {
+			if nextUp < p {
+				nextUp = indexByteFrom(hay, up, p)
+			}
+
+			j = min(j, nextUp)
 		}
+
+		if j > last+k {
+			return -1
+		}
+
+		start := j - k
+		if (!ascii || lowerASCII(s[start]) == first && lowerASCII(s[start+len(substr)-1]) == final) &&
+			strings.EqualFold(s[start:start+len(substr)], substr) {
+			return start
+		}
+
+		p = j + 1
 	}
 
 	return -1
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// letterFrequency orders the letters most common first, as measured over the
+// 28,000 .cfc and .cfm files of the corpus and tassweb: code is not English,
+// and t, r and s are commoner, h and w rarer. The order only picks which byte
+// of a needle to look for, so a poor pick costs speed, never a result.
+const letterFrequency = "etrasncioludfmpgybhvqxwkjz"
+
+// rarestByte is the offset of the byte of needle least likely to occur in
+// source text: a rare letter, else a rare symbol or digit. Spaces and the
+// punctuation code is full of are never chosen over anything else.
+func rarestByte(needle string) int {
+	best, bestRank := 0, -2
+
+	for i := range len(needle) {
+		c := lowerASCII(needle[i])
+
+		rank := -1
+
+		switch {
+		case c >= 'a' && c <= 'z':
+			rank = strings.IndexByte(letterFrequency, c)
+		case c >= '0' && c <= '9':
+			rank = 12
+		case strings.IndexByte("$@!?%^`~|\\", c) >= 0:
+			rank = 30
+		}
+
+		if rank > bestRank {
+			best, bestRank = i, rank
+		}
+	}
+
+	return best
+}
+
+// indexByteFrom is strings.IndexByte from offset i, as an offset into s, or
+// len(s) when c does not occur again: past every start, so it is never
+// searched for twice.
+func indexByteFrom(s string, c byte, i int) int {
+	if j := strings.IndexByte(s[i:], c); j >= 0 {
+		return i + j
+	}
+
+	return len(s)
 }
 
 // lowerASCII folds one ASCII byte. A byte above ASCII is returned unchanged,

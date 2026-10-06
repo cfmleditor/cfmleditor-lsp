@@ -72,11 +72,9 @@ type ParseResult struct {
 	// Lazy global var caches (protected by mu).
 	mu            sync.Mutex
 	globalVars    []string
-	globalDone    bool
 	variablesVars []string
-	varsDone      bool
 	thisVars      []string
-	thisDone      bool
+	scopedDone    bool // the three above, from one scan
 	allVars       []VarDef
 	allVarsDone   bool
 
@@ -246,6 +244,13 @@ func (pr *ParseResult) extractSignatures() {
 	}()
 
 	pr.prepareManagedSetterLookup()
+
+	if pr.FuncLookup != nil {
+		lookup := pr.FuncLookup
+		pr.FuncLookup = memoFuncLookup(lookup)
+
+		defer func() { pr.FuncLookup = lookup }()
+	}
 
 	var allPendingCalls []pendingCall
 
@@ -2138,10 +2143,7 @@ func (pr *ParseResult) GlobalVars() []string {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 
-	if !pr.globalDone {
-		pr.globalVars = pr.computeGlobalVars()
-		pr.globalDone = true
-	}
+	pr.scopedVarsLocked()
 
 	return pr.globalVars
 }
@@ -2151,10 +2153,7 @@ func (pr *ParseResult) VariablesVars() []string {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 
-	if !pr.varsDone {
-		pr.variablesVars = pr.computeScopedVars(ScopeVariables)
-		pr.varsDone = true
-	}
+	pr.scopedVarsLocked()
 
 	return pr.variablesVars
 }
@@ -2164,10 +2163,7 @@ func (pr *ParseResult) ThisVars() []string {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 
-	if !pr.thisDone {
-		pr.thisVars = pr.computeScopedVars(ScopeThis)
-		pr.thisDone = true
-	}
+	pr.scopedVarsLocked()
 
 	return pr.thisVars
 }
@@ -2379,29 +2375,39 @@ func (pr *ParseResult) parseFuncBody(funcStart, funcEnd int) (names []string) {
 	return names
 }
 
-// computeGlobalVars extracts global-scope variables (variables.x, this.x, plain assigns).
-func (pr *ParseResult) computeGlobalVars() []string {
-	vars := pr.computeScopedVars(ScopeVariables)
-	vars = append(vars, pr.computeScopedVars(ScopeThis)...)
+// scopedVarsLocked fills variablesVars, thisVars and globalVars from one scan
+// of the file. Each used to scan it for itself, keeping only its own scope, and
+// globalVars scanned it twice more: on a 65,000-line component that was 17ms a
+// scan, and the completion cache built after every open and save asked for
+// two of them. Callers hold pr.mu.
+func (pr *ParseResult) scopedVarsLocked() {
+	if pr.scopedDone {
+		return
+	}
 
-	return vars
+	pr.variablesVars, pr.thisVars = pr.computeScopedVars()
+	pr.globalVars = append(slices.Clip(pr.variablesVars), pr.thisVars...)
+	pr.scopedDone = true
 }
 
-// computeScopedVars extracts variables of a specific scope from outside functions
-// and from the init() function body.
-func (pr *ParseResult) computeScopedVars(scope Scope) []string {
-	seen := make(map[string]bool)
+// computeScopedVars extracts the variables- and this-scoped names declared
+// outside functions and in the init() function body, each in declaration
+// order and without repeats. Properties come first among the variables, since
+// they default to that scope.
+func (pr *ParseResult) computeScopedVars() (variables, this []string) {
+	vars := scopeNames{seen: map[string]bool{}}
+	thisNames := scopeNames{seen: map[string]bool{}}
 
-	var names []string
+	for _, prop := range pr.Properties {
+		vars.add(prop.name)
+	}
 
-	// Properties default to variables scope
-	if scope == ScopeVariables {
-		for _, prop := range pr.Properties {
-			if !seen[prop.name] {
-				seen[prop.name] = true
-
-				names = append(names, prop.name)
-			}
+	note := func(v *VarDef) {
+		switch v.Scope { //nolint:exhaustive // only these two scopes are collected
+		case ScopeVariables:
+			vars.add(v.Name)
+		case ScopeThis:
+			thisNames.add(v.Name)
 		}
 	}
 
@@ -2427,33 +2433,51 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 			regionVars = tp.vars
 		}
 
-		for _, v := range regionVars {
-			if v.Scope != scope {
+		for i := range regionVars {
+			v := &regionVars[i]
+			if v.Scope != ScopeVariables && v.Scope != ScopeThis {
 				continue
 			}
 
-			fs := findFuncScope(int(v.Line), pr.Scopes)
-			if fs.Start != -1 {
+			if fs := findFuncScope(int(v.Line), pr.Scopes); fs.Start != -1 {
 				continue // inside a function
 			}
 
-			if !seen[v.Name] {
-				seen[v.Name] = true
-
-				names = append(names, v.Name)
-			}
+			note(v)
 		}
 	}
 
-	// Also include vars from init() body
+	for i, bodyVars := 0, pr.initBodyVars(); i < len(bodyVars); i++ {
+		note(&bodyVars[i])
+	}
+
+	return vars.names, thisNames.names
+}
+
+// scopeNames collects names in the order first seen.
+type scopeNames struct {
+	seen  map[string]bool
+	names []string
+}
+
+func (n *scopeNames) add(name string) {
+	if !n.seen[name] {
+		n.seen[name] = true
+		n.names = append(n.names, name)
+	}
+}
+
+// initBodyVars is every variable the init() function's body declares, nil
+// when the file has no init().
+func (pr *ParseResult) initBodyVars() []VarDef {
 	initScope := pr.initFuncScope()
 	if initScope.Start == -1 {
-		return names
+		return nil
 	}
 
 	start, end := pr.lineOffsets(initScope.Start, initScope.End)
 	if start < 0 {
-		return names
+		return nil
 	}
 
 	body := pr.Content[start:end]
@@ -2465,27 +2489,17 @@ func (pr *ParseResult) computeScopedVars(scope Scope) []string {
 		}
 	}
 
-	var bodyVars []VarDef
-
 	if regionKind == RegionScript {
 		sp := newScriptParser(body, "", initScope.Start, nil)
 		sp.parse()
-		bodyVars = sp.vars
-	} else {
-		tp := newTagParser(body, "")
-		tp.parse()
-		bodyVars = tp.vars
+
+		return sp.vars
 	}
 
-	for _, v := range bodyVars {
-		if v.Scope == scope && !seen[v.Name] {
-			seen[v.Name] = true
+	tp := newTagParser(body, "")
+	tp.parse()
 
-			names = append(names, v.Name)
-		}
-	}
-
-	return names
+	return tp.vars
 }
 
 // initFuncScope returns the FuncScope for the init() function, or {-1,-1} if not found.
@@ -3765,4 +3779,38 @@ func callHopName(hop string) string {
 	}
 
 	return hop
+}
+
+// memoFuncLookup answers each (component, method) pair once for the length of
+// one signature pass. A component's methods are asked about once per call site,
+// and a large file names the same few thousands of times: on a 65,000-line
+// component the repeats were most of what a reparse cost. The answer depends on
+// the index and the filesystem, which the pass does not change, so it is held
+// only while the pass runs and never across an edit.
+func memoFuncLookup(lookup func(component, funcName string) string) func(component, funcName string) string {
+	type key struct{ component, funcName string }
+
+	var mu sync.Mutex
+
+	seen := make(map[key]string)
+
+	return func(component, funcName string) string {
+		k := key{component, funcName}
+
+		mu.Lock()
+		answer, ok := seen[k]
+		mu.Unlock()
+
+		if ok {
+			return answer
+		}
+
+		answer = lookup(component, funcName)
+
+		mu.Lock()
+		seen[k] = answer
+		mu.Unlock()
+
+		return answer
+	}
 }
