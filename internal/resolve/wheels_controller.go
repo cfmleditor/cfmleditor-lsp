@@ -73,7 +73,8 @@ func (r *Resolver) wheelsControllerExtendsGlobal(chain []string, at int) bool {
 // wheelsMixinHostFunc answers a bare call made in one of the components
 // Controller.cfc integrates (wheels/controller/*.cfc, wheels/view/*.cfc).
 // Such a component is never instantiated; its public methods are copied into
-// every controller and run there, so a name it calls is the controller's:
+// every controller and run there, so a name it calls is the controller's
+// (and wheels/mapper/*.cfc's the Mapper's, wheelsMapperMixinFunc):
 // Controller's own, wheels.Global's chain and includes, or another integrated
 // package method. Nothing answers unless the Controller beside the package is
 // the pinned one and integrates this very file.
@@ -85,6 +86,10 @@ func (r *Resolver) wheelsMixinHostFunc(pr *parser.ParseResult, name string) *par
 	file := pr.URI.Path()
 	dir := filepath.Dir(file)
 	pkg := strings.ToLower(filepath.Base(dir))
+
+	if pkg == "mapper" {
+		return r.wheelsMapperMixinFunc(file, name)
+	}
 
 	if pkg != "controller" && pkg != "view" {
 		return nil
@@ -117,6 +122,25 @@ func (r *Resolver) wheelsMixinHostFunc(pr *parser.ParseResult, name string) *par
 	}
 
 	return r.wheelsControllerFunc(chain, name)
+}
+
+// wheelsMapperMixinFunc is wheelsMixinHostFunc for wheels/mapper/*.cfc, whose
+// public methods Mapper.init copies into itself after wheels.Global's: a bare
+// call there is the Mapper's, through the same lookup a call on a Mapper makes.
+func (r *Resolver) wheelsMapperMixinFunc(file, name string) *parser.FunctionDef {
+	dir := filepath.Dir(file)
+	host := filepath.Join(filepath.Dir(dir), "Mapper.cfc")
+
+	if !samePath(file, r.ComponentPath("wheels.mapper."+strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)), filepath.Dir(dir))) ||
+		!samePath(host, r.ComponentPath("wheels.Mapper", filepath.Dir(dir))) {
+		return nil
+	}
+
+	if _, ok := r.wheelsMapperSetup(host); !ok {
+		return nil
+	}
+
+	return r.lookupFunc(host, name, 0)
 }
 
 func (r *Resolver) extendsOfPath(path string) string {

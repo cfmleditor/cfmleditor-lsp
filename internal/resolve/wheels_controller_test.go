@@ -140,3 +140,33 @@ func TestAWheelsMixinsBareCallsAreTheControllers(t *testing.T) {
 		}
 	}
 }
+
+// TestAWheelsMapperMixinsBareCallsAreTheMappers: Mapper.init copies the public
+// methods of wheels/mapper/*.cfc into itself, so a bare call in one is the
+// Mapper's — its own, another package's public method — and nothing when the
+// Mapper is not the pinned loader.
+func TestAWheelsMapperMixinsBareCallsAreTheMappers(t *testing.T) {
+	files := mapperFiles()
+	files["wheels/mapper/routes.cfc"] = `component { PUBLIC function route(required string path) { own(); $draw("x"); hidden(); missing(); return this; } }`
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "wheels/mapper/routes.cfc"), map[string]string{
+		"own": "", "$draw": "",
+		"hidden": "no qualifier, not in file", "missing": "no qualifier, not in file",
+	})
+
+	unproven := mapperFiles()
+	unproven["wheels/mapper/routes.cfc"] = files["wheels/mapper/routes.cfc"]
+	unproven["wheels/Mapper.cfc"] = strings.Replace(unproven["wheels/Mapper.cfc"], `function init() {`, `function init() { return this;`, 1)
+
+	dir = t.TempDir()
+	writeFiles(t, dir, unproven)
+
+	got := reasonsWith(t, &Resolver{}, dir, "wheels/mapper/routes.cfc")
+	for _, name := range []string{"own", "$draw"} {
+		if got[name] == "" {
+			t.Errorf("%s resolved through a Mapper that does not run the pinned loader", name)
+		}
+	}
+}

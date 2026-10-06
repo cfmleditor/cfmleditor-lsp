@@ -1888,3 +1888,17 @@ Two "component does not exist" groups were paths a project spells for itself:
 
 Measured per entry: cfwheels 93 removed in each mode, coldbox-platform 18 in each, 0 added
 anywhere. Every method called on the now-resolving components exists.
+
+### Wheels mapper mixins call what their Mapper holds (cfwheels 2,870 -> 2,815)
+
+The controller rule above, for `wheels/mapper/*.cfc`: `Mapper.init` copies Global's public
+methods and then the mapper package's into itself, so a bare call in a mapper component is the
+Mapper's. `wheelsMapperMixinFunc` requires the file to be `wheels.mapper.<name>`, the Mapper
+beside it to be `wheels.Mapper`, and that Mapper to run the pinned loader (`wheelsMapperSetup`,
+split out of `wheelsMapperFunc`), then looks the name up exactly as a call on a Mapper does.
+`TestAWheelsMapperMixinsBareCallsAreTheMappers`, with a Mapper whose init returns before
+loading as the negative case.
+
+Measured per entry: cfwheels 57 removed and 2 added in each mode, every other mode 0 / 0. The
+additions are `$engineAdapter().globRegex()` and a sibling, whose head is now found and declares
+`any`, as in the controller case.
