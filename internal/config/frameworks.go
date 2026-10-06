@@ -290,6 +290,16 @@ var frameworkPresets = map[string]frameworkPreset{
 				DynamicIfMissing: true,
 			},
 		}, returnResolver("mura.MuraScope", "getMuraScope")...),
+		// A display object's template runs inside the content renderer:
+		// contentRenderer.cfc includes it by the path
+		// siteConfig().lookupDisplayObjectFilePath() finds under a modules or
+		// display_objects directory, core/modules/v1 among them, so its bare
+		// calls (showItemMeta(), getURLStem(), dspObject()) are the
+		// renderer's.
+		bases: []implicitBase{
+			{dir: "modules", ext: ".cfm", component: "mura.content.contentRenderer"},
+			{dir: "display_objects", ext: ".cfm", component: "mura.content.contentRenderer"},
+		},
 	},
 
 	// FW/1: the framework object controllers are handed, its bean factory, and

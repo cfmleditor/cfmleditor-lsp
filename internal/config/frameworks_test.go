@@ -186,6 +186,25 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 	}
 }
 
+// TestAMuraDisplayObjectRunsInTheContentRenderer: Mura includes a display
+// object's template from contentRenderer, under a modules or display_objects
+// directory at any depth; a component there and a template elsewhere are not
+// display objects.
+func TestAMuraDisplayObjectRunsInTheContentRenderer(t *testing.T) {
+	implicit := ImplicitExtends([]string{"mura"})
+	for path, want := range map[string]string{
+		"/p/core/modules/v1/gallery/index.cfm":          "mura.content.contentRenderer",
+		"/p/sites/default/display_objects/nav/x.cfm":    "mura.content.contentRenderer",
+		"/p/sites/default/modules/custom/index.cfm":     "mura.content.contentRenderer",
+		"/p/core/modules/v1/cookie_consent/Handler.cfc": "",
+		"/p/admin/core/views/carch/edit.cfm":            "",
+	} {
+		if got := implicit(path); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+}
+
 // TestSuggestFrameworksFromBoxJSON: a project finds out a preset exists from
 // its own box.json — a dependency, a dev dependency or the package's own slug
 // (coldbox-platform is the package named coldbox) — minus the presets the

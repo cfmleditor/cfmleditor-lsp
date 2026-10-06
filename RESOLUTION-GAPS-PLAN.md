@@ -2097,3 +2097,23 @@ latter, the value is dynamic. A ternary qualifies when both branches do. Both
 the qualified-hop and the bare-chain paths ask, and the bare path asks the
 closure-struct rule too. Measured: tb-p −13, cx-p −9, cw-p −6, nothing added.
 `TestAReturnOfABuiltInsValueIsDynamic`.
+
+### A Mura display object runs inside the content renderer
+
+contentRenderer.cfc includes a display object's template by the path
+`siteConfig().lookupDisplayObjectFilePath()` finds under a `modules` or
+`display_objects` directory (`core/modules/v1` among them). The mura preset now
+gives such a `.cfm` the implied base `mura.content.contentRenderer`, the
+mechanism FW/1 views already use, so a bare `showItemMeta()`, `getURLStem()` or
+`dspObject()` in one is the renderer's. Measured: masa-c −74/+20.
+
+Of the 20 added, 12 are earlier findings one step further on. A bare `getSite()`
+is now found on the renderer, but it has no return type. `dspTopNav()` and
+`variables.siteConfig()` are declared nowhere on the renderer, so they move from
+"no qualifier" to "not found in extends chain". The other 6 are
+`event.getContentBean()` reported "not found in event": a template's `event` is
+the renderer's `variables.event`, which DI/1's constructor autowiring types as
+the `event` bean (`mura.event`), while Mura passes a `servletEvent` at render
+time. That is the same question as the held-back `event` preset
+(`resolution-candidates/held-back/mura-event-preset.patch`), so it is left for
+that decision. `TestAMuraDisplayObjectRunsInTheContentRenderer`.
