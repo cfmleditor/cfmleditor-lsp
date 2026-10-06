@@ -2,7 +2,6 @@ package resolve
 
 import (
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -89,27 +88,7 @@ func isBuilderComponent(comp string) bool {
 }
 
 func (r *Resolver) closuresOf(pr *parser.ParseResult) []closureSpan {
-	key := string(pr.URI) + "\x00" + strconv.FormatUint(fnvHash(pr.Content), 16)
-
-	r.mu.RLock()
-	spans, ok := r.closureCache[key]
-	r.mu.RUnlock()
-
-	if ok {
-		return spans
-	}
-
-	spans = r.findClosures(pr)
-
-	r.mu.Lock()
-	if r.closureCache == nil || len(r.closureCache) >= 4096 {
-		r.closureCache = make(map[string][]closureSpan)
-	}
-
-	r.closureCache[key] = spans
-	r.mu.Unlock()
-
-	return spans
+	return r.closureCache.get(&r.mu, pr, func() []closureSpan { return r.findClosures(pr) })
 }
 
 func (r *Resolver) findClosures(pr *parser.ParseResult) []closureSpan {

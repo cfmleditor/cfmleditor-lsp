@@ -233,9 +233,10 @@ func BenchmarkKeystroke(b *testing.B) {
 
 			for b.Loop() {
 				// More than five changes inside 200ms is a burst, and a burst
-				// takes the path that only applies the text and defers the
-				// reparse. A benchmark issues thousands, so without this every
-				// op after the fifth measured that path instead of a keystroke.
+				// that is not an edit inside a function takes the path that only
+				// applies the text and defers the reparse. A benchmark issues
+				// thousands, so without this every op after the fifth could
+				// measure that path instead of a keystroke.
 				s.mu.Lock()
 				delete(s.changeWindowStart, docURI)
 				s.mu.Unlock()

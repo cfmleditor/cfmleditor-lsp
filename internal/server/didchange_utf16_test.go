@@ -30,9 +30,12 @@ func TestDidChangeCountsUTF16Units(t *testing.T) {
 		}
 
 		if burst {
-			// More than five changes inside the window takes the burst path.
+			// More than five changes inside the window takes the burst path,
+			// unless they are edits inside a function of a parse that is up to
+			// date — which this one is, so the parse is marked as lagging.
 			srv.mu.Lock()
 			srv.changeCount[docURI] = 10
+			srv.reparsePending[docURI] = true
 			srv.mu.Unlock()
 		}
 

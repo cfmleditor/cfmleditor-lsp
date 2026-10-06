@@ -204,7 +204,7 @@ type wheelsMethod struct {
 type wheelsSource struct {
 	content   string
 	methods   map[string]wheelsMethod
-	producers map[string]*producerMethod
+	producers *producerPlans
 
 	// size and modTime are the file's stamp when content was read. An
 	// unchanged stamp serves the cache without reading the file again: this
@@ -264,7 +264,7 @@ func (r *Resolver) wheelsSource(path string) wheelsSource {
 
 	result := cached
 	if !ok || cached.content != content {
-		result = wheelsSource{content: content, methods: wheelsMethods(content), producers: producerMethods(content)}
+		result = wheelsSource{content: content, methods: wheelsMethods(content), producers: newProducerPlans(content)}
 	}
 
 	result.size, result.modTime, result.gen = info.Size(), info.ModTime(), gen

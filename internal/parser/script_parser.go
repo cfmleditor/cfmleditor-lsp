@@ -4907,16 +4907,26 @@ func (p *scriptParser) tryExtendChain(chain string) (string, []string) {
 		return "", nil
 	}
 
-	saved := p.sc.Save()
+	saved, recorded := p.sc.Save(), p.mark()
+
+	// The look ahead walks the argument list, which records what it holds;
+	// rewinding the scanner without rewinding those left them recorded, and
+	// the walk that follows recorded them again — every call in the
+	// arguments of a top-level scoped assignment twice, wherever a
+	// componentResolver was configured.
+	rewind := func() {
+		p.sc.Restore(saved)
+		p.rewind(&recorded)
+	}
 
 	if !p.skipParens() {
-		p.sc.Restore(saved)
+		rewind()
 
 		return "", nil
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokDot {
-		p.sc.Restore(saved)
+		rewind()
 
 		return "", nil
 	}
@@ -4925,7 +4935,7 @@ func (p *scriptParser) tryExtendChain(chain string) (string, []string) {
 
 	next := p.sc.PeekSkipComments()
 	if next.Kind != TokIdent {
-		p.sc.Restore(saved)
+		rewind()
 
 		return "", nil
 	}
@@ -4956,7 +4966,7 @@ func (p *scriptParser) tryExtendChain(chain string) (string, []string) {
 	}
 
 	if p.sc.PeekSkipComments().Kind != TokLParen {
-		p.sc.Restore(saved)
+		rewind()
 
 		return "", nil
 	}
@@ -4965,9 +4975,57 @@ func (p *scriptParser) tryExtendChain(chain string) (string, []string) {
 		return comp, names
 	}
 
-	p.sc.Restore(saved)
+	rewind()
 
 	return "", nil
+}
+
+// parseMark is how much a scriptParser has recorded, taken before a look
+// ahead so that a look ahead which is rewound can be un-recorded too.
+type parseMark struct {
+	calls, funcCalls, pending, vars, refs, funcRefs, funcs, scopes, links, funcLinks int
+	hadFuncCalls, hadFuncRefs, hadFuncLinks                                          bool
+}
+
+func (p *scriptParser) mark() parseMark {
+	fc, hadFC := p.funcCalls[p.inFunc]
+	fr, hadFR := p.funcRefs[p.inFunc]
+	fl, hadFL := p.funcLinks[p.inFunc]
+
+	return parseMark{
+		calls: len(p.calls), funcCalls: len(fc), pending: len(p.pendingCalls), vars: len(p.vars),
+		refs: len(p.componentRefs), funcRefs: len(fr), funcs: len(p.funcs), scopes: len(p.scopes),
+		links: len(p.links), funcLinks: len(fl),
+		hadFuncCalls: hadFC, hadFuncRefs: hadFR, hadFuncLinks: hadFL,
+	}
+}
+
+// rewind drops everything recorded since m. p.inFunc must be what it was.
+func (p *scriptParser) rewind(m *parseMark) {
+	p.calls = p.calls[:m.calls]
+	p.pendingCalls = p.pendingCalls[:m.pending]
+	p.vars = p.vars[:m.vars]
+	p.componentRefs = p.componentRefs[:m.refs]
+	p.funcs = p.funcs[:m.funcs]
+	p.scopes = p.scopes[:m.scopes]
+	p.links = p.links[:m.links]
+
+	rewindEntry(p.funcCalls, p.inFunc, m.funcCalls, m.hadFuncCalls)
+	rewindEntry(p.funcRefs, p.inFunc, m.funcRefs, m.hadFuncRefs)
+	rewindEntry(p.funcLinks, p.inFunc, m.funcLinks, m.hadFuncLinks)
+}
+
+// rewindEntry cuts m[key] back to n, removing it if it was not there.
+func rewindEntry[T any](m map[string][]T, key string, n int, had bool) {
+	if !had {
+		delete(m, key)
+
+		return
+	}
+
+	if xs, ok := m[key]; ok {
+		m[key] = xs[:n]
+	}
 }
 
 // continueExtendedChain records the call tryExtendChain resolved on and every

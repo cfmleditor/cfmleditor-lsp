@@ -1,6 +1,9 @@
 package parser
 
 import (
+	"cmp"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
@@ -30,8 +33,10 @@ func MemberReceiverName(variable string) (string, RefScope, bool) {
 
 // Explicit writes type one member, never its whole container. Conflicting or
 // unknown writes and parent replacements withhold the member's component.
-func (pr *ParseResult) applyMemberBindings() {
-	if !pr.hasMemberBinding(pr.Content) {
+// applyMemberBindings types the members a component assigns. hasBindings is
+// hasMemberBinding of the content, which the caller has already asked.
+func (pr *ParseResult) applyMemberBindings(hasBindings bool) {
+	if !hasBindings {
 		return
 	}
 
@@ -84,11 +89,19 @@ func (pr *ParseResult) applyMemberBindings() {
 			continue
 		}
 
-		if !w.element && emptyCollection(w.expression) {
+		// One scanner reads the expression both ways: there is one write per
+		// assignment in the file, and a scanner each was most of what this
+		// loop allocated.
+		sc := NewScanner(w.expression)
+		start := sc.Save()
+
+		if !w.element && emptyCollectionAt(sc) {
 			continue
 		}
 
-		if source, indexed := collectionRead(w.expression); source != "" && !indexed {
+		sc.Restore(start)
+
+		if source, indexed := collectionReadAt(sc); source != "" && !indexed {
 			invalidate(descendants[key(source, w.function)])
 		}
 
@@ -102,7 +115,13 @@ func (pr *ParseResult) applyMemberBindings() {
 
 	components := pr.settleMemberDependencies(nodes, dependencies)
 
-	for identity := range nodes {
+	// In the order the members are first written. Ranging over nodes put a
+	// function's refs in a different order on every parse of the same text.
+	order := slices.SortedFunc(maps.Keys(nodes), func(a, b string) int {
+		return cmp.Or(cmp.Compare(identities[a].offset, identities[b].offset), strings.Compare(a, b))
+	})
+
+	for _, identity := range order {
 		w := identities[identity]
 		name, scope, _ := MemberReceiverName(w.target)
 		component := components[identity]
