@@ -2399,18 +2399,34 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 		return
 	}
 
-	if topUp {
-		p.mergeExpressionMemberSets(expr, line)
-	}
+	memberSets := topUp && hasMemberSetShape(expr)
+	calls := strings.IndexByte(expr, '(') >= 0
 
-	if strings.IndexByte(expr, '(') < 0 {
+	if !calls {
+		if memberSets {
+			p.mergeExpressionMemberSets(expr, line)
+		}
+
 		return
 	}
 
-	sub := newScriptParser(expr, p.fileURI, line, p.resolvers).asCFScript()
-	sub.resolverSet = p.resolverSet
-	sub.extractCalls = true
-	sub.parse()
+	var sub *scriptParser
+
+	if memberSets {
+		// One sub-parse answers both questions. The member assignments need
+		// the body path, so the expression is wrapped in a function; the
+		// calls are the same either way, and parsing the <cfset> twice was a
+		// tenth of a reparse of a large tag component.
+		sub = p.memberSetParser(expr, line)
+		sub.extractCalls = true
+		sub.parse()
+		p.keepMemberSets(sub)
+	} else {
+		sub = newScriptParser(expr, p.fileURI, line, p.resolvers).asCFScript()
+		sub.resolverSet = p.resolverSet
+		sub.extractCalls = true
+		sub.parse()
+	}
 
 	have := map[string]int{}
 
@@ -2425,6 +2441,13 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 	}
 
 	emit := func(c CallSite) {
+		// The wrapper is not a function of the file: a call it encloses has
+		// no caller of its own, as it has unwrapped, and fillCallers gives it
+		// the one whose lines hold it.
+		if c.Caller == memberSetWrapper {
+			c.Caller = ""
+		}
+
 		k := strings.ToLower(c.FuncName)
 		if have[k] > 0 {
 			have[k]--
@@ -2455,14 +2478,35 @@ func (p *tagParser) mergeExpressionCalls(expr string, line int, topUp bool) {
 // script parser's body path, the one implementation that distinguishes
 // `a.m = value` from `a.m == value` and indexed receivers.
 func (p *tagParser) mergeExpressionMemberSets(expr string, line int) {
-	if !strings.Contains(expr, ".") || !strings.Contains(expr, "=") {
+	if !hasMemberSetShape(expr) {
 		return
 	}
 
-	sub := newScriptParser("function __cfset(){"+expr+"}", p.fileURI, line, p.resolvers).asCFScript()
-	sub.resolverSet = p.resolverSet
+	sub := p.memberSetParser(expr, line)
 	sub.parse()
+	p.keepMemberSets(sub)
+}
 
+// hasMemberSetShape is the cheap test for text that may assign a member.
+func hasMemberSetShape(expr string) bool {
+	return strings.Contains(expr, ".") && strings.Contains(expr, "=")
+}
+
+// memberSetParser is the sub-parser mergeExpressionMemberSets reads an
+// expression with: wrapped in a function, so it goes through the script
+// parser's body path.
+func (p *tagParser) memberSetParser(expr string, line int) *scriptParser {
+	sub := newScriptParser("function "+memberSetWrapper+"(){"+expr+"}", p.fileURI, line, p.resolvers).asCFScript()
+	sub.resolverSet = p.resolverSet
+
+	return sub
+}
+
+// memberSetWrapper names the function memberSetParser wraps an expression in.
+const memberSetWrapper = "__cfset"
+
+// keepMemberSets takes the member assignments a memberSetParser found.
+func (p *tagParser) keepMemberSets(sub *scriptParser) {
 	for i := range sub.pendingCalls {
 		c := sub.pendingCalls[i]
 		if !c.memberSet {
