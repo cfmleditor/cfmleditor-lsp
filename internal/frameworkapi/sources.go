@@ -82,6 +82,13 @@ var Sources = []Source{
 	{"cbmessagebox", "https://github.com/coldbox-modules/cbmessagebox", "4bbbf8c84c53540332158b01fa39f0153faceee8", "cbmessagebox", "", []string{
 		"cbmessagebox.models.MessageBox",
 	}},
+	// cbvalidation is another module ContentBox depends on and does not ship.
+	// Its validate() helper reaches every handler; what it returns is the
+	// result handlers then ask hasErrors() of.
+	{"cbvalidation", "https://github.com/coldbox-modules/cbvalidation", "b700fab0245f3268fa978edc11abb561e4bbbcd1", "cbvalidation", "", []string{
+		"cbvalidation.models.ValidationManager",
+		"cbvalidation.models.result.ValidationResult",
+	}},
 	{"fw1", "https://github.com/framework-one/fw1", "d7fb9add9b82be4d7c884ebb2d0f88ffb59ed8c9", "framework", "framework", nil},
 	{"mura", "https://github.com/MasaCMS/MasaCMS", "696383140578f8dea3ece26f80cd7bfb370ddf0f", "mura", "core/mura", nil},
 }
@@ -100,10 +107,17 @@ type Helper struct {
 // holds them.
 var Helpers = map[string][]Helper{
 	"cbmessagebox": {{"helpers/mixins.cfm", map[string]string{"cbmessagebox": "cbmessagebox.models.MessageBox"}}},
+	// validate() is documented as the IValidationResult interface; what
+	// ValidationManager hands back is a ValidationResult.
+	"cbvalidation": {{"helpers/Mixins.cfm", map[string]string{
+		"validate":             "cbvalidation.models.result.ValidationResult",
+		"validatemodel":        "cbvalidation.models.result.ValidationResult",
+		"getvalidationmanager": "cbvalidation.models.ValidationManager",
+	}}},
 }
 
 // implied are the frameworks whose stubs a preset brings with it: ContentBox
 // depends on cbmessagebox.
 var implied = map[string][]string{
-	"contentbox": {"cbmessagebox"},
+	"contentbox": {"cbmessagebox", "cbvalidation"},
 }

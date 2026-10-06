@@ -152,8 +152,14 @@ func (r *Resolver) typeBareCallExpr(method, args string, line uint32, pr *parser
 		return ""
 	}
 
+	// A declared return answers when the parse could not see the function:
+	// a module's helper stub (cbvalidation's validate()) is found only here.
 	if ret := r.ReturnComponentOf(def); ret != "" {
-		return ""
+		if strings.HasPrefix(ret, "$") {
+			return ""
+		}
+
+		return ret
 	}
 
 	if name := strings.TrimSpace(args); identRe.MatchString(name) {

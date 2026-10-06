@@ -2179,33 +2179,24 @@ Measured: fw-p −36/+5. The 5 are methods FW/1's tests inject into the framewor
 object (`selectLayoutTwo()` calling `setLayout()`/`view()`), previously hidden
 behind the unresolved base. `TestMXUnitIsTestBoxsCompatibilityLayer`.
 
-Not done, for decision: cbvalidation, cbsecurity and cbauth are not stubbed.
-Their helpers are accepted (`moduleHelpers`), but nothing types what they
-return. In ContentBox, `vResults = validate( … )` then `vResults.hasErrors()`
-is about 24 findings. Typing those needs cbvalidation's models stubbed, plus a
-stated return for `validate()`, whose documented type is the
-`IValidationResult` interface, which `docReturn` deliberately skips.
+cbvalidation is stubbed; see the next section.
 
-### Performance round
+### cbvalidation is stubbed
 
-Regression round: `vet`, `go test -short`, `-race`, `make gapcheck` and
-`make lint` all pass. Lint's 8 findings, all on this branch, were fixed.
+ContentBox depends on cbvalidation and does not ship it. cbvalidation joins
+`frameworkapi.Sources` at b700fab0, stubbing `ValidationManager` and
+`ValidationResult` (and what they reach), and the `cbvalidation.models.`
+namespace. As with cbmessagebox, its `helpers/Mixins.cfm` is stubbed as a
+helper, and the contentbox preset implies it. `validate()` and
+`validateModel()` are stated to return `ValidationResult`: their doc names the
+`IValidationResult` interface, which `docReturn` skips. `getValidationManager()`
+returns the manager.
 
-Microbenchmarks (parser, server, index) were interleaved against `main`, two
-rounds each, with nothing outside noise. Allocations are identical, and the
-parser's largest deltas fell to ±3% when rerun with longer samples. The index
-package is unchanged and still read +54% on one benchmark, which shows how wide
-two rounds' noise is.
-
-The end-to-end `unresolved` scan found two real regressions, both fixed:
-- cw-p 15.6s → 37.6s: `wheelsWrappedTemplateFunc` re-read and re-tokenised
-  every file calling a Wheels include wrapper for each bare call in a
-  template. The hosts are now cached per template (`wheelsTemplateHosts`); the
-  caller index is complete before any resolution starts.
-- masa-c 18.0s → 25.5s: `walkExtendsRefs` fully parsed each parent to read its
-  `extends`, on every lookup, which the Mura display-object base made hot
-  through contentRenderer.cfc. It now reads the indexed extends (`extendsOf`).
-
-After both fixes, with findings identical on every scan, `main` → branch:
-cb-p 2.5s → 1.7s, cw-p 14.0s → 10.3s, cx-p 1.4s → 1.2s, fw-p 0.6s → 0.4s,
-lucee 18.9s → 16.2s, masa-c 15.5s → 13.9s, tb-p 0.3s → 0.3s (single runs).
+The parse cannot see a helper stub, so `var vResults = validate( … )` is typed
+at lookup. `typeBareCallExpr` used to decline a bare call whose function
+declares a return, on the assumption that the parse had already typed it; it
+now returns that declared component. Measured: cb-p −23 (`vResults` 22, plus one
+argument typed by caller inference), cw-p −2 (`local.bridge = $cliBridge()`, a
+`CliBridge`), nothing added. `TestAValidationResultIsTypedFromTheStubbedHelper`.
+cbsecurity and cbauth remain unstubbed: their helpers are accepted
+(`moduleHelpers`), and nothing in the corpus calls a method on what they return.

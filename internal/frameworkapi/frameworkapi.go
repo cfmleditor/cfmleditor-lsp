@@ -208,6 +208,7 @@ var namespaces = []struct{ prefix, framework string }{
 	{"contentbox.models.", "contentbox"},
 	{"cborm.models.", "cborm"},
 	{"cbmessagebox.models.", "cbmessagebox"},
+	{"cbvalidation.models.", "cbvalidation"},
 }
 
 const mxunitPrefix = "mxunit."
