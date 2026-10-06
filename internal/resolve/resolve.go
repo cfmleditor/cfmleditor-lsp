@@ -1722,6 +1722,13 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 		return ""
 	}
 
+	if def := r.wheelsMixinHostFunc(pr, funcName); def != nil {
+		tr.hit(TargetExtends, "", def)
+		tr.addf("found %q on Wheels' Controller, which this component's methods are copied into", funcName)
+
+		return ""
+	}
+
 	// CFML looks a bare name up in the variables scope, so a bare call to
 	// one the file assigns there — VARIABLES.render = ARGUMENTS.render —
 	// is a call through that function-reference property, the same as the
@@ -1884,9 +1891,11 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 		return def
 	}
 
-	def, _ := r.findThroughIncludes(pr, name)
+	if def, _ := r.findThroughIncludes(pr, name); def != nil {
+		return def
+	}
 
-	return def
+	return r.wheelsMixinHostFunc(pr, name)
 }
 
 // resolveThisCall is canResolveCall for `this.name()`.

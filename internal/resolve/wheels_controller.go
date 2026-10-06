@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -17,19 +18,11 @@ func (r *Resolver) wheelsControllerFunc(chain []string, name string) *parser.Fun
 			continue
 		}
 
-		source := r.wheelsSource(path)
-		if source.methods["init"].body != wheelsTokens(`$integrateComponents("wheels.controller"); $integrateComponents("wheels.view"); return this;`) ||
-			source.methods["$integratecomponents"].body != wheelsTokens(`local.plan = $componentIntegrationPlan(arguments.path); local.overrideSet = $mixinOverrideSet("controller"); local.iEnd = ArrayLen(local.plan); for (local.i = 1; local.i <= local.iEnd; local.i++) { $integrateFunctions(local.plan[local.i].publicMethods, local.overrideSet); }`) ||
-			source.methods["$integratefunctions"].body != wheelsTokens(wheelsControllerCopy) {
+		if !r.wheelsControllerIntegrates(path) {
 			continue
 		}
 
-		if !r.wheelsControllerInheritsLoader(chain[:at]) {
-			return nil
-		}
-
-		global := r.ComponentPath("wheels.Global", filepath.Dir(path))
-		if global == "" || at+1 >= len(chain) || !samePath(chain[at+1], global) || !r.wheelsIntegrationPlan(global) || r.wheelsPlanFunc(global, "$mixinOverrideSet") == nil {
+		if !r.wheelsControllerInheritsLoader(chain[:at]) || !r.wheelsControllerExtendsGlobal(chain, at) {
 			return nil
 		}
 
@@ -56,6 +49,80 @@ func (r *Resolver) wheelsControllerFunc(chain []string, name string) *parser.Fun
 	}
 
 	return nil
+}
+
+// wheelsControllerIntegrates reports whether path is Wheels' Controller.cfc
+// as pinned: an init that integrates the controller and view packages, and
+// the loader that copies their public methods in.
+func (r *Resolver) wheelsControllerIntegrates(path string) bool {
+	source := r.wheelsSource(path)
+
+	return source.methods["init"].body == wheelsTokens(`$integrateComponents("wheels.controller"); $integrateComponents("wheels.view"); return this;`) &&
+		source.methods["$integratecomponents"].body == wheelsTokens(`local.plan = $componentIntegrationPlan(arguments.path); local.overrideSet = $mixinOverrideSet("controller"); local.iEnd = ArrayLen(local.plan); for (local.i = 1; local.i <= local.iEnd; local.i++) { $integrateFunctions(local.plan[local.i].publicMethods, local.overrideSet); }`) &&
+		source.methods["$integratefunctions"].body == wheelsTokens(wheelsControllerCopy)
+}
+
+// wheelsControllerExtendsGlobal reports whether chain[at], the Controller,
+// extends wheels.Global holding the integration plan it calls.
+func (r *Resolver) wheelsControllerExtendsGlobal(chain []string, at int) bool {
+	global := r.ComponentPath("wheels.Global", filepath.Dir(chain[at]))
+
+	return global != "" && at+1 < len(chain) && samePath(chain[at+1], global) && r.wheelsIntegrationPlan(global) && r.wheelsPlanFunc(global, "$mixinOverrideSet") != nil
+}
+
+// wheelsMixinHostFunc answers a bare call made in one of the components
+// Controller.cfc integrates (wheels/controller/*.cfc, wheels/view/*.cfc).
+// Such a component is never instantiated; its public methods are copied into
+// every controller and run there, so a name it calls is the controller's:
+// Controller's own, wheels.Global's chain and includes, or another integrated
+// package method. Nothing answers unless the Controller beside the package is
+// the pinned one and integrates this very file.
+func (r *Resolver) wheelsMixinHostFunc(pr *parser.ParseResult, name string) *parser.FunctionDef {
+	if !pr.URI.IsFile() || r.fileExtends(pr) != "" {
+		return nil
+	}
+
+	file := pr.URI.Path()
+	dir := filepath.Dir(file)
+	pkg := strings.ToLower(filepath.Base(dir))
+
+	if pkg != "controller" && pkg != "view" {
+		return nil
+	}
+
+	host := filepath.Join(filepath.Dir(dir), "Controller.cfc")
+	if !samePath(file, r.ComponentPath("wheels."+pkg+"."+strings.TrimSuffix(filepath.Base(file), filepath.Ext(file)), filepath.Dir(dir))) ||
+		!samePath(host, r.ComponentPath("wheels.Controller", filepath.Dir(dir))) || !r.wheelsControllerIntegrates(host) {
+		return nil
+	}
+
+	chain := []string{host}
+
+	for base, baseDir := r.extendsOfPath(host), filepath.Dir(host); base != "" && len(chain) < 16; {
+		next := r.ComponentPath(base, baseDir)
+		if next == "" || slices.ContainsFunc(chain, func(p string) bool { return samePath(p, next) }) {
+			break
+		}
+
+		chain = append(chain, next)
+		base, baseDir = r.extendsOfPath(next), filepath.Dir(next)
+	}
+
+	if !r.wheelsControllerExtendsGlobal(chain, 0) {
+		return nil
+	}
+
+	if def := r.lookupFunc(host, name, 0); def != nil {
+		return def
+	}
+
+	return r.wheelsControllerFunc(chain, name)
+}
+
+func (r *Resolver) extendsOfPath(path string) string {
+	base, _ := r.extendsOf(path, cfpath.ToURI(path))
+
+	return base
 }
 
 func (r *Resolver) wheelsControllerInheritsLoader(descendants []string) bool {

@@ -1800,3 +1800,31 @@ additions are those summaries (2) and 21 `contentUtility` `arguments.contentBean
 rule had typed while dismissing the `getBean( "contentUtility" )` caller above, which passes an
 untyped `variables.item`. Cost, alternating binaries: Masa 14.4s -> 15.1s, from the calls on
 arguments that are now typed and checked.
+
+### Wheels mixins call what their Controller holds (cfwheels 3,856 -> 3,224)
+
+The largest group left in cfwheels was "no qualifier, not in file" — 910 with presets, 821 of
+them in `vendor/wheels`, and 632 of those in `wheels/view/*.cfc` and `wheels/controller/*.cfc`:
+`$get` 130, `$args` 83, `model` 52, `$element`, `$tag`, … Those components are never
+instantiated. `Controller.init` runs `$integrateComponents( "wheels.controller" )` and
+`( "wheels.view" )`, which copies their public methods into every controller, so a bare call in
+one runs on the controller. The rule already resolved such methods *from* a controller
+(`wheelsControllerFunc`); this is the reverse direction.
+
+`wheelsMixinHostFunc` answers a bare call in a file with no extends whose directory is
+`controller` or `view`, when that file is the component `wheels.<package>.<name>` names, the
+`Controller.cfc` beside the package is `wheels.Controller`, and it integrates both packages as
+pinned (`wheelsControllerIntegrates`, split out of `wheelsControllerFunc` with
+`wheelsControllerExtendsGlobal`). The name is then looked up on the Controller and its chain
+(`lookupFunc`, so Global's includes count), then among the other packages' public methods. It
+runs after cfinclude in `resolveBareCall` and in `bareFunc`, so a chain headed by such a call
+continues. A private method of another package is still not found, since it is never copied.
+`TestAWheelsMixinsBareCallsAreTheControllers`, with a Controller that does not integrate
+`wheels.view` as the negative case; both the rule and the integration check fail it when removed.
+
+Measured per entry against `b98fb2d` (v0.4.1): cfwheels with presets 3,856 -> 3,224 and without
+11,259 -> 10,627, 637 removed and 5 added in each; every other mode 0 / 0. The five additions are
+`$engineAdapter().isBoxLang()` and two siblings, previously "chained on '$engineAdapter', which
+is not found": the head is now found in `global/request.cfm`, which declares `any`, so the chain
+stops at the true break. No bare call in the two package directories is left unresolved; the 56
+findings remaining there are untyped variables.
