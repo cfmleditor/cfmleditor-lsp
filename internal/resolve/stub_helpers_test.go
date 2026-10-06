@@ -72,3 +72,23 @@ func TestAValidationResultIsTypedFromTheStubbedHelper(t *testing.T) {
 		t.Errorf("a method ValidationResult lacks was accepted: %q", got["vResults.nope"])
 	}
 }
+
+// TestCBSecurityHelpersComeFromTheirStubs: jwtAuth() and cbSecure() are
+// cbsecurity's helpers, each a WireBox instance, and ContentBox chains on them.
+func TestCBSecurityHelpersComeFromTheirStubs(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"handlers/Main.cfc": `component { function run(){ jwtAuth().fromUser( u ); cbSecure().secure( "x" ); jwtAuth().nope(); } }`,
+	})
+
+	scope := func(path string) bool { return strings.Contains(filepath.ToSlash(path), "/handlers/") }
+
+	got := reasonsWith(t, &Resolver{HelperScope: scope, Stubs: frameworkapi.For([]string{"contentbox"})}, dir, "handlers/Main.cfc")
+	if got["jwtAuth.fromUser"] != "" || got["cbSecure.secure"] != "" {
+		t.Errorf("cbsecurity helpers not typed: %v", got)
+	}
+
+	if !strings.Contains(got["jwtAuth.nope"], "not found in") {
+		t.Errorf("a method JwtService lacks was accepted: %q", got["jwtAuth.nope"])
+	}
+}

@@ -2198,7 +2198,17 @@ declares a return, on the assumption that the parse had already typed it; it
 now returns that declared component. Measured: cb-p −23 (`vResults` 22, plus one
 argument typed by caller inference), cw-p −2 (`local.bridge = $cliBridge()`, a
 `CliBridge`), nothing added. `TestAValidationResultIsTypedFromTheStubbedHelper`.
-cbsecurity and cbauth remain unstubbed. Their helpers are accepted
-(`moduleHelpers`), and one call in the corpus chains on what they return:
-ContentBox's `jwtAuth().fromUser()`, still reported. Stubbing cbsecurity the
-same way would answer it.
+cbauth remains unstubbed: its `auth()` helper is accepted (`moduleHelpers`),
+and nothing in the corpus chains on it.
+
+### cbsecurity is stubbed
+
+The same pattern, at a890b0cb: `CBSecurity` and `JwtService` (and what they
+reach) are stubbed, along with the `cbsecurity.models.` namespace and
+`helpers/mixins.cfm`. `jwtAuth()` and `cbSecure()` return `JwtService` and
+`CBSecurity`; both are `wirebox.getInstance( "<id>@cbSecurity" )`. The contentbox
+preset implies it. Measured: cb-p −2/+1. `jwtAuth().fromUser()` resolves, and
+the contentbox-api auth handler's missing-base summary goes, since its
+`jwtAuth()` calls were the inherited calls it counted. The added finding was
+hidden before: `jwtAuth().getUser().getMemento()`, where `JwtService.getUser()`
+returns `any`. `TestCBSecurityHelpersComeFromTheirStubs`.

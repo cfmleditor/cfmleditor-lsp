@@ -89,6 +89,11 @@ var Sources = []Source{
 		"cbvalidation.models.ValidationManager",
 		"cbvalidation.models.result.ValidationResult",
 	}},
+	// cbsecurity: jwtAuth() and cbSecure() reach every ContentBox handler.
+	{"cbsecurity", "https://github.com/coldbox-modules/cbsecurity", "a890b0cb52b48880bd1eb6afecc183a820e8c75e", "cbsecurity", "", []string{
+		"cbsecurity.models.CBSecurity",
+		"cbsecurity.models.jwt.JwtService",
+	}},
 	{"fw1", "https://github.com/framework-one/fw1", "d7fb9add9b82be4d7c884ebb2d0f88ffb59ed8c9", "framework", "framework", nil},
 	{"mura", "https://github.com/MasaCMS/MasaCMS", "696383140578f8dea3ece26f80cd7bfb370ddf0f", "mura", "core/mura", nil},
 }
@@ -114,10 +119,15 @@ var Helpers = map[string][]Helper{
 		"validatemodel":        "cbvalidation.models.result.ValidationResult",
 		"getvalidationmanager": "cbvalidation.models.ValidationManager",
 	}}},
+	// Both are wirebox.getInstance( "<id>@cbSecurity" ).
+	"cbsecurity": {{"helpers/mixins.cfm", map[string]string{
+		"jwtauth":  "cbsecurity.models.jwt.JwtService",
+		"cbsecure": "cbsecurity.models.CBSecurity",
+	}}},
 }
 
 // implied are the frameworks whose stubs a preset brings with it: ContentBox
 // depends on cbmessagebox.
 var implied = map[string][]string{
-	"contentbox": {"cbmessagebox", "cbvalidation"},
+	"contentbox": {"cbmessagebox", "cbvalidation", "cbsecurity"},
 }
