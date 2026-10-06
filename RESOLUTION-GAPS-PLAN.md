@@ -1869,3 +1869,22 @@ went through the whole component lookup; `scopeFunc` reads a template's own func
 which is all a template contributes (its includes are in the scope already), and the scan time
 is unchanged. Measured per entry: Lucee 468 removed, cfwheels 8 removed in each mode, 0 added
 anywhere.
+
+### A LuCLI module's own name, and a mapping built by a regex replace (cfwheels 2,963 -> 2,870, coldbox-platform 1,345 -> 1,327)
+
+Two "component does not exist" groups were paths a project spells for itself:
+
+- **cfwheels' CLI** (`cli/lucli`) writes `new modules.wheels.services.deploy.config.ConfigLoader()`:
+  LuCLI installs a module at `modules/<name>`, and the module's `module.json` names it `wheels`.
+  `lucliModuleRoot` answers `modules.<name>.rest` from the nearest directory above the caller
+  whose `module.json` gives that name and a `main` component, after every mapping and the
+  `box.json` slug, as `slugRoot` does for CommandBox. `TestALuCLIModuleNamesItselfUnderModules`.
+- **coldbox-platform's tests** map the harness from the repository root, which their
+  `Application.cfc` finds as `REReplaceNoCase( this.mappings[ "/tests" ], "tests(\\|/)", "" )`.
+  `replacedMappingPath` evaluates `reReplace`/`reReplaceNoCase` of a path by a literal pattern Go
+  compiles, with a literal replacement holding no backreference and an optional literal scope;
+  anything else is declined, as every other term is. Thirteen corpus `Application.cfc` files
+  build a mapping this way. `TestAMappingBuiltByARegexReplaceIsEvaluated`.
+
+Measured per entry: cfwheels 93 removed in each mode, coldbox-platform 18 in each, 0 added
+anywhere. Every method called on the now-resolving components exists.

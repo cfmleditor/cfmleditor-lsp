@@ -353,6 +353,12 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	if root, rest := r.lucliModuleRoot(component, baseDir); root != "" {
+		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
+			return p
+		}
+	}
+
 	// A framework component nothing on disk answers: its API, from the stubs.
 	// Last of the dot-path lookups, so a workspace with the framework checked
 	// out resolves to the real file exactly as it did.
@@ -492,6 +498,71 @@ func (r *Resolver) slugRoot(component, baseDir string) (root, rest string) {
 
 		dir = parent
 	}
+}
+
+// lucliModuleRoot is the directory a LuCLI module is installed from, when
+// component is `modules.<name>.rest` and a directory above baseDir holds the
+// module.json naming it: LuCLI installs a module at modules/<name>, and the
+// module addresses its own components that way. cfwheels' CLI, in cli/lucli,
+// writes `new modules.wheels.services.deploy.config.ConfigLoader()`.
+func (r *Resolver) lucliModuleRoot(component, baseDir string) (root, rest string) {
+	first, rest, ok := strings.Cut(component, ".")
+	if !ok || !strings.EqualFold(first, "modules") || r.FS == nil {
+		return "", ""
+	}
+
+	name, rest, ok := strings.Cut(rest, ".")
+	if !ok || name == "" || rest == "" {
+		return "", ""
+	}
+
+	for dir := baseDir; ; {
+		if module := r.lucliModuleName(dir); module != "" && strings.EqualFold(module, name) {
+			return dir, rest
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ""
+		}
+
+		dir = parent
+	}
+}
+
+// lucliModuleName is the name dir's module.json gives a LuCLI module, "" when
+// it has none or names no main component. It shares boxSlug's cache.
+func (r *Resolver) lucliModuleName(dir string) string {
+	key := "module.json\x00" + dir
+
+	r.mu.RLock()
+	name, ok := r.slugCache[key]
+	r.mu.RUnlock()
+
+	if ok {
+		return name
+	}
+
+	if data, err := r.fs().ReadFile(filepath.Join(dir, "module.json")); err == nil {
+		var module struct {
+			Name string `json:"name"`
+			Main string `json:"main"`
+		}
+
+		if json.Unmarshal(data, &module) == nil && strings.TrimSpace(module.Main) != "" {
+			name = strings.TrimSpace(module.Name)
+		}
+	}
+
+	r.mu.Lock()
+	if r.slugCache == nil {
+		r.slugCache = make(map[string]string)
+	}
+
+	r.slugCache[key] = name
+	r.mu.Unlock()
+
+	return name
 }
 
 // boxSlug is the slug of dir's box.json, "" when it has none; remembered per
