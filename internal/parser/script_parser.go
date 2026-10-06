@@ -1170,6 +1170,8 @@ func (p *scriptParser) parse() {
 				p.parseFunction(tok, "", tok.Value)
 			case peek.Kind == TokDot:
 				// Walk the dot chain — could be dotted return type or bare call
+				named := !isKeyword(tok.Value) || operatorWordIsName(tok, peek)
+
 				var retVal chainBuilder
 				retVal.reset(tok.Value)
 
@@ -1197,7 +1199,7 @@ func (p *scriptParser) parse() {
 				if next.Kind == TokIdent && identEq(next.Value, "function") {
 					p.sc.NextSkipComments()
 					p.parseFunction(tok, "", retVal.String())
-				} else if next.Kind == TokLParen && !isKeyword(tok.Value) {
+				} else if next.Kind == TokLParen && named {
 					_ = prevIdent
 
 					varName := ""
@@ -3301,7 +3303,7 @@ func (p *scriptParser) scanClosureBody(line int, params []string) int {
 }
 
 func (p *scriptParser) checkAssignRef(tok Token) {
-	if isKeyword(tok.Value) {
+	if isKeyword(tok.Value) && !operatorWordIsName(tok, p.sc.PeekSkipComments()) {
 		return
 	}
 
@@ -4641,7 +4643,7 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 	// Any other keyword is handled by what follows it rather than by being
 	// read as a receiver — bar a scope, which is one: `f( local.g() )` left
 	// `.g()` to the next loop, which recorded a bare call to g.
-	if _, _, scope := scopeReceiver(tok.Value); !scope && isKeyword(tok.Value) {
+	if _, _, scope := scopeReceiver(tok.Value); !scope && isKeyword(tok.Value) && !operatorWordIsName(tok, p.sc.PeekSkipComments()) {
 		return
 	}
 
@@ -5117,6 +5119,36 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 	}
 
 	p.scanChainedCalls(component, newTok.Line)
+}
+
+// operatorWordIsName reports whether tok, a word operator, is a variable's
+// name: CFML lets `mod` and the comparison words name a variable, and
+// cfwheels' specs hold their module in one, `mod.generate( … )`. Read as the
+// operator, the receiver was dropped and the call recorded as a bare one. A
+// dot after the word is what decides it: an operand never starts with one
+// but a number, `x mod .5`, and a chain needs a name after the dot.
+func operatorWordIsName(tok, next Token) bool {
+	if next.Kind != TokDot {
+		return false
+	}
+
+	var buf foldScratch
+	switch string(buf.lowerFold(tok.Value)) {
+	case "and", "or", "not", "eq", "neq", "lt", "gt", "lte", "gte", "mod":
+		return true
+	}
+
+	return false
+}
+
+// operatorWordIsNameStr is operatorWordIsName for text: s begins with the
+// word name, and a dot follows it directly.
+func operatorWordIsNameStr(s, name string) bool {
+	if len(s) <= len(name) || s[len(name)] != '.' {
+		return false
+	}
+
+	return operatorWordIsName(Token{Kind: TokIdent, Value: name}, Token{Kind: TokDot})
 }
 
 func isKeyword(s string) bool {

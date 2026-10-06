@@ -1095,7 +1095,7 @@ func (p *tagParser) setAssign(inner string, line int) {
 		// point is only that the name was declared here.
 	default:
 		name, rhs := splitAssign(inner)
-		if name != "" && !isKeyword(name) {
+		if name != "" && (!isKeyword(name) || operatorWordIsNameStr(inner, name)) {
 			if rhs == "" && p.extractCalls {
 				// No assignment — check for bare call: obj.method(...)
 				p.checkBareCallStr(inner, line)

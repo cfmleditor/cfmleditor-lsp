@@ -1828,3 +1828,19 @@ Measured per entry against `b98fb2d` (v0.4.1): cfwheels with presets 3,856 -> 3,
 is not found": the head is now found in `global/request.cfm`, which declares `any`, so the chain
 stops at the true break. No bare call in the two package directories is left unresolved; the 56
 findings remaining there are untyped variables.
+
+### An operator word can name a receiver (cfwheels 3,224 -> 2,971)
+
+Most of the 427 cfwheels "not found in extends chain" findings were in `cli/lucli/tests/specs`,
+which hold their module as `variables.mod = new cli.lucli.Module( … )` and call
+`mod.generate( … )`. `mod` is CFML's modulus operator, so `isKeyword` turned the parser away from
+it and the call was recorded as a bare `generate()`, looked up on the spec's own BaseSpec chain.
+`operatorWordIsName` reads a word operator (`mod`, `and`, `eq`, … ) followed by a dot as a name
+— no operand starts with a dot except a number, and a chain needs a name after it — in the
+statement dispatch (`checkAssignRef`), the argument scan (`scanNestedCall`), the component-level
+loop and the tag parser's `<cfset>` string path. The last mattered only for two calls on one
+line: `<cfset x = mod.g(1)><cfset mod.g(p)>` lost the second to the sub-parse's per-line tally.
+`TestAnOperatorWordCanNameAReceiver`; removing any of the four guards fails it.
+
+Measured per entry: cfwheels with and without presets, 253 removed and 0 added each; every other
+mode 0 / 0. `make gapcheck` unchanged.

@@ -557,6 +557,10 @@ the *formatter*, not the parser.
   types the body's calls name. An unscoped argument or local is not read from
   the component's refs (`pendingCall.baseLocal`), or the answer depended on
   which of the two parses ran first. `TestLazyFuncRefsAreTypedAsTheParseTypesThem`.
+- **A word operator followed by a dot is a name** (`operatorWordIsName`): `mod.generate()` is a
+  call on a variable called `mod`, which cfwheels' CLI specs hold their module in. `isKeyword`
+  turned every token loop away from it and the call was recorded bare. The rule is in each place
+  a keyword is refused before a receiver is read; `TestAnOperatorWordCanNameAReceiver`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.
