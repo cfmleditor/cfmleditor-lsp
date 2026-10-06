@@ -5,9 +5,13 @@
 // group of findings is missing, whether the method exists anywhere, and the
 // liberal matches the scan offers for it, every one with its evidence.
 //
-//	go run scripts/candidates_report.go -out <dir> name=report.json [name=report.json ...]
+//	go run scripts/candidates_report.go [-out <dir>] [-baseline <dir>] name=report.json[@root] ...
 //
-// Nothing here resolves a finding; it only arranges them.
+// A root makes the report's paths relative to it. With -baseline, each scan is
+// also compared finding by finding with <baseline>/<name>.json and the
+// findings removed and added are printed: a count of either alone hides one
+// file breaking while another is fixed. Nothing here resolves a finding; it
+// only arranges them.
 package main
 
 import (
@@ -58,6 +62,7 @@ var categoryTitle = map[string]string{
 
 func main() {
 	out := flag.String("out", "resolution-candidates", "directory to write the reports to")
+	baseline := flag.String("baseline", "", "directory of earlier <name>.json reports to compare with")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -69,8 +74,11 @@ func main() {
 	for _, arg := range flag.Args() {
 		name, path, ok := strings.Cut(arg, "=")
 		if !ok {
-			fail(fmt.Errorf("argument %q is not name=report.json", arg))
+			fail(fmt.Errorf("argument %q is not name=report.json[@root]", arg))
 		}
+
+		path, root, _ := strings.Cut(path, "@")
+		relRoot = strings.TrimSuffix(root, "/")
 
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -88,6 +96,10 @@ func main() {
 		}
 
 		index = append(index, summaryRow(name, findings))
+
+		if *baseline != "" {
+			compare(name, filepath.Join(*baseline, name+".json"), findings)
+		}
 	}
 
 	head := "| Scan | Findings | Object | Variable | Return type | Method | Method defined nowhere | With a high-confidence candidate |\n|---|---:|---:|---:|---:|---:|---:|---:|\n"
@@ -101,9 +113,65 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-var corpusRe = regexp.MustCompile(`^.*/corpus/[^/]+/`)
+var (
+	corpusRe = regexp.MustCompile(`^.*/corpus/[^/]+/`)
+	relRoot  string
+)
 
-func rel(path string) string { return corpusRe.ReplaceAllString(path, "") }
+func rel(path string) string {
+	if relRoot != "" {
+		if r, ok := strings.CutPrefix(path, relRoot+"/"); ok {
+			return r
+		}
+	}
+
+	return corpusRe.ReplaceAllString(path, "")
+}
+
+var uncheckedRe = regexp.MustCompile(`; \d+ (?:inherited )?calls? not checked`)
+
+// compare prints how the findings differ from the baseline's, finding by
+// finding: a count changed only by a number in its reason is not a change.
+func compare(name, path string, findings []finding) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("%-10s %6d  (no baseline: %v)\n", name, len(findings), err)
+
+		return
+	}
+
+	var before []finding
+	if err := json.Unmarshal(data, &before); err != nil {
+		fail(fmt.Errorf("%s: %w", path, err))
+	}
+
+	key := func(f *finding) string {
+		return fmt.Sprintf("%s\x00%d\x00%s\x00%s", rel(f.File), f.Line, f.Function, uncheckedRe.ReplaceAllString(f.Reason, ""))
+	}
+
+	counts := map[string]int{}
+	for i := range before {
+		counts[key(&before[i])]++
+	}
+
+	added := 0
+
+	for i := range findings {
+		k := key(&findings[i])
+		if counts[k] > 0 {
+			counts[k]--
+		} else {
+			added++
+		}
+	}
+
+	removed := 0
+	for _, n := range counts {
+		removed += n
+	}
+
+	fmt.Printf("%-10s %6d -> %6d  removed %5d  added %5d\n", name, len(before), len(findings), removed, added)
+}
 
 func top(f *finding) *candidate {
 	if len(f.Candidates) == 0 {

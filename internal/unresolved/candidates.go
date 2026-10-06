@@ -3,12 +3,16 @@ package unresolved
 import (
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 	"go.lsp.dev/uri"
 )
 
@@ -65,6 +69,87 @@ var (
 	methodNotFoundRe = regexp.MustCompile(`^method '[^']+' not found in (.+)$`)
 	componentRe      = regexp.MustCompile(`^component '([^']+)' does not exist`)
 )
+
+// annotateAll sets the category and candidates of every finding, after the
+// scan: annotating during it would read an index the parallel scan is still
+// filling lazily, so the same workspace gave different candidates from run to
+// run. Every file is indexed first, and each file with findings is parsed
+// again; the findings themselves are the scan's, untouched.
+func annotateAll(fsys vfs.FS, resolver *resolve.Resolver, files []string, calls []Call, opt *Options) {
+	parallel(files, func(f string) { resolver.EnsureIndexed(f) })
+
+	byFile := map[string][]int{}
+
+	var order []string
+
+	for i := range calls {
+		f := calls[i].File
+		if _, ok := byFile[f]; !ok {
+			order = append(order, f)
+		}
+
+		byFile[f] = append(byFile[f], i)
+	}
+
+	parallel(order, func(file string) {
+		data, err := fsys.ReadFile(file)
+		if err != nil {
+			return
+		}
+
+		pr := Parse(resolver, file, string(data), opt)
+		sites := pr.AllCalls()
+		a := &annotator{resolver: resolver, pr: pr, calls: sites, file: file}
+
+		for _, i := range byFile[file] {
+			c := &calls[i]
+			if c.Unchecked > 0 || c.Category != "" {
+				c.Category = CategoryObject
+
+				continue
+			}
+
+			if site := matchingSite(sites, c); site != nil {
+				a.annotate(c, site)
+			} else {
+				c.Category = Category(c.Reason)
+			}
+		}
+	})
+}
+
+// matchingSite is the call site a finding was made from.
+func matchingSite(sites []parser.CallSite, c *Call) *parser.CallSite {
+	for i := range sites {
+		s := &sites[i]
+		if s.Line == c.Line && s.FuncName == c.Function && s.Variable == c.Variable && s.Caller == c.Caller {
+			return s
+		}
+	}
+
+	return nil
+}
+
+func parallel(items []string, fn func(string)) {
+	work := make(chan string)
+
+	var wg sync.WaitGroup
+
+	for range runtime.GOMAXPROCS(0) {
+		wg.Go(func() {
+			for it := range work {
+				fn(it)
+			}
+		})
+	}
+
+	for _, it := range items {
+		work <- it
+	}
+
+	close(work)
+	wg.Wait()
+}
 
 // annotator holds what one file's findings are annotated from.
 type annotator struct {
@@ -163,7 +248,7 @@ func (a *annotator) receiverCandidates(call *parser.CallSite) []Candidate {
 		}
 
 		path := def.URI.Path()
-		if seen[pathKey(path)] || !strings.EqualFold(filepath.Ext(path), ".cfc") {
+		if seen[pathKey(path)] || !strings.EqualFold(filepath.Ext(path), ".cfc") || frameworkapi.IsStub(path) {
 			continue
 		}
 
@@ -210,7 +295,7 @@ func (a *annotator) methodCandidates(call *parser.CallSite, reason string) []Can
 	var out []Candidate
 
 	for _, def := range a.resolver.Index.Lookup(call.FuncName) {
-		if !def.URI.IsFile() {
+		if !def.URI.IsFile() || frameworkapi.IsStub(def.URI.Path()) {
 			continue
 		}
 
@@ -253,6 +338,10 @@ func (a *annotator) objectCandidates(reason string) []Candidate {
 	var out []Candidate
 
 	for _, path := range a.resolver.Index.FindFilesByBasename(last) {
+		if frameworkapi.IsStub(path) {
+			continue
+		}
+
 		out = append(out, Candidate{File: path, Basis: []string{"file named " + last + ".cfc"}})
 	}
 

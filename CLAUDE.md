@@ -42,6 +42,10 @@ make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,
                     # fixed leaves every column identical. OPTS sets formatter.Options fields
                     # by name, for sweeping a new setting through its modes without editing
                     # the test. See FORMATTER-ISSUES.md
+make resolution-report CORPUS="name=dir[,dir] ..." [BASELINE=<dir>] [RUNS=<dir>] [LISTS=<dir>]
+                    # unresolved --json --candidates per named scan; rewrites the lists in
+                    # resolution-candidates/ (LISTS= skips that) and, with BASELINE, prints
+                    # findings removed/added per scan. Skipped without CORPUS; not in CI
 make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
 make release <ver>  # validate, build, test, lint, changelog, commit, tag, push
 make release-dry <ver>

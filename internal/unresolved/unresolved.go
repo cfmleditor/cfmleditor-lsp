@@ -125,6 +125,10 @@ func Scan(fsys vfs.FS, files, targets []string, opt *Options) Report {
 
 	wg.Wait()
 
+	if opt.Candidates {
+		annotateAll(fsys, resolver, files, rep.Calls, opt)
+	}
+
 	rep.ScanTime = time.Since(started)
 
 	// Every field takes part, so two calls on one line come out in the same
@@ -300,10 +304,6 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 			Function: call.FuncName,
 			Reason:   reason,
 			Text:     call.Text,
-		}
-
-		if opt.Candidates {
-			(&annotator{resolver: resolver, pr: pr, calls: calls, file: file}).annotate(&entry, call)
 		}
 
 		out = append(out, entry)

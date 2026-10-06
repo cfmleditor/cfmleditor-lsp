@@ -5,12 +5,25 @@ What `unresolved` still reports over the pinned corpus, arranged for a person to
 each finding is missing, whether the method exists anywhere, and the liberal matches the scan
 can offer for it, each with its evidence and a confidence level.
 
-Regenerate with:
+Regenerate with `make resolution-report`, which builds the binary, runs each named scan with
+`--candidates` (four at a time, `JOBS` to change it), keeps the JSON in `RUNS` (default
+`target/resolution/latest`) and rewrites these lists:
 
 ```sh
-cfmleditor-lsp unresolved --json --candidates <dir> > <name>.json   # per scan
-go run scripts/candidates_report.go -out resolution-candidates <name>=<name>.json ...
+make resolution-report CORPUS="masa-c=/src/MasaCMS cw-p=/src/cfwheels,/src/cfwheels/vendor/wheels ..."
 ```
+
+Each scan resolves under the `.cfmleditor.json` governing its first directory. The lists are
+for milestones, not every change. After a change, compare with an earlier run instead, without
+rewriting them:
+
+```sh
+make resolution-report CORPUS="..." RUNS=target/resolution/after BASELINE=target/resolution/before LISTS=
+```
+
+which prints each scan's findings removed and added, finding by finding. Candidates are
+computed after the scan, against a fully built index, so the same workspace gives the same
+lists, and they never change the findings.
 
 `summary.md` links one report per corpus (each in its configured, presets-on mode):
 ContentBox (`cb-p`), cfwheels (`cw-p`), coldbox-platform (`cx-p`), fw1 (`fw-p`), Lucee

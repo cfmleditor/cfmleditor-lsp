@@ -4,10 +4,10 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 224 | 81 | 23 | 94 | 26 | 19 |
-| return-type | 93 | 0 | 6 | 7 | 80 | 80 |
-| method | 52 | 0 | 16 | 7 | 29 | 29 |
-| object | 40 | 0 | 0 | 0 | 40 | 4 |
+| variable | 224 | 81 | 23 | 94 | 26 | 17 |
+| return-type | 93 | 0 | 4 | 7 | 82 | 80 |
+| method | 52 | 0 | 16 | 7 | 29 | 19 |
+| object | 40 | 0 | 0 | 0 | 40 | 0 |
 
 ## Variable definitions — a receiver whose component is unknown
 
@@ -41,7 +41,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `q → examples/qBall/model/beans/user.cfc` | 5 | medium | declares getUsername(); named like the receiver 'User' (5 candidates) | `examples/qBall/views/main/default.cfm:28` variable 'q' has no component ref |
 | 2 | `rc.question → examples/qBall/model/beans/user.cfc` | 5 | high | declares getUsername(), getId(); named like the receiver 'User' | `examples/qBall/views/question/view.cfm:7` variable 'rc.question' has no component ref |
 | 2 | `role → examples/userManagerAccessControl/model/beans/role.cfc` | 14 | medium | declares getId(); named like the receiver 'role' (14 candidates) | `examples/userManagerAccessControl/model/beans/user.cfc:28` variable 'role' has no component ref |
-| 2 | `sys.out` | 0 | none |  | `framework/ioc.cfc:654` variable 'sys.out' has no component ref |
+| 2 | `sys.out` | 1 | none |  | `framework/ioc.cfc:654` variable 'sys.out' has no component ref |
 | 2 | `this.logservice → tests/aop/services/Log.cfc` | 2 | low | declares logMessage() (2 candidates) | `tests/aop/interceptors/example/Logger.cfc:8` variable 'this.logService' has no component ref |
 | 2 | `this.logservice → tests/issue518/Log.cfc` | 2 | low | declares logMessage() (2 candidates) | `tests/issue518/interceptors/example/Logger.cfc:8` variable 'this.logService' has no component ref |
 | 2 | `todoservice → examples/todos/controllers/main.cfc` | 14 | low | declares list() (14 candidates) | `examples/todos/controllers/main.cfc:30` variable 'todoservice' has no component ref |
@@ -329,9 +329,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 68 | `method 'declare' in framework.ioc has no component return type` | 0 | none |  | `tests/AddBeanTest.cfc:4` method 'declare' in framework.ioc has no component return type (chain to 'asValue') |
+| 70 | `method 'declare' in framework.ioc has no component return type` | 0 | none |  | `tests/AddBeanTest.cfc:4` method 'declare' in framework.ioc has no component return type (chain to 'asValue') |
 | 12 | `method 'renderData' in framework.one has no component return type` | 0 | none |  | `examples/rest/controllers/main.cfc:14` method 'renderData' in framework.one has no component return type (chain to 'data') |
-| 5 | `method 'declare' in framework.ioc has no component return type → framework/ioc.cfc` | 1 | medium | declares addBean() | `tests/BeanInfoTest.cfc:41` method 'declare' in framework.ioc has no component return type (chain to 'addBean') |
+| 3 | `method 'declare' in framework.ioc has no component return type → framework/ioc.cfc` | 1 | medium | declares addBean() | `tests/BeanInfoTest.cfc:41` method 'declare' in framework.ioc has no component return type (chain to 'addBean') |
 | 2 | `method 'getDefaultBeanFactory' has no component return type → framework/WireBoxAdapter.cfc` | 2 | low | declares containsBean(), getBean() (2 candidates) | `framework/one.cfc:1849` method 'getDefaultBeanFactory' has no component return type (chain to 'containsBean') |
 | 2 | `method 'getSubsystemBeanFactory' has no component return type → framework/WireBoxAdapter.cfc` | 2 | low | declares containsBean(), getBean() (2 candidates) | `framework/one.cfc:1847` method 'getSubsystemBeanFactory' has no component return type (chain to 'containsBean') |
 | 1 | `method 'getBean' has no component return type → framework/ioc.cfc` | 2 | low | declares onLoad() (2 candidates) | `framework/ioc.cfc:687` method 'getBean' has no component return type (chain to 'onLoad') |
@@ -373,17 +373,17 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 5 | `__config` | 1 | medium | declares __config; beside the calling file | `tests/coreFunctions.cfc:17` method '__config' not found in framework.one |
 | 4 | `assertequals` | 0 | none |  | `tests/defaultPropertyTest.cfc:17` no qualifier, not in file |
 | 4 | `asserttrue` | 0 | none |  | `tests/defaultPropertyTest.cfc:15` no qualifier, not in file |
-| 4 | `expect` | 0 | none |  | `tests/coreFunctions.cfc:26` no qualifier, not in file |
-| 4 | `it` | 0 | none |  | `tests/coreFunctions.cfc:25` no qualifier, not in file |
+| 4 | `expect` | 1 | none |  | `tests/coreFunctions.cfc:26` no qualifier, not in file |
+| 4 | `it` | 1 | none |  | `tests/coreFunctions.cfc:25` no qualifier, not in file |
 | 3 | `enabletracing` | 0 | none |  | `tests/frameworkRenderTest.cfc:7` method 'enableTracing' not found in framework.one |
 | 3 | `proceed` | 0 | none |  | `framework/beanProxy.cfc:231` no qualifier, not in file |
 | 2 | `buildurl` | 1 | medium | declares buildURL | `examples/modular/pages/main/default.cfm:4` no qualifier, not in file |
 | 2 | `itemtest` | 1 | medium | declares itemTest | `tests/ExtraBeansTest.cfc:40` method 'itemTest' not found in user |
 | 2 | `translateargs` | 0 | none |  | `tests/aop/interceptors/aop/BeforeInterceptor.cfc:12` not found in extends chain |
 | 1 | `around` | 2 | low | declares around (2 candidates) | `framework/beanProxy.cfc:227` no qualifier, not in file |
-| 1 | `beforeeach` | 0 | none |  | `tests/coreFunctions.cfc:14` no qualifier, not in file |
+| 1 | `beforeeach` | 1 | none |  | `tests/coreFunctions.cfc:14` no qualifier, not in file |
 | 1 | `callback` | 0 | none |  | `framework/one.cfc:1278` no qualifier, not in file |
-| 1 | `describe` | 0 | none |  | `tests/coreFunctions.cfc:13` no qualifier, not in file |
+| 1 | `describe` | 1 | none |  | `tests/coreFunctions.cfc:13` no qualifier, not in file |
 | 1 | `getanswers` | 1 | medium | declares getAnswers | `examples/qBall/model/services/question.cfc:56` method 'getAnswers' not found in question |
 | 1 | `getid` | 14 | low | declares getId (14 candidates) | `examples/qBall/model/services/user.cfc:12` method 'getId' not found in user |
 | 1 | `getinterceptedmethods` | 0 | none |  | `framework/beanProxy.cfc:222` no qualifier, not in file |
@@ -452,7 +452,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `base component does not resolve; 18 inherited calls not checked` | ? | none |  | `tests/DeclareBeanTest.cfc:1` base component does not resolve; 18 inherited calls not checked |
 | 2 | `base component does not resolve; 5 inherited calls not checked` | ? | none |  | `tests/FactoryBeanTest.cfc:1` base component does not resolve; 5 inherited calls not checked |
 | 2 | `base component does not resolve; 50 inherited calls not checked` | ? | none |  | `tests/CombinedInterceptorsTest.cfc:1` base component does not resolve; 50 inherited calls not checked |
-| 2 | `chained on 'expect', which is not found (calling 'toBe')` | 0 | none |  | `tests/coreFunctions.cfc:31` chained on 'expect', which is not found (calling 'toBe') |
+| 2 | `chained on 'expect', which is not found (calling 'toBe')` | 1 | none |  | `tests/coreFunctions.cfc:31` chained on 'expect', which is not found (calling 'toBe') |
 | 1 | `base component does not resolve; 10 inherited calls not checked` | ? | none |  | `tests/ParentTest.cfc:1` base component does not resolve; 10 inherited calls not checked |
 | 1 | `base component does not resolve; 11 inherited calls not checked` | ? | none |  | `tests/MappingTest.cfc:1` base component does not resolve; 11 inherited calls not checked |
 | 1 | `base component does not resolve; 14 inherited calls not checked` | ? | none |  | `tests/TransientInjectionTest.cfc:1` base component does not resolve; 14 inherited calls not checked |
@@ -465,8 +465,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `base component does not resolve; 6 inherited calls not checked` | ? | none |  | `tests/frameworkErrorTest.cfc:1` base component does not resolve; 6 inherited calls not checked |
 | 1 | `base component does not resolve; 7 inherited calls not checked` | ? | none |  | `tests/singletonPatternTest.cfc:1` base component does not resolve; 7 inherited calls not checked |
 | 1 | `base component does not resolve; 9 inherited calls not checked` | ? | none |  | `tests/InjectPropertiesTest.cfc:1` base component does not resolve; 9 inherited calls not checked |
-| 1 | `chained on 'expect', which is not found (calling 'toBeEmpty')` | 0 | none |  | `tests/coreFunctions.cfc:26` chained on 'expect', which is not found (calling 'toBeEmpty') |
-| 1 | `chained on 'expect', which is not found (calling 'toThrow')` | 0 | none |  | `tests/coreFunctions.cfc:40` chained on 'expect', which is not found (calling 'toThrow') |
+| 1 | `chained on 'expect', which is not found (calling 'toBeEmpty')` | 1 | none |  | `tests/coreFunctions.cfc:26` chained on 'expect', which is not found (calling 'toBeEmpty') |
+| 1 | `chained on 'expect', which is not found (calling 'toThrow')` | 1 | none |  | `tests/coreFunctions.cfc:40` chained on 'expect', which is not found (calling 'toThrow') |
 | 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 14 inherited calls not checked` | ? | none |  | `tests/frameworkResourceRoutesTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 14 inherited calls not checked |
 | 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 23 inherited calls not checked` | ? | none |  | `tests/frameworkProcessRoutesTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 23 inherited calls not checked |
 | 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 37 inherited calls not checked` | ? | none |  | `tests/frameworkEnvTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 37 inherited calls not checked |
