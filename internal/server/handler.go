@@ -352,8 +352,16 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 
 	s.changeCount[docURI]++
 	changeCount := s.changeCount[docURI]
-	rapidChanges := changeCount > 5 || len(params.ContentChanges) > 50
 	s.mu.Unlock()
+
+	// A burst of edits inside a function stays incremental: each costs a few
+	// milliseconds that way, and the burst path's deferred reparse of the
+	// whole file is what the next request then waited for — ~220ms on a
+	// 65,000-line component, every sixth keystroke of a held-down key. The
+	// burst path remains for everything else, and for a notification of
+	// more than 50 changes, which ApplyEdits streams in one pass.
+	rapidChanges := len(params.ContentChanges) > 50 ||
+		changeCount > 5 && !s.editsInPlace(docURI, pr, params.ContentChanges)
 
 	totalBytes := 0
 
@@ -484,6 +492,20 @@ func (s *Server) handleDidChange(_ context.Context, rawParams []byte) (any, erro
 	}
 
 	return nil, nil
+}
+
+// editsInPlace reports whether changes can be applied to pr incrementally: a
+// parse that is not lagging its text, and a first change that is a partial
+// edit inside a function. handleDidChange checks each later change as it
+// applies it and defers from the first that is not.
+func (s *Server) editsInPlace(docURI uri.URI, pr *parser.ParseResult, changes []protocol.TextDocumentContentChangeEvent) bool {
+	if pr == nil || len(changes) == 0 || s.reparseIsPending(docURI) {
+		return false
+	}
+
+	r, _, isFull := changeRangeAndText(changes[0])
+
+	return !isFull && pr.EditInFunction(int(r.Start.Line), int(r.End.Line), int(r.Start.Character))
 }
 
 const cacheRebuildDelay = 150 * time.Millisecond
