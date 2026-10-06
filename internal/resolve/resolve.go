@@ -90,6 +90,7 @@ type Resolver struct {
 	argCache          map[string]string              // an argument → what its callers pass (argumentFromCallers)
 	requestWriteCache map[string]bool                // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
 	handlerCache      map[string]*parser.ParseResult // handler path → its parse (handlerParse)
+	wrapperHosts      map[string][]string            // template path → Wheels wrapper hosts (wheelsTemplateHosts)
 	handoffs          handoffIndex                   // handler actions by the view each renders (viewActions)
 }
 
@@ -3295,13 +3296,16 @@ func (r *Resolver) walkExtendsRefs(extends, baseDir, name string, visit func(ref
 			}
 		}
 
-		// Walk up the extends chain
-		data, err := r.fs().ReadFile(cfcPath)
-		if err != nil {
+		// Walk up the extends chain. The parent was just indexed, so its
+		// extends is read from the index: a full parse of each parent on
+		// every lookup was 43% of a Masa CMS scan once its display objects
+		// walked through contentRenderer.cfc.
+		next, ok := r.extendsOf(cfcPath, parentURI)
+		if !ok {
 			return
 		}
 
-		extends = r.extendsFor(parser.Parse(parentURI, string(data)).Extends, cfcPath)
+		extends = next
 	}
 }
 

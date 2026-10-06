@@ -2185,3 +2185,27 @@ return. In ContentBox, `vResults = validate( … )` then `vResults.hasErrors()`
 is about 24 findings. Typing those needs cbvalidation's models stubbed, plus a
 stated return for `validate()`, whose documented type is the
 `IValidationResult` interface, which `docReturn` deliberately skips.
+
+### Performance round
+
+Regression round: `vet`, `go test -short`, `-race`, `make gapcheck` and
+`make lint` all pass. Lint's 8 findings, all on this branch, were fixed.
+
+Microbenchmarks (parser, server, index) were interleaved against `main`, two
+rounds each, with nothing outside noise. Allocations are identical, and the
+parser's largest deltas fell to ±3% when rerun with longer samples. The index
+package is unchanged and still read +54% on one benchmark, which shows how wide
+two rounds' noise is.
+
+The end-to-end `unresolved` scan found two real regressions, both fixed:
+- cw-p 15.6s → 37.6s: `wheelsWrappedTemplateFunc` re-read and re-tokenised
+  every file calling a Wheels include wrapper for each bare call in a
+  template. The hosts are now cached per template (`wheelsTemplateHosts`); the
+  caller index is complete before any resolution starts.
+- masa-c 18.0s → 25.5s: `walkExtendsRefs` fully parsed each parent to read its
+  `extends`, on every lookup, which the Mura display-object base made hot
+  through contentRenderer.cfc. It now reads the indexed extends (`extendsOf`).
+
+After both fixes, with findings identical on every scan, `main` → branch:
+cb-p 2.5s → 1.7s, cw-p 14.0s → 10.3s, cx-p 1.4s → 1.2s, fw-p 0.6s → 0.4s,
+lucee 18.9s → 16.2s, masa-c 15.5s → 13.9s, tb-p 0.3s → 0.3s (single runs).

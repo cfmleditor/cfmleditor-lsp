@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -34,26 +35,12 @@ func (r *Resolver) wheelsWrappedTemplateFunc(pr *parser.ParseResult, name string
 		return nil
 	}
 
-	file := pr.URI.Path()
-
-	var (
-		hosts []string
-		found *parser.FunctionDef
-	)
-
-	for _, wrapper := range []string{"$include", "$includeAndOutput", "$includeAndReturnOutput"} {
-		for _, caller := range r.callerFiles(wrapper) {
-			for _, host := range r.wheelsWrapperHosts(caller, wrapper, file) {
-				if host == "" {
-					return nil
-				}
-
-				if !containsFold(hosts, host) {
-					hosts = append(hosts, host)
-				}
-			}
-		}
+	hosts, ok := r.wheelsTemplateHosts(pr.URI.Path())
+	if !ok {
+		return nil
 	}
+
+	var found *parser.FunctionDef
 
 	for _, host := range hosts {
 		def := r.lookupFunc(host, name, 0)
@@ -67,6 +54,60 @@ func (r *Resolver) wheelsWrappedTemplateFunc(pr *parser.ParseResult, name string
 	}
 
 	return found
+}
+
+// wheelsTemplateHosts is the components file is included into through a
+// Global wrapper, and false when a call names it but its host cannot be
+// proven. It reads and tokenises every file calling a wrapper, so it is
+// cached per template: asked once per bare call, it was half of a scan of
+// cfwheels.
+func (r *Resolver) wheelsTemplateHosts(file string) ([]string, bool) {
+	o := r.owner()
+	key := pathKey(file)
+
+	o.mu.RLock()
+	hosts, cached := o.wrapperHosts[key]
+	o.mu.RUnlock()
+
+	if !cached {
+		hosts = r.computeWheelsTemplateHosts(file)
+
+		o.mu.Lock()
+		if o.wrapperHosts == nil {
+			o.wrapperHosts = map[string][]string{}
+		}
+
+		o.wrapperHosts[key] = hosts
+		o.mu.Unlock()
+	}
+
+	if slices.Contains(hosts, "") {
+		return nil, false
+	}
+
+	return hosts, true
+}
+
+// computeWheelsTemplateHosts is wheelsTemplateHosts uncached; an "" among
+// the hosts is a call whose host cannot be proven.
+func (r *Resolver) computeWheelsTemplateHosts(file string) []string {
+	hosts := []string{}
+
+	for _, wrapper := range []string{"$include", "$includeAndOutput", "$includeAndReturnOutput"} {
+		for _, caller := range r.callerFiles(wrapper) {
+			for _, host := range r.wheelsWrapperHosts(caller, wrapper, file) {
+				if host == "" {
+					return []string{""}
+				}
+
+				if !containsFold(hosts, host) {
+					hosts = append(hosts, host)
+				}
+			}
+		}
+	}
+
+	return hosts
 }
 
 // wheelsWrapperHosts is, for each call in caller to wrapper that includes
