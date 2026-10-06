@@ -684,6 +684,10 @@ func (rs *ResolverSet) Resolve(expr string) string {
 			rs.answers = make(map[string]resolverAnswer)
 		}
 
+		// The answer is cloned with the key: a resolver can answer with a
+		// slice of the expression, which is a slice of the whole document,
+		// and kept here it would keep every edit's copy of the document.
+		a.component = strings.Clone(a.component)
 		rs.answers[strings.Clone(expr)] = a
 		rs.answersMu.Unlock()
 	}

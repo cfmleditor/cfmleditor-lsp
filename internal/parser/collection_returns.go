@@ -899,12 +899,21 @@ func collectionCallHop(c *pendingCall) string {
 // component the rest were a tenth of the reparse. Only the bodies the last
 // pass read are kept, so the cache is never larger than the file's <cfset>s.
 type expressionWriteCache struct {
-	prev, next map[string][]expressionWrite
+	prev, next map[string]cachedWrites
+}
+
+// cachedWrites is a body's writes with its text, which is the map key's own
+// copy: a body carried over to the next pass is stored under that copy rather
+// than under the slice of the document the pass found it in, so the cache
+// keeps no document text of its own.
+type cachedWrites struct {
+	key    string
+	writes []expressionWrite
 }
 
 // begin starts a pass: what the last one read is kept for this one to take.
 func (c *expressionWriteCache) begin() {
-	c.prev, c.next = c.next, map[string][]expressionWrite{}
+	c.prev, c.next = c.next, map[string]cachedWrites{}
 }
 
 // scan is scanExpressionWrites, answered from the last pass when it read the
@@ -914,19 +923,19 @@ func (c *expressionWriteCache) scan(expression string) []expressionWrite {
 		return scanExpressionWrites(expression)
 	}
 
-	if ws, ok := c.next[expression]; ok {
-		return ws
+	if e, ok := c.next[expression]; ok {
+		return e.writes
 	}
 
-	ws, ok := c.prev[expression]
+	e, ok := c.prev[expression]
 	if !ok {
 		// Read from a copy, so the strings kept refer to it and not to the
 		// whole of this pass's content.
-		expression = strings.Clone(expression)
-		ws = scanExpressionWrites(expression)
+		e.key = strings.Clone(expression)
+		e.writes = scanExpressionWrites(e.key)
 	}
 
-	c.next[expression] = ws
+	c.next[e.key] = e
 
-	return ws
+	return e.writes
 }

@@ -193,6 +193,10 @@ func (pr *ParseResult) reparseShallow() {
 	pr.Funcs = pr.Funcs[:0]
 	pr.ComponentRefs = pr.ComponentRefs[:0]
 	pr.Scopes = pr.Scopes[:0]
+	// The calls are recorded afresh like the rest. Kept, the last parse's
+	// top-level calls were listed again after every reparse, each copy
+	// keeping its version of the document alive.
+	pr.Calls = nil
 	pr.memberSets = nil
 	pr.extractSignatures()
 	pr.resetGlobalCaches()
