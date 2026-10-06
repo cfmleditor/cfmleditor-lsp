@@ -40,6 +40,16 @@ type Call struct {
 	// how many inherited calls that leaves unchecked. Function holds the
 	// base that does not resolve.
 	Unchecked int `json:"unchecked,omitempty"`
+	// Category, Candidates and CandidateCount are set by a scan with
+	// Options.Candidates: which link is missing, and the liberal matches
+	// offered for it (candidates.go). The finding stands either way.
+	Category       string      `json:"category,omitempty"`
+	Candidates     []Candidate `json:"candidates,omitempty"`
+	CandidateCount int         `json:"candidateCount,omitempty"`
+	// Definitions is how many indexed files define a method of this name: 0
+	// is a method missing from the workspace, more is one the resolver could
+	// not connect the call to.
+	Definitions *int `json:"definitions,omitempty"`
 }
 
 // Options is what a scan resolves with: the .cfmleditor.json settings that
@@ -58,6 +68,7 @@ type Options struct {
 	Stubs                    *frameworkapi.Set        // frameworks' API when their source is absent; see internal/frameworkapi
 	InterpolateAll           bool                     // features.outputContextInterpolation off
 	GlobalDefs               bool                     // accept a bare call any indexed file defines
+	Candidates               bool                     // annotate each finding with its category and liberal matches; see candidates.go
 	InferArgs                bool                     // type an untyped argument from what every caller passes it (resolve.Resolver.InferArgsFiles)
 	Verbose                  io.Writer
 }
@@ -281,7 +292,7 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 			continue
 		}
 
-		out = append(out, Call{
+		entry := Call{
 			File:     file,
 			Line:     call.Line,
 			Caller:   call.Caller,
@@ -289,7 +300,13 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 			Function: call.FuncName,
 			Reason:   reason,
 			Text:     call.Text,
-		})
+		}
+
+		if opt.Candidates {
+			(&annotator{resolver: resolver, pr: pr, calls: calls, file: file}).annotate(&entry, call)
+		}
+
+		out = append(out, entry)
 	}
 
 	if len(bases.order) > 0 {
@@ -299,11 +316,16 @@ func scanFile(fsys vfs.FS, resolver *resolve.Resolver, file string, opt *Options
 		}
 
 		for _, g := range bases.order {
+			entry := receiverBaseCall(file, g)
 			if strings.EqualFold(g.base, own) {
-				out = append(out, missingBaseCall(file, string(data), pr.Extends, g.base, g.calls))
-			} else {
-				out = append(out, receiverBaseCall(file, g))
+				entry = missingBaseCall(file, string(data), pr.Extends, g.base, g.calls)
 			}
+
+			if opt.Candidates {
+				entry.Category = CategoryObject
+			}
+
+			out = append(out, entry)
 		}
 	}
 
