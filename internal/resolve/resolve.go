@@ -84,8 +84,8 @@ type Resolver struct {
 	ctlPathCache   map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
 	includerCache  map[string]string              // template, name, depth and include generation → includerHeld's answer
 	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
-	loopCache      map[string][]loopSpan          // file URI and content hash → every loop it holds (loopsOf)
-	closureCache   map[string][]closureSpan       // file URI and content hash → every function literal it holds (closuresOf)
+	loopCache      spanCache[loopSpan]            // file URI → every loop its current text holds (loopsOf)
+	closureCache   spanCache[closureSpan]         // file URI → every function literal its current text holds (closuresOf)
 	callerIdx      *callerIndex                   // name → files calling it, built once for argumentFromCallers
 	argCache       map[string]string              // an argument → what its callers pass (argumentFromCallers)
 	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)

@@ -1,12 +1,11 @@
 package resolve
 
 import (
-	"hash/fnv"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
@@ -118,34 +117,57 @@ func enclosingLoop(loops []loopSpan, name string, line, start, end int) (collect
 // the lookup runs for every untyped receiver, and finding them anew each time
 // tokenised the whole file per call.
 func (r *Resolver) loopsOf(pr *parser.ParseResult) []loopSpan {
-	key := string(pr.URI) + "\x00" + strconv.FormatUint(fnvHash(pr.Content), 16)
-
-	r.mu.RLock()
-	loops, ok := r.loopCache[key]
-	r.mu.RUnlock()
-
-	if ok {
-		return loops
-	}
-
-	loops = append(scriptLoops(pr.Content), tagLoops(pr.Content)...)
-
-	r.mu.Lock()
-	if r.loopCache == nil || len(r.loopCache) >= 4096 {
-		r.loopCache = make(map[string][]loopSpan)
-	}
-
-	r.loopCache[key] = loops
-	r.mu.Unlock()
-
-	return loops
+	return r.loopCache.get(&r.mu, pr, func() []loopSpan {
+		return append(scriptLoops(pr.Content), tagLoops(pr.Content)...)
+	})
 }
 
-func fnvHash(s string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(s))
+// fileSpans is what a per-file cache holds: the spans found in a file and the
+// text they were found in.
+//
+// The caches were keyed by file and a hash of its text, so every edit of an
+// open document added an entry and none replaced one, and each entry's spans
+// were slices of the text it was found in: up to 4,096 versions of a document
+// kept alive, ~2.8MB each for a 65,000-line component. Keyed by file, a new
+// version replaces the last, and the text kept is the one the file's parse
+// holds anyway. Comparing it costs nothing while it is the same string, where
+// the hash read the whole file on every lookup.
+type fileSpans[T any] struct {
+	content string
+	spans   []T
+}
 
-	return h.Sum64()
+// spanCache is a per-file cache of fileSpans, guarded by the resolver's mu.
+type spanCache[T any] struct {
+	files map[string]fileSpans[T]
+}
+
+// get answers find for pr from the cache while pr's text is what it was last
+// found in. mu guards c.
+func (c *spanCache[T]) get(mu *sync.RWMutex, pr *parser.ParseResult, find func() []T) []T {
+	key := string(pr.URI)
+
+	mu.RLock()
+
+	e, ok := c.files[key]
+
+	mu.RUnlock()
+
+	if ok && e.content == pr.Content {
+		return e.spans
+	}
+
+	spans := find()
+
+	mu.Lock()
+	if c.files == nil || len(c.files) >= 4096 {
+		c.files = make(map[string]fileSpans[T])
+	}
+
+	c.files[key] = fileSpans[T]{content: pr.Content, spans: spans}
+	mu.Unlock()
+
+	return spans
 }
 
 // scriptLoops are the `for ( [var] name in collection ) { … }` loops in content.
