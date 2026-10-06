@@ -91,3 +91,31 @@ func TestWheelsGlobalsReachEveryControllerModelAndView(t *testing.T) {
 		"hasPermission": "no qualifier, not in file",
 	})
 }
+
+// TestWheelsViewHelpersReachTheViewsAndControllers: Controller.cfc includes
+// <viewPath>/helpers.cfm into every controller, and a controller's own
+// views/<name>/helpers.cfm into it, so a view calls both bare and so does the
+// controller. A view in another folder does not get that folder's helpers.
+func TestWheelsViewHelpersReachTheViewsAndControllers(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"app/views/helpers.cfm":          `<cfscript>function panel(){} include "more.cfm";</cfscript>`,
+		"app/views/more.cfm":             `<cfscript>function pageHeader(){}</cfscript>`,
+		"app/views/accounts/helpers.cfm": `<cfscript>function accountBadge(){}</cfscript>`,
+		"app/views/accounts/edit.cfm":    `<cfoutput>#panel()# #pageHeader()# #accountBadge()# #missing()#</cfoutput>`,
+		"app/views/other/show.cfm":       `<cfoutput>#panel()# #accountBadge()#</cfoutput>`,
+		"app/controllers/Accounts.cfc":   `component { function edit(){ panel(); accountBadge(); } }`,
+	})
+
+	helpers := func(string) bool { return true }
+
+	expectReasons(t, reasonsWith(t, &Resolver{HelperScope: helpers}, dir, "app/views/accounts/edit.cfm"), map[string]string{
+		"panel": "", "pageHeader": "", "accountBadge": "", "missing": "no qualifier, not in file",
+	})
+	expectReasons(t, reasonsWith(t, &Resolver{HelperScope: helpers}, dir, "app/views/other/show.cfm"), map[string]string{
+		"panel": "", "accountBadge": "no qualifier, not in file",
+	})
+	expectReasons(t, reasonsWith(t, &Resolver{HelperScope: helpers}, dir, "app/controllers/Accounts.cfc"), map[string]string{
+		"panel": "", "accountBadge": "",
+	})
+}

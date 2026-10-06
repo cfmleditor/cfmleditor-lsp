@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
 
 // ColdBox mixes helper templates into every handler, view, layout and
@@ -75,6 +76,7 @@ func (r *Resolver) helperTemplates(file string) []string {
 	}
 
 	out = append(out, r.wheelsGlobals(file)...)
+	out = append(out, r.wheelsViewHelpers(file)...)
 
 	out = append(out, r.applicationHelpers()...)
 
@@ -102,6 +104,46 @@ func (r *Resolver) wheelsGlobals(file string) []string {
 
 		dir = parent
 	}
+}
+
+// wheelsViewHelpers are the view helper templates Wheels includes into a
+// controller, and so into every view it renders: Controller.cfc includes
+// <viewPath>/helpers.cfm into every controller, and $initControllerObject
+// includes <viewPath>/<controller>/helpers.cfm into the one it starts. For a
+// view the controller is the folder it sits in, and for a controller file its
+// own name. Each comes with what it includes beside it.
+func (r *Resolver) wheelsViewHelpers(file string) []string {
+	views, folder := "", ""
+
+	slash := filepath.ToSlash(file)
+	if before, after, ok := strings.CutLast(slash, "/views/"); ok && strings.EqualFold(filepath.Ext(file), ".cfm") {
+		views = filepath.FromSlash(before + "/views")
+		if dir := filepath.ToSlash(filepath.Dir(after)); dir != "." {
+			folder = dir
+		}
+	} else if before, after, ok := strings.CutLast(slash, "/controllers/"); ok && strings.EqualFold(filepath.Ext(file), ".cfc") {
+		views = filepath.FromSlash(before + "/views")
+		folder = strings.ToLower(strings.TrimSuffix(after, filepath.Ext(after)))
+	}
+
+	if views == "" {
+		return nil
+	}
+
+	var out []string
+
+	candidates := []string{filepath.Join(views, "helpers.cfm")}
+	if folder != "" {
+		candidates = append(candidates, filepath.Join(views, filepath.FromSlash(folder), "helpers.cfm"))
+	}
+
+	for _, c := range candidates {
+		if p := r.existing(c); p != "" && !cfpath.SamePath(p, file) {
+			out = append(out, r.withIncludes(p, 3)...)
+		}
+	}
+
+	return out
 }
 
 // withIncludes is p and the templates it includes beside it, depth deep.

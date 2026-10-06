@@ -2002,3 +2002,16 @@ reported as "has no component return type" where the receiver was untyped before
 
 Measured per entry: Masa configured and automatic 673 removed and 2 added each; every other mode
 unchanged. The additions are calls chained on `contentBean` methods that declare no type.
+
+### Wheels view helpers (cfwheels 2,718 -> 2,600)
+
+Worked back from the method definitions: 116 cfwheels findings were bare calls in views to
+functions declared in `app/views/helpers.cfm`. `Controller.cfc` includes
+`#application.wheels.viewPath#/helpers.cfm` into every controller, and `$initControllerObject`
+includes `<viewPath>/<controller>/helpers.cfm` into the one it starts, so a view (which runs in
+its controller) and the controller call both bare. `wheelsViewHelpers` adds them, with what they
+include beside them, to the preset's helper templates: for a view the controller is its folder,
+for a controller file its own name. `TestWheelsViewHelpersReachTheViewsAndControllers`.
+
+Measured with `make resolution-report` against the previous run: cfwheels 118 removed, 0 added;
+the other six configured scans unchanged.
