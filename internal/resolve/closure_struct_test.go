@@ -54,3 +54,54 @@ func TestAStructOfClosuresAnswersItsMembers(t *testing.T) {
 		"bf.plain.nothing":                    "method 'plain' in ioc has no component return type (chain to 'nothing')",
 	})
 }
+
+// TestAReturnOfABuiltInsValueIsDynamic: TestBox's getPageContextResponse()
+// returns getPageContext().getResponse(), or a struct standing in for it, so
+// a call on what it returns is a call on what the engine hands back. A
+// function with any other kind of return is still reported.
+func TestAReturnOfABuiltInsValueIsDynamic(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Reporter.cfc": `component {
+	function getPageContextResponse() {
+		if ( !getFunctionList().keyExists( "getPageContext" ) ) {
+			return {
+				"setContentType" : function() {}
+			};
+		}
+		return getPageContext().getResponse();
+	}
+
+	function getHeld() {
+		if ( x ) {
+			return getPageContext();
+		}
+		return variables.held;
+	}
+
+	private function getResponse() {
+		return server.keyExists( "lucee" ) ? getPageContext().getResponse() : getPageContext()
+			.getResponse()
+			.getResponse();
+	}
+
+	private function getEither() {
+		return x ? getPageContext() : variables.held;
+	}
+
+	function run() {
+		getPageContextResponse().setContentType( "text/html" );
+		getHeld().anything();
+		getResponse().isCommitted();
+		getEither().anything();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Reporter.cfc"), map[string]string{
+		"getPageContextResponse.setContentType": "",
+		"getHeld.anything":                      "method 'getHeld' has no component return type (chain to 'anything')",
+		"getResponse.isCommitted":               "",
+		"getEither.anything":                    "method 'getEither' has no component return type (chain to 'anything')",
+	})
+}

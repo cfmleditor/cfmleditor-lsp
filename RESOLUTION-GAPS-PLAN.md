@@ -2082,3 +2082,18 @@ returning anything else ends what is checked. A name that is not a member is
 reported as such, and a function returning a struct with no closures is
 reported as before. Measured: fw-p −73, nothing added; other scans unchanged.
 `TestAStructOfClosuresAnswersItsMembers`.
+
+### A function returning a built-in's value returns something dynamic
+
+`getPageContextResponse()` in TestBox, ColdBox's Bootstrap and BaseTestCase,
+and the cfwheels copies, returns `getPageContext().getResponse()`. Depending on
+the engine it may instead return a struct standing in for that, or a ternary
+of two such chains. A call chained directly on a built-in is already dynamic
+where it is written, but one reached through a user function was reported as
+"has no component return type". `engineValueReturn` (`closure_struct.go`) now
+reads the function's own top-level returns. When every one is a literal, or a
+chain headed by a built-in the file does not declare, and at least one is the
+latter, the value is dynamic. A ternary qualifies when both branches do. Both
+the qualified-hop and the bare-chain paths ask, and the bare path asks the
+closure-struct rule too. Measured: tb-p −13, cx-p −9, cw-p −6, nothing added.
+`TestAReturnOfABuiltInsValueIsDynamic`.

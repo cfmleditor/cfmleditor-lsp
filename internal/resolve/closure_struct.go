@@ -3,6 +3,7 @@ package resolve
 import (
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
@@ -23,34 +24,8 @@ import (
 // closureStruct is what fd returns when it is such a struct: each closure
 // member's lowercased name, and whether that member returns the struct.
 func (r *Resolver) closureStruct(fd *parser.FunctionDef) map[string]bool {
-	if fd == nil || !fd.URI.IsFile() {
-		return nil
-	}
-
-	pr := r.handlerParse(fd.URI.Path())
-	if pr == nil {
-		return nil
-	}
-
-	scope := parser.FindFuncScopeAt(int(fd.Line), pr.Scopes)
-	if scope.Start == -1 || !strings.EqualFold(scope.Name, fd.Name) {
-		return nil
-	}
-
-	lines := strings.Split(pr.Content, "\n")
-	if scope.End >= len(lines) {
-		return nil
-	}
-
-	tokens := significantTokens(strings.Join(lines[scope.Start:scope.End+1], "\n"))
-
-	open := indexKind(tokens, 0, parser.TokLBrace)
-	if open < 0 {
-		return nil
-	}
-
-	end := matchingBrace(tokens, open)
-	if end < 0 {
+	_, tokens, open, end, ok := r.fnBody(fd)
+	if !ok {
 		return nil
 	}
 
@@ -72,6 +47,148 @@ func (r *Resolver) closureStruct(fd *parser.FunctionDef) map[string]bool {
 	}
 
 	return members
+}
+
+// fnBody is the tokens of fd's function and the indexes of its body's braces.
+func (r *Resolver) fnBody(fd *parser.FunctionDef) (pr *parser.ParseResult, tokens []parser.Token, open, end int, ok bool) {
+	if fd == nil || !fd.URI.IsFile() {
+		return nil, nil, 0, 0, false
+	}
+
+	pr = r.handlerParse(fd.URI.Path())
+	if pr == nil {
+		return nil, nil, 0, 0, false
+	}
+
+	scope := parser.FindFuncScopeAt(int(fd.Line), pr.Scopes)
+	if scope.Start == -1 || !strings.EqualFold(scope.Name, fd.Name) {
+		return nil, nil, 0, 0, false
+	}
+
+	lines := strings.Split(pr.Content, "\n")
+	if scope.End >= len(lines) {
+		return nil, nil, 0, 0, false
+	}
+
+	tokens = significantTokens(strings.Join(lines[scope.Start:scope.End+1], "\n"))
+
+	open = indexKind(tokens, 0, parser.TokLBrace)
+	if open < 0 {
+		return nil, nil, 0, 0, false
+	}
+
+	end = matchingBrace(tokens, open)
+
+	return pr, tokens, open, end, end > 0
+}
+
+// engineValueReturn reports whether every return at fd's own level returns a
+// literal or a chain headed by a built-in function, and at least one the
+// latter: TestBox's getPageContextResponse() returns
+// `getPageContext().getResponse()`, or a struct standing in for one under the
+// CLI. What the engine hands back is dynamic, as a call chained on a built-in
+// is where it is written.
+func (r *Resolver) engineValueReturn(fd *parser.FunctionDef) bool {
+	pr, tokens, open, end, ok := r.fnBody(fd)
+	if !ok {
+		return false
+	}
+
+	engine := false
+
+	for i := open + 1; i < end; i++ {
+		switch {
+		case tokens[i].Kind == parser.TokLBrace:
+			if closureBody(tokens, i) {
+				if e := matchingBrace(tokens, i); e > 0 {
+					i = e
+				}
+			}
+		case tokens[i].Kind == parser.TokIdent && strings.EqualFold(tokens[i].Value, "return"):
+			if i+1 >= end {
+				return false
+			}
+
+			kind := returnKind(tokens, i+1, end, pr)
+			if kind == retOther {
+				return false
+			}
+
+			engine = engine || kind == retEngine
+		}
+	}
+
+	return engine
+}
+
+type retKindT int
+
+const (
+	retOther retKindT = iota
+	retLiteral
+	retEngine
+)
+
+// returnKind classifies the return expression starting at tokens[from]: a
+// literal (or nothing), a chain headed by a built-in function, or anything
+// else. A ternary is the weaker of its two branches.
+func returnKind(tokens []parser.Token, from, end int, pr *parser.ParseResult) retKindT {
+	stop := from
+	question, colon := -1, -1
+
+	for depth := 0; stop < end; stop++ {
+		switch tokens[stop].Kind {
+		case parser.TokLParen, parser.TokLBrace, parser.TokLBracket:
+			depth++
+		case parser.TokRParen, parser.TokRBrace, parser.TokRBracket:
+			depth--
+		case parser.TokQuestion:
+			if depth == 0 && question < 0 {
+				question = stop
+			}
+		case parser.TokColon:
+			if depth == 0 && question >= 0 && colon < 0 {
+				colon = stop
+			}
+		}
+
+		if depth == 0 && tokens[stop].Kind == parser.TokSemicolon {
+			break
+		}
+
+		if depth < 0 {
+			break
+		}
+	}
+
+	if question >= 0 && colon > question {
+		a, b := headKind(tokens, question+1, pr), headKind(tokens, colon+1, pr)
+		if a == retOther || b == retOther {
+			return retOther
+		}
+
+		return max(a, b)
+	}
+
+	return headKind(tokens, from, pr)
+}
+
+// headKind classifies the expression whose first token is tokens[i].
+func headKind(tokens []parser.Token, i int, pr *parser.ParseResult) retKindT {
+	if i >= len(tokens) {
+		return retLiteral
+	}
+
+	switch next := tokens[i]; {
+	case next.Kind == parser.TokSemicolon, next.Kind == parser.TokRBrace, next.Kind == parser.TokLBrace,
+		next.Kind == parser.TokLBracket, next.Kind == parser.TokString:
+		return retLiteral
+	case next.Kind == parser.TokIdent && i+1 < len(tokens) && tokens[i+1].Kind == parser.TokLParen &&
+		docs.IsBuiltinFunction(next.Value) && !hasFunc(pr, next.Value):
+		return retEngine
+	}
+
+	return retOther
 }
 
 // closureStructHops checks the hops after hop i, then funcName, against the

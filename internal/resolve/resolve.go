@@ -1511,6 +1511,13 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 				return comp, softComp, reason, true
 			}
 
+			if r.engineValueReturn(fd) {
+				tr.addf("chain hop %q returns what a built-in function hands back — the rest of the chain is dynamic", hop)
+				tr.hit(TargetDynamic, "", nil)
+
+				return comp, softComp, "", true
+			}
+
 			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
 		}
 
@@ -1948,6 +1955,17 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 	}
 
 	if ret == "" {
+		if reason, done := r.closureStructHops(def, pr.URI.Path(), first, call, 0, tr); done {
+			return reason
+		}
+
+		if r.engineValueReturn(def) {
+			tr.addf("%q returns what a built-in function hands back — the rest of the chain is dynamic", first)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		return "method '" + first + "' has no component return type (chain to '" + call.FuncName + "')"
 	}
 
