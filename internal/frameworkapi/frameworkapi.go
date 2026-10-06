@@ -223,6 +223,17 @@ func Namespaced(dotted string) string {
 	return ""
 }
 
+// NamespaceOf is the framework whose namespace dotted is in, or "".
+func NamespaceOf(dotted string) string {
+	for _, n := range namespaces {
+		if len(dotted) > len(n.prefix) && strings.EqualFold(dotted[:len(n.prefix)], n.prefix) {
+			return n.framework
+		}
+	}
+
+	return ""
+}
+
 // IsStub reports whether a path is one of the stubs.
 func IsStub(p string) bool {
 	return p == Root || strings.HasPrefix(p, Root+string(filepath.Separator))

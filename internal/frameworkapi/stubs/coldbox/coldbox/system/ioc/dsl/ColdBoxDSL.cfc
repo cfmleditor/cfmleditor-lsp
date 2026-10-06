@@ -24,6 +24,7 @@ component {
 	property name="log";
 	variables.injector = new coldbox.system.ioc.Injector();
 	variables.coldbox = new coldbox.system.web.Controller();
+	variables.log = new coldbox.system.logging.Logger();
 	/**
 	 * Configure the DSL Builder for operation and returns itself
 	 *

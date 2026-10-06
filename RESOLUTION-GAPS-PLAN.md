@@ -2038,3 +2038,33 @@ cbsecurity (`jwtAuth`, `cbSecure`), cbauth (`auth`) and cbmessagebox
 only to a component whose extends chain reaches `coldbox.system.`. Measured:
 cb-p −12, nothing added; the other scans unchanged.
 `TestAModuleHelperIsAColdBoxComponents`.
+
+### A stub keeps a return type documented in another framework's namespace
+
+cborm documents `getObjectPopulator()` as returning
+`coldbox.system.core.dynamic.ObjectPopulator`, a class cborm's source does not
+hold, so `docReturn` dropped it; and its deprecated `getBeanPopulator()`, which
+ContentBox still calls, is `return getObjectPopulator();`. `cmd/cfstubgen` now
+takes a documented path in another framework's namespace
+(`frameworkapi.NamespaceOf`) when that framework's stubs, written earlier in
+the same run, hold it (`foreignStub`; ColdBox comes first in `Sources`). It
+also gives a function whose whole body is `return f();` the stub type of `f`
+in the same file (`delegatedReturn`), and `funcLookup` falls back to a
+documented type. New types: cborm `getBeanPopulator`/`getObjectPopulator`,
+ColdBox `Controller.getDataMarshaller`/`getRequestContext`. Regeneration is
+reproducible (the same diff twice).
+
+Regenerating also picked up drift from this branch's parser changes, each
+checked against the source. Gains: entity relationship variables
+(`variables.site`, `creator`, `role`…) and `buildProviderMenu`'s `Menu` argument.
+Losses, all corrections: `getClassMappingHelper`/`getEngineMappingHelper` assign
+one of three helpers by engine; `buildBinder` returns either a new `Binder` or
+`arguments.binder.init()`; and MediaService's `variables.provider` does not
+exist. Measured: cb-p −22/+2, where the two added are the same chains one hop
+further on (`populateFromStruct` returns the target it is passed). Other scans
+unchanged. `TestAStubReturnsAnotherFrameworksDocumentedClass`.
+
+Not fixed, recorded: cb-p's `build/patches` (193 findings) are upgrade scripts
+written against old ContentBox and ColdBox APIs. `addPermission` (66) is the
+ORM method of an older `Role` that had `singularName="permission"`, and
+`coldbox.system.orm.hibernate.util.ORMUtilFactory` (54) is ColdBox 3/4.

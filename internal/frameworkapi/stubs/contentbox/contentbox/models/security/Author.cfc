@@ -36,6 +36,7 @@ component extends="contentbox.models.BaseEntity" {
 	property name="permissionList" persistent="false";
 	variables.authorService = new contentbox.models.security.AuthorService();
 	variables.avatar = new contentbox.models.ui.Avatar();
+	variables.role = new contentbox.models.security.Role();
 	/**
 	 * Constructor
 	 */
