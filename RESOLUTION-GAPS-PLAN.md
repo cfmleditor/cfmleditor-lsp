@@ -1844,3 +1844,28 @@ line: `<cfset x = mod.g(1)><cfset mod.g(p)>` lost the second to the sub-parse's 
 
 Measured per entry: cfwheels with and without presets, 253 removed and 0 added each; every other
 mode 0 / 0. `make gapcheck` unchanged.
+
+### A page included by a computed name (Lucee 1,975 -> 1,507)
+
+Lucee's admin `web.cfm` includes `web_functions.cfm` and then `#current.action#.cfm`, where the
+action comes from the URL with any `/` refused, so every page beside it runs inside it and calls
+its helpers bare: `toArrayFromForm` 158, `printError` 55, `renderCodingTip` 54, … The include
+scan dropped any path holding `#`. `computedNameGlob` reads one whose file name is a single
+`#...#` span with a literal `.cfm` extension, under a relative literal directory, as that
+directory's `*.cfm` — the glob a directory listing already gives. A name with a literal part,
+two spans, a computed or mapped directory, or `.cfml` is still not read. The scanners take it
+through `includePathAt`, and the reference expressions in `include_scan_test.go` carry the same
+alternative, with a sample per refused shape.
+
+A page then sees what every page beside it declares, which is the include scope's rule for
+siblings. That is right for `ext.applications.detail.cfm`, which `ext.applications.cfm`
+includes beside `ext.functions.cfm`, and wrong once: `messaging.cfm`'s `toFile()` is declared
+only in `services.schedule.edit.cfm`. The 8 cfwheels removals are `public/views` dispatchers
+(`../docs/#type#.cfm`, `../tests/#format#.cfm`, `layouts/#docFormat#.cfm`).
+`TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers`.
+
+A scope of a hundred templates made `findThroughIncludes` ten times dearer, since each template
+went through the whole component lookup; `scopeFunc` reads a template's own functions only,
+which is all a template contributes (its includes are in the scope already), and the scan time
+is unchanged. Measured per entry: Lucee 468 removed, cfwheels 8 removed in each mode, 0 added
+anywhere.

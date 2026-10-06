@@ -117,3 +117,31 @@ func TestATemplateReadsWhatItsIncluderHoldsAtTheInclude(t *testing.T) {
 		"loose.setTable": "variable 'loose' has no component ref",
 	})
 }
+
+// TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers: Lucee's admin
+// web.cfm includes its helpers and then `#current.action#.cfm`, so every page
+// beside it runs inside it and calls those helpers bare. A page in another
+// directory, or one reached through a computed directory, is not included.
+func TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"admin/web.cfm":           `<cfinclude template="web_functions.cfm"><cfif not findOneOf("\/",url.action)><cfinclude template="#url.action#.cfm"></cfif>`,
+		"admin/web_functions.cfm": `<cfscript>function printError(e){}</cfscript>`,
+		"admin/overview.cfm":      `<cfscript>printError(1); notDeclared();</cfscript>`,
+		"admin/sub/page.cfm":      `<cfscript>printError(1);</cfscript>`,
+		"other/web.cfm":           `<cfinclude template="../other/web_functions.cfm"><cfinclude template="#d#/page.cfm">`,
+		"other/web_functions.cfm": `<cfscript>function otherHelper(){}</cfscript>`,
+		"other/x/page.cfm":        `<cfscript>otherHelper();</cfscript>`,
+	})
+
+	expectReasons(t, templateReasons(t, dir, "admin/overview.cfm"), map[string]string{
+		"printError":  "",
+		"notDeclared": "no qualifier, not in file",
+	})
+	expectReasons(t, templateReasons(t, dir, "admin/sub/page.cfm"), map[string]string{
+		"printError": "no qualifier, not in file",
+	})
+	expectReasons(t, templateReasons(t, dir, "other/x/page.cfm"), map[string]string{
+		"otherHelper": "no qualifier, not in file",
+	})
+}

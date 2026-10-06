@@ -287,7 +287,7 @@ func (r *Resolver) findThroughIncludes(pr *parser.ParseResult, funcName string) 
 
 	if g := r.includes(); g != nil {
 		for _, p := range g.includeScope(file) {
-			if def := r.LookupFuncWithExtends(p, funcName); def != nil {
+			if def := r.scopeFunc(p, funcName); def != nil {
 				return def, p
 			}
 		}
@@ -296,4 +296,24 @@ func (r *Resolver) findThroughIncludes(pr *parser.ParseResult, funcName string) 
 	// A framework's helper templates are included by the framework rather
 	// than by the file, which is the only difference that matters here.
 	return r.findThroughHelpers(file, funcName)
+}
+
+// scopeFunc is funcName as p declares it, for p in an include scope. A
+// template has no extends chain and what it includes is in the scope itself,
+// so only its own functions are read; a component is looked up whole. A
+// dispatcher that includes every page beside it puts a hundred templates in
+// each page's scope, and the whole lookup for each was ten times the cost of
+// the scan's include step.
+func (r *Resolver) scopeFunc(p, funcName string) *parser.FunctionDef {
+	if !strings.EqualFold(filepath.Ext(p), ".cfm") && !strings.EqualFold(filepath.Ext(p), ".cfml") {
+		return r.LookupFuncWithExtends(p, funcName)
+	}
+
+	for _, def := range r.EnsureIndexed(p) {
+		if strings.EqualFold(def.Name, funcName) {
+			return def
+		}
+	}
+
+	return nil
 }

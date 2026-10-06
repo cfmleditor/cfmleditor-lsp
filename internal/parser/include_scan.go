@@ -89,7 +89,8 @@ func quotedPath(s string, j int) (start, end int, ok bool) {
 	return j + 1, k, true
 }
 
-// includeTagAt reads `^(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([^"'#]+)["']`
+// includeTagAt reads `^(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*` and an
+// includePathAt
 // and returns the path's bounds.
 func includeTagAt(s string) (start, end int, ok bool) {
 	const open = "<cfinclude"
@@ -98,7 +99,7 @@ func includeTagAt(s string) (start, end int, ok bool) {
 	}
 
 	found := tagAttrValues(s, len(open), "template", func(j int) bool {
-		start, end, ok = quotedPath(s, j)
+		start, end, ok = includePathAt(s, j)
 
 		return ok
 	})
@@ -107,7 +108,7 @@ func includeTagAt(s string) (start, end int, ok bool) {
 }
 
 // includeScriptAt reads
-// `^(?i)(?:cf)?include\s*\(?\s*(?:template\s*=\s*)?["']([^"'#]+)["']`.
+// `^(?i)(?:cf)?include\s*\(?\s*(?:template\s*=\s*)?` and an includePathAt.
 func includeScriptAt(s string) (start, end int, ok bool) {
 	i := 0
 	if hasPrefixFold(s, "cf") {
@@ -134,7 +135,36 @@ func includeScriptAt(s string) (start, end int, ok bool) {
 		}
 	}
 
-	return quotedPath(s, i)
+	return includePathAt(s, i)
+}
+
+// includePathAt is the path an include names at j: a literal one
+// (quotedPath), or one whose file name alone is computed, which
+// computedNameGlob reads as a glob. It is `([^"'#]+|(?:[^"'#*\\/][^"'#*\\]*/)?#[^"'#/]+#\.cfm)`
+// between quotes.
+func includePathAt(s string, j int) (start, end int, ok bool) {
+	if start, end, ok = quotedPath(s, j); ok {
+		return start, end, true
+	}
+
+	if j >= len(s) || !isQuote(s[j]) {
+		return 0, 0, false
+	}
+
+	k := j + 1
+	for k < len(s) && !isQuote(s[k]) {
+		k++
+	}
+
+	if k >= len(s) {
+		return 0, 0, false
+	}
+
+	if _, ok := computedNameGlob(s[j+1 : k]); !ok {
+		return 0, 0, false
+	}
+
+	return j + 1, k, true
 }
 
 // directoryTagEnd reads `^(?is)<cfdirectory\b[^>]*>` and returns the offset
