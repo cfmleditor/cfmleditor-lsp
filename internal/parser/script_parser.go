@@ -82,6 +82,7 @@ type pendingCall struct {
 	memberSet  bool   // not a call: `varName.funcName = …`; see checkMemberSet
 	baseLocal  bool   // baseVar is the function's own, an argument or a local; see baseVarComponent
 	rebinds    bool   // the call is made on varName itself; see ComponentRef.Rebinds
+	baseGuess  bool   // typed as baseVar itself, the method unlooked-up; see ComponentRef.BaseGuess
 	block      uint32 // the block the assignment was made in; see flowBlocks
 	baseScope  RefScope
 

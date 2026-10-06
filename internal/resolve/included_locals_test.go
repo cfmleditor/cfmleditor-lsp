@@ -145,3 +145,29 @@ func TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers(t *testing.T) {
 		"otherHelper": "no qualifier, not in file",
 	})
 }
+
+// TestAReceiversGuessedTypeIsNotAReturnType: the index parses a file without
+// looking methods up, so `variables.$ = variables.event.getValue("muraScope")`
+// gives $ the event's own type there. Mura's contentRenderer returns $ from
+// getMuraScope(), and every call chained on it was checked against the event
+// — "createHREF not found in event". The guess is no statement of what
+// getValue returns.
+func TestAReceiversGuessedTypeIsNotAReturnType(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Event.cfc": `component { function getValue( key ){ return variables.data[ arguments.key ]; } function eventOnly(){} }`,
+		"Renderer.cfc": `<cfcomponent>
+<cffunction name="init">
+	<cfset variables.event = new Event()>
+	<cfset variables.$ = variables.event.getValue("muraScope")>
+	<cfreturn this>
+</cffunction>
+<cffunction name="getMuraScope"><cfreturn variables.$></cffunction>
+</cfcomponent>`,
+		"Page.cfc": `component { function f(){ var r = new Renderer(); r.getMuraScope().createHREF(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Page.cfc"), map[string]string{
+		"r.getMuraScope.createHREF": "method 'getMuraScope' in Renderer has no component return type (chain to 'createHREF')",
+	})
+}

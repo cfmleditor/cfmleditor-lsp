@@ -490,6 +490,17 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 
 	next := lookupCtx{depth: ctx.depth + 1}
 
+	// `this` is the calling component, or any component extending it: Mura's
+	// contentRenderer hands itself to its utility, and a theme's renderer
+	// extends it.
+	if len(expr) == 1 && strings.EqualFold(expr[0].Value, "this") {
+		if pr.URI.IsFile() && strings.EqualFold(filepath.Ext(pr.URI.Path()), ".cfc") {
+			return r.withSubclasses(pr.URI.Path())
+		}
+
+		return ""
+	}
+
 	if path := producerPath(expr); path != "" {
 		name := strings.ReplaceAll(producerText(expr), " ", "")
 

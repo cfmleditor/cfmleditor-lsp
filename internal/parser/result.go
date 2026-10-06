@@ -1290,7 +1290,7 @@ func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
 
 	ref := ComponentRef{
 		Variable: c.varName, Component: comp, ChainRest: c.rest,
-		URI: pr.URI, Line: c.line, This: c.refThis, Rebinds: c.rebinds,
+		URI: pr.URI, Line: c.line, This: c.refThis, Rebinds: c.rebinds, BaseGuess: c.baseGuess,
 		VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 	}
 	if c.funcKey == "" || c.global {
@@ -1463,6 +1463,13 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending, calls []pending
 		}
 
 		reaching := pr.flow.reaching(refs, name, rp.line, admit)
+
+		// A receiver's own type, guessed for a call the parse could not look
+		// up, is not what the function returns; the resolver reads the body.
+		if slices.ContainsFunc(reaching, func(ref *ComponentRef) bool { return ref.BaseGuess }) {
+			continue
+		}
+
 		if len(reaching) > 0 && !assignedBetween(calls, name, reaching[0].Line, rp.line) {
 			comp := agreedComponent(reaching, pr.settledComponent)
 			if scope == RefAny {
@@ -1569,6 +1576,8 @@ func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
 func (pr *ParseResult) baseVarComponent(c *pendingCall, globals []ComponentRef) string {
 	var comp string
 
+	c.baseGuess = false
+
 	if globals == nil {
 		globals = pr.ComponentRefs
 	}
@@ -1615,6 +1624,8 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall, globals []ComponentRef) 
 	if isInjectedFrameworkComponent(comp) {
 		return ""
 	}
+
+	c.baseGuess = comp != ""
 
 	return comp
 }

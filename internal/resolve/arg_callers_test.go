@@ -254,3 +254,25 @@ function plugins( dir ){
 		t.Errorf("typed although a plugin.cfc extending the DAO may be the receiver")
 	}
 }
+
+// TestAnArgumentPassedAsThisIsTheCallersComponent: Mura's contentRenderer
+// hands itself to its utility, `utility.f( this )`, and the utility's
+// `arguments.renderer` was untyped. `this` is the calling component, or a
+// component extending it, as a theme's renderer does.
+func TestAnArgumentPassedAsThisIsTheCallersComponent(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Renderer.cfc":      `component { function own(){} function go(){ new Utility().f( this ); } }`,
+		"ThemeRenderer.cfc": `component extends="Renderer" { function themed(){} }`,
+		"Utility.cfc":       `component { function f( required renderer ){ arguments.renderer.own(); arguments.renderer.themed(); arguments.renderer.nope(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Utility.cfc"), map[string]string{
+		"arguments.renderer.own":    "",
+		"arguments.renderer.themed": "",
+	})
+
+	if got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Utility.cfc")["arguments.renderer.nope"]; !strings.Contains(got, "not found") {
+		t.Errorf("arguments.renderer.nope: %q, want a method not found", got)
+	}
+}

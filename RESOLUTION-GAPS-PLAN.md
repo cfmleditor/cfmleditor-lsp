@@ -1934,3 +1934,24 @@ which fails without each of the three.
 
 Measured per entry: Masa configured 367 removed, 0 added (`arguments.bean` 133, `userBean` 75,
 `feedBean` 72, `categoryBean` 35, …); every other mode unchanged.
+
+### `this` as an argument, and a receiver's guessed type is not a return type (Masa 9,219 -> 9,201)
+
+- An argument passed as `this` from a component is that component or one extending it
+  (`withSubclasses`): Mura's contentRenderer hands itself to contentRendererUtility, and a
+  theme's renderer extends it. `TestAnArgumentPassedAsThisIsTheCallersComponent`.
+- The index parses without looking methods up, and there `x = base.m()` gives x base's own
+  type, the fluent guess `baseVarComponent` makes. Two readers took that guess as a statement:
+  return inference (`settleReturnVars`), and the resolver's body evaluation reading a
+  component variable from the index (`producerEvaluation.read`). So contentRenderer's
+  `getMuraScope()`, returning `variables.$ = variables.event.getValue("muraScope")`, returned
+  the event, and every call chained on it was "not found in event". The ref now carries
+  `ComponentRef.BaseGuess`, and both readers decline it; the resolver then evaluates the body
+  with lookups. `TestAReceiversGuessedTypeIsNotAReturnType` fails without either guard.
+  `TestThisAndVariablesAreSeparateStores` asserted the guess as a return type; it now states
+  `getFromScope`'s return through a lookup and checks the same two stores.
+
+Measured per entry: Masa configured 21 removed, 3 added; automatic 21 removed, 4 added;
+coldbox-platform 2 removed; TestBox 4 removed. The additions are honest: `getMuraScope` now has
+no return type ("has no component return type" instead of "not found in event"), and
+`arguments.content` typed as contentBean exposes `getDisplayInterval()` with none.

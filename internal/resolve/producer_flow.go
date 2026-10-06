@@ -713,6 +713,12 @@ func (e *producerEvaluation) read(path string, env producerEnvironment) producer
 			continue
 		}
 
+		// The index's parse could not look the method up, and the receiver's
+		// own type is no statement of what a call on it returns.
+		if ref.BaseGuess {
+			return producerUnknown()
+		}
+
 		value := e.concrete(ref.Component, filepath.Dir(e.fd.URI.Path()))
 		if !found {
 			answer = value

@@ -3259,7 +3259,16 @@ func TestThisAndVariablesAreSeparateStores(t *testing.T) {
 		return d;
 	}
 }`
-	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+	// Scopes.getFromScope is declared to return a Scopes, so what each
+	// function returns says which store its receiver was read from.
+	lookup := func(comp, fn string) string {
+		if comp == "Scopes" && fn == "getFromScope" {
+			return comp
+		}
+
+		return ""
+	}
+	pr := ParseWithOptions(testURI, content, &ParseOptions{FuncLookup: lookup})
 
 	for name, want := range map[string]string{
 		"viaVariables": "",
