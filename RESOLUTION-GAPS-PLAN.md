@@ -2027,3 +2027,14 @@ syntax already did. `TestAnUnquotedExtendsIsRead`.
 Measured against the previous run: TestBox 21 removed, fw1 23 removed and 1 added (a spec whose
 unquoted base is `mxunit.framework.TestCase`, not installed, now reports that once), Lucee 7 and
 cfwheels 6 removed.
+
+### Module helpers ContentBox depends on but does not check out
+
+cbvalidation (`validate`, `validateOrFail`, `getValidationManager`,
+`validateModel`, `validateHasValue`, `validateIsNullOrEmpty`, `assert`),
+cbsecurity (`jwtAuth`, `cbSecure`), cbauth (`auth`) and cbmessagebox
+(`cbMessageBox`) join `moduleHelpers`, each read from the module's
+`helpers/Mixins.cfm` at the commit noted in `modules.go`. As before they apply
+only to a component whose extends chain reaches `coldbox.system.`. Measured:
+cb-p −12, nothing added; the other scans unchanged.
+`TestAModuleHelperIsAColdBoxComponents`.

@@ -14,6 +14,10 @@ func TestAModuleHelperIsAColdBoxComponents(t *testing.T) {
 	function index( event, rc, prc ) {
 		$r( "messages.hello@fb" );
 		cbfs( "default" );
+		validate( target = rc );
+		cbSecure();
+		auth();
+		cbMessageBox();
 		notAHelper();
 	}
 }`,
@@ -24,9 +28,13 @@ func TestAModuleHelperIsAColdBoxComponents(t *testing.T) {
 	})
 
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "handlers/Home.cfc"), map[string]string{
-		"$r":         "",
-		"cbfs":       "",
-		"notAHelper": "not found in extends chain",
+		"$r":           "",
+		"cbfs":         "",
+		"validate":     "",
+		"cbSecure":     "",
+		"auth":         "",
+		"cbMessageBox": "",
+		"notAHelper":   "not found in extends chain",
 	})
 	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "lib/Plain.cfc"), map[string]string{
 		"$r": "not found in extends chain",
