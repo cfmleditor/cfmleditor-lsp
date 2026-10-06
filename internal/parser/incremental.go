@@ -225,9 +225,7 @@ func (pr *ParseResult) resetFuncCaches() {
 
 func (pr *ParseResult) resetGlobalCaches() {
 	pr.mu.Lock()
-	pr.globalDone = false
-	pr.varsDone = false
-	pr.thisDone = false
+	pr.scopedDone = false
 	pr.allVarsDone = false
 	pr.globalVars = nil
 	pr.variablesVars = nil

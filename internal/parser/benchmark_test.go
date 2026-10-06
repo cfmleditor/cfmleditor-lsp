@@ -121,7 +121,7 @@ func BenchmarkGlobalVars(b *testing.B) {
 	pr := Parse("file:///bench.cfc", benchScriptCFC)
 	for b.Loop() {
 		pr.mu.Lock()
-		pr.globalDone = false
+		pr.scopedDone = false
 		pr.mu.Unlock()
 		pr.GlobalVars()
 	}
