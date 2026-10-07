@@ -422,7 +422,7 @@ func (r *Resolver) withSubclasses(path string) string {
 	return strings.Join(append(all[1:], all[0]), "|")
 }
 
-var localAssignRe = regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:var\s+)?(?:local\.)?(\w+)\s*=\s*([^=].*?)\s*/?>?\s*;?\s*$`)
+var localAssignRe = regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:var\s+)?(?:local\.|variables\.)?(\w+)\s*=\s*([^=].*?)\s*/?>?\s*;?\s*$`)
 
 // localAssignment is the right-hand side of the last assignment to name on a
 // line from start to before header, when its parentheses balance. A statement

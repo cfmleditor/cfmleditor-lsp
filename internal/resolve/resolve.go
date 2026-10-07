@@ -3113,17 +3113,8 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 		}
 	}
 
-	// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
-	if comp == "" && r.fileExtends(pr) != "" {
-		tr.addf("no ref found in this file — checking extends chain (%s) for a ComponentRef", r.fileExtends(pr))
-
-		r.walkExtendsRefs(r.fileExtends(pr), baseDir, lookupVar, func(ref *parser.ComponentRef, parent string) bool {
-			comp = ref.Component
-
-			tr.addf("resolved %q to %q via ComponentRef in parent %s", variable, comp, parent)
-
-			return comp != ""
-		})
+	if comp == "" {
+		comp = r.inheritedReceiver(variable, lookupVar, pr, baseDir, tr)
 	}
 
 	if comp == "" {

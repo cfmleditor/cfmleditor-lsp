@@ -2269,3 +2269,28 @@ so `/coldbox/system/exceptions/Whoops.cfm` resolves without a `/coldbox`
 mapping. Measured: cx-p −70, nothing added.
 `TestAColdBoxErrorTemplateReadsProcessExceptionsLocals`, which fails without
 either half.
+
+### A ColdBox model test's model is the class its attribute names
+
+ColdBox's `BaseModelTest` runs `variables.model = mockBox.createMock(
+annotations.model )`, and `BaseInterceptorTest` does the same with
+`interceptor`. A test written
+`component extends="coldbox.system.testing.BaseModelTest" model="coldbox.system.core.events.EventPool"`
+therefore holds a mock of `EventPool` in `model`. The base's own ref made
+`model` `$any`, so nothing on it was checked, and `pool = model.init( … )`
+typed nothing. `coldboxTestSubject` answers `model`/`interceptor` from the
+attribute when the extends chain reaches one of those bases and the file
+assigns the name nowhere else. It is asked before the extends-chain refs, in
+`inheritedReceiver` (its own file, outside the accept-path test's scope,
+since its `""` means no answer rather than accepted).
+
+The specs assign `variables.pool = model.init( … )` in a `beforeEach` closure
+and read `pool` unscoped in an `it()`. The lookup-time assignment reader
+(`localAssignRe`) now accepts a `variables.` prefix, as it accepted `local.`.
+An unscoped read reaches a variables-scope name when no local hides it.
+
+Measured: cx-p −100, masa-c −6 (Masa's SSRF spec,
+`variables.apiUtility = …getApi( … )` in setup), nothing added. With `model`
+typed, its calls are now checked, and none was missing.
+`TestAColdBoxModelTestsModelIsItsAttributesClass`, which fails without either
+half.
