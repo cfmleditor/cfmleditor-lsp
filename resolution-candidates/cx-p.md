@@ -4,8 +4,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 1016 | 472 | 186 | 98 | 260 | 117 |
-| return-type | 157 | 4 | 52 | 60 | 41 | 37 |
+| variable | 788 | 293 | 172 | 86 | 237 | 117 |
+| return-type | 128 | 4 | 52 | 39 | 33 | 29 |
 | method | 92 | 0 | 47 | 17 | 28 | 20 |
 | object | 51 | 0 | 0 | 5 | 46 | 15 |
 
@@ -13,38 +13,30 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 70 | `oexception → system/web/context/ExceptionBean.cfc` | 1 | high | declares getErrorCode(), getExtraMessage(), getType(), getExceptionStruct(), getMessage() | `system/exceptions/BugReport-Public.cfm:15` variable 'oException' has no component ref |
-| 46 | `arguments.prc.response → system/web/context/Response.cfc` | 1 | high | declares setFormat(), addHeader(), setResponseTime(), getDataPacket(), getError(), getFormat(), getContentType(), getStatusCode(), getLocation(), getBinary()… | `system/RestHandler.cfc:55` variable 'arguments.prc.response' has no component ref |
 | 45 | `now` | 0 | none |  | `system/async/tasks/ScheduledTask.cfc:586` variable 'now' has no component ref |
 | 41 | `mapping → system/ioc/config/Mapping.cfc` | 1 | high | declares isAspect(), getName(); named like the receiver 'mapping' | `system/aop/Mixer.cfc:104` variable 'mapping' has no component ref |
-| 39 | `pool → system/core/events/EventPool.cfc` | 4 | high | declares register(), exists(), getObject(), unregister(), process(), getListenerChain() | `tests/specs/core/events/EventPoolTest.cfc:32` variable 'pool' has no component ref |
 | 30 | `arguments.ehbean → system/web/context/EventHandlerBean.cfc` | 1 | high | declares getModule(), isModule(), getRunnable() | `system/web/services/HandlerService.cfc:103` variable 'arguments.ehBean' has no component ref |
 | 26 | `results.config` | 1 | none |  | `system/web/services/ModuleService.cfc:1295` variable 'results.config' has no component ref |
 | 25 | `results.ehbean → system/web/context/EventHandlerBean.cfc` | 1 | high | declares getViewDispatch(), getActionMetadata(), getMethod(), isMissingAction(), getMissingAction() | `system/web/Controller.cfc:826` variable 'results.ehBean' has no component ref |
 | 24 | `variables.router → system/web/routing/Router.cfc` | 1 | high | declares isValidExtension(), getMimeExtensionAlias(), route(), getRoutes(); named like the receiver 'router' | `tests/specs/web/routing/RouterSSETest.cfc:49` variable 'variables.router' has no component ref |
-| 23 | `router` | 1 | none |  | `tests/specs/web/routing/ResourcesTest.cfc:12` variable 'router' has no component ref |
 | 22 | `cacheconfig` | 0 | none |  | `system/cache/providers/CFProvider.cfc:503` variable 'cacheConfig' has no component ref |
 | 20 | `e` | 1 | none |  | `tests/specs/integration/EventExecutionsSpec.cfc:16` variable 'e' has no component ref |
 | 18 | `arguments.mapping → system/ioc/config/Mapping.cfc` | 2 | medium | declares getObjectMetadata(); named like the receiver 'mapping' (2 candidates) | `system/aop/Mixer.cfc:215` variable 'arguments.mapping' has no component ref |
 | 17 | `orequestcontext → system/web/context/RequestContext.cfc` | 1 | high | declares getSESBaseURL(); named like the receiver 'oRequestContext' | `system/web/Controller.cfc:544` variable 'oRequestContext' has no component ref |
 | 15 | `application[] → system/web/Controller.cfc` | 1 | high | declares getLoaderService(), getSetting(), runEvent(), getLogBox() | `system/Bootstrap.cfc:101` variable 'application[]' has no component ref |
 | 15 | `ohandler` | 1 | none |  | `system/web/Controller.cfc:859` variable 'oHandler' has no component ref |
-| 15 | `scope → system/ioc/scopes/Singleton.cfc` | 1 | high | declares getSingletons(), getFromScope() | `tests/specs/ioc/scopes/SingletonTest.cfc:22` variable 'scope' has no component ref |
 | 14 | `arguments.now` | 0 | none |  | `system/async/tasks/ScheduledTask.cfc:1682` variable 'arguments.now' has no component ref |
 | 14 | `arguments.oconfig → system/core/dynamic/MixerUtil.cfc` | 1 | medium | declares getPropertyMixin() | `system/web/config/ApplicationLoader.cfc:233` variable 'arguments.oConfig' has no component ref |
 | 14 | `variables.native → system/async/executors/Executor.cfc` | 1 | medium | declares isTerminated() | `system/async/executors/Executor.cfc:175` variable 'variables.native' has no component ref |
-| 13 | `buffer → system/web/context/InterceptorBuffer.cfc` | 1 | high | declares hasContent(), getString(), length() | `tests/specs/web/context/InterceptorBufferTest.cfc:30` variable 'buffer' has no component ref |
 | 13 | `event1 → system/web/context/RequestContext.cfc` | 1 | medium | declares getPrivateCollection() | `tests/specs/integration/EventCachingSpec.cfc:41` variable 'event1' has no component ref |
 | 12 | `cachestats → system/cache/util/CacheStats.cfc` | 5 | medium | declares getHits(), getMisses(), getGarbageCollections(), getEvictionCount(); named like the receiver 'cacheStats' (5 candidates) | `system/cache/report/skins/default/CacheCharting.cfm:37` variable 'cacheStats' has no component ref |
 | 12 | `variables.asyncmanager → system/async/AsyncManager.cfc` | 5 | medium | declares out(); named like the receiver 'asyncManager' (5 candidates) | `system/async/tasks/Scheduler.cfc:153` variable 'variables.asyncManager' has no component ref |
 | 11 | `e → system/testing/BaseTestCase.cfc` | 1 | high | declares getHandlerResults(), getRenderedContent(), getRenderData() | `tests/specs/integration/RenderingsSpec.cfc:16` variable 'e' has no component ref |
 | 11 | `expectation.actual → system/web/context/Response.cfc` | 2 | high | declares getStatusCode(), getMemento(), getData() | `system/testing/CustomMatchers.cfc:64` variable 'expectation.actual' has no component ref |
-| 11 | `prc.response → system/web/context/Response.cfc` | 1 | medium | declares addMessage() | `system/RestHandler.cfc:220` variable 'prc.response' has no component ref |
 | 10 | `emitter → system/web/context/SSEEmitter.cfc` | 2 | low | declares send(), isClosed() (2 candidates) | `system/web/routing/Router.cfc:2616` variable 'emitter' has no component ref |
 | 10 | `event2 → system/web/context/RequestContext.cfc` | 1 | medium | declares getPrivateCollection() | `tests/specs/integration/EventCachingSpec.cfc:52` variable 'event2' has no component ref |
 | 10 | `obean → test-harness/models/formBean.cfc` | 1 | high | declares getFname(), getLname() | `tests/specs/FrameworkSuperTypeTest.cfc:70` variable 'oBean' has no component ref |
 | 10 | `oscheduler` | 21 | none |  | `system/web/services/SchedulerService.cfc:123` variable 'oScheduler' has no component ref |
-| 9 | `scope → system/ioc/scopes/CFScopes.cfc` | 6 | low | declares getFromScope() (6 candidates) | `tests/specs/ioc/scopes/CFScopesTest.cfc:51` variable 'scope' has no component ref |
 | 8 | `caches.cache1` | 1 | none |  | `tests/specs/cache/CacheFactoryTest.cfc:62` variable 'caches.cache1' has no component ref |
 | 7 | `arguments.requestcontext → system/web/context/RequestContext.cfc` | 1 | high | declares getCurrentRouteRecord(); named like the receiver 'requestContext' | `system/web/services/HandlerService.cfc:579` variable 'arguments.requestContext' has no component ref |
 | 7 | `arguments.target → system/async/time/Duration.cfc` | 2 | high | declares plusDays(), plusHours(), plusMinutes(), plusSeconds(), plusNanos() | `system/async/time/DateTimeHelper.cfc:436` variable 'arguments.target' has no component ref |
@@ -145,7 +137,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `arguments.ocontext → system/web/context/ExceptionBean.cfc` | 17 | low | declares getMemento() (16 candidates) | `system/web/context/RequestContextDecorator.cfc:21` variable 'arguments.oContext' has no component ref |
 | 1 | `arguments.parentinjector → system/ioc/Injector.cfc` | 1 | medium | declares registerChildInjector() | `system/web/services/ModuleService.cfc:1260` variable 'arguments.parentInjector' has no component ref |
 | 1 | `arguments.prc.exception → system/web/context/ExceptionBean.cfc` | 1 | high | declares getExceptionStruct(); named like the receiver 'exception' | `system/RestHandler.cfc:193` variable 'arguments.prc.exception' has no component ref |
-| 1 | `arguments.prc.response → system/web/context/RequestContext.cfc` | 2 | low | declares setStatusCode() (2 candidates) | `system/RestHandler.cfc:560` variable 'arguments.prc.response' has no component ref |
 | 1 | `arguments.record.task → system/async/tasks/ScheduledTask.cfc` | 8 | low | declares getStats() (8 candidates) | `system/async/tasks/Scheduler.cfc:417` variable 'arguments.record.task' has no component ref |
 | 1 | `arguments.result.value → system/aop/Matcher.cfc` | 17 | low | declares getMemento() (16 candidates) | `tests/specs/async/AsyncManagerSpec.cfc:373` variable 'arguments.result.value' has no component ref |
 | 1 | `arguments.target → system/EventHandler.cfc` | 1 | medium | declares _privateInvoker() | `system/web/Controller.cfc:1268` variable 'arguments.target' has no component ref |
@@ -181,7 +172,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `providertest.coolpizza → system/ioc/IProvider.cfc` | 2 | low | declares $get() (2 candidates) | `tests/specs/ioc/InjectorCreationTest.cfc:118` variable 'providerTest.coolPizza' has no component ref |
 | 1 | `routeresults.route → test-harness/handlers/rendering.cfc` | 1 | medium | declares redirect() | `system/web/services/RoutingService.cfc:779` variable 'routeResults.route' has no component ref |
 | 1 | `scheduler → system/async/tasks/Scheduler.cfc` | 2 | medium | declares restart(); named like the receiver 'scheduler' (2 candidates) | `system/web/services/SchedulerService.cfc:227` variable 'scheduler' has no component ref |
-| 1 | `scope → system/testing/BaseTestCase.cfc` | 4 | low | declares put() (4 candidates) | `tests/specs/ioc/scopes/SingletonTest.cfc:58` variable 'scope' has no component ref |
 | 1 | `services.handlerservice → system/web/context/EventHandlerBean.cfc` | 1 | medium | declares setIsPrivate() | `system/web/Controller.cfc:821` variable 'services.handlerService' has no component ref |
 | 1 | `services.loaderservice → system/web/services/LoaderService.cfc` | 1 | high | declares createDefaultLogBox(); named like the receiver 'loaderService' | `system/web/Controller.cfc:140` variable 'services.loaderService' has no component ref |
 | 1 | `services.moduleservice → system/web/services/ModuleService.cfc` | 1 | high | declares activateAllModules(); named like the receiver 'moduleService' | `system/web/services/LoaderService.cfc:91` variable 'services.moduleService' has no component ref |
@@ -231,13 +221,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `emitter → system/web/context/SSEEmitter.cfc` — 10 finding(s), 2 candidate(s):
   - low `system/web/context/SSEEmitter.cfc` — declares send(), isClosed()
   - low `system/testing/mock/web/MockSSEEmitter.cfc` — declares send(), isClosed()
-- `scope → system/ioc/scopes/CFScopes.cfc` — 9 finding(s), 6 candidate(s):
-  - low `system/ioc/scopes/CFScopes.cfc` — declares getFromScope()
-  - low `system/ioc/scopes/CacheBox.cfc` — declares getFromScope()
-  - low `system/ioc/scopes/IScope.cfc` — declares getFromScope()
-  - low `system/ioc/scopes/NoScope.cfc` — declares getFromScope()
-  - low `system/ioc/scopes/RequestScope.cfc` — declares getFromScope()
-  - low `system/ioc/scopes/Singleton.cfc` — declares getFromScope()
 - `services.interceptorservice → system/web/services/InterceptorService.cfc` — 7 finding(s), 5 candidate(s):
   - medium `system/web/services/InterceptorService.cfc` — declares announce(); named like the receiver 'interceptorService'
   - low `system/FrameworkSupertype.cfc` — declares announce()
@@ -373,9 +356,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `system/cache/AbstractCacheBoxProvider.cfc` — declares getMemento()
   - low `system/async/tasks/ScheduledTask.cfc` — declares getMemento()
   - … 8 more
-- `arguments.prc.response → system/web/context/RequestContext.cfc` — 1 finding(s), 2 candidate(s):
-  - low `system/web/context/RequestContext.cfc` — declares setStatusCode()
-  - low `system/web/context/Response.cfc` — declares setStatusCode()
 - `arguments.record.task → system/async/tasks/ScheduledTask.cfc` — 1 finding(s), 8 candidate(s):
   - low `system/async/tasks/ScheduledTask.cfc` — declares getStats()
   - low `system/async/executors/Executor.cfc` — declares getStats()
@@ -482,11 +462,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `scheduler → system/async/tasks/Scheduler.cfc` — 1 finding(s), 2 candidate(s):
   - medium `system/async/tasks/Scheduler.cfc` — declares restart(); named like the receiver 'scheduler'
   - low `system/testing/VirtualApp.cfc` — declares restart()
-- `scope → system/testing/BaseTestCase.cfc` — 1 finding(s), 4 candidate(s):
-  - low `system/testing/BaseTestCase.cfc` — declares put()
-  - low `system/core/collections/ScopeStorage.cfc` — declares put()
-  - low `system/web/flash/AbstractFlashScope.cfc` — declares put()
-  - low `system/web/routing/Router.cfc` — declares put()
 - `services.requestservice → system/web/flash/AbstractFlashScope.cfc` — 1 finding(s), 4 candidate(s):
   - low `system/web/flash/AbstractFlashScope.cfc` — declares saveFlash()
   - low `system/web/flash/ColdboxCacheFlash.cfc` — declares saveFlash()
@@ -604,9 +579,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
 | 22 | `method 'registerNewInstance' in coldbox.system.ioc.Injector has no component return type → system/ioc/config/Mapping.cfc` | 1 | medium | declares setCacheProperties() | `system/web/services/HandlerService.cfc:111` method 'registerNewInstance' in coldbox.system.ioc.Injector has no component return type (chain to 'setCacheProperties') |
-| 17 | `method 'getCacheProvider' has no component return type → system/cache/providers/BoxLangProvider.cfc` | 12 | low | declares getCache() (12 candidates) | `system/cache/providers/stats/BoxLangStats.cfc:29` method 'getCacheProvider' has no component return type (chain to 'getCache') |
 | 14 | `method 'getEventManager' has no component return type → system/FrameworkSupertype.cfc` | 5 | low | declares announce() (5 candidates) | `system/cache/providers/BoxLangProvider.cfc:370` method 'getEventManager' has no component return type (chain to 'announce') |
-| 8 | `method 'getCacheProvider' has no component return type` | 0 | none |  | `system/cache/providers/stats/BoxLangStats.cfc:29` method 'getCacheProvider' has no component return type (chain to 'hitRate') |
 | 6 | `method 'getScheduler' has no component return type → system/async/tasks/Scheduler.cfc` | 3 | low | declares beforeAnyTask(), afterAnyTask(), onAnyTaskSuccess(), onAnyTaskError(); named like the receiver 'Scheduler' (3 candidates) | `system/async/tasks/ScheduledTask.cfc:705` method 'getScheduler' has no component return type (chain to 'beforeAnyTask') |
 | 6 | `method 'toLocalDateTime' has no component return type` | 0 | none |  | `system/async/time/DateTimeHelper.cfc:230` method 'toLocalDateTime' has no component return type (chain to 'withHour') |
 | 5 | `method 'getJavaNow' in ScheduledTask has no component return type` | 0 | none |  | `tests/specs/async/tasks/ScheduledTaskSpec.cfc:329` method 'getJavaNow' in ScheduledTask has no component return type (chain to 'getDayOfMonth') |
@@ -615,7 +588,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 4 | `method 'getInetAddress' has no component return type` | 0 | none |  | `system/core/util/Util.cfc:101` method 'getInetAddress' has no component return type (chain to 'getHostName') |
 | 4 | `method 'getTaskScheduler' in coldbox.system.cache.CacheFactory has no component return type → system/async/tasks/ScheduledTask.cfc` | 1 | medium | declares delay() | `system/cache/providers/CacheBoxProvider.cfc:236` method 'getTaskScheduler' in coldbox.system.cache.CacheFactory has no component return type (chain to 'delay') |
 | 4 | `method 'getTimezone' has no component return type → tests/tmp/User.cfc` | 2 | low | declares getId() (2 candidates) | `system/web/tasks/ColdBoxScheduledTask.cfc:329` method 'getTimezone' has no component return type (chain to 'getId') |
-| 3 | `method 'getCacheProvider' has no component return type → system/cache/providers/ICacheProvider.cfc` | 2 | low | declares getConfiguration() (2 candidates) | `system/cache/providers/stats/LuceeStats.cfc:45` method 'getCacheProvider' has no component return type (chain to 'getConfiguration') |
 | 3 | `method 'getCacheStats' has no component return type` | 0 | none |  | `system/cache/providers/stats/CFStats.cfc:67` method 'getCacheStats' has no component return type (chain to 'cacheEvictionCount') |
 | 3 | `method 'getColdBoxVirtualApp' has no component return type → system/testing/VirtualApp.cfc` | 4 | low | declares startup() (4 candidates) | `system/testing/BaseTestCase.cfc:115` method 'getColdBoxVirtualApp' has no component return type (chain to 'startup') |
 | 3 | `method 'getJavaSystem' has no component return type → system/Interceptor.cfc` | 5 | high | declares getProperty(), getEnv() | `system/core/delegates/Env.cfc:15` method 'getJavaSystem' has no component return type (chain to 'getProperty') |
@@ -629,7 +601,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `method 'createMock' in testbox.system.MockBox has no component return type` | 1 | none |  | `tests/specs/ioc/aop/MixerTest.cfc:19` method 'createMock' in testbox.system.MockBox has no component return type (chain to '$') |
 | 1 | `method 'get' has no component return type` | 0 | none |  | `system/web/context/InterceptorBuffer.cfc:31` method 'get' has no component return type (chain to 'setLength') |
 | 1 | `method 'getCacheBoxDSL' has no component return type → system/ioc/dsl/CacheBoxDSL.cfc` | 11 | medium | declares process(); named like the receiver 'CacheBoxDSL' (11 candidates) | `system/ioc/Builder.cfc:611` method 'getCacheBoxDSL' has no component return type (chain to 'process') |
-| 1 | `method 'getCacheProvider' has no component return type → system/cache/providers/stats/BoxLangStats.cfc` | 10 | low | declares clearStatistics() (10 candidates) | `system/cache/providers/stats/BoxLangStats.cfc:48` method 'getCacheProvider' has no component return type (chain to 'clearStatistics') |
 | 1 | `method 'getCacheStats' has no component return type → system/cache/providers/BoxLangProvider.cfc` | 14 | low | declares getSize() (14 candidates) | `system/cache/providers/stats/CFStats.cfc:44` method 'getCacheStats' has no component return type (chain to 'getSize') |
 | 1 | `method 'getClassMappingHelper' has no component return type → system/core/util/BoxLangMappingHelper.cfc` | 4 | low | declares addCustomTagPath() (4 candidates) | `system/core/util/Util.cfc:30` method 'getClassMappingHelper' has no component return type (chain to 'addCustomTagPath') |
 | 1 | `method 'getColdBoxDSL' has no component return type → system/ioc/dsl/ColdBoxDSL.cfc` | 11 | medium | declares process(); named like the receiver 'ColdBoxDSL' (11 candidates) | `system/ioc/Builder.cfc:630` method 'getColdBoxDSL' has no component return type (chain to 'process') |
@@ -660,16 +631,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 <details><summary>Groups with several candidates</summary>
 
-- `method 'getCacheProvider' has no component return type → system/cache/providers/BoxLangProvider.cfc` — 17 finding(s), 12 candidate(s):
-  - low `system/cache/providers/BoxLangProvider.cfc` — declares getCache()
-  - low `system/cache/providers/MockProvider.cfc` — declares getCache()
-  - low `system/cache/CacheFactory.cfc` — declares getCache()
-  - low `system/FrameworkSupertype.cfc` — declares getCache()
-  - low `system/cache/config/CacheBoxConfig.cfc` — declares getCache()
-  - low `system/remote/ColdboxProxy.cfc` — declares getCache()
-  - low `system/testing/BaseTestCase.cfc` — declares getCache()
-  - low `system/web/Controller.cfc` — declares getCache()
-  - … 4 more
 - `method 'getEventManager' has no component return type → system/FrameworkSupertype.cfc` — 14 finding(s), 5 candidate(s):
   - low `system/FrameworkSupertype.cfc` — declares announce()
   - low `system/remote/ColdboxProxy.cfc` — declares announce()
@@ -692,9 +653,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 - `method 'getTimezone' has no component return type → tests/tmp/User.cfc` — 4 finding(s), 2 candidate(s):
   - low `tests/tmp/User.cfc` — declares getId()
   - low `test-harness/models/entities/User.cfc` — declares getId()
-- `method 'getCacheProvider' has no component return type → system/cache/providers/ICacheProvider.cfc` — 3 finding(s), 2 candidate(s):
-  - low `system/cache/providers/ICacheProvider.cfc` — declares getConfiguration()
-  - low `system/cache/AbstractCacheBoxProvider.cfc` — declares getConfiguration()
 - `method 'getColdBoxVirtualApp' has no component return type → system/testing/VirtualApp.cfc` — 3 finding(s), 4 candidate(s):
   - low `system/testing/VirtualApp.cfc` — declares startup()
   - low `system/web/Renderer.cfc` — declares startup()
@@ -710,16 +668,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `system/remote/ColdboxProxy.cfc` — declares process()
   - low `system/core/events/EventPool.cfc` — declares process()
   - … 3 more
-- `method 'getCacheProvider' has no component return type → system/cache/providers/stats/BoxLangStats.cfc` — 1 finding(s), 10 candidate(s):
-  - low `system/cache/providers/stats/BoxLangStats.cfc` — declares clearStatistics()
-  - low `system/cache/providers/stats/CFStats.cfc` — declares clearStatistics()
-  - low `system/cache/providers/stats/LuceeStats.cfc` — declares clearStatistics()
-  - low `system/cache/providers/BoxLangProvider.cfc` — declares clearStatistics()
-  - low `system/cache/providers/CFProvider.cfc` — declares clearStatistics()
-  - low `system/cache/providers/ICacheProvider.cfc` — declares clearStatistics()
-  - low `system/cache/providers/LuceeProvider.cfc` — declares clearStatistics()
-  - low `system/cache/AbstractCacheBoxProvider.cfc` — declares clearStatistics()
-  - … 2 more
 - `method 'getCacheStats' has no component return type → system/cache/providers/BoxLangProvider.cfc` — 1 finding(s), 14 candidate(s):
   - low `system/cache/providers/BoxLangProvider.cfc` — declares getSize()
   - low `system/cache/providers/CFProvider.cfc` — declares getSize()

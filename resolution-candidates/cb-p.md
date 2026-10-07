@@ -4,10 +4,10 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 1223 | 560 | 171 | 127 | 365 | 73 |
-| return-type | 69 | 9 | 34 | 18 | 8 | 4 |
+| variable | 1190 | 560 | 168 | 127 | 335 | 49 |
+| return-type | 70 | 9 | 35 | 18 | 8 | 4 |
 | method | 155 | 0 | 0 | 75 | 80 | 40 |
-| object | 97 | 0 | 0 | 0 | 97 | 82 |
+| object | 83 | 0 | 0 | 0 | 83 | 81 |
 
 ## Variable definitions — a receiver whose component is unknown
 
@@ -25,10 +25,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 21 | `incomment → modules/contentbox/models/comments/Comment.cfc` | 7 | high | declares getRelatedContent(), setAuthorIP(), setIsApproved(), getIsApproved(), getMemento() | `modules/contentbox/models/comments/CommentService.cfc:197` variable 'inComment' has no component ref |
 | 21 | `prc.cbhelper → modules/contentbox/models/system/CBHelper.cfc` | 1 | high | declares adminRoot(), siteRoot(); named like the receiver 'cbHelper' | `modules/contentbox/modules/contentbox-admin/layouts/admin.cfm:21` variable 'prc.cbHelper' has no component ref |
 | 21 | `response` | 0 | none |  | `modules/contentbox/models/media/ForwardMediaProvider.cfc:34` variable 'response' has no component ref |
-| 20 | `vresults` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/authors.cfc:347` variable 'vResults' has no component ref |
 | 19 | `arguments.original → modules/contentbox/models/content/BaseContent.cfc` | 1 | high | declares getHTMLKeywords(), getHTMLDescription(), getHTMLTitle(), getMarkup(), getCache(), getCacheTimeout(), getCacheLastAccessTimeout(), getShowInSearch(),… | `modules/contentbox/models/content/BaseContent.cfc:1324` variable 'arguments.original' has no component ref |
-| 19 | `arguments.site → modules/contentbox/models/system/Site.cfc` | 5 | medium | declares getsiteID(); named like the receiver 'site' (5 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1784` variable 'arguments.site' has no component ref |
 | 19 | `prc.author → modules/contentbox/models/security/Author.cfc` | 2 | high | declares getUsername(), getEmail(), isLoaded(), getAuthorID(); named like the receiver 'author' | `modules/contentbox/modules/contentbox-admin/views/authors/editorHelper.cfm:38` variable 'prc.author' has no component ref |
+| 18 | `arguments.site → modules/contentbox/models/system/Site.cfc` | 5 | medium | declares getsiteID(); named like the receiver 'site' (5 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1784` variable 'arguments.site' has no component ref |
 | 18 | `content` | 7 | none |  | `modules/contentbox/models/system/NotificationService.cfc:426` variable 'content' has no component ref |
 | 18 | `setting → modules/contentbox/models/system/Setting.cfc` | 1 | high | declares getSettingID(), getName(), getValue(), getIsCore(), hasSite(), getSite(), getsiteID(); named like the receiver 'setting' | `modules/contentbox/modules/contentbox-admin/views/settings/rawSettingsTable.cfm:25` variable 'setting' has no component ref |
 | 18 | `thisperm → modules/contentbox/models/security/Permission.cfc` | 1 | high | declares getPermission(), getPermissionID() | `modules/contentbox/modules/contentbox-admin/views/authors/permissions.cfm:151` variable 'thisPerm' has no component ref |
@@ -65,7 +64,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 7 | `c.restrictions` | 1 | none |  | `modules/contentbox/models/content/ContentService.cfc:513` variable 'c.restrictions' has no component ref |
 | 7 | `entryresults.content[]` | 5 | none |  | `modules/contentbox/models/rss/RSSService.cfc:212` variable 'entryResults.content[]' has no component ref |
 | 7 | `pageresults.content[]` | 5 | none |  | `modules/contentbox/models/rss/RSSService.cfc:287` variable 'pageResults.content[]' has no component ref |
-| 7 | `prc.response` | 1 | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/auth.cfc:30` variable 'prc.response' has no component ref |
 | 7 | `settingservice → modules/contentbox/models/system/SettingService.cfc` | 2 | medium | declares getAllSettings(); named like the receiver 'settingService' (2 candidates) | `modules/contentbox/models/rss/RSSService.cfc:36` variable 'settingService' has no component ref |
 | 7 | `thisauthor → modules/contentbox/models/security/Author.cfc` | 2 | high | declares getEmail(), getRole(), getAUthorID(), getFullName() | `modules/contentbox/modules/contentbox-admin/views/content/search.cfm:66` variable 'thisAuthor' has no component ref |
 | 6 | `arguments.target → modules/contentbox/models/content/BaseContent.cfc` | 50 | high | declares getContentService(), getContentType(), getContentID(), isLoaded(), hasSite(), getSite() | `modules/contentbox/models/content/BaseContent.cfc:568` variable 'arguments.target' has no component ref |
@@ -84,7 +82,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 5 | `locpage → modules/contentbox/models/content/BaseContent.cfc` | 1 | high | declares getContentID(), hasParent(), getParent() | `modules/contentbox/models/system/CBHelper.cfc:2459` variable 'locPage' has no component ref |
 | 5 | `ouser → modules/contentbox/models/security/Author.cfc` | 4 | high | declares setPermissions(), addPermissionGroup(), setRole(), isLoaded() | `modules/contentbox/models/security/AuthorService.cfc:481` variable 'oUser' has no component ref |
 | 5 | `page → modules/contentbox/models/content/Page.cfc` | 7 | medium | declares getSite(), getTitle(), hasExcerpt(), renderExcerpt(), renderContent(); named like the receiver 'page' (2 candidates) | `modules/contentbox/models/system/NotificationService.cfc:359` variable 'page' has no component ref |
-| 5 | `prc.response → modules/contentbox/models/menu/item/BaseMenuItem.cfc` | 2 | medium | declares setData() | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/auth.cfc:117` variable 'prc.response' has no component ref |
 | 4 | `args.provider` | 12 | none |  | `modules/contentbox/modules/contentbox-admin/views/menus/provider.cfm:11` variable 'args.provider' has no component ref |
 | 4 | `arguments.categories[] → modules/contentbox/models/content/Category.cfc` | 5 | low | declares getCategory(), getNumberOfEntries() (2 candidates) | `modules/contentbox/widgets/Categories.cfc:86` variable 'arguments.categories[]' has no component ref |
 | 4 | `arguments.original → modules/contentbox/models/content/Page.cfc` | 1 | high | declares getLayout(), getShowInMenu(), hasExcerpt(), getExcerpt() | `modules/contentbox/models/content/Page.cfc:183` variable 'arguments.original' has no component ref |
@@ -102,7 +99,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 3 | `args.ocurrentauthor → modules/contentbox/models/security/Author.cfc` | 2 | high | declares getEmail(), getFullName() | `modules/contentbox/modules/contentbox-ui/views/adminbar/index.cfm:144` variable 'args.oCurrentAuthor' has no component ref |
 | 3 | `arguments.author` | 2 | none |  | `modules/contentbox/models/security/AuthorService.cfc:225` variable 'arguments.author' has no component ref |
 | 3 | `arguments.c.restrictions` | 1 | none |  | `modules/contentbox/models/content/ContentService.cfc:535` variable 'arguments.c.restrictions' has no component ref |
-| 3 | `arguments.criteria` | 1 | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:66` variable 'arguments.criteria' has no component ref |
 | 3 | `arguments.entity` | 2 | none |  | `modules/contentbox/models/security/SecurityRuleService.cfc:55` variable 'arguments.entity' has no component ref |
 | 3 | `arguments.entry → modules/contentbox/models/system/Site.cfc` | 5 | low | declares getSlug() (5 candidates) | `modules/contentbox/models/system/CBHelper.cfc:1433` variable 'arguments.entry' has no component ref |
 | 3 | `arguments.menuitem → modules/contentbox/models/search/SearchResults.cfc` | 10 | medium | declares getMemento() | `modules/contentbox/models/menu/providers/FreeProvider.cfc:55` variable 'arguments.menuItem' has no component ref |
@@ -121,11 +117,12 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 3 | `ogroup` | 4 | none |  | `modules/contentbox/models/security/PermissionGroupService.cfc:125` variable 'oGroup' has no component ref |
 | 3 | `orole` | 4 | none |  | `modules/contentbox/models/security/RoleService.cfc:127` variable 'oRole' has no component ref |
 | 3 | `otemplate → modules/contentbox/models/content/BaseContent.cfc` | 6 | high | declares setSite(), isLoaded() | `modules/contentbox/models/content/ContentTemplateService.cfc:311` variable 'oTemplate' has no component ref |
-| 3 | `prc.activedisk → modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/authors.cfc` | 12 | low | declares create() (11 candidates) | `modules/contentbox/modules/contentbox-admin/modules/contentbox-filebrowser/handlers/Editor.cfc:214` variable 'prc.activeDisk' has no component ref |
+| 3 | `prc.activedisk → modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/authors.cfc` | 13 | low | declares create() (11 candidates) | `modules/contentbox/modules/contentbox-admin/modules/contentbox-filebrowser/handlers/Editor.cfc:214` variable 'prc.activeDisk' has no component ref |
 | 3 | `prc.adminmenuservice → modules/contentbox/models/ui/AdminMenuService.cfc` | 1 | high | declares generateUtilsMenu(), generateProfileMenu(), generateMenu(); named like the receiver 'adminMenuService' | `modules/contentbox/modules/contentbox-admin/layouts/admin.cfm:244` variable 'prc.adminMenuService' has no component ref |
 | 3 | `prc.oeditordriver → modules/contentbox/modules/contentbox-admin/modules/contentbox-ckeditor/models/CKEditor.cfc` | 9 | low | declares startup(), shutdown(), loadAssets() (4 candidates) | `modules/contentbox/modules/contentbox-admin/views/content/editorHelper.cfm:30` variable 'prc.oEditorDriver' has no component ref |
 | 3 | `prc.owidget → modules/contentbox/models/modules/Module.cfc` | 8 | low | declares getName(), getVersion(), getForgeBoxSlug(), getDescription() (2 candidates) | `modules/contentbox/modules/contentbox-admin/views/widgets/docs.cfm:15` variable 'prc.oWidget' has no component ref |
 | 3 | `thispage → modules/contentbox/models/content/BaseContent.cfc` | 5 | low | declares getSlug(), setSlug() (5 candidates) | `modules/contentbox/models/content/PageService.cfc:40` variable 'thisPage' has no component ref |
+| 3 | `variables.ormservice → modules/contentbox/models/system/SiteService.cfc` | 4 | medium | declares getOrFail() | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:93` variable 'variables.ormService' has no component ref |
 | 2 | `activecontent → modules/contentbox/models/content/ContentVersion.cfc` | 6 | high | declares getAuthor(), hasAuthor() | `modules/contentbox/models/content/BaseContent.cfc:661` variable 'activeContent' has no component ref |
 | 2 | `args.menuitem → modules/contentbox/models/menu/item/MediaMenuItem.cfc` | 1 | medium | declares getMediaPath() | `modules/contentbox/modules/contentbox-admin/views/menus/providers/media/admin.cfm:10` variable 'args.menuItem' has no component ref |
 | 2 | `arguments.content → modules/contentbox/models/system/Site.cfc` | 1 | high | declares getSiteRoot(); named like the receiver 'Site' | `modules/contentbox/models/exporters/StaticExporter.cfc:273` variable 'arguments.content' has no component ref |
@@ -178,18 +175,18 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `thisgroup → modules/contentbox/models/security/PermissionGroup.cfc` | 1 | high | declares getPermissionGroupID(), getName() | `modules/contentbox/modules/contentbox-admin/views/authors/new.cfm:132` variable 'thisGroup' has no component ref |
 | 2 | `thisrole → modules/contentbox/models/security/Author.cfc` | 2 | low | declares getRole() (2 candidates) | `modules/contentbox/modules/contentbox-admin/views/securityRules/editor.cfm:173` variable 'thisRole' has no component ref |
 | 2 | `topcommented → modules/contentbox/models/content/BaseContent.cfc` | 4 | high | declares getTitle(), getNumberOfComments() | `modules/contentbox/modules/contentbox-admin/views/dashboard/latestSnapshot.cfm:55` variable 'topCommented' has no component ref |
-| 2 | `validationresult` | 0 | none |  | `modules/contentbox/models/validators/UniqueSiteFieldValidator.cfc:75` variable 'validationResult' has no component ref |
+| 2 | `validationresult` | 1 | none |  | `modules/contentbox/models/validators/UniqueSiteFieldValidator.cfc:75` variable 'validationResult' has no component ref |
 | 2 | `variables.cache` | 1 | none |  | `modules/contentbox/models/rss/RSSService.cfc:62` variable 'variables.cache' has no component ref |
 | 2 | `variables.settingservice → modules/contentbox/models/system/SettingService.cfc` | 2 | medium | declares getAllSettings(); named like the receiver 'settingService' (2 candidates) | `modules/contentbox/models/rss/RSSService.cfc:326` variable 'variables.settingService' has no component ref |
 | 2 | `variables[] → modules/contentbox/models/content/CategoryService.cfc` | 14 | low | declares getAllForExport() (14 candidates) | `modules/contentbox/models/exporters/ContentBoxExporter.cfc:235` variable 'variables[]' has no component ref |
 | 2 | `version → modules/contentbox/models/content/ContentVersion.cfc` | 4 | low | declares getIsActive(), setIsActive() (4 candidates) | `modules/contentbox/models/content/BaseContent.cfc:831` variable 'version' has no component ref |
-| 2 | `vresult` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/authors.cfc:550` variable 'vResult' has no component ref |
 | 2 | `widget → modules/contentbox/models/ui/Widget.cfc` | 2 | medium | declares getIcon(); named like the receiver 'widget' (2 candidates) | `modules/contentbox/models/ui/WidgetService.cfc:506` variable 'widget' has no component ref |
 | 1 | `activecontent → modules/contentbox/models/security/Author.cfc` | 5 | medium | declares getInfoSnapshot(); named like the receiver 'Author' (5 candidates) | `modules/contentbox/models/content/BaseContent.cfc:661` variable 'activeContent' has no component ref |
 | 1 | `application.cbcontroller → modules/contentbox/models/system/SettingService.cfc` | 3 | medium | declares getSetting() | `Application.cfc:156` variable 'application.cbController' has no component ref |
 | 1 | `application.wirebox` | 4 | none |  | `config/modules/cbfs.cfc:21` variable 'application.wirebox' has no component ref |
 | 1 | `args.ocontent → modules/contentbox/models/BaseEntityMethods.cfc` | 1 | medium | declares getDisplayCreatedDate() | `modules/contentbox/modules/contentbox-ui/views/adminbar/index.cfm:63` variable 'args.oContent' has no component ref |
 | 1 | `arguments.comment → modules/contentbox/models/content/BaseContent.cfc` | 3 | low | declares getContentType() (2 candidates) | `modules/contentbox/models/system/CBHelper.cfc:1748` variable 'arguments.comment' has no component ref |
+| 1 | `arguments.criteria` | 1 | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:66` variable 'arguments.criteria' has no component ref |
 | 1 | `arguments.data.comment → modules/contentbox/models/comments/Comment.cfc` | 7 | medium | declares getRelatedContent(); named like the receiver 'comment' (7 candidates) | `modules/contentbox/models/rss/RSSCacheCleanup.cfc:40` variable 'arguments.data.comment' has no component ref |
 | 1 | `arguments.data.comment → modules/contentbox/models/content/BaseContent.cfc` | 5 | low | declares getSlug() (5 candidates) | `modules/contentbox/models/rss/RSSCacheCleanup.cfc:40` variable 'arguments.data.comment' has no component ref |
 | 1 | `arguments.field → modules/contentbox/models/search/SearchResults.cfc` | 10 | medium | declares getMemento() | `modules/contentbox/modules/contentbox-admin/views/_components/editor/CustomFieldsHelper.cfm:6` variable 'arguments.field' has no component ref |
@@ -253,13 +250,14 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `variables.contentversions[] → modules/contentbox/models/content/ContentVersion.cfc` | 8 | low | declares getVersion() (4 candidates) | `modules/contentbox/models/content/BaseContent.cfc:847` variable 'variables.contentVersions[]' has no component ref |
 | 1 | `variables.editors[] → modules/contentbox/models/ui/editors/IEditor.cfc` | 8 | low | declares getDisplayName() (8 candidates) | `modules/contentbox/models/ui/editors/EditorService.cfc:128` variable 'variables.editors[]' has no component ref |
 | 1 | `variables.logger` | 3 | none |  | `modules/contentbox/models/security/AuthorService.cfc:205` variable 'variables.logger' has no component ref |
+| 1 | `variables.ormservice` | 3 | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:248` variable 'variables.ormService' has no component ref |
 | 1 | `variables.providers[] → modules/contentbox/models/security/twofactor/ITwoFactorProvider.cfc` | 8 | low | declares getDisplayName() (8 candidates) | `modules/contentbox/models/security/twofactor/TwoFactorService.cfc:114` variable 'variables.providers[]' has no component ref |
 | 1 | `variables.siteservice` | 2 | none |  | `tests/resources/BaseApiTest.cfc:164` variable 'variables.siteService' has no component ref |
 | 1 | `ziptemp` | 0 | none |  | `modules/contentbox/models/util/ZipUtil.cfc:253` variable 'zipTemp' has no component ref |
 
 <details><summary>Groups with several candidates</summary>
 
-- `arguments.site → modules/contentbox/models/system/Site.cfc` — 19 finding(s), 5 candidate(s):
+- `arguments.site → modules/contentbox/models/system/Site.cfc` — 18 finding(s), 5 candidate(s):
   - medium `modules/contentbox/models/system/Site.cfc` — declares getsiteID(); named like the receiver 'site'
   - low `modules/contentbox/models/content/BaseContent.cfc` — declares getsiteID()
   - low `modules/contentbox/models/content/Category.cfc` — declares getsiteID()
@@ -686,6 +684,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `method 'getInstance' in coldbox.system.ioc.Injector has no component return type → modules/contentbox/models/security/SecurityRule.cfc` | 2 | medium | declares setMessage() | `modules/contentbox/models/security/SecurityValidator.cfc:86` method 'getInstance' in coldbox.system.ioc.Injector has no component return type (chain to 'setMessage') |
 | 1 | `method 'getInstance' in coldbox.system.ioc.Injector has no component return type → modules/contentbox/models/system/CBHelper.cfc` | 1 | medium | declares site() | `modules/contentbox/models/content/ContentTemplateService.cfc:142` method 'getInstance' in coldbox.system.ioc.Injector has no component return type (chain to 'site') |
 | 1 | `method 'getResults' in SearchResults@contentbox has no component return type` | 1 | none |  | `tests/specs/contentbox-web/contentbox/unit/search/DBSearchTest.cfc:42` method 'getResults' in SearchResults@contentbox has no component return type (chain to 'size') |
+| 1 | `method 'getUser' in cbsecurity.models.jwt.JwtService has no component return type → modules/contentbox/models/search/SearchResults.cfc` | 10 | medium | declares getMemento() | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/auth.cfc:118` method 'getUser' in cbsecurity.models.jwt.JwtService has no component return type (chain to 'getMemento') |
 | 1 | `method 'getWidget' has no component return type → modules/contentbox/models/ui/BaseWidget.cfc` | 26 | low | declares renderit() (25 candidates) | `modules/contentbox/models/system/CBHelper.cfc:1814` method 'getWidget' has no component return type (chain to 'renderit') |
 | 1 | `method 'populate' has no component return type → modules/contentbox/models/content/BaseContent.cfc` | 6 | low | declares setSite() (6 candidates) | `modules/contentbox/modules/contentbox-admin/handlers/categories.cfc:96` method 'populate' has no component return type (chain to 'setSite') |
 | 1 | `method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type → modules/contentbox/models/content/BaseContent.cfc` | 7 | low | declares setRelatedContent() (7 candidates) | `modules/contentbox/models/content/ContentService.cfc:1204` method 'populateFromStruct' in coldbox.system.core.dynamic.ObjectPopulator has no component return type (chain to 'setRelatedContent') |
@@ -812,7 +811,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `getrecursiveslug` | 0 | none |  | `build/patches/1-0-4/Update.cfc:107` method 'getRecursiveSlug' not found in Page |
 | 1 | `renderexcerpt` | 2 | low | declares renderExcerpt; beside the calling file (2 candidates) | `modules/contentbox/models/content/BaseContent.cfc:1624` not found in extends chain |
 | 1 | `run` | 55 | low | declares run (49 candidates) | `tests/index.cfm:29` no qualifier, not in file |
-| 1 | `validate` | 5 | low | declares validate; beside the calling file (5 candidates) | `modules/contentbox/models/exporters/BaseExporter.cfc:60` no qualifier, not in file |
+| 1 | `validate` | 6 | low | declares validate; beside the calling file (5 candidates) | `modules/contentbox/models/exporters/BaseExporter.cfc:60` no qualifier, not in file |
 | 1 | `view` | 2 | none |  | `modules/contentbox/modules/contentbox-admin/helpers/Mixins.cfm:11` no qualifier, not in file |
 
 <details><summary>Groups with several candidates</summary>
@@ -868,13 +867,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 27 | `component 'coldbox.system.orm.hibernate.util.ORMUtilFactory' does not exist (chain hop 'getORMUtil' to 'getDefaultDatasource')` | 0 | none |  | `build/patches/1-0-7/Update.cfc:156` component 'coldbox.system.orm.hibernate.util.ORMUtilFactory' does not exist (chain hop 'getORMUtil' to 'getDefaultDatasource') |
 | 13 | `component 'cborm.models.util.ORMUtilFactory' does not exist (calling 'getORMUtil')` | 0 | none |  | `build/patches/3.0.0-beta/Update.cfc:511` component 'cborm.models.util.ORMUtilFactory' does not exist (calling 'getORMUtil') |
 | 13 | `component 'cborm.models.util.ORMUtilFactory' does not exist (chain hop 'getORMUtil' to 'getDefaultDatasource')` | 0 | none |  | `build/patches/3.0.0-beta/Update.cfc:511` component 'cborm.models.util.ORMUtilFactory' does not exist (chain hop 'getORMUtil' to 'getDefaultDatasource') |
-| 4 | `extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 2 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/authors.cfc:5` extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 2 inherited calls not checked |
-| 3 | `extends baseContentHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 2 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/contentStore.cfc:6` extends baseContentHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 2 inherited calls not checked |
-| 3 | `extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 3 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/comments.cfc:7` extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 3 inherited calls not checked |
 | 1 | `base component does not resolve; 1 inherited call not checked` | ? | none |  | `modules/contentbox/models/security/SecurityValidator.cfc:9` base component does not resolve; 1 inherited call not checked |
-| 1 | `base component does not resolve; 15 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseHandler.cfc:37` base component does not resolve; 15 inherited calls not checked |
 | 1 | `chained on 'cbfs', which is not found (calling 'getDisks')` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/sites.cfc:67` chained on 'cbfs', which is not found (calling 'getDisks') |
 | 1 | `chained on 'getCache', which is not found (calling 'getOrSet')` | 1 | none |  | `modules/contentbox/modules/contentbox-admin/helpers/Mixins.cfm:33` chained on 'getCache', which is not found (calling 'getOrSet') |
-| 1 | `chained on 'jwtAuth', which is not found (calling 'fromUser')` | 0 | none |  | `modules/contentbox/modules/contentbox-admin/handlers/baseContentHandler.cfc:331` chained on 'jwtAuth', which is not found (calling 'fromUser') |
-| 1 | `extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 13 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/auth.cfc:4` extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 13 inherited calls not checked |
-| 1 | `extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 4 inherited calls not checked` | ? | none |  | `modules/contentbox/modules/contentbox-api/modules/contentbox-api-v1/handlers/baseContentHandler.cfc:4` extends baseHandler, whose chain breaks at cborm.models.resources.BaseHandler, which does not resolve; 4 inherited calls not checked |

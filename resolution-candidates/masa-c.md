@@ -4,7 +4,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 4547 | 1829 | 843 | 765 | 1110 | 88 |
+| variable | 4541 | 1829 | 837 | 765 | 1110 | 88 |
 | return-type | 649 | 130 | 270 | 237 | 12 | 2 |
 | method | 62 | 0 | 12 | 35 | 15 | 15 |
 | object | 89 | 0 | 0 | 0 | 89 | 12 |
@@ -53,7 +53,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 28 | `item` | 1 | none |  | `admin/core/views/cchain/edit.cfm:63` variable 'item' has no component ref |
 | 28 | `parentbean → core/mura/content/contentBean.cfc` | 1 | high | declares getContentHistID(), getURL(), getActive(), getIsOnDisplay() | `admin/core/views/carch/dsp_close_compact_display.cfm:108` variable 'parentBean' has no component ref |
 | 28 | `variables.contentgateway → core/mura/content/contentGatewayAdobe.cfc` | 2 | high | declares getNest(), getTop() | `core/mura/content/contentManager.cfc:165` variable 'variables.contentGateway' has no component ref |
-| 26 | `apiutility → core/mura/client/api/json/v1/jsonApiUtility.cfc` | 1 | high | declares getApiVersion(), getParamsWithOutMethod(), getSerializer() | `core/mura/Handler/standardEventsHandler.cfc:813` variable 'apiUtility' has no component ref |
 | 26 | `arguments.content → core/mura/content/contentBean.cfc` | 25 | low | declares getAllValues() (25 candidates) | `core/mura/content/contentRendererUtility.cfc:1919` variable 'arguments.content' has no component ref |
 | 26 | `local.formbean → core/mura/content/contentBean.cfc` | 6 | high | declares getSubType(), getBody(), getContentID(), getResponseChart(), getResponseMessage(), getDisplayTitle() | `core/modules/v1/form/index.cfm:77` variable 'local.formBean' has no component ref |
 | 26 | `request.userbean → core/mura/user/userBean.cfc` | 6 | medium | declares getCategoryID(); named like the receiver 'userBean' (6 candidates) | `core/modules/v1/editprofile/dsp_categories_next.cfm:87` variable 'request.userBean' has no component ref |
@@ -67,6 +66,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 21 | `arguments.contentbean` | 14 | none |  | `core/mura/content/contentUtility.cfc:392` variable 'arguments.contentBean' has no component ref |
 | 21 | `arguments.feed → core/mura/content/feed/feedBean.cfc` | 9 | high | declares getEntityName(), setSortBy(), setOrderBy(), setIncludeHomePage(), setShowNavOnly(), setUseCategoryIntersect(), setShowExcludeSearch(), setValue(), s… | `core/mura/client/api/json/v1/jsonApiUtility.cfc:2989` variable 'arguments.feed' has no component ref |
 | 21 | `relatedcontentsets[] → core/mura/extend/extendRelatedContentSetBean.cfc` | 1 | high | declares getRelatedContentSetId(), getEntityType(), getDisplayName() | `admin/core/views/carch/loadrelatedcontent.cfm:101` variable 'relatedContentSets[]' has no component ref |
+| 20 | `apiutility → core/mura/client/api/json/v1/jsonApiUtility.cfc` | 1 | high | declares getApiVersion(), getParamsWithOutMethod(), getSerializer() | `core/mura/Handler/standardEventsHandler.cfc:813` variable 'apiUtility' has no component ref |
 | 20 | `arguments.entity` | 9 | none |  | `core/mura/client/api/json/v1/jsonApiUtility.cfc:2101` variable 'arguments.entity' has no component ref |
 | 19 | `rc.changeset → core/mura/content/changeset/changesetBean.cfc` | 1 | high | declares getPublished(), getIsNew(), getChangesetID(); named like the receiver 'changeset' | `admin/core/views/cchangesets/dsp_secondary_menu.cfm:84` variable 'rc.changeset' has no component ref |
 | 18 | `arguments.event → core/mura/plugin/pluginStandardEventWrapper.cfc` | 1 | medium | declares handle() | `core/mura/Handler/standardEventsHandler.cfc:246` variable 'arguments.event' has no component ref |

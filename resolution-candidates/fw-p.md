@@ -6,8 +6,8 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 |---|---:|---:|---:|---:|---:|---:|
 | variable | 224 | 81 | 23 | 94 | 26 | 17 |
 | return-type | 20 | 0 | 1 | 7 | 12 | 12 |
-| method | 33 | 0 | 15 | 7 | 11 | 11 |
-| object | 37 | 0 | 0 | 0 | 37 | 0 |
+| method | 38 | 0 | 18 | 9 | 11 | 11 |
+| object | 1 | 0 | 0 | 0 | 1 | 0 |
 
 ## Variable definitions — a receiver whose component is unknown
 
@@ -369,11 +369,13 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
 | 5 | `__config` | 1 | medium | declares __config; beside the calling file | `tests/coreFunctions.cfc:17` method '__config' not found in framework.one |
+| 3 | `buildurl` | 1 | medium | declares buildURL | `examples/modular/pages/main/default.cfm:4` no qualifier, not in file |
 | 3 | `enabletracing` | 0 | none |  | `tests/frameworkRenderTest.cfc:7` method 'enableTracing' not found in framework.one |
 | 3 | `proceed` | 0 | none |  | `framework/beanProxy.cfc:231` no qualifier, not in file |
-| 2 | `buildurl` | 1 | medium | declares buildURL | `examples/modular/pages/main/default.cfm:4` no qualifier, not in file |
 | 2 | `itemtest` | 1 | medium | declares itemTest | `tests/ExtraBeansTest.cfc:40` method 'itemTest' not found in user |
+| 2 | `setlayout` | 1 | medium | declares setLayout | `tests/onMissingViewLayoutTest.cfc:56` not found in extends chain |
 | 2 | `translateargs` | 0 | none |  | `tests/aop/interceptors/aop/BeforeInterceptor.cfc:12` not found in extends chain |
+| 2 | `view` | 2 | low | declares view (2 candidates) | `tests/onMissingViewLayoutTest.cfc:57` not found in extends chain |
 | 1 | `around` | 2 | low | declares around (2 candidates) | `framework/beanProxy.cfc:227` no qualifier, not in file |
 | 1 | `callback` | 0 | none |  | `framework/one.cfc:1278` no qualifier, not in file |
 | 1 | `getanswers` | 1 | medium | declares getAnswers | `examples/qBall/model/services/question.cfc:56` method 'getAnswers' not found in question |
@@ -393,6 +395,9 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 <details><summary>Groups with several candidates</summary>
 
+- `view` — 2 finding(s), 2 candidate(s):
+  - low `framework/one.cfc:1414` — declares view
+  - low `examples/qBall/controllers/question.cfc:77` — declares view
 - `around` — 1 finding(s), 2 candidate(s):
   - low `tests/aop/interceptors/aop/AroundInterceptor.cfc:9` — declares around
   - low `tests/issue518/interceptors/aop/AroundInterceptor.cfc:9` — declares around
@@ -436,30 +441,4 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Findings | Group | Defined | Confidence | Evidence | Example |
 |---:|---|---:|---|---|---|
-| 3 | `base component does not resolve; 12 inherited calls not checked` | ? | none |  | `tests/BasicBeanTest.cfc:1` base component does not resolve; 12 inherited calls not checked |
-| 3 | `base component does not resolve; 3 inherited calls not checked` | ? | none |  | `framework/WireBoxAdapter.cfc:1` base component does not resolve; 3 inherited calls not checked |
-| 3 | `base component does not resolve; 4 inherited calls not checked` | ? | none |  | `tests/AddBeanTest.cfc:1` base component does not resolve; 4 inherited calls not checked |
-| 2 | `base component does not resolve; 13 inherited calls not checked` | ? | none |  | `tests/ModelTest.cfc:1` base component does not resolve; 13 inherited calls not checked |
-| 2 | `base component does not resolve; 18 inherited calls not checked` | ? | none |  | `tests/DeclareBeanTest.cfc:1` base component does not resolve; 18 inherited calls not checked |
-| 2 | `base component does not resolve; 5 inherited calls not checked` | ? | none |  | `tests/FactoryBeanTest.cfc:1` base component does not resolve; 5 inherited calls not checked |
-| 2 | `base component does not resolve; 50 inherited calls not checked` | ? | none |  | `tests/CombinedInterceptorsTest.cfc:1` base component does not resolve; 50 inherited calls not checked |
-| 1 | `base component does not resolve; 10 inherited calls not checked` | ? | none |  | `tests/ParentTest.cfc:1` base component does not resolve; 10 inherited calls not checked |
-| 1 | `base component does not resolve; 11 inherited calls not checked` | ? | none |  | `tests/MappingTest.cfc:1` base component does not resolve; 11 inherited calls not checked |
-| 1 | `base component does not resolve; 14 inherited calls not checked` | ? | none |  | `tests/TransientInjectionTest.cfc:1` base component does not resolve; 14 inherited calls not checked |
-| 1 | `base component does not resolve; 16 inherited calls not checked` | ? | none |  | `tests/ExtraBeansTest.cfc:1` base component does not resolve; 16 inherited calls not checked |
-| 1 | `base component does not resolve; 17 inherited calls not checked` | ? | none |  | `tests/frameworkRenderTest.cfc:1` base component does not resolve; 17 inherited calls not checked |
-| 1 | `base component does not resolve; 19 inherited calls not checked` | ? | none |  | `tests/rest/DecodeTest.cfc:1` base component does not resolve; 19 inherited calls not checked |
-| 1 | `base component does not resolve; 20 inherited calls not checked` | ? | none |  | `tests/defaultargTest.cfc:1` base component does not resolve; 20 inherited calls not checked |
-| 1 | `base component does not resolve; 30 inherited calls not checked` | ? | none |  | `tests/BeanInfoTest.cfc:1` base component does not resolve; 30 inherited calls not checked |
-| 1 | `base component does not resolve; 58 inherited calls not checked` | ? | none |  | `tests/frameworkPopulateTest.cfc:1` base component does not resolve; 58 inherited calls not checked |
-| 1 | `base component does not resolve; 6 inherited calls not checked` | ? | none |  | `tests/frameworkErrorTest.cfc:1` base component does not resolve; 6 inherited calls not checked |
-| 1 | `base component does not resolve; 7 inherited calls not checked` | ? | none |  | `tests/singletonPatternTest.cfc:1` base component does not resolve; 7 inherited calls not checked |
-| 1 | `base component does not resolve; 8 inherited calls not checked` | ? | none |  | `tests/defaultPropertyTest.cfc:1` base component does not resolve; 8 inherited calls not checked |
-| 1 | `base component does not resolve; 9 inherited calls not checked` | ? | none |  | `tests/InjectPropertiesTest.cfc:1` base component does not resolve; 9 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 14 inherited calls not checked` | ? | none |  | `tests/frameworkResourceRoutesTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 14 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 23 inherited calls not checked` | ? | none |  | `tests/frameworkProcessRoutesTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 23 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 37 inherited calls not checked` | ? | none |  | `tests/frameworkEnvTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 37 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 4 inherited calls not checked` | ? | none |  | `tests/DisableLayoutTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 4 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 51 inherited calls not checked` | ? | none |  | `tests/frameworkRouteTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 51 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 7 inherited calls not checked` | ? | none |  | `tests/onMissingViewLayoutTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 7 inherited calls not checked |
-| 1 | `extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 8 inherited calls not checked` | ? | none |  | `tests/onSessionStartBuildURLTest.cfc:1` extends tests.InjectableTest, whose chain breaks at mxunit.framework.TestCase, which does not resolve; 8 inherited calls not checked |
+| 1 | `base component does not resolve; 3 inherited calls not checked` | ? | none |  | `framework/WireBoxAdapter.cfc:1` base component does not resolve; 3 inherited calls not checked |

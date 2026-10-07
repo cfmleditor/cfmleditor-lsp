@@ -4,7 +4,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 158 | 19 | 39 | 9 | 91 | 67 |
+| variable | 157 | 19 | 38 | 9 | 91 | 67 |
 | return-type | 27 | 5 | 18 | 1 | 3 | 3 |
 | method | 63 | 0 | 48 | 4 | 11 | 11 |
 | object | 10 | 0 | 0 | 0 | 10 | 8 |
@@ -28,12 +28,12 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 4 | `arguments.spec` | 0 | none |  | `system/BaseSpec.cfc:1810` variable 'arguments.spec' has no component ref |
 | 4 | `attributes.callbacks` | 0 | none |  | `system/runners/BDDRunner.cfc:265` variable 'attributes.callbacks' has no component ref |
 | 4 | `thread.target → system/BaseSpec.cfc` | 1 | medium | declares runSpec() | `system/runners/BDDRunner.cfc:284` variable 'thread.target' has no component ref |
-| 4 | `variables.spec → system/BaseSpec.cfc` | 1 | medium | declares expect() | `system/CollectionExpectation.cfc:119` variable 'variables.spec' has no component ref |
 | 3 | `arguments.runner → system/TestBox.cfc` | 1 | high | declares announceToModules(); named like the receiver 'TestBox' | `system/BaseSpec.cfc:1129` variable 'arguments.runner' has no component ref |
 | 3 | `arguments.runner → system/runners/BaseRunner.cfc` | 1 | high | declares canRunLabel(), canRunSpec() | `system/BaseSpec.cfc:1438` variable 'arguments.runner' has no component ref |
 | 3 | `arguments.target → tests/specs/BDDInheritanceTest.cfc` | 39 | low | declares run(), beforeAll(), afterAll() (19 candidates) | `system/runners/BDDRunner.cfc:51` variable 'arguments.target' has no component ref |
 | 3 | `attributes.service → system/util/StreamingService.cfc` | 1 | high | declares queueEvent(), streamEvent() | `tests/specs/streaming/StreamingServiceTest.cfc:452` variable 'attributes.service' has no component ref |
 | 3 | `spec` | 0 | none |  | `tests/specs/BDDLifecycleTest.cfc:34` variable 'spec' has no component ref |
+| 3 | `variables.spec → system/BaseSpec.cfc` | 1 | medium | declares expect() | `system/Expectation.cfc:1853` variable 'variables.spec' has no component ref |
 | 2 | `arguments.suite → system/BaseSpec.cfc` | 1 | medium | declares beforeEach() | `system/BaseSpec.cfc:1259` variable 'arguments.suite' has no component ref |
 | 2 | `nextclosure` | 0 | none |  | `system/BaseSpec.cfc:1357` variable 'nextClosure' has no component ref |
 | 2 | `this.mockbox → system/MockBox.cfc` | 1 | high | declares normalizeArguments(); named like the receiver 'mockBox' | `system/MockBox.cfc:400` variable 'this.mockBox' has no component ref |

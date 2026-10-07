@@ -4,7 +4,7 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 
 | Category | Findings | high | medium | low | none | method defined nowhere |
 |---|---:|---:|---:|---:|---:|---:|
-| variable | 1800 | 392 | 305 | 603 | 500 | 306 |
+| variable | 1795 | 390 | 304 | 601 | 500 | 306 |
 | return-type | 148 | 18 | 43 | 74 | 13 | 11 |
 | method | 210 | 0 | 100 | 75 | 35 | 32 |
 | object | 218 | 0 | 1 | 2 | 215 | 3 |
@@ -208,7 +208,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `local.assoc → vendor/wheels/interfaces/model/ModelPropertyInterface.cfc` | 4 | low | declares key() (2 candidates) | `vendor/wheels/view/formsassociation.cfc:147` variable 'local.assoc' has no component ref |
 | 2 | `local.auth → vendor/wheels/auth/Authenticator.cfc` | 1 | high | declares authenticateWith(), authenticate() | `vendor/wheels/middleware/AuthMiddleware.cfc:85` variable 'local.auth' has no component ref |
 | 2 | `local.authenticator → vendor/wheels/auth/Authenticator.cfc` | 2 | high | declares getStrategyNames(), getStrategy(); named like the receiver 'authenticator' | `vendor/wheels/controller/authorization.cfc:264` variable 'local.authenticator' has no component ref |
-| 2 | `local.bridge → vendor/wheels/public/CliBridge.cfc` | 1 | high | declares handles(), dispatch() | `vendor/wheels/public/views/cli.cfm:81` variable 'local.bridge' has no component ref |
 | 2 | `local.col → vendor/wheels/migrator/ColumnDefinition.cfc` | 2 | low | declares toSQL() (2 candidates) | `vendor/wheels/databaseAdapters/Oracle/OracleMigrator.cfc:55` variable 'local.col' has no component ref |
 | 2 | `local.entries` | 0 | none |  | `vendor/wheels/global/tags.cfm:629` variable 'local.entries' has no component ref |
 | 2 | `local.entry.strategy → vendor/wheels/auth/AuthStrategy.cfc` | 12 | low | declares authenticate() (12 candidates) | `vendor/wheels/auth/Authenticator.cfc:149` variable 'local.entry.strategy' has no component ref |
@@ -241,7 +240,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 2 | `variables.$classloader → cli/lucli/services/deploy/lib/JarLoader.cfc` | 1 | medium | declares loadClass() | `vendor/wheels/wheelstest/BrowserLauncher.cfc:430` variable 'variables.$classLoader' has no component ref |
 | 2 | `variables.context` | 0 | none |  | `vendor/wheels/wheelstest/BrowserClient.cfc:484` variable 'variables.context' has no component ref |
 | 2 | `variables.sink → vendor/wheels/wheelstest/system/BaseSpec.cfc` | 2 | medium | declares println() | `cli/lucli/services/deploy/lib/Output.cfc:29` variable 'variables.sink' has no component ref |
-| 2 | `variables.spec → vendor/wheels/wheelstest/system/BaseSpec.cfc` | 3 | low | declares expect() (2 candidates) | `vendor/wheels/wheelstest/system/CollectionExpectation.cfc:40` variable 'variables.spec' has no component ref |
 | 2 | `variables.wheels.class.adapter → vendor/wheels/databaseAdapters/H2/H2Model.cfc` | 7 | low | declares $upsertSQL(), $querySetup() (6 candidates) | `vendor/wheels/model/bulk.cfm:134` variable 'variables.wheels.class.adapter' has no component ref |
 | 2 | `variables.wheels.class.adapter → vendor/wheels/databaseAdapters/Oracle/OracleModel.cfc` | 2 | high | declares $bulkInsertSQL(), $querySetup() | `vendor/wheels/model/bulk.cfm:45` variable 'variables.wheels.class.adapter' has no component ref |
 | 1 | `a → cli/lucli/services/deploy/config/Accessory.cfc` | 9 | low | declares name() (9 candidates) | `cli/lucli/tests/specs/deploy/config/AccessorySpec.cfc:15` variable 'a' has no component ref |
@@ -380,7 +378,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
 | 1 | `variables.migration.adapter → vendor/wheels/databaseAdapters/CockroachDB/CockroachDBMigrator.cfc` | 7 | low | declares adapterName() (7 candidates) | `vendor/wheels/tests/specs/hardener/MigratorHardenerShouldSpec.cfc:26` variable 'variables.migration.adapter' has no component ref |
 | 1 | `variables.modelreference` | 1 | none |  | `vendor/wheels/model/query/ScopeChain.cfc:46` variable 'variables.modelReference' has no component ref |
 | 1 | `variables.page → vendor/wheels/interfaces/model/ModelFinderInterface.cfc` | 4 | low | declares reload() (2 candidates) | `vendor/wheels/wheelstest/BrowserClient.cfc:60` variable 'variables.page' has no component ref |
-| 1 | `variables.pool → cli/lucli/services/deploy/lib/SshPool.cfc` | 1 | medium | declares getConnection() | `cli/lucli/services/deploy/lib/SshPoolTask.cfc:25` variable 'variables.pool' has no component ref |
 | 1 | `variables.securerandom` | 0 | none |  | `vendor/wheels/auth/PasswordHasher.cfc:349` variable 'variables.secureRandom' has no component ref |
 | 1 | `variables.simpleservice → vendor/wheels/tests/_assets/di/SimpleService.cfc` | 2 | medium | declares greet(); named like the receiver 'simpleService' (2 candidates) | `vendor/wheels/tests/_assets/di/DependentService.cfc:17` variable 'variables.simpleService' has no component ref |
 | 1 | `yamlctors[]` | 0 | none |  | `cli/lucli/services/deploy/lib/Yaml.cfc:150` variable 'yamlCtors[]' has no component ref |
@@ -816,9 +813,6 @@ Every finding below is still reported. A candidate is a liberal match offered fo
   - low `vendor/wheels/tests/_assets/packages_sp/failregister/Failregister.cfc` — declares register()
   - low `vendor/wheels/tests/_assets/packages_sp/goodsp/Goodsp.cfc` — declares register()
   - … 3 more
-- `variables.spec → vendor/wheels/wheelstest/system/BaseSpec.cfc` — 2 finding(s), 2 candidate(s):
-  - low `vendor/wheels/wheelstest/system/BaseSpec.cfc` — declares expect()
-  - low `cli/lucli/services/deploy/lib/FakeSshPool.cfc` — declares expect()
 - `variables.wheels.class.adapter → vendor/wheels/databaseAdapters/H2/H2Model.cfc` — 2 finding(s), 6 candidate(s):
   - low `vendor/wheels/databaseAdapters/H2/H2Model.cfc` — declares $upsertSQL(), $querySetup()
   - low `vendor/wheels/databaseAdapters/MicrosoftSQLServer/MicrosoftSQLServerModel.cfc` — declares $upsertSQL(), $querySetup()
