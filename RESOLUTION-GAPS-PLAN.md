@@ -2348,15 +2348,8 @@ there. When a policy's own folders hold two beans of a name (qBall's
 DI/1 fills only with a singleton, takes the one that is not transient
 (`beanIn(name, singletonOnly)`, `transient`).
 
-Measured: fw-p −17/+2. The 2 added are a resolution error that was already
-there, now visible because the services are typed. `entityNew( "question" )`
-in `services/question.cfc` resolves the bare name relative to the calling
-directory, finding the service itself rather than the persistent
-`beans/question.cfc`, which comes later (`Index.LookupEntity`). Fixing it needs
-the parser to mark a name passed to `entityNew()`/`entityLoad()` as an entity
-name, so the resolver looks it up as an entity first. Component types travel as
-plain strings, and doing it at parse time against a partly built index would
-make results depend on scan order, so it is left recorded here.
+Measured: fw-p −17/+2. The 2 added were a resolution error that was already
+there, now visible because the services are typed; the next section fixes it.
 `TestFW1AutowiresItsControllersWhateverDILocationsSays`.
 
 ### CommandBox's getInstance() takes WireBox ids
@@ -2368,3 +2361,23 @@ coldbox preset registered `idResolver("getInstance")` and the DSL resolvers,
 so under the commandbox preset alone the id typed nothing. The commandbox
 preset now carries both. Measured: cw-p −67, tb-p −1, nothing added.
 `TestEveryPresetResolverMatchesItsOwnNames` has the case.
+
+### An entity name is an entity, not the file beside the caller
+
+`entityNew( "question" )` in FW/1 qBall's `services/question.cfc` was read as a
+path, which found that service itself rather than the persistent
+`beans/question.cfc`. The parser now marks a name passed to `entityNew()`,
+`entityLoad()` or `entityLoadByPk()` as an entity name (`parser.EntityPrefix`,
+`entity:Name`), in both syntaxes. The resolver looks such a name up as an
+entity first and falls back to reading it as a path (`componentPathUncached`,
+`nearestEntity`); `displayComponent` drops the prefix. The batch index now also
+keeps persistent components that name no `entityname`, whose entity is called
+after the file, as candidates per name (`Index.EntityCandidates`), as the editor
+already registered them. An explicit `entityname` wins; otherwise the candidate
+nearest the caller does, the lowest path among equals, since several
+applications in one workspace each have one.
+
+A first attempt preferred an entity for any bare name; it changed nothing in
+fw-p and added 8 wrong findings in lucee, and was dropped. Measured with the
+marked name: fw-p −12, nothing added; the full short test suite and
+gapcheck pass. `TestAnEntityNameIsTheEntityNotTheFileBesideTheCaller`.

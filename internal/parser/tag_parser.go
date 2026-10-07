@@ -1450,7 +1450,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 
 	case hasPrefixFold(rhs, "entitynew("):
-		comp := extractEntityNewArg(rhs[10:])
+		comp := entityRef(extractEntityNewArg(rhs[10:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
@@ -1458,7 +1458,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 	case hasPrefixFold(rhs, "entityload("):
-		comp := extractEntityNewArg(rhs[11:])
+		comp := entityRef(extractEntityNewArg(rhs[11:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
@@ -1466,7 +1466,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 	case hasPrefixFold(rhs, "entityloadbypk("):
-		comp := extractEntityNewArg(rhs[15:])
+		comp := entityRef(extractEntityNewArg(rhs[15:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,

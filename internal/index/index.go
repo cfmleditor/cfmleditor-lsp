@@ -3,6 +3,7 @@ package index
 
 import (
 	"net/url"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -28,7 +29,11 @@ type Index struct {
 	fileURIs  map[string]uri.URI                           // lowercase URI -> the file's URI as indexed, in its real case; kept with fileFuncs
 	beans     map[string]string                            // lowercase bean name -> dot-path
 	entities  map[string]uri.URI                           // lowercase entity name -> file URI
-	includes  map[string]fileIncludes                      // lowercase URI -> the paths that file cfincludes
+	// defaultEntities holds persistent components that name no entityname,
+	// whose entity is called after the file: several applications in one
+	// workspace may each have one, so every candidate is kept.
+	defaultEntities map[string][]uri.URI
+	includes        map[string]fileIncludes // lowercase URI -> the paths that file cfincludes
 	// includeGen counts changes to includes, so a reader that derives something
 	// from all of them — the resolver's reverse map — can tell when to rebuild.
 	includeGen uint64
@@ -62,18 +67,19 @@ type fileIncludes struct {
 // New creates an empty Index.
 func New() *Index {
 	return &Index{
-		funcs:     make(map[string][]*parser.FunctionDef),
-		fileFuncs: make(map[string][]*parser.FunctionDef),
-		comprefs:  make(map[string][]*parser.ComponentRef),
-		fileRefs:  make(map[string][]*parser.ComponentRef),
-		thisVars:  make(map[string][]string),
-		scopeRefs: make(map[string]map[string][]*parser.ComponentRef),
-		extends:   make(map[string]string),
-		delegates: make(map[string][]parser.Delegate),
-		fileURIs:  make(map[string]uri.URI),
-		beans:     make(map[string]string),
-		entities:  make(map[string]uri.URI),
-		includes:  make(map[string]fileIncludes),
+		funcs:           make(map[string][]*parser.FunctionDef),
+		fileFuncs:       make(map[string][]*parser.FunctionDef),
+		comprefs:        make(map[string][]*parser.ComponentRef),
+		fileRefs:        make(map[string][]*parser.ComponentRef),
+		thisVars:        make(map[string][]string),
+		scopeRefs:       make(map[string]map[string][]*parser.ComponentRef),
+		extends:         make(map[string]string),
+		delegates:       make(map[string][]parser.Delegate),
+		fileURIs:        make(map[string]uri.URI),
+		beans:           make(map[string]string),
+		entities:        make(map[string]uri.URI),
+		defaultEntities: make(map[string][]uri.URI),
+		includes:        make(map[string]fileIncludes),
 	}
 }
 
@@ -526,6 +532,9 @@ func (idx *Index) indexParseResult(fileURI uri.URI, content string, pr *parser.P
 	// entityNew( "cbAuthor" ) names it.
 	if name := pr.EntityName(); name != "" && pr.Persistent {
 		idx.entities[strings.ToLower(name)] = uri.URI(strings.Clone(string(fileURI)))
+	} else if pr.Persistent {
+		name := strings.ToLower(strings.TrimSuffix(path.Base(string(fileURI)), path.Ext(string(fileURI))))
+		idx.defaultEntities[name] = append(idx.defaultEntities[name], uri.URI(strings.Clone(string(fileURI))))
 	}
 
 	idx.setIncludesLocked(fileURI, parser.ExtractIncludes(content))
@@ -627,6 +636,11 @@ func (idx *Index) RemoveFile(fileURI uri.URI) {
 		if uriKey(u) == key {
 			delete(idx.entities, name)
 		}
+	}
+
+	name := strings.ToLower(strings.TrimSuffix(path.Base(string(fileURI)), path.Ext(string(fileURI))))
+	if list := idx.defaultEntities[name]; len(list) > 0 {
+		idx.defaultEntities[name] = slices.DeleteFunc(list, func(u uri.URI) bool { return uriKey(u) == key })
 	}
 }
 
@@ -1037,6 +1051,23 @@ func (idx *Index) SetEntity(name string, fileURI uri.URI) {
 	idx.mu.Lock()
 	idx.entities[strings.ToLower(name)] = fileURI
 	idx.mu.Unlock()
+}
+
+// EntityCandidates are the files an ORM entity name may name: the one whose
+// entityname it is, or else every persistent component called after it,
+// sorted, for the caller to choose the nearest.
+func (idx *Index) EntityCandidates(name string) []uri.URI {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	if u, ok := idx.entities[strings.ToLower(name)]; ok {
+		return []uri.URI{u}
+	}
+
+	out := slices.Clone(idx.defaultEntities[strings.ToLower(name)])
+	slices.Sort(out)
+
+	return out
 }
 
 // LookupEntity returns the file URI for an ORM entity name (case-insensitive).

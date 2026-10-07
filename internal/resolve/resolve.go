@@ -313,6 +313,16 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	// An ORM entity named by entityNew()/entityLoad(): the entity of that
+	// name, else the name read as a path, as it was before it was marked.
+	if name, ok := strings.CutPrefix(component, parser.EntityPrefix); ok {
+		if p := r.nearestEntity(name, baseDir); p != "" {
+			return p
+		}
+
+		return r.ComponentPath(name, baseDir)
+	}
+
 	// A WireBox id with its module: `Name@module`.
 	if strings.Contains(component, "@") {
 		p, _ := r.wireboxID(component, baseDir)
@@ -1049,6 +1059,26 @@ func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bo
 	r.Index.SetExtends(cfcURI, ext)
 
 	return ext, true
+}
+
+// nearestEntity is the file an ORM entity name names from baseDir: the one
+// whose entityname it is, else the persistent component called after it
+// nearest baseDir, the lowest path among equals.
+func (r *Resolver) nearestEntity(name, baseDir string) string {
+	if r.Index == nil {
+		return ""
+	}
+
+	from := string(cfpath.ToURI(filepath.Join(baseDir, "x.cfc")))
+	best, bestDist := "", -1
+
+	for _, u := range r.Index.EntityCandidates(name) {
+		if d := cfpath.URIDistance(from, string(u)); bestDist < 0 || d < bestDist {
+			best, bestDist = cfpath.FromURI(string(u)), d
+		}
+	}
+
+	return best
 }
 
 // ResolveFunc finds a function definition by component path and function name,
@@ -2892,6 +2922,8 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 // a reason is written into a known-issues file that is committed and read on
 // other machines, where an absolute path would not mean anything.
 func displayComponent(comp string) string {
+	comp = strings.TrimPrefix(comp, parser.EntityPrefix)
+
 	if filepath.IsAbs(comp) {
 		return strings.TrimSuffix(filepath.Base(comp), filepath.Ext(comp))
 	}

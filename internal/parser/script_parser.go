@@ -2984,7 +2984,22 @@ func (p *scriptParser) readEntityNewComponent() string {
 		return ""
 	}
 
-	return unquote(arg.Value)
+	return entityRef(unquote(arg.Value))
+}
+
+// EntityPrefix marks a component named as an ORM entity, by entityNew() or
+// entityLoad(): the name is an entityname, which the resolver looks up as
+// one before reading it as a path. Read as a path, entityNew( "question" ) in
+// FW/1's services/question.cfc named that service, beside it.
+const EntityPrefix = "entity:"
+
+// entityRef is name marked as an entity name, or "" for none.
+func entityRef(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	return EntityPrefix + name
 }
 
 // parseBodyVarDecl handles: var name = expr inside a function body.
@@ -3966,7 +3981,7 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 		return
 	}
 
-	comp := unquote(arg.Value)
+	comp := entityRef(unquote(arg.Value))
 	if comp != "" {
 		p.addRef(&ComponentRef{
 			Variable: varName, Component: comp,

@@ -520,8 +520,10 @@ func TestParseComponentRefs_CreateObject(t *testing.T) {
 }
 
 func TestParseComponentRefs_EntityNew(t *testing.T) {
+	// An entity name is marked as one (EntityPrefix), so the resolver looks
+	// it up as an entity before reading it as a path.
 	refs := ParseComponentRefs(testURI, `component { user = entityNew("User") }`)
-	assertFirstRef(t, refs, "user", "User")
+	assertFirstRef(t, refs, "user", EntityPrefix+"User")
 }
 
 func TestParseComponentRefs_CfObject(t *testing.T) {
@@ -976,8 +978,8 @@ func TestFunctionDef_ReturnType(t *testing.T) {
 		t.Errorf("expected ReturnComponent 'services.UserService', got %q", pr.Funcs[1].ReturnComponent)
 	}
 
-	if pr.Funcs[2].ReturnComponent != "Order" {
-		t.Errorf("expected ReturnComponent 'Order', got %q", pr.Funcs[2].ReturnComponent)
+	if pr.Funcs[2].ReturnComponent != EntityPrefix+"Order" {
+		t.Errorf("expected ReturnComponent 'entity:Order', got %q", pr.Funcs[2].ReturnComponent)
 	}
 
 	if pr.Funcs[3].ReturnType != "string" {
@@ -2217,7 +2219,7 @@ func TestScriptParser_AllRefTypes(t *testing.T) {
 	pr := Parse(testURI, content)
 
 	// Global refs: a, b, c, d, i (variables. inside func with forceGlobal)
-	globals := map[string]string{"a": "models.A", "b": "models.B", "c": "EntityC", "d": "EntityD", "i": "models.I"}
+	globals := map[string]string{"a": "models.A", "b": "models.B", "c": EntityPrefix + "EntityC", "d": EntityPrefix + "EntityD", "i": "models.I"}
 	for _, ref := range pr.ComponentRefs {
 		if expected, ok := globals[ref.Variable]; ok {
 			if ref.Component != expected {
@@ -2235,7 +2237,7 @@ func TestScriptParser_AllRefTypes(t *testing.T) {
 	// Function refs: e, f, g, h
 	scope := pr.Scopes[0]
 	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
-	locals := map[string]string{"e": "models.E", "f": "models.F", "g": "EntityG", "h": "models.H"}
+	locals := map[string]string{"e": "models.E", "f": "models.F", "g": EntityPrefix + "EntityG", "h": "models.H"}
 
 	for _, ref := range funcRefs {
 		if expected, ok := locals[ref.Variable]; ok {
