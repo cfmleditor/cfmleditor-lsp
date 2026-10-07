@@ -192,31 +192,90 @@ func quotedNameLines(content, name string) []int {
 	return out
 }
 
-var initArgAssignRe = regexp.MustCompile(`(?i)^\s*(?:variables\.)?(\w+)\s*=\s*arguments\.(\w+)\s*;?\s*$`)
+var (
+	initArgAssignRe = regexp.MustCompile(`(?i)^\s*(?:variables\.)?(\w+)\s*=\s*arguments\.(\w+)\s*;?\s*$`)
+	initArgSetRe    = regexp.MustCompile(`(?i)^\s*(?:this\.|variables\.)?set(\w+)\(\s*arguments\.(\w+)\s*\)\s*;?\s*$`)
+)
 
-// initArgMember is what variables.name holds when its only assignments in the
-// file are `variables.name = arguments.p` inside init: what every
-// construction passes as p.
+// initArgMember is what variables.name holds when the file stores only an
+// init argument in it (initStoredArg): what every construction passes.
 func (r *Resolver) initArgMember(variable string, pr *parser.ParseResult, ctx lookupCtx) string {
 	name, ok := strings.CutPrefix(strings.ToLower(variable), "variables.")
 	if !ok || name == "" || strings.ContainsAny(name, ".[(") || !pr.URI.IsFile() {
 		return ""
 	}
 
+	return r.initArgType(pr, initStoredArg(pr, name), ctx)
+}
+
+// initArgGetter is what the generated getter def returns when its property is
+// only ever stored from an init argument: BoxLangStats' init does
+// `setCacheProvider( arguments.cacheProvider )` and reads it back through
+// getCacheProvider(). A getter the file writes itself is not generated.
+func (r *Resolver) initArgGetter(def *parser.FunctionDef) string {
+	if def == nil || !def.URI.IsFile() || len(def.Name) <= 3 || !strings.EqualFold(def.Name[:3], "get") {
+		return ""
+	}
+
+	pr := r.handlerParse(def.URI.Path())
+	if pr == nil {
+		return ""
+	}
+
+	// A getter the index holds and the source never writes is the one
+	// generated for a property.
+	name := def.Name[3:]
+	if hasWrittenFunc(pr, def.Name) {
+		return ""
+	}
+
+	return r.initArgType(pr, initStoredArg(pr, name), lookupCtx{})
+}
+
+// initArgType is what init's argument param holds: its declared component
+// type (BoxLangStats documents its provider's), else what every construction
+// passes it.
+func (r *Resolver) initArgType(pr *parser.ParseResult, param string, ctx lookupCtx) string {
+	if param == "" {
+		return ""
+	}
+
+	if arg := argumentOf(pr, "init", param); arg != nil && strings.Contains(arg.Type, ".") {
+		return arg.Type
+	}
+
+	return r.argumentFromCallers("arguments."+param, "init", pr, ctx)
+}
+
+// hasWrittenFunc reports whether pr's source declares a function called name,
+// as opposed to one generated for a property.
+func hasWrittenFunc(pr *parser.ParseResult, name string) bool {
+	return regexp.MustCompile(`(?i)\bfunction\s+` + regexp.QuoteMeta(name) + `\s*\(|<cffunction[^>]+name\s*=\s*["']` + regexp.QuoteMeta(name) + `["']`).MatchString(pr.Content)
+}
+
+// initStoredArg is the init argument p when every write to name in pr is
+// `variables.name = arguments.p` or `setName( arguments.p )` inside init, and
+// "" otherwise.
+func initStoredArg(pr *parser.ParseResult, name string) string {
 	scope, ok := funcScope(pr, "init")
 	if !ok {
 		return ""
 	}
 
-	assign := regexp.MustCompile(`(?i)(?:^|[^\w.])(?:variables\.)?` + regexp.QuoteMeta(name) + `\s*=[^=]`)
+	q := regexp.QuoteMeta(name)
+	write := regexp.MustCompile(`(?i)(?:(?:^|[^\w.])(?:variables\.)?` + q + `\s*=[^=])|(?:\bset` + q + `\s*\()`)
 	param := ""
 
 	for i, line := range strings.Split(pr.Content, "\n") {
-		if !assign.MatchString(line) {
+		if !write.MatchString(line) {
 			continue
 		}
 
 		m := initArgAssignRe.FindStringSubmatch(line)
+		if m == nil {
+			m = initArgSetRe.FindStringSubmatch(line)
+		}
+
 		if m == nil || !strings.EqualFold(m[1], name) || i < scope.Start || i > scope.End || param != "" && !strings.EqualFold(param, m[2]) {
 			return ""
 		}
@@ -224,9 +283,5 @@ func (r *Resolver) initArgMember(variable string, pr *parser.ParseResult, ctx lo
 		param = m[2]
 	}
 
-	if param == "" {
-		return ""
-	}
-
-	return r.argumentFromCallers("arguments."+param, "init", pr, ctx)
+	return param
 }

@@ -61,3 +61,57 @@ func TestAConstructorArgumentIsWhatEveryConstructionPasses(t *testing.T) {
 		"variables.helpers.pluralize": "variable 'variables.helpers' has no component ref",
 	})
 }
+
+// TestAGeneratedGetterReturnsTheInitArgumentItsSetterStored: ColdBox's
+// BoxLangStats keeps its provider through accessors, `setCacheProvider(
+// arguments.cacheProvider )` in init, and reads it as getCacheProvider().
+// A setter called anywhere else leaves the getter untyped.
+func TestAGeneratedGetterReturnsTheInitArgumentItsSetterStored(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Stats.cfc": `component accessors="true" {
+	property name="cacheProvider";
+	function init( required cacheProvider ){
+		setCacheProvider( arguments.cacheProvider );
+		return this;
+	}
+	function ratio(){ return getCacheProvider().getHits(); }
+}`,
+		"Loose.cfc": `component accessors="true" {
+	property name="cacheProvider";
+	function init( required cacheProvider ){
+		setCacheProvider( arguments.cacheProvider );
+		return this;
+	}
+	function swap( p ){ setCacheProvider( p ); }
+	function ratio(){ return getCacheProvider().getHits(); }
+}`,
+		"Provider.cfc": `component {
+	function getHits(){ return 1; }
+	function stats(){ return new Stats( this ); }
+	function loose(){ return new Loose( this ); }
+}`,
+		"lib/Hits.cfc": `component { function getHits(){ return 1; } }`,
+		"Typed.cfc": `component accessors="true" {
+	property name="cacheProvider";
+	function init( required lib.Hits cacheProvider ){
+		setCacheProvider( arguments.cacheProvider );
+		return this;
+	}
+	function ratio(){ return getCacheProvider().getHits(); }
+}`,
+	})
+
+	r := &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}
+
+	expectReasons(t, reasonsWith(t, r, dir, "Stats.cfc"), map[string]string{
+		"getCacheProvider.getHits": "",
+	})
+	// Nothing constructs Typed; its argument's declared type answers.
+	expectReasons(t, reasonsWith(t, r, dir, "Typed.cfc"), map[string]string{
+		"getCacheProvider.getHits": "",
+	})
+	expectReasons(t, reasonsWith(t, r, dir, "Loose.cfc"), map[string]string{
+		"getCacheProvider.getHits": "method 'getCacheProvider' has no component return type (chain to 'getHits')",
+	})
+}

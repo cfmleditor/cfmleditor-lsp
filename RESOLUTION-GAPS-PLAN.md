@@ -2234,7 +2234,19 @@ Measured: cw-p −3, tb-p −1 (`CollectionExpectation`'s `variables.spec`, a
 (cw-p 9.4s, masa-c 12.5s). The case it was written for, cfwheels' CLI
 `Templates`, stays untyped for a real reason: its one construction passes
 `helpers = getService( "helpers" )`, a service locator keyed by name.
-ColdBox's `BoxLangStats` (29) is also not reached: it stores the argument
-through `setCacheProvider()` and reads it back through the generated
-`getCacheProvider()`, which this does not follow.
 `TestAConstructorArgumentIsWhatEveryConstructionPasses`.
+
+### A generated getter returns the init argument its setter stored
+
+ColdBox's `BoxLangStats` stores its provider through accessors:
+`setCacheProvider( arguments.cacheProvider )` in init, read back as
+`getCacheProvider().getCache()`. `initArgGetter` answers a chain hop on a
+generated getter when every write to the property in the file is
+`variables.x = arguments.p` or `setX( arguments.p )` inside init
+(`initStoredArg`). A setter called anywhere else leaves it untyped.
+`initArgType` answers with the argument's declared component type when it is
+dotted (BoxLangStats documents `ICacheProvider` through `@cacheProvider.doc_generic`),
+and otherwise with what every construction passes. Both the qualified-hop and
+the bare-chain paths ask; the qualified one moved into `untypedHop` to keep
+`walkHops` under the complexity limit. Measured: cx-p −29, nothing added.
+`TestAGeneratedGetterReturnsTheInitArgumentItsSetterStored`.

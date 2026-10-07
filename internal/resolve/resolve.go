@@ -1500,38 +1500,57 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if ret == "" {
-			// What an untyped hop returns is a mock when the next call on it
-			// is one MockBox adds: `c.getRequestService().$( "getContext", x )`.
-			next := funcName
-			if i+1 < len(call.Chain) {
-				next = parser.CallHopName(call.Chain[i+1])
-			}
-
-			if mockDecoration(next) {
-				tr.addf("chain hop %q declares no component, and %q is called on what it returns — a mock, so the rest of the chain is dynamic", hop, next)
-				tr.hit(TargetDynamic, "", nil)
-
-				return comp, softComp, "", true
-			}
-
-			if reason, done := r.closureStructHops(fd, comp, hop, call, i, tr); done {
+			next, reason, done := r.untypedHop(fd, comp, hop, call, i, tr)
+			if done {
 				return comp, softComp, reason, true
 			}
 
-			if r.engineValueReturn(fd) {
-				tr.addf("chain hop %q returns what a built-in function hands back — the rest of the chain is dynamic", hop)
-				tr.hit(TargetDynamic, "", nil)
-
-				return comp, softComp, "", true
-			}
-
-			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
+			ret = next
 		}
 
 		comp = ret
 	}
 
 	return comp, softComp, "", false
+}
+
+// untypedHop decides a chain hop whose function declares no component: what
+// it returns when something else says (next), or the call's answer (done).
+func (r *Resolver) untypedHop(fd *parser.FunctionDef, comp, hop string, call *parser.CallSite, i int, tr *callTrace) (next, reason string, done bool) {
+	funcName := call.FuncName
+
+	// What an untyped hop returns is a mock when the next call on it is one
+	// MockBox adds: `c.getRequestService().$( "getContext", x )`.
+	after := funcName
+	if i+1 < len(call.Chain) {
+		after = parser.CallHopName(call.Chain[i+1])
+	}
+
+	if mockDecoration(after) {
+		tr.addf("chain hop %q declares no component, and %q is called on what it returns — a mock, so the rest of the chain is dynamic", hop, after)
+		tr.hit(TargetDynamic, "", nil)
+
+		return "", "", true
+	}
+
+	if reason, done := r.closureStructHops(fd, comp, hop, call, i, tr); done {
+		return "", reason, true
+	}
+
+	if ret := r.initArgGetter(fd); ret != "" {
+		tr.addf("chain hop %q returns the property init stores from its argument, which every construction passes as %q", hop, ret)
+
+		return ret, "", false
+	}
+
+	if r.engineValueReturn(fd) {
+		tr.addf("chain hop %q returns what a built-in function hands back — the rest of the chain is dynamic", hop)
+		tr.hit(TargetDynamic, "", nil)
+
+		return "", "", true
+	}
+
+	return "", "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
 }
 
 // propertyHop is walkHops for a property hop: what the property holds, from
@@ -1966,6 +1985,13 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 			return reason
 		}
 
+		ret = r.initArgGetter(def)
+		if ret != "" {
+			tr.addf("%q returns the property init stores from its argument, which every construction passes as %q", first, ret)
+		}
+	}
+
+	if ret == "" {
 		if r.engineValueReturn(def) {
 			tr.addf("%q returns what a built-in function hands back — the rest of the chain is dynamic", first)
 			tr.hit(TargetDynamic, "", nil)
