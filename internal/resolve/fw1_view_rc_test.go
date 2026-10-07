@@ -124,3 +124,35 @@ func TestAnRcMemberAssignedFromAnInheritedServiceIsTyped(t *testing.T) {
 		t.Errorf("rc.siteBean.missingSave: %q", got["rc.siteBean.missingSave"])
 	}
 }
+
+// TestASelfAssignmentKeepsWhatItsCallReturns: `arguments.rc.contentBean =
+// arguments.rc.contentBean.save()` is a call on what the member held before
+// the line. Skipped as a self-reference, it left the member untyped from there
+// on; read at the assignment's own line, it is what save() returns.
+func TestASelfAssignmentKeepsWhatItsCallReturns(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"model/Bean.cfc": `component { model.Bean function save(){ return this; } function own(){} function other(){} }`,
+		"model/Svc.cfc":  `component { model.Bean function get(){} }`,
+		"controllers/controller.cfc": `component {
+	function init(){ variables.svc = new model.Svc(); }
+}`,
+		"controllers/carch.cfc": `component extends="controller" {
+	function update( rc ){
+		arguments.rc.contentBean = variables.svc.get();
+		arguments.rc.contentBean = arguments.rc.contentBean.save();
+		arguments.rc.contentBean.own();
+	}
+	function plain( rc ){
+		var b = variables.svc.get();
+		b = b.save();
+		b.other();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "controllers/carch.cfc"), map[string]string{
+		"arguments.rc.contentBean.own": "",
+		"b.other":                      "",
+	})
+}

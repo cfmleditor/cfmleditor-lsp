@@ -421,17 +421,27 @@ func lastPrcAssignment(body, name string) (string, bool) {
 
 // lastMemberAssignment is lastPrcAssignment for any container.
 func lastMemberAssignment(body, container, name string) (string, bool) {
-	all := memberAssignRe(container, name).FindAllStringSubmatch(body, -1)
+	rhs, _, ok := lastMemberAssignmentAt(body, container, name)
+
+	return rhs, ok
+}
+
+// lastMemberAssignmentAt is lastMemberAssignment with the line of body the
+// assignment is on.
+func lastMemberAssignmentAt(body, container, name string) (string, int, bool) {
+	all := memberAssignRe(container, name).FindAllStringSubmatchIndex(body, -1)
 	if len(all) == 0 {
-		return "", false
+		return "", 0, false
 	}
 
-	rhs := strings.TrimSuffix(strings.TrimSpace(all[len(all)-1][1]), ";")
+	last := all[len(all)-1]
+
+	rhs := strings.TrimSuffix(strings.TrimSpace(body[last[2]:last[3]]), ";")
 	if strings.Count(rhs, "(") != strings.Count(rhs, ")") {
-		return "", false
+		return "", 0, false
 	}
 
-	return rhs, true
+	return rhs, strings.Count(body[:last[0]], "\n"), true
 }
 
 // pathsOf is comp with each alternative (a|b) replaced by its file where one

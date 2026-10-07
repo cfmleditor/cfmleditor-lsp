@@ -67,14 +67,21 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 	var (
 		rhs string
 		ok  bool
+		at  = -1 // the assignment's line, when known
 	)
 
 	if container != "" {
 		lines := strings.Split(pr.Content, "\n")
-		rhs, ok = lastMemberAssignment(strings.Join(lines[min(start, len(lines)):min(int(line), len(lines))], "\n"), container, name)
+		from := min(start, len(lines))
+
+		var idx int
+
+		rhs, idx, ok = lastMemberAssignmentAt(strings.Join(lines[from:min(int(line), len(lines))], "\n"), container, name)
+		at = from + idx
 	} else {
-		rhs, ok = localAssignment(pr.Content, name, start, int(line))
+		rhs, at, ok = localAssignmentAt(pr.Content, name, start, int(line))
 		if !ok && start > 0 && variable == name {
+			at = -1
 			rhs, ok = variablesAssignment(pr, name, caller, start, int(line))
 		}
 	}
@@ -97,13 +104,26 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
-	if m := assignedCallRe.FindStringSubmatch(rhs); m == nil || m[1] == "" && isScopeWord(m[2]) || strings.EqualFold(m[1], variable) ||
-		container != "" && strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "arguments."), container+"."+strings.ToLower(name)) ||
-		strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
+	m := assignedCallRe.FindStringSubmatch(rhs)
+	if m == nil || m[1] == "" && isScopeWord(m[2]) {
 		return ""
 	}
 
-	answer := r.typeCallExpr(rhs, line, caller, pr, baseDir, ctx)
+	// `x = x.save()`: the call is made on what x held before the line, so
+	// the receiver is read there. Without the assignment's line it cannot be.
+	at32 := line
+
+	if selfAssigned(m[1], variable, container, name) {
+		if at < 0 {
+			return ""
+		}
+
+		at32 = uint32(at)
+	} else if strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
+		return ""
+	}
+
+	answer := r.typeCallExpr(rhs, at32, caller, pr, baseDir, ctx)
 	if answer != "" {
 		tr.addf("resolved %q to %q: the last assignment to it is %s", variable, answer, rhs)
 	}
@@ -332,4 +352,14 @@ func variablesAssignment(pr *parser.ParseResult, name, caller string, start, lin
 	}
 
 	return rhs, true
+}
+
+// selfAssigned reports whether receiver, the receiver of the call assigned to
+// variable, is variable itself, however its arguments. prefix is spelled.
+func selfAssigned(receiver, variable, container, name string) bool {
+	if strings.EqualFold(receiver, variable) {
+		return true
+	}
+
+	return container != "" && strings.EqualFold(strings.TrimPrefix(strings.ToLower(receiver), "arguments."), container+"."+strings.ToLower(name))
 }
