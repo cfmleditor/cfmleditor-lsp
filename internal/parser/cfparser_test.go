@@ -4512,3 +4512,29 @@ func TestTagFunctionScopeEndsAtItsCloseTag(t *testing.T) {
 		t.Error("svc.afterFunction() was not recorded")
 	}
 }
+
+func TestAComputedEntityNameIsDynamic(t *testing.T) {
+	// Lucee's LDEV0405 builds its entity names: entityNew( "Comp" & nbr ) is
+	// Comp1 to Comp4, and no entity called Comp.
+	cases := map[string]string{
+		`component { function f(nbr) { var e = entityNew("Comp" & nbr); } }`: "$any",
+		`component { e = entityNew("Comp" & nbr) }`:                          "$any",
+		`<cfset e = entityNew("Comp" & nbr)>`:                                "$any",
+		`component { function f() { var e = entityNew( "Comp" ); } }`:        EntityPrefix + "Comp",
+		`<cfset e = entityNew("Comp", {a = 1})>`:                             EntityPrefix + "Comp",
+	}
+
+	for src, want := range cases {
+		pr := Parse(testURI, src)
+		refs := append([]ComponentRef{}, pr.ComponentRefs...)
+
+		for _, s := range pr.Scopes {
+			fr, _ := pr.FuncRefs(s.Start, s.End)
+			refs = append(refs, fr...)
+		}
+
+		if len(refs) != 1 || refs[0].Variable != "e" || refs[0].Component != want {
+			t.Errorf("%s: refs %+v, want e = %s", src, refs, want)
+		}
+	}
+}

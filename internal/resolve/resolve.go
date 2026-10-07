@@ -2866,6 +2866,15 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		}
 	}
 
+	return r.missingMethod(comp, softComp, call, pr, baseDir, tr)
+}
+
+// missingMethod is checkMethodOn's answer once comp is known not to declare
+// funcName: a component that is not there, a base that is not, or a method
+// the code checks for or that comp lacks.
+func (r *Resolver) missingMethod(comp, softComp string, call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	funcName, variable := call.FuncName, call.Variable
+
 	// A component that names no file is a different finding from a method a
 	// real component lacks, and reporting it as the second hid it. It is
 	// almost always a componentResolver producing a path — a broad get$1()
@@ -2913,6 +2922,14 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		}
 
 		return MissingBaseReason(base)
+	}
+
+	// Nor a method the code checks for before calling it.
+	if guardedByExistsCheck(pr, variable, funcName, int(call.Line)) {
+		tr.addf("%q is called only after the code checks %q has it — accepted as dynamic", funcName, variable)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
 	}
 
 	return "method '" + funcName + "' not found in " + displayComponent(comp)

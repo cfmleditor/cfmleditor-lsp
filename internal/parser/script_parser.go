@@ -2984,6 +2984,16 @@ func (p *scriptParser) readEntityNewComponent() string {
 		return ""
 	}
 
+	return p.entityArg(arg)
+}
+
+// entityArg is the entity the string arg names, or $any when the name is
+// computed: entityNew( "Comp" & nbr ) is no entity called Comp.
+func (p *scriptParser) entityArg(arg Token) string {
+	if next := p.sc.PeekSkipComments().Kind; next != TokRParen && next != TokComma {
+		return "$any"
+	}
+
 	return entityRef(unquote(arg.Value))
 }
 
@@ -2995,8 +3005,8 @@ const EntityPrefix = "entity:"
 
 // entityRef is name marked as an entity name, or "" for none.
 func entityRef(name string) string {
-	if name == "" {
-		return ""
+	if name == "" || name == "$any" {
+		return name
 	}
 
 	return EntityPrefix + name
@@ -3656,8 +3666,14 @@ func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
 		break
 	}
 
-	if p.sc.PeekSkipComments().Kind == TokLParen {
+	switch p.sc.PeekSkipComments().Kind {
+	case TokLParen:
 		p.recordChainFromScope(fullChain.String(), scopeTok.Line)
+	case TokEquals:
+		if chain := strings.Split(fullChain.String(), "."); len(chain) > 2 {
+			p.checkMemberSet(chain, scopeTok.Line)
+		}
+	default:
 	}
 }
 
@@ -3981,7 +3997,7 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 		return
 	}
 
-	comp := entityRef(unquote(arg.Value))
+	comp := p.entityArg(arg)
 	if comp != "" {
 		p.addRef(&ComponentRef{
 			Variable: varName, Component: comp,

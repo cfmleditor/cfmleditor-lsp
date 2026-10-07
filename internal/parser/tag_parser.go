@@ -2070,6 +2070,11 @@ func extractEntityNewArg(s string) string {
 		return ""
 	}
 
+	// A computed name, entityNew( "Comp" & nbr ), is no entity called Comp.
+	if rest := strings.TrimSpace(s[2+end:]); rest != "" && rest[0] != ')' && rest[0] != ',' {
+		return "$any"
+	}
+
 	return s[1 : 1+end]
 }
 

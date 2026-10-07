@@ -2230,7 +2230,8 @@ func (pr *ParseResult) FuncVars(funcStart, funcEnd int) []string {
 // AssignsMember reports whether the function holding line assigns
 // variable.member on a line before it: `a.getVariables = getVariables;` then
 // `a.getVariables()` calls what was stored there, which is no method of a's
-// component. Compared case-insensitively, as CFML names are.
+// component. Compared case-insensitively, as CFML names are. A member stored
+// as `variables.a.m = …` counts from any function and any line.
 func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool {
 	key := ""
 	if s := findFuncScope(int(line), pr.Scopes); s.Start >= 0 {
@@ -2239,12 +2240,35 @@ func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool 
 
 	for i := range pr.memberSets {
 		m := &pr.memberSets[i]
-		if m.funcKey == key && m.line <= line && strings.EqualFold(m.funcName, member) && strings.EqualFold(m.varName, variable) {
+		if !strings.EqualFold(m.funcName, member) {
+			continue
+		}
+
+		if m.funcKey == key && m.line <= line && strings.EqualFold(m.varName, variable) {
 			return true
+		}
+
+		// One stored through variables. is on the component's own variable,
+		// which every function sees: FW/1's tests set it in setup() and call
+		// it, spelled with or without the scope, from each spec.
+		if held, ok := cutVariablesScope(m.varName); ok {
+			if v, _ := cutVariablesScope(variable); strings.EqualFold(held, v) {
+				return true
+			}
 		}
 	}
 
 	return false
+}
+
+// cutVariablesScope is name without a leading variables., and whether it had one.
+func cutVariablesScope(name string) (string, bool) {
+	const scope = "variables."
+	if len(name) > len(scope) && strings.EqualFold(name[:len(scope)], scope) {
+		return name[len(scope):], true
+	}
+
+	return name, false
 }
 
 // HasScopedAssignment reports whether name was ever assigned in the given scope

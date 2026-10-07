@@ -2428,3 +2428,31 @@ re-read the candidate files: Masa's scan went from 12.8s to 22.1s. They are now
 cached per template (`frameworkIncludeHosts`), and Masa is 14.0s against
 `main`'s 14.9s; every scan is as fast as `main` or faster.
 `TestATemplateIncludedByAComputedPathReadsItsIncluder`.
+
+### Missing-method findings that were ours
+
+Of the 207 "method 'x' not found in Y" findings left, three groups were the
+resolver's mistake rather than the code's:
+
+- **A computed entity name** (Lucee −3). `entityNew( "Comp" & nbr )` was read as
+  the entity `Comp`; the name is built at run time (Comp1 … Comp4), so the ref is
+  `$any`, as a computed component path is. Both parsers check what follows the
+  string. `TestAComputedEntityNameIsDynamic`.
+- **A call the code checks for** (cx −2, cw −1). `if ( structKeyExists(
+  variables.config, "onShutdown" ) ) variables.config.onShutdown( this )` calls a
+  convention the object may not follow. `guardedByExistsCheck` accepts a call made
+  inside the block a non-negated `structKeyExists( x, "m" )`, `x.keyExists( "m" )`
+  or `isDefined( "x.m" )` opens in the same function — a brace group, a `<cfif>`
+  up to its close, or the rest of a braceless statement. Its `else` and anything
+  after the block are still checked. `TestACallTheCodeChecksForIsNotMissing`.
+- **A member stored through a scope** (fw −8, Lucee −2). `AssignsMember` already
+  accepted `a.m = f; a.m()` in one function, but the script parser recorded the
+  member set only for an unscoped receiver, so `variables.fw.__config = __config`,
+  `request.fw.enableTracing = …` and `local.com2.override = …` were never seen.
+  `scopedChainCall` records them now, and one stored through `variables.` counts
+  from every function, spelled with or without the scope, since the object is the
+  component's. `TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic`.
+
+Nothing was added. What remains of the 207 is genuinely missing (ContentBox's
+old patches calling removed APIs, a handful of real misses in ColdBox and Masa),
+added at run time by a test (mixins, custom assertions), or Masa's `event`.
