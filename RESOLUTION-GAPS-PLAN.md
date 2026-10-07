@@ -2526,3 +2526,23 @@ script and in a `<cfset>`, so `fw1ViewRc` gets an answer from the action and the
 view's `rc.siteBean` is a `settingsBean`. Measured: masa-c −207/+1 (147
 `rc.siteBean` in `csettings/editsite.cfm`, 47 `rc.contentBean`; the one added is
 a chain now checked a step further). `TestAnRcMemberAssignedFromAnInheritedServiceIsTyped`.
+
+### An assigned chain is typed hop by hop
+
+`assignedFromCall` matched its right-hand side with one regular expression,
+`receiver.method( args )`, whose argument group ran to the last `)`. A chain
+therefore matched as its first call: `var apiUtility =
+application.settingsManager.getSite( id ).getApi( 'json', 'v1' )` was typed as
+`getSite`'s return, a `settingsBean`, and every call on apiUtility was checked
+against the wrong component. `callChain` now splits the right-hand side into the
+name it starts from and each call made on it, and each hop is typed on what the
+one before returns; a property read or an operator between calls is refused. A
+self-assignment (`x = x.save()`) reads its receiver at the assignment's own line
+rather than being skipped. Measured: masa-c +12, every one a call on such a
+chain's value (`apiUtility` ×10, `contentRenderer` ×2) whose last hop declares
+no return type, previously checked against the head's component.
+`TestAnAssignedChainIsTypedHopByHop`, `TestASelfAssignmentKeepsWhatItsCallReturns`.
+
+Masa's carch views keep ~180 `rc.contentBean` findings: the update action builds
+it as `getBean( 'content' ).loadBy( … ).set( rc )`, and `loadBy` is `$any` to the
+parse, so the action's value is dynamic and `fw1ViewRc` gives the view nothing.

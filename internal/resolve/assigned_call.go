@@ -104,8 +104,8 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
-	m := assignedCallRe.FindStringSubmatch(rhs)
-	if m == nil || m[1] == "" && isScopeWord(m[2]) {
+	recv, calls, isCall := callChain(rhs)
+	if !isCall || recv == "" && isScopeWord(calls[0].name) {
 		return ""
 	}
 
@@ -113,13 +113,13 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 	// the receiver is read there. Without the assignment's line it cannot be.
 	at32 := line
 
-	if selfAssigned(m[1], variable, container, name) {
+	if selfAssigned(recv, variable, container, name) {
 		if at < 0 {
 			return ""
 		}
 
 		at32 = uint32(at)
-	} else if strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
+	} else if strings.EqualFold(strings.TrimPrefix(strings.ToLower(recv), "variables."), strings.ToLower(name)) {
 		return ""
 	}
 
@@ -136,37 +136,54 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 // and the method's return taken per alternative: every one must return a
 // component, or there is none.
 func (r *Resolver) typeCallExpr(rhs string, line uint32, caller string, pr *parser.ParseResult, baseDir string, ctx lookupCtx) string {
-	m := assignedCallRe.FindStringSubmatch(rhs)
-	if m == nil {
+	receiver, calls, ok := callChain(rhs)
+	if !ok {
 		return ""
 	}
 
-	receiver, method := m[1], m[2]
+	var comp string
+
 	if receiver == "" {
-		return r.typeBareCallExpr(method, m[3], line, pr, baseDir)
+		comp = r.typeBareCallExpr(calls[0].name, calls[0].args, line, pr, baseDir)
+		calls = calls[1:]
+	} else {
+		comp, _ = r.receiverComponentD(receiver, line, caller, calls[0].name, pr, baseDir, nil, lookupCtx{depth: ctx.depth + 1, leaf: ctx.leaf})
+		if comp == "" {
+			// A receiver only a configured resolver names (a preset's
+			// application.wo), as ComponentOf reads it.
+			comp, _, _ = parser.ResolveFromCallMatch(receiver, r.Resolvers)
+		}
 	}
-
-	comp, _ := r.receiverComponentD(receiver, line, caller, method, pr, baseDir, nil, lookupCtx{depth: ctx.depth + 1, leaf: ctx.leaf})
-	if comp == "" {
-		// A receiver only a configured resolver names (a preset's
-		// application.wo), as ComponentOf reads it.
-		comp, _, _ = parser.ResolveFromCallMatch(receiver, r.Resolvers)
-	}
-
-	if comp == "" || strings.HasPrefix(comp, "$") {
-		return ""
-	}
-
-	var returns []string
 
 	lookup := r.FuncLookup(baseDir)
 
+	// Each call in a chain is made on what the one before it returns.
+	for _, c := range calls {
+		if comp == "" || strings.HasPrefix(comp, "$") {
+			return ""
+		}
+
+		comp = hopReturns(lookup, comp, c)
+	}
+
+	if strings.HasPrefix(comp, "$") {
+		return ""
+	}
+
+	return comp
+}
+
+// hopReturns is what method c returns on each alternative of comp, or "" when
+// any alternative returns no component.
+func hopReturns(lookup func(string, string) string, comp string, c chainCall) string {
+	var returns []string
+
 	for alt := range strings.SplitSeq(comp, "|") {
-		ret := lookup(alt, method)
+		ret := lookup(alt, c.name)
 		if ret == "" {
 			// What some methods return depends on what they are handed
 			// (Wheels' controller( "name" )); the parse asks the same way.
-			ret = lookup(alt, parser.CallHop(method+"("+m[3]+")"))
+			ret = lookup(alt, parser.CallHop(c.name+"("+c.args+")"))
 		}
 
 		if ret == "" || strings.HasPrefix(ret, "$") {
@@ -226,9 +243,95 @@ var identRe = regexp.MustCompile(`^[A-Za-z_]\w*$`)
 // aliasRe is a right-hand side that is a dotted name and nothing else.
 var aliasRe = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$`)
 
-// assignedCallRe is loopCallRe allowing `$` in names, as CFML does: Wheels
-// spells its internal methods `$pluginObj()` and `$createObjectFromRoot()`.
-var assignedCallRe = regexp.MustCompile(`^(?:([\w.$]+)\.)?([\w$]+)\s*\((.*)\)$`)
+// chainCall is one call of a chain: its name and its argument text.
+type chainCall struct{ name, args string }
+
+// callChain splits rhs into the dotted name it starts from and the calls made
+// on it, each on what the one before returns: `svc.get( id )` is svc and get,
+// `getBean( "x" ).loadBy( id = 1 ).set( rc )` no receiver and three calls. It
+// fails on anything else — a property read between calls, an operator, a
+// bracket — since that is not a chain of calls. Names may hold `$`, as CFML's
+// do: Wheels' internal methods are $-prefixed.
+func callChain(rhs string) (receiver string, calls []chainCall, ok bool) {
+	s := strings.TrimSpace(rhs)
+
+	var segs []string
+
+	for {
+		n := 0
+		for n < len(s) && (s[n] == '_' || s[n] == '$' || s[n] >= '0' && s[n] <= '9' || s[n] >= 'a' && s[n] <= 'z' || s[n] >= 'A' && s[n] <= 'Z') {
+			n++
+		}
+
+		if n == 0 || s[0] >= '0' && s[0] <= '9' {
+			return "", nil, false
+		}
+
+		word := s[:n]
+		s = strings.TrimLeft(s[n:], " \t")
+
+		switch {
+		case strings.HasPrefix(s, "("):
+			end := closingParen(s)
+			if end < 0 {
+				return "", nil, false
+			}
+
+			// Only the first call has a receiver: after it a bare word is a
+			// property read, which the default case below refuses.
+			if len(calls) == 0 {
+				receiver = strings.Join(segs, ".")
+			}
+
+			calls = append(calls, chainCall{word, s[1:end]})
+			s = strings.TrimLeft(s[end+1:], " \t")
+
+			if s == "" {
+				return receiver, calls, true
+			}
+		case len(calls) == 0:
+			segs = append(segs, word)
+		default:
+			return "", nil, false
+		}
+
+		if !strings.HasPrefix(s, ".") {
+			return "", nil, false
+		}
+
+		s = strings.TrimLeft(s[1:], " \t")
+	}
+}
+
+// closingParen is the index of the ) closing the ( at s[0], stepping over
+// quoted strings, or -1.
+func closingParen(s string) int {
+	depth := 0
+
+	var quote byte
+
+	for i := range len(s) {
+		c := s[i]
+
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
 
 // inlineStructArg is the literal struct name holds at line, its fields that
 // are string literals, as `{a="x",b="y"}`: the last `name = { … }` between

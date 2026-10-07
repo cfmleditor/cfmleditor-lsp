@@ -156,3 +156,37 @@ func TestASelfAssignmentKeepsWhatItsCallReturns(t *testing.T) {
 		"b.other":                      "",
 	})
 }
+
+// TestAnAssignedChainIsTypedHopByHop: `x = svc.getSite( id ).getApi( "json" )`
+// was matched as one call to getSite with everything after its first
+// parenthesis as its arguments, so x was typed as getSite's return — a Site,
+// when getApi hands back something else entirely. Each call of a chain is
+// made on what the one before returns.
+func TestAnAssignedChainIsTypedHopByHop(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"model/Site.cfc": `component { model.Api function getApi( kind ){} function untyped(){} function siteOnly(){} }`,
+		"model/Api.cfc":  `component { function call(){} }`,
+		"model/Svc.cfc":  `component { model.Site function getSite( id ){} }`,
+		"controllers/controller.cfc": `component {
+	function init(){ variables.svc = new model.Svc(); }
+}`,
+		"controllers/c.cfc": `component extends="controller" {
+	function typed( rc ){
+		var api = variables.svc.getSite( rc.id ).getApi( "json" );
+		api.call();
+		api.siteOnly();
+	}
+	function lost( rc ){
+		var u = variables.svc.getSite( rc.id ).untyped();
+		u.siteOnly();
+	}
+}`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "controllers/c.cfc"), map[string]string{
+		"api.call":     "",
+		"api.siteOnly": "method 'siteOnly' not found in model.Api",
+		"u.siteOnly":   "variable 'u' has no component ref",
+	})
+}
