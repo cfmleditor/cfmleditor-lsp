@@ -2407,6 +2407,20 @@ writes `var mmRBF = application.rbFactory`, a value a startup template assigns
 and only a lookup types. A right-hand side that is a dotted name and nothing
 else (`aliasRe`) is now typed as that name is at the line, one assignment
 deeper (`maxAssignedDepth`). Measured: masa-c −13, cw-p −12, cb-p −6, nothing
-added. `TestAnAliasIsTypedAsTheNameItCopies`. The form-builder templates
-themselves (144 findings) read `mmRBF` from functions that include them by a
-computed path, and are not reached yet.
+added. `TestAnAliasIsTypedAsTheNameItCopies`.
+
+### A template included by a computed path reads its includer
+
+Masa's form builder keeps
+`variables.templatePath = "/muraWRM#…#/core/utilities/formbuilder/templates"`
+and includes `<cfinclude template="#templatePath#">` from functions that set
+`var mmRBF = application.rbFactory`. The include graph cannot see a computed
+edge, so every `mmRBF` call in the field templates was untyped.
+`computedIncludeHosts` treats a file as a template's includer when it holds
+both a computed include and a string literal naming the template's directory
+by at least its last three segments. Each computed include in it is a site,
+and `includerHeld` requires every site to agree, as for a literal include.
+Candidates come from the batch caller index (a name ending a quoted string),
+so this runs in a batch scan only, like the other caller inference. Measured:
+masa-c −138, nothing added; Masa's scan time unchanged.
+`TestATemplateIncludedByAComputedPathReadsItsIncluder`.

@@ -50,7 +50,7 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 
 	file := cfpath.FromURI(string(pr.URI))
 
-	extra := r.coldboxErrorHosts(file)
+	extra := append(r.coldboxErrorHosts(file), r.computedIncludeHosts(file)...)
 	if len(g.rev[pathKey(file)]) == 0 && len(extra) == 0 {
 		return ""
 	}
