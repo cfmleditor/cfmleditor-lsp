@@ -491,6 +491,12 @@ func callArgument(tokens []parser.Token, name string, line, pos int, argName str
 			continue
 		}
 
+		// `function f() { x.f( a ); }` on one line: the declaration is not
+		// the call.
+		if i > 0 && tokens[i-1].Kind == parser.TokIdent && strings.EqualFold(tokens[i-1].Value, "function") {
+			continue
+		}
+
 		return callArgumentAt(tokens, i, pos, argName)
 	}
 

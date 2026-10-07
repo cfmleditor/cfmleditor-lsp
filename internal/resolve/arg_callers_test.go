@@ -311,3 +311,23 @@ func TestACallerTypedByAResolverIsPlaced(t *testing.T) {
 		"arguments.renderer.own": "",
 	})
 }
+
+// TestADeclarationIsNotTheCallOnItsLine: `function dspObjects() {
+// variables.util.dspObjects( renderer = this ); }` written on one line holds
+// the function's name twice, and reading the first as the call found no
+// argument there, so the caller passed nothing.
+func TestADeclarationIsNotTheCallOnItsLine(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Renderer.cfc": `component {
+	variables.util = new Util();
+	function dspObjects() { variables.util.dspObjects( renderer = this ); }
+	function own() {}
+}`,
+		"Util.cfc": `component { function dspObjects( renderer ) { arguments.renderer.own(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Util.cfc"), map[string]string{
+		"arguments.renderer.own": "",
+	})
+}
