@@ -93,6 +93,8 @@ type Resolver struct {
 	wrapperHosts      map[string][]string                 // template path → Wheels wrapper hosts (wheelsTemplateHosts)
 	extraIncludeHosts map[string][]includeHost            // template path → includes the graph cannot see (frameworkIncludeHosts)
 	muraEventFiles    map[string]bool                     // file → Mura calls it with an event (handsMuraEvent)
+	lazyGetters       map[string]string                   // file and function → what its lazy getter returns (lazyGetterReturn)
+	lazyFiles         map[string]bool                     // file → it holds an isObject() guard at all
 	viewArgCache      map[string]map[string][]viewArgSite // module → view → its renders (viewArgSites)
 	handoffs          handoffIndex                        // handler actions by the view each renders (viewActions)
 }
@@ -2502,6 +2504,10 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 
 	if fd.URI.IsFile() && (fd.ReturnType == "" || strings.EqualFold(fd.ReturnType, "any") || strings.EqualFold(fd.ReturnType, "component") || strings.EqualFold(fd.ReturnType, "object")) {
 		if ret := r.sharedGetterReturn(fd); ret != "" {
+			return ret
+		}
+
+		if ret := r.lazyGetterReturn(fd); ret != "" {
 			return ret
 		}
 

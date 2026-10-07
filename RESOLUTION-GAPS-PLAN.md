@@ -2606,3 +2606,34 @@ exporter, plugin manager, utility and file DAO. A value that only creates a
 component (`new a.b.C( … )`, `createObject( "component", "a.b.C" )`, with
 nothing chained on it) now names it. Measured: masa-c −76, nothing added.
 `TestDI1BeanAddedAsANewInstanceIsThatComponent`.
+
+### A lazy getter returns what it loads
+
+Mura's configBean starts its class extension manager as `""` and loads it on the
+first call to `getClassExtensionManager()`, whose whole body is
+`<cfif not isObject(variables.instance.extensionManager)>` a loader
+`</cfif>` and `<cfreturn variables.instance.extensionManager />`. The field is
+written a placeholder and a component, so the getter had no type, and the
+startup template's `application.classExtensionManager =
+application.configBean.getClassExtensionManager()` and everything read through it
+was untyped. `lazyGetterReturn` answers for a function whose whole body is that
+guard and that return, in tags or script: the component every other write of the
+field in the file creates in place (`new X()`, `createObject( "component", "X" )`,
+with or without `.init()`). A write of anything else, found anywhere in the file
+including mid-line, withholds the answer; the guarded block may not return or
+open another `<cfif>`. It reads the file's text rather than a parse, since a
+parse asks for return types, and is cached per file and function — asked about
+every untyped function, it first cost Masa 12%.
+
+With it, the startup lookup's typing of a created component was fixed: it matched
+`new X(` or `createObject( "component", "X"` as a prefix and ignored what was
+chained on it, so `new Script().getLoose()` was a Script. Each chained call is now
+typed on what the one before returns (`createdThenCalled`), `init()` keeping the
+instance; Masa's `application.configBean = new mura.configBean().set( props )`
+stays a configBean because `set()` returns this. Returning nothing for every chain
+instead added 1,018 findings, which is how that case was found.
+
+Measured: masa-c −209 (64 `application.classExtensionManager`, 74 `subType`, 38
+`variables.configBean`/`application.configBean`), nothing added; Masa scans as
+fast as `main`. `TestALazyGetterReturnsWhatItLoads`,
+`TestAStartupCreationIsWhatItsChainedCallsReturn`.
