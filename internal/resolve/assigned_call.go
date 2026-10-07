@@ -67,7 +67,7 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 	var (
 		rhs string
 		ok  bool
-		at  = -1 // the assignment's line, when known
+		at  int // the assignment's line, -1 when not known
 	)
 
 	if container != "" {
