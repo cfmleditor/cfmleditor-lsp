@@ -88,6 +88,14 @@ func (r *Resolver) includePathUncached(raw, baseDir string) string {
 				candidates = append(candidates, filepath.Join(dir, filepath.FromSlash(rest)))
 			}
 		}
+
+		// A first segment naming the package a box.json above says this is,
+		// as slugRoot reads a dot-path: coldbox-platform includes
+		// "/coldbox/system/exceptions/BugReport-Public.cfm" from its own
+		// system/Bootstrap.cfc, a mapping only an installed copy has.
+		if root, _ := r.slugRoot(seg+".x", baseDir); root != "" {
+			candidates = append(candidates, filepath.Join(root, filepath.FromSlash(rest)))
+		}
 	}
 
 	for _, root := range r.WorkspaceFolders {

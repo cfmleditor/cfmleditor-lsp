@@ -2250,3 +2250,22 @@ and otherwise with what every construction passes. Both the qualified-hop and
 the bare-chain paths ask; the qualified one moved into `untypedHop` to keep
 `walkHops` under the complexity limit. Measured: cx-p −29, nothing added.
 `TestAGeneratedGetterReturnsTheInitArgumentItsSetterStored`.
+
+### A ColdBox error template reads processException's locals
+
+ColdBox renders an application's error page by including the template its
+config names as `customErrorTemplate`. The include is computed
+(`include "#bugReportRelativePath#"`) from inside Bootstrap's
+`processException()`, where `var oException = new ExceptionBean( … )`, so every
+`oException.x()` in ColdBox's own Whoops.cfm, BugReport.cfm and
+BugReport-Public.cfm was "has no component ref". `coldboxErrorHosts`
+(`coldbox_error_template.go`) gives such a template that site as an includer,
+for `includerHeld`. The template must be named by some `config/ColdBox.cfc`.
+The site is checked by its text and by the function it is in, and ColdBox's
+source must be present, since a stub has no body. For coldbox-platform's own
+checkout, an include path's first segment may also be the `box.json` slug
+above the file (`includePathUncached`, as `slugRoot` already reads a dot-path),
+so `/coldbox/system/exceptions/Whoops.cfm` resolves without a `/coldbox`
+mapping. Measured: cx-p −70, nothing added.
+`TestAColdBoxErrorTemplateReadsProcessExceptionsLocals`, which fails without
+either half.

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
@@ -48,7 +49,9 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 	}
 
 	file := cfpath.FromURI(string(pr.URI))
-	if len(g.rev[pathKey(file)]) == 0 {
+
+	extra := r.coldboxErrorHosts(file)
+	if len(g.rev[pathKey(file)]) == 0 && len(extra) == 0 {
 		return ""
 	}
 
@@ -70,7 +73,7 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 
 	answer := ""
 	if !setsName(pr.Content, name) {
-		answer = r.includerHeldUncached(variable, file, g, ctx)
+		answer = r.includerHeldUncached(variable, file, g, extra, ctx)
 	}
 
 	r.mu.Lock()
@@ -88,10 +91,10 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 	return answer
 }
 
-func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, ctx lookupCtx) string {
+func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, extra []includeHost, ctx lookupCtx) string {
 	includers := g.rev[pathKey(file)]
 
-	if len(includers) == 0 {
+	if len(includers) == 0 && len(extra) == 0 {
 		return ""
 	}
 
@@ -132,6 +135,30 @@ func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, 
 				if !containsFold(comps, alt) {
 					comps = append(comps, alt)
 				}
+			}
+		}
+	}
+
+	// A framework's own computed include (coldboxErrorHosts).
+	for _, h := range extra {
+		hpr := r.handlerParse(h.path)
+		if hpr == nil {
+			return ""
+		}
+
+		sites++
+
+		line := conv.Uint32(h.line)
+		caller := parser.FindFuncScopeAt(h.line, hpr.Scopes).Name
+
+		comp, _ := r.receiverComponentD(variable, line, caller, "", hpr, filepath.Dir(h.path), nil, lookupCtx{depth: ctx.depth + 1})
+		if comp == "" || strings.HasPrefix(comp, "$") {
+			return ""
+		}
+
+		for alt := range strings.SplitSeq(r.pathsOf(comp, filepath.Dir(h.path)), "|") {
+			if !containsFold(comps, alt) {
+				comps = append(comps, alt)
 			}
 		}
 	}
