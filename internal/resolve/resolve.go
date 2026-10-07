@@ -77,23 +77,24 @@ type Resolver struct {
 	beanPathsCache    map[string]string   // merged application/configured bean roots
 	fw1Scopes         map[string]fw1Scope // nearest application's source-defined injection scope
 	diOnce            sync.Once
-	diPolicies        []diPolicy                     // source-backed DI/1 injection contracts
-	discoveringDI     bool                           // private policy discovery never re-enters injection lookup
-	startupCache      map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
-	wheelsSources     map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
-	ctlPathCache      map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
-	includerCache     map[string]string              // template, name, depth and include generation → includerHeld's answer
-	returnCache       returnCache                    // ReturnComponentOf answers, for one index generation
-	loopCache         spanCache[loopSpan]            // file URI → every loop its current text holds (loopsOf)
-	closureCache      spanCache[closureSpan]         // file URI → every function literal its current text holds (closuresOf)
-	callerIdx         *callerIndex                   // name → files calling it, built once for argumentFromCallers
-	argCache          map[string]string              // an argument → what its callers pass (argumentFromCallers)
-	requestWriteCache map[string]bool                // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
-	handlerCache      map[string]*parser.ParseResult // handler path → its parse (handlerParse)
-	wrapperHosts      map[string][]string            // template path → Wheels wrapper hosts (wheelsTemplateHosts)
-	extraIncludeHosts map[string][]includeHost       // template path → includes the graph cannot see (frameworkIncludeHosts)
-	muraEventFiles    map[string]bool                // file → Mura calls it with an event (handsMuraEvent)
-	handoffs          handoffIndex                   // handler actions by the view each renders (viewActions)
+	diPolicies        []diPolicy                          // source-backed DI/1 injection contracts
+	discoveringDI     bool                                // private policy discovery never re-enters injection lookup
+	startupCache      map[string][]startupAssign          // app root → its startup templates' shared-scope assignments
+	wheelsSources     map[string]wheelsSource             // source-checked method bodies; refreshed when bytes change
+	ctlPathCache      map[string]controllerPaths          // dir → its files' writes of Wheels' controllerPath
+	includerCache     map[string]string                   // template, name, depth and include generation → includerHeld's answer
+	returnCache       returnCache                         // ReturnComponentOf answers, for one index generation
+	loopCache         spanCache[loopSpan]                 // file URI → every loop its current text holds (loopsOf)
+	closureCache      spanCache[closureSpan]              // file URI → every function literal its current text holds (closuresOf)
+	callerIdx         *callerIndex                        // name → files calling it, built once for argumentFromCallers
+	argCache          map[string]string                   // an argument → what its callers pass (argumentFromCallers)
+	requestWriteCache map[string]bool                     // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
+	handlerCache      map[string]*parser.ParseResult      // handler path → its parse (handlerParse)
+	wrapperHosts      map[string][]string                 // template path → Wheels wrapper hosts (wheelsTemplateHosts)
+	extraIncludeHosts map[string][]includeHost            // template path → includes the graph cannot see (frameworkIncludeHosts)
+	muraEventFiles    map[string]bool                     // file → Mura calls it with an event (handsMuraEvent)
+	viewArgCache      map[string]map[string][]viewArgSite // module → view → its renders (viewArgSites)
+	handoffs          handoffIndex                        // handler actions by the view each renders (viewActions)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and
@@ -3058,30 +3059,7 @@ func (r *Resolver) inferredReceiver(variable string, line uint32, caller, funcNa
 // `y = z.g()`, and the subclass a handoff reads on behalf of.
 func (r *Resolver) receiverComponentD(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace, ctx lookupCtx) (comp string, member bool) {
 	if name, scope, record := parser.MemberReceiverName(variable); record {
-		comp := r.recordReceiver(variable, name, scope, line, caller, pr)
-		if comp == "" {
-			comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
-		}
-
-		if comp == "" {
-			comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
-		}
-
-		// A view's rc member is what its controller left there, and a
-		// template's what the file including it holds.
-		if comp == "" {
-			comp = r.fw1ViewRc(variable, "", pr, tr)
-		}
-
-		if comp == "" {
-			comp = r.coldboxPrcResponse(variable, pr)
-		}
-
-		if comp == "" {
-			comp = r.includerHeld(variable, pr, tr, ctx)
-		}
-
-		return comp, false
+		return r.memberReceiver(variable, name, scope, line, caller, funcName, pr, baseDir, tr, ctx), false
 	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a

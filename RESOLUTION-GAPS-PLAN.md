@@ -2546,3 +2546,23 @@ no return type, previously checked against the head's component.
 Masa's carch views keep ~180 `rc.contentBean` findings: the update action builds
 it as `getBean( 'content' ).loadBy( … ).set( rc )`, and `loadBy` is `$any` to the
 parse, so the action's value is dynamic and `fw1ViewRc` gives the view nothing.
+
+### A ColdBox view's args are what its renders pass
+
+ContentBox renders its table partials with `view( view :
+"_components/content/TableCreationInfo", args : { content : content } )` from
+each listing, and its admin bar from an interceptor; the view reads
+`args.content`, and nothing in it says who renders it. `viewArgs` reads every
+literal `view()`, `renderView()` or `setView()` naming the view in its module's
+handlers, views, interceptors and layouts, takes the value its `args` struct
+literal gives the key, and types it where the call is made: a variable, a dotted
+name, `new X()`, a single call, or a loop variable there (`content` is the
+`<cfloop>` index over `prc.content`). A trailing `?: javacast( "null", "" )` is
+dropped. A render passing no args, or not this key, says nothing; one passing
+args other than as a literal leaves it untyped; every render passing the key
+must type it, and they are the alternatives. Renders are read once per module.
+Measured: cb −30/+2. The two added are the admin bar's `oContent`, now a
+`BaseContent` (from `contentService.get()`), calling `getLayout()`, which only
+the `Page` subclass declares, inside `<cfif getContentType() eq "Page">`, and a
+chain on `getActiveContent()`, which declares no type: what a handler holding
+the same value already gets. `TestAViewsArgsAreWhatItsRendersPass`.
