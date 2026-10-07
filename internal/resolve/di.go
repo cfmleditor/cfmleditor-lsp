@@ -31,6 +31,9 @@ type diPolicy struct {
 	// (lowercased): DI/1 names each by its file and by its file followed by
 	// its folder's singular (indexBeans).
 	beans map[string][]string
+	// injected are folders the factory autowires but does not discover beans
+	// in: FW/1 injects its controllers whatever diLocations says.
+	injected []string
 }
 
 // InjectionBeanLookup is deliberately separate from getBean identity lookup:
@@ -66,7 +69,7 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 
 	for i := range r.diPolicies {
 		p := &r.diPolicies[i]
-		if p.contains(file) {
+		if p.serves(file) {
 			policies = append(policies, p)
 		}
 	}
@@ -80,7 +83,7 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 		result := ""
 
 		for _, p := range policies {
-			if !p.discovers(file) || p.unknownOverrides[pathKey(file)] || p.overrides[pathKey(file)][strings.ToLower(name)] {
+			if !p.discovers(file) && !underAny(p.injected, file) || p.unknownOverrides[pathKey(file)] || p.overrides[pathKey(file)][strings.ToLower(name)] {
 				return ""
 			}
 
@@ -89,7 +92,7 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 				// The workspace's bean map names one file per bean, and
 				// applications side by side (FW/1's examples) share names;
 				// a policy's own folders answer for it.
-				own = p.beanIn(name)
+				own = p.beanIn(name, singletonOnly)
 			}
 
 			candidate := p.dependency(strings.ToLower(name), own, r, map[string]bool{}, singletonOnly)
@@ -111,14 +114,14 @@ func (r *Resolver) InjectionPropertyLookup(file string) func(string, map[string]
 	}
 
 	lookup := r.InjectionBeanLookup(file)
-	if !slices.ContainsFunc(r.diPolicies, func(p diPolicy) bool { return p.contains(file) }) {
+	if !slices.ContainsFunc(r.diPolicies, func(p diPolicy) bool { return p.serves(file) }) {
 		return nil
 	}
 
 	return func(name string, attrs map[string]string) string {
 		for i := range r.diPolicies {
 			p := &r.diPolicies[i]
-			if !p.contains(file) {
+			if !p.serves(file) {
 				continue
 			}
 
@@ -133,12 +136,40 @@ func (r *Resolver) InjectionPropertyLookup(file string) func(string, map[string]
 }
 
 // beanIn is the one component the policy's folders register as name, or "".
-func (p *diPolicy) beanIn(name string) string {
-	if hits := p.beans[strings.ToLower(name)]; len(hits) == 1 {
-		return hits[0]
+// For singletonOnly (property and setter injection) a transient does not
+// count: qBall has model/beans/question.cfc and model/services/question.cfc,
+// and `property question;` can only be the service.
+func (p *diPolicy) beanIn(name string, singletonOnly bool) string {
+	found := ""
+
+	for _, hit := range p.beans[strings.ToLower(name)] {
+		if singletonOnly && p.transient(hit) {
+			continue
+		}
+
+		if found != "" {
+			return ""
+		}
+
+		found = hit
 	}
 
-	return ""
+	return found
+}
+
+// transient reports whether DI/1 makes the component in file a transient:
+// a beans folder, one the config names transient, or a transient pattern.
+func (p *diPolicy) transient(file string) bool {
+	base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	dir := strings.ToLower(filepath.Base(filepath.Dir(file)))
+
+	singular := strings.TrimSuffix(dir, "s")
+	if custom, ok := p.singulars[dir]; ok {
+		singular = custom
+	}
+
+	return singular == "bean" || p.transients[dir] || p.transientPattern != nil && p.transientPattern.MatchString(base) ||
+		p.singletonPattern != nil && !p.singletonPattern.MatchString(base)
 }
 
 // indexBeans fills p.beans from the components under p.roots.
@@ -186,6 +217,23 @@ func (p *diPolicy) indexBeans(r *Resolver) {
 			}
 		}
 	}
+}
+
+// serves reports whether the factory injects into file: one it discovers, or
+// one under an injected folder.
+func (p *diPolicy) serves(file string) bool {
+	return p.contains(file) || underAny(p.injected, file)
+}
+
+func underAny(roots []string, file string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, file)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *diPolicy) contains(file string) bool {
@@ -475,6 +523,7 @@ func (r *Resolver) automaticDIPolicy(source diSource) (diPolicy, bool) {
 
 	p := diConfig(cfg["diconfig"])
 	p.roots = roots
+	p.injected = []string{filepath.Join(filepath.Dir(source.file), "controllers")}
 
 	return p, true
 }

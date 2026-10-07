@@ -2335,3 +2335,26 @@ answer is not under it (`beanIn`).
 
 Measured: fw-p −22, nothing added; Masa CMS scan time unchanged (12.8s).
 `TestEachNestedFW1AppHasItsOwnDI1Beans`, which fails without either half.
+
+### FW/1 injects its controllers; a property names a singleton
+
+qBall sets `diLocations = "./model/services"`, so its DI/1 policy covered only
+that folder and its controllers' properties were untyped, although FW/1
+autowires its controllers from the bean factory whatever `diLocations` says.
+An automatic FW/1 policy now also injects into the application's
+`controllers` folder (`diPolicy.injected`, `serves`), without discovering beans
+there. When a policy's own folders hold two beans of a name (qBall's
+`beans/question.cfc` and `services/question.cfc`), a property or setter, which
+DI/1 fills only with a singleton, takes the one that is not transient
+(`beanIn(name, singletonOnly)`, `transient`).
+
+Measured: fw-p −17/+2. The 2 added are a resolution error that was already
+there, now visible because the services are typed. `entityNew( "question" )`
+in `services/question.cfc` resolves the bare name relative to the calling
+directory, finding the service itself rather than the persistent
+`beans/question.cfc`, which comes later (`Index.LookupEntity`). Fixing it needs
+the parser to mark a name passed to `entityNew()`/`entityLoad()` as an entity
+name, so the resolver looks it up as an entity first. Component types travel as
+plain strings, and doing it at parse time against a partly built index would
+make results depend on scan order, so it is left recorded here.
+`TestFW1AutowiresItsControllersWhateverDILocationsSays`.
