@@ -2399,3 +2399,14 @@ into `initArgSites` to stay under the complexity limit.
 Measured: masa-c −56/+2, where the 2 added are the same chains one step further
 on (`getEvent()` on the renderer, untyped); other scans unchanged.
 `TestAForwardedArgumentIsWhatTheCallerHolds`.
+
+### An alias is typed as the name it copies
+
+`assignedFromCall` read only `x = receiver.call( … )`. Masa's form builder
+writes `var mmRBF = application.rbFactory`, a value a startup template assigns
+and only a lookup types. A right-hand side that is a dotted name and nothing
+else (`aliasRe`) is now typed as that name is at the line, one assignment
+deeper (`maxAssignedDepth`). Measured: masa-c −13, cw-p −12, cb-p −6, nothing
+added. `TestAnAliasIsTypedAsTheNameItCopies`. The form-builder templates
+themselves (144 findings) read `mmRBF` from functions that include them by a
+computed path, and are not reached yet.

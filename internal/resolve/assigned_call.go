@@ -78,6 +78,20 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
+	// `var mmRBF = application.rbFactory`: an alias of a name, which is
+	// typed as that name is at the line (Masa's form builder reads the
+	// resource bundle factory a startup template assigns).
+	if aliasRe.MatchString(rhs) && !strings.EqualFold(rhs, variable) && !strings.EqualFold(rhs, name) {
+		comp, _ := r.receiverComponentD(rhs, line, caller, "", pr, baseDir, nil, lookupCtx{depth: depth + 1, leaf: ctx.leaf})
+		if comp != "" && !strings.HasPrefix(comp, "$") {
+			tr.addf("resolved %q to %q: it is assigned %s", variable, comp, rhs)
+
+			return comp
+		}
+
+		return ""
+	}
+
 	if m := assignedCallRe.FindStringSubmatch(rhs); m == nil || m[1] == "" && isScopeWord(m[2]) || strings.EqualFold(m[1], variable) ||
 		strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
 		return ""
@@ -182,6 +196,9 @@ func (r *Resolver) typeBareCallExpr(method, args string, line uint32, pr *parser
 }
 
 var identRe = regexp.MustCompile(`^[A-Za-z_]\w*$`)
+
+// aliasRe is a right-hand side that is a dotted name and nothing else.
+var aliasRe = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$`)
 
 // assignedCallRe is loopCallRe allowing `$` in names, as CFML does: Wheels
 // spells its internal methods `$pluginObj()` and `$createObjectFromRoot()`.
