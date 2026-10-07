@@ -2514,3 +2514,15 @@ another component's method of that name on a receiver nothing types
 whose own argument is in the same position. Placing those would mean guessing
 that an untyped caller is not the function's, which this inference refuses by
 design.
+
+### An FW/1 rc member is typed from its last assignment
+
+Masa's csettings controller fills `arguments.rc.siteBean =
+variables.settingsManager.read( arguments.rc.siteid )`, with settingsManager
+injected by a setter on the base controller. The parse cannot type that, and
+`assignedFromCall`, which types `x = svc.read()` at lookup, took a bare name,
+`local.x` and `prc.x` only. `rc.x` and `arguments.rc.x` now go the same way, in
+script and in a `<cfset>`, so `fw1ViewRc` gets an answer from the action and the
+view's `rc.siteBean` is a `settingsBean`. Measured: masa-c −207/+1 (147
+`rc.siteBean` in `csettings/editsite.cfm`, 47 `rc.contentBean`; the one added is
+a chain now checked a step further). `TestAnRcMemberAssignedFromAnInheritedServiceIsTyped`.

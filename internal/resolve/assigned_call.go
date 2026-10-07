@@ -20,7 +20,7 @@ import (
 // standing for the components its subclasses hold. Every alternative must
 // return a component, or there is no answer.
 //
-// Only a bare or local. name and prc.name, and only a single call: a chain
+// Only a bare or local. name, prc.name and FW/1's rc.name, and only a single call: a chain
 // (`svc.get().x()`) or an expression is the parse's. It runs after the other
 // steps and so never overrides one.
 
@@ -41,12 +41,17 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
-	name, prc := variable, false
+	name, container := variable, ""
 
-	switch {
-	case strings.HasPrefix(strings.ToLower(variable), "prc."):
-		name, prc = variable[4:], true
-	case strings.HasPrefix(strings.ToLower(variable), "local."):
+	switch lower := strings.ToLower(variable); {
+	case strings.HasPrefix(lower, "prc."):
+		name, container = variable[4:], "prc"
+	case strings.HasPrefix(lower, "rc."):
+		// FW/1's request context, as a controller fills it.
+		name, container = variable[3:], "rc"
+	case strings.HasPrefix(lower, "arguments.rc."):
+		name, container = variable[13:], "rc"
+	case strings.HasPrefix(lower, "local."):
 		name = variable[6:]
 	}
 
@@ -64,9 +69,9 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		ok  bool
 	)
 
-	if prc {
+	if container != "" {
 		lines := strings.Split(pr.Content, "\n")
-		rhs, ok = lastPrcAssignment(strings.Join(lines[min(start, len(lines)):min(int(line), len(lines))], "\n"), name)
+		rhs, ok = lastMemberAssignment(strings.Join(lines[min(start, len(lines)):min(int(line), len(lines))], "\n"), container, name)
 	} else {
 		rhs, ok = localAssignment(pr.Content, name, start, int(line))
 		if !ok && start > 0 && variable == name {
@@ -93,6 +98,7 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 	}
 
 	if m := assignedCallRe.FindStringSubmatch(rhs); m == nil || m[1] == "" && isScopeWord(m[2]) || strings.EqualFold(m[1], variable) ||
+		container != "" && strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "arguments."), container+"."+strings.ToLower(name)) ||
 		strings.EqualFold(strings.TrimPrefix(strings.ToLower(m[1]), "variables."), strings.ToLower(name)) {
 		return ""
 	}

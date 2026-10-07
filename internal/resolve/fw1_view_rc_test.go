@@ -66,3 +66,61 @@ func TestAnFW1ViewsRcIsWhatItsControllerAssigns(t *testing.T) {
 		t.Errorf("edit.cfm: resolved without a framework giving views a base")
 	}
 }
+
+// TestAnRcMemberAssignedFromAnInheritedServiceIsTyped: Masa's csettings
+// controller fills `arguments.rc.siteBean = variables.settingsManager.read(
+// arguments.rc.siteid )`, where settingsManager is injected through a setter
+// on the base controller. The parse cannot type that, and the lookup that
+// types `x = svc.read()` at the line took only a bare name and prc.x, so the
+// controller's rc.siteBean, and every call on it in the view, was untyped.
+func TestAnRcMemberAssignedFromAnInheritedServiceIsTyped(t *testing.T) {
+	files := map[string]string{
+		"framework/one.cfc": `component { function view(){} }`,
+		"model/Site.cfc":    `component { function getThemes(){} }`,
+		"model/Manager.cfc": `component { model.Site function read( id ){} }`,
+		"controllers/controller.cfc": `component {
+	function setSettingsManager( settingsManager ){ variables.settingsManager = arguments.settingsManager; }
+	function init(){ variables.settingsManager = new model.Manager(); }
+}`,
+		"controllers/csettings.cfc": `component extends="controller" {
+	function editSite( rc ){
+		arguments.rc.siteBean = variables.settingsManager.read( arguments.rc.siteid );
+		arguments.rc.siteBean.getThemes();
+	}
+	function tagged( rc ){ }
+}`,
+		"controllers/ctag.cfc": `<cfcomponent extends="controller">
+<cffunction name="show"><cfargument name="rc">
+	<cfset rc.siteBean = variables.settingsManager.read(rc.siteid)>
+	<cfset rc.siteBean.getThemes()>
+	<cfset rc.siteBean = rc.siteBean.missingSave()>
+	<cfset rc.siteBean.getThemes()>
+</cffunction>
+</cfcomponent>`,
+		"views/csettings/editsite.cfm": `<cfoutput>#rc.siteBean.getThemes()# #rc.siteBean.nope()#</cfoutput>`,
+	}
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+
+	views := func(path string) string {
+		if strings.Contains(filepath.ToSlash(path), "/views/") {
+			return "framework.one"
+		}
+
+		return ""
+	}
+
+	expectReasons(t, reasonsWith(t, &Resolver{ImplicitExtends: views}, dir, "controllers/csettings.cfc"), map[string]string{
+		"arguments.rc.siteBean.getThemes": "",
+	})
+	expectReasons(t, reasonsWith(t, &Resolver{ImplicitExtends: views}, dir, "views/csettings/editsite.cfm"), map[string]string{
+		"rc.siteBean.getThemes": "",
+		"rc.siteBean.nope":      "method 'nope' not found in Site",
+	})
+	// A member assigned from a call on itself is not typed by that call.
+	got := reasonsWith(t, &Resolver{ImplicitExtends: views}, dir, "controllers/ctag.cfc")
+	if got["rc.siteBean.missingSave"] != "method 'missingSave' not found in model.Site" {
+		t.Errorf("rc.siteBean.missingSave: %q", got["rc.siteBean.missingSave"])
+	}
+}

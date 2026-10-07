@@ -406,14 +406,22 @@ func prcMember(variable string) (string, bool) {
 	return name, true
 }
 
-func prcAssignRe(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?im)^\s*(?:arguments\.)?prc\.` + regexp.QuoteMeta(name) + `\s*=\s*([^=].*?)\s*;?\s*$`)
+// memberAssignRe matches `container.name = …` on a line of its own, in script
+// or in a <cfset>, with or without arguments. before the container.
+func memberAssignRe(container, name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:arguments\.)?` + regexp.QuoteMeta(container) + `\.` + regexp.QuoteMeta(name) +
+		`\s*=\s*([^=].*?)\s*/?>?\s*;?\s*$`)
 }
 
 // lastPrcAssignment is the right-hand side of the last `prc.name = …` in body,
 // when it is written on one line and its parentheses balance.
 func lastPrcAssignment(body, name string) (string, bool) {
-	all := prcAssignRe(name).FindAllStringSubmatch(body, -1)
+	return lastMemberAssignment(body, "prc", name)
+}
+
+// lastMemberAssignment is lastPrcAssignment for any container.
+func lastMemberAssignment(body, container, name string) (string, bool) {
+	all := memberAssignRe(container, name).FindAllStringSubmatch(body, -1)
 	if len(all) == 0 {
 		return "", false
 	}
