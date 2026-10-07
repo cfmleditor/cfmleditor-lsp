@@ -124,6 +124,7 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"commandbox", "print", "commandbox.system.util.PrintBuffer"},
 		{"commandbox", "command()", "commandbox.system.util.CommandDSL"},
 		{"commandbox", "task()", ""}, // a ColdBox scheduler's task() is not CommandBox's
+		{"commandbox", `getInstance( "DetailOutputService@wheels-cli" )`, "DetailOutputService@wheels-cli"},
 		{"coldbox", "task()", "coldbox.system.web.tasks.ColdBoxScheduledTask"},
 		{"contentbox", "prc.oContent", "contentbox.models.content.BaseContent|contentbox.models.content.Entry|contentbox.models.content.Page|contentbox.models.content.ContentStore"},
 		{"cfmigrations", "table", "qb.models.Schema.Blueprint"},

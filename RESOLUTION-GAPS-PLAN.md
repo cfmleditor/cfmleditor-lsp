@@ -2358,3 +2358,13 @@ name, so the resolver looks it up as an entity first. Component types travel as
 plain strings, and doing it at parse time against a partly built index would
 make results depend on scan order, so it is left recorded here.
 `TestFW1AutowiresItsControllersWhateverDILocationsSays`.
+
+### CommandBox's getInstance() takes WireBox ids
+
+CommandBox is built on WireBox, and a command's `getInstance()` takes the same
+ids and DSL as a ColdBox handler's: cfwheels' CLI writes
+`application.wirebox.getInstance( "DetailOutputService@wheels-cli" )`. Only the
+coldbox preset registered `idResolver("getInstance")` and the DSL resolvers,
+so under the commandbox preset alone the id typed nothing. The commandbox
+preset now carries both. Measured: cw-p −67, tb-p −1, nothing added.
+`TestEveryPresetResolverMatchesItsOwnNames` has the case.

@@ -223,6 +223,10 @@ var frameworkPresets = map[string]frameworkPreset{
 			},
 			returnResolver(commandboxSystem+"util.CommandDSL", "command"),
 			returnResolver(commandboxSystem+"util.PrintBuffer", "getPrint"),
+			// CommandBox is built on WireBox: a command's getInstance() takes
+			// the ids and DSL a ColdBox one does ("X@module", "wirebox:…").
+			dslResolvers(),
+			[]Resolver{idResolver("getInstance")},
 		),
 		bases: []implicitBase{
 			{dir: "commands", ext: ".cfc", component: commandboxSystem + "BaseCommand"},
