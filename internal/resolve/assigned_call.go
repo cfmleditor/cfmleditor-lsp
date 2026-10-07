@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 )
 
@@ -41,9 +42,12 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		return ""
 	}
 
-	name, container := variable, ""
+	name, container, scoped := variable, "", false
 
 	switch lower := strings.ToLower(variable); {
+	case strings.HasPrefix(lower, "variables."):
+		// The component's own variable, which any function may have set.
+		name, scoped = variable[10:], true
 	case strings.HasPrefix(lower, "prc."):
 		name, container = variable[4:], "prc"
 	case strings.HasPrefix(lower, "rc."):
@@ -70,6 +74,10 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		at  int // the assignment's line, -1 when not known
 	)
 
+	// Where the right-hand side is typed: the lookup's own line and function,
+	// unless the assignment was made in another function.
+	evalLine, evalCaller := line, caller
+
 	if container != "" {
 		lines := strings.Split(pr.Content, "\n")
 		from := min(start, len(lines))
@@ -80,9 +88,21 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 		at = from + idx
 	} else {
 		rhs, at, ok = localAssignmentAt(pr.Content, name, start, int(line))
-		if !ok && start > 0 && variable == name {
-			at = -1
-			rhs, ok = variablesAssignment(pr, name, caller, start, int(line))
+		if ok && scoped && localDeclRe.MatchString(lineOfContent(pr.Content, at)) {
+			// `var x = …` is a local, not the variables.x asked about.
+			ok = false
+		}
+
+		if !ok && start > 0 && (variable == name || scoped) {
+			rhs, at, ok = variablesAssignment(pr, name, caller, start, int(line), scoped)
+			if ok {
+				// Typed where it was assigned: `variables.x = arguments.x` in
+				// init() reads init's argument, not the caller's.
+				evalLine = conv.Uint32(at)
+				if scope, found := enclosingScope(pr, evalLine); found {
+					evalCaller = scope.Name
+				}
+			}
 		}
 	}
 
@@ -94,7 +114,7 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 	// typed as that name is at the line (Masa's form builder reads the
 	// resource bundle factory a startup template assigns).
 	if aliasRe.MatchString(rhs) && !strings.EqualFold(rhs, variable) && !strings.EqualFold(rhs, name) {
-		comp, _ := r.receiverComponentD(rhs, line, caller, "", pr, baseDir, nil, lookupCtx{depth: depth + 1, leaf: ctx.leaf})
+		comp, _ := r.receiverComponentD(rhs, evalLine, evalCaller, "", pr, baseDir, nil, lookupCtx{depth: depth + 1, leaf: ctx.leaf})
 		if comp != "" && !strings.HasPrefix(comp, "$") {
 			tr.addf("resolved %q to %q: it is assigned %s", variable, comp, rhs)
 
@@ -111,19 +131,19 @@ func (r *Resolver) assignedFromCall(variable string, line uint32, caller string,
 
 	// `x = x.save()`: the call is made on what x held before the line, so
 	// the receiver is read there. Without the assignment's line it cannot be.
-	at32 := line
+	at32 := evalLine
 
 	if selfAssigned(recv, variable, container, name) {
 		if at < 0 {
 			return ""
 		}
 
-		at32 = uint32(at)
+		at32 = conv.Uint32(at)
 	} else if strings.EqualFold(strings.TrimPrefix(strings.ToLower(recv), "variables."), strings.ToLower(name)) {
 		return ""
 	}
 
-	answer := r.typeCallExpr(rhs, at32, caller, pr, baseDir, ctx)
+	answer := r.typeCallExpr(rhs, at32, evalCaller, pr, baseDir, ctx)
 	if answer != "" {
 		tr.addf("resolved %q to %q: the last assignment to it is %s", variable, answer, rhs)
 	}
@@ -239,6 +259,9 @@ func (r *Resolver) typeBareCallExpr(method, args string, line uint32, pr *parser
 }
 
 var identRe = regexp.MustCompile(`^[A-Za-z_]\w*$`)
+
+// localDeclRe is a line declaring a local: `var x`, `local.x`.
+var localDeclRe = regexp.MustCompile(`(?i)(?:^|[^\w.])(?:var\s+[\w$]|local\.)`)
 
 // aliasRe is a right-hand side that is a dotted name and nothing else.
 var aliasRe = regexp.MustCompile(`^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$`)
@@ -437,24 +460,28 @@ func containsFold(list []string, s string) bool {
 // function the lookup is in, which CFML makes a variables-scope write:
 // TestBox's `_controller = …` in beforeAll(), read by every spec in run().
 // It is the parse's own rule for such a name (fileLevelRef: the nearest
-// preceding assignment in the file). Not when the function declares name as
+// preceding assignment in the file). A variables.-scoped receiver reads the
+// same assignment. Not when the function declares name as
 // a local or an argument, which hides the variable, nor when the assignment
 // found is a `var` or local. one, which never left its function.
-func variablesAssignment(pr *parser.ParseResult, name, caller string, start, line int) (string, bool) {
+func variablesAssignment(pr *parser.ParseResult, name, caller string, start, line int, scoped bool) (string, int, bool) {
 	lines := strings.Split(pr.Content, "\n")
 	end := min(line, len(lines))
 
+	// A local or an argument of the same name hides an unscoped one; a
+	// variables.-scoped receiver is the component's whatever the function
+	// declares.
 	declared := regexp.MustCompile(`(?i)(?:\bvar\s+|\blocal\.|<cfargument\s[^>]*name\s*=\s*["'])` + regexp.QuoteMeta(name) + `\b`)
-	if argumentOf(pr, caller, name) != nil || declared.MatchString(strings.Join(lines[min(start, end):end], "\n")) {
-		return "", false
+	if !scoped && (argumentOf(pr, caller, name) != nil || declared.MatchString(strings.Join(lines[min(start, end):end], "\n"))) {
+		return "", 0, false
 	}
 
 	rhs, at, ok := localAssignmentAt(pr.Content, name, 0, start)
 	if !ok || declared.MatchString(lines[at]) {
-		return "", false
+		return "", 0, false
 	}
 
-	return rhs, true
+	return rhs, at, true
 }
 
 // selfAssigned reports whether receiver, the receiver of the call assigned to

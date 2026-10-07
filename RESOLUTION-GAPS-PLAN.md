@@ -2580,3 +2580,17 @@ function assigned one), unless the list is asked for a query or a stream
 contentViewlet, 6 `args.content` in TableStatus, 2 in latestLogins; the one added
 is a chain on `getActiveContent()`, which declares no type).
 `TestALoopOverAViewsArgsHoldsWhatTheRenderPassed`.
+
+### A component variable is what another function assigned it
+
+Masa's settingsBundle sets `<cfset variables.configBean = application.configBean />`
+in `init()` and calls `variables.configBean.getAdminDir()` from every other
+function. `application.configBean` is typed only by the resolver's startup
+lookup, so the parse filed no type for the component variable, and
+`assignedFromCall`, which reads an assignment at lookup, took a bare name (and
+`local.`, `prc.`, `rc.`) but never a `variables.` receiver. It now does: the
+assignment is looked for in the calling function, a `var x` there being a
+different variable, then above it as for a bare name, and a right-hand side
+assigned in another function is typed at that assignment, in that function.
+Measured: masa-c −80 (67 `variables.configBean`), cx −3, cb −2; nothing added.
+`TestAComponentVariableIsWhatAnotherFunctionAssignedIt`.

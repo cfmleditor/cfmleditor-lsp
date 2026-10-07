@@ -190,3 +190,35 @@ func TestAnAssignedChainIsTypedHopByHop(t *testing.T) {
 		"u.siteOnly":   "variable 'u' has no component ref",
 	})
 }
+
+// TestAComponentVariableIsWhatAnotherFunctionAssignedIt: Masa's settingsBundle
+// sets `variables.configBean = application.configBean` in init() and calls
+// variables.configBean.getAdminDir() from every other function. The lookup
+// that types an assignment at use took a bare name only, never a variables.
+// receiver, and typed what it found in the calling function: init's
+// `variables.svc = arguments.svc` has to be read in init.
+func TestAComponentVariableIsWhatAnotherFunctionAssignedIt(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"model/Config.cfc": `component { function getAdminDir(){} }`,
+		"model/Svc.cfc":    `component { function run(){} }`,
+		"Application.cfc":  `component { function onApplicationStart(){ include "startup.cfm"; } }`,
+		"startup.cfm":      `<cfset application.configBean = new model.Config()>`,
+		"Bundle.cfc": `<cfcomponent output="false">
+	<cffunction name="init" output="false">
+		<cfargument name="svc" type="model.Svc">
+		<cfset variables.configBean	= application.configBean />
+		<cfset variables.svc = arguments.svc>
+		<cfreturn this>
+	</cffunction>
+	<cffunction name="a"><cfset variables.configBean.getAdminDir()><cfset variables.configBean.nope()></cffunction>
+	<cffunction name="b"><cfargument name="svc"><cfset variables.svc.run()></cffunction>
+</cfcomponent>`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "Bundle.cfc"), map[string]string{
+		"variables.configBean.getAdminDir": "",
+		"variables.configBean.nope":        "method 'nope' not found in model.Config",
+		"variables.svc.run":                "",
+	})
+}
