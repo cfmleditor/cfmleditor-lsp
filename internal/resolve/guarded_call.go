@@ -24,8 +24,29 @@ import (
 // line (0-based) is made only after its containing code checked that the
 // method exists.
 func guardedByExistsCheck(pr *parser.ParseResult, variable, funcName string, line int) bool {
-	if pr == nil || variable == "" || funcName == "" {
+	if funcName == "" {
 		return false
+	}
+
+	text, ok := guardText(pr, variable, funcName, line)
+	if !ok {
+		return false
+	}
+
+	for _, m := range existsGuard(variable, funcName).FindAllStringIndex(text, -1) {
+		if guards(text, m[0], m[1]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// guardText is the code of the function holding line, from its start to the
+// call to variable.funcName on that line.
+func guardText(pr *parser.ParseResult, variable, funcName string, line int) (string, bool) {
+	if pr == nil || variable == "" {
+		return "", false
 	}
 
 	from := 0
@@ -35,32 +56,31 @@ func guardedByExistsCheck(pr *parser.ParseResult, variable, funcName string, lin
 
 	start, ok := lineOffset(pr.Content, from)
 	if !ok {
-		return false
+		return "", false
 	}
 
-	callLine, ok := lineOffset(pr.Content, line)
+	at, ok := lineOffset(pr.Content, line)
 	if !ok {
-		return false
+		return "", false
 	}
 
-	at := callLine
 	if i := indexFoldStr(lineOfContent(pr.Content, line), variable+"."+funcName); i >= 0 {
 		at += i
 	}
 
-	text := pr.Content[start:at]
+	return pr.Content[start:at], true
+}
 
-	for _, m := range existsGuard(variable, funcName).FindAllStringIndex(text, -1) {
-		if negatedGuard(text[:m[0]]) {
-			continue
-		}
-
-		if controls(text[:m[0]], text[m[1]:]) {
-			return true
-		}
+// guards reports whether the check at text[from:to] guards the end of text:
+// not negated, and what it opens still open there. A qualifier on the
+// check's function (variables.utility.checkForInstanceOf) is stepped over.
+func guards(text string, from, to int) bool {
+	head := strings.TrimRight(text[:from], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$.")
+	if !strings.HasSuffix(text[:from], ".") {
+		head = text[:from]
 	}
 
-	return false
+	return !negatedGuard(head) && controls(head, text[to:])
 }
 
 func existsGuard(variable, funcName string) *regexp.Regexp {
@@ -155,4 +175,29 @@ func lineOffset(content string, n int) (int, bool) {
 
 func indexFoldStr(s, sub string) int {
 	return strings.Index(strings.ToLower(s), strings.ToLower(sub))
+}
+
+// guardedInstanceOf is the components a type check guarding the call names
+// for variable: inside `<cfif checkForInstanceOf( arguments.event,
+// "mura.MuraScope" )>` Mura's pluginManager calls arguments.event.event(),
+// which the MuraScope declares and the event it is otherwise handed does not.
+// isInstanceOf() and Mura's utility.checkForInstanceOf() are read, under the
+// rules guardedByExistsCheck applies.
+func guardedInstanceOf(pr *parser.ParseResult, variable, funcName string, line int) []string {
+	text, ok := guardText(pr, variable, funcName, line)
+	if !ok {
+		return nil
+	}
+
+	re := regexp.MustCompile(`(?i)\b(?:isInstanceOf|checkForInstanceOf)\(\s*` + regexp.QuoteMeta(variable) + `\s*,\s*["']([\w.]+)["']\s*\)`)
+
+	var comps []string
+
+	for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
+		if guards(text, m[0], m[1]) {
+			comps = append(comps, text[m[2]:m[3]])
+		}
+	}
+
+	return comps
 }

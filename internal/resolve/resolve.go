@@ -92,6 +92,7 @@ type Resolver struct {
 	handlerCache      map[string]*parser.ParseResult // handler path → its parse (handlerParse)
 	wrapperHosts      map[string][]string            // template path → Wheels wrapper hosts (wheelsTemplateHosts)
 	extraIncludeHosts map[string][]includeHost       // template path → includes the graph cannot see (frameworkIncludeHosts)
+	muraEventFiles    map[string]bool                // file → Mura calls it with an event (handsMuraEvent)
 	handoffs          handoffIndex                   // handler actions by the view each renders (viewActions)
 }
 
@@ -2924,6 +2925,16 @@ func (r *Resolver) missingMethod(comp, softComp string, call *parser.CallSite, p
 		return MissingBaseReason(base)
 	}
 
+	// Nor one a type check before the call says the object has.
+	for _, c := range guardedInstanceOf(pr, variable, funcName, int(call.Line)) {
+		if def := r.ResolveFunc(c, funcName, baseDir); def != nil {
+			tr.addf("%q is called only after the code checks %q is a %q, which declares it", funcName, variable, c)
+			tr.hit(TargetComponent, c, def)
+
+			return ""
+		}
+	}
+
 	// Nor a method the code checks for before calling it.
 	if guardedByExistsCheck(pr, variable, funcName, int(call.Line)) {
 		tr.addf("%q is called only after the code checks %q has it — accepted as dynamic", funcName, variable)
@@ -3086,6 +3097,13 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
+	}
+
+	// Mura's event, in the code Mura hands one to.
+	if ev := r.muraEvent(variable, comp, line, caller, pr); ev != "" {
+		tr.addf("resolved %q to %q: Mura calls this file with its event", variable, ev)
+
+		return ev, false
 	}
 
 	// An argument shadows a same-named component field. In particular, an

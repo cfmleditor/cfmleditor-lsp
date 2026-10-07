@@ -2456,3 +2456,39 @@ resolver's mistake rather than the code's:
 Nothing was added. What remains of the 207 is genuinely missing (ContentBox's
 old patches calling removed APIs, a handful of real misses in ColdBox and Masa),
 added at run time by a test (mixins, custom assertions), or Masa's `event`.
+
+### Mura's event, where Mura hands one over
+
+Masa's largest group was calls on `event`, `arguments.event` and
+`variables.event`: 673 findings, almost all in Mura's own source
+(`core/mura/Handler` 329, `core/mura/content` 159, `core/mura/client` 116).
+Mura passes a `servletEvent` or a plain `event`, which share an API and no base,
+and says so nowhere. The held-back preset typed any variable called `event` in a
+Mura project; this is the narrower rule chosen instead (`muraEvent`,
+`mura_event.go`). `event` is `mura.servletEvent|mura.event` only:
+
+- under the directory holding `mura/event.cfc` and `mura/servletEvent.cfc`,
+  which is Mura's own source;
+- in a display object, a `.cfm` the mura preset runs inside the content
+  renderer;
+- in a plugin's event handler, a component extending
+  `pluginGenericEventHandler`.
+
+A project file of its own keeps whatever it had. A local the function declares
+is left alone unless it is assigned the event (`renderer.getEvent()`,
+`$.event()`, a new `mura.event`): `contentIntervalManager` loops with
+`var event = events.next()`, and typing that cost 5 wrong "not found" findings in
+the first version. A second rule came with it: inside
+`<cfif variables.utility.checkForInstanceOf( arguments.event, "mura.MuraScope" )>`,
+pluginManager calls `arguments.event.event()`, which only the MuraScope
+declares. `guardedInstanceOf` checks a call guarded by `isInstanceOf()` or
+`checkForInstanceOf()` against the component the guard names, under
+`guardedByExistsCheck`'s rules for what a guard controls.
+
+Measured: masa-c 5136 → 4619, −668/+151, nothing else moved. Every one of the
+151 added is the next hop of a chain now checked one step further:
+`event.getValue( … ).x()` stops at "method 'getValue' in
+mura.servletEvent|mura.event has no component return type" (90 getValue,
+21 getSite, 18 getHandler, 8 getValidator, 6 getContentBean, 1
+getContentRenderer). Masa scans in 12.1s against `main`'s 13.7–14.4s.
+`TestMuraHandsItsOwnCodeAnEvent`, `TestATypeCheckSaysWhatTheObjectIs`.

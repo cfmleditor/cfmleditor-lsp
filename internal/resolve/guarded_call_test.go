@@ -54,3 +54,43 @@ func TestACallTheCodeChecksForIsNotMissing(t *testing.T) {
 		"c.onTagAfter": "method 'onTagAfter' not found in Config",
 	})
 }
+
+// TestATypeCheckSaysWhatTheObjectIs: Mura's pluginManager is handed an event
+// or a MuraScope, and inside `<cfif variables.utility.checkForInstanceOf(
+// arguments.event, "mura.MuraScope" )>` calls arguments.event.event(), which
+// only the MuraScope declares. The call is checked against the component the
+// guard names; outside the guard, or under a negated one, it is not.
+func TestATypeCheckSaysWhatTheObjectIs(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Event.cfc": `component { function getValue() {} }`,
+		"Scope.cfc": `component { function event() {} }`,
+		"Manager.cfc": `<cfcomponent>
+<cffunction name="announce">
+	<cfargument name="ev" type="Event">
+	<cfif variables.utility.checkForInstanceOf(arguments.ev, "Scope")>
+		<cfset arguments.ev.event()>
+		<cfset arguments.ev.notOnScope()>
+	</cfif>
+</cffunction>
+<cffunction name="negated">
+	<cfargument name="neg" type="Event">
+	<cfif not isInstanceOf(arguments.neg, "Scope")>
+		<cfset arguments.neg.event()>
+	</cfif>
+</cffunction>
+<cffunction name="after">
+	<cfargument name="aft" type="Event">
+	<cfif isInstanceOf(arguments.aft, "Scope")></cfif>
+	<cfset arguments.aft.event()>
+</cffunction>
+</cfcomponent>`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "Manager.cfc"), map[string]string{
+		"arguments.ev.event":      "",
+		"arguments.ev.notOnScope": "method 'notOnScope' not found in Event",
+		"arguments.neg.event":     "method 'event' not found in Event",
+		"arguments.aft.event":     "method 'event' not found in Event",
+	})
+}
