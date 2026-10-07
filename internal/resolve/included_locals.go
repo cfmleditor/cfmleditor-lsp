@@ -50,7 +50,7 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 
 	file := cfpath.FromURI(string(pr.URI))
 
-	extra := append(r.coldboxErrorHosts(file), r.computedIncludeHosts(file)...)
+	extra := r.frameworkIncludeHosts(file)
 	if len(g.rev[pathKey(file)]) == 0 && len(extra) == 0 {
 		return ""
 	}
@@ -195,4 +195,33 @@ func isCFMLScope(s string) bool {
 	default:
 		return false
 	}
+}
+
+// frameworkIncludeHosts are the include sites the include graph cannot see
+// for file: ColdBox's error template and a computed include naming the file's
+// directory. Cached per file, since includerHeld asks for every untyped name
+// a template reads, and finding them reads files.
+func (r *Resolver) frameworkIncludeHosts(file string) []includeHost {
+	o := r.owner()
+	key := pathKey(file)
+
+	o.mu.RLock()
+	hosts, ok := o.extraIncludeHosts[key]
+	o.mu.RUnlock()
+
+	if ok {
+		return hosts
+	}
+
+	hosts = append(r.coldboxErrorHosts(file), r.computedIncludeHosts(file)...)
+
+	o.mu.Lock()
+	if o.extraIncludeHosts == nil {
+		o.extraIncludeHosts = map[string][]includeHost{}
+	}
+
+	o.extraIncludeHosts[key] = hosts
+	o.mu.Unlock()
+
+	return hosts
 }

@@ -91,6 +91,7 @@ type Resolver struct {
 	requestWriteCache map[string]bool                // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
 	handlerCache      map[string]*parser.ParseResult // handler path → its parse (handlerParse)
 	wrapperHosts      map[string][]string            // template path → Wheels wrapper hosts (wheelsTemplateHosts)
+	extraIncludeHosts map[string][]includeHost       // template path → includes the graph cannot see (frameworkIncludeHosts)
 	handoffs          handoffIndex                   // handler actions by the view each renders (viewActions)
 }
 

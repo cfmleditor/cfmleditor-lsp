@@ -2422,5 +2422,9 @@ by at least its last three segments. Each computed include in it is a site,
 and `includerHeld` requires every site to agree, as for a literal include.
 Candidates come from the batch caller index (a name ending a quoted string),
 so this runs in a batch scan only, like the other caller inference. Measured:
-masa-c −138, nothing added; Masa's scan time unchanged.
+masa-c −138, nothing added. As first committed, `includerHeld` computed these
+hosts before its own cache check, so every untyped name in every template
+re-read the candidate files: Masa's scan went from 12.8s to 22.1s. They are now
+cached per template (`frameworkIncludeHosts`), and Masa is 14.0s against
+`main`'s 14.9s; every scan is as fast as `main` or faster.
 `TestATemplateIncludedByAComputedPathReadsItsIncluder`.
