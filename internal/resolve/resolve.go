@@ -1390,6 +1390,12 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 	}
 
 	if comp == "" {
+		if comp = r.initArgMember(variable, pr, lookupCtx{}); comp != "" {
+			tr.addf("resolved %q to %q: init stores its argument there, and every construction passes it that", variable, comp)
+		}
+	}
+
+	if comp == "" {
 		tr.addf("no ComponentRef and no componentResolver matched %q", variable)
 	}
 

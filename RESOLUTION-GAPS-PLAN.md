@@ -2212,3 +2212,29 @@ the contentbox-api auth handler's missing-base summary goes, since its
 `jwtAuth()` calls were the inherited calls it counted. The added finding was
 hidden before: `jwtAuth().getUser().getMemento()`, where `JwtService.getUser()`
 returns `any`. `TestCBSecurityHelpersComeFromTheirStubs`.
+
+### A constructor argument is what every construction passes
+
+Caller-argument inference never covered `init`. It looked for calls by the
+function's name, which for `init` is every file, and `new X( … )` is not a call
+named init. `inferInitArgument` (`init_args.go`) finds an `init` argument's
+callers by the component's file name instead. It reads every `new a.b.X( … )`
+whose path resolves to the component (`constructions`, using the call's own
+token, since `callArgument`'s name-and-line lookup met `function stats()`
+before `new Stats( this )`), and every `init()` call the existing check places
+on it. Any other place the name ends a quoted string, such as
+`getInstance( "X" )` or a `createObject` with no init on its line, is a
+construction that cannot be read, and leaves the argument untyped. The caller
+index records names ending a quoted string for that purpose
+(`quotedCallerKey`). `initArgMember` then types a `variables.x` whose only
+assignments are `variables.x = arguments.p` inside init.
+
+Measured: cw-p −3, tb-p −1 (`CollectionExpectation`'s `variables.spec`, a
+`SshPoolTask`'s pool), nothing added. Scan time is unchanged within noise
+(cw-p 9.4s, masa-c 12.5s). The case it was written for, cfwheels' CLI
+`Templates`, stays untyped for a real reason: its one construction passes
+`helpers = getService( "helpers" )`, a service locator keyed by name.
+ColdBox's `BoxLangStats` (29) is also not reached: it stores the argument
+through `setCacheProvider()` and reads it back through the generated
+`getCacheProvider()`, which this does not follow.
+`TestAConstructorArgumentIsWhatEveryConstructionPasses`.

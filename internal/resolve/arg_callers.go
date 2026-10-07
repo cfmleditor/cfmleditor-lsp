@@ -95,8 +95,29 @@ func callerNames(content string) map[string]bool {
 		open = next + rel
 	}
 
+	// A name ending a quoted string is recorded too, as quotedCallerKey:
+	// createObject( "component", "a.Templates" ) and getInstance( "Templates" )
+	// make an object without a `Templates(` for the scan above to see.
+	for i := range len(content) {
+		if c := content[i]; c != '"' && c != '\'' {
+			continue
+		}
+
+		start := i
+		for start > 0 && callerWord(content[start-1]) {
+			start--
+		}
+
+		if start < i {
+			addCallerName(seen, quotedCallerKey(content[start:i]))
+		}
+	}
+
 	return seen
 }
+
+// quotedCallerKey is the caller-index key for name ending a quoted string.
+func quotedCallerKey(name string) string { return "\"" + name }
 
 func addCallerName(seen map[string]bool, name string) {
 	const stackName = 128
@@ -269,6 +290,10 @@ func (r *Resolver) argumentFromCallers(variable, caller string, pr *parser.Parse
 }
 
 func (r *Resolver) inferArgument(fd *parser.FunctionDef, pos int, file string, ctx lookupCtx) string {
+	if strings.EqualFold(fd.Name, "init") && strings.EqualFold(filepath.Ext(file), ".cfc") {
+		return r.inferInitArgument(fd, pos, file, ctx)
+	}
+
 	files := r.callerFiles(fd.Name)
 	if len(files) == 0 || len(files) > maxArgCallerFiles {
 		return ""
@@ -451,30 +476,35 @@ func callArgument(tokens []parser.Token, name string, line, pos int, argName str
 			continue
 		}
 
-		end := producerGroupEnd(tokens, i+1, parser.TokLParen, parser.TokRParen)
-		if end < 0 {
-			return nil, false
-		}
+		return callArgumentAt(tokens, i, pos, argName)
+	}
 
-		positional := 0
+	return nil, false
+}
 
-		for _, piece := range producerSplit(tokens[i+2 : end]) {
-			if len(piece) > 2 && piece[0].Kind == parser.TokIdent && (piece[1].Kind == parser.TokEquals || piece[1].Kind == parser.TokColon) {
-				if strings.EqualFold(piece[0].Value, argName) {
-					return piece[2:], true
-				}
-
-				continue
-			}
-
-			if positional == pos {
-				return piece, len(piece) > 0
-			}
-
-			positional++
-		}
-
+// callArgumentAt is callArgument for the call whose name is tokens[i].
+func callArgumentAt(tokens []parser.Token, i, pos int, argName string) (expr []parser.Token, passed bool) {
+	end := producerGroupEnd(tokens, i+1, parser.TokLParen, parser.TokRParen)
+	if end < 0 {
 		return nil, false
+	}
+
+	positional := 0
+
+	for _, piece := range producerSplit(tokens[i+2 : end]) {
+		if len(piece) > 2 && piece[0].Kind == parser.TokIdent && (piece[1].Kind == parser.TokEquals || piece[1].Kind == parser.TokColon) {
+			if strings.EqualFold(piece[0].Value, argName) {
+				return piece[2:], true
+			}
+
+			continue
+		}
+
+		if positional == pos {
+			return piece, len(piece) > 0
+		}
+
+		positional++
 	}
 
 	return nil, false
