@@ -276,3 +276,38 @@ func TestAnArgumentPassedAsThisIsTheCallersComponent(t *testing.T) {
 		t.Errorf("arguments.renderer.nope: %q, want a method not found", got)
 	}
 }
+
+// TestACallerTypedByAResolverIsPlaced: Mura's admin pages call
+// `$.dspObjects( … )`, and `$` is a MuraScope only by the mura preset's
+// resolver on the variable name. The MuraScope has no dspObjects of its own —
+// its onMissingMethod hands the call to the renderer — so the page does not
+// call the utility's dspObjects, whose renderer argument is then what its one
+// real caller passes. Placing the receiver by the receiver lookup alone left
+// the page's call unplaceable, and the argument untyped.
+func TestACallerTypedByAResolverIsPlaced(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"mura/MuraScope.cfc": `component { function onMissingMethod( name, args ) {} }`,
+		"mura/Renderer.cfc": `component {
+	variables.util = new Util();
+	function dspObjects( columnid ) {
+		arguments.renderer = this;
+		return variables.util.dspObjects( argumentCollection = arguments );
+	}
+	function own() {}
+}`,
+		"mura/Util.cfc": `component {
+	function dspObjects( renderer ) { arguments.renderer.own(); }
+}`,
+		"admin/page.cfm": `<cfoutput>#$.dspObjects( columnid = 1 )#</cfoutput>`,
+	})
+
+	r := &Resolver{
+		InferArgsFiles: cfmlFilesIn(t, dir),
+		Resolvers:      []parser.Resolver{{Match: "$", Resolve: "mura.MuraScope", Prefix: "$"}},
+	}
+
+	expectReasons(t, reasonsWith(t, r, dir, "mura/Util.cfc"), map[string]string{
+		"arguments.renderer.own": "",
+	})
+}

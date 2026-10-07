@@ -399,6 +399,15 @@ func (r *Resolver) callIsTo(call *parser.CallSite, hpr *parser.ParseResult, path
 	}
 
 	comp, _ := r.receiverComponentD(call.Variable, call.Line, call.Caller, call.FuncName, hpr, dir, nil, lookupCtx{depth: ctx.depth + 1})
+
+	// Then a componentResolver on the variable's name, as canResolveCall
+	// tries next: the mura preset's `$` is a MuraScope, and `$.dspObjects()`
+	// is the renderer's dspObjects, reached through the scope's
+	// onMissingMethod, not a call of the utility function of that name.
+	if comp == "" {
+		comp, _ = parser.ResolveFromCallFull(call.Variable, r.Resolvers)
+	}
+
 	if comp == "" || strings.HasPrefix(comp, "$") {
 		// A receiver that cannot hold fd's component is known not to call fd:
 		// MessageDigest's md.update() is not a DAO's update().

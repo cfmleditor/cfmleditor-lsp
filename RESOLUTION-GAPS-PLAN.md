@@ -2492,3 +2492,25 @@ mura.servletEvent|mura.event has no component return type" (90 getValue,
 21 getSite, 18 getHandler, 8 getValidator, 6 getContentBean, 1
 getContentRenderer). Masa scans in 12.1s against `main`'s 13.7–14.4s.
 `TestMuraHandsItsOwnCodeAnEvent`, `TestATypeCheckSaysWhatTheObjectIs`.
+
+### A caller typed by a resolver is placed
+
+The caller inference (`argumentFromCallers`) gives up on an argument when any
+call of the function's name has a receiver it cannot place, and it placed a
+receiver by the receiver lookup alone, without the componentResolver on the
+variable's name that `canResolveCall` tries next. Mura's admin pages call
+`$.dspObjects( … )`, and `$` is a MuraScope only by the mura preset's resolver,
+so every utility function sharing a name with a renderer method
+(`contentRendererUtility.dspObjects( renderer )`) was left untyped. `callIsTo`
+now tries that resolver too; the MuraScope declares no `dspObjects`, so the page
+is known not to call the utility's. Measured: masa-c −26/+1 (the one added is a
+chain now checked a step further), cx −4. `TestACallerTypedByAResolverIsPlaced`.
+
+Masa's `arguments.renderer` is 105 findings after this. Each function still left
+untyped has a caller of the same name the inference cannot place: a call to
+another component's method of that name on a receiver nothing types
+(`content.getTemplate()`, `arguments.contentBean.getMetaKeyWords()`,
+`request.contentRenderer.createHREF()`), or a nested `arguments.renderer.x()`
+whose own argument is in the same position. Placing those would mean guessing
+that an untyped caller is not the function's, which this inference refuses by
+design.
