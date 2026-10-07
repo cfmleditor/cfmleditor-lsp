@@ -574,9 +574,13 @@ func (r *Resolver) diRegistrations(d *Resolver, sources []diSource, factories ma
 						expr.WriteString(tok.Value)
 					}
 
-					if isCallChain(expr.String()) && !strings.ContainsAny(expr.String(), "()") || len(value) == 1 && value[0].Kind == parser.TokIdent {
+					switch {
+					case isCallChain(expr.String()) && !strings.ContainsAny(expr.String(), "()") || len(value) == 1 && value[0].Kind == parser.TokIdent:
 						comp, _ := d.receiverComponent(expr.String(), call.line, "", "", s.pr, filepath.Dir(s.file), nil)
 						entry.component = d.ComponentPath(comp, filepath.Dir(s.file))
+					case instantiated(value) != "":
+						// Mura: addBean( "fileWriter", new mura.fileWriter() ).
+						entry.component = d.ComponentPath(instantiated(value), filepath.Dir(s.file))
 					}
 				}
 			default:
@@ -1051,4 +1055,39 @@ func (p *diPolicy) recordExternalValues(r *Resolver) {
 			}
 		}
 	}
+}
+
+// instantiated is the component a bean value creates and nothing more:
+// `new a.b.C( … )` or `createObject( "component", "a.b.C" )`, with no call
+// chained on it, or "".
+func instantiated(value []parser.Token) string {
+	if len(value) < 3 || value[0].Kind != parser.TokIdent {
+		return ""
+	}
+
+	if strings.EqualFold(value[0].Value, "new") {
+		var path strings.Builder
+
+		i := 1
+		for ; i < len(value) && (value[i].Kind == parser.TokIdent || value[i].Kind == parser.TokDot); i++ {
+			path.WriteString(value[i].Value)
+		}
+
+		if i >= len(value) || value[i].Kind != parser.TokLParen || producerGroupEnd(value, i, parser.TokLParen, parser.TokRParen) != len(value)-1 {
+			return ""
+		}
+
+		return path.String()
+	}
+
+	if strings.EqualFold(value[0].Value, "createObject") && value[1].Kind == parser.TokLParen &&
+		producerGroupEnd(value, 1, parser.TokLParen, parser.TokRParen) == len(value)-1 {
+		args := producerSplit(value[2 : len(value)-1])
+		if len(args) == 2 && len(args[0]) == 1 && len(args[1]) == 1 && args[1][0].Kind == parser.TokString &&
+			strings.EqualFold(strings.Trim(args[0][0].Value, `"'`), "component") {
+			return strings.Trim(args[1][0].Value, `"'`)
+		}
+	}
+
+	return ""
 }

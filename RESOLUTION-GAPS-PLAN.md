@@ -2594,3 +2594,15 @@ different variable, then above it as for a bare name, and a right-hand side
 assigned in another function is typed at that assignment, in that function.
 Measured: masa-c −80 (67 `variables.configBean`), cx −3, cb −2; nothing added.
 `TestAComponentVariableIsWhatAnotherFunctionAssignedIt`.
+
+### A DI/1 bean added as a new instance is that component
+
+Mura registers `serviceFactory.addBean( "fileWriter", new mura.fileWriter() )`,
+and DI/1 hands that instance to every service declaring a `fileWriter`
+constructor argument. `diRegistrations` read an `addBean` value only when it was
+a variable or a dotted name, so the bean had no component and every such
+argument stayed untyped: 76 calls on `variables.fileWriter` across Masa's
+exporter, plugin manager, utility and file DAO. A value that only creates a
+component (`new a.b.C( … )`, `createObject( "component", "a.b.C" )`, with
+nothing chained on it) now names it. Measured: masa-c −76, nothing added.
+`TestDI1BeanAddedAsANewInstanceIsThatComponent`.
