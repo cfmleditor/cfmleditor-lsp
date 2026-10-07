@@ -51,3 +51,57 @@ func TestAViewsArgsAreWhatItsRendersPass(t *testing.T) {
 		"args.content.getTitle": "variable 'args.content' has no component ref",
 	})
 }
+
+// TestALoopOverAViewsArgsHoldsWhatTheRenderPassed: ContentBox's
+// contentViewlet loops `<cfloop array="#args.aContent#" index="thisContent">`,
+// and the handler passes `aContent : aLatestEdits`, a local holding
+// contentService.getLatestEdits(), a finder that returns
+// `newCriteria()….list( … )`. A criteria list() on a service bound to an
+// entity is an array of the entity, unless it is asked for a query.
+func TestALoopOverAViewsArgsHoldsWhatTheRenderPassed(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"orm/VirtualEntityService.cfc": `component { function init( entityName ){ return this; } function newCriteria(){} }`,
+		"models/Content.cfc":           `component persistent="true" entityname="cbContent" { function getTitle(){} }`,
+		"models/ContentService.cfc": `component extends="orm.VirtualEntityService" {
+	function init(){ super.init( entityName = "cbContent" ); return this; }
+	array function getLatestEdits( numeric max = 25 ){
+		return newCriteria()
+			.when( true, function( c ){ c.isEq( "a", 1 ); } )
+			.list( max = arguments.max, sortOrder = "createdDate desc" );
+	}
+	array function findExpired(){
+		var c = newCriteria();
+		return c.list( offset = 0 );
+	}
+	function asRows(){ return newCriteria().list( asQuery = true ); }
+}`,
+		"admin/handlers/content.cfc": `component {
+	function init(){ variables.contentService = new models.ContentService(); }
+	function latest( event ){
+		var aLatestEdits = variables.contentService.getLatestEdits();
+		return view( view = "content/contentViewlet", args = { aContent : aLatestEdits } );
+	}
+	function expired( event ){
+		return view( view = "content/expiredViewlet", args = { aContent : variables.contentService.findExpired() } );
+	}
+	function rows( event ){
+		return view( view = "content/rowsViewlet", args = { aContent : variables.contentService.asRows() } );
+	}
+}`,
+		"admin/views/content/contentViewlet.cfm": `<cfloop array="#args.aContent#" index="thisContent"><cfoutput>#thisContent.getTitle()# #thisContent.nope()#</cfoutput></cfloop>`,
+		"admin/views/content/expiredViewlet.cfm": `<cfloop array="#args.aContent#" index="old"><cfoutput>#old.getTitle()#</cfoutput></cfloop>`,
+		"admin/views/content/rowsViewlet.cfm":    `<cfloop array="#args.aContent#" index="row"><cfoutput>#row.getTitle()#</cfoutput></cfloop>`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "admin/views/content/contentViewlet.cfm"), map[string]string{
+		"thisContent.getTitle": "",
+		"thisContent.nope":     "method 'nope' not found in Content",
+	})
+	expectReasons(t, reasonsIn(t, dir, "admin/views/content/expiredViewlet.cfm"), map[string]string{
+		"old.getTitle": "",
+	})
+	expectReasons(t, reasonsIn(t, dir, "admin/views/content/rowsViewlet.cfm"), map[string]string{
+		"row.getTitle": "variable 'row' has no component ref",
+	})
+}

@@ -307,9 +307,14 @@ func (r *Resolver) elementOf(expression string, header, start int, caller string
 		return r.methodElement(target, method, arguments, baseDir)
 	}
 
-	// A view's prc.X is what the handler action rendering the view assigns.
+	// A view's prc.X is what the handler action rendering the view assigns,
+	// and its args.X what the renders of it pass.
 	if name, ok := prcMember(expression); ok {
 		return r.viewPrcElement(name, pr, depth)
+	}
+
+	if scope, name, ok := strings.Cut(expression, "."); ok && strings.EqualFold(scope, "args") {
+		return r.viewArgsElement(name, pr, depth)
 	}
 
 	// A field of the struct a local's call returned: results.comments.
@@ -377,8 +382,9 @@ func (r *Resolver) methodElement(comp, method, arguments, baseDir string) string
 	}
 
 	// cborm: a service bound to an entity returns an array of it from getAll(),
-	// and structs when asked for some of its properties.
-	if strings.EqualFold(method, "getAll") && !strings.Contains(strings.ToLower(arguments), "properties") {
+	// and structs when asked for some of its properties; and from a finder of
+	// its own built on a criteria list() (returnsCriteriaList).
+	if strings.EqualFold(method, "getAll") && !strings.Contains(strings.ToLower(arguments), "properties") || r.returnsCriteriaList(fd) {
 		if entity := r.boundEntity(r.ComponentPath(comp, baseDir)); entity != "" {
 			return r.withSubclasses(r.ComponentPath(entity, baseDir))
 		}

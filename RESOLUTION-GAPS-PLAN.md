@@ -2566,3 +2566,17 @@ Measured: cb −30/+2. The two added are the admin bar's `oContent`, now a
 the `Page` subclass declares, inside `<cfif getContentType() eq "Page">`, and a
 chain on `getActiveContent()`, which declares no type: what a handler holding
 the same value already gets. `TestAViewsArgsAreWhatItsRendersPass`.
+
+### A cborm criteria list() is an array of the service's entity
+
+ContentBox's `ContentService.getLatestEdits()` returns `newCriteria().createAlias(
+… ).when( … ).list( max = arguments.max )`, and `contentViewlet.cfm` loops over
+it, as `args.aContent`, with `thisContent`. Two pieces: `methodElement` now
+answers the bound entity for a function every top-level return of which is a
+criteria `list()` (a chain on `newCriteria()`, or `.list()` on a local the
+function assigned one), unless the list is asked for a query or a stream
+(`returnsCriteriaList`); and `elementOf` reads `args.X` through the same renders
+`viewArgs` does (`viewArgsElement`). Measured: cb −34/+1 (25 `thisContent` in
+contentViewlet, 6 `args.content` in TableStatus, 2 in latestLogins; the one added
+is a chain on `getActiveContent()`, which declares no type).
+`TestALoopOverAViewsArgsHoldsWhatTheRenderPassed`.

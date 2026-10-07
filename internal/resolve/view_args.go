@@ -299,3 +299,52 @@ func renderCall(arguments []parser.Token, module string) (view string, args []pa
 
 	return view, args, true
 }
+
+// viewArgsElement is the element of the collection args.name holds in the
+// view pr, when every render passing it agrees, or "".
+func (r *Resolver) viewArgsElement(name string, pr *parser.ParseResult, depth int) string {
+	if name == "" || strings.ContainsAny(name, ".[") || !pr.URI.IsFile() {
+		return ""
+	}
+
+	module, view, ok := viewNameOf(pr.URI.Path())
+	if !ok {
+		return ""
+	}
+
+	answer := ""
+
+	for _, s := range r.viewArgSites(module)[view] {
+		if len(s.args) == 0 {
+			continue
+		}
+
+		value, passed, literal := argsMember(s.args, name)
+		if !literal {
+			return ""
+		}
+
+		if !passed {
+			continue
+		}
+
+		hpr := r.handlerParse(s.file)
+		if hpr == nil {
+			return ""
+		}
+
+		start, caller := 0, ""
+		if scope := parser.FindFuncScopeAt(s.line, hpr.Scopes); scope.Start != -1 {
+			start, caller = scope.Start, scope.Name
+		}
+
+		element := r.elementOf(producerText(value), s.line, start, caller, hpr, filepath.Dir(s.file), depth+1, "")
+		if element == "" || answer != "" && answer != element {
+			return ""
+		}
+
+		answer = element
+	}
+
+	return answer
+}
