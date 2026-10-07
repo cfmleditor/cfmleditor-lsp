@@ -27,6 +27,10 @@ type diPolicy struct {
 	omitTyped, omitDefaulted           bool
 	overrides                          map[string]map[string]bool
 	unknownOverrides                   map[string]bool
+	// beans is the policy's own folders' components by bean name
+	// (lowercased): DI/1 names each by its file and by its file followed by
+	// its folder's singular (indexBeans).
+	beans map[string][]string
 }
 
 // InjectionBeanLookup is deliberately separate from getBean identity lookup:
@@ -80,7 +84,15 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 				return ""
 			}
 
-			candidate := p.dependency(strings.ToLower(name), comp, r, map[string]bool{}, singletonOnly)
+			own := comp
+			if own == "" || !p.discovers(own) {
+				// The workspace's bean map names one file per bean, and
+				// applications side by side (FW/1's examples) share names;
+				// a policy's own folders answer for it.
+				own = p.beanIn(name)
+			}
+
+			candidate := p.dependency(strings.ToLower(name), own, r, map[string]bool{}, singletonOnly)
 			if candidate == "" || result != "" && !cfpath.SamePath(result, candidate) {
 				return ""
 			}
@@ -117,6 +129,62 @@ func (r *Resolver) InjectionPropertyLookup(file string) func(string, map[string]
 		}
 
 		return lookup(name)
+	}
+}
+
+// beanIn is the one component the policy's folders register as name, or "".
+func (p *diPolicy) beanIn(name string) string {
+	if hits := p.beans[strings.ToLower(name)]; len(hits) == 1 {
+		return hits[0]
+	}
+
+	return ""
+}
+
+// indexBeans fills p.beans from the components under p.roots.
+func (p *diPolicy) indexBeans(r *Resolver) {
+	p.beans = map[string][]string{}
+
+	queue := slices.Clone(p.roots)
+	for dirs := 0; len(queue) > 0 && dirs < maxAppWalkDirs; dirs++ {
+		dir := queue[0]
+		queue = queue[1:]
+
+		entries, err := r.fs().ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() {
+				if !strings.HasPrefix(name, ".") {
+					queue = append(queue, filepath.Join(dir, name))
+				}
+
+				continue
+			}
+
+			if !strings.EqualFold(filepath.Ext(name), ".cfc") {
+				continue
+			}
+
+			file := filepath.Join(dir, name)
+			base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+
+			folder := strings.ToLower(filepath.Base(dir))
+
+			singular := strings.TrimSuffix(folder, "s")
+			if custom, ok := p.singulars[folder]; ok {
+				singular = custom
+			}
+
+			for _, key := range []string{base, base + singular} {
+				if !slices.Contains(p.beans[key], file) {
+					p.beans[key] = append(p.beans[key], file)
+				}
+			}
+		}
 	}
 }
 
@@ -247,6 +315,7 @@ func (r *Resolver) buildDIPolicies() {
 
 	for i := range r.diPolicies {
 		r.diPolicies[i].recordExternalValues(r)
+		r.diPolicies[i].indexBeans(r)
 	}
 }
 
@@ -289,7 +358,83 @@ func (r *Resolver) diSources(d *Resolver) []diSource {
 		}
 	}
 
-	return sources
+	return append(sources, r.nestedFW1Apps(d, seen)...)
+}
+
+var fw1AppExtendsRe = regexp.MustCompile(`(?i)\bextends\s*=\s*["']framework\.one["']`)
+
+// maxNestedApps bounds the FW/1 applications found below the workspace roots.
+const maxNestedApps = 64
+
+// maxAppWalkDirs bounds the directories applicationFiles reads.
+const maxAppWalkDirs = 20000
+
+// applicationFiles are the Application.cfc files under the workspace folders,
+// found by walking them (dot-directories and node_modules skipped). The
+// policies are built while the index is still being filled, so the index
+// cannot answer this.
+func (r *Resolver) applicationFiles() []string {
+	var (
+		out   []string
+		dirs  = 0
+		queue = slices.Clone(r.WorkspaceFolders)
+	)
+
+	for len(queue) > 0 && dirs < maxAppWalkDirs {
+		dir := queue[0]
+		queue = queue[1:]
+		dirs++
+
+		entries, err := r.fs().ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			name := e.Name()
+
+			switch {
+			case e.IsDir():
+				if !strings.HasPrefix(name, ".") && !strings.EqualFold(name, "node_modules") {
+					queue = append(queue, filepath.Join(dir, name))
+				}
+			case strings.EqualFold(name, "Application.cfc"):
+				out = append(out, filepath.Join(dir, name))
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// nestedFW1Apps are the FW/1 applications below the workspace roots, whose
+// Application.cfc only the root's own search does not reach: FW/1's examples
+// are one application per directory, each with DI/1 over its own model and
+// controllers. Each gets the automatic policy its root would have.
+func (r *Resolver) nestedFW1Apps(d *Resolver, seen map[string]bool) []diSource {
+	var out []diSource
+
+	for _, file := range r.applicationFiles() {
+		if len(out) >= maxNestedApps || seen[pathKey(file)] {
+			continue
+		}
+
+		data, err := r.fs().ReadFile(file)
+		if err != nil || !fw1AppExtendsRe.Match(data) {
+			continue
+		}
+
+		seen[pathKey(file)] = true
+		r.Discovery.add(file)
+
+		content := string(data)
+		pr := parser.ParseWithOptions(cfpath.ToURI(file), content, &parser.ParseOptions{Resolvers: r.Resolvers, FuncLookup: d.FuncLookup(filepath.Dir(file))})
+		out = append(out, diSource{file, pr, beanCalls(content)})
+	}
+
+	return out
 }
 
 func (r *Resolver) automaticDIPolicy(source diSource) (diPolicy, bool) {

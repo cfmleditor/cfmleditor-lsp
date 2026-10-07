@@ -2314,3 +2314,24 @@ missing-base summaries, now that cborm's BaseHandler resolves. The 4 added
 were behind that broken base: the API `baseHandler` reads
 `variables.ormService`, which only its subclasses set and not all of them
 type. `TestPrcResponseIsColdBoxsResponse`.
+
+### Each nested FW/1 application has its own DI/1 beans
+
+DI/1 discovery read only the `Application.cfc` at each workspace root. FW/1's
+examples are applications side by side, each extending `framework.one` with
+DI/1 over its own `model` and `controllers`, and none got a policy, so
+`property userService;` was untyped. `diSources` now also takes every
+`Application.cfc` under the workspace folders that extends `framework.one`
+(`nestedFW1Apps`). They are found by a bounded walk (`applicationFiles`),
+because the policies are built while the index is still being filled.
+Each such application then gets the automatic policy its root would have.
+
+Several applications also share bean names (each has a `model/services/user.cfc`),
+and the workspace bean map names one file per bean, so a policy found its
+candidate in another application or not at all. Each policy now indexes its
+own folders (`indexBeans`: a component by its file name, and by file name plus
+its folder's singular, DI/1's alias). It uses that when the workspace map's
+answer is not under it (`beanIn`).
+
+Measured: fw-p −22, nothing added; Masa CMS scan time unchanged (12.8s).
+`TestEachNestedFW1AppHasItsOwnDI1Beans`, which fails without either half.
