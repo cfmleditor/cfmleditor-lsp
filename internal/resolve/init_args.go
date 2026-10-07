@@ -44,94 +44,110 @@ func (r *Resolver) inferInitArgument(fd *parser.FunctionDef, pos int, file strin
 		return ""
 	}
 
-	argName := fd.Arguments[pos].Name
+	acc := &initArgSites{r: r, fd: fd, pos: pos, file: file, base: base, argName: fd.Arguments[pos].Name, ctx: ctx}
 
-	var (
-		comps []string
-		sites int
-	)
-
-	add := func(comp, dir string) bool {
-		if comp == "" {
-			return false
+	for _, path := range files {
+		if !acc.scan(path) {
+			return ""
 		}
+	}
 
-		for alt := range strings.SplitSeq(r.pathsOf(comp, dir), "|") {
-			if !containsFold(comps, alt) {
-				comps = append(comps, alt)
-			}
-		}
+	if acc.sites == 0 {
+		return ""
+	}
+
+	slices.Sort(acc.comps)
+
+	return strings.Join(acc.comps, "|")
+}
+
+// initArgSites gathers what the constructions of one component pass one init
+// argument, file by file.
+type initArgSites struct {
+	r          *Resolver
+	fd         *parser.FunctionDef
+	ctx        lookupCtx
+	file, base string
+	argName    string
+	comps      []string
+	pos, sites int
+}
+
+// take records what one construction passes, expr read at line in caller of
+// hpr. It reports false when the construction cannot be typed.
+func (a *initArgSites) take(expr []parser.Token, line uint32, caller string, hpr *parser.ParseResult, dir string) bool {
+	a.sites++
+	if a.sites > maxArgCallSites {
+		return false
+	}
+
+	comp := a.r.argumentExprComponent(expr, line, caller, hpr, dir, a.ctx)
+	if comp == "" && forwardedArg(expr) {
+		a.sites--
 
 		return true
 	}
 
-	for _, path := range files {
-		hpr := r.handlerParse(path)
-		if hpr == nil {
-			return ""
-		}
+	if comp == "" {
+		return false
+	}
 
-		dir := filepath.Dir(path)
-		tokens := allTokens(hpr.Content)
-		read := map[int]bool{}
-
-		for _, site := range r.constructions(tokens, base, file, dir) {
-			read[site.line] = true
-
-			expr, passed := callArgumentAt(tokens, site.at, pos, argName)
-			if !passed {
-				continue
-			}
-
-			sites++
-			if sites > maxArgCallSites {
-				return ""
-			}
-
-			caller := parser.FindFuncScopeAt(site.line, hpr.Scopes).Name
-			if !add(r.argumentExprComponent(expr, conv.Uint32(site.line), caller, hpr, dir, ctx), dir) {
-				return ""
-			}
-		}
-
-		calls := hpr.AllCalls()
-		for ci := range calls {
-			call := &calls[ci]
-			if !strings.EqualFold(call.FuncName, "init") {
-				continue
-			}
-
-			if ours, known := r.callIsTo(call, hpr, path, fd, file, dir, ctx); !ours || !known {
-				continue
-			}
-
-			read[int(call.Line)] = true
-
-			expr, passed := callArgument(tokens, call.FuncName, int(call.Line), pos, argName)
-			if !passed {
-				continue
-			}
-
-			sites++
-			if sites > maxArgCallSites || !add(r.argumentExprComponent(expr, call.Line, call.Caller, hpr, dir, ctx), dir) {
-				return ""
-			}
-		}
-
-		for _, line := range quotedNameLines(hpr.Content, base) {
-			if !read[line] {
-				return ""
-			}
+	for alt := range strings.SplitSeq(a.r.pathsOf(comp, dir), "|") {
+		if !containsFold(a.comps, alt) {
+			a.comps = append(a.comps, alt)
 		}
 	}
 
-	if sites == 0 {
-		return ""
+	return true
+}
+
+// scan reads the constructions in the file at path. It reports false when
+// one cannot be read or typed.
+func (a *initArgSites) scan(path string) bool {
+	hpr := a.r.handlerParse(path)
+	if hpr == nil {
+		return false
 	}
 
-	slices.Sort(comps)
+	dir := filepath.Dir(path)
+	tokens := allTokens(hpr.Content)
+	read := map[int]bool{}
 
-	return strings.Join(comps, "|")
+	for _, site := range a.r.constructions(tokens, a.base, a.file, dir) {
+		read[site.line] = true
+
+		expr, passed := callArgumentAt(tokens, site.at, a.pos, a.argName)
+		if passed && !a.take(expr, conv.Uint32(site.line), parser.FindFuncScopeAt(site.line, hpr.Scopes).Name, hpr, dir) {
+			return false
+		}
+	}
+
+	calls := hpr.AllCalls()
+	for ci := range calls {
+		call := &calls[ci]
+		if !strings.EqualFold(call.FuncName, "init") {
+			continue
+		}
+
+		if ours, known := a.r.callIsTo(call, hpr, path, a.fd, a.file, dir, a.ctx); !ours || !known {
+			continue
+		}
+
+		read[int(call.Line)] = true
+
+		expr, passed := callArgument(tokens, call.FuncName, int(call.Line), a.pos, a.argName)
+		if passed && !a.take(expr, call.Line, call.Caller, hpr, dir) {
+			return false
+		}
+	}
+
+	for _, line := range quotedNameLines(hpr.Content, a.base) {
+		if !read[line] {
+			return false
+		}
+	}
+
+	return true
 }
 
 type construction struct {

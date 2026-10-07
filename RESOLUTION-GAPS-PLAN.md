@@ -2381,3 +2381,21 @@ A first attempt preferred an entity for any bare name; it changed nothing in
 fw-p and added 8 wrong findings in lucee, and was dropped. Measured with the
 marked name: fw-p −12, nothing added; the full short test suite and
 gapcheck pass. `TestAnEntityNameIsTheEntityNotTheFileBesideTheCaller`.
+
+### A forwarded argument is what the caller holds
+
+Mura's contentRenderer sets `arguments.renderer = this` and calls its utility
+with `dspObject( argumentCollection = arguments )`. Caller-argument inference
+saw no `renderer` passed at that call. `callArgumentAt` now reads a call
+passing `argumentCollection = arguments` as handing over the caller's own
+`arguments.<name>`, which the receiver lookup types in the caller's file. A
+forwarded argument that cannot be typed is skipped (`forwardedArg`), as a call
+that does not pass the argument always was. Without that, cfwheels'
+`SpyTenantMigrator`, which forwards its own untyped migrator to `super`, left
+`TenantMigrator`'s `arguments.migrator` untyped (+8). The constructor
+inference applies the same rule; `inferInitArgument`'s per-file scan moved
+into `initArgSites` to stay under the complexity limit.
+
+Measured: masa-c −56/+2, where the 2 added are the same chains one step further
+on (`getEvent()` on the renderer, untyped); other scans unchanged.
+`TestAForwardedArgumentIsWhatTheCallerHolds`.

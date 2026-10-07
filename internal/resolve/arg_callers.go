@@ -348,6 +348,12 @@ func (r *Resolver) inferArgument(fd *parser.FunctionDef, pos int, file string, c
 			}
 
 			comp := r.argumentExprComponent(expr, call.Line, call.Caller, hpr, dir, ctx)
+			if comp == "" && forwardedArg(expr) {
+				sites--
+
+				continue
+			}
+
 			if comp == "" {
 				return ""
 			}
@@ -490,11 +496,16 @@ func callArgumentAt(tokens []parser.Token, i, pos int, argName string) (expr []p
 	}
 
 	positional := 0
+	forwards := false
 
 	for _, piece := range producerSplit(tokens[i+2 : end]) {
 		if len(piece) > 2 && piece[0].Kind == parser.TokIdent && (piece[1].Kind == parser.TokEquals || piece[1].Kind == parser.TokColon) {
 			if strings.EqualFold(piece[0].Value, argName) {
 				return piece[2:], true
+			}
+
+			if strings.EqualFold(piece[0].Value, "argumentCollection") && len(piece) == 3 && strings.EqualFold(piece[2].Value, "arguments") {
+				forwards = true
 			}
 
 			continue
@@ -507,7 +518,32 @@ func callArgumentAt(tokens []parser.Token, i, pos int, argName string) (expr []p
 		positional++
 	}
 
+	// `f( argumentCollection = arguments )` hands over the caller's own
+	// arguments: Mura's contentRenderer sets `arguments.renderer = this` and
+	// forwards to its utility's dspObject( renderer ). What the caller's
+	// arguments.name holds is the argument.
+	if forwards {
+		line := tokens[i].Line
+
+		return []parser.Token{
+			{Kind: parser.TokIdent, Value: "arguments", Line: line, Offset: forwardedOffset},
+			{Kind: parser.TokDot, Value: ".", Line: line, Offset: forwardedOffset},
+			{Kind: parser.TokIdent, Value: argName, Line: line, Offset: forwardedOffset},
+		}, true
+	}
+
 	return nil, false
+}
+
+// forwardedOffset marks the tokens callArgumentAt makes for a forwarded
+// argument; no real token has a negative offset.
+const forwardedOffset = -1
+
+// forwardedArg reports whether expr is a forwarded argument. One that cannot
+// be typed is skipped, as a call that does not pass the argument always was:
+// cfwheels' SpyTenantMigrator forwards its own untyped migrator to super.
+func forwardedArg(expr []parser.Token) bool {
+	return len(expr) > 0 && expr[0].Offset == forwardedOffset
 }
 
 // argumentExprComponent types the expression a caller passes: `new X( … )`, a
