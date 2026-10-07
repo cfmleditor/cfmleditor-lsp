@@ -14,6 +14,12 @@ func (r *Resolver) inheritedReceiver(variable, lookupVar string, pr *parser.Pars
 		return comp
 	}
 
+	if comp := r.coldboxPrcResponse(variable, pr); comp != "" {
+		tr.addf("resolved %q to %q: ColdBox keeps the request's Response in prc.response", variable, comp)
+
+		return comp
+	}
+
 	if r.fileExtends(pr) == "" {
 		return ""
 	}

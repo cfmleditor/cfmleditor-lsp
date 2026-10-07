@@ -3013,6 +3013,10 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 		}
 
 		if comp == "" {
+			comp = r.coldboxPrcResponse(variable, pr)
+		}
+
+		if comp == "" {
 			comp = r.includerHeld(variable, pr, tr, ctx)
 		}
 

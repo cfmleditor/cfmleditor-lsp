@@ -2294,3 +2294,23 @@ Measured: cx-p −100, masa-c −6 (Masa's SSRF spec,
 typed, its calls are now checked, and none was missing.
 `TestAColdBoxModelTestsModelIsItsAttributesClass`, which fails without either
 half.
+
+### prc.response is ColdBox's Response
+
+`RequestContext.getResponse()` stores a `coldbox.system.web.context.Response`
+in the private collection ("The response object lives in `prc.response`"), and
+ColdBox's RestHandler calls it before reading `arguments.prc.response`.
+`coldboxPrcResponse` answers `prc.response`/`arguments.prc.response` with
+that Response in a component whose chain reaches ColdBox's EventHandler, by
+name or by resolving to its file (RestHandler's bare `extends="EventHandler"`).
+It does not apply when the file assigns `prc.response` itself; no application
+in the corpus does. It is asked on both receiver paths: `inheritedReceiver`,
+and the member path that `arguments.prc.response` takes. cborm's
+`resources.BaseHandler`, which ContentBox's API handlers extend (it extends
+RestHandler), joins the cborm stubs.
+
+Measured: cx-p −58, cb-p −26/+4. The ContentBox removals include the 12 API
+missing-base summaries, now that cborm's BaseHandler resolves. The 4 added
+were behind that broken base: the API `baseHandler` reads
+`variables.ormService`, which only its subclasses set and not all of them
+type. `TestPrcResponseIsColdBoxsResponse`.

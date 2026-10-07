@@ -75,6 +75,8 @@ var Sources = []Source{
 		"cborm.models.ActiveEntity",
 		"cborm.models.criterion.CriteriaBuilder",
 		"cborm.models.criterion.DetachedCriteriaBuilder",
+		// ContentBox's API handlers extend it; it extends ColdBox's RestHandler.
+		"cborm.models.resources.BaseHandler",
 	}},
 	// cbmessagebox is a ColdBox module ContentBox depends on and does not ship in
 	// its checkout (it installs into contentbox-deps). Its cbMessageBox() helper
