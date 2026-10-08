@@ -118,3 +118,73 @@ func TestArtifactPathReturnInference(t *testing.T) {
 		t.Errorf("string method lookup = %q, want no component type", got)
 	}
 }
+
+// TestAStubReturnsAnotherFrameworksDocumentedClass: cborm documents
+// getObjectPopulator() as a coldbox.system class its own source does not hold
+// but ColdBox's stubs, generated earlier in the run, do; and its deprecated
+// getBeanPopulator() is `return getObjectPopulator();`. Both stubs carry the
+// type. A documented class no earlier stub holds is still left out.
+func TestAStubReturnsAnotherFrameworksDocumentedClass(t *testing.T) {
+	root, stubs := t.TempDir(), t.TempDir()
+
+	populator := filepath.Join(stubs, "coldbox", "coldbox", "system", "core", "dynamic", "ObjectPopulator.cfc")
+	if err := os.MkdirAll(filepath.Dir(populator), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(populator, []byte(`component { function populateFromStruct() {} }`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	service := filepath.Join(root, "BaseORMService.cfc")
+	source := `component {
+	/**
+	 * @deprecated Use getObjectPopulator()
+	 */
+	function getBeanPopulator(){
+		return getObjectPopulator();
+	}
+
+	/**
+	 * Get the populator
+	 *
+	 * @return coldbox.system.core.dynamic.ObjectPopulator
+	 */
+	function getObjectPopulator(){
+		return variables.populator;
+	}
+
+	/**
+	 * @return coldbox.system.core.dynamic.Missing
+	 */
+	function getMissing(){
+		return variables.missing;
+	}
+}`
+
+	if err := os.WriteFile(service, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(stubs, "cborm", "cborm", "models")
+	g := &generator{src: &frameworkapi.Source{Framework: "cborm", Prefix: "cborm"}, root: root, out: out, stubs: stubs}
+
+	if err := g.emit(service); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(out, "BaseORMService.cfc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"coldbox.system.core.dynamic.ObjectPopulator function getBeanPopulator()",
+		"coldbox.system.core.dynamic.ObjectPopulator function getObjectPopulator()",
+		"\tfunction getMissing()",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("stub lacks %q:\n%s", want, data)
+		}
+	}
+}

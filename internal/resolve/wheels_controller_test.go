@@ -107,3 +107,66 @@ func TestWheelsControllerKeepsInheritedOverride(t *testing.T) {
 		t.Fatalf("inherited override lost %+v", fd)
 	}
 }
+
+// TestAWheelsMixinsBareCallsAreTheControllers: wheels/view/*.cfc and
+// wheels/controller/*.cfc are never instantiated; Controller copies their
+// public methods into every controller, so a bare call in one is a call on
+// the controller — its own methods, Global's and what Global includes, and
+// the other packages' public methods.
+func TestAWheelsMixinsBareCallsAreTheControllers(t *testing.T) {
+	files := controllerFiles()
+	files["wheels/view/links.cfc"] = `component {public string function linkTo(required string text) {} public function untouched() {
+	redirectTo("home"); $mixinOverrideSet("x"); init(); secret(); missing(); }}`
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "wheels/view/links.cfc"), map[string]string{
+		"redirectTo": "", "$mixinOverrideSet": "", "init": "",
+		"secret": "no qualifier, not in file", "missing": "no qualifier, not in file",
+	})
+
+	// A Controller that does not integrate the package proves nothing.
+	unproven := controllerFiles()
+	unproven["wheels/view/links.cfc"] = files["wheels/view/links.cfc"]
+	unproven["wheels/Controller.cfc"] = strings.Replace(unproven["wheels/Controller.cfc"], `$integrateComponents("wheels.view");`, ``, 1)
+
+	dir = t.TempDir()
+	writeFiles(t, dir, unproven)
+
+	got := reasonsWith(t, &Resolver{}, dir, "wheels/view/links.cfc")
+	for _, name := range []string{"redirectTo", "$mixinOverrideSet", "init"} {
+		if got[name] == "" {
+			t.Errorf("%s resolved through a Controller that does not integrate wheels.view", name)
+		}
+	}
+}
+
+// TestAWheelsMapperMixinsBareCallsAreTheMappers: Mapper.init copies the public
+// methods of wheels/mapper/*.cfc into itself, so a bare call in one is the
+// Mapper's — its own, another package's public method — and nothing when the
+// Mapper is not the pinned loader.
+func TestAWheelsMapperMixinsBareCallsAreTheMappers(t *testing.T) {
+	files := mapperFiles()
+	files["wheels/mapper/routes.cfc"] = `component { PUBLIC function route(required string path) { own(); $draw("x"); hidden(); missing(); return this; } }`
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "wheels/mapper/routes.cfc"), map[string]string{
+		"own": "", "$draw": "",
+		"hidden": "no qualifier, not in file", "missing": "no qualifier, not in file",
+	})
+
+	unproven := mapperFiles()
+	unproven["wheels/mapper/routes.cfc"] = files["wheels/mapper/routes.cfc"]
+	unproven["wheels/Mapper.cfc"] = strings.Replace(unproven["wheels/Mapper.cfc"], `function init() {`, `function init() { return this;`, 1)
+
+	dir = t.TempDir()
+	writeFiles(t, dir, unproven)
+
+	got := reasonsWith(t, &Resolver{}, dir, "wheels/mapper/routes.cfc")
+	for _, name := range []string{"own", "$draw"} {
+		if got[name] == "" {
+			t.Errorf("%s resolved through a Mapper that does not run the pinned loader", name)
+		}
+	}
+}

@@ -352,13 +352,13 @@ component {
 	/**
 	 * @deprecated Please do not use. Use `getObjectPopulator()`
 	 */
-	function getBeanPopulator() {}
+	coldbox.system.core.dynamic.ObjectPopulator function getBeanPopulator() {}
 	/**
 	 * Get access to the object populator objet
 	 *
 	 * @return coldbox.system.core.dynamic.ObjectPopulator
 	 */
-	function getObjectPopulator() {}
+	coldbox.system.core.dynamic.ObjectPopulator function getObjectPopulator() {}
 	/**
 	 * Merge an entity or array of entities back into a session
 	 *

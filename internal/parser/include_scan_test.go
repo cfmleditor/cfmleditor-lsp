@@ -12,8 +12,8 @@ import (
 // The expressions the include scanners replaced, and the scan built on them as
 // it was, kept as the reference the scanners must agree with.
 var (
-	refIncludeTagAt       = regexp.MustCompile(`^(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([^"'#]+)["']`)
-	refIncludeScriptAt    = regexp.MustCompile(`^(?i)(?:cf)?include\s*\(?\s*(?:template\s*=\s*)?["']([^"'#]+)["']`)
+	refIncludeTagAt       = regexp.MustCompile(`^(?i)<cfinclude\b[^>]*?\btemplate\s*=\s*["']([^"'#]+|(?:[^"'#*\\/][^"'#*\\]*/)?#[^"'#/]+#\.cfm)["']`)
+	refIncludeScriptAt    = regexp.MustCompile(`^(?i)(?:cf)?include\s*\(?\s*(?:template\s*=\s*)?["']([^"'#]+|(?:[^"'#*\\/][^"'#*\\]*/)?#[^"'#/]+#\.cfm)["']`)
 	refDirectoryListing   = regexp.MustCompile(`(?is)<cfdirectory\b[^>]*>`)
 	refListingAttr        = regexp.MustCompile(`(?i)\b([a-z]+)\s*=\s*["']([^"']*)["']`)
 	refListingDir         = regexp.MustCompile(`(?i)^#\s*getDirectoryFromPath\s*\(\s*getCurrentTemplatePath\s*\(\s*\)\s*\)\s*#([\w./-]+?)/?$`)
@@ -39,6 +39,10 @@ func includeSitesRegexp(content string) []IncludeSite {
 		}
 
 		p := strings.TrimSpace(content[start+m[2] : start+m[3]])
+		if glob, ok := computedNameGlob(p); ok {
+			p = glob
+		}
+
 		if p == "" || strings.Contains(p, "://") || !isIncludable(p) {
 			continue
 		}
@@ -176,6 +180,18 @@ var includeSamples = map[string]string{
 	"tag later attr":          `<cfinclude x="1" template="c.cfm">`,
 	"tag dynamic":             `<cfinclude template="#x#.cfm">`,
 	"tag dynamic then static": `<cfinclude template="#x#" template="d.cfm">`,
+	"tag computed name":       `<cfinclude template="pages/#x.y#.cfm">`,
+	"tag computed name upper": `<cfinclude template="#x#.CFM">`,
+	"tag computed directory":  `<cfinclude template="#x#/a.cfm">`,
+	"tag computed mapping":    `<cfinclude template="/m/#x#.cfm">`,
+	"tag computed part":       `<cfinclude template="page_#x#.cfm">`,
+	"tag computed two":        `<cfinclude template="#x##y#.cfm">`,
+	"tag computed backslash":  `<cfinclude template="a\#x#.cfm">`,
+	"tag computed both":       `<cfinclude template="#d#/#x#.cfm">`,
+	"tag backslash directory": `<cfinclude template="a\b/#x#.cfm">`,
+	"tag glob directory":      `<cfinclude template="*/#x#.cfm">`,
+	"script computed name":    `include "../v/#local.view#.cfm";`,
+	"script computed cfml":    `include "#view#.cfml";`,
 	"tag no boundary":         `<cfincludex template="e.cfm">`,
 	"tag attr word":           `<cfinclude mytemplate="f.cfm">`,
 	"tag after end":           `<cfinclude a="1"> template="g.cfm"`,

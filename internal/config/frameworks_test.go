@@ -124,6 +124,7 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"commandbox", "print", "commandbox.system.util.PrintBuffer"},
 		{"commandbox", "command()", "commandbox.system.util.CommandDSL"},
 		{"commandbox", "task()", ""}, // a ColdBox scheduler's task() is not CommandBox's
+		{"commandbox", `getInstance( "DetailOutputService@wheels-cli" )`, "DetailOutputService@wheels-cli"},
 		{"coldbox", "task()", "coldbox.system.web.tasks.ColdBoxScheduledTask"},
 		{"contentbox", "prc.oContent", "contentbox.models.content.BaseContent|contentbox.models.content.Entry|contentbox.models.content.Page|contentbox.models.content.ContentStore"},
 		{"cfmigrations", "table", "qb.models.Schema.Blueprint"},
@@ -148,6 +149,17 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		{"wheels", `model( "User" )`, "User"},
 		{"fw1", `getBeanFactory().getBean( "userService" )`, "userService"},
 		{"wheels", `model( "User" ).findAll()`, ""},
+		{"mura", "$", "mura.MuraScope"},
+		{"mura", "variables.$", "mura.MuraScope"},
+		{"mura", "arguments.m", "mura.MuraScope"},
+		{"mura", "rc.$", "mura.MuraScope"},
+		{"mura", "mura", "mura.MuraScope"},
+		{"mura", "$x", ""},
+		{"mura", "item", ""},
+		{"mura", `variables.event.getValue("muraScope")`, "mura.MuraScope"},
+		{"mura", `event.getValue( 'MuraScope' )`, "mura.MuraScope"},
+		{"mura", `event.getValue("other")`, ""},
+		{"mura", "getMuraScope()", "mura.MuraScope"},
 	} {
 		var rs []parser.Resolver
 		for _, r := range FrameworkResolvers([]string{tc.framework}) {
@@ -168,6 +180,45 @@ func TestEveryPresetResolverMatchesItsOwnNames(t *testing.T) {
 		// the resolver decides that (resolve.applicationBase).
 		"/p/views/main/default.cfm": parser.ApplicationBase + "framework.one",
 		"/p/models/task.cfm":        "",
+	} {
+		if got := implicit(path); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestAMuraDisplayObjectRunsInTheContentRenderer: Mura includes a display
+// object's template from contentRenderer, under a modules or display_objects
+// directory at any depth; a component there and a template elsewhere are not
+// display objects.
+func TestAMuraDisplayObjectRunsInTheContentRenderer(t *testing.T) {
+	implicit := ImplicitExtends([]string{"mura"})
+	for path, want := range map[string]string{
+		"/p/core/modules/v1/gallery/index.cfm":          "mura.content.contentRenderer",
+		"/p/sites/default/display_objects/nav/x.cfm":    "mura.content.contentRenderer",
+		"/p/sites/default/modules/custom/index.cfm":     "mura.content.contentRenderer",
+		"/p/core/modules/v1/cookie_consent/Handler.cfc": "",
+		"/p/admin/core/views/carch/edit.cfm":            "",
+	} {
+		if got := implicit(path); got != want {
+			t.Errorf("%s: %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestAWheelsGlobalTemplateRunsInGlobal: app/global/*.cfm is mixed into
+// every controller, model and view, and vendor/wheels/global/*.cfm into
+// Global, so both read Global's functions; the Seeder includes seeds.cfm
+// and seeds/<env>.cfm.
+func TestAWheelsGlobalTemplateRunsInGlobal(t *testing.T) {
+	implicit := ImplicitExtends([]string{"wheels"})
+	for path, want := range map[string]string{
+		"/p/app/global/auth.cfm":              "wheels.Global",
+		"/p/vendor/wheels/global/strings.cfm": "wheels.Global",
+		"/p/app/global/Helper.cfc":            "",
+		"/p/app/db/seeds.cfm":                 "wheels.Seeder",
+		"/p/app/db/seeds/testing.cfm":         "wheels.Seeder",
+		"/p/app/db/seed-notes.cfm":            "",
 	} {
 		if got := implicit(path); got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)

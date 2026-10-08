@@ -1,5 +1,5 @@
 {
-  "frameworks": ["fw1"],
+  "frameworks": ["fw1", "mura"],
   "mappings": {
     "mura": "core/mura",
     "muraWRM": ".",

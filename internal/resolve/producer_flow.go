@@ -423,7 +423,7 @@ func (e *producerEvaluation) specialCondition(tokens []parser.Token, env produce
 
 	if path, matched := e.structKeyCondition(tokens); matched {
 		value, known := env[path]
-		if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+		if e.guardedField(path) {
 			value = e.sharedFieldContract(path, false)
 			known = !value.unknown
 		} else if !known {
@@ -532,7 +532,7 @@ func (e *producerEvaluation) structKeyCondition(tokens []parser.Token) (string, 
 // writes are admitted only for isSimpleValue's sentinel pattern.
 func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive bool) producerValue {
 	path = normalizeProducerPath(path)
-	if !strings.HasPrefix(path, "variables.") && !strings.HasPrefix(path, "this.") {
+	if !e.guardedField(path) {
 		return producerUnknown()
 	}
 
@@ -541,6 +541,8 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	component := ""
 	found := false
 	valid := true
+	request := strings.HasPrefix(path, "request.")
+	writes := 0
 	write := func(expression string) {
 		value := e.expression(expression, producerEnvironment{})
 		switch {
@@ -566,7 +568,8 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 	visit = func(nodes []producerNode) {
 		for i := range nodes {
 			node := &nodes[i]
-			if node.kind == "unsafe" && producerMayTouchField(node.expression, path) {
+			// A request field's writes are counted in the text instead.
+			if node.kind == "unsafe" && !request && producerMayTouchField(node.expression, path) {
 				valid = false
 			}
 
@@ -579,6 +582,8 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 				}
 
 				if target == path {
+					writes++
+
 					write(node.expression)
 				}
 			}
@@ -608,11 +613,31 @@ func (e *producerEvaluation) sharedFieldContract(path string, allowPrimitive boo
 		}
 	}
 
+	// Every write of a request field in the file's text must be one the
+	// plan read: a statement it could not read may hold another.
+	if request && len(requestWriteRe(strings.TrimPrefix(path, "request.")).FindAllStringIndex(source.content, -1)) != writes {
+		valid = false
+	}
+
 	if !valid || !found || component == "" {
 		return producerUnknown()
 	}
 
 	return e.concrete(component, e.baseDir)
+}
+
+// guardedField reports whether path is a field whose writes the component
+// holds: its own variables or this scope, or a request-scope key no other
+// file in a batch scan writes. Mura's getCurrentUser() creates
+// request.currentUser when it is absent and nothing else ever sets it.
+func (e *producerEvaluation) guardedField(path string) bool {
+	if strings.HasPrefix(path, "variables.") || strings.HasPrefix(path, "this.") {
+		return true
+	}
+
+	name, ok := strings.CutPrefix(path, "request.")
+
+	return ok && name != "" && !strings.Contains(name, ".") && e.resolver.onlyFileWritesRequest(name, e.fd.URI.Path())
 }
 
 // Unsupported plans cannot supply an all-writes-agree proof. A scope or field
@@ -711,6 +736,12 @@ func (e *producerEvaluation) read(path string, env producerEnvironment) producer
 	for _, ref := range e.resolver.Index.RefsForFile(e.fd.URI) {
 		if !strings.EqualFold(ref.Variable, name) || ref.This != strings.HasPrefix(path, "this.") {
 			continue
+		}
+
+		// The index's parse could not look the method up, and the receiver's
+		// own type is no statement of what a call on it returns.
+		if ref.BaseGuess {
+			return producerUnknown()
 		}
 
 		value := e.concrete(ref.Component, filepath.Dir(e.fd.URI.Path()))

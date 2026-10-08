@@ -27,6 +27,13 @@ type diPolicy struct {
 	omitTyped, omitDefaulted           bool
 	overrides                          map[string]map[string]bool
 	unknownOverrides                   map[string]bool
+	// beans is the policy's own folders' components by bean name
+	// (lowercased): DI/1 names each by its file and by its file followed by
+	// its folder's singular (indexBeans).
+	beans map[string][]string
+	// injected are folders the factory autowires but does not discover beans
+	// in: FW/1 injects its controllers whatever diLocations says.
+	injected []string
 }
 
 // InjectionBeanLookup is deliberately separate from getBean identity lookup:
@@ -62,7 +69,7 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 
 	for i := range r.diPolicies {
 		p := &r.diPolicies[i]
-		if p.contains(file) {
+		if p.serves(file) {
 			policies = append(policies, p)
 		}
 	}
@@ -76,11 +83,19 @@ func (r *Resolver) factoryDependencyLookup(file string, singletonOnly bool) func
 		result := ""
 
 		for _, p := range policies {
-			if !p.discovers(file) || p.unknownOverrides[pathKey(file)] || p.overrides[pathKey(file)][strings.ToLower(name)] {
+			if !p.discovers(file) && !underAny(p.injected, file) || p.unknownOverrides[pathKey(file)] || p.overrides[pathKey(file)][strings.ToLower(name)] {
 				return ""
 			}
 
-			candidate := p.dependency(strings.ToLower(name), comp, r, map[string]bool{}, singletonOnly)
+			own := comp
+			if own == "" || !p.discovers(own) {
+				// The workspace's bean map names one file per bean, and
+				// applications side by side (FW/1's examples) share names;
+				// a policy's own folders answer for it.
+				own = p.beanIn(name, singletonOnly)
+			}
+
+			candidate := p.dependency(strings.ToLower(name), own, r, map[string]bool{}, singletonOnly)
 			if candidate == "" || result != "" && !cfpath.SamePath(result, candidate) {
 				return ""
 			}
@@ -99,14 +114,14 @@ func (r *Resolver) InjectionPropertyLookup(file string) func(string, map[string]
 	}
 
 	lookup := r.InjectionBeanLookup(file)
-	if !slices.ContainsFunc(r.diPolicies, func(p diPolicy) bool { return p.contains(file) }) {
+	if !slices.ContainsFunc(r.diPolicies, func(p diPolicy) bool { return p.serves(file) }) {
 		return nil
 	}
 
 	return func(name string, attrs map[string]string) string {
 		for i := range r.diPolicies {
 			p := &r.diPolicies[i]
-			if !p.contains(file) {
+			if !p.serves(file) {
 				continue
 			}
 
@@ -118,6 +133,107 @@ func (r *Resolver) InjectionPropertyLookup(file string) func(string, map[string]
 
 		return lookup(name)
 	}
+}
+
+// beanIn is the one component the policy's folders register as name, or "".
+// For singletonOnly (property and setter injection) a transient does not
+// count: qBall has model/beans/question.cfc and model/services/question.cfc,
+// and `property question;` can only be the service.
+func (p *diPolicy) beanIn(name string, singletonOnly bool) string {
+	found := ""
+
+	for _, hit := range p.beans[strings.ToLower(name)] {
+		if singletonOnly && p.transient(hit) {
+			continue
+		}
+
+		if found != "" {
+			return ""
+		}
+
+		found = hit
+	}
+
+	return found
+}
+
+// transient reports whether DI/1 makes the component in file a transient:
+// a beans folder, one the config names transient, or a transient pattern.
+func (p *diPolicy) transient(file string) bool {
+	base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	dir := strings.ToLower(filepath.Base(filepath.Dir(file)))
+
+	singular := strings.TrimSuffix(dir, "s")
+	if custom, ok := p.singulars[dir]; ok {
+		singular = custom
+	}
+
+	return singular == "bean" || p.transients[dir] || p.transientPattern != nil && p.transientPattern.MatchString(base) ||
+		p.singletonPattern != nil && !p.singletonPattern.MatchString(base)
+}
+
+// indexBeans fills p.beans from the components under p.roots.
+func (p *diPolicy) indexBeans(r *Resolver) {
+	p.beans = map[string][]string{}
+
+	queue := slices.Clone(p.roots)
+	for dirs := 0; len(queue) > 0 && dirs < maxAppWalkDirs; dirs++ {
+		dir := queue[0]
+		queue = queue[1:]
+
+		entries, err := r.fs().ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() {
+				if !strings.HasPrefix(name, ".") {
+					queue = append(queue, filepath.Join(dir, name))
+				}
+
+				continue
+			}
+
+			if !strings.EqualFold(filepath.Ext(name), ".cfc") {
+				continue
+			}
+
+			file := filepath.Join(dir, name)
+			base := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+
+			folder := strings.ToLower(filepath.Base(dir))
+
+			singular := strings.TrimSuffix(folder, "s")
+			if custom, ok := p.singulars[folder]; ok {
+				singular = custom
+			}
+
+			for _, key := range []string{base, base + singular} {
+				if !slices.Contains(p.beans[key], file) {
+					p.beans[key] = append(p.beans[key], file)
+				}
+			}
+		}
+	}
+}
+
+// serves reports whether the factory injects into file: one it discovers, or
+// one under an injected folder.
+func (p *diPolicy) serves(file string) bool {
+	return p.contains(file) || underAny(p.injected, file)
+}
+
+func underAny(roots []string, file string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, file)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *diPolicy) contains(file string) bool {
@@ -247,6 +363,7 @@ func (r *Resolver) buildDIPolicies() {
 
 	for i := range r.diPolicies {
 		r.diPolicies[i].recordExternalValues(r)
+		r.diPolicies[i].indexBeans(r)
 	}
 }
 
@@ -289,7 +406,83 @@ func (r *Resolver) diSources(d *Resolver) []diSource {
 		}
 	}
 
-	return sources
+	return append(sources, r.nestedFW1Apps(d, seen)...)
+}
+
+var fw1AppExtendsRe = regexp.MustCompile(`(?i)\bextends\s*=\s*["']framework\.one["']`)
+
+// maxNestedApps bounds the FW/1 applications found below the workspace roots.
+const maxNestedApps = 64
+
+// maxAppWalkDirs bounds the directories applicationFiles reads.
+const maxAppWalkDirs = 20000
+
+// applicationFiles are the Application.cfc files under the workspace folders,
+// found by walking them (dot-directories and node_modules skipped). The
+// policies are built while the index is still being filled, so the index
+// cannot answer this.
+func (r *Resolver) applicationFiles() []string {
+	var (
+		out   []string
+		dirs  = 0
+		queue = slices.Clone(r.WorkspaceFolders)
+	)
+
+	for len(queue) > 0 && dirs < maxAppWalkDirs {
+		dir := queue[0]
+		queue = queue[1:]
+		dirs++
+
+		entries, err := r.fs().ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			name := e.Name()
+
+			switch {
+			case e.IsDir():
+				if !strings.HasPrefix(name, ".") && !strings.EqualFold(name, "node_modules") {
+					queue = append(queue, filepath.Join(dir, name))
+				}
+			case strings.EqualFold(name, "Application.cfc"):
+				out = append(out, filepath.Join(dir, name))
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// nestedFW1Apps are the FW/1 applications below the workspace roots, whose
+// Application.cfc only the root's own search does not reach: FW/1's examples
+// are one application per directory, each with DI/1 over its own model and
+// controllers. Each gets the automatic policy its root would have.
+func (r *Resolver) nestedFW1Apps(d *Resolver, seen map[string]bool) []diSource {
+	var out []diSource
+
+	for _, file := range r.applicationFiles() {
+		if len(out) >= maxNestedApps || seen[pathKey(file)] {
+			continue
+		}
+
+		data, err := r.fs().ReadFile(file)
+		if err != nil || !fw1AppExtendsRe.Match(data) {
+			continue
+		}
+
+		seen[pathKey(file)] = true
+		r.Discovery.add(file)
+
+		content := string(data)
+		pr := parser.ParseWithOptions(cfpath.ToURI(file), content, &parser.ParseOptions{Resolvers: r.Resolvers, FuncLookup: d.FuncLookup(filepath.Dir(file))})
+		out = append(out, diSource{file, pr, beanCalls(content)})
+	}
+
+	return out
 }
 
 func (r *Resolver) automaticDIPolicy(source diSource) (diPolicy, bool) {
@@ -330,6 +523,7 @@ func (r *Resolver) automaticDIPolicy(source diSource) (diPolicy, bool) {
 
 	p := diConfig(cfg["diconfig"])
 	p.roots = roots
+	p.injected = []string{filepath.Join(filepath.Dir(source.file), "controllers")}
 
 	return p, true
 }
@@ -380,9 +574,13 @@ func (r *Resolver) diRegistrations(d *Resolver, sources []diSource, factories ma
 						expr.WriteString(tok.Value)
 					}
 
-					if isCallChain(expr.String()) && !strings.ContainsAny(expr.String(), "()") || len(value) == 1 && value[0].Kind == parser.TokIdent {
+					switch {
+					case isCallChain(expr.String()) && !strings.ContainsAny(expr.String(), "()") || len(value) == 1 && value[0].Kind == parser.TokIdent:
 						comp, _ := d.receiverComponent(expr.String(), call.line, "", "", s.pr, filepath.Dir(s.file), nil)
 						entry.component = d.ComponentPath(comp, filepath.Dir(s.file))
+					case instantiated(value) != "":
+						// Mura: addBean( "fileWriter", new mura.fileWriter() ).
+						entry.component = d.ComponentPath(instantiated(value), filepath.Dir(s.file))
 					}
 				}
 			default:
@@ -857,4 +1055,39 @@ func (p *diPolicy) recordExternalValues(r *Resolver) {
 			}
 		}
 	}
+}
+
+// instantiated is the component a bean value creates and nothing more:
+// `new a.b.C( … )` or `createObject( "component", "a.b.C" )`, with no call
+// chained on it, or "".
+func instantiated(value []parser.Token) string {
+	if len(value) < 3 || value[0].Kind != parser.TokIdent {
+		return ""
+	}
+
+	if strings.EqualFold(value[0].Value, "new") {
+		var path strings.Builder
+
+		i := 1
+		for ; i < len(value) && (value[i].Kind == parser.TokIdent || value[i].Kind == parser.TokDot); i++ {
+			path.WriteString(value[i].Value)
+		}
+
+		if i >= len(value) || value[i].Kind != parser.TokLParen || producerGroupEnd(value, i, parser.TokLParen, parser.TokRParen) != len(value)-1 {
+			return ""
+		}
+
+		return path.String()
+	}
+
+	if strings.EqualFold(value[0].Value, "createObject") && value[1].Kind == parser.TokLParen &&
+		producerGroupEnd(value, 1, parser.TokLParen, parser.TokRParen) == len(value)-1 {
+		args := producerSplit(value[2 : len(value)-1])
+		if len(args) == 2 && len(args[0]) == 1 && len(args[1]) == 1 && args[1][0].Kind == parser.TokString &&
+			strings.EqualFold(strings.Trim(args[0][0].Value, `"'`), "component") {
+			return strings.Trim(args[1][0].Value, `"'`)
+		}
+	}
+
+	return ""
 }

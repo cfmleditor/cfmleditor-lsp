@@ -58,6 +58,38 @@ func TestAPackageNamesItselfByItsSlug(t *testing.T) {
 	}
 }
 
+// TestALuCLIModuleNamesItselfUnderModules: LuCLI installs a module at
+// modules/<name>, and the module spells its own components that way —
+// cfwheels' cli/lucli writes `new modules.wheels.services.X()`. The name is
+// the module.json above the calling file; one without a main component is not
+// a module, and a different name is not claimed.
+func TestALuCLIModuleNamesItselfUnderModules(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"cli/module.json":               `{ "name": "wheels", "main": "Module.cfc" }`,
+		"cli/Module.cfc":                `component {}`,
+		"cli/services/Loader.cfc":       `component {}`,
+		"cli/services/deploy/Cli.cfc":   `component {}`,
+		"other/module.json":             `{ "name": "nomain" }`,
+		"other/services/Loader.cfc":     `component {}`,
+		"other/services/deploy/Cli.cfc": `component {}`,
+	})
+
+	r := &Resolver{FS: vfs.OS{}, Index: index.New()}
+
+	if got, want := r.ComponentPath("modules.wheels.services.Loader", filepath.Join(dir, "cli", "services", "deploy")), filepath.Join(dir, "cli", "services", "Loader.cfc"); got != want {
+		t.Errorf("modules.wheels.services.Loader: got %q, want %q", got, want)
+	}
+
+	if got := r.ComponentPath("modules.other.services.Loader", filepath.Join(dir, "cli", "services", "deploy")); got != "" {
+		t.Errorf("another module's name: got %q, want nothing", got)
+	}
+
+	if got := r.ComponentPath("modules.nomain.services.Loader", filepath.Join(dir, "other", "services", "deploy")); got != "" {
+		t.Errorf("a module.json with no main: got %q, want nothing", got)
+	}
+}
+
 // TestACallChainedOnABareCallIsCheckedOnWhatItReturns: `make().go()` is a call
 // to go on what make returns. It was resolved as a bare call to go — looked
 // for among this file's own methods — which reported every TestBox matcher

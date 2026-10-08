@@ -283,3 +283,20 @@ func (f fakeFS) ReadDir(string) ([]fs.DirEntry, error) { return nil, errors.ErrU
 func (f fakeFS) Walk(string, filepath.WalkFunc) error  { return errors.ErrUnsupported }
 
 var _ vfs.FS = fakeFS{}
+
+// TestMXUnitIsTestBoxsCompatibilityLayer: an MXUnit test extends
+// mxunit.framework.TestCase, which TestBox serves from system/compat.
+func TestMXUnitIsTestBoxsCompatibilityLayer(t *testing.T) {
+	want := Namespaced("testbox.system.compat.framework.TestCase")
+	if want == "" {
+		t.Fatal("no compat TestCase stub")
+	}
+
+	if got := Namespaced("mxunit.framework.TestCase"); got != want {
+		t.Errorf("mxunit.framework.TestCase: %q, want %q", got, want)
+	}
+
+	if got := Namespaced("mxunit.framework.Missing"); got != "" {
+		t.Errorf("a class compat lacks: %q", got)
+	}
+}

@@ -141,6 +141,10 @@ func evalPathTerm(term string, env map[string]string, appDir string) (string, bo
 		return value, true
 	}
 
+	if value, ok := replacedMappingPath(term, env, appDir); ok {
+		return value, true
+	}
+
 	if m := mappingTargetRe.FindStringSubmatch(term); m != nil {
 		v, ok := env["mapping:"+strings.ToLower(strings.Trim(strings.TrimSpace(m[1]), "/"))]
 

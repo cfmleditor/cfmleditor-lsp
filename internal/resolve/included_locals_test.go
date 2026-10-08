@@ -17,7 +17,14 @@ import (
 func templateReasons(t *testing.T, dir, page string) map[string]string {
 	t.Helper()
 
-	r := &Resolver{FS: vfs.OS{}, WorkspaceFolders: []string{dir}, Index: index.New()}
+	return templateReasonsWith(t, &Resolver{}, dir, page)
+}
+
+// templateReasonsWith is templateReasons with r's own settings kept.
+func templateReasonsWith(t *testing.T, r *Resolver, dir, page string) map[string]string {
+	t.Helper()
+
+	r.FS, r.WorkspaceFolders, r.Index = vfs.OS{}, []string{dir}, index.New()
 
 	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
 		if err != nil || !cfpath.IsCFMLFile(p) {
@@ -115,5 +122,59 @@ func TestATemplateReadsWhatItsIncluderHoldsAtTheInclude(t *testing.T) {
 	// others hold.
 	expectReasons(t, templateReasons(t, dir, "loose.cfm"), map[string]string{
 		"loose.setTable": "variable 'loose' has no component ref",
+	})
+}
+
+// TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers: Lucee's admin
+// web.cfm includes its helpers and then `#current.action#.cfm`, so every page
+// beside it runs inside it and calls those helpers bare. A page in another
+// directory, or one reached through a computed directory, is not included.
+func TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"admin/web.cfm":           `<cfinclude template="web_functions.cfm"><cfif not findOneOf("\/",url.action)><cfinclude template="#url.action#.cfm"></cfif>`,
+		"admin/web_functions.cfm": `<cfscript>function printError(e){}</cfscript>`,
+		"admin/overview.cfm":      `<cfscript>printError(1); notDeclared();</cfscript>`,
+		"admin/sub/page.cfm":      `<cfscript>printError(1);</cfscript>`,
+		"other/web.cfm":           `<cfinclude template="../other/web_functions.cfm"><cfinclude template="#d#/page.cfm">`,
+		"other/web_functions.cfm": `<cfscript>function otherHelper(){}</cfscript>`,
+		"other/x/page.cfm":        `<cfscript>otherHelper();</cfscript>`,
+	})
+
+	expectReasons(t, templateReasons(t, dir, "admin/overview.cfm"), map[string]string{
+		"printError":  "",
+		"notDeclared": "no qualifier, not in file",
+	})
+	expectReasons(t, templateReasons(t, dir, "admin/sub/page.cfm"), map[string]string{
+		"printError": "no qualifier, not in file",
+	})
+	expectReasons(t, templateReasons(t, dir, "other/x/page.cfm"), map[string]string{
+		"otherHelper": "no qualifier, not in file",
+	})
+}
+
+// TestAReceiversGuessedTypeIsNotAReturnType: the index parses a file without
+// looking methods up, so `variables.$ = variables.event.getValue("muraScope")`
+// gives $ the event's own type there. Mura's contentRenderer returns $ from
+// getMuraScope(), and every call chained on it was checked against the event
+// — "createHREF not found in event". The guess is no statement of what
+// getValue returns.
+func TestAReceiversGuessedTypeIsNotAReturnType(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Event.cfc": `component { function getValue( key ){ return variables.data[ arguments.key ]; } function eventOnly(){} }`,
+		"Renderer.cfc": `<cfcomponent>
+<cffunction name="init">
+	<cfset variables.event = new Event()>
+	<cfset variables.$ = variables.event.getValue("muraScope")>
+	<cfreturn this>
+</cffunction>
+<cffunction name="getMuraScope"><cfreturn variables.$></cffunction>
+</cfcomponent>`,
+		"Page.cfc": `component { function f(){ var r = new Renderer(); r.getMuraScope().createHREF(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{}, dir, "Page.cfc"), map[string]string{
+		"r.getMuraScope.createHREF": "method 'getMuraScope' in Renderer has no component return type (chain to 'createHREF')",
 	})
 }

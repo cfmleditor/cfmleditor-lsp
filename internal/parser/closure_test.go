@@ -108,6 +108,26 @@ func TestAnInlineComponentIsDynamic(t *testing.T) {
 	}
 }
 
+// TestAnInlineComponentWithAttributesIsDynamic: Lucee's tests write
+// `new component accessors=true { … }` and `new component javaSettings='…'
+// { … }`. The attributes were read as a path's continuation, giving a
+// component called "component", and `accessors` became a variable.
+func TestAnInlineComponentWithAttributesIsDynamic(t *testing.T) {
+	src := "component {\n\tfunction f() {\n\t\tvar comp = new component accessors=true javaSettings='{ \"maven\": [] }' persistent {\n\t\t\tproperty name=\"x\";\n\t\t};\n\t\tcomp.getX();\n\t}\n}"
+	pr := Parse(testURI, src)
+	scope := pr.Scopes[0]
+
+	if ref := refNamed(pr.FuncComponentRefs(scope.Start, scope.End), "comp"); ref == nil || ref.Component != "$any" {
+		t.Errorf("comp: got %+v, want $any", ref)
+	}
+
+	for _, v := range pr.FuncVars(scope.Start, scope.End) {
+		if strings.EqualFold(v, "accessors") || strings.EqualFold(v, "javaSettings") {
+			t.Errorf("an attribute declared a variable: %+v", v)
+		}
+	}
+}
+
 // TestMocksAndUnstubbedJavaAreDynamic: a Java object has nothing to be
 // checked against without a stub, so it is $any rather than untyped — every
 // call on one was "no component ref". A mock of a named class is that class,

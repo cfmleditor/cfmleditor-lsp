@@ -16,7 +16,7 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
-const unresolvedUsage = "usage: cfmleditor-lsp unresolved [--json | --known-issues [--relative-to <dir>] [--include-workspace] | --write] [--global-defs] [--no-infer-args] <dir> [...]\n"
+const unresolvedUsage = "usage: cfmleditor-lsp unresolved [--json | --known-issues [--relative-to <dir>] [--include-workspace] | --write] [--global-defs] [--candidates] [--no-infer-args] <dir> [...]\n"
 
 // unresolvedFlags is what cmdUnresolved's flags ask for.
 type unresolvedFlags struct {
@@ -27,6 +27,7 @@ type unresolvedFlags struct {
 	includeWorkspace bool
 	verbose          bool
 	globalDefs       bool
+	candidates       bool
 	noInferArgs      bool
 }
 
@@ -66,6 +67,8 @@ func parseUnresolvedFlags(args []string) (unresolvedFlags, []string) {
 			fl.verbose = true
 		case "--global-defs":
 			fl.globalDefs = true
+		case "--candidates":
+			fl.candidates = true
 		case "--no-infer-args":
 			fl.noInferArgs = true
 		default:
@@ -142,7 +145,7 @@ func cmdUnresolved(args []string) {
 // unresolvedOptions builds the scan's options from the config, or from the
 // paths given when there is none.
 func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *unresolved.Options {
-	opt := &unresolved.Options{GlobalDefs: fl.globalDefs, InferArgs: !fl.noInferArgs, WorkspaceFolders: cliWorkspaceFolders(vfs.OS{}, cfg, args)}
+	opt := &unresolved.Options{GlobalDefs: fl.globalDefs, Candidates: fl.candidates, InferArgs: !fl.noInferArgs, WorkspaceFolders: cliWorkspaceFolders(vfs.OS{}, cfg, args)}
 	if fl.verbose {
 		opt.Verbose = os.Stderr
 	}

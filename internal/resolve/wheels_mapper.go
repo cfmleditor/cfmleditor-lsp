@@ -20,45 +20,12 @@ func (r *Resolver) wheelsMapperFunc(path, name string) (*parser.FunctionDef, boo
 		return nil, false
 	}
 
-	source := r.wheelsSource(path)
-	if source.methods["init"].body != wheelsTokens(`local.globalComponent = createObject("wheels.Global"); $integrateFunctions(local.globalComponent); $integrateComponents("wheels.mapper"); return this;`) ||
-		source.methods["$integratecomponents"].body != wheelsTokens(`local.plan = $componentIntegrationPlan(arguments.path); local.iEnd = ArrayLen(local.plan); for (local.i = 1; local.i <= local.iEnd; local.i++) { $integrateFunctions(local.plan[local.i].instance, local.plan[local.i].publicMethods); }`) {
+	setup, ok := r.wheelsMapperSetup(path)
+	if !ok {
 		return nil, false
 	}
 
-	copyBody := source.methods["$integratefunctions"].body
-	if !strings.HasPrefix(copyBody, wheelsTokens(`if (ArrayLen(arguments.publicMethods)) { local.iEnd = ArrayLen(arguments.publicMethods); for (local.i = 1; local.i <= local.iEnd; local.i++) { local.m = arguments.publicMethods[local.i]; variables[local.m.name] = local.m.ref; this[local.m.name] = local.m.ref; } return; }`)) {
-		return nil, false
-	}
-	// init first copies Global's methods; otherwise the integration-plan call
-	// below has no implementation on Mapper. Require that fallback path too.
-	for _, evidence := range []string{
-		`local.meta = getMetaData(arguments.componentInstance);`,
-		`local.excludeList = "get,controller";`,
-		`if (local.method.access == "public" && (!listFindNoCase(local.excludeList, local.functionName) || findNoCase("wheels.mapper", local.componentName))) { variables[local.functionName] = componentInstance[local.functionName]; this[local.functionName] = componentInstance[local.functionName]; }`,
-	} {
-		if !strings.Contains(copyBody, wheelsTokens(evidence)) {
-			return nil, false
-		}
-	}
-
-	global := r.ComponentPath("wheels.Global", filepath.Dir(path))
-	if global == "" {
-		return nil, false
-	}
-
-	if !r.wheelsIntegrationPlan(global) {
-		return nil, false
-	}
-
-	// ExpandPath in the loader uses the active wheels mapping. Resolve an actual
-	// source component as an anchor, and reject a basename fallback elsewhere.
-	anchor := r.ComponentPath("wheels.mapper.mapping", filepath.Dir(path))
-	if anchor == "" || !strings.EqualFold(filepath.Base(filepath.Dir(anchor)), "mapper") || !samePath(filepath.Dir(filepath.Dir(anchor)), filepath.Dir(path)) {
-		return nil, false
-	}
-
-	folder := filepath.Dir(anchor)
+	source, copyBody, global, folder := setup.source, setup.copyBody, setup.global, setup.folder
 
 	entries, err := r.fs().ReadDir(folder)
 	if err != nil || len(entries) > 128 {
@@ -586,3 +553,59 @@ const wheelsGlobalIncludeCopy = `if (StructKeyExists(arguments.componentInstance
   }
  }
 }`
+
+type wheelsMapperLoader struct {
+	source                   wheelsSource
+	copyBody, global, folder string
+}
+
+// wheelsMapperSetup reports whether path is Wheels' Mapper.cfc as pinned,
+// with what its loader reads: its source, the copy body, wheels.Global and
+// the mapper package folder.
+func (r *Resolver) wheelsMapperSetup(path string) (wheelsMapperLoader, bool) {
+	if !strings.EqualFold(filepath.Base(path), "Mapper.cfc") {
+		return wheelsMapperLoader{}, false
+	}
+
+	source := r.wheelsSource(path)
+	if source.methods["init"].body != wheelsTokens(`local.globalComponent = createObject("wheels.Global"); $integrateFunctions(local.globalComponent); $integrateComponents("wheels.mapper"); return this;`) ||
+		source.methods["$integratecomponents"].body != wheelsTokens(`local.plan = $componentIntegrationPlan(arguments.path); local.iEnd = ArrayLen(local.plan); for (local.i = 1; local.i <= local.iEnd; local.i++) { $integrateFunctions(local.plan[local.i].instance, local.plan[local.i].publicMethods); }`) {
+		return wheelsMapperLoader{}, false
+	}
+
+	copyBody := source.methods["$integratefunctions"].body
+	if !strings.HasPrefix(copyBody, wheelsTokens(`if (ArrayLen(arguments.publicMethods)) { local.iEnd = ArrayLen(arguments.publicMethods); for (local.i = 1; local.i <= local.iEnd; local.i++) { local.m = arguments.publicMethods[local.i]; variables[local.m.name] = local.m.ref; this[local.m.name] = local.m.ref; } return; }`)) {
+		return wheelsMapperLoader{}, false
+	}
+	// init first copies Global's methods; otherwise the integration-plan call
+	// below has no implementation on Mapper. Require that fallback path too.
+	for _, evidence := range []string{
+		`local.meta = getMetaData(arguments.componentInstance);`,
+		`local.excludeList = "get,controller";`,
+		`if (local.method.access == "public" && (!listFindNoCase(local.excludeList, local.functionName) || findNoCase("wheels.mapper", local.componentName))) { variables[local.functionName] = componentInstance[local.functionName]; this[local.functionName] = componentInstance[local.functionName]; }`,
+	} {
+		if !strings.Contains(copyBody, wheelsTokens(evidence)) {
+			return wheelsMapperLoader{}, false
+		}
+	}
+
+	global := r.ComponentPath("wheels.Global", filepath.Dir(path))
+	if global == "" {
+		return wheelsMapperLoader{}, false
+	}
+
+	if !r.wheelsIntegrationPlan(global) {
+		return wheelsMapperLoader{}, false
+	}
+
+	// ExpandPath in the loader uses the active wheels mapping. Resolve an actual
+	// source component as an anchor, and reject a basename fallback elsewhere.
+	anchor := r.ComponentPath("wheels.mapper.mapping", filepath.Dir(path))
+	if anchor == "" || !strings.EqualFold(filepath.Base(filepath.Dir(anchor)), "mapper") || !samePath(filepath.Dir(filepath.Dir(anchor)), filepath.Dir(path)) {
+		return wheelsMapperLoader{}, false
+	}
+
+	folder := filepath.Dir(anchor)
+
+	return wheelsMapperLoader{source: source, copyBody: copyBody, global: global, folder: folder}, true
+}

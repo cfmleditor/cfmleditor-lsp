@@ -195,6 +195,12 @@ type ComponentRef struct {
 	// before the line, so a receiver on the ref's own line does not read
 	// this ref; see resolve's funcScopedRef.
 	Rebinds bool
+	// BaseGuess is set when Component is the receiver's own, given by
+	// `x = base.m()` in a parse that could not look m up: a guess for a
+	// fluent component, which a parse with FuncLookup replaces by m's
+	// return. Mura's `variables.$ = variables.event.getValue("muraScope")`
+	// is not an event; a reader wanting what the source states skips it.
+	BaseGuess bool
 	// New factory chains require a concrete result, not dynamic acceptance
 	// when a suffix method has an unknown return.
 	strictChain bool

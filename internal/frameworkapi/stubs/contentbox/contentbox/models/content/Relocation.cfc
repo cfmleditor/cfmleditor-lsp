@@ -21,5 +21,7 @@ component extends="contentbox.models.BaseEntity" {
 	 */
 	property name="site" notnull="true" cfc="contentbox.models.system.Site" fieldtype="many-to-one" fkcolumn="FK_siteID" fetch="join";
 	property name="relatedContent" notnull="false" cfc="contentbox.models.content.BaseContent" fieldtype="many-to-one" fkcolumn="FK_contentID" lazy="false" fetch="select";
+	variables.site = new contentbox.models.system.Site();
+	variables.relatedContent = new contentbox.models.content.BaseContent();
 	contentbox.models.content.Relocation function setSlug( value ) {}
 }

@@ -57,6 +57,7 @@ component {
 	property name="taskScheduler";
 	this.logLevels = new coldbox.system.logging.LogLevels();
 	variables.asyncManager = new coldbox.system.async.AsyncManager();
+	variables.config = new coldbox.system.logging.config.LogBoxConfig();
 	/**
 	 * Constructor
 	 *
