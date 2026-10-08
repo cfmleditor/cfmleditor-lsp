@@ -102,7 +102,7 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 | `refs` | `refs [--mermaid] <component-or-function> <dir> [...]` — find references |
 | `deps` | `deps [--mermaid] <dir-or-file> [...]` — transitive dependency graph, built through `deps.Build` so the CLI and `cfmleditor.exportDeps` answer alike |
 | `graph` | `graph [--level function\|call\|file\|package] [--format text\|json\|jsonl\|dot\|mermaid\|html] [--db <file>] [--out <f>] [--live\|--detached\|--from <id>] [--under <p>] <dir> [...]` — whole-project code map |
-| `mcp` | `mcp --db <file> [--root <dir>] [--no-explain]` — serve that map over MCP on stdio, read-only |
+| `mcp` | `mcp [--db <file>] [--root <dir>] [--allow-lint] [--map-only] [--no-explain]` — serve the workspace over MCP on stdio: unresolved, refs and explain from source, the map's tools with `--db`, CFLint with `--allow-lint`. Writes nothing |
 | `explain` | `explain [--root <dir>] <file> <line> [call-substring]` — trace how a call site resolved |
 | `version`, `help` | |
 
@@ -164,7 +164,7 @@ Editor document change
 | `internal/route` | Convention-based framework routing: the `routes` config grammar, the source scanner, and resolution to a controller method or a view |
 | `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
-| `internal/codemap/mcp` | Read-only MCP server over the store |
+| `internal/codemap/mcp` | MCP server: the map tools over the store, and the task tools (unresolved, refs, explain, lint) as hooks `cmd/cfmleditor-lsp/mcp_tasks.go` supplies, so the tool and its CLI command run the same code. A nil hook or store is a tool not advertised |
 | `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
 | `internal/tsoracle` | Differential check: what `internal/parser` extracted vs what the tree-sitter grammar saw in the same file. See the note under Verification discipline |
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |

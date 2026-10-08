@@ -21,20 +21,34 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
-const mcpUsage = `usage: cfmleditor-lsp mcp --db <file> [--root <dir>] [--no-explain]
+const mcpUsage = `usage: cfmleditor-lsp mcp [--db <file>] [--root <dir>] [--allow-lint] [--map-only] [--no-explain]
 
-Serve a code map over the Model Context Protocol on stdio, so an assistant can
-query the codebase's structure instead of grepping for it. Read-only: every
-tool is a query, and none of them writes a file or runs a command.
+Serve a CFML workspace over the Model Context Protocol on stdio, so an
+assistant can ask about the code instead of grepping for it. It writes nothing.
 
-  --db <file>     the database written by "graph --db" (required)
-  --root <dir>    workspace root for explain_call (default: the map's own root)
-  --no-explain    do not offer explain_call, and never parse source
+Always offered, reading source on disk:
+  find_unresolved_calls   what "unresolved" reports
+  find_references         what "refs" reports
+  explain_call            what "explain" reports
+With --db, the code map "graph --db" built:
+  search_symbols, get_symbol, get_callers, get_callees, find_path,
+  list_islands, list_orphans, get_stats
+With --allow-lint:
+  lint                    CFLint's findings, as "cflint" reports them; starts a
+                          Java process and downloads CFLint on first use
 
-Build the map first:
-  cfmleditor-lsp graph --db .cfmleditor/codemap.db .
+  --db <file>     the database written by "graph --db"
+  --root <dir>    workspace root for explain_call (default: the map's own root,
+                  or the working directory without a map)
+  --allow-lint    offer the lint tool
+  --map-only      offer only the map tools, and never read source (needs --db)
+  --no-explain    do not offer explain_call
 
-Then register this command with your MCP client, for example:
+Paths given to a tool are relative to the server's working directory.
+
+Register it with your MCP client, for example:
+  {"command": "cfmleditor-lsp", "args": ["mcp", "--allow-lint"], "cwd": "/path/to/project"}
+or with a map, built first by: cfmleditor-lsp graph --db .cfmleditor/codemap.db .
   {"command": "cfmleditor-lsp", "args": ["mcp", "--db", ".cfmleditor/codemap.db"]}
 `
 
@@ -46,87 +60,129 @@ func fatalf(format string, args ...any) {
 	os.Exit(1)
 }
 
-func cmdMCP(args []string) {
-	var (
-		dbPath    string
-		root      string
-		noExplain bool
-	)
+type mcpFlags struct {
+	db, root                      string
+	allowLint, mapOnly, noExplain bool
+}
+
+func parseMCPFlags(args []string) mcpFlags {
+	var f mcpFlags
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--db", "--root":
 			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "%s needs a value\n\n%s", args[i], mcpUsage)
-				os.Exit(1)
+				fatalf("%s needs a value\n\n%s", args[i], mcpUsage)
 			}
 
 			if args[i] == "--db" {
-				dbPath = args[i+1]
+				f.db = args[i+1]
 			} else {
-				root = args[i+1]
+				f.root = args[i+1]
 			}
 
 			i++
+		case "--allow-lint":
+			f.allowLint = true
+		case "--map-only":
+			f.mapOnly = true
 		case "--no-explain":
-			noExplain = true
-		case "-h", "--help":
-			fmt.Fprint(os.Stderr, mcpUsage)
-
-			return
+			f.noExplain = true
 		default:
-			fmt.Fprintf(os.Stderr, "unknown option %q\n\n%s", args[i], mcpUsage)
-			os.Exit(1)
+			fatalf("unknown option %q\n\n%s", args[i], mcpUsage)
 		}
 	}
 
-	if dbPath == "" {
-		fmt.Fprint(os.Stderr, mcpUsage)
-		os.Exit(1)
+	if f.mapOnly && f.db == "" {
+		fatalf("--map-only needs --db: without a map there is nothing to offer\n\n%s", mcpUsage)
 	}
 
-	if _, err := os.Stat(dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "No map at %s. Build one first:\n  cfmleditor-lsp graph --db %s <dir>\n", dbPath, dbPath)
-		os.Exit(1)
+	if f.mapOnly && f.allowLint {
+		fatalf("--map-only and --allow-lint cannot be used together\n\n%s", mcpUsage)
 	}
 
-	db, err := store.Open(dbPath)
+	return f
+}
+
+// openMap opens and checks the map at path, or exits saying how to build one.
+func openMap(path string) *store.Store {
+	if _, err := os.Stat(path); err != nil {
+		fatalf("No map at %s. Build one first:\n  cfmleditor-lsp graph --db %s <dir>\n", path, path)
+	}
+
+	db, err := store.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		fatalf("%v\n", err)
 	}
-
-	defer func() { _ = db.Close() }()
 
 	if _, err := db.Stats(); err != nil {
 		// Closed explicitly and then exited via a helper, because os.Exit runs no
 		// defers and a WAL-mode database left open strands its -wal and -shm files.
 		_ = db.Close()
 
-		fatalf("%s holds no map yet. Run: cfmleditor-lsp graph --db %s <dir>\n", dbPath, dbPath)
+		fatalf("%s holds no map yet. Run: cfmleditor-lsp graph --db %s <dir>\n", path, path)
 	}
 
-	srv := &mcp.Server{Store: db, Name: "cfmleditor-lsp codemap", Version: version}
+	return db
+}
 
-	if !noExplain {
-		if root == "" {
+// mcpServer builds the server the flags ask for. db may be nil.
+func mcpServer(f *mcpFlags, db *store.Store) *mcp.Server {
+	srv := &mcp.Server{Store: db, Name: "cfmleditor-lsp", Version: version}
+
+	if f.mapOnly {
+		return srv
+	}
+
+	srv.Unresolved = mcpUnresolved
+	srv.FindRefs = mcpFindRefs
+
+	if f.allowLint {
+		srv.Lint = newMCPLinter()
+	}
+
+	if !f.noExplain {
+		root := f.root
+		if root == "" && db != nil {
 			root, _ = db.Meta("root")
 		}
 
-		if root != "" {
-			srv.Explain = newExplainer(root)
+		if root == "" {
+			root = mustGetwd()
 		}
+
+		srv.Explain = newExplainer(root)
 	}
+
+	return srv
+}
+
+func cmdMCP(args []string) {
+	f := parseMCPFlags(args)
+
+	var db *store.Store
+	if f.db != "" {
+		db = openMap(f.db)
+		defer func() { _ = db.Close() }()
+	}
+
+	srv := mcpServer(&f, db)
 
 	// Diagnostics go to stderr. Stdout is the protocol channel, and one stray line
 	// on it is a parse error at the other end rather than a log message.
-	fmt.Fprintf(os.Stderr, "cfmleditor-lsp codemap MCP server on stdio (db: %s)\n", dbPath)
+	if f.db != "" {
+		fmt.Fprintf(os.Stderr, "cfmleditor-lsp MCP server on stdio (db: %s)\n", f.db)
+	} else {
+		fmt.Fprintf(os.Stderr, "cfmleditor-lsp MCP server on stdio (no code map)\n")
+	}
 
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
 		// Close before exiting rather than relying on the defer, which os.Exit
 		// skips: this is a WAL-mode database and an unclosed one strands its -wal
 		// and -shm files next to it for the next reader to recover.
-		_ = db.Close()
+		if db != nil {
+			_ = db.Close()
+		}
 
 		fatalf("%v\n", err)
 	}

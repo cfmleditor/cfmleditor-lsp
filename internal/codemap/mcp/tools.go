@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
@@ -20,6 +21,17 @@ type tool struct {
 // readOnly marks every tool here. MCP clients use it to decide what needs
 // confirmation, and nothing in this server writes.
 var readOnly = map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true}
+
+// runsCFLint marks lint, which writes nothing either but starts a Java process,
+// and on first use downloads CFLint: open-world, in MCP's terms.
+var runsCFLint = map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true}
+
+func strList(desc string) map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
+}
+
+const pathsHelp = "Files or directories, absolute or relative to the server's working directory. " +
+	"The .cfmleditor.json above the first one decides how calls resolve."
 
 func obj(props map[string]any, required ...string) map[string]any {
 	schema := map[string]any{"type": "object", "properties": props}
@@ -43,116 +55,184 @@ const idHelp = "Node id. A function is \"<file>::<lowercased name>\", e.g. " +
 	"Use search_symbols to find one rather than guessing."
 
 func (s *Server) tools() []tool {
-	list := []tool{
-		{
-			Name:  "search_symbols",
-			Title: "Search symbols",
-			Description: "Find functions and files by name, path or component. Start here: every other " +
-				"tool takes a node id, and this is how you get one. A blank query with filters set " +
-				"lists by those filters alone (for example every unreachable function under a path).",
-			InputSchema: obj(map[string]any{
-				"query":  str("Text to match against name, file and component. Substring matching, so \"perms\" finds checkPermsList."),
-				"kind":   map[string]any{"type": "string", "enum": []string{"function", "file", "package", "external"}, "description": "Restrict to one kind of node."},
-				"file":   str("Restrict to nodes whose path starts with this prefix."),
-				"island": num("Restrict to one connected component of the graph."),
-				"only_unreachable": flag("Only nodes no entry point reaches. Deletion candidates, " +
-					"not proven dead code — see get_stats for how many calls went unresolved."),
-				"sort_by_fan_in": flag("Order by how many things depend on the node, most first, rather than by name."),
-				"limit":          num("Maximum results (default 50)."),
-			}),
-			Annotations: readOnly,
-		},
-		{
-			Name:        "get_symbol",
-			Title:       "Get one symbol",
-			Description: "Full detail for one node: file, line, access, island, and how many things depend on it.",
-			InputSchema: obj(map[string]any{"id": str(idHelp)}, "id"),
-			Annotations: readOnly,
-		},
-		{
-			Name:  "get_callers",
-			Title: "Get callers",
-			Description: "What depends on this node, and how. An empty result on a function that " +
-				"clearly runs usually means the call was made through a receiver the resolver could " +
-				"not type, not that nothing calls it.",
-			InputSchema: obj(map[string]any{
-				"id":    str(idHelp),
-				"limit": num("Maximum results (default 200)."),
-			}, "id"),
-			Annotations: readOnly,
-		},
-		{
-			Name:        "get_callees",
-			Title:       "Get callees",
-			Description: "What this node depends on: what it calls, instantiates, extends or includes.",
-			InputSchema: obj(map[string]any{
-				"id":    str(idHelp),
-				"limit": num("Maximum results (default 200)."),
-			}, "id"),
-			Annotations: readOnly,
-		},
-		{
-			Name:  "find_path",
-			Title: "Find a dependency path",
-			Description: "The shortest chain of dependencies from one node to another, or nothing if " +
-				"there is none within the depth limit. Use it to answer \"how does this page reach that " +
-				"component\" without reading the files in between.",
-			InputSchema: obj(map[string]any{
-				"from":      str("Starting node id."),
-				"to":        str("Target node id."),
-				"max_depth": num("How many hops to search (default 12)."),
-			}, "from", "to"),
-			Annotations: readOnly,
-		},
-		{
-			Name:  "list_islands",
-			Title: "List islands",
-			Description: "The disconnected pieces of the graph, largest first. The biggest is the " +
-				"application; the rest are detached subsystems — either genuinely dead, or live code " +
-				"reached through a call the resolver could not follow.",
-			InputSchema: obj(map[string]any{
-				"detached_only": flag("Only islands no entry point reaches."),
-				"limit":         num("Maximum results (default 50)."),
-			}),
-			Annotations: readOnly,
-		},
-		{
-			Name:  "list_orphans",
-			Title: "List unreferenced symbols",
-			Description: "Nodes nothing depends on and no entry point reaches. Deletion candidates. " +
-				"Always read get_stats alongside: an unresolved call is an edge the map does not have, " +
-				"so a high unresolved count makes this list longer than the truth.",
-			InputSchema: obj(map[string]any{
-				"kind":  map[string]any{"type": "string", "enum": []string{"function", "file"}, "description": "Restrict to one kind."},
-				"limit": num("Maximum results (default 50)."),
-			}),
-			Annotations: readOnly,
-		},
-		{
-			Name:  "get_stats",
-			Title: "Map statistics",
-			Description: "Counts for the whole map, including how many call sites resolved to a " +
-				"definition. That ratio is the map's confidence in itself: at 50%, half the call graph " +
-				"is missing and an empty caller list proves much less than it looks like it does.",
-			InputSchema: obj(map[string]any{}),
-			Annotations: readOnly,
-		},
+	list := s.taskTools()
+
+	if s.Store != nil {
+		list = append(list, mapTools...)
 	}
 
 	if s.Explain != nil {
+		list = append(list, explainTool)
+	}
+
+	return list
+}
+
+// mapTools query the code map, and are offered only when one is loaded.
+var mapTools = []tool{
+	{
+		Name:  "search_symbols",
+		Title: "Search symbols",
+		Description: "Find functions and files by name, path or component. Start here: every other " +
+			"tool takes a node id, and this is how you get one. A blank query with filters set " +
+			"lists by those filters alone (for example every unreachable function under a path).",
+		InputSchema: obj(map[string]any{
+			"query":  str("Text to match against name, file and component. Substring matching, so \"perms\" finds checkPermsList."),
+			"kind":   map[string]any{"type": "string", "enum": []string{"function", "file", "package", "external"}, "description": "Restrict to one kind of node."},
+			"file":   str("Restrict to nodes whose path starts with this prefix."),
+			"island": num("Restrict to one connected component of the graph."),
+			"only_unreachable": flag("Only nodes no entry point reaches. Deletion candidates, " +
+				"not proven dead code — see get_stats for how many calls went unresolved."),
+			"sort_by_fan_in": flag("Order by how many things depend on the node, most first, rather than by name."),
+			"limit":          num("Maximum results (default 50)."),
+		}),
+		Annotations: readOnly,
+	},
+	{
+		Name:        "get_symbol",
+		Title:       "Get one symbol",
+		Description: "Full detail for one node: file, line, access, island, and how many things depend on it.",
+		InputSchema: obj(map[string]any{"id": str(idHelp)}, "id"),
+		Annotations: readOnly,
+	},
+	{
+		Name:  "get_callers",
+		Title: "Get callers",
+		Description: "What depends on this node, and how. An empty result on a function that " +
+			"clearly runs usually means the call was made through a receiver the resolver could " +
+			"not type, not that nothing calls it.",
+		InputSchema: obj(map[string]any{
+			"id":    str(idHelp),
+			"limit": num("Maximum results (default 200)."),
+		}, "id"),
+		Annotations: readOnly,
+	},
+	{
+		Name:        "get_callees",
+		Title:       "Get callees",
+		Description: "What this node depends on: what it calls, instantiates, extends or includes.",
+		InputSchema: obj(map[string]any{
+			"id":    str(idHelp),
+			"limit": num("Maximum results (default 200)."),
+		}, "id"),
+		Annotations: readOnly,
+	},
+	{
+		Name:  "find_path",
+		Title: "Find a dependency path",
+		Description: "The shortest chain of dependencies from one node to another, or nothing if " +
+			"there is none within the depth limit. Use it to answer \"how does this page reach that " +
+			"component\" without reading the files in between.",
+		InputSchema: obj(map[string]any{
+			"from":      str("Starting node id."),
+			"to":        str("Target node id."),
+			"max_depth": num("How many hops to search (default 12)."),
+		}, "from", "to"),
+		Annotations: readOnly,
+	},
+	{
+		Name:  "list_islands",
+		Title: "List islands",
+		Description: "The disconnected pieces of the graph, largest first. The biggest is the " +
+			"application; the rest are detached subsystems — either genuinely dead, or live code " +
+			"reached through a call the resolver could not follow.",
+		InputSchema: obj(map[string]any{
+			"detached_only": flag("Only islands no entry point reaches."),
+			"limit":         num("Maximum results (default 50)."),
+		}),
+		Annotations: readOnly,
+	},
+	{
+		Name:  "list_orphans",
+		Title: "List unreferenced symbols",
+		Description: "Nodes nothing depends on and no entry point reaches. Deletion candidates. " +
+			"Always read get_stats alongside: an unresolved call is an edge the map does not have, " +
+			"so a high unresolved count makes this list longer than the truth.",
+		InputSchema: obj(map[string]any{
+			"kind":  map[string]any{"type": "string", "enum": []string{"function", "file"}, "description": "Restrict to one kind."},
+			"limit": num("Maximum results (default 50)."),
+		}),
+		Annotations: readOnly,
+	},
+	{
+		Name:  "get_stats",
+		Title: "Map statistics",
+		Description: "Counts for the whole map, including how many call sites resolved to a " +
+			"definition. That ratio is the map's confidence in itself: at 50%, half the call graph " +
+			"is missing and an empty caller list proves much less than it looks like it does.",
+		InputSchema: obj(map[string]any{}),
+		Annotations: readOnly,
+	},
+}
+
+var explainTool = tool{
+	Name:  "explain_call",
+	Title: "Explain a call site",
+	Description: "Trace, step by step, how a call site's receiver was typed and why the method " +
+		"check passed or failed. This is the tool for \"why is this reported unresolved\" and for " +
+		"\"where did that component path come from\" — it names the exact componentResolver that " +
+		"fired. It re-parses the file, so it reflects what is on disk now, not what any map holds.",
+	InputSchema: obj(map[string]any{
+		"file":  str("Path to the CFML file, absolute or relative to the working directory."),
+		"line":  num("1-based line number of the call site."),
+		"match": str("Optional substring to pick one call on that line."),
+	}, "file", "line"),
+	Annotations: readOnly,
+}
+
+// taskTools run what the CLI runs, from source on disk; none needs a map.
+func (s *Server) taskTools() []tool {
+	var list []tool
+
+	if s.Unresolved != nil {
 		list = append(list, tool{
-			Name:  "explain_call",
-			Title: "Explain a call site",
-			Description: "Trace, step by step, how a call site's receiver was typed and why the method " +
-				"check passed or failed. This is the tool for \"why is this reported unresolved\" and for " +
-				"\"where did that component path come from\" — it names the exact componentResolver that " +
-				"fired. It re-parses the file, so it reflects what is on disk now, not what the map holds.",
+			Name:  "find_unresolved_calls",
+			Title: "Find unresolved calls",
+			Description: "Every component or method call under the given paths that does not resolve: " +
+				"a receiver with no known component, a method the component does not declare, a " +
+				"component that does not exist. What `cfmleditor-lsp unresolved` reports. Pass " +
+				"explain_call a result's file and line to see why. It indexes the workspace on " +
+				"every call, which takes seconds on a large one.",
 			InputSchema: obj(map[string]any{
-				"file":  str("Path to the CFML file, absolute or relative to the working directory."),
-				"line":  num("1-based line number of the call site."),
-				"match": str("Optional substring to pick one call on that line."),
-			}, "file", "line"),
+				"paths":       strList(pathsHelp),
+				"global_defs": flag("Accept a bare call to a function any indexed file declares."),
+				"limit":       num("Maximum calls listed (default 200). The result gives the total."),
+			}, "paths"),
 			Annotations: readOnly,
+		})
+	}
+
+	if s.FindRefs != nil {
+		list = append(list, tool{
+			Name:  "find_references",
+			Title: "Find references",
+			Description: "Every reference under the given paths to a component (a dot-path such as " +
+				"\"packages.finance.service\") or a function (a bare name such as \"getReport\"), with " +
+				"whether each resolved to it. What `cfmleditor-lsp refs` reports. It reads source, so " +
+				"it needs no map and reflects what is on disk now.",
+			InputSchema: obj(map[string]any{
+				"target": str("A component dot-path, or a function name."),
+				"paths":  strList(pathsHelp),
+				"limit":  num("Maximum references listed (default 200). The result gives the total."),
+			}, "target", "paths"),
+			Annotations: readOnly,
+		})
+	}
+
+	if s.Lint != nil {
+		list = append(list, tool{
+			Name:  "lint",
+			Title: "Run CFLint",
+			Description: "Run CFLint over files or directories and return its findings: path, line, " +
+				"column, severity, rule and message. linting.minSeverity in .cfmleditor.json sets the " +
+				"least severe level reported. It starts a Java process, downloads CFLint on first " +
+				"use, and writes no report. CFLint reports some rules (MISSING_VAR, IMPLICIT_SCOPE) " +
+				"once per name per run, so lint one file to see all of its findings.",
+			InputSchema: obj(map[string]any{
+				"paths": strList("Files or directories, absolute or relative to the server's working directory."),
+				"limit": num("Maximum findings listed (default 200). The result gives the total."),
+			}, "paths"),
+			Annotations: runsCFLint,
 		})
 	}
 
@@ -197,20 +277,23 @@ func (s *Server) callTool(raw json.RawMessage) (any, *rpcError) {
 }
 
 type toolArgs struct {
-	Query           string `json:"query"`
-	Kind            string `json:"kind"`
-	File            string `json:"file"`
-	Island          *int   `json:"island"`
-	OnlyUnreachable bool   `json:"only_unreachable"`
-	SortByFanIn     bool   `json:"sort_by_fan_in"`
-	Limit           int    `json:"limit"`
-	ID              string `json:"id"`
-	From            string `json:"from"`
-	To              string `json:"to"`
-	MaxDepth        int    `json:"max_depth"`
-	DetachedOnly    bool   `json:"detached_only"`
-	Line            int    `json:"line"`
-	Match           string `json:"match"`
+	Query           string   `json:"query"`
+	Kind            string   `json:"kind"`
+	File            string   `json:"file"`
+	Island          *int     `json:"island"`
+	OnlyUnreachable bool     `json:"only_unreachable"`
+	SortByFanIn     bool     `json:"sort_by_fan_in"`
+	Limit           int      `json:"limit"`
+	ID              string   `json:"id"`
+	From            string   `json:"from"`
+	To              string   `json:"to"`
+	MaxDepth        int      `json:"max_depth"`
+	DetachedOnly    bool     `json:"detached_only"`
+	Line            int      `json:"line"`
+	Match           string   `json:"match"`
+	Target          string   `json:"target"`
+	Paths           []string `json:"paths"`
+	GlobalDefs      bool     `json:"global_defs"`
 }
 
 func (s *Server) run(name string, raw json.RawMessage) (any, error) {
@@ -220,6 +303,11 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, fmt.Errorf("bad arguments for %s: %w", name, err)
 		}
+	}
+
+	if s.Store == nil && slices.ContainsFunc(mapTools, func(t tool) bool { return t.Name == name }) {
+		return nil, fmt.Errorf("%s needs a code map, and this server was started without one: build it with "+
+			"`cfmleditor-lsp graph --db <file> <dir>` and start the server with --db <file>", name)
 	}
 
 	switch name {
@@ -305,6 +393,39 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 
 		return map[string]any{"explanation": text}, nil
 
+	case "find_unresolved_calls":
+		if s.Unresolved == nil {
+			return nil, errors.New("find_unresolved_calls is not available on this server")
+		}
+
+		if len(a.Paths) == 0 {
+			return nil, errMissing("paths")
+		}
+
+		return s.Unresolved(a.Paths, a.GlobalDefs, limitOr(a.Limit))
+
+	case "find_references":
+		if s.FindRefs == nil {
+			return nil, errors.New("find_references is not available on this server")
+		}
+
+		if strings.TrimSpace(a.Target) == "" || len(a.Paths) == 0 {
+			return nil, errMissing("target and paths")
+		}
+
+		return s.FindRefs(a.Target, a.Paths, limitOr(a.Limit))
+
+	case "lint":
+		if s.Lint == nil {
+			return nil, errors.New("lint is not available: start the server with --allow-lint to offer it")
+		}
+
+		if len(a.Paths) == 0 {
+			return nil, errMissing("paths")
+		}
+
+		return s.Lint(a.Paths, limitOr(a.Limit))
+
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
@@ -318,6 +439,33 @@ func wrap[T any](field string, items []T) map[string]any {
 	}
 
 	return map[string]any{field: items, "count": len(items)}
+}
+
+// defaultTaskLimit caps a task tool's list. A whole-workspace unresolved scan
+// can find thousands, and every one of them lands in the model's context.
+const defaultTaskLimit = 200
+
+func limitOr(n int) int {
+	if n <= 0 {
+		return defaultTaskLimit
+	}
+
+	return n
+}
+
+// Limited is a task tool's list result: at most limit items, and how many
+// there were in all, so a reader can tell a short answer from a cut one.
+func Limited[T any](field string, items []T, limit int) map[string]any {
+	total := len(items)
+	if limit > 0 && total > limit {
+		items = items[:limit]
+	}
+
+	out := wrap(field, items)
+	out["total"] = total
+	out["truncated"] = len(items) < total
+
+	return out
 }
 
 func errMissing(what string) error {

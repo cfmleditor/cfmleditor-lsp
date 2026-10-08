@@ -452,26 +452,36 @@ WHERE kind = 'function' AND reachable = 0 AND file LIKE 'packages/tass/%';
 
 ### MCP server
 
-`cfmleditor-lsp mcp --db <file>` serves that map over the Model Context Protocol on
-stdio, so an assistant can ask about structure instead of grepping for it. It is
-read-only by construction: every tool is a query, and none writes a file or runs a
-command.
+`cfmleditor-lsp mcp` serves a workspace over the Model Context Protocol on stdio,
+so an assistant can ask about the code instead of grepping for it. It writes
+nothing.
+
+Without a map it offers the checks the CLI runs, read from source on disk:
+`find_unresolved_calls` (what `unresolved` reports), `find_references` (`refs`)
+and `explain_call` (`explain`), which traces step by step how a call site's
+receiver was typed and which `componentResolver` fired. Paths are relative to the
+server's working directory, and the `.cfmleditor.json` above the first one decides
+how calls resolve. Lists are capped at 200 by default, with the total alongside.
 
 ```jsonc
 {
   "mcpServers": {
-    "cfmleditor-codemap": {
+    "cfmleditor": {
       "command": "cfmleditor-lsp",
-      "args": ["mcp", "--db", ".cfmleditor/codemap.db"]
+      "args": ["mcp", "--allow-lint"],
+      "cwd": "/path/to/project"
     }
   }
 }
 ```
 
-Tools: `search_symbols`, `get_symbol`, `get_callers`, `get_callees`, `find_path`,
-`list_islands`, `list_orphans`, `get_stats`, and `explain_call` — which re-parses a
-file and traces, step by step, how a call site's receiver was typed and which
-`componentResolver` fired.
+`--allow-lint` adds `lint`, CFLint's findings as JSON. It is off by default because
+it starts a Java process and downloads CFLint on first use; it writes no report.
+
+`--db <file>` loads the code map `graph --db` built, and adds `search_symbols`,
+`get_symbol`, `get_callers`, `get_callees`, `find_path`, `list_islands`,
+`list_orphans` and `get_stats`. `--map-only` offers those alone and never reads
+source.
 
 **Read `get_stats` before trusting an empty caller list.** The resolved/unresolved
 ratio is the map's confidence in itself: a call the resolver could not follow is an
