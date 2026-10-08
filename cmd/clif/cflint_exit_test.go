@@ -15,6 +15,13 @@ import (
 func runClif(t *testing.T, dir string, args ...string) (string, int) {
 	t.Helper()
 
+	return runClifEnv(t, dir, nil, args...)
+}
+
+// runClifEnv is runClif with extra environment variables.
+func runClifEnv(t *testing.T, dir string, env []string, args ...string) (string, int) {
+	t.Helper()
+
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +30,7 @@ func runClif(t *testing.T, dir string, args ...string) (string, int) {
 	cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestEverySubcommandRejectsAnUnknownOption$")
 	cmd.Dir = dir
 
-	cmd.Env = append(os.Environ(), "CLIF_CLI_TEST_ARGS="+strings.Join(args, "\x1f"))
+	cmd.Env = append(append(os.Environ(), env...), "CLIF_CLI_TEST_ARGS="+strings.Join(args, "\x1f"))
 
 	out, err := cmd.CombinedOutput()
 

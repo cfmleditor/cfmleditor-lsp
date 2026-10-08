@@ -231,3 +231,21 @@ func (run *Run) Diagnostics() map[string][]protocol.Diagnostic {
 
 	return out
 }
+
+// KeepLines drops every issue not on one of lines (by cleaned path, then
+// 1-based line), returning how many it dropped.
+func (run *Run) KeepLines(lines map[string]map[int]bool) int {
+	kept := run.Issues[:0]
+
+	for i := range run.Issues {
+		loc := firstLocation(&run.Issues[i].Issue)
+		if lines[filepath.Clean(loc.File)][loc.Line] {
+			kept = append(kept, run.Issues[i])
+		}
+	}
+
+	dropped := len(run.Issues) - len(kept)
+	run.Issues = kept
+
+	return dropped
+}

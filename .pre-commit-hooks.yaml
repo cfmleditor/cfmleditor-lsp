@@ -1,0 +1,11 @@
+# Hooks for pre-commit (https://pre-commit.com) and prek, which read this file
+# when a repository's .pre-commit-config.yaml or prek.toml lists clif. Both
+# stash unstaged changes before running a hook, so the files passed are as
+# staged. clif must be installed and on PATH (language: system).
+- id: clif-cflint
+  name: CFLint (clif)
+  description: Run CFLint over the staged .cfm and .cfc files; every CFLint level fails the commit.
+  entry: clif cflint --strict -q
+  language: system
+  files: \.(cfm|cfc)$
+  require_serial: true

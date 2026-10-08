@@ -88,6 +88,7 @@ Commands:
   unresolved   Scan for unresolved component/method calls
   cflint       Run CFLint over files, a project, or what is staged or changed
   suppressions Count CFLint suppressions by rule, and fail if they rise
+  hook         Install and run a git pre-commit hook that runs CFLint
   refs         Find references to a component or function
   deps         Print component dependency info
   graph        Build a whole-project map of functions and their connections

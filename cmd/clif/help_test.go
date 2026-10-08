@@ -65,6 +65,10 @@ func TestWantsHelp(t *testing.T) {
 // flag for a path.
 func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
 	if args := os.Getenv("CLIF_CLI_TEST_ARGS"); args != "" {
+		// Here the executable is this test binary: a hook that ran it again
+		// would start the test suite over, not clif, and never finish.
+		clifExecutable = func() (string, error) { return "", errors.New("no clif executable under test") }
+
 		os.Args = append([]string{"clif"}, strings.Split(args, "\x1f")...)
 
 		main()
@@ -89,10 +93,11 @@ func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
 			out, err := cmd.CombinedOutput()
 
 			var exit *exec.ExitError
-			// clif cflint and clif suppressions keep 1 for findings (a rise,
-			// for suppressions), so their usage errors exit 2.
+			// clif cflint, suppressions and hook keep 1 for findings (a rise for
+			// suppressions, a missing hook for hook check), so their usage
+			// errors exit 2.
 			want := 1
-			if name == "cflint" || name == "suppressions" {
+			if name == "cflint" || name == "suppressions" || name == "hook" {
 				want = exitCFLintError
 			}
 
