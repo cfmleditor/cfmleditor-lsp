@@ -1,0 +1,86 @@
+name: Install scripts
+
+# Runs scripts/install.sh and scripts/install.ps1 against published releases
+# on each platform, when either changes: a pinned version, the version read
+# from clif.version, a release from before the rename (cfmleditor-lsp
+# archives, installed as clif), and a version that does not exist, which must
+# fail rather than install nothing quietly.
+on:
+  pull_request:
+    paths:
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - ".github/workflows/install-scripts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pinned version
+        run: |
+          set -eu
+          sh scripts/install.sh 0.5.0 "$RUNNER_TEMP/a"
+          "$RUNNER_TEMP/a/clif" version | grep -x 'clif 0.5.0'
+
+      - name: Version from clif.version, from before the rename
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/proj" && cd "$RUNNER_TEMP/proj"
+          echo 0.4.1 > clif.version
+          sh "$GITHUB_WORKSPACE/scripts/install.sh" "" "$RUNNER_TEMP/b"
+          "$RUNNER_TEMP/b/clif" version | grep -x 'cfmleditor-lsp 0.4.1'
+
+      - name: A version that does not exist fails
+        run: |
+          if sh scripts/install.sh 9.9.9 "$RUNNER_TEMP/c"; then
+            echo "::error::installing 9.9.9 succeeded"
+            exit 1
+          fi
+          test ! -e "$RUNNER_TEMP/c/clif"
+
+  windows:
+    name: install.ps1 (${{ matrix.shell }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # PowerShell 7, and the Windows PowerShell 5.1 every Windows ships.
+        shell: [pwsh, powershell]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pinned version
+        run: |
+          .\scripts\install.ps1 -Version 0.5.0 -Dir "$env:RUNNER_TEMP\a"
+          $v = & "$env:RUNNER_TEMP\a\clif.exe" version
+          if ($v -ne 'clif 0.5.0') { throw "got '$v'" }
+
+      - name: Version from clif.version, from before the rename
+        run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\proj" -Force | Out-Null
+          Set-Location "$env:RUNNER_TEMP\proj"
+          Set-Content clif.version '0.4.1'
+          & "$env:GITHUB_WORKSPACE\scripts\install.ps1" -Dir "$env:RUNNER_TEMP\b"
+          $v = & "$env:RUNNER_TEMP\b\clif.exe" version
+          if ($v -ne 'cfmleditor-lsp 0.4.1') { throw "got '$v'" }
+
+      - name: A version that does not exist fails
+        run: |
+          $failed = $false
+          try { .\scripts\install.ps1 -Version 9.9.9 -Dir "$env:RUNNER_TEMP\c" } catch { $failed = $true }
+          if (-not $failed) { throw 'installing 9.9.9 succeeded' }
+          if (Test-Path "$env:RUNNER_TEMP\c\clif.exe") { throw 'something was installed' }
