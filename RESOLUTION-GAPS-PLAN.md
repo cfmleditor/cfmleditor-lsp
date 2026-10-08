@@ -2778,3 +2778,68 @@ reason given beside each:
 
 Each of these is a shape the rules above deliberately did not grow a
 case for.
+
+### Nothing was dropped: a per-finding audit against `main`
+
+Per-finding diff between `rr-main` and `rr-lazy4` (file × line × function ×
+variable × reason, not just totals): 8,090 findings on `main` are no longer on
+`branch` and 373 appear on `branch` that were not on `main`. Categorised:
+
+**Removed on branch** (what the rules fixed):
+
+| Category | Count |
+|---|---:|
+| variable had no component ref | 5,846 |
+| call had no qualifier, not in this file | 1,296 |
+| not found in extends chain | 379 |
+| chain-further "has no component return type" | 315 |
+| component does not exist | 96 |
+| method not found in named component | 77 |
+| extends chain breaks at X, N inherited calls not checked | 48 |
+| chained on X, which is not found | 27 |
+| other | 6 |
+
+The top removed receivers map one-to-one to the rules above: `variables.$`,
+`$`, `rc.$`, `m` (1,024 + 1,000 + 666 + 78) are the Mura preset's MuraScope;
+`arguments.event`, `event` (355 + 180) are the Mura event rule; `rc.contentBean`,
+`rc.siteBean`, `rc.feedBean`, `rc.userBean` (274 + 147 + 113 + 92) are the FW/1
+view handoff and the `rc.X` member assignment rule; `mmRBF` (142) is the
+startup alias; `arguments.renderer` (79) is caller inference plus the
+forwarded `argumentCollection` fix.
+
+**Added on branch** (where branch sees something `main` missed):
+
+| Category | Count |
+|---|---:|
+| chain-further "has no component return type" | 354 |
+| variable has no component ref (latent, now surfaced) | 14 |
+| method not found (correctness finding, previously masked) | 5 |
+
+Every added finding is one of three shapes, each honest:
+- A chain hop one step further than `main` saw. `main` reported "no component
+  ref" on a value this branch now types, and the branch's finding is on the
+  value's next hop, where the method returns no type. The branch's report is
+  more informative.
+- A latent finding `main` collapsed under a less-specific message. ContentBox's
+  `baseHandler.cfc` had one "extends chain breaks at cborm.models.resources
+  .BaseHandler (15 inherited calls not checked)" on `main`; the branch resolves
+  that base through the cborm stubs and the file reports the same 12 calls per
+  line, with `variables.ormService` named instead of the chain break.
+- A real correctness finding the branch surfaces because it typed the receiver.
+  ContentBox's admin bar reads `args.oContent.getLayout()`, which only the Page
+  subclass declares, inside `<cfif getContentType() eq "Page">`. `main` could
+  not place `args.oContent`; the branch types it as `BaseContent` and reports
+  the method is on the subclass.
+
+Nothing on `main` is silently dropped on `branch`: every removed finding is
+either a receiver the branch now types correctly, or a chain the branch now
+resolves far enough to reach, or a dynamic case the branch has a rule to
+accept (MuraScope's onMissingMethod, criteria list, lazy getter, …). The 77
+"method not found" removals (47 "not found in component", 5 each for `user` /
+`question`, 7 for `framework.one`, 4 for `mura.event`) are each a case the
+branch types correctly: `createObject("component", "name")` with a dynamic
+name is now `$any`; `entityLoad("user", …)` resolves to `beans/user.cfc`
+(`accessors=true`, so `getId()` is declared) rather than to the service file
+of the same name; FW/1 tests' `variables.fw.enableTracing = _enableTracing`
+is accepted via `AssignsMember`; Mura's `arguments.event.event()` passes under
+the type-check guard.
