@@ -52,7 +52,7 @@ component {
 	 *
 	 * @return coldbox.system.web.context.RequestContext
 	 */
-	function getRequestContext() {}
+	coldbox.system.web.context.RequestContext function getRequestContext() {}
 	/**
 	 * Get the RC or PRC collection reference
 	 *
@@ -804,7 +804,7 @@ component {
 	 * @menu.doc_generic contentbox.models.menu.Menu
 	 * @slugCache        The cache of menu slugs already used in this request
 	 */
-	public string function buildProviderMenu( required any menu, required array slugCache ) {}
+	public string function buildProviderMenu( required contentbox.models.menu.Menu menu, required array slugCache ) {}
 	/**
 	 * Render out a quick menu for root level pages
 	 *

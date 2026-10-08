@@ -110,7 +110,70 @@ func (r *Resolver) wheelsFactoryReturn(def *parser.FunctionDef, expression, base
 		return r.wheelsFactoryReturn(factory, "$createObjectFromRoot("+wheelsNamedArgs(merged)+")", baseDir)
 	}
 
+	// A spec's own wrapper hands the factory the struct it is given:
+	// `return g.$createObjectFromRoot( argumentCollection = arguments.config )`,
+	// called as `$pluginObj( config )` with config a literal struct the
+	// caller inlines (inlineStructArgs).
+	if param := wheelsArgCollectionParam(source.body); param != "" && len(def.Arguments) > 0 && strings.EqualFold(param, def.Arguments[0].Name) && len(args) == 1 {
+		factory := r.wheelsPlanFunc(global, "$createObjectFromRoot")
+		if factory == nil {
+			return ""
+		}
+
+		pairs := structLiteralPairs(args[0])
+		if pairs == "" {
+			return ""
+		}
+
+		return r.wheelsFactoryReturn(factory, "$createObjectFromRoot("+pairs+")", baseDir)
+	}
+
 	return ""
+}
+
+// wheelsArgCollectionParam is p when body (wheelsTokens form) is exactly
+// `return x.$createObjectFromRoot( argumentCollection = arguments.p )`.
+func wheelsArgCollectionParam(body string) string {
+	toks := strings.Split(strings.TrimSuffix(strings.TrimSuffix(body, "\t"), "\t;"), "\t")
+	want := []string{"return", "", ".", "$createobjectfromroot", "(", "argumentcollection", "=", "arguments", ".", "", ")"}
+
+	if len(toks) != len(want) {
+		return ""
+	}
+
+	for i, w := range want {
+		if w != "" && toks[i] != w {
+			return ""
+		}
+	}
+
+	return toks[9]
+}
+
+// structLiteralPairs is a literal struct's string-valued fields as named
+// arguments (`a="x",b="y"`), or "" when tokens are not one.
+func structLiteralPairs(tokens []parser.Token) string {
+	if len(tokens) < 2 || tokens[0].Kind != parser.TokLBrace || tokens[len(tokens)-1].Kind != parser.TokRBrace {
+		return ""
+	}
+
+	inner := tokens[1 : len(tokens)-1]
+	parts := []string{}
+
+	for i := 0; i < len(inner); i += 4 {
+		if i+2 >= len(inner) || inner[i].Kind != parser.TokIdent ||
+			inner[i+1].Kind != parser.TokEquals && inner[i+1].Kind != parser.TokColon || inner[i+2].Kind != parser.TokString {
+			return ""
+		}
+
+		if i+3 < len(inner) && inner[i+3].Kind != parser.TokComma {
+			return ""
+		}
+
+		parts = append(parts, inner[i].Value+"="+inner[i+2].Value)
+	}
+
+	return strings.Join(parts, ",")
 }
 
 func (r *Resolver) wheelsConstructedFactory(args [][]parser.Token, baseDir string) string {

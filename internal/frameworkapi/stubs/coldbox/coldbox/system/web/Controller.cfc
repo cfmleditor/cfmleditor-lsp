@@ -98,7 +98,7 @@ component {
 	 *
 	 * @return coldbox.system.core.conversion.DataMarhsaller
 	 */
-	function getDataMarshaller() {}
+	coldbox.system.core.conversion.DataMarshaller function getDataMarshaller() {}
 	/**
 	 * Get a Cache provider from CacheBox
 	 *

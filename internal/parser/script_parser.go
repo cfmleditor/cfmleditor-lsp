@@ -82,6 +82,7 @@ type pendingCall struct {
 	memberSet  bool   // not a call: `varName.funcName = …`; see checkMemberSet
 	baseLocal  bool   // baseVar is the function's own, an argument or a local; see baseVarComponent
 	rebinds    bool   // the call is made on varName itself; see ComponentRef.Rebinds
+	baseGuess  bool   // typed as baseVar itself, the method unlooked-up; see ComponentRef.BaseGuess
 	block      uint32 // the block the assignment was made in; see flowBlocks
 	baseScope  RefScope
 
@@ -1170,6 +1171,8 @@ func (p *scriptParser) parse() {
 				p.parseFunction(tok, "", tok.Value)
 			case peek.Kind == TokDot:
 				// Walk the dot chain — could be dotted return type or bare call
+				named := !isKeyword(tok.Value) || operatorWordIsName(tok, peek)
+
 				var retVal chainBuilder
 				retVal.reset(tok.Value)
 
@@ -1197,7 +1200,7 @@ func (p *scriptParser) parse() {
 				if next.Kind == TokIdent && identEq(next.Value, "function") {
 					p.sc.NextSkipComments()
 					p.parseFunction(tok, "", retVal.String())
-				} else if next.Kind == TokLParen && !isKeyword(tok.Value) {
+				} else if next.Kind == TokLParen && named {
 					_ = prevIdent
 
 					varName := ""
@@ -1356,8 +1359,16 @@ func (p *scriptParser) parseComponentAttrs() {
 
 		switch {
 		case strings.EqualFold(tok.Value, "extends"):
-			if val, ok := p.attrValue(); ok && val.Kind == TokString {
-				p.extends = unquote(val.Value)
+			if val, ok := p.attrValue(); ok {
+				switch val.Kind {
+				case TokString:
+					p.extends = unquote(val.Value)
+				case TokIdent:
+					// CFML lets an attribute value go unquoted:
+					// `component extends=testbox.system.BaseSpec {`.
+					p.extends = dottedRest(p.sc, val.Value)
+				default:
+				}
 			}
 		case strings.EqualFold(tok.Value, "accessors"):
 			if val, ok := p.attrValue(); ok {
@@ -1370,6 +1381,27 @@ func (p *scriptParser) parseComponentAttrs() {
 			}
 		}
 	}
+}
+
+// dottedRest is first followed by every `.name` the scanner holds next: an
+// unquoted dotted attribute value.
+func dottedRest(sc *Scanner, first string) string {
+	var b chainBuilder
+	b.reset(first)
+
+	for sc.PeekSkipComments().Kind == TokDot {
+		sc.NextSkipComments()
+
+		next := sc.NextSkipComments()
+		if next.Kind != TokIdent {
+			break
+		}
+
+		b.writeDot()
+		b.writeString(next.Value)
+	}
+
+	return b.String()
 }
 
 // attrValue reads `= value` after an attribute name, returning the value
@@ -2734,11 +2766,57 @@ func (p *scriptParser) readNewComponent() string {
 	// name: its type is the body that follows. It was read as a path, a
 	// component literally called "component", which then failed every
 	// method check against it.
-	if identEq(tok.Value, "component") && p.sc.PeekSkipComments().Kind == TokLBrace {
-		return "$any"
+	//
+	// It may carry attributes before the body (`new component accessors=true
+	// { … }`, `javaSettings='…'`), which are consumed here: left to the
+	// statement scan, `accessors=true` declared a variable called accessors.
+	// A path would continue with a dot or a parenthesis, never a name.
+	if identEq(tok.Value, "component") {
+		switch p.sc.PeekSkipComments().Kind {
+		case TokLBrace:
+			return "$any"
+		case TokIdent:
+			if p.skipInlineComponentAttrs() {
+				return "$any"
+			}
+		default:
+		}
 	}
 
 	return p.applyImport(p.readDottedPath(tok))
+}
+
+// skipInlineComponentAttrs consumes the attributes between `new component`
+// and its body, `name` or `name=value` pairs, and reports whether the body's
+// `{` follows them. The scanner is restored when it does not.
+func (p *scriptParser) skipInlineComponentAttrs() bool {
+	saved := p.sc.Save()
+
+	for p.sc.PeekSkipComments().Kind == TokIdent {
+		p.sc.NextSkipComments()
+
+		if p.sc.PeekSkipComments().Kind != TokEquals {
+			continue
+		}
+
+		p.sc.NextSkipComments()
+
+		switch p.sc.NextSkipComments().Kind {
+		case TokString, TokIdent, TokNumber:
+		default:
+			p.sc.Restore(saved)
+
+			return false
+		}
+	}
+
+	if p.sc.PeekSkipComments().Kind == TokLBrace {
+		return true
+	}
+
+	p.sc.Restore(saved)
+
+	return false
 }
 
 // parseImport records `import models.User;`, so a later `new User()` resolves
@@ -2906,7 +2984,32 @@ func (p *scriptParser) readEntityNewComponent() string {
 		return ""
 	}
 
-	return unquote(arg.Value)
+	return p.entityArg(arg)
+}
+
+// entityArg is the entity the string arg names, or $any when the name is
+// computed: entityNew( "Comp" & nbr ) is no entity called Comp.
+func (p *scriptParser) entityArg(arg Token) string {
+	if next := p.sc.PeekSkipComments().Kind; next != TokRParen && next != TokComma {
+		return "$any"
+	}
+
+	return entityRef(unquote(arg.Value))
+}
+
+// EntityPrefix marks a component named as an ORM entity, by entityNew() or
+// entityLoad(): the name is an entityname, which the resolver looks up as
+// one before reading it as a path. Read as a path, entityNew( "question" ) in
+// FW/1's services/question.cfc named that service, beside it.
+const EntityPrefix = "entity:"
+
+// entityRef is name marked as an entity name, or "" for none.
+func entityRef(name string) string {
+	if name == "" || name == "$any" {
+		return name
+	}
+
+	return EntityPrefix + name
 }
 
 // parseBodyVarDecl handles: var name = expr inside a function body.
@@ -3301,7 +3404,7 @@ func (p *scriptParser) scanClosureBody(line int, params []string) int {
 }
 
 func (p *scriptParser) checkAssignRef(tok Token) {
-	if isKeyword(tok.Value) {
+	if isKeyword(tok.Value) && !operatorWordIsName(tok, p.sc.PeekSkipComments()) {
 		return
 	}
 
@@ -3563,8 +3666,14 @@ func (p *scriptParser) scopedChainCall(scopeTok, nameTok Token) {
 		break
 	}
 
-	if p.sc.PeekSkipComments().Kind == TokLParen {
+	switch p.sc.PeekSkipComments().Kind {
+	case TokLParen:
 		p.recordChainFromScope(fullChain.String(), scopeTok.Line)
+	case TokEquals:
+		if chain := strings.Split(fullChain.String(), "."); len(chain) > 2 {
+			p.checkMemberSet(chain, scopeTok.Line)
+		}
+	default:
 	}
 }
 
@@ -3888,7 +3997,7 @@ func (p *scriptParser) parseEntityNewRef(varName string, line int) {
 		return
 	}
 
-	comp := unquote(arg.Value)
+	comp := p.entityArg(arg)
 	if comp != "" {
 		p.addRef(&ComponentRef{
 			Variable: varName, Component: comp,
@@ -4641,7 +4750,7 @@ func (p *scriptParser) scanNestedCall(tok Token) {
 	// Any other keyword is handled by what follows it rather than by being
 	// read as a receiver — bar a scope, which is one: `f( local.g() )` left
 	// `.g()` to the next loop, which recorded a bare call to g.
-	if _, _, scope := scopeReceiver(tok.Value); !scope && isKeyword(tok.Value) {
+	if _, _, scope := scopeReceiver(tok.Value); !scope && isKeyword(tok.Value) && !operatorWordIsName(tok, p.sc.PeekSkipComments()) {
 		return
 	}
 
@@ -5117,6 +5226,36 @@ func (p *scriptParser) parseStandaloneNew(newTok Token) {
 	}
 
 	p.scanChainedCalls(component, newTok.Line)
+}
+
+// operatorWordIsName reports whether tok, a word operator, is a variable's
+// name: CFML lets `mod` and the comparison words name a variable, and
+// cfwheels' specs hold their module in one, `mod.generate( … )`. Read as the
+// operator, the receiver was dropped and the call recorded as a bare one. A
+// dot after the word is what decides it: an operand never starts with one
+// but a number, `x mod .5`, and a chain needs a name after the dot.
+func operatorWordIsName(tok, next Token) bool {
+	if next.Kind != TokDot {
+		return false
+	}
+
+	var buf foldScratch
+	switch string(buf.lowerFold(tok.Value)) {
+	case "and", "or", "not", "eq", "neq", "lt", "gt", "lte", "gte", "mod":
+		return true
+	}
+
+	return false
+}
+
+// operatorWordIsNameStr is operatorWordIsName for text: s begins with the
+// word name, and a dot follows it directly.
+func operatorWordIsNameStr(s, name string) bool {
+	if len(s) <= len(name) || s[len(name)] != '.' {
+		return false
+	}
+
+	return operatorWordIsName(Token{Kind: TokIdent, Value: name}, Token{Kind: TokDot})
 }
 
 func isKeyword(s string) bool {

@@ -520,8 +520,10 @@ func TestParseComponentRefs_CreateObject(t *testing.T) {
 }
 
 func TestParseComponentRefs_EntityNew(t *testing.T) {
+	// An entity name is marked as one (EntityPrefix), so the resolver looks
+	// it up as an entity before reading it as a path.
 	refs := ParseComponentRefs(testURI, `component { user = entityNew("User") }`)
-	assertFirstRef(t, refs, "user", "User")
+	assertFirstRef(t, refs, "user", EntityPrefix+"User")
 }
 
 func TestParseComponentRefs_CfObject(t *testing.T) {
@@ -976,8 +978,8 @@ func TestFunctionDef_ReturnType(t *testing.T) {
 		t.Errorf("expected ReturnComponent 'services.UserService', got %q", pr.Funcs[1].ReturnComponent)
 	}
 
-	if pr.Funcs[2].ReturnComponent != "Order" {
-		t.Errorf("expected ReturnComponent 'Order', got %q", pr.Funcs[2].ReturnComponent)
+	if pr.Funcs[2].ReturnComponent != EntityPrefix+"Order" {
+		t.Errorf("expected ReturnComponent 'entity:Order', got %q", pr.Funcs[2].ReturnComponent)
 	}
 
 	if pr.Funcs[3].ReturnType != "string" {
@@ -2217,7 +2219,7 @@ func TestScriptParser_AllRefTypes(t *testing.T) {
 	pr := Parse(testURI, content)
 
 	// Global refs: a, b, c, d, i (variables. inside func with forceGlobal)
-	globals := map[string]string{"a": "models.A", "b": "models.B", "c": "EntityC", "d": "EntityD", "i": "models.I"}
+	globals := map[string]string{"a": "models.A", "b": "models.B", "c": EntityPrefix + "EntityC", "d": EntityPrefix + "EntityD", "i": "models.I"}
 	for _, ref := range pr.ComponentRefs {
 		if expected, ok := globals[ref.Variable]; ok {
 			if ref.Component != expected {
@@ -2235,7 +2237,7 @@ func TestScriptParser_AllRefTypes(t *testing.T) {
 	// Function refs: e, f, g, h
 	scope := pr.Scopes[0]
 	funcRefs := pr.FuncComponentRefs(scope.Start, scope.End)
-	locals := map[string]string{"e": "models.E", "f": "models.F", "g": "EntityG", "h": "models.H"}
+	locals := map[string]string{"e": "models.E", "f": "models.F", "g": EntityPrefix + "EntityG", "h": "models.H"}
 
 	for _, ref := range funcRefs {
 		if expected, ok := locals[ref.Variable]; ok {
@@ -3259,7 +3261,16 @@ func TestThisAndVariablesAreSeparateStores(t *testing.T) {
 		return d;
 	}
 }`
-	pr := ParseWithOptions(testURI, content, &ParseOptions{})
+	// Scopes.getFromScope is declared to return a Scopes, so what each
+	// function returns says which store its receiver was read from.
+	lookup := func(comp, fn string) string {
+		if comp == "Scopes" && fn == "getFromScope" {
+			return comp
+		}
+
+		return ""
+	}
+	pr := ParseWithOptions(testURI, content, &ParseOptions{FuncLookup: lookup})
 
 	for name, want := range map[string]string{
 		"viaVariables": "",
@@ -4499,5 +4510,31 @@ func TestTagFunctionScopeEndsAtItsCloseTag(t *testing.T) {
 
 	if !found {
 		t.Error("svc.afterFunction() was not recorded")
+	}
+}
+
+func TestAComputedEntityNameIsDynamic(t *testing.T) {
+	// Lucee's LDEV0405 builds its entity names: entityNew( "Comp" & nbr ) is
+	// Comp1 to Comp4, and no entity called Comp.
+	cases := map[string]string{
+		`component { function f(nbr) { var e = entityNew("Comp" & nbr); } }`: "$any",
+		`component { e = entityNew("Comp" & nbr) }`:                          "$any",
+		`<cfset e = entityNew("Comp" & nbr)>`:                                "$any",
+		`component { function f() { var e = entityNew( "Comp" ); } }`:        EntityPrefix + "Comp",
+		`<cfset e = entityNew("Comp", {a = 1})>`:                             EntityPrefix + "Comp",
+	}
+
+	for src, want := range cases {
+		pr := Parse(testURI, src)
+		refs := append([]ComponentRef{}, pr.ComponentRefs...)
+
+		for _, s := range pr.Scopes {
+			fr, _ := pr.FuncRefs(s.Start, s.End)
+			refs = append(refs, fr...)
+		}
+
+		if len(refs) != 1 || refs[0].Variable != "e" || refs[0].Component != want {
+			t.Errorf("%s: refs %+v, want e = %s", src, refs, want)
+		}
 	}
 }

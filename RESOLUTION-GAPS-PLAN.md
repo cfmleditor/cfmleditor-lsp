@@ -1800,3 +1800,1046 @@ additions are those summaries (2) and 21 `contentUtility` `arguments.contentBean
 rule had typed while dismissing the `getBean( "contentUtility" )` caller above, which passes an
 untyped `variables.item`. Cost, alternating binaries: Masa 14.4s -> 15.1s, from the calls on
 arguments that are now typed and checked.
+
+### Wheels mixins call what their Controller holds (cfwheels 3,856 -> 3,224)
+
+The largest group left in cfwheels was "no qualifier, not in file" — 910 with presets, 821 of
+them in `vendor/wheels`, and 632 of those in `wheels/view/*.cfc` and `wheels/controller/*.cfc`:
+`$get` 130, `$args` 83, `model` 52, `$element`, `$tag`, … Those components are never
+instantiated. `Controller.init` runs `$integrateComponents( "wheels.controller" )` and
+`( "wheels.view" )`, which copies their public methods into every controller, so a bare call in
+one runs on the controller. The rule already resolved such methods *from* a controller
+(`wheelsControllerFunc`); this is the reverse direction.
+
+`wheelsMixinHostFunc` answers a bare call in a file with no extends whose directory is
+`controller` or `view`, when that file is the component `wheels.<package>.<name>` names, the
+`Controller.cfc` beside the package is `wheels.Controller`, and it integrates both packages as
+pinned (`wheelsControllerIntegrates`, split out of `wheelsControllerFunc` with
+`wheelsControllerExtendsGlobal`). The name is then looked up on the Controller and its chain
+(`lookupFunc`, so Global's includes count), then among the other packages' public methods. It
+runs after cfinclude in `resolveBareCall` and in `bareFunc`, so a chain headed by such a call
+continues. A private method of another package is still not found, since it is never copied.
+`TestAWheelsMixinsBareCallsAreTheControllers`, with a Controller that does not integrate
+`wheels.view` as the negative case; both the rule and the integration check fail it when removed.
+
+Measured per entry against `b98fb2d` (v0.4.1): cfwheels with presets 3,856 -> 3,224 and without
+11,259 -> 10,627, 637 removed and 5 added in each; every other mode 0 / 0. The five additions are
+`$engineAdapter().isBoxLang()` and two siblings, previously "chained on '$engineAdapter', which
+is not found": the head is now found in `global/request.cfm`, which declares `any`, so the chain
+stops at the true break. No bare call in the two package directories is left unresolved; the 56
+findings remaining there are untyped variables.
+
+### An operator word can name a receiver (cfwheels 3,224 -> 2,971)
+
+Most of the 427 cfwheels "not found in extends chain" findings were in `cli/lucli/tests/specs`,
+which hold their module as `variables.mod = new cli.lucli.Module( … )` and call
+`mod.generate( … )`. `mod` is CFML's modulus operator, so `isKeyword` turned the parser away from
+it and the call was recorded as a bare `generate()`, looked up on the spec's own BaseSpec chain.
+`operatorWordIsName` reads a word operator (`mod`, `and`, `eq`, … ) followed by a dot as a name
+— no operand starts with a dot except a number, and a chain needs a name after it — in the
+statement dispatch (`checkAssignRef`), the argument scan (`scanNestedCall`), the component-level
+loop and the tag parser's `<cfset>` string path. The last mattered only for two calls on one
+line: `<cfset x = mod.g(1)><cfset mod.g(p)>` lost the second to the sub-parse's per-line tally.
+`TestAnOperatorWordCanNameAReceiver`; removing any of the four guards fails it.
+
+Measured per entry: cfwheels with and without presets, 253 removed and 0 added each; every other
+mode 0 / 0. `make gapcheck` unchanged.
+
+### A page included by a computed name (Lucee 1,975 -> 1,507)
+
+Lucee's admin `web.cfm` includes `web_functions.cfm` and then `#current.action#.cfm`, where the
+action comes from the URL with any `/` refused, so every page beside it runs inside it and calls
+its helpers bare: `toArrayFromForm` 158, `printError` 55, `renderCodingTip` 54, … The include
+scan dropped any path holding `#`. `computedNameGlob` reads one whose file name is a single
+`#...#` span with a literal `.cfm` extension, under a relative literal directory, as that
+directory's `*.cfm` — the glob a directory listing already gives. A name with a literal part,
+two spans, a computed or mapped directory, or `.cfml` is still not read. The scanners take it
+through `includePathAt`, and the reference expressions in `include_scan_test.go` carry the same
+alternative, with a sample per refused shape.
+
+A page then sees what every page beside it declares, which is the include scope's rule for
+siblings. That is right for `ext.applications.detail.cfm`, which `ext.applications.cfm`
+includes beside `ext.functions.cfm`, and wrong once: `messaging.cfm`'s `toFile()` is declared
+only in `services.schedule.edit.cfm`. The 8 cfwheels removals are `public/views` dispatchers
+(`../docs/#type#.cfm`, `../tests/#format#.cfm`, `layouts/#docFormat#.cfm`).
+`TestAPageADispatcherIncludesByNameSeesTheDispatchersHelpers`.
+
+A scope of a hundred templates made `findThroughIncludes` ten times dearer, since each template
+went through the whole component lookup; `scopeFunc` reads a template's own functions only,
+which is all a template contributes (its includes are in the scope already), and the scan time
+is unchanged. Measured per entry: Lucee 468 removed, cfwheels 8 removed in each mode, 0 added
+anywhere.
+
+### A LuCLI module's own name, and a mapping built by a regex replace (cfwheels 2,963 -> 2,870, coldbox-platform 1,345 -> 1,327)
+
+Two "component does not exist" groups were paths a project spells for itself:
+
+- **cfwheels' CLI** (`cli/lucli`) writes `new modules.wheels.services.deploy.config.ConfigLoader()`:
+  LuCLI installs a module at `modules/<name>`, and the module's `module.json` names it `wheels`.
+  `lucliModuleRoot` answers `modules.<name>.rest` from the nearest directory above the caller
+  whose `module.json` gives that name and a `main` component, after every mapping and the
+  `box.json` slug, as `slugRoot` does for CommandBox. `TestALuCLIModuleNamesItselfUnderModules`.
+- **coldbox-platform's tests** map the harness from the repository root, which their
+  `Application.cfc` finds as `REReplaceNoCase( this.mappings[ "/tests" ], "tests(\\|/)", "" )`.
+  `replacedMappingPath` evaluates `reReplace`/`reReplaceNoCase` of a path by a literal pattern Go
+  compiles, with a literal replacement holding no backreference and an optional literal scope;
+  anything else is declined, as every other term is. Thirteen corpus `Application.cfc` files
+  build a mapping this way. `TestAMappingBuiltByARegexReplaceIsEvaluated`.
+
+Measured per entry: cfwheels 93 removed in each mode, coldbox-platform 18 in each, 0 added
+anywhere. Every method called on the now-resolving components exists.
+
+### Wheels mapper mixins call what their Mapper holds (cfwheels 2,870 -> 2,815)
+
+The controller rule above, for `wheels/mapper/*.cfc`: `Mapper.init` copies Global's public
+methods and then the mapper package's into itself, so a bare call in a mapper component is the
+Mapper's. `wheelsMapperMixinFunc` requires the file to be `wheels.mapper.<name>`, the Mapper
+beside it to be `wheels.Mapper`, and that Mapper to run the pinned loader (`wheelsMapperSetup`,
+split out of `wheelsMapperFunc`), then looks the name up exactly as a call on a Mapper does.
+`TestAWheelsMapperMixinsBareCallsAreTheMappers`, with a Mapper whose init returns before
+loading as the negative case.
+
+Measured per entry: cfwheels 57 removed and 2 added in each mode, every other mode 0 / 0. The
+additions are `$engineAdapter().globRegex()` and a sibling, whose head is now found and declares
+`any`, as in the controller case.
+
+### Templates Wheels includes through Global's wrappers; `$`-named callers (cfwheels 2,815 -> 2,718)
+
+- `public/Application.cfc` runs `application.wo.$includeAndOutput( template =
+  "/wheels/events/onrequestend/debug.cfm" )`, and the template calls Global's methods bare
+  (`$get`, `urlFor`, `capitalize`). `wheelsWrappedTemplateFunc` finds every call to `$include`,
+  `$includeAndOutput` or `$includeAndReturnOutput` naming the template by a literal
+  mapping-absolute path, takes the component it runs in (Global for `application.wo`, the
+  calling component for a bare call), checks the wrapper and the two methods it calls against
+  Global's pinned bodies, and looks the name up there; every such include must agree. Batch
+  only, through the caller index. `TestATemplateAWheelsWrapperIncludesIsItsIncluders`.
+- The caller index read `$build(` as a call to `build`, so no `$`-named function's argument was
+  ever typed from its callers; `callerWord` now takes `$`. `TestADollarNamedFunctionsCallersAreFound`.
+
+Measured per entry on cfwheels with presets: 97 removed, 0 added (55 through the wrappers, 42
+`$`-named functions' arguments).
+
+### A caller whose receiver cannot be the component (Masa 9,586 -> 9,219)
+
+Caller inference gives up on an argument when any call of the function's name cannot be placed,
+and Mura's DAOs name their writers `update` and `create`: `settingsDAO.update( bean )` shared its
+name with `cryptUtility`'s `md.update()` on a `java.security.MessageDigest` and with
+`pluginManager`'s `pluginCFC.update()` on `createObject("component",
+"plugins.#dir#.plugin.plugin")`. Neither receiver types, so no DAO's `arguments.bean` ever did.
+`cannotHold` places such a call as "not this function" when the receiver's assignment reaching
+the call makes a Java object (`createObject("java", …)`, `new java:`), or a component whose
+computed path ends in a literal file name other than the declaring file's — unless a workspace
+file of that name extends the declaring component. `TestACallOnWhatCannotBeTheComponentIsNotACaller`,
+which fails without each of the three.
+
+Measured per entry: Masa configured 367 removed, 0 added (`arguments.bean` 133, `userBean` 75,
+`feedBean` 72, `categoryBean` 35, …); every other mode unchanged.
+
+### `this` as an argument, and a receiver's guessed type is not a return type (Masa 9,219 -> 9,201)
+
+- An argument passed as `this` from a component is that component or one extending it
+  (`withSubclasses`): Mura's contentRenderer hands itself to contentRendererUtility, and a
+  theme's renderer extends it. `TestAnArgumentPassedAsThisIsTheCallersComponent`.
+- The index parses without looking methods up, and there `x = base.m()` gives x base's own
+  type, the fluent guess `baseVarComponent` makes. Two readers took that guess as a statement:
+  return inference (`settleReturnVars`), and the resolver's body evaluation reading a
+  component variable from the index (`producerEvaluation.read`). So contentRenderer's
+  `getMuraScope()`, returning `variables.$ = variables.event.getValue("muraScope")`, returned
+  the event, and every call chained on it was "not found in event". The ref now carries
+  `ComponentRef.BaseGuess`, and both readers decline it; the resolver then evaluates the body
+  with lookups. `TestAReceiversGuessedTypeIsNotAReturnType` fails without either guard.
+  `TestThisAndVariablesAreSeparateStores` asserted the guess as a return type; it now states
+  `getFromScope`'s return through a lookup and checks the same two stores.
+
+Measured per entry: Masa configured 21 removed, 3 added; automatic 21 removed, 4 added;
+coldbox-platform 2 removed; TestBox 4 removed. The additions are honest: `getMuraScope` now has
+no return type ("has no component return type" instead of "not found in event"), and
+`arguments.content` typed as contentBean exposes `getDisplayInterval()` with none.
+
+### A Mura preset, and a lazy request field's only writer (Masa 9,201 -> 6,072; automatic 11,452 -> 8,436)
+
+- **`frameworks: ["mura"]`** types the Mura scope, which Mura's documentation spells `$`, `m`
+  and `mura` and which an admin view reads as `rc.$`: those names in any scope,
+  `getMuraScope()` and an event's `getValue( "muraScope" )` are `mura.MuraScope`. Every resolver
+  is `dynamicIfMissing`, as presets are, and the stubs (`MuraScope`, `MasaScope`, `cfobject`,
+  `event`, `sessionUserFacade`) are generated from MasaCMS at the commit the corpus pins. The
+  scope's `OnMissingMethod` forwards to the content renderer, so calls it does not declare are
+  accepted as the runtime answers them. The source never states what `$` holds in a view — the
+  admin framework copies `rc.$` into a local before a computed include, and `rc.$` is
+  `request.event.getValue('MuraScope')` — which is what makes it a preset and not a rule.
+  `scripts/corpus/masacms.json` now enables it, so both Masa baselines move with this commit.
+  `TestEveryPresetResolverMatchesItsOwnNames` has its cases.
+- **A lazily created request field** is what its only writer stores: `getCurrentUser()` creates
+  `request.currentUser` when absent and returns it, and no other file writes the key, so it
+  returns `sessionUserFacade` — which types `$.currentUser()` and the rest of the chains the
+  preset exposed. `sharedFieldContract` reads it for `request.` as for `variables.`, in a batch
+  scan only (`onlyFileWritesRequest` checks every file for an assignment, a bracketed write,
+  `structInsert` or `cfparam`), and the file's own writes counted in its text must equal the
+  ones the plan read, since a statement the planner cannot read may hold one.
+  `TestALazyRequestFieldIsWhatItsOnlyWriterStores`.
+
+Measured per entry against the previous commit: Masa configured 3,326 removed and 197 added,
+automatic 3,474 removed and 458 added; every other mode unchanged. The additions are calls
+chained on the scope's dual-mode accessors (`$.event()`, `$.content()`, `$.getFeed()`), now
+reported as "has no component return type" where the receiver was untyped before.
+
+### An FW/1 view's rc, and a partial reads its view's members (Masa 6,072 -> 5,401)
+
+- **`rc.X` in an FW/1 view** is what the controller action rendering it leaves there
+  (`fw1ViewRc`): `views/<section>/<item>.cfm` runs after `controllers/<section>.cfc`'s
+  `<item>( rc )`, which runs after `before( rc )`, and an action calling
+  `setView( "section.item" )` renders it too. The item action's assignment at its end, else
+  `before()`'s, typed with the controller's own rules; every action must agree, and a view no
+  action renders gives nothing. Applied only where a preset gives views a base (the fw1
+  preset), so the convention is not guessed elsewhere. Mura's admin views read
+  `rc.contentBean`, `rc.siteBean`, `rc.feedBean` and the rest this way.
+- **A partial reads its includer's members** (`includerHeld`): `rc.contentBean` in
+  `views/carch/form/*.cfm` is what the view including it holds. `includerHeld` took plain names
+  only, and refused `rc` and `prc` with the rest of `isScopeWord`'s list; it now takes one member
+  of a variable that is not a CFML scope (`isCFMLScope`), and the member branch of
+  `receiverComponentD` asks it, and the FW/1 rule, last.
+  `TestAnFW1ViewsRcIsWhatItsControllerAssigns`, failing without each of the five pieces.
+
+Measured per entry: Masa configured and automatic 673 removed and 2 added each; every other mode
+unchanged. The additions are calls chained on `contentBean` methods that declare no type.
+
+### Wheels view helpers (cfwheels 2,718 -> 2,600)
+
+Worked back from the method definitions: 116 cfwheels findings were bare calls in views to
+functions declared in `app/views/helpers.cfm`. `Controller.cfc` includes
+`#application.wheels.viewPath#/helpers.cfm` into every controller, and `$initControllerObject`
+includes `<viewPath>/<controller>/helpers.cfm` into the one it starts, so a view (which runs in
+its controller) and the controller call both bare. `wheelsViewHelpers` adds them, with what they
+include beside them, to the preset's helper templates: for a view the controller is its folder,
+for a controller file its own name. `TestWheelsViewHelpersReachTheViewsAndControllers`.
+
+Measured with `make resolution-report` against the previous run: cfwheels 118 removed, 0 added;
+the other six configured scans unchanged.
+
+### An unquoted `extends` (TestBox 292 -> 271, fw1 409 -> 387, Lucee -7, cfwheels -6)
+
+Working back from `describe()`, defined in TestBox's BaseSpec: the specs calling it bare declared
+`component extends=testbox.system.BaseSpec {` — an unquoted attribute value, which CFML allows.
+The script parser read `extends` only from a quoted string, so the spec had no base. It now
+takes an unquoted dotted name (`dottedRest`), as does the `Application.cfc` mapping reader; tag
+syntax already did. `TestAnUnquotedExtendsIsRead`.
+
+Measured against the previous run: TestBox 21 removed, fw1 23 removed and 1 added (a spec whose
+unquoted base is `mxunit.framework.TestCase`, not installed, now reports that once), Lucee 7 and
+cfwheels 6 removed.
+
+### Module helpers ContentBox depends on but does not check out
+
+cbvalidation (`validate`, `validateOrFail`, `getValidationManager`,
+`validateModel`, `validateHasValue`, `validateIsNullOrEmpty`, `assert`),
+cbsecurity (`jwtAuth`, `cbSecure`), cbauth (`auth`) and cbmessagebox
+(`cbMessageBox`) join `moduleHelpers`, each read from the module's
+`helpers/Mixins.cfm` at the commit noted in `modules.go`. As before they apply
+only to a component whose extends chain reaches `coldbox.system.`. Measured:
+cb-p −12, nothing added; the other scans unchanged.
+`TestAModuleHelperIsAColdBoxComponents`.
+
+### A stub keeps a return type documented in another framework's namespace
+
+cborm documents `getObjectPopulator()` as returning
+`coldbox.system.core.dynamic.ObjectPopulator`, a class cborm's source does not
+hold, so `docReturn` dropped it; and its deprecated `getBeanPopulator()`, which
+ContentBox still calls, is `return getObjectPopulator();`. `cmd/cfstubgen` now
+takes a documented path in another framework's namespace
+(`frameworkapi.NamespaceOf`) when that framework's stubs, written earlier in
+the same run, hold it (`foreignStub`; ColdBox comes first in `Sources`). It
+also gives a function whose whole body is `return f();` the stub type of `f`
+in the same file (`delegatedReturn`), and `funcLookup` falls back to a
+documented type. New types: cborm `getBeanPopulator`/`getObjectPopulator`,
+ColdBox `Controller.getDataMarshaller`/`getRequestContext`. Regeneration is
+reproducible (the same diff twice).
+
+Regenerating also picked up drift from this branch's parser changes, each
+checked against the source. Gains: entity relationship variables
+(`variables.site`, `creator`, `role`…) and `buildProviderMenu`'s `Menu` argument.
+Losses, all corrections: `getClassMappingHelper`/`getEngineMappingHelper` assign
+one of three helpers by engine; `buildBinder` returns either a new `Binder` or
+`arguments.binder.init()`; and MediaService's `variables.provider` does not
+exist. Measured: cb-p −22/+2, where the two added are the same chains one hop
+further on (`populateFromStruct` returns the target it is passed). Other scans
+unchanged. `TestAStubReturnsAnotherFrameworksDocumentedClass`.
+
+Not fixed, recorded: cb-p's `build/patches` (193 findings) are upgrade scripts
+written against old ContentBox and ColdBox APIs. `addPermission` (66) is the
+ORM method of an older `Role` that had `singularName="permission"`, and
+`coldbox.system.orm.hibernate.util.ORMUtilFactory` (54) is ColdBox 3/4.
+
+### A struct of closures answers its members
+
+DI/1's `declare()` returns a local struct built from literals whose members are
+closures, each returning the struct again, and FW/1 applications chain them:
+`declare( "x" ).instanceOf( "y" ).asSingleton()`. A chain hop whose function
+declares no component now reads its body (`closure_struct.go`). When every
+top-level return returns one local, and that local is assigned a struct literal
+or `structAppend()`ed one, the closure members of those literals are the methods
+the next hops may call. A member returning the local keeps the chain on it; one
+returning anything else ends what is checked. A name that is not a member is
+reported as such, and a function returning a struct with no closures is
+reported as before. Measured: fw-p −73, nothing added; other scans unchanged.
+`TestAStructOfClosuresAnswersItsMembers`.
+
+### A function returning a built-in's value returns something dynamic
+
+`getPageContextResponse()` in TestBox, ColdBox's Bootstrap and BaseTestCase,
+and the cfwheels copies, returns `getPageContext().getResponse()`. Depending on
+the engine it may instead return a struct standing in for that, or a ternary
+of two such chains. A call chained directly on a built-in is already dynamic
+where it is written, but one reached through a user function was reported as
+"has no component return type". `engineValueReturn` (`closure_struct.go`) now
+reads the function's own top-level returns. When every one is a literal, or a
+chain headed by a built-in the file does not declare, and at least one is the
+latter, the value is dynamic. A ternary qualifies when both branches do. Both
+the qualified-hop and the bare-chain paths ask, and the bare path asks the
+closure-struct rule too. Measured: tb-p −13, cx-p −9, cw-p −6, nothing added.
+`TestAReturnOfABuiltInsValueIsDynamic`.
+
+### A Mura display object runs inside the content renderer
+
+contentRenderer.cfc includes a display object's template by the path
+`siteConfig().lookupDisplayObjectFilePath()` finds under a `modules` or
+`display_objects` directory (`core/modules/v1` among them). The mura preset now
+gives such a `.cfm` the implied base `mura.content.contentRenderer`, the
+mechanism FW/1 views already use, so a bare `showItemMeta()`, `getURLStem()` or
+`dspObject()` in one is the renderer's. Measured: masa-c −74/+20.
+
+Of the 20 added, 12 are earlier findings one step further on. A bare `getSite()`
+is now found on the renderer, but it has no return type. `dspTopNav()` and
+`variables.siteConfig()` are declared nowhere on the renderer, so they move from
+"no qualifier" to "not found in extends chain". The other 6 are
+`event.getContentBean()` reported "not found in event": a template's `event` is
+the renderer's `variables.event`, which DI/1's constructor autowiring types as
+the `event` bean (`mura.event`), while Mura passes a `servletEvent` at render
+time. That is the same question as the held-back `event` preset
+(`resolution-candidates/held-back/mura-event-preset.patch`), so it is left for
+that decision. `TestAMuraDisplayObjectRunsInTheContentRenderer`.
+
+### A Wheels global template reads Global's functions
+
+`app/global/*.cfm` is mixed into every Wheels controller, model and view, and
+`vendor/wheels/global/*.cfm` into `Global`. The wheels preset gives a `.cfm` under
+a `global` directory the implied base `wheels.Global`, which all of those hosts
+have, so `model()` in `install.cfm` is found while a view-only helper there would
+still be reported. Measured: cw-p −9/+1, where the added one is `$getDBType`
+moving from "no qualifier" to "not found in extends chain".
+`TestAWheelsGlobalTemplateRunsInGlobal`.
+
+### Wheels seed files run in the Seeder
+
+`wheels.Seeder` includes `app/db/seeds.cfm` and `app/db/seeds/<env>.cfm`
+through a computed path, so `seedOnce()` there is the seeder's. The wheels
+preset now gives `seeds.cfm` (by name) and `.cfm` files under a `seeds`
+directory the implied base `wheels.Seeder`, and `wheels.Seeder` is added to
+the Wheels stubs' `Extra` list for apps without the framework checked out.
+Regenerating also stubbed Mura's `contentRenderer`, which the mura preset now
+names as a base. Measured: cw-p −9, nothing added; masa-c unchanged, since its
+own source outranks the stub.
+
+### An inline component with attributes is dynamic
+
+Lucee's tests write `new component accessors=true { … }` and
+`new component javaSettings='…' { … }`. The parser handled `new component { … }`
+as `$any` only when the brace came straight after, so these were read as a
+component literally named `component`, and every call on them was "not found in
+component". `readNewComponent` now consumes `name` and `name=value` attributes
+up to the body's `{` (`skipInlineComponentAttrs`) and gives `$any`, restoring
+the scanner when no body follows. Measured: lucee −47, nothing added; gapcheck
+unchanged. `TestAnInlineComponentWithAttributesIsDynamic`.
+
+### What Wheels' $createObjectFromRoot builds, through a spec's wrapper
+
+`assignedFromCall` reads `x = receiver.method( … )` at lookup time, with a regex
+that did not allow `$` in names. So every
+`d = application.wo.$createObjectFromRoot( path = "wheels", fileName = "Dispatch", method = "$init" )`
+in cfwheels' specs was untyped, although the factory with literal arguments was
+already answered (`wheelsConstructedFactory`). It now uses `assignedCallRe`,
+which allows `$`. A bare `x = f( args )` is read too (`typeBareCallExpr`): when
+`f` declares no component, its argument-dependent return is asked
+(`expressionReturn`), and a local holding a literal struct is written into the
+call in its place (`inlineStructArg`: the last `name = { … }` in the function,
+with later `name.key = …` applied, keeping string literals only).
+`wheelsFactoryReturn` recognises one more wrapper shape,
+`return g.$createObjectFromRoot( argumentCollection = arguments.config )`
+(`wheelsArgCollectionParam`), and hands the factory the struct's fields.
+Measured: cw-p −195 (`d` 85, `PluginObj`/`pluginObj` 94, `_dispatch` 16),
+nothing added. `TestAWrapperHandsTheFactoryItsArgumentsStruct`, whose
+computed-`fileName` case stays untyped.
+
+### MXUnit is TestBox's compatibility layer
+
+TestBox documents running MXUnit tests by mapping `/mxunit` to
+`testbox/system/compat`, and its stubs already hold
+`testbox.system.compat.framework.TestCase`. `frameworkapi.Namespaced` now reads
+`mxunit.` as `testbox.system.compat.`, so no MXUnit source is stubbed.
+Measured: fw-p −36/+5. The 5 are methods FW/1's tests inject into the framework
+object (`selectLayoutTwo()` calling `setLayout()`/`view()`), previously hidden
+behind the unresolved base. `TestMXUnitIsTestBoxsCompatibilityLayer`.
+
+cbvalidation is stubbed; see the next section.
+
+### cbvalidation is stubbed
+
+ContentBox depends on cbvalidation and does not ship it. cbvalidation joins
+`frameworkapi.Sources` at b700fab0, stubbing `ValidationManager` and
+`ValidationResult` (and what they reach), and the `cbvalidation.models.`
+namespace. As with cbmessagebox, its `helpers/Mixins.cfm` is stubbed as a
+helper, and the contentbox preset implies it. `validate()` and
+`validateModel()` are stated to return `ValidationResult`: their doc names the
+`IValidationResult` interface, which `docReturn` skips. `getValidationManager()`
+returns the manager.
+
+The parse cannot see a helper stub, so `var vResults = validate( … )` is typed
+at lookup. `typeBareCallExpr` used to decline a bare call whose function
+declares a return, on the assumption that the parse had already typed it; it
+now returns that declared component. Measured: cb-p −23 (`vResults` 22, plus one
+argument typed by caller inference), cw-p −2 (`local.bridge = $cliBridge()`, a
+`CliBridge`), nothing added. `TestAValidationResultIsTypedFromTheStubbedHelper`.
+cbauth remains unstubbed: its `auth()` helper is accepted (`moduleHelpers`),
+and nothing in the corpus chains on it.
+
+### cbsecurity is stubbed
+
+The same pattern, at a890b0cb: `CBSecurity` and `JwtService` (and what they
+reach) are stubbed, along with the `cbsecurity.models.` namespace and
+`helpers/mixins.cfm`. `jwtAuth()` and `cbSecure()` return `JwtService` and
+`CBSecurity`; both are `wirebox.getInstance( "<id>@cbSecurity" )`. The contentbox
+preset implies it. Measured: cb-p −2/+1. `jwtAuth().fromUser()` resolves, and
+the contentbox-api auth handler's missing-base summary goes, since its
+`jwtAuth()` calls were the inherited calls it counted. The added finding was
+hidden before: `jwtAuth().getUser().getMemento()`, where `JwtService.getUser()`
+returns `any`. `TestCBSecurityHelpersComeFromTheirStubs`.
+
+### A constructor argument is what every construction passes
+
+Caller-argument inference never covered `init`. It looked for calls by the
+function's name, which for `init` is every file, and `new X( … )` is not a call
+named init. `inferInitArgument` (`init_args.go`) finds an `init` argument's
+callers by the component's file name instead. It reads every `new a.b.X( … )`
+whose path resolves to the component (`constructions`, using the call's own
+token, since `callArgument`'s name-and-line lookup met `function stats()`
+before `new Stats( this )`), and every `init()` call the existing check places
+on it. Any other place the name ends a quoted string, such as
+`getInstance( "X" )` or a `createObject` with no init on its line, is a
+construction that cannot be read, and leaves the argument untyped. The caller
+index records names ending a quoted string for that purpose
+(`quotedCallerKey`). `initArgMember` then types a `variables.x` whose only
+assignments are `variables.x = arguments.p` inside init.
+
+Measured: cw-p −3, tb-p −1 (`CollectionExpectation`'s `variables.spec`, a
+`SshPoolTask`'s pool), nothing added. Scan time is unchanged within noise
+(cw-p 9.4s, masa-c 12.5s). The case it was written for, cfwheels' CLI
+`Templates`, stays untyped for a real reason: its one construction passes
+`helpers = getService( "helpers" )`, a service locator keyed by name.
+`TestAConstructorArgumentIsWhatEveryConstructionPasses`.
+
+### A generated getter returns the init argument its setter stored
+
+ColdBox's `BoxLangStats` stores its provider through accessors:
+`setCacheProvider( arguments.cacheProvider )` in init, read back as
+`getCacheProvider().getCache()`. `initArgGetter` answers a chain hop on a
+generated getter when every write to the property in the file is
+`variables.x = arguments.p` or `setX( arguments.p )` inside init
+(`initStoredArg`). A setter called anywhere else leaves it untyped.
+`initArgType` answers with the argument's declared component type when it is
+dotted (BoxLangStats documents `ICacheProvider` through `@cacheProvider.doc_generic`),
+and otherwise with what every construction passes. Both the qualified-hop and
+the bare-chain paths ask; the qualified one moved into `untypedHop` to keep
+`walkHops` under the complexity limit. Measured: cx-p −29, nothing added.
+`TestAGeneratedGetterReturnsTheInitArgumentItsSetterStored`.
+
+### A ColdBox error template reads processException's locals
+
+ColdBox renders an application's error page by including the template its
+config names as `customErrorTemplate`. The include is computed
+(`include "#bugReportRelativePath#"`) from inside Bootstrap's
+`processException()`, where `var oException = new ExceptionBean( … )`, so every
+`oException.x()` in ColdBox's own Whoops.cfm, BugReport.cfm and
+BugReport-Public.cfm was "has no component ref". `coldboxErrorHosts`
+(`coldbox_error_template.go`) gives such a template that site as an includer,
+for `includerHeld`. The template must be named by some `config/ColdBox.cfc`.
+The site is checked by its text and by the function it is in, and ColdBox's
+source must be present, since a stub has no body. For coldbox-platform's own
+checkout, an include path's first segment may also be the `box.json` slug
+above the file (`includePathUncached`, as `slugRoot` already reads a dot-path),
+so `/coldbox/system/exceptions/Whoops.cfm` resolves without a `/coldbox`
+mapping. Measured: cx-p −70, nothing added.
+`TestAColdBoxErrorTemplateReadsProcessExceptionsLocals`, which fails without
+either half.
+
+### A ColdBox model test's model is the class its attribute names
+
+ColdBox's `BaseModelTest` runs `variables.model = mockBox.createMock(
+annotations.model )`, and `BaseInterceptorTest` does the same with
+`interceptor`. A test written
+`component extends="coldbox.system.testing.BaseModelTest" model="coldbox.system.core.events.EventPool"`
+therefore holds a mock of `EventPool` in `model`. The base's own ref made
+`model` `$any`, so nothing on it was checked, and `pool = model.init( … )`
+typed nothing. `coldboxTestSubject` answers `model`/`interceptor` from the
+attribute when the extends chain reaches one of those bases and the file
+assigns the name nowhere else. It is asked before the extends-chain refs, in
+`inheritedReceiver` (its own file, outside the accept-path test's scope,
+since its `""` means no answer rather than accepted).
+
+The specs assign `variables.pool = model.init( … )` in a `beforeEach` closure
+and read `pool` unscoped in an `it()`. The lookup-time assignment reader
+(`localAssignRe`) now accepts a `variables.` prefix, as it accepted `local.`.
+An unscoped read reaches a variables-scope name when no local hides it.
+
+Measured: cx-p −100, masa-c −6 (Masa's SSRF spec,
+`variables.apiUtility = …getApi( … )` in setup), nothing added. With `model`
+typed, its calls are now checked, and none was missing.
+`TestAColdBoxModelTestsModelIsItsAttributesClass`, which fails without either
+half.
+
+### prc.response is ColdBox's Response
+
+`RequestContext.getResponse()` stores a `coldbox.system.web.context.Response`
+in the private collection ("The response object lives in `prc.response`"), and
+ColdBox's RestHandler calls it before reading `arguments.prc.response`.
+`coldboxPrcResponse` answers `prc.response`/`arguments.prc.response` with
+that Response in a component whose chain reaches ColdBox's EventHandler, by
+name or by resolving to its file (RestHandler's bare `extends="EventHandler"`).
+It does not apply when the file assigns `prc.response` itself; no application
+in the corpus does. It is asked on both receiver paths: `inheritedReceiver`,
+and the member path that `arguments.prc.response` takes. cborm's
+`resources.BaseHandler`, which ContentBox's API handlers extend (it extends
+RestHandler), joins the cborm stubs.
+
+Measured: cx-p −58, cb-p −26/+4. The ContentBox removals include the 12 API
+missing-base summaries, now that cborm's BaseHandler resolves. The 4 added
+were behind that broken base: the API `baseHandler` reads
+`variables.ormService`, which only its subclasses set and not all of them
+type. `TestPrcResponseIsColdBoxsResponse`.
+
+### Each nested FW/1 application has its own DI/1 beans
+
+DI/1 discovery read only the `Application.cfc` at each workspace root. FW/1's
+examples are applications side by side, each extending `framework.one` with
+DI/1 over its own `model` and `controllers`, and none got a policy, so
+`property userService;` was untyped. `diSources` now also takes every
+`Application.cfc` under the workspace folders that extends `framework.one`
+(`nestedFW1Apps`). They are found by a bounded walk (`applicationFiles`),
+because the policies are built while the index is still being filled.
+Each such application then gets the automatic policy its root would have.
+
+Several applications also share bean names (each has a `model/services/user.cfc`),
+and the workspace bean map names one file per bean, so a policy found its
+candidate in another application or not at all. Each policy now indexes its
+own folders (`indexBeans`: a component by its file name, and by file name plus
+its folder's singular, DI/1's alias). It uses that when the workspace map's
+answer is not under it (`beanIn`).
+
+Measured: fw-p −22, nothing added; Masa CMS scan time unchanged (12.8s).
+`TestEachNestedFW1AppHasItsOwnDI1Beans`, which fails without either half.
+
+### FW/1 injects its controllers; a property names a singleton
+
+qBall sets `diLocations = "./model/services"`, so its DI/1 policy covered only
+that folder and its controllers' properties were untyped, although FW/1
+autowires its controllers from the bean factory whatever `diLocations` says.
+An automatic FW/1 policy now also injects into the application's
+`controllers` folder (`diPolicy.injected`, `serves`), without discovering beans
+there. When a policy's own folders hold two beans of a name (qBall's
+`beans/question.cfc` and `services/question.cfc`), a property or setter, which
+DI/1 fills only with a singleton, takes the one that is not transient
+(`beanIn(name, singletonOnly)`, `transient`).
+
+Measured: fw-p −17/+2. The 2 added were a resolution error that was already
+there, now visible because the services are typed; the next section fixes it.
+`TestFW1AutowiresItsControllersWhateverDILocationsSays`.
+
+### CommandBox's getInstance() takes WireBox ids
+
+CommandBox is built on WireBox, and a command's `getInstance()` takes the same
+ids and DSL as a ColdBox handler's: cfwheels' CLI writes
+`application.wirebox.getInstance( "DetailOutputService@wheels-cli" )`. Only the
+coldbox preset registered `idResolver("getInstance")` and the DSL resolvers,
+so under the commandbox preset alone the id typed nothing. The commandbox
+preset now carries both. Measured: cw-p −67, tb-p −1, nothing added.
+`TestEveryPresetResolverMatchesItsOwnNames` has the case.
+
+### An entity name is an entity, not the file beside the caller
+
+`entityNew( "question" )` in FW/1 qBall's `services/question.cfc` was read as a
+path, which found that service itself rather than the persistent
+`beans/question.cfc`. The parser now marks a name passed to `entityNew()`,
+`entityLoad()` or `entityLoadByPk()` as an entity name (`parser.EntityPrefix`,
+`entity:Name`), in both syntaxes. The resolver looks such a name up as an
+entity first and falls back to reading it as a path (`componentPathUncached`,
+`nearestEntity`); `displayComponent` drops the prefix. The batch index now also
+keeps persistent components that name no `entityname`, whose entity is called
+after the file, as candidates per name (`Index.EntityCandidates`), as the editor
+already registered them. An explicit `entityname` wins; otherwise the candidate
+nearest the caller does, the lowest path among equals, since several
+applications in one workspace each have one.
+
+A first attempt preferred an entity for any bare name; it changed nothing in
+fw-p and added 8 wrong findings in lucee, and was dropped. Measured with the
+marked name: fw-p −12, nothing added; the full short test suite and
+gapcheck pass. `TestAnEntityNameIsTheEntityNotTheFileBesideTheCaller`.
+
+### A forwarded argument is what the caller holds
+
+Mura's contentRenderer sets `arguments.renderer = this` and calls its utility
+with `dspObject( argumentCollection = arguments )`. Caller-argument inference
+saw no `renderer` passed at that call. `callArgumentAt` now reads a call
+passing `argumentCollection = arguments` as handing over the caller's own
+`arguments.<name>`, which the receiver lookup types in the caller's file. A
+forwarded argument that cannot be typed is skipped (`forwardedArg`), as a call
+that does not pass the argument always was. Without that, cfwheels'
+`SpyTenantMigrator`, which forwards its own untyped migrator to `super`, left
+`TenantMigrator`'s `arguments.migrator` untyped (+8). The constructor
+inference applies the same rule; `inferInitArgument`'s per-file scan moved
+into `initArgSites` to stay under the complexity limit.
+
+Measured: masa-c −56/+2, where the 2 added are the same chains one step further
+on (`getEvent()` on the renderer, untyped); other scans unchanged.
+`TestAForwardedArgumentIsWhatTheCallerHolds`.
+
+### An alias is typed as the name it copies
+
+`assignedFromCall` read only `x = receiver.call( … )`. Masa's form builder
+writes `var mmRBF = application.rbFactory`, a value a startup template assigns
+and only a lookup types. A right-hand side that is a dotted name and nothing
+else (`aliasRe`) is now typed as that name is at the line, one assignment
+deeper (`maxAssignedDepth`). Measured: masa-c −13, cw-p −12, cb-p −6, nothing
+added. `TestAnAliasIsTypedAsTheNameItCopies`.
+
+### A template included by a computed path reads its includer
+
+Masa's form builder keeps
+`variables.templatePath = "/muraWRM#…#/core/utilities/formbuilder/templates"`
+and includes `<cfinclude template="#templatePath#">` from functions that set
+`var mmRBF = application.rbFactory`. The include graph cannot see a computed
+edge, so every `mmRBF` call in the field templates was untyped.
+`computedIncludeHosts` treats a file as a template's includer when it holds
+both a computed include and a string literal naming the template's directory
+by at least its last three segments. Each computed include in it is a site,
+and `includerHeld` requires every site to agree, as for a literal include.
+Candidates come from the batch caller index (a name ending a quoted string),
+so this runs in a batch scan only, like the other caller inference. Measured:
+masa-c −138, nothing added. As first committed, `includerHeld` computed these
+hosts before its own cache check, so every untyped name in every template
+re-read the candidate files: Masa's scan went from 12.8s to 22.1s. They are now
+cached per template (`frameworkIncludeHosts`), and Masa is 14.0s against
+`main`'s 14.9s; every scan is as fast as `main` or faster.
+`TestATemplateIncludedByAComputedPathReadsItsIncluder`.
+
+### Missing-method findings that were ours
+
+Of the 207 "method 'x' not found in Y" findings left, three groups were the
+resolver's mistake rather than the code's:
+
+- **A computed entity name** (Lucee −3). `entityNew( "Comp" & nbr )` was read as
+  the entity `Comp`; the name is built at run time (Comp1 … Comp4), so the ref is
+  `$any`, as a computed component path is. Both parsers check what follows the
+  string. `TestAComputedEntityNameIsDynamic`.
+- **A call the code checks for** (cx −2, cw −1). `if ( structKeyExists(
+  variables.config, "onShutdown" ) ) variables.config.onShutdown( this )` calls a
+  convention the object may not follow. `guardedByExistsCheck` accepts a call made
+  inside the block a non-negated `structKeyExists( x, "m" )`, `x.keyExists( "m" )`
+  or `isDefined( "x.m" )` opens in the same function — a brace group, a `<cfif>`
+  up to its close, or the rest of a braceless statement. Its `else` and anything
+  after the block are still checked. `TestACallTheCodeChecksForIsNotMissing`.
+- **A member stored through a scope** (fw −8, Lucee −2). `AssignsMember` already
+  accepted `a.m = f; a.m()` in one function, but the script parser recorded the
+  member set only for an unscoped receiver, so `variables.fw.__config = __config`,
+  `request.fw.enableTracing = …` and `local.com2.override = …` were never seen.
+  `scopedChainCall` records them now, and one stored through `variables.` counts
+  from every function, spelled with or without the scope, since the object is the
+  component's. `TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic`.
+
+Nothing was added. What remains of the 207 is genuinely missing (ContentBox's
+old patches calling removed APIs, a handful of real misses in ColdBox and Masa),
+added at run time by a test (mixins, custom assertions), or Masa's `event`.
+
+### Mura's event, where Mura hands one over
+
+Masa's largest group was calls on `event`, `arguments.event` and
+`variables.event`: 673 findings, almost all in Mura's own source
+(`core/mura/Handler` 329, `core/mura/content` 159, `core/mura/client` 116).
+Mura passes a `servletEvent` or a plain `event`, which share an API and no base,
+and says so nowhere. The held-back preset typed any variable called `event` in a
+Mura project; this is the narrower rule chosen instead (`muraEvent`,
+`mura_event.go`). `event` is `mura.servletEvent|mura.event` only:
+
+- under the directory holding `mura/event.cfc` and `mura/servletEvent.cfc`,
+  which is Mura's own source;
+- in a display object, a `.cfm` the mura preset runs inside the content
+  renderer;
+- in a plugin's event handler, a component extending
+  `pluginGenericEventHandler`.
+
+A project file of its own keeps whatever it had. A local the function declares
+is left alone unless it is assigned the event (`renderer.getEvent()`,
+`$.event()`, a new `mura.event`): `contentIntervalManager` loops with
+`var event = events.next()`, and typing that cost 5 wrong "not found" findings in
+the first version. A second rule came with it: inside
+`<cfif variables.utility.checkForInstanceOf( arguments.event, "mura.MuraScope" )>`,
+pluginManager calls `arguments.event.event()`, which only the MuraScope
+declares. `guardedInstanceOf` checks a call guarded by `isInstanceOf()` or
+`checkForInstanceOf()` against the component the guard names, under
+`guardedByExistsCheck`'s rules for what a guard controls.
+
+Measured: masa-c 5136 → 4619, −668/+151, nothing else moved. Every one of the
+151 added is the next hop of a chain now checked one step further:
+`event.getValue( … ).x()` stops at "method 'getValue' in
+mura.servletEvent|mura.event has no component return type" (90 getValue,
+21 getSite, 18 getHandler, 8 getValidator, 6 getContentBean, 1
+getContentRenderer). Masa scans in 12.1s against `main`'s 13.7–14.4s.
+`TestMuraHandsItsOwnCodeAnEvent`, `TestATypeCheckSaysWhatTheObjectIs`.
+
+### A caller typed by a resolver is placed
+
+The caller inference (`argumentFromCallers`) gives up on an argument when any
+call of the function's name has a receiver it cannot place, and it placed a
+receiver by the receiver lookup alone, without the componentResolver on the
+variable's name that `canResolveCall` tries next. Mura's admin pages call
+`$.dspObjects( … )`, and `$` is a MuraScope only by the mura preset's resolver,
+so every utility function sharing a name with a renderer method
+(`contentRendererUtility.dspObjects( renderer )`) was left untyped. `callIsTo`
+now tries that resolver too; the MuraScope declares no `dspObjects`, so the page
+is known not to call the utility's. Measured: masa-c −26/+1 (the one added is a
+chain now checked a step further), cx −4. `TestACallerTypedByAResolverIsPlaced`.
+
+Masa's `arguments.renderer` is 105 findings after this. Each function still left
+untyped has a caller of the same name the inference cannot place: a call to
+another component's method of that name on a receiver nothing types
+(`content.getTemplate()`, `arguments.contentBean.getMetaKeyWords()`,
+`request.contentRenderer.createHREF()`), or a nested `arguments.renderer.x()`
+whose own argument is in the same position. Placing those would mean guessing
+that an untyped caller is not the function's, which this inference refuses by
+design.
+
+### An FW/1 rc member is typed from its last assignment
+
+Masa's csettings controller fills `arguments.rc.siteBean =
+variables.settingsManager.read( arguments.rc.siteid )`, with settingsManager
+injected by a setter on the base controller. The parse cannot type that, and
+`assignedFromCall`, which types `x = svc.read()` at lookup, took a bare name,
+`local.x` and `prc.x` only. `rc.x` and `arguments.rc.x` now go the same way, in
+script and in a `<cfset>`, so `fw1ViewRc` gets an answer from the action and the
+view's `rc.siteBean` is a `settingsBean`. Measured: masa-c −207/+1 (147
+`rc.siteBean` in `csettings/editsite.cfm`, 47 `rc.contentBean`; the one added is
+a chain now checked a step further). `TestAnRcMemberAssignedFromAnInheritedServiceIsTyped`.
+
+### An assigned chain is typed hop by hop
+
+`assignedFromCall` matched its right-hand side with one regular expression,
+`receiver.method( args )`, whose argument group ran to the last `)`. A chain
+therefore matched as its first call: `var apiUtility =
+application.settingsManager.getSite( id ).getApi( 'json', 'v1' )` was typed as
+`getSite`'s return, a `settingsBean`, and every call on apiUtility was checked
+against the wrong component. `callChain` now splits the right-hand side into the
+name it starts from and each call made on it, and each hop is typed on what the
+one before returns; a property read or an operator between calls is refused. A
+self-assignment (`x = x.save()`) reads its receiver at the assignment's own line
+rather than being skipped. Measured: masa-c +12, every one a call on such a
+chain's value (`apiUtility` ×10, `contentRenderer` ×2) whose last hop declares
+no return type, previously checked against the head's component.
+`TestAnAssignedChainIsTypedHopByHop`, `TestASelfAssignmentKeepsWhatItsCallReturns`.
+
+Masa's carch views keep ~180 `rc.contentBean` findings: the update action builds
+it as `getBean( 'content' ).loadBy( … ).set( rc )`, and `loadBy` is `$any` to the
+parse, so the action's value is dynamic and `fw1ViewRc` gives the view nothing.
+
+### A ColdBox view's args are what its renders pass
+
+ContentBox renders its table partials with `view( view :
+"_components/content/TableCreationInfo", args : { content : content } )` from
+each listing, and its admin bar from an interceptor; the view reads
+`args.content`, and nothing in it says who renders it. `viewArgs` reads every
+literal `view()`, `renderView()` or `setView()` naming the view in its module's
+handlers, views, interceptors and layouts, takes the value its `args` struct
+literal gives the key, and types it where the call is made: a variable, a dotted
+name, `new X()`, a single call, or a loop variable there (`content` is the
+`<cfloop>` index over `prc.content`). A trailing `?: javacast( "null", "" )` is
+dropped. A render passing no args, or not this key, says nothing; one passing
+args other than as a literal leaves it untyped; every render passing the key
+must type it, and they are the alternatives. Renders are read once per module.
+Measured: cb −30/+2. The two added are the admin bar's `oContent`, now a
+`BaseContent` (from `contentService.get()`), calling `getLayout()`, which only
+the `Page` subclass declares, inside `<cfif getContentType() eq "Page">`, and a
+chain on `getActiveContent()`, which declares no type: what a handler holding
+the same value already gets. `TestAViewsArgsAreWhatItsRendersPass`.
+
+### A cborm criteria list() is an array of the service's entity
+
+ContentBox's `ContentService.getLatestEdits()` returns `newCriteria().createAlias(
+… ).when( … ).list( max = arguments.max )`, and `contentViewlet.cfm` loops over
+it, as `args.aContent`, with `thisContent`. Two pieces: `methodElement` now
+answers the bound entity for a function every top-level return of which is a
+criteria `list()` (a chain on `newCriteria()`, or `.list()` on a local the
+function assigned one), unless the list is asked for a query or a stream
+(`returnsCriteriaList`); and `elementOf` reads `args.X` through the same renders
+`viewArgs` does (`viewArgsElement`). Measured: cb −34/+1 (25 `thisContent` in
+contentViewlet, 6 `args.content` in TableStatus, 2 in latestLogins; the one added
+is a chain on `getActiveContent()`, which declares no type).
+`TestALoopOverAViewsArgsHoldsWhatTheRenderPassed`.
+
+### A component variable is what another function assigned it
+
+Masa's settingsBundle sets `<cfset variables.configBean = application.configBean />`
+in `init()` and calls `variables.configBean.getAdminDir()` from every other
+function. `application.configBean` is typed only by the resolver's startup
+lookup, so the parse filed no type for the component variable, and
+`assignedFromCall`, which reads an assignment at lookup, took a bare name (and
+`local.`, `prc.`, `rc.`) but never a `variables.` receiver. It now does: the
+assignment is looked for in the calling function, a `var x` there being a
+different variable, then above it as for a bare name, and a right-hand side
+assigned in another function is typed at that assignment, in that function.
+Measured: masa-c −80 (67 `variables.configBean`), cx −3, cb −2; nothing added.
+`TestAComponentVariableIsWhatAnotherFunctionAssignedIt`.
+
+### A DI/1 bean added as a new instance is that component
+
+Mura registers `serviceFactory.addBean( "fileWriter", new mura.fileWriter() )`,
+and DI/1 hands that instance to every service declaring a `fileWriter`
+constructor argument. `diRegistrations` read an `addBean` value only when it was
+a variable or a dotted name, so the bean had no component and every such
+argument stayed untyped: 76 calls on `variables.fileWriter` across Masa's
+exporter, plugin manager, utility and file DAO. A value that only creates a
+component (`new a.b.C( … )`, `createObject( "component", "a.b.C" )`, with
+nothing chained on it) now names it. Measured: masa-c −76, nothing added.
+`TestDI1BeanAddedAsANewInstanceIsThatComponent`.
+
+### A lazy getter returns what it loads
+
+Mura's configBean starts its class extension manager as `""` and loads it on the
+first call to `getClassExtensionManager()`, whose whole body is
+`<cfif not isObject(variables.instance.extensionManager)>` a loader
+`</cfif>` and `<cfreturn variables.instance.extensionManager />`. The field is
+written a placeholder and a component, so the getter had no type, and the
+startup template's `application.classExtensionManager =
+application.configBean.getClassExtensionManager()` and everything read through it
+was untyped. `lazyGetterReturn` answers for a function whose whole body is that
+guard and that return, in tags or script: the component every other write of the
+field in the file creates in place (`new X()`, `createObject( "component", "X" )`,
+with or without `.init()`). A write of anything else, found anywhere in the file
+including mid-line, withholds the answer; the guarded block may not return or
+open another `<cfif>`. It reads the file's text rather than a parse, since a
+parse asks for return types, and is cached per file and function — asked about
+every untyped function, it first cost Masa 12%.
+
+With it, the startup lookup's typing of a created component was fixed: it matched
+`new X(` or `createObject( "component", "X"` as a prefix and ignored what was
+chained on it, so `new Script().getLoose()` was a Script. Each chained call is now
+typed on what the one before returns (`createdThenCalled`), `init()` keeping the
+instance; Masa's `application.configBean = new mura.configBean().set( props )`
+stays a configBean because `set()` returns this. Returning nothing for every chain
+instead added 1,018 findings, which is how that case was found.
+
+Measured: masa-c −209 (64 `application.classExtensionManager`, 74 `subType`, 38
+`variables.configBean`/`application.configBean`), nothing added; Masa scans as
+fast as `main`. `TestALazyGetterReturnsWhatItLoads`,
+`TestAStartupCreationIsWhatItsChainedCallsReturn`.
+
+## Summary of this branch
+
+Branch `ccr-b348b908-xa7msk` (draft PR #228) started from
+`origin/main` and walked the seven-project corpus down with narrow
+rules, each one tested against the shape it answers for and measured on
+the corpus before being kept.
+
+### Corpus against `main`
+
+| Scan | main | branch | removed |
+|---|---:|---:|---:|
+| cb-p (ContentBox) | 1,576 | 1,429 | 147 |
+| cw-p (cfwheels + vendor) | 3,856 | 2,291 | 1,565 |
+| cx-p (coldbox-platform) | 1,345 | 1,050 | 295 |
+| fw-p (fw1) | 409 | 226 | 183 |
+| lucee | 1,975 | 1,448 | 527 |
+| masa-c (MasaCMS) | 9,586 | 4,035 | 5,551 |
+| tb-p (TestBox) | 296 | 256 | 40 |
+| **total** | **19,043** | **10,735** | **8,308** |
+
+### Timing against `main`
+
+Every project scans faster than it does on `main`:
+
+| Scan | main | branch |
+|---|---:|---:|
+| MasaCMS | 15.1s | 12.5s |
+| ContentBox | 2.4s | 1.6s |
+| cfwheels | 4.3s | 2.0s |
+| coldbox-platform | 2.3s | 1.3s |
+| Lucee | 17.0s | 13.1s |
+| fw1 | 0.75s | 0.48s |
+| TestBox | 0.36s | 0.28s |
+
+### What's left and why
+
+What remains in each project is dominated by three kinds of case,
+each recorded in its own section above and left on purpose:
+
+- **Dynamic receivers no static rule can type.** Lucee's `field`,
+  `driver` and `coll` (280 findings) are driver objects listed from
+  packages at run time; Masa's `arguments.item` (128) and
+  `rc.contentBean` chained on `loadBy()` (~180) are built through
+  factories or ORM operations whose return is `$any`; Masa's
+  `attributeBean` and `arguments.feedBean` (193) are mutated through
+  struct writes and tested methods the parse cannot see.
+- **Code the resolver would need project-specific routing to see.**
+  cfwheels CLI's `variables.helpers` (66) comes through a Module's
+  `getService( "helpers" )` whose body switches on the string and
+  constructs the right class; cfwheels engine adapters (161) and
+  `migration.adapter` (48) are chosen the same way.
+- **Methods tests or run time add to the receiver.** TestBox custom
+  assertions, cborm's dynamic finders beyond what `onMissingMethod`
+  covers, ColdBox's test-harness mixins, and a handful of real
+  bugs — ContentBox's old patch scripts calling removed APIs are
+  the largest group (~113 findings), listed in
+  "Missing-method findings that were ours" and left as findings
+  deliberately.
+
+A per-group breakdown of what remains, with "would type if we had X" for each,
+lives in the sections above. Section titles follow the shape the rule
+accepts: searching for "`rc.X`", "lazy getter", "args", or any of the
+other named shapes picks up the rule that handles it and the test that
+pins it.
+
+### Tests
+
+Each change above has at least one test in `internal/resolve/` with a
+mutation check written into the plan entry: the fix is reverted,
+rerun, and the recorded failure is quoted. The tests cover both
+tag and script syntax where the rule applies to both, and each test
+holds the shapes the rule accepts beside shapes it must refuse —
+`TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic` pins the
+non-member shadowing cases, `TestAViewsArgsAreWhatItsRendersPass`
+holds the renders in another module and the computed args that
+must leave the key untyped, and so on.
+
+### How to measure a new change against this branch
+
+The scratchpad holds the baselines and binaries this branch was
+measured against:
+
+```
+S=/tmp/claude-0/-home-user-cfmleditor-lsp/23710295-57ad-5cdf-b4fb-6b66b79ffa8c/scratchpad
+make resolution-report CORPUS="$(bash $S/configured.sh)" \
+                       RUNS=$S/rr-next BASELINE=$S/rr-lazy4 LISTS=
+```
+
+The seven baselines (`$S/rr-main`, `$S/rr-lazy4` and the intermediate
+runs listed above) stay for the life of the session, and
+`BASELINE=<earlier run>` prints the diff per scan rather than only the
+totals. Timing against `main` is a direct `unresolved --json` on each
+project with the two binaries at `$S/bench/lsp-main` and
+`$S/bench/lsp-branch`.
+
+### Followups considered and left
+
+After the summary above, five more groups were measured and left for the
+reason given beside each:
+
+- **cfwheels CLI `variables.helpers` (66)** reaches each service through
+  `new services.Admin( helpers = getService( "helpers" ), … )` from
+  `cli/lucli/Module.cfc`. `getService` is Module's own function with a
+  switch on its string argument that constructs the right class;
+  typing the construction's argument needs an argument-sensitive return
+  for `getService`, which no present rule provides. Caller inference
+  reaches the construction but `argumentExprComponent` cannot type
+  `getService("helpers")`.
+- **Masa's `arguments.feedBean` (113)** on `feedGateway.getFeed` has two
+  callers; one is `sample.getFeed()` in `loadrelatedcontent.cfm`, where
+  `sample = $.getBean( rc.entitytype )` is a bean of a dynamic name.
+  `callIsTo` returns ours=false, known=false, and the strict "any
+  unplaceable caller gives up" rule aborts the inference. Relaxing to
+  "ignore the unplaceable one when the placeable ones all agree" would
+  cross a design line this branch has held throughout: an untyped
+  caller is a caller whose type the inference cannot prove, not one it
+  may ignore.
+- **ColdBox integration-test `e` (34)** sits in `var e = this.get( "/x" )`
+  where `get()` → `request()` → `this.execute( argumentCollection =
+  arguments )` returns a `RequestContext`. Each hop forwards its
+  argumentCollection, which the chain-walker in `assignedFromCall`
+  stops at: a chain whose head is a bare call types only when every
+  hop's return is statically visible.
+- **Lucee's `not found in extends chain` (158)** is one include away:
+  `component extends="org.lucee.cfml.test.LuceeTestCase" { function
+  beforeAll() { include template="/admin/ext.functions.cfm"; } }` and
+  `toVersionSortable` is declared in that template. The `/admin`
+  mapping is set at build time by Lucee's Ant script and not reachable
+  from the source tree; this is already recorded in
+  `resolution-candidates/README.md` under "Config, not code".
+- **FW/1's `local.user = rc.user` views (29)** need the controller's
+  `rc.user = variables.userService.get( … )` to resolve. The user
+  service's `get()` has two branches (`result = variables.users[ id ]`
+  and `result = variables.beanFactory.getBean( "userBean" )`), one of
+  which is an index access the parse keeps untyped. A branch-merge
+  rule that treats an untyped sibling as `$any` would over-accept the
+  broader cases this branch has refused.
+
+Each of these is a shape the rules above deliberately did not grow a
+case for.
+
+### Nothing was dropped: a per-finding audit against `main`
+
+Per-finding diff between `rr-main` and `rr-lazy4` (file × line × function ×
+variable × reason, not just totals): 8,090 findings on `main` are no longer on
+`branch` and 373 appear on `branch` that were not on `main`. Categorised:
+
+**Removed on branch** (what the rules fixed):
+
+| Category | Count |
+|---|---:|
+| variable had no component ref | 5,846 |
+| call had no qualifier, not in this file | 1,296 |
+| not found in extends chain | 379 |
+| chain-further "has no component return type" | 315 |
+| component does not exist | 96 |
+| method not found in named component | 77 |
+| extends chain breaks at X, N inherited calls not checked | 48 |
+| chained on X, which is not found | 27 |
+| other | 6 |
+
+The top removed receivers map one-to-one to the rules above: `variables.$`,
+`$`, `rc.$`, `m` (1,024 + 1,000 + 666 + 78) are the Mura preset's MuraScope;
+`arguments.event`, `event` (355 + 180) are the Mura event rule; `rc.contentBean`,
+`rc.siteBean`, `rc.feedBean`, `rc.userBean` (274 + 147 + 113 + 92) are the FW/1
+view handoff and the `rc.X` member assignment rule; `mmRBF` (142) is the
+startup alias; `arguments.renderer` (79) is caller inference plus the
+forwarded `argumentCollection` fix.
+
+**Added on branch** (where branch sees something `main` missed):
+
+| Category | Count |
+|---|---:|
+| chain-further "has no component return type" | 354 |
+| variable has no component ref (latent, now surfaced) | 14 |
+| method not found (correctness finding, previously masked) | 5 |
+
+Every added finding is one of three shapes, each honest:
+- A chain hop one step further than `main` saw. `main` reported "no component
+  ref" on a value this branch now types, and the branch's finding is on the
+  value's next hop, where the method returns no type. The branch's report is
+  more informative.
+- A latent finding `main` collapsed under a less-specific message. ContentBox's
+  `baseHandler.cfc` had one "extends chain breaks at cborm.models.resources
+  .BaseHandler (15 inherited calls not checked)" on `main`; the branch resolves
+  that base through the cborm stubs and the file reports the same 12 calls per
+  line, with `variables.ormService` named instead of the chain break.
+- A real correctness finding the branch surfaces because it typed the receiver.
+  ContentBox's admin bar reads `args.oContent.getLayout()`, which only the Page
+  subclass declares, inside `<cfif getContentType() eq "Page">`. `main` could
+  not place `args.oContent`; the branch types it as `BaseContent` and reports
+  the method is on the subclass.
+
+Nothing on `main` is silently dropped on `branch`: every removed finding is
+either a receiver the branch now types correctly, or a chain the branch now
+resolves far enough to reach, or a dynamic case the branch has a rule to
+accept (MuraScope's onMissingMethod, criteria list, lazy getter, …). The 77
+"method not found" removals (47 "not found in component", 5 each for `user` /
+`question`, 7 for `framework.one`, 4 for `mura.event`) are each a case the
+branch types correctly: `createObject("component", "name")` with a dynamic
+name is now `$any`; `entityLoad("user", …)` resolves to `beans/user.cfc`
+(`accessors=true`, so `getId()` is declared) rather than to the service file
+of the same name; FW/1 tests' `variables.fw.enableTracing = _enableTracing`
+is accepted via `AssignsMember`; Mura's `arguments.event.event()` passes under
+the type-check guard.

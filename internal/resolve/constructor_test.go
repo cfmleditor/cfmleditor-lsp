@@ -180,3 +180,30 @@ func TestDI1ConstructorDoesNotInferConstructionForConstants(t *testing.T) {
 		t.Fatal("constant registration inferred factory construction")
 	}
 }
+
+// TestDI1BeanAddedAsANewInstanceIsThatComponent: Mura registers
+// `serviceFactory.addBean( "fileWriter", new mura.fileWriter() )`, and every
+// service taking a fileWriter constructor argument gets that instance. Only a
+// variable or a dotted name was read as addBean's value, so the bean had no
+// component and the argument stayed untyped. A call chained on the instance
+// is not the instance.
+func TestDI1BeanAddedAsANewInstanceIsThatComponent(t *testing.T) {
+	r, dir := writeDIApp(t, `component {}`, `<cfscript>f=new framework.ioc("/model");
+f.addBean("writer", new model.jobs.Job());
+f.addBean("maker", createObject("component", "model.jobs.Job"));
+f.addBean("chained", new model.jobs.Job().other());
+</cfscript>`)
+
+	lookup := r.ConstructorLookup(filepath.Join(dir, "model", "services", "Consumer.cfc"))
+	if lookup == nil {
+		t.Fatal("missing constructor policy")
+	}
+
+	job := filepath.Join(dir, "model", "jobs", "Job.cfc")
+
+	for name, want := range map[string]string{"writer": job, "maker": job, "chained": ""} {
+		if got := lookup(name); !cfpath.SamePath(got, want) && got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
+	}
+}

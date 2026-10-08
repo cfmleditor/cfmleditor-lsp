@@ -63,6 +63,9 @@ var Sources = []Source{
 		"wheels.Test",
 		"wheels.WheelsTest",
 		"wheels.migrator.Migration",
+		// Includes app/db/seeds.cfm and seeds/<env>.cfm (config's wheels
+		// preset gives them this base).
+		"wheels.Seeder",
 	}},
 	// cborm has no preset: a service written `extends="cborm.models.
 	// VirtualEntityService"` names it, and Namespaced answers that path.
@@ -72,6 +75,8 @@ var Sources = []Source{
 		"cborm.models.ActiveEntity",
 		"cborm.models.criterion.CriteriaBuilder",
 		"cborm.models.criterion.DetachedCriteriaBuilder",
+		// ContentBox's API handlers extend it; it extends ColdBox's RestHandler.
+		"cborm.models.resources.BaseHandler",
 	}},
 	// cbmessagebox is a ColdBox module ContentBox depends on and does not ship in
 	// its checkout (it installs into contentbox-deps). Its cbMessageBox() helper
@@ -79,7 +84,20 @@ var Sources = []Source{
 	{"cbmessagebox", "https://github.com/coldbox-modules/cbmessagebox", "4bbbf8c84c53540332158b01fa39f0153faceee8", "cbmessagebox", "", []string{
 		"cbmessagebox.models.MessageBox",
 	}},
+	// cbvalidation is another module ContentBox depends on and does not ship.
+	// Its validate() helper reaches every handler; what it returns is the
+	// result handlers then ask hasErrors() of.
+	{"cbvalidation", "https://github.com/coldbox-modules/cbvalidation", "b700fab0245f3268fa978edc11abb561e4bbbcd1", "cbvalidation", "", []string{
+		"cbvalidation.models.ValidationManager",
+		"cbvalidation.models.result.ValidationResult",
+	}},
+	// cbsecurity: jwtAuth() and cbSecure() reach every ContentBox handler.
+	{"cbsecurity", "https://github.com/coldbox-modules/cbsecurity", "a890b0cb52b48880bd1eb6afecc183a820e8c75e", "cbsecurity", "", []string{
+		"cbsecurity.models.CBSecurity",
+		"cbsecurity.models.jwt.JwtService",
+	}},
 	{"fw1", "https://github.com/framework-one/fw1", "d7fb9add9b82be4d7c884ebb2d0f88ffb59ed8c9", "framework", "framework", nil},
+	{"mura", "https://github.com/MasaCMS/MasaCMS", "696383140578f8dea3ece26f80cd7bfb370ddf0f", "mura", "core/mura", nil},
 }
 
 // Helper is a template a module mixes into every handler and view
@@ -96,10 +114,22 @@ type Helper struct {
 // holds them.
 var Helpers = map[string][]Helper{
 	"cbmessagebox": {{"helpers/mixins.cfm", map[string]string{"cbmessagebox": "cbmessagebox.models.MessageBox"}}},
+	// validate() is documented as the IValidationResult interface; what
+	// ValidationManager hands back is a ValidationResult.
+	"cbvalidation": {{"helpers/Mixins.cfm", map[string]string{
+		"validate":             "cbvalidation.models.result.ValidationResult",
+		"validatemodel":        "cbvalidation.models.result.ValidationResult",
+		"getvalidationmanager": "cbvalidation.models.ValidationManager",
+	}}},
+	// Both are wirebox.getInstance( "<id>@cbSecurity" ).
+	"cbsecurity": {{"helpers/mixins.cfm", map[string]string{
+		"jwtauth":  "cbsecurity.models.jwt.JwtService",
+		"cbsecure": "cbsecurity.models.CBSecurity",
+	}}},
 }
 
 // implied are the frameworks whose stubs a preset brings with it: ContentBox
 // depends on cbmessagebox.
 var implied = map[string][]string{
-	"contentbox": {"cbmessagebox"},
+	"contentbox": {"cbmessagebox", "cbvalidation", "cbsecurity"},
 }

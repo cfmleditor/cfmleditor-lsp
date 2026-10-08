@@ -9,7 +9,8 @@ func TestExtractIncludes(t *testing.T) {
 	content := `<cfcomponent>
 	<cfinclude template="api-shared.cfm" />
 	<cfinclude template = '/tassweb/packages/tass/core/error.cfm'>
-	<cfinclude template="#dynamicPath#.cfm">
+	<cfinclude template="#dynamicDir#/page.cfm">
+	<cfinclude template="#dynamicPage#.cfm">
 	<cfinclude template="API-SHARED.cfm">
 	<cfmodule template="module.cfm">
 	<a href="page.cfm">x</a>
@@ -26,6 +27,7 @@ func TestExtractIncludes(t *testing.T) {
 	want := []string{
 		"api-shared.cfm",
 		"/tassweb/packages/tass/core/error.cfm",
+		"./*.cfm",
 		"script-form.cfm",
 		"script-named.cfm",
 		"script-call.cfm",

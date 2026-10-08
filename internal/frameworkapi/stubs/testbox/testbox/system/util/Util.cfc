@@ -70,5 +70,5 @@ component {
 	/**
 	 * Get the appropriate engine mapping helper for the current engine
 	 */
-	private testbox.system.util.BoxLangMappingHelper function getEngineMappingHelper() {}
+	private function getEngineMappingHelper() {}
 }

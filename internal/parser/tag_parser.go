@@ -1095,7 +1095,7 @@ func (p *tagParser) setAssign(inner string, line int) {
 		// point is only that the name was declared here.
 	default:
 		name, rhs := splitAssign(inner)
-		if name != "" && !isKeyword(name) {
+		if name != "" && (!isKeyword(name) || operatorWordIsNameStr(inner, name)) {
 			if rhs == "" && p.extractCalls {
 				// No assignment — check for bare call: obj.method(...)
 				p.checkBareCallStr(inner, line)
@@ -1450,7 +1450,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 		}
 
 	case hasPrefixFold(rhs, "entitynew("):
-		comp := extractEntityNewArg(rhs[10:])
+		comp := entityRef(extractEntityNewArg(rhs[10:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
@@ -1458,7 +1458,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 	case hasPrefixFold(rhs, "entityload("):
-		comp := extractEntityNewArg(rhs[11:])
+		comp := entityRef(extractEntityNewArg(rhs[11:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
@@ -1466,7 +1466,7 @@ func (p *tagParser) checkSetRHSStr(rhs, varName string, line int) {
 			})
 		}
 	case hasPrefixFold(rhs, "entityloadbypk("):
-		comp := extractEntityNewArg(rhs[15:])
+		comp := entityRef(extractEntityNewArg(rhs[15:]))
 		if comp != "" {
 			p.addRef(&ComponentRef{
 				Variable: varName, Component: comp,
@@ -2068,6 +2068,11 @@ func extractEntityNewArg(s string) string {
 	end := strings.IndexByte(s[1:], q)
 	if end < 0 {
 		return ""
+	}
+
+	// A computed name, entityNew( "Comp" & nbr ), is no entity called Comp.
+	if rest := strings.TrimSpace(s[2+end:]); rest != "" && rest[0] != ')' && rest[0] != ',' {
+		return "$any"
 	}
 
 	return s[1 : 1+end]

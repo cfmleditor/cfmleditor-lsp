@@ -33,6 +33,10 @@ does not exist. Reads the .cfmleditor.json above the first directory.
   --verbose            also list each call that resolved, on stderr
   --global-defs        resolve bare calls against functions declared anywhere
                        in the workspace
+  --candidates         give each finding a category (object, variable,
+                       return-type, method) and the liberal matches a strict
+                       resolver refuses, each with a confidence; they never
+                       resolve it. Shown with --json
   --no-infer-args      do not type an untyped argument from what its callers
                        pass it
 
@@ -48,6 +52,7 @@ type unresolvedFlags struct {
 	includeWorkspace bool
 	verbose          bool
 	globalDefs       bool
+	candidates       bool
 	noInferArgs      bool
 }
 
@@ -87,6 +92,8 @@ func parseUnresolvedFlags(args []string) (unresolvedFlags, []string) {
 			fl.verbose = true
 		case "--global-defs":
 			fl.globalDefs = true
+		case "--candidates":
+			fl.candidates = true
 		case "--no-infer-args":
 			fl.noInferArgs = true
 		default:
@@ -163,7 +170,7 @@ func cmdUnresolved(args []string) {
 // unresolvedOptions builds the scan's options from the config, or from the
 // paths given when there is none.
 func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *unresolved.Options {
-	opt := &unresolved.Options{GlobalDefs: fl.globalDefs, InferArgs: !fl.noInferArgs, WorkspaceFolders: cliWorkspaceFolders(vfs.OS{}, cfg, args)}
+	opt := &unresolved.Options{GlobalDefs: fl.globalDefs, Candidates: fl.candidates, InferArgs: !fl.noInferArgs, WorkspaceFolders: cliWorkspaceFolders(vfs.OS{}, cfg, args)}
 	if fl.verbose {
 		opt.Verbose = os.Stderr
 	}

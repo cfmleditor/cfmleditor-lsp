@@ -397,12 +397,13 @@ func (r *Resolver) typeOfFactory(root string, methods []string, dir string) (str
 // typeOfChain types a created component, or a chain of calls on a shared
 // variable or a resolver-matched receiver.
 func (r *Resolver) typeOfChain(rhs, dir string, assigns []startupAssign, visiting map[string]bool) string {
-	if m := createdComponent.FindStringSubmatch(rhs); m != nil {
-		return r.staticPath(m[1])
-	}
-
-	if m := newComponent.FindStringSubmatch(rhs); m != nil {
-		return r.staticPath(m[1])
+	// A created component, alone or with init() on it. Anything else chained
+	// on it is a call on the instance, whose return is not the instance:
+	// `new Script().getLoose()` is no Script.
+	for _, re := range []*regexp.Regexp{createdComponent, newComponent} {
+		if m := re.FindStringSubmatch(rhs); m != nil {
+			return r.createdThenCalled(r.staticPath(m[1]), rhs, dir)
+		}
 	}
 
 	if !isCallChain(rhs) {
@@ -596,4 +597,51 @@ func (r *Resolver) startupLoopBean(a *startupAssign, assigns []startupAssign, vi
 	}
 
 	return r.BeanLookup(a.bean)
+}
+
+// createdThenCalled is what rhs, which starts by creating comp, holds: comp
+// itself, or what the calls chained on it return, each on what the one before
+// does. init() returns the instance, by the convention every CFML constructor
+// follows; `new mura.configBean().set( props )` is a configBean because set()
+// returns this, and a call returning nothing typed leaves nothing.
+func (r *Resolver) createdThenCalled(comp, rhs, dir string) string {
+	tokens := significantTokens(rhs)
+
+	open := indexKind(tokens, 0, parser.TokLParen)
+	if open < 0 || comp == "" {
+		return comp
+	}
+
+	end := producerGroupEnd(tokens, open, parser.TokLParen, parser.TokRParen)
+	if end < 0 {
+		return ""
+	}
+
+	lookup := r.FuncLookup(dir)
+
+	for i := end + 1; i < len(tokens); {
+		if i+2 >= len(tokens) || tokens[i].Kind != parser.TokDot || tokens[i+1].Kind != parser.TokIdent || tokens[i+2].Kind != parser.TokLParen {
+			return ""
+		}
+
+		method := tokens[i+1].Value
+
+		closing := producerGroupEnd(tokens, i+2, parser.TokLParen, parser.TokRParen)
+		if closing < 0 {
+			return ""
+		}
+
+		if !strings.EqualFold(method, "init") {
+			comp = lookup(comp, method)
+			if comp == "" || strings.HasPrefix(comp, "$") {
+				return ""
+			}
+
+			comp = r.staticPath(comp)
+		}
+
+		i = closing + 1
+	}
+
+	return comp
 }

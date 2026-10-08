@@ -1,0 +1,15 @@
+diff --git a/internal/config/frameworks.go b/internal/config/frameworks.go
+index 28944b4..5e1e465 100644
+--- a/internal/config/frameworks.go
++++ b/internal/config/frameworks.go
+@@ -283,6 +283,10 @@ var frameworkPresets = map[string]frameworkPreset{
+ 	"mura": {
+ 		resolvers: append([]Resolver{
+ 			variableResolver("mura.MuraScope", "$", "m", "mura", "rc.$", "rc.m"),
++			// The event every handler, renderer and display object is handed:
++			// the front end's servletEvent or a plain event, which share an API
++			// without sharing a base.
++			variableResolver("mura.servletEvent|mura.event", "event"),
+ 			{
+ 				Match:            `(?i)(?:^|\.)getValue\(\s*["']muraScope["']\s*\)$`,
+ 				Resolve:          "mura.MuraScope",

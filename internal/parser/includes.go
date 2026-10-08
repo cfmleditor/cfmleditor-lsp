@@ -183,6 +183,10 @@ func includeSiteAt(content string, i int) (IncludeSite, bool) {
 	}
 
 	p := strings.TrimSpace(content[start+from : start+to])
+	if glob, ok := computedNameGlob(p); ok {
+		p = glob
+	}
+
 	if p == "" || strings.Contains(p, "://") || !isIncludable(p) {
 		return IncludeSite{}, false
 	}
@@ -334,4 +338,31 @@ func listingIncludes(content string, listed map[string]string, comments [][2]int
 	}
 
 	return out
+}
+
+// computedNameGlob reads an include whose file name is computed and whose
+// directory is not — `#current.action#.cfm`, `layouts/#docFormat#.cfm` — as
+// every template in that directory, the glob a directory listing gives. It
+// is how a dispatcher picks a page by name: Lucee's admin web.cfm includes
+// `#url.action#.cfm`, so every page beside it runs there and calls the
+// helpers web_functions.cfm declares. The name must be one #...# span and
+// nothing else, the extension .cfm, and the directory relative and literal:
+// a mapping, a computed directory or a name with a literal part is not read.
+func computedNameGlob(p string) (string, bool) {
+	dir, name := path.Split(p)
+	if len(name) < len("#x#.cfm") || !strings.EqualFold(name[len(name)-len(".cfm"):], ".cfm") {
+		return "", false
+	}
+
+	stem := name[:len(name)-len(".cfm")]
+	if stem[0] != '#' || stem[len(stem)-1] != '#' || strings.Count(stem, "#") != 2 ||
+		strings.ContainsAny(dir, "#*\\") || strings.HasPrefix(dir, "/") {
+		return "", false
+	}
+
+	if dir == "" {
+		return "./*.cfm", true
+	}
+
+	return dir + "*.cfm", true
 }

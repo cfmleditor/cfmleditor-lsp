@@ -51,3 +51,45 @@ func TestApplicationMappingsAreEvaluated(t *testing.T) {
 		}
 	}
 }
+
+// TestAMappingBuiltByARegexReplaceIsEvaluated: ColdBox's test Application.cfc
+// strips its own directory name to find the repository root,
+// `REReplaceNoCase( this.mappings[ "/tests" ], "tests(\\|/)", "" )`, and
+// maps the test harness under it. A pattern Go cannot read, a replacement
+// with a backreference or an unknown scope is declined.
+func TestAMappingBuiltByARegexReplaceIsEvaluated(t *testing.T) {
+	app := filepath.FromSlash("/w/coldbox/tests")
+	src := `component {
+	this.mappings[ "/tests" ] = getDirectoryFromPath( getCurrentTemplatePath() );
+	rootPath = REReplaceNoCase( this.mappings[ "/tests" ], "TESTS(\\|/)", "" );
+	this.mappings[ "/cbtestharness" ] = rootPath & "test-harness";
+	this.mappings[ "/all" ] = reReplace( "a/x/x/", "x/", "y/", "all" );
+	this.mappings[ "/one" ] = reReplace( "a/x/x/", "x/", "y/" );
+	this.mappings[ "/cased" ] = reReplace( "a/X/", "x/", "" );
+	this.mappings[ "/backref" ] = reReplace( "a/x/", "(x)/", "\1" );
+	this.mappings[ "/badpattern" ] = reReplace( "a/x/", "(?<=a)x", "" );
+	this.mappings[ "/badscope" ] = reReplace( "a/x/", "x", "", "some" );
+}`
+
+	got := ParseApplicationMappings(src, app)
+
+	want := map[string]string{
+		"tests":         "/w/coldbox/tests",
+		"cbtestharness": "/w/coldbox/test-harness",
+		"all":           "/w/coldbox/tests/a/y/y",
+		"one":           "/w/coldbox/tests/a/y/x",
+		"cased":         "/w/coldbox/tests/a/X",
+	}
+
+	for key, path := range want {
+		if got[key] != filepath.FromSlash(path) {
+			t.Errorf("%s: got %q, want %q", key, got[key], path)
+		}
+	}
+
+	for _, key := range []string{"backref", "badpattern", "badscope"} {
+		if v, ok := got[key]; ok {
+			t.Errorf("%s: got %q, want it declined", key, v)
+		}
+	}
+}

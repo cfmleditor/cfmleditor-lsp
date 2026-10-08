@@ -33,6 +33,8 @@ component extends="contentbox.models.BaseEntityMethods" {
 	property name="assignedContentItems" ormtype="integer" default=0 formula="select count(*) from cb_content cbc2 WHERE cbc2.FK_contentTemplateID=templateID or cbc2.FK_childContentTemplateID=templateID";
 	property name="schema" persistent="false";
 	variables.contentTemplateService = new contentbox.models.content.ContentTemplateService();
+	variables.creator = new contentbox.models.security.Author();
+	variables.site = new contentbox.models.system.Site();
 	contentbox.models.content.ContentTemplate function init() {}
 	/**
 	 * Overload getter for definition to deal with JSON conversion

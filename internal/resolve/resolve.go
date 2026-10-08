@@ -60,36 +60,43 @@ type Resolver struct {
 	// InferArgsFiles are the files to search for the callers of a function, to
 	// type an argument from what they pass (argumentFromCallers). Nil switches
 	// it off: a batch scan sets it once its index is complete.
-	InferArgsFiles []string
-	stubFS         vfs.FS
-	mu             sync.RWMutex
-	appRootCache   map[string]string   // dir → Application.cfc root
-	slugCache      map[string]string   // dir → its box.json slug, "" for none
-	resolveCache   map[string]string   // component+"\t"+baseDir → file path
-	includeCache   map[string]string   // include path+"\t"+including directory → template
-	interfaceCache map[string]bool     // component file → whether it declares an interface
-	dirCache       *cfpath.DirCache    // directory listings behind those resolutions
-	incGraph       *includeGraph       // the index's cfincludes, rebuilt when they change
-	exprKeys       []string            // ExpressionMappings' keys in the order they apply
-	implicitCache  map[string]string   // path → ImplicitExtends(path)
-	helpers        *helperSet          // application helper templates, per set of config files
-	wb             *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
-	beanPathsCache map[string]string   // merged application/configured bean roots
-	fw1Scopes      map[string]fw1Scope // nearest application's source-defined injection scope
-	diOnce         sync.Once
-	diPolicies     []diPolicy                     // source-backed DI/1 injection contracts
-	discoveringDI  bool                           // private policy discovery never re-enters injection lookup
-	startupCache   map[string][]startupAssign     // app root → its startup templates' shared-scope assignments
-	wheelsSources  map[string]wheelsSource        // source-checked method bodies; refreshed when bytes change
-	ctlPathCache   map[string]controllerPaths     // dir → its files' writes of Wheels' controllerPath
-	includerCache  map[string]string              // template, name, depth and include generation → includerHeld's answer
-	returnCache    returnCache                    // ReturnComponentOf answers, for one index generation
-	loopCache      spanCache[loopSpan]            // file URI → every loop its current text holds (loopsOf)
-	closureCache   spanCache[closureSpan]         // file URI → every function literal its current text holds (closuresOf)
-	callerIdx      *callerIndex                   // name → files calling it, built once for argumentFromCallers
-	argCache       map[string]string              // an argument → what its callers pass (argumentFromCallers)
-	handlerCache   map[string]*parser.ParseResult // handler path → its parse (handlerParse)
-	handoffs       handoffIndex                   // handler actions by the view each renders (viewActions)
+	InferArgsFiles    []string
+	stubFS            vfs.FS
+	mu                sync.RWMutex
+	appRootCache      map[string]string   // dir → Application.cfc root
+	slugCache         map[string]string   // dir → its box.json slug, "" for none
+	resolveCache      map[string]string   // component+"\t"+baseDir → file path
+	includeCache      map[string]string   // include path+"\t"+including directory → template
+	interfaceCache    map[string]bool     // component file → whether it declares an interface
+	dirCache          *cfpath.DirCache    // directory listings behind those resolutions
+	incGraph          *includeGraph       // the index's cfincludes, rebuilt when they change
+	exprKeys          []string            // ExpressionMappings' keys in the order they apply
+	implicitCache     map[string]string   // path → ImplicitExtends(path)
+	helpers           *helperSet          // application helper templates, per set of config files
+	wb                *wireboxWorkspace   // what ModuleConfig.cfc and config/WireBox.cfc say about ids, per set of files
+	beanPathsCache    map[string]string   // merged application/configured bean roots
+	fw1Scopes         map[string]fw1Scope // nearest application's source-defined injection scope
+	diOnce            sync.Once
+	diPolicies        []diPolicy                          // source-backed DI/1 injection contracts
+	discoveringDI     bool                                // private policy discovery never re-enters injection lookup
+	startupCache      map[string][]startupAssign          // app root → its startup templates' shared-scope assignments
+	wheelsSources     map[string]wheelsSource             // source-checked method bodies; refreshed when bytes change
+	ctlPathCache      map[string]controllerPaths          // dir → its files' writes of Wheels' controllerPath
+	includerCache     map[string]string                   // template, name, depth and include generation → includerHeld's answer
+	returnCache       returnCache                         // ReturnComponentOf answers, for one index generation
+	loopCache         spanCache[loopSpan]                 // file URI → every loop its current text holds (loopsOf)
+	closureCache      spanCache[closureSpan]              // file URI → every function literal its current text holds (closuresOf)
+	callerIdx         *callerIndex                        // name → files calling it, built once for argumentFromCallers
+	argCache          map[string]string                   // an argument → what its callers pass (argumentFromCallers)
+	requestWriteCache map[string]bool                     // request.<key> and a file → no other file writes it (onlyFileWritesRequest)
+	handlerCache      map[string]*parser.ParseResult      // handler path → its parse (handlerParse)
+	wrapperHosts      map[string][]string                 // template path → Wheels wrapper hosts (wheelsTemplateHosts)
+	extraIncludeHosts map[string][]includeHost            // template path → includes the graph cannot see (frameworkIncludeHosts)
+	muraEventFiles    map[string]bool                     // file → Mura calls it with an event (handsMuraEvent)
+	lazyGetters       map[string]string                   // file and function → what its lazy getter returns (lazyGetterReturn)
+	lazyFiles         map[string]bool                     // file → it holds an isObject() guard at all
+	viewArgCache      map[string]map[string][]viewArgSite // module → view → its renders (viewArgSites)
+	handoffs          handoffIndex                        // handler actions by the view each renders (viewActions)
 }
 
 // returnCache holds ReturnComponentOf's answers. An answer reads the index and
@@ -311,6 +318,16 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 		}
 	}
 
+	// An ORM entity named by entityNew()/entityLoad(): the entity of that
+	// name, else the name read as a path, as it was before it was marked.
+	if name, ok := strings.CutPrefix(component, parser.EntityPrefix); ok {
+		if p := r.nearestEntity(name, baseDir); p != "" {
+			return p
+		}
+
+		return r.ComponentPath(name, baseDir)
+	}
+
 	// A WireBox id with its module: `Name@module`.
 	if strings.Contains(component, "@") {
 		p, _ := r.wireboxID(component, baseDir)
@@ -348,6 +365,12 @@ func (r *Resolver) componentPathUncached(component, baseDir string) string {
 	}
 
 	if root, rest := r.slugRoot(component, baseDir); root != "" {
+		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
+			return p
+		}
+	}
+
+	if root, rest := r.lucliModuleRoot(component, baseDir); root != "" {
 		if p := cfpath.ResolvePathCached(rest, root, nil, dirs); p != "" {
 			return p
 		}
@@ -492,6 +515,71 @@ func (r *Resolver) slugRoot(component, baseDir string) (root, rest string) {
 
 		dir = parent
 	}
+}
+
+// lucliModuleRoot is the directory a LuCLI module is installed from, when
+// component is `modules.<name>.rest` and a directory above baseDir holds the
+// module.json naming it: LuCLI installs a module at modules/<name>, and the
+// module addresses its own components that way. cfwheels' CLI, in cli/lucli,
+// writes `new modules.wheels.services.deploy.config.ConfigLoader()`.
+func (r *Resolver) lucliModuleRoot(component, baseDir string) (root, rest string) {
+	first, rest, ok := strings.Cut(component, ".")
+	if !ok || !strings.EqualFold(first, "modules") || r.FS == nil {
+		return "", ""
+	}
+
+	name, rest, ok := strings.Cut(rest, ".")
+	if !ok || name == "" || rest == "" {
+		return "", ""
+	}
+
+	for dir := baseDir; ; {
+		if module := r.lucliModuleName(dir); module != "" && strings.EqualFold(module, name) {
+			return dir, rest
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ""
+		}
+
+		dir = parent
+	}
+}
+
+// lucliModuleName is the name dir's module.json gives a LuCLI module, "" when
+// it has none or names no main component. It shares boxSlug's cache.
+func (r *Resolver) lucliModuleName(dir string) string {
+	key := "module.json\x00" + dir
+
+	r.mu.RLock()
+	name, ok := r.slugCache[key]
+	r.mu.RUnlock()
+
+	if ok {
+		return name
+	}
+
+	if data, err := r.fs().ReadFile(filepath.Join(dir, "module.json")); err == nil {
+		var module struct {
+			Name string `json:"name"`
+			Main string `json:"main"`
+		}
+
+		if json.Unmarshal(data, &module) == nil && strings.TrimSpace(module.Main) != "" {
+			name = strings.TrimSpace(module.Name)
+		}
+	}
+
+	r.mu.Lock()
+	if r.slugCache == nil {
+		r.slugCache = make(map[string]string)
+	}
+
+	r.slugCache[key] = name
+	r.mu.Unlock()
+
+	return name
 }
 
 // boxSlug is the slug of dir's box.json, "" when it has none; remembered per
@@ -978,6 +1066,26 @@ func (r *Resolver) declaredExtendsOf(cfcPath string, cfcURI uri.URI) (string, bo
 	return ext, true
 }
 
+// nearestEntity is the file an ORM entity name names from baseDir: the one
+// whose entityname it is, else the persistent component called after it
+// nearest baseDir, the lowest path among equals.
+func (r *Resolver) nearestEntity(name, baseDir string) string {
+	if r.Index == nil {
+		return ""
+	}
+
+	from := string(cfpath.ToURI(filepath.Join(baseDir, "x.cfc")))
+	best, bestDist := "", -1
+
+	for _, u := range r.Index.EntityCandidates(name) {
+		if d := cfpath.URIDistance(from, string(u)); bestDist < 0 || d < bestDist {
+			best, bestDist = cfpath.FromURI(string(u)), d
+		}
+	}
+
+	return best
+}
+
 // ResolveFunc finds a function definition by component path and function name,
 // handling pipe-separated alternatives, absolute paths, and the extends chain.
 func (r *Resolver) ResolveFunc(component, funcName, baseDir string) *parser.FunctionDef {
@@ -1303,12 +1411,22 @@ func (r *Resolver) canResolveCall(call *parser.CallSite, pr *parser.ParseResult,
 		comp = r.viewPrc(variable, funcName, pr, tr)
 	}
 
+	if comp == "" {
+		comp = r.fw1ViewRc(variable, funcName, pr, tr)
+	}
+
 	// Last, an untyped argument is what every caller passes it, when the scan
 	// was given the files to look through. After every other answer, so an
 	// inference never turns a call something else accepted into a finding.
 	if comp == "" {
 		if comp = r.argumentFromCallers(variable, call.Caller, pr, lookupCtx{}); comp != "" {
 			tr.addf("resolved %q to %q: what every caller of %s passes it", variable, comp, call.Caller)
+		}
+	}
+
+	if comp == "" {
+		if comp = r.initArgMember(variable, pr, lookupCtx{}); comp != "" {
+			tr.addf("resolved %q to %q: init stores its argument there, and every construction passes it that", variable, comp)
 		}
 	}
 
@@ -1417,27 +1535,57 @@ func (r *Resolver) walkHops(comp, softComp string, call *parser.CallSite, pr *pa
 		}
 
 		if ret == "" {
-			// What an untyped hop returns is a mock when the next call on it
-			// is one MockBox adds: `c.getRequestService().$( "getContext", x )`.
-			next := funcName
-			if i+1 < len(call.Chain) {
-				next = parser.CallHopName(call.Chain[i+1])
+			next, reason, done := r.untypedHop(fd, comp, hop, call, i, tr)
+			if done {
+				return comp, softComp, reason, true
 			}
 
-			if mockDecoration(next) {
-				tr.addf("chain hop %q declares no component, and %q is called on what it returns — a mock, so the rest of the chain is dynamic", hop, next)
-				tr.hit(TargetDynamic, "", nil)
-
-				return comp, softComp, "", true
-			}
-
-			return comp, softComp, "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
+			ret = next
 		}
 
 		comp = ret
 	}
 
 	return comp, softComp, "", false
+}
+
+// untypedHop decides a chain hop whose function declares no component: what
+// it returns when something else says (next), or the call's answer (done).
+func (r *Resolver) untypedHop(fd *parser.FunctionDef, comp, hop string, call *parser.CallSite, i int, tr *callTrace) (next, reason string, done bool) {
+	funcName := call.FuncName
+
+	// What an untyped hop returns is a mock when the next call on it is one
+	// MockBox adds: `c.getRequestService().$( "getContext", x )`.
+	after := funcName
+	if i+1 < len(call.Chain) {
+		after = parser.CallHopName(call.Chain[i+1])
+	}
+
+	if mockDecoration(after) {
+		tr.addf("chain hop %q declares no component, and %q is called on what it returns — a mock, so the rest of the chain is dynamic", hop, after)
+		tr.hit(TargetDynamic, "", nil)
+
+		return "", "", true
+	}
+
+	if reason, done := r.closureStructHops(fd, comp, hop, call, i, tr); done {
+		return "", reason, true
+	}
+
+	if ret := r.initArgGetter(fd); ret != "" {
+		tr.addf("chain hop %q returns the property init stores from its argument, which every construction passes as %q", hop, ret)
+
+		return ret, "", false
+	}
+
+	if r.engineValueReturn(fd) {
+		tr.addf("chain hop %q returns what a built-in function hands back — the rest of the chain is dynamic", hop)
+		tr.hit(TargetDynamic, "", nil)
+
+		return "", "", true
+	}
+
+	return "", "method '" + hop + "' in " + displayComponent(comp) + " has no component return type (chain to '" + funcName + "')", true
 }
 
 // propertyHop is walkHops for a property hop: what the property holds, from
@@ -1722,6 +1870,20 @@ func (r *Resolver) resolveBareCall(call *parser.CallSite, pr *parser.ParseResult
 		return ""
 	}
 
+	if def := r.wheelsMixinHostFunc(pr, funcName); def != nil {
+		tr.hit(TargetExtends, "", def)
+		tr.addf("found %q on Wheels' Controller, which this component's methods are copied into", funcName)
+
+		return ""
+	}
+
+	if def := r.wheelsWrappedTemplateFunc(pr, funcName); def != nil {
+		tr.hit(TargetInclude, "", def)
+		tr.addf("found %q on the component that includes this template through a Wheels include wrapper", funcName)
+
+		return ""
+	}
+
 	// CFML looks a bare name up in the variables scope, so a bare call to
 	// one the file assigns there — VARIABLES.render = ARGUMENTS.render —
 	// is a call through that function-reference property, the same as the
@@ -1854,6 +2016,24 @@ func (r *Resolver) resolveBareChain(call *parser.CallSite, pr *parser.ParseResul
 	}
 
 	if ret == "" {
+		if reason, done := r.closureStructHops(def, pr.URI.Path(), first, call, 0, tr); done {
+			return reason
+		}
+
+		ret = r.initArgGetter(def)
+		if ret != "" {
+			tr.addf("%q returns the property init stores from its argument, which every construction passes as %q", first, ret)
+		}
+	}
+
+	if ret == "" {
+		if r.engineValueReturn(def) {
+			tr.addf("%q returns what a built-in function hands back — the rest of the chain is dynamic", first)
+			tr.hit(TargetDynamic, "", nil)
+
+			return ""
+		}
+
 		return "method '" + first + "' has no component return type (chain to '" + call.FuncName + "')"
 	}
 
@@ -1884,9 +2064,15 @@ func (r *Resolver) bareFunc(name string, pr *parser.ParseResult, baseDir string)
 		return def
 	}
 
-	def, _ := r.findThroughIncludes(pr, name)
+	if def, _ := r.findThroughIncludes(pr, name); def != nil {
+		return def
+	}
 
-	return def
+	if def := r.wheelsMixinHostFunc(pr, name); def != nil {
+		return def
+	}
+
+	return r.wheelsWrappedTemplateFunc(pr, name)
 }
 
 // resolveThisCall is canResolveCall for `this.name()`.
@@ -2321,6 +2507,10 @@ func (r *Resolver) returnComponentOf(fd *parser.FunctionDef, depth int, budget *
 			return ret
 		}
 
+		if ret := r.lazyGetterReturn(fd); ret != "" {
+			return ret
+		}
+
 		method := r.producerFor(fd)
 
 		// A value the function adds members to before returning it is not
@@ -2684,6 +2874,15 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		}
 	}
 
+	return r.missingMethod(comp, softComp, call, pr, baseDir, tr)
+}
+
+// missingMethod is checkMethodOn's answer once comp is known not to declare
+// funcName: a component that is not there, a base that is not, or a method
+// the code checks for or that comp lacks.
+func (r *Resolver) missingMethod(comp, softComp string, call *parser.CallSite, pr *parser.ParseResult, baseDir string, tr *callTrace) string {
+	funcName, variable := call.FuncName, call.Variable
+
 	// A component that names no file is a different finding from a method a
 	// real component lacks, and reporting it as the second hid it. It is
 	// almost always a componentResolver producing a path — a broad get$1()
@@ -2733,6 +2932,24 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 		return MissingBaseReason(base)
 	}
 
+	// Nor one a type check before the call says the object has.
+	for _, c := range guardedInstanceOf(pr, variable, funcName, int(call.Line)) {
+		if def := r.ResolveFunc(c, funcName, baseDir); def != nil {
+			tr.addf("%q is called only after the code checks %q is a %q, which declares it", funcName, variable, c)
+			tr.hit(TargetComponent, c, def)
+
+			return ""
+		}
+	}
+
+	// Nor a method the code checks for before calling it.
+	if guardedByExistsCheck(pr, variable, funcName, int(call.Line)) {
+		tr.addf("%q is called only after the code checks %q has it — accepted as dynamic", funcName, variable)
+		tr.hit(TargetDynamic, comp, nil)
+
+		return ""
+	}
+
 	return "method '" + funcName + "' not found in " + displayComponent(comp)
 }
 
@@ -2741,6 +2958,8 @@ func (r *Resolver) checkMethodOn(comp, softComp string, call *parser.CallSite, p
 // a reason is written into a known-issues file that is committed and read on
 // other machines, where an absolute path would not mean anything.
 func displayComponent(comp string) string {
+	comp = strings.TrimPrefix(comp, parser.EntityPrefix)
+
 	if filepath.IsAbs(comp) {
 		return strings.TrimSuffix(filepath.Base(comp), filepath.Ext(comp))
 	}
@@ -2846,16 +3065,7 @@ func (r *Resolver) inferredReceiver(variable string, line uint32, caller, funcNa
 // `y = z.g()`, and the subclass a handoff reads on behalf of.
 func (r *Resolver) receiverComponentD(variable string, line uint32, caller, funcName string, pr *parser.ParseResult, baseDir string, tr *callTrace, ctx lookupCtx) (comp string, member bool) {
 	if name, scope, record := parser.MemberReceiverName(variable); record {
-		comp := r.recordReceiver(variable, name, scope, line, caller, pr)
-		if comp == "" {
-			comp = r.builderMember(variable, line, caller, funcName, pr, baseDir, tr)
-		}
-
-		if comp == "" {
-			comp = r.assignedFromCall(variable, line, caller, pr, baseDir, tr, ctx)
-		}
-
-		return comp, false
+		return r.memberReceiver(variable, name, scope, line, caller, funcName, pr, baseDir, tr, ctx), false
 	}
 	// Strip scope prefix for matching (VARIABLES.x -> x). Bracket-aware: a "."
 	// inside a "[...]" subscript (e.g. "linkMap[arguments.startSource]") is not a
@@ -2871,6 +3081,13 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 		comp = ref.Component
 
 		tr.addf("resolved %q to %q via function-scoped ComponentRef", variable, comp)
+	}
+
+	// Mura's event, in the code Mura hands one to.
+	if ev := r.muraEvent(variable, comp, line, caller, pr); ev != "" {
+		tr.addf("resolved %q to %q: Mura calls this file with its event", variable, ev)
+
+		return ev, false
 	}
 
 	// An argument shadows a same-named component field. In particular, an
@@ -2952,17 +3169,8 @@ func (r *Resolver) receiverComponentD(variable string, line uint32, caller, func
 		}
 	}
 
-	// Fall back to extends chain component refs (e.g. variables.$assert assigned in a parent)
-	if comp == "" && r.fileExtends(pr) != "" {
-		tr.addf("no ref found in this file — checking extends chain (%s) for a ComponentRef", r.fileExtends(pr))
-
-		r.walkExtendsRefs(r.fileExtends(pr), baseDir, lookupVar, func(ref *parser.ComponentRef, parent string) bool {
-			comp = ref.Component
-
-			tr.addf("resolved %q to %q via ComponentRef in parent %s", variable, comp, parent)
-
-			return comp != ""
-		})
+	if comp == "" {
+		comp = r.inheritedReceiver(variable, lookupVar, pr, baseDir, tr)
 	}
 
 	if comp == "" {
@@ -3167,13 +3375,16 @@ func (r *Resolver) walkExtendsRefs(extends, baseDir, name string, visit func(ref
 			}
 		}
 
-		// Walk up the extends chain
-		data, err := r.fs().ReadFile(cfcPath)
-		if err != nil {
+		// Walk up the extends chain. The parent was just indexed, so its
+		// extends is read from the index: a full parse of each parent on
+		// every lookup was 43% of a Masa CMS scan once its display objects
+		// walked through contentRenderer.cfc.
+		next, ok := r.extendsOf(cfcPath, parentURI)
+		if !ok {
 			return
 		}
 
-		extends = r.extendsFor(parser.Parse(parentURI, string(data)).Extends, cfcPath)
+		extends = next
 	}
 }
 

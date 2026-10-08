@@ -194,3 +194,140 @@ func TestACallerPlacedByTheParseIsACaller(t *testing.T) {
 		t.Errorf("a placed caller passing an untyped value was ignored: %q", got["arguments.thing.ready"])
 	}
 }
+
+// TestADollarNamedFunctionsCallersAreFound: Wheels names its internals with a
+// leading $, and the caller index read `$build(` as a call to build, so such a
+// function's untyped argument was never typed by what its callers pass.
+func TestADollarNamedFunctionsCallersAreFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Item.cfc": `component { function go(){} }`,
+		"Svc.cfc": `component {
+function $use( required thing ){ arguments.thing.go(); arguments.thing.nope(); }
+function callers(){ $use( new Item() ); }
+}`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Svc.cfc"), map[string]string{
+		"arguments.thing.go":   "",
+		"arguments.thing.nope": "method 'nope' not found in Item",
+		"$use":                 "",
+	})
+}
+
+// TestACallOnWhatCannotBeTheComponentIsNotACaller: Mura's settingsDAO.update(bean)
+// shares its name with MessageDigest's md.update() and with a plugin's
+// pluginCFC.update(), and neither receiver could be typed, so the DAO's
+// argument was never inferred. A Java object is never a component, and a
+// component built from a computed path ending in a literal file name is that
+// file — unless a file of that name extends the declaring component.
+func TestACallOnWhatCannotBeTheComponentIsNotACaller(t *testing.T) {
+	files := map[string]string{
+		"Item.cfc": `component { function go(){} }`,
+		"DAO.cfc":  `component { function update( required bean ){ arguments.bean.go(); } }`,
+		"Mgr.cfc": `component {
+function save(){ var d = new DAO(); d.update( new Item() ); }
+function sha(){
+	var md = createObject("java", "java.security.MessageDigest").getInstance("SHA-1");
+	md.update( 1 );
+}
+function plugins( dir ){
+	var p = createObject("component", "plugins.#dir#.plugin");
+	p.update( 1 );
+}
+}`,
+	}
+
+	dir := t.TempDir()
+	writeFiles(t, dir, files)
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "DAO.cfc"), map[string]string{
+		"arguments.bean.go": "",
+	})
+
+	// A plugin.cfc that extends the DAO could be the receiver.
+	files["plugins/x/plugin.cfc"] = `component extends="DAO" {}`
+
+	dir = t.TempDir()
+	writeFiles(t, dir, files)
+
+	if got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "DAO.cfc")["arguments.bean.go"]; got == "" {
+		t.Errorf("typed although a plugin.cfc extending the DAO may be the receiver")
+	}
+}
+
+// TestAnArgumentPassedAsThisIsTheCallersComponent: Mura's contentRenderer
+// hands itself to its utility, `utility.f( this )`, and the utility's
+// `arguments.renderer` was untyped. `this` is the calling component, or a
+// component extending it, as a theme's renderer does.
+func TestAnArgumentPassedAsThisIsTheCallersComponent(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Renderer.cfc":      `component { function own(){} function go(){ new Utility().f( this ); } }`,
+		"ThemeRenderer.cfc": `component extends="Renderer" { function themed(){} }`,
+		"Utility.cfc":       `component { function f( required renderer ){ arguments.renderer.own(); arguments.renderer.themed(); arguments.renderer.nope(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Utility.cfc"), map[string]string{
+		"arguments.renderer.own":    "",
+		"arguments.renderer.themed": "",
+	})
+
+	if got := reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Utility.cfc")["arguments.renderer.nope"]; !strings.Contains(got, "not found") {
+		t.Errorf("arguments.renderer.nope: %q, want a method not found", got)
+	}
+}
+
+// TestACallerTypedByAResolverIsPlaced: Mura's admin pages call
+// `$.dspObjects( … )`, and `$` is a MuraScope only by the mura preset's
+// resolver on the variable name. The MuraScope has no dspObjects of its own —
+// its onMissingMethod hands the call to the renderer — so the page does not
+// call the utility's dspObjects, whose renderer argument is then what its one
+// real caller passes. Placing the receiver by the receiver lookup alone left
+// the page's call unplaceable, and the argument untyped.
+func TestACallerTypedByAResolverIsPlaced(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"mura/MuraScope.cfc": `component { function onMissingMethod( name, args ) {} }`,
+		"mura/Renderer.cfc": `component {
+	variables.util = new Util();
+	function dspObjects( columnid ) {
+		arguments.renderer = this;
+		return variables.util.dspObjects( argumentCollection = arguments );
+	}
+	function own() {}
+}`,
+		"mura/Util.cfc": `component {
+	function dspObjects( renderer ) { arguments.renderer.own(); }
+}`,
+		"admin/page.cfm": `<cfoutput>#$.dspObjects( columnid = 1 )#</cfoutput>`,
+	})
+
+	r := &Resolver{
+		InferArgsFiles: cfmlFilesIn(t, dir),
+		Resolvers:      []parser.Resolver{{Match: "$", Resolve: "mura.MuraScope", Prefix: "$"}},
+	}
+
+	expectReasons(t, reasonsWith(t, r, dir, "mura/Util.cfc"), map[string]string{
+		"arguments.renderer.own": "",
+	})
+}
+
+// TestADeclarationIsNotTheCallOnItsLine: `function dspObjects() {
+// variables.util.dspObjects( renderer = this ); }` written on one line holds
+// the function's name twice, and reading the first as the call found no
+// argument there, so the caller passed nothing.
+func TestADeclarationIsNotTheCallOnItsLine(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Renderer.cfc": `component {
+	variables.util = new Util();
+	function dspObjects() { variables.util.dspObjects( renderer = this ); }
+	function own() {}
+}`,
+		"Util.cfc": `component { function dspObjects( renderer ) { arguments.renderer.own(); } }`,
+	})
+
+	expectReasons(t, reasonsWith(t, &Resolver{InferArgsFiles: cfmlFilesIn(t, dir)}, dir, "Util.cfc"), map[string]string{
+		"arguments.renderer.own": "",
+	})
+}

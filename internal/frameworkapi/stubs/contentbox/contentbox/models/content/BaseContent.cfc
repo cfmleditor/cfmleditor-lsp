@@ -93,6 +93,11 @@ component extends="contentbox.models.BaseEntityMethods" {
 	variables.settingService = new contentbox.models.system.SettingService();
 	variables.mediaService = new contentbox.models.media.MediaService();
 	variables.statsService = new contentbox.models.content.StatsService();
+	variables.creator = new contentbox.models.security.Author();
+	variables.site = new contentbox.models.system.Site();
+	variables.parent = new contentbox.models.content.BaseContent();
+	variables.contentTemplate = new contentbox.models.content.ContentTemplate();
+	variables.childContentTemplate = new contentbox.models.content.ContentTemplate();
 	/**
 	 * Base constructor
 	 */
