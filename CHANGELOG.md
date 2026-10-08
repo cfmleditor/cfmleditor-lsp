@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.1]
+
 ### Added
 
 - **`clif cflint` speaks CFLint's formats.** `--format text` is CFLint's `-text` report, `Total issues:N` line included. `--format json` is its `-json` report, each issue as CFLint wrote it. `--format sarif` is SARIF 2.1.0 with CFLint's codes as rule ids. `--out` writes any of them to a file.
