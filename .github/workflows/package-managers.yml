@@ -1,16 +1,24 @@
 name: Package managers
 
-# Publishes a release to Homebrew (the cfmleditor/homebrew-tap formula) and
-# Chocolatey. The release workflow calls it once a release is published; it
-# can also be run by hand for an existing release, and runs on a pull request
-# that touches packaging/, against the latest release, without publishing, so
-# a change to the formula or the package is tried before it ships.
+# Publishes a release to Homebrew (the cfmleditor/homebrew-tap formula),
+# Chocolatey, Scoop (the cfmleditor/scoop-bucket manifest) and winget (a pull
+# request to microsoft/winget-pkgs). The release workflow calls it once a
+# release is published; it can also be run by hand for an existing release,
+# and runs on a pull request that touches packaging/, against the latest
+# release, without publishing, so a change to any of them is tried before it
+# ships.
 #
-# Publishing needs two repository secrets. Without one, that half builds and
-# checks its package and says it did not publish:
+# Publishing needs repository secrets. Without one, that job still builds and
+# checks what it would publish, and says it did not publish:
 #   HOMEBREW_TAP_TOKEN   a token that can push to cfmleditor/homebrew-tap
+#   SCOOP_BUCKET_TOKEN   a token that can push to cfmleditor/scoop-bucket;
+#                        HOMEBREW_TAP_TOKEN is used when it is unset, so one
+#                        token granted both repositories serves both
 #   CHOCOLATEY_API_KEY   the API key of the community.chocolatey.org account
 #                        that owns the clif package
+#   WINGET_TOKEN         a classic token with the public_repo scope, of the
+#                        account whose fork of microsoft/winget-pkgs the pull
+#                        request comes from
 
 on:
   workflow_call:
@@ -184,3 +192,124 @@ jobs:
           }
           choco push "dist/clif.$env:version.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
           if ($LASTEXITCODE -ne 0) { throw "choco push failed: $LASTEXITCODE" }
+
+  scoop:
+    name: Scoop
+    needs: tag
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Write the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-windows-amd64.zip' --pattern checksums.txt --dir dist
+          hash="$(cd dist && sha256sum clif-windows-amd64.zip | cut -d' ' -f1)"
+          want="$(awk '$2 == "clif-windows-amd64.zip" { print $1 }' dist/checksums.txt)"
+          if [ "${want}" != "${hash}" ]; then
+            echo "::error::clif-windows-amd64.zip is ${hash}, checksums.txt says ${want}"
+            exit 1
+          fi
+
+          # The bucket's manifest is the template: only the version, the URLs
+          # and the hash change.
+          curl -fsSL https://raw.githubusercontent.com/cfmleditor/scoop-bucket/main/bucket/clif.json -o current.json
+          python3 packaging/scoop/update_manifest.py current.json "${TAG}" "${hash}" > clif.json
+          cat clif.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scoop-manifest
+          path: clif.json
+          retention-days: 7
+
+      - name: Push it to the bucket
+        if: needs.tag.outputs.publish == 'true'
+        env:
+          BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BUCKET_TOKEN}" ]; then
+            echo "::warning::Neither SCOOP_BUCKET_TOKEN nor HOMEBREW_TAP_TOKEN is set, so the manifest was not pushed; the bucket's own updater picks the release up within six hours"
+            exit 0
+          fi
+
+          git clone -q "https://x-access-token:${BUCKET_TOKEN}@github.com/cfmleditor/scoop-bucket.git" bucket
+          cp clif.json bucket/bucket/clif.json
+          cd bucket
+          if git diff --quiet; then
+            echo "The bucket already has this release."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/clif.json
+          git commit -q -m "clif ${TAG#v}"
+          git push -q
+
+  winget:
+    name: winget
+    needs: tag
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+      # Komac writes the update from the package's previous manifest and
+      # submits it. Pinned, and checked against its SHA256SUMS.
+      KOMAC_VERSION: "2.16.0"
+    steps:
+      - name: Install komac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          gh release download "v${KOMAC_VERSION}" --repo russellbanks/Komac --pattern "${asset}" --pattern SHA256SUMS --dir komac
+          # SHA256SUMS names each file with sha256sum's binary marker, *name.
+          (cd komac && awk -v f="${asset}" '{ n = $2; sub(/^\*/, "", n) } n == f' SHA256SUMS | sha256sum -c -)
+          tar -xzf "komac/${asset}" -C komac
+          echo "${PWD}/komac" >> "$GITHUB_PATH"
+
+      - name: Update cfmleditor.clif
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          PUBLISH: ${{ needs.tag.outputs.publish }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          manifests=repos/microsoft/winget-pkgs/contents/manifests/c/cfmleditor/clif
+
+          # Komac updates a package from its previous manifest, so the first
+          # version is a pull request of its own, reviewed before any update.
+          if ! gh api "${manifests}" >/dev/null 2>&1; then
+            echo "::warning::cfmleditor.clif is not in winget-pkgs yet (its first version is in review), so there is nothing to update"
+            exit 0
+          fi
+
+          if gh api "${manifests}/${version}" >/dev/null 2>&1; then
+            echo "winget-pkgs already has cfmleditor.clif ${version}."
+            exit 0
+          fi
+
+          args=(update cfmleditor.clif
+            --version "${version}"
+            --urls "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clif-windows-amd64.zip"
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}")
+
+          if [ "${PUBLISH}" != "true" ]; then
+            komac "${args[@]}" --dry-run --token "${GH_TOKEN}"
+            exit 0
+          fi
+
+          if [ -z "${WINGET_TOKEN}" ]; then
+            echo "::warning::WINGET_TOKEN is not set, so no winget pull request was opened"
+            komac "${args[@]}" --dry-run --token "${GH_TOKEN}"
+            exit 0
+          fi
+
+          komac "${args[@]}" --submit --token "${WINGET_TOKEN}"
