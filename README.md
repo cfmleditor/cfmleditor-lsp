@@ -1044,13 +1044,42 @@ entries; the unresolved report still scans every workspace folder. `--out <file>
 anywhere above the linted directories, with paths relative to it:
 `clif cflint --out myapp/.clif-cflint.txt myapp`.
 
-`clif cflint` exits 0 when it found nothing, 1 when it printed findings, and 2
-when the run can't be trusted: a path that doesn't exist, CFLint unavailable
-or failing, a usage error, or a `.cflintrc` CFLint can't parse. CFLint itself
-says nothing about the last one and lints with its default rules instead, so
-clif parses every `.cflintrc` CFLint would read first. A run that writes a
-report (`--write`, `--out`) exits 0 whatever it found. `clif --version` prints
-the version and exits, like `clif version`.
+`clif cflint` is also a front end for CFLint that a git hook, CI or a script
+can call directly, with no Java:
+
+```sh
+clif cflint --staged --strict --format text            # pre-commit: the staged content, every level fails
+clif cflint --changed origin/main --format sarif --out cflint.sarif   # CI: what the branch changed
+clif cflint --format json src/                         # CFLint's own -json schema
+```
+
+- **What is linted.** Paths are files or directories. `--staged` lints each
+  staged `.cfm`/`.cfc` file *as staged*: the index content, through CFLint's
+  `-stdin`, so an unstaged edit neither hides nor adds a finding.
+  `--changed <ref>` lints the files `git diff <ref>...HEAD` lists. With no
+  paths, both take the whole repository.
+- **Formats.** `report` is the known-issues report above, and the default.
+  `text` is CFLint's `-text` report, ending in its `Total issues:N` line.
+  `json` is CFLint's `-json` report: each issue exactly as CFLint wrote it,
+  under `issues`, with `counts` recomputed over the whole run. `sarif` is
+  SARIF 2.1.0 with CFLint's codes as rule ids, for CI servers and code-quality
+  tools. `--out <file>` writes any of them to a file.
+- **Severity.** `--min-severity <level>` reports, and fails on, CFLint levels
+  at or above it, overriding `linting.minSeverity`. `--strict` reports and
+  fails on every level.
+- **Configuration.** `.cflintrc` files and `@CFLintIgnore` comments are
+  CFLint's own, and apply exactly as they do when CFLint is run directly.
+  CFLint says nothing about a `.cflintrc` it can't parse and lints with its
+  default rules instead, so clif parses every `.cflintrc` CFLint would read
+  first and stops the run if one is broken.
+
+Exit status: 0 when there is nothing to report, 1 when there are findings,
+and 2 when the run can't be trusted: a path that doesn't exist, a broken
+`.cflintrc`, CFLint unavailable or failing, not a git repository for
+`--staged`/`--changed`, or a usage error. A known-issues report written with
+`--write` or `--out` exits 0 whatever it holds, as a regeneration. `-q` drops
+the progress on stderr. `clif --version` prints the version and exits, like
+`clif version`.
 
 A `cflint` report's entries are labelled `cflint` and carry the rule ID, as
 CFLint's own diagnostics do. They give way file by file to CFLint on save: once

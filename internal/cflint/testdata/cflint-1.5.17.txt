@@ -1,0 +1,78 @@
+Issue
+Severity:WARNING
+Message code:CFQUERYPARAM_REQ
+	File:/fixture/root.cfm
+	Column:14
+	Line:10
+		Message:<cfquery> should use <cfqueryparam/> for variable 'url.id'.
+		Variable:'url.id' in function: 
+		Expression:<cfquery name="q" datasource="ds">
+  SELECT *
+  FROM #tablePrefix#people
+  WHERE id = #url.id#
+    AND name = '#url.name#'
+</cfquery>
+
+Severity:WARNING
+Message code:CFQUERYPARAM_REQ
+	File:/fixture/root.cfm
+	Column:17
+	Line:11
+		Message:<cfquery> should use <cfqueryparam/> for variable 'url.name'.
+		Variable:'url.name' in function: 
+		Expression:<cfquery name="q" datasource="ds">
+  SELECT *
+  FROM #tablePrefix#people
+  WHERE id = #url.id#
+    AND name = '#url.name#'
+</cfquery>
+Issue
+Severity:WARNING
+Message code:AVOID_USING_CFFILE_TAG
+	File:/fixture/root.cfm
+	Column:1
+	Line:1
+		Message:Avoid using <cffile> tags. Use abstraction functions instead.
+		Variable:'cffile' in function: 
+		Expression:<cffile action="read" file="x" variable="y">
+Issue
+Severity:WARNING
+Message code:AVOID_USING_CFDUMP_TAG
+	File:/fixture/root.cfm
+	Column:1
+	Line:4
+		Message:Avoid leaving <cfdump> tags in committed code. Debug information should be omitted from release code
+		Variable:'cfdump' in function: 
+		Expression:<cfdump var="#y#">
+Issue
+Severity:ERROR
+Message code:MISSING_VAR
+	File:/fixture/a.cfc
+	Column:20
+	Line:2
+		Message:Variable total is not declared with a var statement.
+		Variable:'total' in function: one
+		Expression:total
+
+Severity:ERROR
+Message code:MISSING_VAR
+	File:/fixture/a.cfc
+	Column:20
+	Line:3
+		Message:Variable total is not declared with a var statement.
+		Variable:'total' in function: two
+		Expression:total
+
+
+Total files:2
+Total lines:18
+
+Issue counts:4
+CFQUERYPARAM_REQ:2
+AVOID_USING_CFFILE_TAG:1
+AVOID_USING_CFDUMP_TAG:1
+MISSING_VAR:2
+
+Total issues:6
+Total errors:2
+Total warnings:4

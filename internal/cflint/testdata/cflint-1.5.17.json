@@ -1,0 +1,131 @@
+{
+  "version" : "1.5.17",
+  "timestamp" : 1791459130,
+  "issues" : [ {
+    "severity" : "WARNING",
+    "id" : "AVOID_USING_CFDUMP_TAG",
+    "message" : "AVOID_USING_CFDUMP_TAG",
+    "category" : "CFLINT",
+    "abbrev" : "AU",
+    "locations" : [ {
+      "file" : "/fixture/root.cfm",
+      "fileName" : "root.cfm",
+      "function" : "",
+      "offset" : 140,
+      "column" : 1,
+      "line" : 4,
+      "message" : "Avoid leaving <cfdump> tags in committed code. Debug information should be omitted from release code",
+      "variable" : "cfdump",
+      "expression" : "<cfdump var=\"#y#\">"
+    } ]
+  }, {
+    "severity" : "WARNING",
+    "id" : "AVOID_USING_CFFILE_TAG",
+    "message" : "AVOID_USING_CFFILE_TAG",
+    "category" : "CFLINT",
+    "abbrev" : "AU",
+    "locations" : [ {
+      "file" : "/fixture/root.cfm",
+      "fileName" : "root.cfm",
+      "function" : "",
+      "offset" : 0,
+      "column" : 1,
+      "line" : 1,
+      "message" : "Avoid using <cffile> tags. Use abstraction functions instead.",
+      "variable" : "cffile",
+      "expression" : "<cffile action=\"read\" file=\"x\" variable=\"y\">"
+    } ]
+  }, {
+    "severity" : "WARNING",
+    "id" : "CFQUERYPARAM_REQ",
+    "message" : "CFQUERYPARAM_REQ",
+    "category" : "CFLINT",
+    "abbrev" : "CR",
+    "locations" : [ {
+      "file" : "/fixture/root.cfm",
+      "fileName" : "root.cfm",
+      "function" : "",
+      "offset" : 337,
+      "column" : 14,
+      "line" : 10,
+      "message" : "<cfquery> should use <cfqueryparam/> for variable 'url.id'.",
+      "variable" : "url.id",
+      "expression" : "<cfquery name=\"q\" datasource=\"ds\">\n  SELECT *\n  FROM #tablePrefix#people\n  WHERE id = #url.id#\n    AND name = '#url.name#'\n</cfquery>"
+    } ]
+  }, {
+    "severity" : "WARNING",
+    "id" : "CFQUERYPARAM_REQ",
+    "message" : "CFQUERYPARAM_REQ",
+    "category" : "CFLINT",
+    "abbrev" : "CR",
+    "locations" : [ {
+      "file" : "/fixture/root.cfm",
+      "fileName" : "root.cfm",
+      "function" : "",
+      "offset" : 362,
+      "column" : 17,
+      "line" : 11,
+      "message" : "<cfquery> should use <cfqueryparam/> for variable 'url.name'.",
+      "variable" : "url.name",
+      "expression" : "<cfquery name=\"q\" datasource=\"ds\">\n  SELECT *\n  FROM #tablePrefix#people\n  WHERE id = #url.id#\n    AND name = '#url.name#'\n</cfquery>"
+    } ]
+  }, {
+    "severity" : "ERROR",
+    "id" : "MISSING_VAR",
+    "message" : "MISSING_VAR",
+    "category" : "CFLINT",
+    "abbrev" : "MV",
+    "locations" : [ {
+      "file" : "/fixture/a.cfc",
+      "fileName" : "a.cfc",
+      "function" : "one",
+      "offset" : 31,
+      "column" : 20,
+      "line" : 2,
+      "message" : "Variable total is not declared with a var statement.",
+      "variable" : "total",
+      "expression" : "total"
+    } ]
+  }, {
+    "severity" : "ERROR",
+    "id" : "MISSING_VAR",
+    "message" : "MISSING_VAR",
+    "category" : "CFLINT",
+    "abbrev" : "MV",
+    "locations" : [ {
+      "file" : "/fixture/a.cfc",
+      "fileName" : "a.cfc",
+      "function" : "two",
+      "offset" : 77,
+      "column" : 20,
+      "line" : 3,
+      "message" : "Variable total is not declared with a var statement.",
+      "variable" : "total",
+      "expression" : "total"
+    } ]
+  } ],
+  "counts" : {
+    "totalFiles" : 2,
+    "totalLines" : 18,
+    "countByCode" : [ {
+      "code" : "CFQUERYPARAM_REQ",
+      "count" : 2
+    }, {
+      "code" : "AVOID_USING_CFFILE_TAG",
+      "count" : 1
+    }, {
+      "code" : "AVOID_USING_CFDUMP_TAG",
+      "count" : 1
+    }, {
+      "code" : "MISSING_VAR",
+      "count" : 2
+    } ],
+    "countBySeverity" : [ {
+      "severity" : "ERROR",
+      "count" : 2
+    }, {
+      "severity" : "WARNING",
+      "count" : 4
+    } ]
+  }
+}
