@@ -255,11 +255,21 @@ jobs:
             exit 1
           fi
 
+      # scripts/install.sh and install.ps1 check an archive against this, so
+      # a pinned install gets exactly the bytes the release published.
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum clif-* cfmleditor-lsp-* > checksums.txt
+          cat checksums.txt
+
       - uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/clif-*
             dist/cfmleditor-lsp-*
+            dist/checksums.txt
           fail_on_unmatched_files: true
           # Semver prerelease convention: v1.2.3-rc1 is flagged a prerelease
           # and never becomes "Latest"; a plain v1.2.3 does.

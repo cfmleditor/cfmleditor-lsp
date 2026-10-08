@@ -158,6 +158,99 @@ Use `>>` (or `Out-File -Append`) to add to an earlier report. Windows PowerShell
 
 Use the binary from `target/release/` after `make build`, or a release download; give its full path if it is not on `PATH`. Add `--json` for machine-readable output, `--verbose` for the reason behind each entry, and `--write` to write `.clif-unresolved.txt` beside the config (see [Generated reports](#generated-reports)). `clif explain <file> <line>` traces one call.
 
+## Replacing CFLint
+
+`clif cflint` runs CFLint itself: a native build, so no Java is involved, with
+the same rules, the same `.cflintrc` files (folder overrides, `inheritParent`
+and `parameters` included) and the same `@CFLintIgnore` comments. What it
+replaces is how CFLint gets invoked. Hooks, CI jobs, scripts and editor
+gates all call one command, which exits with a meaningful status on every
+platform.
+
+| With CFLint | With clif |
+|---|---|
+| `java -jar cflint.jar -file a.cfm,b.cfc -text -stdout` | `clif cflint --format text a.cfm b.cfc` |
+| `java -jar cflint.jar -folder src -json -stdout` | `clif cflint --format json src` |
+| `cflint --version` | `clif --version` |
+| grep the text for `Total issues:([1-9])` | the exit status: 0 clean, 1 findings, 2 the run can't be trusted. `--format text` still ends in `Total issues:N` |
+| a hook script per machine | `clif hook install`, committed in `.githooks/` (see [Linting](#linting)) |
+| lint every file in a commit | `--staged` (what is committed), `--changed <ref>` (what a branch changed), `--changed-lines` (only the lines it touched) |
+| a minimum severity | `--min-severity <level>`, or `--strict` for every level |
+| (no equivalent) | `--format sarif`, `--baseline <file>`, `clif suppressions --baseline <file>` |
+
+CFLint's `-json` output names its list `issues`, not `issue`, and so does
+`clif cflint --format json`. CFLint wants a comma-separated list for
+`-file a,b` and silently does nothing given `-file a -file b`. clif takes
+plain arguments. A `.cflintrc` CFLint can't parse makes it lint with its
+default rules and say nothing; clif stops with exit 2 instead.
+
+**One command for people, CI and agents.** Keep the invocation in the
+repository, so a developer, a CI job and an agent run the same thing:
+
+```make
+# Makefile
+lint:
+	clif cflint --strict --format text .
+```
+
+```powershell
+# scripts\lint.ps1
+clif cflint --strict --format text .
+exit $LASTEXITCODE
+```
+
+**CI.** Lint what the branch changed on every build, everything on a
+schedule, and keep a SARIF file for the CI server or a code-quality tool
+(GitHub code scanning, or SonarQube's `sonar.sarifReportPaths`). The exit
+status fails the stage.
+
+```sh
+clif cflint --changed origin/main --strict --format sarif --out cflint.sarif   # each build
+clif cflint --strict --format sarif --out cflint.sarif .                       # nightly
+```
+
+`--changed` needs the merge base of `HEAD` and the ref, and CI checkouts are
+often shallow or single-branch. Fetch the base branch with enough history
+first, for example `git fetch --unshallow origin main` or a checkout depth of
+0. Without it, git can't diff and clif exits 2 rather than passing a build
+it never linted.
+
+```groovy
+// Jenkinsfile: the same command on a Linux or a Windows agent
+stage('CFLint') {
+  steps {
+    script {
+      def cmd = 'clif cflint --changed origin/main --strict --format sarif --out cflint.sarif'
+      if (isUnix()) { sh cmd } else { bat cmd }
+    }
+  }
+}
+```
+
+**Agents and editor gates.** One file takes about half a second:
+`clif cflint --format json path/to/file.cfc` prints CFLint's JSON, and exit
+status 1 means findings. To block only on serious ones, add
+`--min-severity ERROR`.
+
+**Pinning a version.** Put the version in `clif.version` (or
+`scripts/clif.version`) at the repository's root. The install scripts read
+it, so every developer and every CI agent installs the same build, into a
+directory of their own, with no administrator rights:
+
+```sh
+scripts/install.sh                     # macOS, Linux: into ~/.local/bin
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # Windows: into %LOCALAPPDATA%\clif\bin
+```
+
+Each script checks the archive against the release's `checksums.txt`, which
+releases publish from 0.6.0 on. `CLIF_DOWNLOAD_URL` points
+either script at an internal mirror of the releases. Chocolatey installs an
+exact version with `choco install clif --version <v>`; Homebrew's tap holds
+only the latest.
+
 ## Code map
 
 `clif graph` builds a map of a whole project: every function and file, and
