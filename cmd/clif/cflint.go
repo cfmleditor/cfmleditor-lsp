@@ -11,6 +11,7 @@ import (
 	"github.com/cfmleditor/clif/internal/cflint"
 	"github.com/cfmleditor/clif/internal/config"
 	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/knownissues"
 	cfpath "github.com/cfmleditor/clif/internal/path"
 	"github.com/cfmleditor/clif/internal/vfs"
 )
@@ -55,6 +56,15 @@ Output:
                       refused, since rewriting it would drop the entries for
                       everything else; lint its whole directory, or use --out
   -q, --quiet         no progress on stderr
+
+Baseline:
+  --baseline <file>   report, and fail on, only findings the file does not
+                      list. The file is a known-issues report, as
+                      clif cflint --out <file> writes one; a finding matches
+                      an entry by file, rule and message, not line, so an
+                      edit above it does not make it new. Entries no longer
+                      found are listed on stderr: regenerate the file to drop
+                      them
 
 Severity:
   --min-severity <l>  report, and fail on, CFLint levels at or above <l>:
@@ -103,6 +113,7 @@ func cflintExitCode(findings int, regenerating bool) int {
 // cflintFlags is what cmdCFLint's arguments ask for.
 type cflintFlags struct {
 	out         string
+	baseline    string
 	format      string
 	minSeverity string
 	changed     string
@@ -165,6 +176,8 @@ func parseCFLintFlags(args []string) cflintFlags {
 			fl.minSeverity = value()
 		case "--changed":
 			fl.changed = value()
+		case "--baseline":
+			fl.baseline = value()
 		default:
 			fl.roots = append(fl.roots, positionalOr(arg, cflintUsage, exitCFLintError))
 		}
@@ -191,6 +204,12 @@ func checkCFLintFlags(fl *cflintFlags) {
 	case len(fl.roots) == 0 && !fl.staged && fl.changed == "":
 		fmt.Fprint(os.Stderr, cflintUsage)
 		os.Exit(exitCFLintError)
+	}
+
+	if fl.baseline != "" {
+		if _, err := os.Stat(fl.baseline); err != nil {
+			cflintFailf("--baseline %s does not exist; write one with clif cflint --out %s <path>\n", fl.baseline, fl.baseline)
+		}
 	}
 
 	if fl.minSeverity != "" {
@@ -268,6 +287,10 @@ func cmdCFLint(args []string) {
 		cflintFailf("%v\n", err)
 	}
 
+	if fl.baseline != "" {
+		applyCFLintBaseline(fl.baseline, run, logf)
+	}
+
 	if fl.format == "report" {
 		writeCFLintReports(&fl, run, targets, logf)
 	} else {
@@ -281,6 +304,40 @@ func cmdCFLint(args []string) {
 
 	if code := cflintExitCode(len(run.Issues), fl.regenerating()); code != 0 {
 		os.Exit(code)
+	}
+}
+
+// applyCFLintBaseline drops from run the findings the baseline lists, so only
+// new ones are reported and fail the run. The baseline is read before CFLint
+// would have reason to, so a missing one is checked in checkCFLintFlags.
+func applyCFLintBaseline(path string, run *cflint.Run, logf func(string, ...any)) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		cflintFailf("--baseline %s: %v\n", path, err)
+	}
+
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		cflintFailf("--baseline: %v\n", err)
+	}
+
+	matched, stale := run.Subtract(knownissues.Parse(string(data), filepath.Dir(abs)))
+
+	logf("Baseline %s: %d findings already listed, %d new\n", path, matched, len(run.Issues))
+
+	if len(stale) > 0 {
+		logf("%d baseline entries are no longer found; regenerate it with clif cflint --out %s to drop them:\n", len(stale), path)
+
+		const shown = 20
+
+		for i := range stale[:min(len(stale), shown)] {
+			e := &stale[i]
+			logf("  %s:%d: [%s] %s\n", e.Path, e.Line+1, e.Code, e.Message)
+		}
+
+		if len(stale) > shown {
+			logf("  ...and %d more\n", len(stale)-shown)
+		}
 	}
 }
 

@@ -89,9 +89,10 @@ func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
 			out, err := cmd.CombinedOutput()
 
 			var exit *exec.ExitError
-			// clif cflint keeps 1 for findings, so its usage errors exit 2.
+			// clif cflint and clif suppressions keep 1 for findings (a rise,
+			// for suppressions), so their usage errors exit 2.
 			want := 1
-			if name == "cflint" {
+			if name == "cflint" || name == "suppressions" {
 				want = exitCFLintError
 			}
 
