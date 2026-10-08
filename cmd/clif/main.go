@@ -86,7 +86,8 @@ Commands:
   scan         Scan CFML files and report parse errors
   format       Format CFML files (stdout or in-place with -w)
   unresolved   Scan for unresolved component/method calls
-  cflint       Run CFLint over a project as a known-issues report
+  cflint       Run CFLint over files, a project, or what is staged or changed
+  suppressions Count CFLint suppressions by rule, and fail if they rise
   refs         Find references to a component or function
   deps         Print component dependency info
   graph        Build a whole-project map of functions and their connections

@@ -1073,6 +1073,29 @@ clif cflint --format json src/                         # CFLint's own -json sche
   default rules instead, so clif parses every `.cflintrc` CFLint would read
   first and stops the run if one is broken.
 
+**Adopting rules on code that already breaks them.** Two ratchets let a
+project turn a rule on without fixing or suppressing everything first, and
+stop the debt growing:
+
+```sh
+clif cflint --out cflint-baseline.txt .                     # once: record today's findings
+clif cflint --baseline cflint-baseline.txt --format text .  # fail only on findings not in it
+
+clif suppressions --baseline suppressions.json --update-baseline .  # once
+clif suppressions --baseline suppressions.json .            # fail if @CFLintIgnore counts rose
+```
+
+- **`--baseline <file>`** reports, and fails on, only the findings the file
+  doesn't list. The file is a known-issues report, as `--out` writes one. A
+  finding matches by file, rule and message, not line, so an edit above it
+  doesn't make it new. Entries no longer found are listed on stderr, so the
+  baseline can be regenerated to lock the fixes in.
+- **`clif suppressions`** counts `@CFLintIgnore` tags and `// cflint ignore:`
+  comments by rule, reading code lists as CFLint does: `@CFLintIgnore A, B`
+  suppresses, and counts, only `A`. With `--baseline` it fails (exit 1) when
+  the total or any rule's count rises, so a new suppression needs a
+  deliberate, reviewable baseline change. `--update-baseline` writes it.
+
 Exit status: 0 when there is nothing to report, 1 when there are findings,
 and 2 when the run can't be trusted: a path that doesn't exist, a broken
 `.cflintrc`, CFLint unavailable or failing, not a git repository for
