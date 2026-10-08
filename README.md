@@ -265,7 +265,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1   # Windows: into %
 ```
 
 Each script checks the archive against the release's `checksums.txt`, which
-releases publish from 0.6.0 on. `CLIF_DOWNLOAD_URL` points
+releases publish from 0.5.1 on. `CLIF_DOWNLOAD_URL` points
 either script at an internal mirror of the releases. Chocolatey installs an
 exact version with `choco install clif --version <v>`; Homebrew's tap holds
 only the latest.
@@ -1217,7 +1217,7 @@ the committed config:
 ```yaml
 repos:
   - repo: https://github.com/cfmleditor/clif
-    rev: v0.6.0
+    rev: v0.5.1
     hooks:
       - id: clif-cflint
 ```
