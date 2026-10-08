@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="clif">
+  <rect width="160" height="160" rx="28" fill="#1F3A5F"/>
+  <path d="M34,80 L54,38 L90,38 Q104,38 104,50 L104,64 Q104,74 120,77 Q126,79 126,80 Z" fill="#E8E1D3"/>
+  <path d="M34,80 L126,80 Q126,81 120,83 Q104,86 104,96 L104,110 Q104,122 90,122 L54,122 Z" fill="#2BA59A"/>
+</svg>
