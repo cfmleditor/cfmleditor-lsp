@@ -2637,3 +2637,98 @@ Measured: masa-c −209 (64 `application.classExtensionManager`, 74 `subType`, 3
 `variables.configBean`/`application.configBean`), nothing added; Masa scans as
 fast as `main`. `TestALazyGetterReturnsWhatItLoads`,
 `TestAStartupCreationIsWhatItsChainedCallsReturn`.
+
+## Summary of this branch
+
+Branch `ccr-b348b908-xa7msk` (draft PR #228) started from
+`origin/main` and walked the seven-project corpus down with narrow
+rules, each one tested against the shape it answers for and measured on
+the corpus before being kept.
+
+### Corpus against `main`
+
+| Scan | main | branch | removed |
+|---|---:|---:|---:|
+| cb-p (ContentBox) | 1,576 | 1,429 | 147 |
+| cw-p (cfwheels + vendor) | 3,856 | 2,291 | 1,565 |
+| cx-p (coldbox-platform) | 1,345 | 1,050 | 295 |
+| fw-p (fw1) | 409 | 226 | 183 |
+| lucee | 1,975 | 1,448 | 527 |
+| masa-c (MasaCMS) | 9,586 | 4,035 | 5,551 |
+| tb-p (TestBox) | 296 | 256 | 40 |
+| **total** | **19,043** | **10,735** | **8,308** |
+
+### Timing against `main`
+
+Every project scans faster than it does on `main`:
+
+| Scan | main | branch |
+|---|---:|---:|
+| MasaCMS | 15.1s | 12.5s |
+| ContentBox | 2.4s | 1.6s |
+| cfwheels | 4.3s | 2.0s |
+| coldbox-platform | 2.3s | 1.3s |
+| Lucee | 17.0s | 13.1s |
+| fw1 | 0.75s | 0.48s |
+| TestBox | 0.36s | 0.28s |
+
+### What's left and why
+
+What remains in each project is dominated by three kinds of case,
+each recorded in its own section above and left on purpose:
+
+- **Dynamic receivers no static rule can type.** Lucee's `field`,
+  `driver` and `coll` (280 findings) are driver objects listed from
+  packages at run time; Masa's `arguments.item` (128) and
+  `rc.contentBean` chained on `loadBy()` (~180) are built through
+  factories or ORM operations whose return is `$any`; Masa's
+  `attributeBean` and `arguments.feedBean` (193) are mutated through
+  struct writes and tested methods the parse cannot see.
+- **Code the resolver would need project-specific routing to see.**
+  cfwheels CLI's `variables.helpers` (66) comes through a Module's
+  `getService( "helpers" )` whose body switches on the string and
+  constructs the right class; cfwheels engine adapters (161) and
+  `migration.adapter` (48) are chosen the same way.
+- **Methods tests or run time add to the receiver.** TestBox custom
+  assertions, cborm's dynamic finders beyond what `onMissingMethod`
+  covers, ColdBox's test-harness mixins, and a handful of real
+  bugs — ContentBox's old patch scripts calling removed APIs are
+  the largest group (~113 findings), listed in
+  "Missing-method findings that were ours" and left as findings
+  deliberately.
+
+A per-group breakdown of what remains, with "would type if we had X" for each,
+lives in the sections above. Section titles follow the shape the rule
+accepts: searching for "`rc.X`", "lazy getter", "args", or any of the
+other named shapes picks up the rule that handles it and the test that
+pins it.
+
+### Tests
+
+Each change above has at least one test in `internal/resolve/` with a
+mutation check written into the plan entry: the fix is reverted,
+rerun, and the recorded failure is quoted. The tests cover both
+tag and script syntax where the rule applies to both, and each test
+holds the shapes the rule accepts beside shapes it must refuse —
+`TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic` pins the
+non-member shadowing cases, `TestAViewsArgsAreWhatItsRendersPass`
+holds the renders in another module and the computed args that
+must leave the key untyped, and so on.
+
+### How to measure a new change against this branch
+
+The scratchpad holds the baselines and binaries this branch was
+measured against:
+
+```
+S=/tmp/claude-0/-home-user-cfmleditor-lsp/23710295-57ad-5cdf-b4fb-6b66b79ffa8c/scratchpad
+make resolution-report CORPUS="$(bash $S/configured.sh)" \
+                       RUNS=$S/rr-next BASELINE=$S/rr-lazy4 LISTS=
+```
+
+The seven baselines (`$S/rr-main`, `$S/rr-lazy4` and the intermediate
+runs listed above) stay for the life of the session, and
+`BASELINE=<earlier run>` prints the diff per scan rather than only the
+totals. Timing against `main` is a direct `unresolved --json` on each
+project with the two binaries at `$S/bench/lsp-main` and
+`$S/bench/lsp-branch`.
