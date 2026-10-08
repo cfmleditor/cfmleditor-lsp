@@ -125,7 +125,8 @@ component {
 	variables.logBox = new coldbox.system.logging.LogBox();
 	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
 	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
-	variables.binder = new coldbox.system.ioc.config.Binder();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.cacheBox = new coldbox.system.cache.CacheFactory();
 	/**
 	 * WireBox can be constructed with no parameters and it will use the default binder: `coldbox.system.ioc.config.DefaultBinder` for configuration
 	 * and place the instance in `application.wirebox` scope for easy access.
@@ -441,5 +442,5 @@ component {
 	 * @binder     The data CFC configuration instance, instantiation path or programmatic binder object to configure this injector with
 	 * @properties A map of binding properties to passthrough to the Configuration CFC
 	 */
-	private coldbox.system.ioc.config.Binder function buildBinder( required binder, required properties ) {}
+	private any function buildBinder( required binder, required properties ) {}
 }

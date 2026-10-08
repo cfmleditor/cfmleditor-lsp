@@ -79,3 +79,43 @@ func TestAMethodAssignedOntoAnObjectByCFSetIsDynamic(t *testing.T) {
 		"c.missing":      "method 'missing' not found in Bean",
 	})
 }
+
+// TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic: FW/1's coreFunctions
+// spec stores `variables.fw.__config = __config;` in setup and calls
+// variables.fw.__config() and fw.__config() from its specs. The object is the
+// component's variable, so the assignment holds in every function; a member
+// stored on a local, or a different member, does not.
+func TestAMethodAssignedOntoAVariablesScopeObjectIsDynamic(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"Fw.cfc": `component { function own() {} }`,
+		"Spec.cfc": `component {
+	function setup() {
+		variables.fw = new Fw();
+		variables.fw.__config = __config;
+		var loc = new Fw();
+		loc.__peek = __config;
+	}
+	function a() { variables.fw.__config(); }
+	function b() { fw.__config(); }
+	function c() { fw.__peek(); }
+	function d() { fw.__other(); }
+	function __config() {}
+}`,
+		"Tag.cfc": `<cfcomponent>
+<cffunction name="setup"><cfset variables.fw = new Fw()><cfset variables.fw.__tagged = __config></cffunction>
+<cffunction name="a"><cfset fw.__tagged()></cffunction>
+<cffunction name="__config"></cffunction>
+</cfcomponent>`,
+	})
+
+	expectReasons(t, reasonsIn(t, dir, "Spec.cfc"), map[string]string{
+		"variables.fw.__config": "",
+		"fw.__config":           "",
+		"fw.__peek":             "method '__peek' not found in Fw",
+		"fw.__other":            "method '__other' not found in Fw",
+	})
+	expectReasons(t, reasonsIn(t, dir, "Tag.cfc"), map[string]string{
+		"fw.__tagged": "",
+	})
+}

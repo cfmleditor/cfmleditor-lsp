@@ -2,6 +2,7 @@ package parser
 
 import (
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -47,6 +48,10 @@ func mappingParentName(content string) string {
 					if ok && !strings.Contains(value, "#") {
 						return value
 					}
+				}
+
+				if t.Kind == TokIdent {
+					return dottedRest(sc, t.Value)
 				}
 			}
 		}
@@ -468,4 +473,72 @@ func splitPathArguments(args string) []string {
 		default:
 		}
 	}
+}
+
+// replacedMappingPath evaluates reReplace and reReplaceNoCase of a path by a
+// literal pattern: ColdBox's test Application.cfc finds its root as
+// `REReplaceNoCase( this.mappings[ "/tests" ], "tests(\\|/)", "" )`. The
+// pattern must compile as Go reads it, the replacement must be a literal
+// with no backreference and the scope, when given, "one" or "all"; anything
+// else is declined.
+func replacedMappingPath(term string, env map[string]string, dir string) (string, bool) {
+	for _, fn := range []string{"reReplaceNoCase", "reReplace"} {
+		args, ok := callArg(term, fn)
+		if !ok {
+			continue
+		}
+
+		parts := splitPathArguments(args)
+		if len(parts) != 3 && len(parts) != 4 {
+			return "", false
+		}
+
+		value, ok := evalPathExpr(parts[0], env, dir)
+		if !ok {
+			return "", false
+		}
+
+		pattern, ok := stringLiteral(strings.TrimSpace(parts[1]))
+		if !ok || pattern == "" {
+			return "", false
+		}
+
+		replacement, ok := stringLiteral(strings.TrimSpace(parts[2]))
+		if !ok || strings.ContainsAny(replacement, "\\$") {
+			return "", false
+		}
+
+		all := false
+
+		if len(parts) == 4 {
+			scope, ok := stringLiteral(strings.TrimSpace(parts[3]))
+			if !ok || !strings.EqualFold(scope, "one") && !strings.EqualFold(scope, "all") {
+				return "", false
+			}
+
+			all = strings.EqualFold(scope, "all")
+		}
+
+		if fn == "reReplaceNoCase" {
+			pattern = "(?i)" + pattern
+		}
+
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return "", false
+		}
+
+		if all {
+			return re.ReplaceAllLiteralString(value, replacement), true
+		}
+
+		loc := re.FindStringIndex(value)
+		if loc == nil {
+			return value, true
+		}
+
+		return value[:loc[0]] + replacement + value[loc[1]:], true
+	}
+
+	return "", false
 }

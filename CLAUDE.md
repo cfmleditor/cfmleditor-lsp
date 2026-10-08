@@ -42,6 +42,10 @@ make corpus CORPUS=<dir>[:<dir>...] [REPORT=<file>] [BASELINE=<file>] [OPTS=k=v,
                     # fixed leaves every column identical. OPTS sets formatter.Options fields
                     # by name, for sweeping a new setting through its modes without editing
                     # the test. See FORMATTER-ISSUES.md
+make resolution-report CORPUS="name=dir[,dir] ..." [BASELINE=<dir>] [RUNS=<dir>] [LISTS=<dir>]
+                    # unresolved --json --candidates per named scan; rewrites the lists in
+                    # resolution-candidates/ (LISTS= skips that) and, with BASELINE, prints
+                    # findings removed/added per scan. Skipped without CORPUS; not in CI
 make build-wasm     # wasip1/wasm build (needs WASI_SDK, default /opt/wasi-sdk)
 make release <ver>  # validate, build, test, lint, changelog, commit, tag, push
 make release-dry <ver>
@@ -557,6 +561,10 @@ the *formatter*, not the parser.
   types the body's calls name. An unscoped argument or local is not read from
   the component's refs (`pendingCall.baseLocal`), or the answer depended on
   which of the two parses ran first. `TestLazyFuncRefsAreTypedAsTheParseTypesThem`.
+- **A word operator followed by a dot is a name** (`operatorWordIsName`): `mod.generate()` is a
+  call on a variable called `mod`, which cfwheels' CLI specs hold their module in. `isKeyword`
+  turned every token loop away from it and the call was recorded bare. The rule is in each place
+  a keyword is refused before a receiver is read; `TestAnOperatorWordCanNameAReceiver`.
 - **`import models.User;` qualifies a later bare `new User()`.** `import
   models.*;` does not: which component a bare name then means is a question
   about what is on disk, and the parser has no filesystem.

@@ -223,6 +223,10 @@ var frameworkPresets = map[string]frameworkPreset{
 			},
 			returnResolver(commandboxSystem+"util.CommandDSL", "command"),
 			returnResolver(commandboxSystem+"util.PrintBuffer", "getPrint"),
+			// CommandBox is built on WireBox: a command's getInstance() takes
+			// the ids and DSL a ColdBox one does ("X@module", "wirebox:…").
+			dslResolvers(),
+			[]Resolver{idResolver("getInstance")},
 		),
 		bases: []implicitBase{
 			{dir: "commands", ext: ".cfc", component: commandboxSystem + "BaseCommand"},
@@ -270,10 +274,44 @@ var frameworkPresets = map[string]frameworkPreset{
 		bases: []implicitBase{
 			{dir: "views", ext: ".cfm", component: wheelsView},
 			{dir: "layouts", ext: ".cfm", component: wheelsView},
+			// app/global/*.cfm is mixed into every controller, model and
+			// view, and vendor/wheels/global/*.cfm into Global; Global is
+			// what all of them have, so model() in a global helper is its.
+			{dir: "global", ext: ".cfm", component: "wheels.Global"},
+			// wheels.Seeder includes app/db/seeds.cfm and seeds/<env>.cfm, so
+			// seedOnce() in either is the seeder's.
+			{file: "seeds.cfm", ext: ".cfm", component: "wheels.Seeder"},
+			{dir: "seeds", ext: ".cfm", component: "wheels.Seeder"},
 		},
 		// The application's global/functions.cfm reaches every controller,
 		// model and view (resolve.wheelsGlobals).
 		helperDirs: []string{"controllers", "models", "views", "layouts"},
+	},
+
+	// Mura / Masa CMS: the Mura scope, which Mura's documentation spells $, m
+	// and mura and hands every display object, view and event handler, and
+	// which an admin view reads as rc.$. getMuraScope() and the event's
+	// getValue( "muraScope" ) return it.
+	"mura": {
+		resolvers: append([]Resolver{
+			variableResolver("mura.MuraScope", "$", "m", "mura", "rc.$", "rc.m"),
+			{
+				Match:            `(?i)(?:^|\.)getValue\(\s*["']muraScope["']\s*\)$`,
+				Resolve:          "mura.MuraScope",
+				Prefix:           "getValue",
+				DynamicIfMissing: true,
+			},
+		}, returnResolver("mura.MuraScope", "getMuraScope")...),
+		// A display object's template runs inside the content renderer:
+		// contentRenderer.cfc includes it by the path
+		// siteConfig().lookupDisplayObjectFilePath() finds under a modules or
+		// display_objects directory, core/modules/v1 among them, so its bare
+		// calls (showItemMeta(), getURLStem(), dspObject()) are the
+		// renderer's.
+		bases: []implicitBase{
+			{dir: "modules", ext: ".cfm", component: "mura.content.contentRenderer"},
+			{dir: "display_objects", ext: ".cfm", component: "mura.content.contentRenderer"},
+		},
 	},
 
 	// FW/1: the framework object controllers are handed, its bean factory, and

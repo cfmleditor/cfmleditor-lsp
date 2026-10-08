@@ -8,7 +8,7 @@ component {
 	/**
 	 * SERVER/USER/CFML ENGINE HELPERS *
 	 */
-	private coldbox.system.core.util.BoxLangMappingHelper function getClassMappingHelper() {}
+	private function getClassMappingHelper() {}
 	/**
 	 * Add a path to the application's custom tag path
 	 *

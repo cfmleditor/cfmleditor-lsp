@@ -1290,7 +1290,7 @@ func (pr *ParseResult) addPendingRef(c *pendingCall, comp string) bool {
 
 	ref := ComponentRef{
 		Variable: c.varName, Component: comp, ChainRest: c.rest,
-		URI: pr.URI, Line: c.line, This: c.refThis, Rebinds: c.rebinds,
+		URI: pr.URI, Line: c.line, This: c.refThis, Rebinds: c.rebinds, BaseGuess: c.baseGuess,
 		VisibleFrom: c.visibleFrom, VisibleTo: c.visibleTo,
 	}
 	if c.funcKey == "" || c.global {
@@ -1463,6 +1463,13 @@ func (pr *ParseResult) settleReturnVars(pending []returnPending, calls []pending
 		}
 
 		reaching := pr.flow.reaching(refs, name, rp.line, admit)
+
+		// A receiver's own type, guessed for a call the parse could not look
+		// up, is not what the function returns; the resolver reads the body.
+		if slices.ContainsFunc(reaching, func(ref *ComponentRef) bool { return ref.BaseGuess }) {
+			continue
+		}
+
 		if len(reaching) > 0 && !assignedBetween(calls, name, reaching[0].Line, rp.line) {
 			comp := agreedComponent(reaching, pr.settledComponent)
 			if scope == RefAny {
@@ -1569,6 +1576,8 @@ func (pr *ParseResult) hasRefFor(c *pendingCall) bool {
 func (pr *ParseResult) baseVarComponent(c *pendingCall, globals []ComponentRef) string {
 	var comp string
 
+	c.baseGuess = false
+
 	if globals == nil {
 		globals = pr.ComponentRefs
 	}
@@ -1615,6 +1624,8 @@ func (pr *ParseResult) baseVarComponent(c *pendingCall, globals []ComponentRef) 
 	if isInjectedFrameworkComponent(comp) {
 		return ""
 	}
+
+	c.baseGuess = comp != ""
 
 	return comp
 }
@@ -2219,7 +2230,8 @@ func (pr *ParseResult) FuncVars(funcStart, funcEnd int) []string {
 // AssignsMember reports whether the function holding line assigns
 // variable.member on a line before it: `a.getVariables = getVariables;` then
 // `a.getVariables()` calls what was stored there, which is no method of a's
-// component. Compared case-insensitively, as CFML names are.
+// component. Compared case-insensitively, as CFML names are. A member stored
+// as `variables.a.m = …` counts from any function and any line.
 func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool {
 	key := ""
 	if s := findFuncScope(int(line), pr.Scopes); s.Start >= 0 {
@@ -2228,12 +2240,35 @@ func (pr *ParseResult) AssignsMember(variable, member string, line uint32) bool 
 
 	for i := range pr.memberSets {
 		m := &pr.memberSets[i]
-		if m.funcKey == key && m.line <= line && strings.EqualFold(m.funcName, member) && strings.EqualFold(m.varName, variable) {
+		if !strings.EqualFold(m.funcName, member) {
+			continue
+		}
+
+		if m.funcKey == key && m.line <= line && strings.EqualFold(m.varName, variable) {
 			return true
+		}
+
+		// One stored through variables. is on the component's own variable,
+		// which every function sees: FW/1's tests set it in setup() and call
+		// it, spelled with or without the scope, from each spec.
+		if held, ok := cutVariablesScope(m.varName); ok {
+			if v, _ := cutVariablesScope(variable); strings.EqualFold(held, v) {
+				return true
+			}
 		}
 	}
 
 	return false
+}
+
+// cutVariablesScope is name without a leading variables., and whether it had one.
+func cutVariablesScope(name string) (string, bool) {
+	const scope = "variables."
+	if len(name) > len(scope) && strings.EqualFold(name[:len(scope)], scope) {
+		return name[len(scope):], true
+	}
+
+	return name, false
 }
 
 // HasScopedAssignment reports whether name was ever assigned in the given scope

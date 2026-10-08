@@ -406,24 +406,42 @@ func prcMember(variable string) (string, bool) {
 	return name, true
 }
 
-func prcAssignRe(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(?im)^\s*(?:arguments\.)?prc\.` + regexp.QuoteMeta(name) + `\s*=\s*([^=].*?)\s*;?\s*$`)
+// memberAssignRe matches `container.name = …` on a line of its own, in script
+// or in a <cfset>, with or without arguments. before the container.
+func memberAssignRe(container, name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?im)^\s*(?:<cfset\s+)?(?:arguments\.)?` + regexp.QuoteMeta(container) + `\.` + regexp.QuoteMeta(name) +
+		`\s*=\s*([^=].*?)\s*/?>?\s*;?\s*$`)
 }
 
 // lastPrcAssignment is the right-hand side of the last `prc.name = …` in body,
 // when it is written on one line and its parentheses balance.
 func lastPrcAssignment(body, name string) (string, bool) {
-	all := prcAssignRe(name).FindAllStringSubmatch(body, -1)
+	return lastMemberAssignment(body, "prc", name)
+}
+
+// lastMemberAssignment is lastPrcAssignment for any container.
+func lastMemberAssignment(body, container, name string) (string, bool) {
+	rhs, _, ok := lastMemberAssignmentAt(body, container, name)
+
+	return rhs, ok
+}
+
+// lastMemberAssignmentAt is lastMemberAssignment with the line of body the
+// assignment is on.
+func lastMemberAssignmentAt(body, container, name string) (string, int, bool) {
+	all := memberAssignRe(container, name).FindAllStringSubmatchIndex(body, -1)
 	if len(all) == 0 {
-		return "", false
+		return "", 0, false
 	}
 
-	rhs := strings.TrimSuffix(strings.TrimSpace(all[len(all)-1][1]), ";")
+	last := all[len(all)-1]
+
+	rhs := strings.TrimSuffix(strings.TrimSpace(body[last[2]:last[3]]), ";")
 	if strings.Count(rhs, "(") != strings.Count(rhs, ")") {
-		return "", false
+		return "", 0, false
 	}
 
-	return rhs, true
+	return rhs, strings.Count(body[:last[0]], "\n"), true
 }
 
 // pathsOf is comp with each alternative (a|b) replaced by its file where one

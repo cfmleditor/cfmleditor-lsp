@@ -66,6 +66,8 @@ component {
 	variables.eventManager = new coldbox.system.core.events.EventPoolManager();
 	variables.logBox = new coldbox.system.logging.LogBox();
 	variables.wirebox = new coldbox.system.ioc.Injector();
+	variables.log = new coldbox.system.logging.Logger();
+	variables.config = new coldbox.system.cache.config.CacheBoxConfig();
 	/**
 	 * Constructor
 	 *

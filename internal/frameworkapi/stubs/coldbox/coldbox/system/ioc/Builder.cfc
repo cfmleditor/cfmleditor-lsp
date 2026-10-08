@@ -41,6 +41,7 @@ component {
 	variables.utility = new coldbox.system.core.util.Util();
 	variables.mixerUtil = new coldbox.system.core.dynamic.MixerUtil();
 	variables.logBox = new coldbox.system.logging.LogBox();
+	variables.log = new coldbox.system.logging.Logger();
 	/**
 	 * Constructor. If called without a configuration binder, then WireBox will instantiate the default configuration binder found coldbox.system.ioc.config.DefaultBinder
 	 *

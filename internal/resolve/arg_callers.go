@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,8 +95,29 @@ func callerNames(content string) map[string]bool {
 		open = next + rel
 	}
 
+	// A name ending a quoted string is recorded too, as quotedCallerKey:
+	// createObject( "component", "a.Templates" ) and getInstance( "Templates" )
+	// make an object without a `Templates(` for the scan above to see.
+	for i := range len(content) {
+		if c := content[i]; c != '"' && c != '\'' {
+			continue
+		}
+
+		start := i
+		for start > 0 && callerWord(content[start-1]) {
+			start--
+		}
+
+		if start < i {
+			addCallerName(seen, quotedCallerKey(content[start:i]))
+		}
+	}
+
 	return seen
 }
+
+// quotedCallerKey is the caller-index key for name ending a quoted string.
+func quotedCallerKey(name string) string { return "\"" + name }
 
 func addCallerName(seen map[string]bool, name string) {
 	const stackName = 128
@@ -147,7 +169,7 @@ func callerSpace(c byte) bool {
 }
 
 func callerWord(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_'
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$'
 }
 
 // owner is the resolver that holds the shared caches: a per-caller view
@@ -268,6 +290,10 @@ func (r *Resolver) argumentFromCallers(variable, caller string, pr *parser.Parse
 }
 
 func (r *Resolver) inferArgument(fd *parser.FunctionDef, pos int, file string, ctx lookupCtx) string {
+	if strings.EqualFold(fd.Name, "init") && strings.EqualFold(filepath.Ext(file), ".cfc") {
+		return r.inferInitArgument(fd, pos, file, ctx)
+	}
+
 	files := r.callerFiles(fd.Name)
 	if len(files) == 0 || len(files) > maxArgCallerFiles {
 		return ""
@@ -322,6 +348,12 @@ func (r *Resolver) inferArgument(fd *parser.FunctionDef, pos int, file string, c
 			}
 
 			comp := r.argumentExprComponent(expr, call.Line, call.Caller, hpr, dir, ctx)
+			if comp == "" && forwardedArg(expr) {
+				sites--
+
+				continue
+			}
+
 			if comp == "" {
 				return ""
 			}
@@ -367,11 +399,75 @@ func (r *Resolver) callIsTo(call *parser.CallSite, hpr *parser.ParseResult, path
 	}
 
 	comp, _ := r.receiverComponentD(call.Variable, call.Line, call.Caller, call.FuncName, hpr, dir, nil, lookupCtx{depth: ctx.depth + 1})
+
+	// Then a componentResolver on the variable's name, as canResolveCall
+	// tries next: the mura preset's `$` is a MuraScope, and `$.dspObjects()`
+	// is the renderer's dspObjects, reached through the scope's
+	// onMissingMethod, not a call of the utility function of that name.
+	if comp == "" {
+		comp, _ = parser.ResolveFromCallFull(call.Variable, r.Resolvers)
+	}
+
 	if comp == "" || strings.HasPrefix(comp, "$") {
-		return false, false
+		// A receiver that cannot hold fd's component is known not to call fd:
+		// MessageDigest's md.update() is not a DAO's update().
+		return false, r.cannotHold(call, hpr, fd)
 	}
 
 	return r.componentCallIs(comp, call.FuncName, fd, dir), true
+}
+
+// javaObjectRe is an expression that makes a Java object: createObject with
+// the java type, or Lucee's new java:, whatever is chained on it.
+var javaObjectRe = regexp.MustCompile(`(?is)^(?:createObject\s*\(\s*["']java["']|new\s+java:)`)
+
+// computedComponentRe is createObject of a component whose path is computed
+// but whose last segment, the file's name, is literal.
+var computedComponentRe = regexp.MustCompile(`(?is)^createObject\s*\(\s*["']component["']\s*,\s*["'][^"']*#[^"']*\.(\w+)["']\s*\)$`)
+
+// cannotHold reports whether the variable call is made on is, at the call, a
+// local assigned something that cannot be fd's component: a Java object, or a
+// component whose computed path names a file of another name — Mura's
+// createObject("component","plugins.#dir#.plugin.plugin") is a plugin.cfc,
+// unless a file of that name in the workspace extends fd's component.
+func (r *Resolver) cannotHold(call *parser.CallSite, pr *parser.ParseResult, fd *parser.FunctionDef) bool {
+	name := strings.TrimPrefix(strings.ToLower(call.Variable), "local.")
+	if name == "" || strings.ContainsAny(name, ".[(") || pr == nil {
+		return false
+	}
+
+	start := 0
+	if scope, ok := enclosingScope(pr, call.Line); ok {
+		start = scope.Start
+	}
+
+	rhs, ok := localAssignment(pr.Content, name, start, int(call.Line))
+	if !ok {
+		return false
+	}
+
+	rhs = strings.TrimSpace(rhs)
+	if javaObjectRe.MatchString(rhs) {
+		return true
+	}
+
+	m := computedComponentRe.FindStringSubmatch(rhs)
+	if m == nil || !fd.URI.IsFile() {
+		return false
+	}
+
+	file := fd.URI.Path()
+	if strings.EqualFold(m[1], strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))) || r.Index == nil {
+		return false
+	}
+
+	for _, p := range r.Index.FindFilesByBasename(m[1]) {
+		if r.descendsFrom(p, file) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // componentCallIs reports whether funcName called on comp (or any of its
@@ -395,33 +491,74 @@ func callArgument(tokens []parser.Token, name string, line, pos int, argName str
 			continue
 		}
 
-		end := producerGroupEnd(tokens, i+1, parser.TokLParen, parser.TokRParen)
-		if end < 0 {
-			return nil, false
+		// `function f() { x.f( a ); }` on one line: the declaration is not
+		// the call.
+		if i > 0 && tokens[i-1].Kind == parser.TokIdent && strings.EqualFold(tokens[i-1].Value, "function") {
+			continue
 		}
 
-		positional := 0
-
-		for _, piece := range producerSplit(tokens[i+2 : end]) {
-			if len(piece) > 2 && piece[0].Kind == parser.TokIdent && (piece[1].Kind == parser.TokEquals || piece[1].Kind == parser.TokColon) {
-				if strings.EqualFold(piece[0].Value, argName) {
-					return piece[2:], true
-				}
-
-				continue
-			}
-
-			if positional == pos {
-				return piece, len(piece) > 0
-			}
-
-			positional++
-		}
-
-		return nil, false
+		return callArgumentAt(tokens, i, pos, argName)
 	}
 
 	return nil, false
+}
+
+// callArgumentAt is callArgument for the call whose name is tokens[i].
+func callArgumentAt(tokens []parser.Token, i, pos int, argName string) (expr []parser.Token, passed bool) {
+	end := producerGroupEnd(tokens, i+1, parser.TokLParen, parser.TokRParen)
+	if end < 0 {
+		return nil, false
+	}
+
+	positional := 0
+	forwards := false
+
+	for _, piece := range producerSplit(tokens[i+2 : end]) {
+		if len(piece) > 2 && piece[0].Kind == parser.TokIdent && (piece[1].Kind == parser.TokEquals || piece[1].Kind == parser.TokColon) {
+			if strings.EqualFold(piece[0].Value, argName) {
+				return piece[2:], true
+			}
+
+			if strings.EqualFold(piece[0].Value, "argumentCollection") && len(piece) == 3 && strings.EqualFold(piece[2].Value, "arguments") {
+				forwards = true
+			}
+
+			continue
+		}
+
+		if positional == pos {
+			return piece, len(piece) > 0
+		}
+
+		positional++
+	}
+
+	// `f( argumentCollection = arguments )` hands over the caller's own
+	// arguments: Mura's contentRenderer sets `arguments.renderer = this` and
+	// forwards to its utility's dspObject( renderer ). What the caller's
+	// arguments.name holds is the argument.
+	if forwards {
+		line := tokens[i].Line
+
+		return []parser.Token{
+			{Kind: parser.TokIdent, Value: "arguments", Line: line, Offset: forwardedOffset},
+			{Kind: parser.TokDot, Value: ".", Line: line, Offset: forwardedOffset},
+			{Kind: parser.TokIdent, Value: argName, Line: line, Offset: forwardedOffset},
+		}, true
+	}
+
+	return nil, false
+}
+
+// forwardedOffset marks the tokens callArgumentAt makes for a forwarded
+// argument; no real token has a negative offset.
+const forwardedOffset = -1
+
+// forwardedArg reports whether expr is a forwarded argument. One that cannot
+// be typed is skipped, as a call that does not pass the argument always was:
+// cfwheels' SpyTenantMigrator forwards its own untyped migrator to super.
+func forwardedArg(expr []parser.Token) bool {
+	return len(expr) > 0 && expr[0].Offset == forwardedOffset
 }
 
 // argumentExprComponent types the expression a caller passes: `new X( … )`, a
@@ -433,6 +570,17 @@ func (r *Resolver) argumentExprComponent(expr []parser.Token, line uint32, calle
 	}
 
 	next := lookupCtx{depth: ctx.depth + 1}
+
+	// `this` is the calling component, or any component extending it: Mura's
+	// contentRenderer hands itself to its utility, and a theme's renderer
+	// extends it.
+	if len(expr) == 1 && strings.EqualFold(expr[0].Value, "this") {
+		if pr.URI.IsFile() && strings.EqualFold(filepath.Ext(pr.URI.Path()), ".cfc") {
+			return r.withSubclasses(pr.URI.Path())
+		}
+
+		return ""
+	}
 
 	if path := producerPath(expr); path != "" {
 		name := strings.ReplaceAll(producerText(expr), " ", "")

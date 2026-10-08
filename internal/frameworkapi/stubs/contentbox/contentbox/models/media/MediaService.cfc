@@ -12,7 +12,6 @@ component {
 	 * ContentBox Providers Map
 	 */
 	property name="providers" type="struct";
-	variables.provider = new contentbox.models.media.BaseProvider();
 	variables.settingService = new contentbox.models.system.SettingService();
 	/**
 	 * Constructor

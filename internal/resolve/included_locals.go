@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
 	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
 	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
 )
@@ -35,7 +36,10 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 		name = variable[len(variable)-len(rest):]
 	}
 
-	if name == "" || strings.ContainsAny(name, ".[(") || isScopeWord(strings.ToLower(name)) {
+	// A name, or a member of one: an FW/1 view's partial reads rc.contentBean
+	// as the view including it holds it.
+	base, member, dotted := strings.Cut(name, ".")
+	if base == "" || strings.ContainsAny(name, "[(") || isCFMLScope(base) || dotted && (member == "" || strings.Contains(member, ".")) {
 		return ""
 	}
 
@@ -45,7 +49,9 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 	}
 
 	file := cfpath.FromURI(string(pr.URI))
-	if len(g.rev[pathKey(file)]) == 0 {
+
+	extra := r.frameworkIncludeHosts(file)
+	if len(g.rev[pathKey(file)]) == 0 && len(extra) == 0 {
 		return ""
 	}
 
@@ -67,7 +73,7 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 
 	answer := ""
 	if !setsName(pr.Content, name) {
-		answer = r.includerHeldUncached(variable, file, g, ctx)
+		answer = r.includerHeldUncached(variable, file, g, extra, ctx)
 	}
 
 	r.mu.Lock()
@@ -85,10 +91,10 @@ func (r *Resolver) includerHeld(variable string, pr *parser.ParseResult, tr *cal
 	return answer
 }
 
-func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, ctx lookupCtx) string {
+func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, extra []includeHost, ctx lookupCtx) string {
 	includers := g.rev[pathKey(file)]
 
-	if len(includers) == 0 {
+	if len(includers) == 0 && len(extra) == 0 {
 		return ""
 	}
 
@@ -133,6 +139,30 @@ func (r *Resolver) includerHeldUncached(variable, file string, g *includeGraph, 
 		}
 	}
 
+	// A framework's own computed include (coldboxErrorHosts).
+	for _, h := range extra {
+		hpr := r.handlerParse(h.path)
+		if hpr == nil {
+			return ""
+		}
+
+		sites++
+
+		line := conv.Uint32(h.line)
+		caller := parser.FindFuncScopeAt(h.line, hpr.Scopes).Name
+
+		comp, _ := r.receiverComponentD(variable, line, caller, "", hpr, filepath.Dir(h.path), nil, lookupCtx{depth: ctx.depth + 1})
+		if comp == "" || strings.HasPrefix(comp, "$") {
+			return ""
+		}
+
+		for alt := range strings.SplitSeq(r.pathsOf(comp, filepath.Dir(h.path)), "|") {
+			if !containsFold(comps, alt) {
+				comps = append(comps, alt)
+			}
+		}
+	}
+
 	if sites == 0 {
 		return ""
 	}
@@ -153,4 +183,45 @@ func setsName(content, name string) bool {
 		`|\b(?:item|index|name|returnvariable|variable|result)\s*=\s*["']` + q + `["']`)
 
 	return re.MatchString(content)
+}
+
+// isCFMLScope reports whether s names one of CFML's own scopes. An FW/1 or
+// ColdBox view's rc and prc are not among them: they are variables the view
+// holds, and a template it includes reads them.
+func isCFMLScope(s string) bool {
+	switch strings.ToLower(s) {
+	case "local", "variables", "this", "arguments", "session", "application", "request", "server", "url", "form", "cgi", "cookie", "client":
+		return true
+	default:
+		return false
+	}
+}
+
+// frameworkIncludeHosts are the include sites the include graph cannot see
+// for file: ColdBox's error template and a computed include naming the file's
+// directory. Cached per file, since includerHeld asks for every untyped name
+// a template reads, and finding them reads files.
+func (r *Resolver) frameworkIncludeHosts(file string) []includeHost {
+	o := r.owner()
+	key := pathKey(file)
+
+	o.mu.RLock()
+	hosts, ok := o.extraIncludeHosts[key]
+	o.mu.RUnlock()
+
+	if ok {
+		return hosts
+	}
+
+	hosts = append(r.coldboxErrorHosts(file), r.computedIncludeHosts(file)...)
+
+	o.mu.Lock()
+	if o.extraIncludeHosts == nil {
+		o.extraIncludeHosts = map[string][]includeHost{}
+	}
+
+	o.extraIncludeHosts[key] = hosts
+	o.mu.Unlock()
+
+	return hosts
 }

@@ -28,6 +28,16 @@ var moduleHelpers = map[string]string{
 	"cbfs": "cbfs",
 	// ColdBox's own HTMLHelper module, system/modules/HTMLHelper.
 	"addasset": "HTMLHelper",
+	// coldbox-modules/cbvalidation@b700fab0 helpers/Mixins.cfm.
+	"validate": "cbvalidation", "validateorfail": "cbvalidation", "getvalidationmanager": "cbvalidation",
+	"validatemodel": "cbvalidation", "validatehasvalue": "cbvalidation", "validateisnullorempty": "cbvalidation",
+	"assert": "cbvalidation",
+	// coldbox-modules/cbsecurity@a890b0cb helpers/mixins.cfm.
+	"jwtauth": "cbsecurity", "cbsecure": "cbsecurity",
+	// coldbox-modules/cbauth@cb4dce99 helpers/Mixins.cfm.
+	"auth": "cbauth",
+	// coldbox-modules/cbmessagebox@4bbbf8c8 helpers/mixins.cfm.
+	"cbmessagebox": "cbmessagebox",
 }
 
 // moduleHelper reports whether a bare call to funcName in pr is a module

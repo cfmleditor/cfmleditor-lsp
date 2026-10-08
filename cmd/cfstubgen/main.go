@@ -128,11 +128,12 @@ func sourceFor(fw string) (*frameworkapi.Source, bool) {
 }
 
 type generator struct {
-	src  *frameworkapi.Source
-	root string // the directory Prefix stands for
-	out  string // <out>/<framework>/<prefix>
-	done map[string]bool
-	todo []string
+	src   *frameworkapi.Source
+	root  string // the directory Prefix stands for
+	out   string // <out>/<framework>/<prefix>
+	stubs string // <out>, holding the frameworks generated before this one
+	done  map[string]bool
+	todo  []string
 	// names indexes the source's components by file name, for byName.
 	names map[string][]string
 	// parsed holds signatures' parses.
@@ -140,14 +141,17 @@ type generator struct {
 	// helperReturns names the component a helper function returns, while one
 	// is being written (frameworkapi.Helper.Returns).
 	helperReturns map[string]string
+	// delegating guards delegatedReturn against a cycle.
+	delegating map[*parser.FunctionDef]bool
 }
 
 func generate(src *frameworkapi.Source, repo, out string) error {
 	g := &generator{
-		src:  src,
-		root: filepath.Join(repo, filepath.FromSlash(src.Dir)),
-		out:  filepath.Join(out, src.Framework, src.Prefix),
-		done: map[string]bool{},
+		src:   src,
+		root:  filepath.Join(repo, filepath.FromSlash(src.Dir)),
+		out:   filepath.Join(out, src.Framework, src.Prefix),
+		stubs: out,
+		done:  map[string]bool{},
 	}
 
 	if err := os.RemoveAll(filepath.Join(out, src.Framework)); err != nil {
@@ -373,11 +377,19 @@ func (g *generator) funcLookup(dir string) func(component, funcName string) stri
 				}
 			}
 
-			return ""
+			return g.docReturn(g.sourceOf(abs, pr), fd)
 		}
 
 		return ""
 	}
+}
+
+// sourceOf is abs as a source for funcDoc, with pr its parse.
+func (g *generator) sourceOf(abs string, pr *parser.ParseResult) *source {
+	data, _ := os.ReadFile(abs)
+	text := strings.TrimPrefix(string(data), "\ufeff")
+
+	return &source{path: abs, text: text, lines: strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"), pr: pr}
 }
 
 // locate is the file a component names from dir: a path, a dot-path, or a
@@ -812,7 +824,61 @@ func (g *generator) componentReturn(src *source, def *parser.FunctionDef) string
 		}
 	}
 
-	return g.docReturn(src, def)
+	if q := g.docReturn(src, def); q != "" {
+		return q
+	}
+
+	return g.delegatedReturn(src, def)
+}
+
+var delegateRe = regexp.MustCompile(`(?is)^\s*\{\s*return\s+([A-Za-z_]\w*)\s*\(\s*\)\s*;?\s*\}\s*$`)
+
+// delegatedReturn is what def returns when its whole body is `return f();`
+// for a function f of the same file: cborm's deprecated getBeanPopulator()
+// is `return getObjectPopulator();`, which documents its type. The parse
+// does not answer this, since an own function's documented type names no
+// file in the source.
+func (g *generator) delegatedReturn(src *source, def *parser.FunctionDef) string {
+	if g.delegating == nil {
+		g.delegating = map[*parser.FunctionDef]bool{}
+	}
+
+	if g.delegating[def] {
+		return ""
+	}
+
+	g.delegating[def] = true
+	defer delete(g.delegating, def)
+
+	scope := parser.FindFuncScopeAt(int(def.Line), src.pr.Scopes)
+	if scope.Start == -1 || !strings.EqualFold(scope.Name, def.Name) || scope.End >= len(src.lines) {
+		return ""
+	}
+
+	text := strings.Join(src.lines[scope.Start:scope.End+1], "\n")
+
+	open := strings.IndexByte(text, '{')
+	if open < 0 {
+		return ""
+	}
+
+	m := delegateRe.FindStringSubmatch(text[open:])
+	if m == nil {
+		return ""
+	}
+
+	for i := range src.pr.Funcs {
+		fd := &src.pr.Funcs[i]
+		if strings.EqualFold(fd.Name, m[1]) && fd != def {
+			if t := g.returnType(src, fd); validType(t) && strings.Contains(t, ".") {
+				return t
+			}
+
+			return ""
+		}
+	}
+
+	return ""
 }
 
 var docReturnRe = regexp.MustCompile(`(?im)^@returns?\s+([A-Za-z_]\w*(?:\.\w+)+)\b`)
@@ -832,6 +898,10 @@ func (g *generator) docReturn(src *source, def *parser.FunctionDef) string {
 
 	abs, q := g.resolve(m[1], filepath.Dir(src.path))
 	if abs == "" {
+		if q := g.foreignStub(m[1]); q != "" {
+			return q
+		}
+
 		abs = g.byName(m[1][strings.LastIndexByte(m[1], '.')+1:])
 		q = g.qualify(abs)
 	}
@@ -843,6 +913,30 @@ func (g *generator) docReturn(src *source, def *parser.FunctionDef) string {
 	g.todo = append(g.todo, abs)
 
 	return q
+}
+
+// foreignStub is dotted when it names a component in another framework's
+// namespace that the run has already stubbed: cborm documents
+// getObjectPopulator() as returning coldbox.system.core.dynamic.ObjectPopulator,
+// which is not in cborm's source but is in ColdBox's stubs, generated first
+// (frameworkapi.Sources order). The path is spelt as the stub file is.
+func (g *generator) foreignStub(dotted string) string {
+	fw := frameworkapi.NamespaceOf(dotted)
+	if fw == "" || strings.EqualFold(fw, g.src.Framework) {
+		return ""
+	}
+
+	abs := findFold(filepath.Join(g.stubs, fw), strings.Split(dotted, "."))
+	if abs == "" || isInterface(abs) {
+		return ""
+	}
+
+	rel, err := filepath.Rel(filepath.Join(g.stubs, fw), abs)
+	if err != nil {
+		return ""
+	}
+
+	return strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(rel), filepath.Ext(rel)), "/", ".")
 }
 
 var interfaceRe = regexp.MustCompile(`(?im)^\s*interface\b|<cfinterface\b`)

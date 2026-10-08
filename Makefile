@@ -13,7 +13,7 @@ GOBIN_DIR := $(shell go env GOPATH)/bin
 LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 
-.PHONY: build build-wasm test conformance framework-stubs conformance-summary corpus gapcheck shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -203,6 +203,20 @@ corpus:
 	CFML_CORPUS="$(CORPUS)" CFML_CORPUS_REPORT="$(REPORT)" \
 	CFML_CORPUS_BASELINE="$(BASELINE)" CFML_CORPUS_OPTS="$(OPTS)" \
 		go test -v -count=1 -timeout 30m -run TestFormatterCorpus ./internal/formatter/
+
+# Scans named corpora with `unresolved --json --candidates` and writes the
+# lists in resolution-candidates/ (see its README). Each scan is name=dir[,dir],
+# under the .cfmleditor.json governing its first directory. BASELINE compares
+# with an earlier run's JSON finding by finding; LISTS= (empty) skips rewriting
+# the lists, the cheap check after a change. The corpus is not vendored, so
+# CORPUS is required and nothing in CI runs this.
+#
+#   make resolution-report CORPUS="masa=/src/MasaCMS lucee=/src/Lucee"
+#   make resolution-report CORPUS="..." RUNS=target/resolution/after BASELINE=target/resolution/before LISTS=
+LISTS ?= resolution-candidates
+resolution-report:
+	@test -n "$(CORPUS)" || { echo "usage: make resolution-report CORPUS=\"name=dir[,dir...] ...\" [BASELINE=<dir>] [RUNS=<dir>] [LISTS=<dir>]" >&2; exit 2; }
+	OUT="$(LISTS)" JOBS="$(or $(JOBS),4)" RUNS="$(or $(RUNS),target/resolution/latest)" BASELINE="$(BASELINE)" bash scripts/resolution-report.sh $(CORPUS)
 
 # Reduces the parse-refused and script-refused entries in a corpus report to
 # the smallest contiguous fragment that still fails, so "the grammar cannot
