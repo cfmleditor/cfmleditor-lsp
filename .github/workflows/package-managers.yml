@@ -269,7 +269,8 @@ jobs:
           set -euo pipefail
           asset="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
           gh release download "v${KOMAC_VERSION}" --repo russellbanks/Komac --pattern "${asset}" --pattern SHA256SUMS --dir komac
-          (cd komac && grep " ${asset}\$" SHA256SUMS | sha256sum -c -)
+          # SHA256SUMS names each file with sha256sum's binary marker, *name.
+          (cd komac && awk -v f="${asset}" '{ n = $2; sub(/^\*/, "", n) } n == f' SHA256SUMS | sha256sum -c -)
           tar -xzf "komac/${asset}" -C komac
           echo "${PWD}/komac" >> "$GITHUB_PATH"
 
