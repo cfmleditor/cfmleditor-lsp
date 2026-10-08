@@ -1,11 +1,13 @@
-// Package mcp serves a code map over the Model Context Protocol, so an assistant
-// can ask questions about a codebase's structure instead of grepping for them.
+// Package mcp serves a CFML workspace over the Model Context Protocol, so an
+// assistant can ask questions about a codebase instead of grepping for them:
+// its structure from a code map, and the checks the CLI runs (unresolved calls,
+// references, CFLint).
 //
-// It is read-only by construction: every tool is a query against an already-built
-// map, there is no tool that writes a file or runs a command, and the one tool
-// that touches source (explain_call) parses it and reports. A server that can only
-// answer questions is one that can be pointed at a production checkout without a
-// conversation about blast radius.
+// It writes nothing. The map tools query an already-built map, and the task
+// tools parse source and report. The one tool that runs another program, lint,
+// is offered only when the server is started with it switched on. A server that
+// can only answer questions is one that can be pointed at a production checkout
+// without a conversation about blast radius.
 //
 // The transport is JSON-RPC 2.0 over stdio with newline-delimited messages, which
 // is what MCP specifies. That is deliberately not the Content-Length framing the
@@ -36,15 +38,32 @@ const protocolVersion = "2025-06-18"
 // and this package should not grow a second copy of that wiring.
 type Explainer func(file string, line int, match string) (string, error)
 
-// Server answers MCP requests against a store.
+// Unresolver reports the calls under paths that do not resolve. limit caps the
+// list it returns; the result says how many there were in all.
+type Unresolver func(paths []string, globalDefs bool, limit int) (any, error)
+
+// RefFinder finds the references to a component (a dot-path) or a function (a
+// bare name) under paths.
+type RefFinder func(target string, paths []string, limit int) (any, error)
+
+// Linter runs CFLint over paths.
+type Linter func(paths []string, limit int) (any, error)
+
+// Server answers MCP requests. Like Explain, every hook is supplied by the
+// caller, since each needs the workspace config and resolver chain.
 type Server struct {
+	// Store is the code map. When nil the map tools are not advertised: the
+	// task tools need no map, and a server started without one still has them.
 	Store   *store.Store
 	Name    string
 	Version string
 
-	// Explain is optional. When nil the explain_call tool is not advertised, so a
+	// Each hook is optional. When one is nil its tool is not advertised, so a
 	// client sees the tools that actually work rather than one that always errors.
-	Explain Explainer
+	Explain    Explainer
+	Unresolved Unresolver
+	FindRefs   RefFinder
+	Lint       Linter
 }
 
 type request struct {
@@ -132,6 +151,28 @@ func send(enc *json.Encoder, writer *bufio.Writer, r *response) error {
 	return writer.Flush()
 }
 
+func (s *Server) instructions() string {
+	text := "Checks over a CFML workspace: find_unresolved_calls reports calls that do not " +
+		"resolve and explain_call says why one did or did not; find_references finds the uses " +
+		"of a component or function."
+
+	if s.Lint != nil {
+		text += " lint runs CFLint over files or directories."
+	}
+
+	if s.Store == nil {
+		return text + " No code map is loaded, so the structural tools (search_symbols, " +
+			"get_callers and the rest) are not offered: build one with " +
+			"`cfmleditor-lsp graph --db <file> <dir>` and start this server with --db <file>."
+	}
+
+	return text + " A structural map is loaded too: every function and file, and the calls, " +
+		"instantiations, inheritance and includes between them. Search for a symbol, then follow " +
+		"callers and callees rather than reading whole files. Unreachable code is kept and " +
+		"labelled, not dropped — check get_stats for how many call sites went unresolved before " +
+		"treating an empty caller list as proof of dead code."
+}
+
 func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError) {
 	switch method {
 	case "initialize":
@@ -139,11 +180,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (any, *rpcError
 			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": s.Name, "version": s.Version},
-			"instructions": "A structural map of a CFML codebase: every function and file, " +
-				"and the calls, instantiations, inheritance and includes between them. " +
-				"Search for a symbol, then follow callers and callees rather than reading whole files. " +
-				"Unreachable code is kept and labelled, not dropped — check get_stats for how many " +
-				"call sites went unresolved before treating an empty caller list as proof of dead code.",
+			"instructions":    s.instructions(),
 		}, nil
 
 	case "ping":

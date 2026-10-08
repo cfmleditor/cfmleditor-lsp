@@ -117,32 +117,7 @@ func cmdUnresolved(args []string) {
 		os.Exit(1)
 	}
 
-	fsys := vfs.OS{}
-
-	// Find .cfmleditor.json config based on the first file/dir argument
-	searchDir, _ := filepath.Abs(args[0])
-	if info, err := os.Stat(searchDir); err == nil && !info.IsDir() {
-		searchDir = filepath.Dir(searchDir)
-	}
-
-	cfg, _ := daemon.FindConfig(searchDir)
-	opt := unresolvedOptions(cfg, args, &fl)
-
-	// Collect files from workspace folders or args
-	scanRoots := args
-
-	configuredRoots := cfg != nil && len(cfg.WorkspaceFolders()) > 0
-	if configuredRoots {
-		scanRoots = opt.WorkspaceFolders
-	}
-
-	files := collectCFMLFiles(fsys, scanRoots)
-
-	scanFiles := scanTargets(fsys, args, configuredRoots)
-
-	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
-
-	rep := unresolved.Scan(fsys, files, scanFiles, opt)
+	rep, cfg, searchDir := scanUnresolved(args, &fl)
 	if !writeUnresolved(rep.Calls, cfg, args, searchDir, &fl) {
 		return
 	}
@@ -165,6 +140,38 @@ func cmdUnresolved(args []string) {
 	fmt.Fprintf(os.Stderr, "  Index:  %v (%d files)\n", rep.IndexTime, rep.Indexed)
 	fmt.Fprintf(os.Stderr, "  Scan:   %v (%d files)\n", rep.ScanTime, rep.Scanned)
 	fmt.Fprintf(os.Stderr, "  Total:  %v\n", rep.IndexTime+rep.ScanTime)
+}
+
+// scanUnresolved runs the scan the unresolved command reports: it indexes the
+// workspace the config above the first path names, and checks the calls in the
+// paths given. The MCP server's find_unresolved_calls runs it too.
+func scanUnresolved(args []string, fl *unresolvedFlags) (unresolved.Report, *daemon.Config, string) {
+	fsys := vfs.OS{}
+
+	// Find .cfmleditor.json config based on the first file/dir argument
+	searchDir, _ := filepath.Abs(args[0])
+	if info, err := os.Stat(searchDir); err == nil && !info.IsDir() {
+		searchDir = filepath.Dir(searchDir)
+	}
+
+	cfg, _ := daemon.FindConfig(searchDir)
+	opt := unresolvedOptions(cfg, args, fl)
+
+	// Collect files from workspace folders or args
+	scanRoots := args
+
+	configuredRoots := cfg != nil && len(cfg.WorkspaceFolders()) > 0
+	if configuredRoots {
+		scanRoots = opt.WorkspaceFolders
+	}
+
+	files := collectCFMLFiles(fsys, scanRoots)
+
+	scanFiles := scanTargets(fsys, args, configuredRoots)
+
+	fmt.Fprintf(os.Stderr, "Indexing %d files, then scanning for unresolved calls...\n", len(files))
+
+	return unresolved.Scan(fsys, files, scanFiles, opt), cfg, searchDir
 }
 
 // unresolvedOptions builds the scan's options from the config, or from the
