@@ -32,7 +32,7 @@ func TestMainDispatchesOnlyThroughTheTable(t *testing.T) {
 		for name := range strings.SplitSeq(m[1], ",") {
 			name = strings.Trim(strings.TrimSpace(name), `"`)
 			switch name {
-			case "version", "help", "--help", "-h":
+			case "version", "--version", "-version", "-v", "help", "--help", "-h":
 			default:
 				t.Errorf("main dispatches %q itself; add it to subcommands() so it answers --help", name)
 			}
@@ -89,8 +89,14 @@ func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
 			out, err := cmd.CombinedOutput()
 
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-				t.Fatalf("exit = %v, want status 1; output:\n%s", err, out)
+			// clif cflint keeps 1 for findings, so its usage errors exit 2.
+			want := 1
+			if name == "cflint" {
+				want = exitCFLintError
+			}
+
+			if !errors.As(err, &exit) || exit.ExitCode() != want {
+				t.Fatalf("exit = %v, want status %d; output:\n%s", err, want, out)
 			}
 
 			if !strings.Contains(string(out), `unknown option "--bogus"`) {

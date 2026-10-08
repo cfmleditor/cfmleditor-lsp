@@ -48,7 +48,12 @@ func main() {
 		}
 
 		switch name {
-		case "version":
+		// --version and -version (CFLint's spelling) as well as the subcommand:
+		// a tool checking that a binary is installed runs `<binary> --version`,
+		// and without these that started the language server, which waits on
+		// stdin for a client that never comes. Editors start the server with no
+		// arguments, so no client sends one of these.
+		case "version", "--version", "-version", "-v":
 			fmt.Printf("clif %s\n", version)
 
 			return
@@ -88,7 +93,7 @@ Commands:
   mcp          Serve that map over the Model Context Protocol on stdio
   routes       Report framework routes and what they resolve to
   explain      Explain how a call site's component was resolved
-  version      Print version
+  version      Print version (also --version)
   help         Show this help
 
 Run "clif <command> --help" (or "clif help <command>")

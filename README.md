@@ -1042,7 +1042,15 @@ project's config lists for resolution. Both refuse to rewrite a report whose
 directory holds more than was linted, since that would drop everything else's
 entries; the unresolved report still scans every workspace folder. `--out <file>` writes one report
 anywhere above the linted directories, with paths relative to it:
-`clif cflint --out ~/tassdev/prs/.clif-cflint.txt ~/tassdev/prs`.
+`clif cflint --out myapp/.clif-cflint.txt myapp`.
+
+`clif cflint` exits 0 when it found nothing, 1 when it printed findings, and 2
+when the run can't be trusted: a path that doesn't exist, CFLint unavailable
+or failing, a usage error, or a `.cflintrc` CFLint can't parse. CFLint itself
+says nothing about the last one and lints with its default rules instead, so
+clif parses every `.cflintrc` CFLint would read first. A run that writes a
+report (`--write`, `--out`) exits 0 whatever it found. `clif --version` prints
+the version and exits, like `clif version`.
 
 A `cflint` report's entries are labelled `cflint` and carry the rule ID, as
 CFLint's own diagnostics do. They give way file by file to CFLint on save: once
