@@ -3,10 +3,10 @@ package codemap_test
 import (
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/codemap"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // Build takes its options by pointer and fills in Workers and ConfigFor when

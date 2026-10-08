@@ -10,19 +10,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap/store"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-const graphUsage = `usage: cfmleditor-lsp graph [options] <dir> [...]
+const graphUsage = `usage: clif graph [options] <dir> [...]
 
 Build a whole-project map: every function and file, and the calls,
 instantiations, inheritance and includes between them.
@@ -50,19 +50,19 @@ instantiations, inheritance and includes between them.
                    runner invokes by a constructed name (repeatable), e.g.
                    --entry '../prs' --entry 'tasks/*'
   --utility <glob> mark files as infrastructure rather than application code
-                   (repeatable, and added to any in .cfmleditor.json). They
+                   (repeatable, and added to any in .clif.json). They
                    stay in the map and every ranking says so; the html report
                    can then set them aside on request.
                    e.g. --utility 'packages/tass/core/context.cfc'
   --hide-utility   open the html report with utility code switched off (the
                    toggle is still there; nothing is removed from the page)
-  --one-config     read every file under the scan root's own .cfmleditor.json,
+  --one-config     read every file under the scan root's own .clif.json,
                    instead of each file's nearest one
   --workers <n>    scan parallelism (default: GOMAXPROCS)
   --limit <n>      list length in the text report (default 20)
   --quiet          no progress on stderr
 
-The "codemap" block of .cfmleditor.json carries the entry and utility globs,
+The "codemap" block of .clif.json carries the entry and utility globs,
 so every run describes the same codebase; these flags add to it.
 
 Every declared function is in the map whether or not anything calls it.

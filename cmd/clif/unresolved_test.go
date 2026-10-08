@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 func TestCollectCFMLFiles(t *testing.T) {
@@ -75,7 +75,7 @@ func TestPresetHint(t *testing.T) {
 
 	write("box.json", `{"dependencies":{"coldbox":"^7"},"devDependencies":{"testbox":"*"}}`)
 
-	if got := presetHint(nil, dir); !strings.Contains(got, `"frameworks": ["coldbox", "testbox"]`) || !strings.Contains(got, "a .cfmleditor.json") {
+	if got := presetHint(nil, dir); !strings.Contains(got, `"frameworks": ["coldbox", "testbox"]`) || !strings.Contains(got, "a .clif.json") {
 		t.Errorf("no config: %q", got)
 	}
 

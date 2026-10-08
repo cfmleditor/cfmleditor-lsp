@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/config"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/route"
 )
 
 // Every field of Settings must reach the Server. The failure this guards was

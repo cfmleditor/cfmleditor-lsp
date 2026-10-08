@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // cborm's VirtualEntityService is a service bound to one entity: ContentBox's

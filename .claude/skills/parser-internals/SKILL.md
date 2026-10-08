@@ -1,6 +1,6 @@
 ---
 name: parser-internals
-description: understand, debug, or extend the cfmleditor-lsp parser — scanner tokenisation, the two parse loops, call-site extraction, and how the unresolved command works
+description: understand, debug, or extend the clif parser — scanner tokenisation, the two parse loops, call-site extraction, and how the unresolved command works
 ---
 
 Use this skill when debugging unexpected parser output, tracing how a CFML construct is tokenised, adding call-site extraction features, or investigating why a variable/ref is wrong in the `unresolved` command output.
@@ -71,7 +71,7 @@ Enable with `ParseOptions{ExtractCalls: true}`.
 
 `CanResolveCall` in `internal/resolve/resolve.go:277` checks function-scoped refs first, then falls back to `pr.ComponentRefs`. The reason string `"variable 'X' has no component ref"` means neither lookup found a `ComponentRef.Variable` matching `X`.
 
-## The `unresolved` command (`cmd/cfmleditor-lsp/unresolved.go`)
+## The `unresolved` command (`cmd/clif/unresolved.go`)
 
 Parse options used:
 

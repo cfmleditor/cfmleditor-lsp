@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/codemap"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 )
 
-// codeMapRequest is the optional argument to cfmleditor.generateCodeMap.
+// codeMapRequest is the optional argument to clif.generateCodeMap.
 //
 // Every field has a working default, so the command is useful with no arguments
 // at all: an editor can bind it to a menu item and a person who has never read
@@ -29,7 +29,7 @@ type codeMapRequest struct {
 	Format string `json:"format"`
 
 	// Out is where to write. Relative paths resolve against the workspace root;
-	// the default is .cfmleditor/codemap.<ext> beside the config.
+	// the default is .clif/codemap.<ext> beside the config.
 	Out string `json:"out"`
 
 	// Under scopes the map to a path prefix, keeping the nodes just outside it
@@ -223,7 +223,7 @@ func (s *Server) writeCodeMap(m *codemap.Map, req *codeMapRequest, out string) e
 func (s *Server) codeMapOutputPath(req *codeMapRequest, root string) (string, error) {
 	out := req.Out
 	if out == "" {
-		return filepath.Join(root, ".cfmleditor", "codemap"+codeMapExt(req.Format)), nil
+		return filepath.Join(root, ".clif", "codemap"+codeMapExt(req.Format)), nil
 	}
 
 	if !filepath.IsAbs(out) {

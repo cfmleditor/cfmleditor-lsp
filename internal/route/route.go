@@ -13,7 +13,7 @@
 // controllers/section.cfc's item() and views/section/item.cfm; TASS maps
 // "kiosk.customrollcall.dialog.custom.roll" to packages/tass/kiosk-customrollcall.cfc's
 // dialogCustomRoll(). Those are the same shape with different templates, and a
-// third framework will be a third set — so the rules live in .cfmleditor.json and
+// third framework will be a third set — so the rules live in .clif.json and
 // this package only knows how to apply them.
 package route
 
@@ -26,7 +26,7 @@ import (
 	"strings"
 )
 
-// Config is the "routes" block of .cfmleditor.json.
+// Config is the "routes" block of .clif.json.
 type Config struct {
 	// Attributes are the HTML attribute names that carry a route, e.g. "data-view",
 	// "data-read" and "data-process". Matching is case-insensitive.

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/codemap"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // The same workspace gives the same map. ContentBox keeps a RailoDBInfo.cfc in

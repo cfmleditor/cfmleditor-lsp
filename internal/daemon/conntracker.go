@@ -27,7 +27,7 @@ import (
 // already woken on the closed channel cannot be called back by swapping the
 // field underneath it. The waiter has to re-check Count() after a grace
 // period and go back to waiting if a client turned up — see the loop in
-// cmd/cfmleditor-lsp/main.go, which is the other half of this.
+// cmd/clif/main.go, which is the other half of this.
 type ConnTracker struct {
 	mu    sync.Mutex
 	count int

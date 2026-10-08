@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 )
 
 type capture struct {

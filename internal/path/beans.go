@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // BuildBeanMap scans configured bean directories and builds a lookup map.

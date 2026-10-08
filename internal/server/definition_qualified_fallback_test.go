@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

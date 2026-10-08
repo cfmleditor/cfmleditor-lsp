@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/language"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -302,7 +302,7 @@ func rootIdent(e ast.Expr) string {
 	}
 }
 
-// cfmleditor.goToMatchingTag takes the editor's cursor as arguments and answers
+// clif.goToMatchingTag takes the editor's cursor as arguments and answers
 // with a position the editor moves to, so both are LSP columns. Read as a byte
 // column, the cursor after two emoji landed four bytes early, inside the
 // string before the tag, and no tag was found.
@@ -313,7 +313,7 @@ func TestGoToMatchingTagCountsUTF16Units(t *testing.T) {
 	srv.setDocument(docURI, line)
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.goToMatchingTag",
+		Command:   "clif.goToMatchingTag",
 		Arguments: lspAnyArgs(string(docURI), 0, utf16Of(t, line, "<cfif", 1)),
 	})
 

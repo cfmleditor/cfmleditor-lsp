@@ -1,6 +1,6 @@
 package resolve
 
-import "github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+import "github.com/cfmleditor/clif/internal/parser"
 
 // inheritedReceiver is what a receiver the file never types holds through its
 // extends chain: a ColdBox test base's mock of the class the test names,

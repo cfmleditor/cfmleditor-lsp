@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/conv"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	routepkg "github.com/cfmleditor/clif/internal/route"
 	"go.lsp.dev/protocol"
 )
 
@@ -395,7 +395,7 @@ func routeTooltip(t *routepkg.Target) string {
 // is wrong still opens a file, just not the right one.
 func (s *Server) handleResolveRoute(params []protocol.LSPAny) (any, error) {
 	if len(params) == 0 {
-		return nil, errors.New("cfmleditor.resolveRoute requires a route")
+		return nil, errors.New("clif.resolveRoute requires a route")
 	}
 
 	route, _ := argString(params, 0)

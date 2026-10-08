@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/docs"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func TestProducerDefaultAndSuppliedObject(t *testing.T) {

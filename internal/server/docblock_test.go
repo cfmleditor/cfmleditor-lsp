@@ -9,7 +9,7 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/clif/internal/config"
 )
 
 func docCompletion(t *testing.T, srv *Server, text string, line, char uint32) []protocol.CompletionItem {

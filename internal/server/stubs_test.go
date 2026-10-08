@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

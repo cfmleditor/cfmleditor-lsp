@@ -10,7 +10,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/language"
 )
 
 // formatOnce formats src with the standard option set used by the CLI.

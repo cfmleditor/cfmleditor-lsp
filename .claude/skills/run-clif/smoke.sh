@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Smoke-tests cfmleditor-lsp: builds, exercises CLI subcommands, and runs
+# Smoke-tests clif: builds, exercises CLI subcommands, and runs
 # a real LSP initialize/shutdown cycle over stdio.
-# Run from repo root: bash .claude/skills/run-cfmleditor-lsp/smoke.sh
+# Run from repo root: bash .claude/skills/run-clif/smoke.sh
 
 set -euo pipefail
 
-BIN=./target/release/cfmleditor-lsp
+BIN=./target/release/clif
 PASS=0; FAIL=0
 
 pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
@@ -39,7 +39,7 @@ EOF
 # ── version ──────────────────────────────────────────────────────────────────
 echo "==> version"
 out=$("$BIN" version 2>&1)
-echo "$out" | grep -q "cfmleditor-lsp" \
+echo "$out" | grep -q "clif" \
   && pass "version output" || fail "version output" "$out"
 
 # ── parse ────────────────────────────────────────────────────────────────────

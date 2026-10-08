@@ -68,7 +68,7 @@ func NewLogger(debug bool) Logger {
 		l = zap.NewNop()
 	}
 
-	// A copy on disk when CFMLEDITOR_LSP_LOG names one. See FileEnv: stderr
+	// A copy on disk when CLIF_LOG names one. See FileEnv: stderr
 	// belongs to the client, so it is the one place a record cannot be trusted
 	// to survive the client going away — which is when the record matters.
 	if fc := fileCore(debug); fc != nil {

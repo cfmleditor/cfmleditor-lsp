@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/clif/internal/conv"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/protocol"
 )
 

@@ -6,8 +6,8 @@ import (
 	"encoding/json/v2"
 	"slices"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/parser"
 	"go.lsp.dev/protocol"
 )
 

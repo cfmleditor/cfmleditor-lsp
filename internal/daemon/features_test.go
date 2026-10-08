@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/clif/internal/config"
 )
 
 func configWith(t *testing.T, body string) *Config {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 func TestScanTargetsNarrowsToADirectoryUnderAWiderIndex(t *testing.T) {

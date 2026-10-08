@@ -1,6 +1,6 @@
 package config
 
-import "github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
+import "github.com/cfmleditor/clif/internal/formatter"
 
 // DefaultResolvedFormatting returns the documented default for every knob,
 // for callers that format without a config to read. Enabled stays false,
@@ -34,7 +34,7 @@ func DefaultResolvedFormatting() ResolvedFormatting {
 // This is the single translation from config to formatter behaviour, shared by
 // the LSP's textDocument/formatting handler and the `format` subcommand. When
 // the two built their own option structs, `format -w` silently ignored every
-// `formatting` key in .cfmleditor.json and produced different bytes than the
+// `formatting` key in .clif.json and produced different bytes than the
 // editor did for the same file.
 //
 // The zero-valued int fields are treated as "unset" rather than as literal

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 // MemberReceiverName preserves a record's path. A scoped variable and an

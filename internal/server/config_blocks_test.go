@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/clif/internal/config"
 )
 
 // A config that does not mention a block must not reset it.

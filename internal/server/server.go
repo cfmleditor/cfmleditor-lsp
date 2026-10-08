@@ -11,18 +11,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/cache"
+	"github.com/cfmleditor/clif/internal/cflint"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/route"
+	"github.com/cfmleditor/clif/internal/vfs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -63,7 +63,7 @@ type Server struct {
 	ExpressionMappings       map[string]string    // runtime expression → static value substitutions
 	ServicePropertyResolvers map[string]string    // "@serviceproperty" annotation kind → dot-path template
 	Routes                   route.Config         // framework routing convention (see internal/route)
-	CodeMap                  config.CodeMap       // entry and utility globs for cfmleditor.generateCodeMap
+	CodeMap                  config.CodeMap       // entry and utility globs for clif.generateCodeMap
 	KnownIssues              []config.KnownIssues // files of documented findings published as diagnostics
 
 	// diag holds every diagnostic this session has published, per file and
@@ -87,7 +87,7 @@ type Server struct {
 	LintMinSeverity          string                    // CFLint severity floor ("" reports everything)
 	DocBlock                 config.ResolvedDocBlock   // what a `/**` expands to (see config.DocBlock)
 	References               bool                      // answer textDocument/references (opt-in; see config.References)
-	ConfigPath               string                    // the .cfmleditor.json the daemon configured this session from, if any
+	ConfigPath               string                    // the .clif.json the daemon configured this session from, if any
 	TagSnippets              bool                      // insert snippets for tags
 	FunctionSnippets         bool                      // insert snippets for functions
 	GlobalFunctionResolution bool                      // resolve unqualified functions via global index
@@ -210,7 +210,7 @@ func (s *Server) capabilities() protocol.ServerCapabilities {
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &resolveProvider},
 		CodeActionProvider:        protocol.Boolean(true),
 		ExecuteCommandProvider: protocol.ExecuteCommandOptions{
-			Commands: []string{"cfmleditor.reindex", "cfmleditor.format", "cfmleditor.showComponentPath", "cfmleditor.restartDaemon", "cfmleditor.showResolvers", "cfmleditor.showFileIndex", "cfmleditor.showConnections", "cfmleditor.openActiveApplicationFile", "cfmleditor.goToMatchingTag", "cfmleditor.copyPackage", "cfmleditor.findRefs", "cfmleditor.exportDeps", "cfmleditor.scanWorkspace", "cfmleditor.generateCodeMap", "cfmleditor.showCodeMapStats", "cfmleditor.resolveRoute", "cfmleditor.exportUnresolved", "cfmleditor.exportCFLint", "cfmleditor.explainCall"},
+			Commands: []string{"clif.reindex", "clif.format", "clif.showComponentPath", "clif.restartDaemon", "clif.showResolvers", "clif.showFileIndex", "clif.showConnections", "clif.openActiveApplicationFile", "clif.goToMatchingTag", "clif.copyPackage", "clif.findRefs", "clif.exportDeps", "clif.scanWorkspace", "clif.generateCodeMap", "clif.showCodeMapStats", "clif.resolveRoute", "clif.exportUnresolved", "clif.exportCFLint", "clif.explainCall"},
 		},
 		Workspace: &protocol.WorkspaceOptions{
 			WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
@@ -500,7 +500,7 @@ func (s *Server) logPresetSuggestion() {
 // The caches have to go too, not just the resolver: applyConfig invalidates and
 // then appends the config file's componentResolvers to s.ComponentResolvers. If
 // cachedResolvers survived that, the appended entries would never be converted
-// and every resolver a .cfmleditor.json contributed would be silently ignored
+// and every resolver a .clif.json contributed would be silently ignored
 // for the rest of the session.
 func (s *Server) invalidateResolver() {
 	// The route resolver closes over the index and the workspace roots too, so it
@@ -707,10 +707,10 @@ func (s *Server) usableWorkspaceRoot(rawURI string) (string, bool) {
 // from config when there are any, and otherwise the roots the editor opened.
 //
 // WorkspaceFolders alone is only ever the *configured* set — it comes from
-// `workspacePaths` and is empty for every session without a .cfmleditor.json,
+// `workspacePaths` and is empty for every session without a .clif.json,
 // which since daemon mode became opt-in is the ordinary standalone case. A
 // search that reads it directly then covers nothing and reports nothing found,
-// which is indistinguishable from there being nothing to find: cfmleditor.findRefs
+// which is indistinguishable from there being nothing to find: clif.findRefs
 // answered "0 match(es)" for a function with three callers sitting next to it.
 //
 // Use this for anything that goes looking. The configured set itself is still

@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // muraEventComponent is what Mura hands its code as `event`: a servletEvent

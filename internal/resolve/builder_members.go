@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // Two cborm facts the stubs cannot state, both from cborm's BaseBuilder and

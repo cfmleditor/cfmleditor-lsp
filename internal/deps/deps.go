@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/graph"
+	"github.com/cfmleditor/clif/internal/parser"
 	"go.lsp.dev/uri"
 )
 

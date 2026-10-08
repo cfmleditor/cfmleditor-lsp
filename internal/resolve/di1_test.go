@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/index"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // TestDI1AutowiresByBeanName: an FW/1 application's DI/1 registers each

@@ -15,7 +15,7 @@ import (
 
 // crashChildEnv names what a child process of TestCrashReachesTheCrashFile is
 // to do. Set only in that child.
-const crashChildEnv = "CFMLEDITOR_LSP_TEST_CRASH"
+const crashChildEnv = "CLIF_TEST_CRASH"
 
 // TestCrashReachesTheCrashFile is the reason EnableCrashReports exists. Neither
 // crash passes through CapturePanic or any logger: a goroutine the server did
@@ -51,7 +51,7 @@ func TestCrashReachesTheCrashFile(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				got, out := runChild(t, mode, configured)
 
-				for _, w := range []string{want, "goroutine ", "--- cfmleditor-lsp test-version started, pid "} {
+				for _, w := range []string{want, "goroutine ", "--- clif test-version started, pid "} {
 					if !strings.Contains(got, w) {
 						t.Errorf("the crash file does not hold %q; it holds:\n%s\nstderr was:\n%s", w, got, out)
 					}

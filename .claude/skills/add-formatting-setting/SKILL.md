@@ -1,9 +1,9 @@
 ---
 name: add-formatting-setting
-description: add a formatting option to cfmleditor-lsp — the config hops a new `formatting` key crosses, the defaults that must not move, and how to verify it against the corpus
+description: add a formatting option to clif — the config hops a new `formatting` key crosses, the defaults that must not move, and how to verify it against the corpus
 ---
 
-Add a new key under `formatting` in `.cfmleditor.json` and wire it through to the
+Add a new key under `formatting` in `.clif.json` and wire it through to the
 formatter.
 
 ## The rule that governs everything else

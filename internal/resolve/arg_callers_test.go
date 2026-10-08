@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func cfmlFilesIn(t *testing.T, dir string) []string {

@@ -3,7 +3,7 @@ package resolve
 import (
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
 )
 
 // TestAWireBoxIDIsWhatItsModuleRegisters: ColdBox registers a module's models

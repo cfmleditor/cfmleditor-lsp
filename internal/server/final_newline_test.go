@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/clif/internal/config"
 	"go.lsp.dev/protocol"
 )
 
@@ -38,7 +38,7 @@ func formatEOF(t *testing.T, content string, opts protocol.FormattingOptions) st
 // options are measured against, and the reason they are needed: the formatter
 // rebuilds the document rather than editing it, so it ends with exactly one
 // newline whatever the source did. A client that sends neither option — the
-// `cfmleditor.format` command, or anything older than LSP 3.15 — has to keep
+// `clif.format` command, or anything older than LSP 3.15 — has to keep
 // getting exactly that.
 func TestFormatterAlwaysEndsWithOneNewlineByDefault(t *testing.T) {
 	t.Parallel()

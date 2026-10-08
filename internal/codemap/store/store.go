@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap"
 	_ "modernc.org/sqlite" // pure-Go driver, registered as "sqlite"
 )
 

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // fakeDirEntry is a minimal fs.DirEntry for caseSensitiveFS.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // eventResolver is the coldbox preset's `event`, spelled out: this package

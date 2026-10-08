@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/route"
 )
 
 // Settings is the per-session configuration a Server needs, gathered in one
@@ -20,7 +20,7 @@ import (
 // Adding a config key now means adding a field here and a line in Apply,
 // rather than remembering three call sites.
 type Settings struct {
-	// ConfigPath is the .cfmleditor.json these settings were read from, empty
+	// ConfigPath is the .clif.json these settings were read from, empty
 	// when the daemon's own walk found none. It is what tells a session
 	// whether its configuration has already been discovered for it — see
 	// handleInitialize.

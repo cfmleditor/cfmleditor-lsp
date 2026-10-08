@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
 )
 
 func TestPropertyDocGenericTypesReceiverAndGetter(t *testing.T) {

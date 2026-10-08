@@ -7,16 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/cflint"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-const cflintUsage = `usage: cfmleditor-lsp cflint [--write | --out <file>] <dir> [...]
+const cflintUsage = `usage: clif cflint [--write | --out <file>] <dir> [...]
 
 Run CFLint over the given directories and print the result as a known-issues
-report, one issue per line, paths relative to the .cfmleditor.json found above
+report, one issue per line, paths relative to the .clif.json found above
 the first directory. The CFLint binary is downloaded on first use.
 linting.minSeverity in the config sets the least severe level reported.
 
@@ -80,8 +80,8 @@ func parseCFLintFlags(args []string) cflintFlags {
 }
 
 // cmdCFLint runs CFLint over a project and writes the result as a known-issues
-// report: to stdout, relative to the project's .cfmleditor.json; with --out to
-// one file; or with --write to the files the editor's cfmleditor.exportCFLint
+// report: to stdout, relative to the project's .clif.json; with --out to
+// one file; or with --write to the files the editor's clif.exportCFLint
 // writes (config.GenerateTargets). It is that command for anything that cannot
 // send the server one: a Zed task, CI, a shell.
 func cmdCFLint(args []string) {
@@ -116,7 +116,7 @@ func cmdCFLint(args []string) {
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
 	} else if fl.write {
-		fatalf("--write needs a .cfmleditor.json to say where the report goes; use --out\n")
+		fatalf("--write needs a .clif.json to say where the report goes; use --out\n")
 	}
 
 	targets := cflintTargets(&fl, knownIssues, configDir, roots, scanRoots)

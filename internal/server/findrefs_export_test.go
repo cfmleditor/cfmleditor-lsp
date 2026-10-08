@@ -16,12 +16,12 @@ func runFindRefs(t *testing.T, srv *Server, args ...any) {
 	t.Helper()
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.findRefs",
+		Command:   "clif.findRefs",
 		Arguments: lspAnyArgs(args...),
 	})
 
 	if _, err := srv.handleExecuteCommand(context.Background(), req); err != nil {
-		t.Fatalf("cfmleditor.findRefs: %v", err)
+		t.Fatalf("clif.findRefs: %v", err)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestCodeActionsSeparateFindingFromExporting(t *testing.T) {
 	var exports int
 
 	for _, a := range actions {
-		if a.Command.Command != "cfmleditor.findRefs" {
+		if a.Command.Command != "clif.findRefs" {
 			continue
 		}
 

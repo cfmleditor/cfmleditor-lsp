@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func TestPropertyReadText(t *testing.T) {

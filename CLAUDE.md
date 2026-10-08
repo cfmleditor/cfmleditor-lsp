@@ -11,7 +11,7 @@ For sandbox proxy failures, follow the execution-context retry guidance in
 `AGENTS.md` before diagnosing an outage.
 
 ```bash
-make build          # generate docs + build binary to target/release/cfmleditor-lsp
+make build          # generate docs + build binary to target/release/clif
 make test           # go test ./...
 make lint           # golangci-lint run ./... (pinned scanner, built from source)
 make lint-fix       # golangci-lint run --fix ./...
@@ -20,7 +20,7 @@ make fmt            # gofmt -w . && golangci-lint run --fix ./... (gofumpt inclu
 make install        # build and copy to `go env GOPATH`/bin
 make link           # build + symlink onto PATH for local editor use (LINK_DIR=<dir> to override)
 make unlink         # remove that symlink
-make link-status    # show the link, the build, and what PATH resolves cfmleditor-lsp to
+make link-status    # show the link, the build, and what PATH resolves clif to
 make update-grammar # bump tree-sitter-cfml, regen docs + injections.scm, clear build cache
 make framework-stubs # regenerate internal/frameworkapi/stubs from each pinned framework
                     # source (needs git + network; the stubs are committed)
@@ -62,7 +62,7 @@ go test ./internal/parser/ -bench . -run '^$'
 **`make build` requires network access.** `build` depends on `generate` → `docs` →
 `scripts/fetch-docs-cfdocs.sh`, which git-clones the cfdocs repo into the gitignored
 `docs/data/`. The *generated* Go file (`internal/docs/generated_docs.go`) is committed, so plain
-`go build ./cmd/cfmleditor-lsp`, `go test ./...`, and `make lint` all work offline
+`go build ./cmd/clif`, `go test ./...`, and `make lint` all work offline
 — use those when the fetch step can't run. (`make lint`'s first run needs the network once, to
 fetch and build the pinned linter; after that it is served from the build cache.)
 
@@ -94,17 +94,17 @@ Go toolchain is pinned at **1.27.1** (`go.mod`). CGO is required (tree-sitter gr
 ### CLI subcommands
 
 The binary is an LSP server by default; `os.Args[1]` selects a subcommand
-(`cmd/cfmleditor-lsp/main.go`).
+(`cmd/clif/main.go`).
 
 | Command | Usage |
 |---|---|
 | *(none)* | Run the LSP server over stdio (JSON-RPC 2.0, Content-Length framing) |
 | `parse` | `parse <file-or-dir> [...]` — parse and report per-file timing/counts |
 | `scan` | `scan <file-or-dir> [...]` — report parse errors |
-| `format` | `format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]` — format to stdout, or in place with `-w`. Reads `formatting` from each file's governing `.cfmleditor.json`, or from `--root`'s |
+| `format` | `format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]` — format to stdout, or in place with `-w`. Reads `formatting` from each file's governing `.clif.json`, or from `--root`'s |
 | `unresolved` | `unresolved [--json] [--verbose] [--global-defs] <dir> [...]` — batch scan for unresolvable component/method calls |
 | `refs` | `refs [--mermaid] <component-or-function> <dir> [...]` — find references |
-| `deps` | `deps [--mermaid] <dir-or-file> [...]` — transitive dependency graph, built through `deps.Build` so the CLI and `cfmleditor.exportDeps` answer alike |
+| `deps` | `deps [--mermaid] <dir-or-file> [...]` — transitive dependency graph, built through `deps.Build` so the CLI and `clif.exportDeps` answer alike |
 | `graph` | `graph [--level function\|call\|file\|package] [--format text\|json\|jsonl\|dot\|mermaid\|html] [--db <file>] [--out <f>] [--live\|--detached\|--from <id>] [--under <p>] <dir> [...]` — whole-project code map |
 | `mcp` | `mcp [--db <file>] [--root <dir>] [--allow-lint] [--map-only] [--no-explain]` — serve the workspace over MCP on stdio: unresolved, refs and explain from source, the map's tools with `--db`, CFLint with `--allow-lint`. Writes nothing |
 | `explain` | `explain [--root <dir>] <file> <line> [call-substring]` — trace how a call site resolved |
@@ -112,12 +112,34 @@ The binary is an LSP server by default; `os.Args[1]` selects a subcommand
 
 `cmd/cfparse` is a separate debug binary for parser development (timing + `-cpuprofile`).
 
+## The old name: cfmleditor-lsp
+
+This project was cfmleditor-lsp, and every name it had is still honoured, so
+neither editors nor projects have to change at once. **Write the new name
+everywhere; read both.** README.md's "Formerly cfmleditor-lsp" lists each pair.
+The fallbacks live in one place each, with a test that fails if it goes:
+
+- config file: `config.FileNames` (`.clif.json` before `.cfmleditor.json`), used by
+  `daemon.FindConfig`, `Server.findConfigUpwards`, `loadResolversFromConfig` and the
+  code map's config preload. `TestFindConfigPrefersClifJSON`, `TestAClifConfigOutranksALegacyOne`.
+- commands: `canonicalCommand` maps `cfmleditor.X` to `clif.X` before dispatch; only
+  `clif.*` is advertised. `TestLegacyCommandNamesStillRun`, `TestOnlyTheNewCommandNamesAreAdvertised`.
+- default report files: `config.defaultReport` keeps an existing legacy-named report.
+  `TestADefaultReportKeepsItsLegacyName`.
+- environment: `cflog.Getenv(new, legacy)`. `TestGetenvFallsBackToTheLegacyName`.
+- binary: the release workflow publishes `cfmleditor-lsp-<platform>` archives beside
+  `clif-<platform>`, and `make build`/`install`/`link` create both names.
+
+A new config key, command, env var or default file name needs no legacy twin — only
+names that shipped under cfmleditor-lsp do. Keep CHANGELOG.md's history as it was
+written.
+
 ## Architecture
 
 An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml` grammar.
 
 **Two runtime modes**, selected at startup by whether `daemon.FindConfig(cwd)` finds a
-`.cfmleditor.json` (walking from the current directory up to the filesystem root):
+`.clif.json` (walking from the current directory up to the filesystem root):
 
 - **Daemon mode** — the first LSP client becomes the daemon: it listens on a Unix socket (path
   derived from `workspaceName`) *and* serves that first client over stdio, sharing one
@@ -130,7 +152,7 @@ An LSP server for CFML/ColdFusion written in Go, backed by the `tree-sitter-cfml
   base name, so unrelated projects in folders with the same name shared one daemon and one
   index. Every caller already tested for nil.
 
-Note the repo root has its own `.cfmleditor.json` (`workspaceName: testdata`), so running the
+Note the repo root has its own `.clif.json` (`workspaceName: testdata`), so running the
 binary from the repo root enters daemon mode against `testdata/`.
 
 **Core data pipeline:**
@@ -156,25 +178,25 @@ Editor document change
 | `internal/index` | Concurrency-safe store of function defs, component refs, beans, ORM entities. `HasFile` answers "indexed at all" — not the same as `FunctionsForFile` returning nothing, since a property-only bean indexes to an empty but present entry. Two views of every entry — the name buckets (`funcs`/`comprefs`) and the per-file lists (`fileFuncs`/`fileRefs`) — hold the same pointers, and **every writer must fill or clear both**; `removeFileEntries` reaches the buckets *through* the per-file lists, so a writer that updates one view alone leaves entries no removal can find. **Accessors return a copy** (`snapshot`), which is what lets writers compact and rewrite buckets in place rather than rebuild a slice that, for a name every component declares, holds one entry per file — pinned by `TestAccessorsReturnStorageWritersDoNotTouch`. On a per-keystroke path reach for `LookupPreferred`/`CountFunctions`, not `Lookup`, which pays that copy. **Bucket order is not an answer**: entries land in the order a parallel workspace scan finished, so it differs between restarts — where several files declare a name and none is the requesting file, `LookupPreferred` picks the nearest by `cfpath.URIDistance` and the lowest URI among equals, and `definition.go` orders its multi-location list the same way |
 | `internal/resolve` | Dot-path → `.cfc` file resolution, `CanResolveCall`/`ExplainCall`, extends chain, cfinclude scope |
 | `internal/path` | Case-insensitive path resolution, mappings, globs, `Application.cfc` mapping/bean/ORM extraction, binary + CFML file detection |
-| `internal/config` | `.cfmleditor.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
+| `internal/config` | `.clif.json` schema (`config.JSON`), defaults, `JavaStubResolver` |
 | `internal/daemon` | Unix socket serve/proxy, connection tracking, config discovery |
 | `internal/formatter` | tree-sitter CST-walking formatter (elements, cfscript, cfquery/SQL) |
 | `internal/language` | tree-sitter language handles (`CFML`, `CFScript`, `CFQuery`) + injection queries |
 | `internal/docs` | Built-in CFML function/tag signatures and return types (**generated — do not hand-edit**) |
 | `internal/cflint` | Downloads/runs the CFLint binary, maps JSON output to LSP diagnostics |
 | `internal/cache` | Per-file, per-scope completion item cache with content hashing |
-| `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `cfmleditor.findRefs` and `textDocument/references` |
+| `internal/refs` | Shared reference-finding + `Trace` (multi-hop wrapper following) for the `refs` CLI, `clif.findRefs` and `textDocument/references` |
 | `internal/frameworkapi` | The presets' frameworks' API, bundled: generated stubs (`stubs/`, from `cmd/cfstubgen`), the overlay filesystem that serves them under the virtual `Root`, and their doc comments (`DocAt`). See "Framework presets" |
 | `internal/route` | Convention-based framework routing: the `routes` config grammar, the source scanner, and resolution to a controller method or a view |
 | `internal/codemap` | Whole-project map: every function, file, and the calls/instantiations/inheritance/includes between them. The **inverse** of `internal/deps` — see the note below |
 | `internal/codemap/store` | SQLite persistence + the per-file parse cache (`!wasip1`; a stub declines on wasm) |
-| `internal/codemap/mcp` | MCP server: the map tools over the store, and the task tools (unresolved, refs, explain, lint) as hooks `cmd/cfmleditor-lsp/mcp_tasks.go` supplies, so the tool and its CLI command run the same code. A nil hook or store is a tool not advertised |
-| `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `cfmleditor.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
+| `internal/codemap/mcp` | MCP server: the map tools over the store, and the task tools (unresolved, refs, explain, lint) as hooks `cmd/clif/mcp_tasks.go` supplies, so the tool and its CLI command run the same code. A nil hook or store is a tool not advertised |
+| `internal/deps` | Transitive dependency graph builder, the single implementation behind both the `deps` CLI and `clif.exportDeps`. Two traversals: file-level, which walks `Index.RefsForFile`; and function-level, which needs an `Options.LoadCalls` hook, because the index stores definitions and refs but no call sites. Without that hook the function-level graph stops after one hop |
 | `internal/tsoracle` | Differential check: what `internal/parser` extracted vs what the tree-sitter grammar saw in the same file. See the note under Verification discipline |
 | `internal/textdiff` | Myers line diff, for range formatting: which lines the formatter changed and what each became |
 | `internal/graph` | Graph type + Mermaid renderer |
 | `internal/vfs` | `FS` interface + stdio transport, abstracted for native vs WASM builds |
-| `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment`. `EnableCrashReports` (called from `runServer` only, so test binaries never write to the user's cache) sends the runtime's crash output and every panic record to `CFMLEDITOR_LSP_LOG` or, unset, `<os.UserCacheDir>/cfmleditor-lsp/crash.log`. A recover site calls `cflog.Recovered`, not `log.Error`, so the record carries its stack and reaches that file |
+| `internal/log` | zap wrapper; `debug: true` in config switches to `zap.NewDevelopment`. `EnableCrashReports` (called from `runServer` only, so test binaries never write to the user's cache) sends the runtime's crash output and every panic record to `CLIF_LOG` or, unset, `<os.UserCacheDir>/clif/crash.log`. A recover site calls `cflog.Recovered`, not `log.Error`, so the record carries its stack and reaches that file |
 | `internal/conv` | Range-checked integer conversions (`Uint32`, `Uint32FromUint`, `Int32`) for LSP line and column numbers; imports only `math` |
 
 ### Parser design (`internal/parser`)
@@ -578,7 +600,7 @@ is off by default — `<cfquery>` bodies are emitted verbatim unless opted in.
 
 **Two entry points format a whole file and they must not drift**: the LSP's
 `textDocument/formatting` handler (`internal/server/formatting.go`) and the `format` subcommand
-(`cmd/cfmleditor-lsp/main.go`). Both go through the same two shared pieces, and new behaviour
+(`cmd/clif/main.go`). Both go through the same two shared pieces, and new behaviour
 belongs in them rather than at either call site:
 
 - `config.ResolvedFormatting.FormatterOptions()` (`internal/config/formatting.go`) maps config
@@ -707,7 +729,7 @@ not say where the controller's name stops and the method's begins. It replaced o
 hand-written rule per start point and is safe only because each candidate is still
 checked against the component's real methods.
 
-`cfmleditor-lsp routes --unresolved` groups what did not resolve by leading
+`clif routes --unresolved` groups what did not resolve by leading
 segments. On tassweb: 82% of 2,741 occurrences resolve, and 257 of the 292
 unresolved distinct routes share their first two segments with routes that *do* —
 so the controller is found and the method name is what the route does not spell.
@@ -717,11 +739,11 @@ so the controller is found and the method name is what the route does not spell.
 carries dots of its own, so the split between directory and file depends on what
 is on disk. Measured on a real workspace: 79% of 1,022 route occurrences resolve.
 
-**Each file is resolved under its own `.cfmleditor.json` (`Options.ConfigFor`).**
+**Each file is resolved under its own `.clif.json` (`Options.ConfigFor`).**
 A workspace of several applications has one config each, and every one lists the
 others in `workspacePaths`, so a scan rooted anywhere reads all of them. Under a
 single config the other applications' `componentResolvers` never fire — it does not
-error, it just resolves nothing. `cmd/cfmleditor-lsp/graph_config.go` memoises a
+error, it just resolves nothing. `cmd/clif/graph_config.go` memoises a
 `resolve.Resolver` per config file, **all sharing one `index.Index`** (signatures
 are a property of the workspace, not of whose resolvers you read them under), and
 mixes every config's content hash into the cache fingerprint via `ConfigExtra`,
@@ -786,7 +808,7 @@ byte for byte (only `buildMillis` differs).
 - `internal/server/server.go` — `Server` struct, capabilities, per-URI caches
 - `internal/server/handler.go` — LSP method dispatch and `workspace/executeCommand`
 - `internal/resolve/resolve.go` — `ComponentPath`, `CanResolveCall`, `ExplainCall`, extends walking
-- `internal/config/config.go` — `.cfmleditor.json` schema and defaults
+- `internal/config/config.go` — `.clif.json` schema and defaults
 - `internal/docs/` — generated; regenerate via `make generate`, never hand-edit
 
 **Scope-prefixed assignments:** each handled scope (`local.`, `variables.`, `this.`,
@@ -919,7 +941,7 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   is needed from the extension. Before this the index was a startup snapshot: `indexWorkspace`
   ran once and only `didOpen`/`didChange`/`didSave` updated it afterwards, so a checkout or a
   second editor left the server resolving to components that no longer existed, with
-  `cfmleditor.reindex` the only cure — and in daemon mode one stale snapshot served every
+  `clif.reindex` the only cure — and in daemon mode one stale snapshot served every
   client and outlived the editor.
 
   Three rules decide what an event does, and each has a test that fails without it. An **open
@@ -933,7 +955,7 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `"references": {"enabled": true}`, and `capabilities()` advertises `referencesProvider` only
   when the flag is on, so a client that has not opted in never offers the command. It is gated
   because one request walks and parses every CFML file under `searchRoots()` — the same scan
-  `cfmleditor.findRefs` and the `refs` CLI do — with no incremental call-site index to answer
+  `clif.findRefs` and the `refs` CLI do — with no incremental call-site index to answer
   from. A dot-path under the cursor searches `refs.Options.Component`; anything else is a
   function name and searches `refs.Options.FuncName`. The search is scoped by the file that
   *declares* the function (`declarationOf`, which follows go-to-definition's order of
@@ -1066,7 +1088,7 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   has two keys now, so a plain bool could not tell "turned off" from "not
   mentioned", and `mergeLinting` unions key by key — otherwise a child config
   naming only `minSeverity` would switch linting off while appearing to tune it.
-- `cfmleditor.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
+- `clif.findRefs` writes its `refs-<name>.md`/`.dot` report only when its third argument is
   `true`, and — like `.exportDeps`' `deps-<name>.md` — only through `reportPath`, which refuses a
   name that is not a plain file name and a directory outside the workspace roots. Both come from
   the command's arguments: `x/../../escaped` as a function name, which `filepath.Join` cleans, wrote
@@ -1077,7 +1099,7 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   workspace reached through a symlinked directory still gets its reports. It used to write unconditionally, which meant the code action on an ordinary "find all
   references" gesture dropped two files beside the source file being read. The plain code actions
   pass two arguments; a separate "Export references to X to a file" action passes the third.
-- `workspace/executeCommand`: `cfmleditor.reindex`, `.format`, `.showComponentPath`,
+- `workspace/executeCommand`: `clif.reindex`, `.format`, `.showComponentPath`,
   `.restartDaemon`, `.showResolvers`, `.showFileIndex`, `.showConnections`,
   `.openActiveApplicationFile`, `.goToMatchingTag`, `.copyPackage`, `.findRefs`, `.exportDeps`,
   `.scanWorkspace`, `.generateCodeMap`, `.showCodeMapStats`, `.resolveRoute`,
@@ -1226,7 +1248,7 @@ what the repo-wide scans find — `TestReachabilityDoesNotFollowContains` failed
 on the fixture `Application.cfc`'s `onRequestStart`, correctly, because a second
 application had appeared in the tree it walks.
 
-## Configuration (`.cfmleditor.json`)
+## Configuration (`.clif.json`)
 
 The authoritative schema is `config.JSON` in `internal/config/config.go`; README.md documents
 the user-facing view and all `formatting` defaults.
@@ -1254,25 +1276,25 @@ the user-facing view and all `formatting` defaults.
 
 ## Debugging why a call site resolved (or didn't)
 
-`cfmleditor-lsp explain [--root <dir>] <file> <line> [call-substring]` prints, for every call
+`clif explain [--root <dir>] <file> <line> [call-substring]` prints, for every call
 site on that line, the exact sequence of decisions `CanResolveCall`
 (`internal/resolve/resolve.go`) walked through: which mechanism set the receiver's component
 (function-scoped ref, file-level ref, `Application.cfc` ref, `<cfargument>` type, extends chain,
 a `componentResolver` match on the variable name, a `componentResolver` match on the full line
 text), which `FuncLookup`/componentResolver fallback fired for each hop of a chained call, and
 why the final method-exists check passed or failed. `--root <dir>` picks which
-`.cfmleditor.json` to load and which files to index — same semantics as `unresolved`'s directory
+`.clif.json` to load and which files to index — same semantics as `unresolved`'s directory
 argument — and defaults to the target file's own directory if omitted, which matters because a
 file's *own* nearest config can differ from the config a batch `unresolved` scan used.
 
-The same trace is available from the editor: `cfmleditor.explainCall` (document URI,
+The same trace is available from the editor: `clif.explainCall` (document URI,
 0-based line, optional filter), offered as the "Explain call resolution on line N" code
 action on any line holding a call. It answers with the running server's resolver and index
 rather than a `--root` config, and shows the report as a message.
 
 **Reach for this before manually tracing through
 script_parser.go/tag_parser.go/result.go/resolve.go.** A component path that shows up in an
-unresolved-call error but doesn't match anything literal in `.cfmleditor.json` or on disk is
+unresolved-call error but doesn't match anything literal in `.clif.json` or on disk is
 almost always a `componentResolver` firing on a substring you didn't expect (see "Known resolver
 false-positive" below) — `explain` shows the exact resolver and match in one call instead of a
 multi-file manual trace. Example: a `VARIABLES._content.createTemplate(...)` call reported "not
@@ -1796,7 +1818,7 @@ Set `"javaStubsPath": "<dot.path.to.stubs>"` to auto-resolve any `createObject("
 "some.Class.Name")` to `<javaStubsPath>.some.Class.Name` without hand-writing the equivalent
 regex resolver — it's synthesized and appended alongside your own `componentResolvers`
 (`config.JavaStubResolver`, wired in `config.Resolve`, `daemon.Config.ComponentResolvers`, and
-`cmd/cfmleditor-lsp/cliutil.go: loadResolversFromConfig`). It covers the `createObject("java",
+`cmd/clif/cliutil.go: loadResolversFromConfig`). It covers the `createObject("java",
 ...)` call site and Lucee's `new java:some.Class.Name()` — the latter because
 `readNewComponent` recognises the `java:` type prefix and re-spells it as the equivalent
 `createObject` expression before resolving, rather than a second resolver existing for it.
@@ -2191,6 +2213,6 @@ gate, and a local run cannot drift apart.
 - `/add-formatting-setting` — the config hops a new `formatting` key crosses, the defaults
   that must not move, and how to verify one against the corpus
 - `/add-parser-test` — patterns and pitfalls for adding tests to `internal/parser/cfparser_test.go`
-- `/run-cfmleditor-lsp` — build, smoke-test, and drive the binary (CLI subcommands + LSP stdio)
+- `/run-clif` — build, smoke-test, and drive the binary (CLI subcommands + LSP stdio)
 - `/parser-internals` — scanner tokenisation, the two parse loops, call-site extraction, and how
   the `unresolved` command works

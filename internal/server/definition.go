@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	routepkg "github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/conv"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	routepkg "github.com/cfmleditor/clif/internal/route"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

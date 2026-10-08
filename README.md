@@ -1,8 +1,28 @@
-# cfmleditor-lsp
+# clif
 
-A Language Server Protocol (LSP) implementation for CFML / ColdFusion, written in Go.
+*Pronounced "cliff".* A Language Server Protocol (LSP) implementation for CFML /
+ColdFusion, written in Go, and a command-line tool for the same checks.
 
 Uses [tree-sitter-cfml](https://github.com/cfmleditor/tree-sitter-cfml).
+
+## Formerly cfmleditor-lsp
+
+clif was called cfmleditor-lsp. Everything that used the old name still works,
+so nothing has to change at once:
+
+| Old name | New name | What still works |
+|---|---|---|
+| `cfmleditor-lsp` binary | `clif` | Releases publish `cfmleditor-lsp-<platform>` archives holding the same binary under its old name; `make build`, `make install` and `make link` create both names |
+| `.cfmleditor.json` | `.clif.json` | Both are read; a directory holding both is configured by `.clif.json` |
+| `cfmleditor.*` commands | `clif.*` | Both are run; only `clif.*` are advertised, so a command picker lists each once |
+| `.cfmleditor-cflint.txt`, `.cfmleditor-unresolved.txt` | `.clif-cflint.txt`, `.clif-unresolved.txt` | A report that exists under the old name, with none under the new one, keeps being read and written there |
+| `CFMLEDITOR_LSP_LOG`, `CFMLEDITOR_CPUPROFILE`, `CFMLEDITOR_MEMPROFILE` | `CLIF_LOG`, `CLIF_CPUPROFILE`, `CLIF_MEMPROFILE` | The old variable is read when the new one is unset |
+| `github.com/cfmleditor/cfmleditor-lsp` | `github.com/cfmleditor/clif` | GitHub redirects the old repository URL |
+
+Two things move without a fallback: the daemon's socket directory and the crash
+log directory are named `clif` now, so a daemon started by an older release is
+not shared with a newer one, which they never could be safely anyway. A CFLint
+already downloaded under the old cache directory is used where it is.
 
 ## Build
 
@@ -13,7 +33,7 @@ make build
 Or manually:
 
 ```sh
-go build -trimpath -ldflags="-s -w" -o cfmleditor-lsp ./cmd/cfmleditor-lsp
+go build -trimpath -ldflags="-s -w" -o clif ./cmd/clif
 ```
 
 The Go toolchain version is pinned in `go.mod`, and CGO is required (the
@@ -94,7 +114,7 @@ gopls cannot be pinned the same way, because the build never invokes it.
 The server communicates over stdio using JSON-RPC 2.0 with LSP headers:
 
 ```sh
-./cfmleditor-lsp
+./clif
 ```
 
 Configure your editor to launch this binary as an LSP server for `.cfm`, `.cfc`, `.cfml`, and `.cfs` files.
@@ -103,14 +123,14 @@ Configure your editor to launch this binary as an LSP server for `.cfm`, `.cfc`,
 
 The server logs to stderr, which the editor keeps in its language-server log. Two files outlast that:
 
-- **Crash reports** always go to a file, with nothing to configure: `crash.log` in the server's cache directory. That is `~/Library/Caches/cfmleditor-lsp/crash.log` on macOS, `~/.cache/cfmleditor-lsp/crash.log` on Linux (or under `$XDG_CACHE_HOME`), and `%LocalAppData%\cfmleditor-lsp\crash.log` on Windows. Each start adds one line naming the version, the process and the time; anything else in the file is a crash record. That covers a crash that ended the process, whatever caused it, and a panic the server recovered from and kept running after, each with its stack.
-- **A copy of the whole log** goes to the file named by `CFMLEDITOR_LSP_LOG`, when that is set in the environment the editor starts the server with. Crash reports then go to that file instead of `crash.log`.
+- **Crash reports** always go to a file, with nothing to configure: `crash.log` in the server's cache directory. That is `~/Library/Caches/clif/crash.log` on macOS, `~/.cache/clif/crash.log` on Linux (or under `$XDG_CACHE_HOME`), and `%LocalAppData%\clif\crash.log` on Windows. Each start adds one line naming the version, the process and the time; anything else in the file is a crash record. That covers a crash that ended the process, whatever caused it, and a panic the server recovered from and kept running after, each with its stack.
+- **A copy of the whole log** goes to the file named by `CLIF_LOG`, when that is set in the environment the editor starts the server with. Crash reports then go to that file instead of `crash.log`.
 
 For a fatal Go error, such as a stack overflow, the one-line reason (`fatal error: stack overflow`) appears only on stderr. The file gets the traceback that follows it.
 
 ### Scanning a project for unresolved calls
 
-`unresolved` reports every call the server cannot resolve to a definition. It takes files or directories and walks directories itself, so there is no glob to pass. It skips dot-directories such as `.git` and `.claude/worktrees`. It reads the `.cfmleditor.json` governing the first path it is given.
+`unresolved` reports every call the server cannot resolve to a definition. It takes files or directories and walks directories itself, so there is no glob to pass. It skips dot-directories such as `.git` and `.claude/worktrees`. It reads the `.clif.json` governing the first path it is given.
 
 The whole workspace is always *indexed* (every folder in `workspacePaths`), because resolving a call reads every other component. The *report* holds only what you name: a directory or file argument narrows it, so `unresolved packages/tass/core` lists calls in that directory alone.
 
@@ -119,36 +139,36 @@ When `workspacePaths` is omitted, the requested directories also supply the reso
 macOS and Linux:
 
 ```sh
-cfmleditor-lsp unresolved ~/projects/myapp > unresolved.txt
+clif unresolved ~/projects/myapp > unresolved.txt
 ```
 
 Windows PowerShell (`cmd.exe` and PowerShell do not expand `**/*.cfc`, and neither needs it):
 
 ```powershell
-cfmleditor-lsp.exe unresolved "$HOME\projects\myapp" | Out-File -Encoding utf8 unresolved.txt
+clif.exe unresolved "$HOME\projects\myapp" | Out-File -Encoding utf8 unresolved.txt
 ```
 
 Windows `cmd.exe`:
 
 ```bat
-cfmleditor-lsp.exe unresolved "%USERPROFILE%\projects\myapp" > unresolved.txt
+clif.exe unresolved "%USERPROFILE%\projects\myapp" > unresolved.txt
 ```
 
 Use `>>` (or `Out-File -Append`) to add to an earlier report. Windows PowerShell 5.1 writes UTF-16 for a plain `>` or `>>`, hence `Out-File -Encoding utf8`; PowerShell 7 writes UTF-8 either way. Progress and timing go to stderr, so they stay on the console and out of the file.
 
-Use the binary from `target/release/` after `make build`, or a release download; give its full path if it is not on `PATH`. Add `--json` for machine-readable output, `--verbose` for the reason behind each entry, and `--write` to write `.cfmleditor-unresolved.txt` beside the config (see [Generated reports](#generated-reports)). `cfmleditor-lsp explain <file> <line>` traces one call.
+Use the binary from `target/release/` after `make build`, or a release download; give its full path if it is not on `PATH`. Add `--json` for machine-readable output, `--verbose` for the reason behind each entry, and `--write` to write `.clif-unresolved.txt` beside the config (see [Generated reports](#generated-reports)). `clif explain <file> <line>` traces one call.
 
 ## Code map
 
-`cfmleditor-lsp graph` builds a map of a whole project: every function and file, and
+`clif graph` builds a map of a whole project: every function and file, and
 the calls, instantiations, inheritance and includes between them. On an 11,700-file
 workspace that is around 60,000 nodes and 105,000 edges in roughly ten seconds.
 
 ```sh
-cfmleditor-lsp graph .                                     # summary to the terminal
-cfmleditor-lsp graph --format html --out map.html .         # interactive report
-cfmleditor-lsp graph --level package --format dot . | dot -Tsvg > map.svg
-cfmleditor-lsp graph --db .cfmleditor/codemap.db .          # save it, and cache it
+clif graph .                                     # summary to the terminal
+clif graph --format html --out map.html .         # interactive report
+clif graph --level package --format dot . | dot -Tsvg > map.svg
+clif graph --db .clif/codemap.db .          # save it, and cache it
 ```
 
 **Every declared function is in the map, whether or not anything calls it.** Code
@@ -198,7 +218,7 @@ the file opens the same on an air-gapped machine and still renders years later.
 
 ### From the editor
 
-`cfmleditor.generateCodeMap` builds a report from the running server, so nothing
+`clif.generateCodeMap` builds a report from the running server, so nothing
 needs a CLI on a PATH:
 
 ```jsonc
@@ -207,8 +227,8 @@ needs a CLI on a PATH:
   "under": "packages/tass", "live": true, "open": true }
 ```
 
-Defaults are `level: function`, `format: html`, output `.cfmleditor/codemap.html`,
-and the `codemap` config block supplies the rest. `cfmleditor.showCodeMapStats`
+Defaults are `level: function`, `format: html`, output `.clif/codemap.html`,
+and the `codemap` config block supplies the rest. `clif.showCodeMapStats`
 answers the cheap question — how much of this workspace the map resolves — without
 writing anything.
 
@@ -236,7 +256,7 @@ dotted route out of a URL or an HTML attribute, builds a component path and a
 method name from it and invokes them — nothing in the source names either, so
 every routed controller method looks uncalled and every view unreferenced.
 
-`routes` in `.cfmleditor.json` describes the convention, and the LSP then follows
+`routes` in `.clif.json` describes the convention, and the LSP then follows
 it: route edges in the code map, ctrl-click to the controller method or the view
 from go-to-definition, and a document link on each resolvable route.
 
@@ -332,15 +352,15 @@ The same grammar covers FW/1 — `{ "component": "controllers.${1}", "method":
 "${2}" }` with `{ "path": "views/${1}/${2}" }` — which is the test that keeps it
 from being one framework's rules in disguise.
 
-`cfmleditor-lsp routes <dir>` reports what was found and what it resolved to, and
+`clif routes <dir>` reports what was found and what it resolved to, and
 `--unresolved` groups what it could not so a missing *rule* is visible: one
 unresolved route is usually noise, forty sharing a prefix is a shape the config
 does not cover.
 
 ```sh
-cfmleditor-lsp routes --unresolved .                        # to the terminal
-cfmleditor-lsp routes --format md --out routes.md .          # a report to keep
-cfmleditor-lsp routes --format json . | jq                   # for a script
+clif routes --unresolved .                        # to the terminal
+clif routes --format md --out routes.md .          # a report to keep
+clif routes --format json . | jq                   # for a script
 ```
 
 The markdown report is the one to keep. It groups by *shape* — how many unresolved
@@ -406,7 +426,7 @@ among twenty application ones is not something a reader can set aside.
 ### Per-application configs, and code a runner invokes
 
 A workspace is often several applications side by side, each with its own
-`.cfmleditor.json` — and each listing the others in `workspacePaths`, so any scan
+`.clif.json` — and each listing the others in `workspacePaths`, so any scan
 reads all of them. By default each file is now resolved under **its own** nearest
 config, because applying one application's `componentResolvers` to another's source
 does not fail loudly: it resolves nothing, and those files come out of the map with
@@ -419,7 +439,7 @@ folders. On one workspace 10,639 of 11,374 apparently-unreferenced functions wer
 release scripts of exactly that kind:
 
 ```sh
-cfmleditor-lsp graph --entry '../prs' --entry 'tasks/*' .
+clif graph --entry '../prs' --entry 'tasks/*' .
 ```
 
 A bare directory name matches everything beneath it. Private methods are never
@@ -452,7 +472,7 @@ WHERE kind = 'function' AND reachable = 0 AND file LIKE 'packages/tass/%';
 
 ### MCP server
 
-`cfmleditor-lsp mcp` serves a workspace over the Model Context Protocol on stdio,
+`clif mcp` serves a workspace over the Model Context Protocol on stdio,
 so an assistant can ask about the code instead of grepping for it. It writes
 nothing.
 
@@ -460,14 +480,14 @@ Without a map it offers the checks the CLI runs, read from source on disk:
 `find_unresolved_calls` (what `unresolved` reports), `find_references` (`refs`)
 and `explain_call` (`explain`), which traces step by step how a call site's
 receiver was typed and which `componentResolver` fired. Paths are relative to the
-server's working directory, and the `.cfmleditor.json` above the first one decides
+server's working directory, and the `.clif.json` above the first one decides
 how calls resolve. Lists are capped at 200 by default, with the total alongside.
 
 ```jsonc
 {
   "mcpServers": {
     "cfmleditor": {
-      "command": "cfmleditor-lsp",
+      "command": "clif",
       "args": ["mcp", "--allow-lint"],
       "cwd": "/path/to/project"
     }
@@ -501,9 +521,9 @@ enabled:
 
 ## Configuration
 
-Place a `.cfmleditor.json` file in your project root to enable daemon mode and configure workspace indexing.
+Place a `.clif.json` file in your project root to enable daemon mode and configure workspace indexing.
 
-The same settings can also be supplied by your editor as LSP `initializationOptions`, which is useful when you would rather not add a file to the project. `.cfmleditor.json` takes priority: it wins on every key it sets, and editor settings fill in the rest. See [Editor settings](#editor-settings) below.
+The same settings can also be supplied by your editor as LSP `initializationOptions`, which is useful when you would rather not add a file to the project. `.clif.json` takes priority: it wins on every key it sets, and editor settings fill in the rest. See [Editor settings](#editor-settings) below.
 
 ```json
 {
@@ -746,7 +766,7 @@ alternative that matches matches at the same position.
 
 Anchoring is off by default because a resolver aimed at a *call* usually does want to match
 through a receiver (`VARIABLES._parent.getService("x")`). Reach for it when a resolver is aimed
-at a variable name, or when a broad catch-all is producing wrong answers — `cfmleditor-lsp
+at a variable name, or when a broad catch-all is producing wrong answers — `clif
 explain`, or the "Explain call resolution on line N" code action, will name the resolver
 that fired.
 
@@ -856,7 +876,7 @@ they are off unless you ask for them.**
 |---|---|---|
 | `documentHighlight` | on | Shading the other occurrences of the identifier under the cursor. |
 | `folding` | **off** | Folding ranges for functions and comments; in CFScript every block, closure, literal, multi-line argument list and switch case; in markup every element, CF tag and `<cfelse>` branch. With it off the editor folds by indentation, as it did before the feature existed. |
-| `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `cfmleditor.reindex` is the way to refresh it. |
+| `watchedFiles` | on | Re-indexing files changed outside the editor. With it off the index reflects startup plus whatever you have had open, and `clif.reindex` is the way to refresh it. |
 | `rangeFormatting` | on | "Format Selection". Switching it off leaves whole-document formatting and format-on-save working. |
 | `typeDefinition` | **off** | "Go to Type Definition": from a variable, argument or property to the component it holds, or from a call to the component the function returns. The newest capability here, so it waits to be asked for. |
 | `outputContextInterpolation` | on | Reading `#...#` in a tag file's text only where ColdFusion evaluates it: inside `<cfoutput>`, `<cfquery>`, `<cfmail>` and `output="true"` functions, and in the attributes of CF and custom tags. Also reads a `.cfm` template with no CF tags as HTML rather than CFScript. Off, every pair of hashes in text is scanned, which finds calls in JavaScript, CSS and prose between two stray hashes. Unlike the others this changes what the parser reads, not what the server advertises. |
@@ -867,7 +887,7 @@ with `{"features": {"folding": true}}`.
 
 Set only the keys you want to change — the block is merged key by key, so naming
 one leaves the rest alone, and an editor's `initializationOptions` and a project's
-`.cfmleditor.json` can each set different ones.
+`.clif.json` can each set different ones.
 
 Switching one off *un-advertises* it rather than leaving the server to decline
 the request, so the editor falls back to its own behaviour instead of offering a
@@ -935,7 +955,7 @@ panel beside everything else:
     "severity": "warning",
     "files": [
       "docs/todo.txt",
-      { "file": ".cfmleditor-cflint.txt", "severity": "warning", "scope": "workspace" }
+      { "file": ".clif-cflint.txt", "severity": "warning", "scope": "workspace" }
     ]
   }
 }
@@ -949,7 +969,7 @@ and `warning`.
 |---|---|
 | `scope` | `open` (the default) publishes a file's entries only while it is open, so a long list informs the file being worked on rather than filling the panel. `workspace` publishes every entry at startup, so the panel lists the whole project's |
 | `severity` | `error`, `warning` (the default), `information` or `hint`. Warning is the least severe level every editor's problems panel lists: Zed's lists only errors and warnings, so `information` entries show inline there but not in the panel, and VS Code's leaves out hints |
-| `files` | The files: each a path relative to the `.cfmleditor.json`, or an object |
+| `files` | The files: each a path relative to the `.clif.json`, or an object |
 
 A file object:
 
@@ -961,8 +981,8 @@ A file object:
 | `source` | The diagnostics' label: `known issue` by default, `cflint` for a `generate: "cflint"` file |
 | `generate` | `unresolved` or `cflint`: the file is a report the server writes. See below |
 
-The generated reports' default files, `.cfmleditor-unresolved.txt` and
-`.cfmleditor-cflint.txt` beside the `.cfmleditor.json`, are included without
+The generated reports' default files, `.clif-unresolved.txt` and
+`.clif-cflint.txt` beside the `.clif.json`, are included without
 being listed, with `scope` and `severity` of `"inherit"`, and show whenever they
 exist. List one only to set its own, as above; named by its default path, it
 keeps its `generate` kind.
@@ -997,8 +1017,8 @@ Two reports are written by the server rather than by hand:
 
 | `generate` | Written by | Default file |
 |---|---|---|
-| `unresolved` | `cfmleditor.exportUnresolved`, or `cfmleditor-lsp unresolved --write <project>` | `.cfmleditor-unresolved.txt` |
-| `cflint` | `cfmleditor.exportCFLint`, or `cfmleditor-lsp cflint --write <project>` | `.cfmleditor-cflint.txt` |
+| `unresolved` | `clif.exportUnresolved`, or `clif unresolved --write <project>` | `.clif-unresolved.txt` |
+| `cflint` | `clif.exportCFLint`, or `clif cflint --write <project>` | `.clif-cflint.txt` |
 
 Both are also offered as code actions on any CFML file, "Export unresolved
 calls report for the workspace" and "Export CFLint report for the workspace",
@@ -1015,14 +1035,14 @@ The header carries no date, so regenerating an unchanged project changes
 nothing a diff would show.
 
 A CFLint report covers only what was asked for: the directories given to
-`cfmleditor-lsp cflint`, or the folders open in the editor for
-`cfmleditor.exportCFLint`. The config's own directory stands for the
+`clif cflint`, or the folders open in the editor for
+`clif.exportCFLint`. The config's own directory stands for the
 `workspacePaths` folders beneath it, never the ones outside it, which a
 project's config lists for resolution. Both refuse to rewrite a report whose
 directory holds more than was linted, since that would drop everything else's
 entries; the unresolved report still scans every workspace folder. `--out <file>` writes one report
 anywhere above the linted directories, with paths relative to it:
-`cfmleditor-lsp cflint --out ~/tassdev/prs/.cfmleditor-cflint.txt ~/tassdev/prs`.
+`clif cflint --out ~/tassdev/prs/.clif-cflint.txt ~/tassdev/prs`.
 
 A `cflint` report's entries are labelled `cflint` and carry the rule ID, as
 CFLint's own diagnostics do. They give way file by file to CFLint on save: once
@@ -1187,7 +1207,7 @@ overrides:
 `beanPaths` and `propertyResolvers` apply to the report and the code map as
 they do in the editor.
 
-To print a report instead of writing it, `cfmleditor-lsp unresolved
+To print a report instead of writing it, `clif unresolved
 --known-issues <dir>` writes the same format to stdout, relative to the config's
 directory or `--relative-to <dir>`. Findings outside it are left out, and
 counted, unless `--include-workspace` writes them as `../` paths.
@@ -1213,7 +1233,7 @@ its lint results. Closing a file clears its CFLint and parse diagnostics and its
 
 The capability is advertised to the editor only when it is on, so a workspace that has not opted in does not see the command at all.
 
-It is opt-in because of what one request costs. Answering it walks and parses every CFML file under the workspace roots, the same scan the `refs` CLI and the `cfmleditor.findRefs` command already do; there is no incremental index of call sites to answer from. On a few hundred files that is imperceptible, and on a few thousand it is a noticeable pause during which the server is busy. Whether that trade is worth making by default is the thing the flag exists to find out.
+It is opt-in because of what one request costs. Answering it walks and parses every CFML file under the workspace roots, the same scan the `refs` CLI and the `clif.findRefs` command already do; there is no incremental index of call sites to answer from. On a few hundred files that is imperceptible, and on a few thousand it is a noticeable pause during which the server is busy. Whether that trade is worth making by default is the thing the flag exists to find out.
 
 What it answers depends on what the cursor is on:
 
@@ -1228,14 +1248,14 @@ The search is scoped by the file that *declares* the function, which is resolved
 
 ### Editor settings
 
-Every field above can be sent as LSP `initializationOptions` instead of, or alongside, `.cfmleditor.json`. The payload has exactly the same shape as the file.
+Every field above can be sent as LSP `initializationOptions` instead of, or alongside, `.clif.json`. The payload has exactly the same shape as the file.
 
 In Zed, via `settings.json`:
 
 ```json
 {
   "lsp": {
-    "cfmleditor-lsp": {
+    "clif": {
       "initialization_options": {
         "linting": { "enabled": true },
         "mappings": { "models": "./src/models" }
@@ -1251,7 +1271,7 @@ Precedence, when both are present:
 
 | | Result |
 |---|---|
-| Key set in `.cfmleditor.json` | The file's value wins |
+| Key set in `.clif.json` | The file's value wins |
 | Key set only in editor settings | The editor's value applies |
 | `formatting` set on both | Merged key by key — the file wins on the keys it names, the editor's other keys stand |
 | `mappings`, `beanPaths`, and other maps | Merged per key; the file wins on conflicts |
@@ -1262,11 +1282,11 @@ Relative paths resolve against the directory of whichever source declared them �
 Two caveats:
 
 - Settings are read once, at `initialize`. Changing them requires restarting the language server.
-- `debug` is ignored here, because the logger is constructed before the client connects. Use `.cfmleditor.json` for that one.
+- `debug` is ignored here, because the logger is constructed before the client connects. Use `.clif.json` for that one.
 
 ### Daemon mode
 
-When `.cfmleditor.json` is found, the server starts in daemon mode. The search walks upwards from the current directory to the filesystem root, and the nearest config wins:
+When `.clif.json` is found, the server starts in daemon mode. The search walks upwards from the current directory to the filesystem root, and the nearest config wins:
 
 1. The first editor session becomes the daemon, listening on a Unix socket and serving LSP over stdio.
 2. Subsequent sessions connect to the existing daemon via the socket, sharing a single index.
@@ -1274,7 +1294,7 @@ When `.cfmleditor.json` is found, the server starts in daemon mode. The search w
 
 Without a config file the server runs in standalone mode — a single session with its own index. Standalone sessions look for a config the same way, walking upwards from each workspace folder the editor reports, so the same file is picked up in either mode; what they do not do is join a daemon.
 
-That is deliberate. The socket is derived from `workspaceName`, so an index is only ever shared between sessions that named the same project. With no config there is no name to key on, and the alternative — falling back to the working directory — is not one: it groups whatever happens to share a folder name, and an editor that starts the server without setting a working directory (the IntelliJ plugin does not) gives every project on the machine the same one. A shared index means one project's symbols answering another's go-to-definition and workspace-symbol queries. Add a `.cfmleditor.json` with a `workspaceName` to get the sharing.
+That is deliberate. The socket is derived from `workspaceName`, so an index is only ever shared between sessions that named the same project. With no config there is no name to key on, and the alternative — falling back to the working directory — is not one: it groups whatever happens to share a folder name, and an editor that starts the server without setting a working directory (the IntelliJ plugin does not) gives every project on the machine the same one. A shared index means one project's symbols answering another's go-to-definition and workspace-symbol queries. Add a `.clif.json` with a `workspaceName` to get the sharing.
 
 ### Indexing behaviour
 
@@ -1302,12 +1322,12 @@ make link-status   # show what the link points at, and what PATH actually resolv
 make unlink        # remove it
 ```
 
-The link points at `target/release/cfmleditor-lsp`, so a later `make build` takes
+The link points at `target/release/clif`, so a later `make build` takes
 effect without re-linking.
 
 This is how the [zed-cfml](https://github.com/cfmleditor/zed-cfml) extension picks
 up a local build. It resolves its server in three steps: a path it has already
-cached, then a `cfmleditor-lsp` found on `PATH`, and only then a download of a
+cached, then a `clif` found on `PATH`, and only then a download of a
 GitHub release. A symlink on `PATH` wins at the second step, so no release is
 downloaded. Restart the editor after linking or unlinking — the resolved path is
 cached for the life of the session.
@@ -1325,7 +1345,7 @@ make unlink LINK_DIR=$HOME/.local/bin   # same LINK_DIR to remove it
 
 `make link` refuses to overwrite a real file at that path — normally a `make
 install` copy — rather than silently replacing it, and warns when the link it
-just made is shadowed by another `cfmleditor-lsp` earlier on `PATH`.
+just made is shadowed by another `clif` earlier on `PATH`.
 
 ### Make commands
 
@@ -1341,5 +1361,5 @@ just made is shadowed by another `cfmleditor-lsp` earlier on `PATH`.
 | `make install` | Build and copy binary to `go env GOPATH`/bin. |
 | `make link` | Build, then symlink the binary onto `PATH` for local editor use. Override the directory with `LINK_DIR=<dir>`. |
 | `make unlink` | Remove that symlink. |
-| `make link-status` | Show the link, the build, and what `PATH` resolves `cfmleditor-lsp` to. |
+| `make link-status` | Show the link, the build, and what `PATH` resolves `clif` to. |
 | `make clean` | Remove build artifacts. |

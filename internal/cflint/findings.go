@@ -6,7 +6,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
+	"github.com/cfmleditor/clif/internal/knownissues"
 )
 
 // Finding is one CFLint issue as a caller outside an editor wants it: a path,

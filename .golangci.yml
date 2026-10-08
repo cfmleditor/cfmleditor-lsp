@@ -101,24 +101,24 @@ linters:
           list-mode: lax
           files: ["**/internal/parser/**", "!$test"]
           deny:
-            - pkg: github.com/cfmleditor/cfmleditor-lsp/internal
+            - pkg: github.com/cfmleditor/clif/internal
               desc: internal/parser imports no project package but internal/log and internal/conv
           allow:
-            - github.com/cfmleditor/cfmleditor-lsp/internal/log
+            - github.com/cfmleditor/clif/internal/log
             # Range-checked integer conversions; imports nothing but math.
-            - github.com/cfmleditor/cfmleditor-lsp/internal/conv
+            - github.com/cfmleditor/clif/internal/conv
         server-importers:
           files: ["**/internal/**", "!**/internal/daemon/**", "!**/internal/server/**"]
           deny:
-            - pkg: github.com/cfmleditor/cfmleditor-lsp/internal/server
+            - pkg: github.com/cfmleditor/clif/internal/server
               desc: only internal/daemon and cmd import the server
         store-is-cli-only:
           # Keeps SQLite out of the server and the wasm build.
           files: ["**/internal/**", "!**/internal/codemap/mcp/**", "!**/internal/codemap/store/**"]
           deny:
-            - pkg: github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store
+            - pkg: github.com/cfmleditor/clif/internal/codemap/store
               desc: only cmd imports the code-map store
-            - pkg: github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp
+            - pkg: github.com/cfmleditor/clif/internal/codemap/mcp
               desc: only cmd imports the MCP server
     forbidigo:
       # Scoped to internal/ below. stdout is the LSP channel there, and one

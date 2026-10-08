@@ -147,46 +147,63 @@ jobs:
           if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
 
           go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
-            -o "cfmleditor-lsp${ext}" ./cmd/cfmleditor-lsp
+            -o "clif${ext}" ./cmd/clif
 
       - name: Verify the binary is for the target platform
         run: |
           set -euo pipefail
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
-          file "cfmleditor-lsp${ext}"
-          go version -m "cfmleditor-lsp${ext}" | grep -E "GOARCH=${{ matrix.goarch }}$"
+          file "clif${ext}"
+          go version -m "clif${ext}" | grep -E "GOARCH=${{ matrix.goarch }}$"
 
       - name: Package
         id: package
         run: |
           set -euo pipefail
-          base="cfmleditor-lsp-${{ matrix.goos }}-${{ matrix.goarch }}"
+          platform="${{ matrix.goos }}-${{ matrix.goarch }}"
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
 
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            # Both formats, deliberately. A zip is what someone unpacking the
-            # asset by hand on Windows expects, but editor extensions derive
-            # the asset name from the platform alone and ask every platform
-            # for the same extension: the Zed extension requests
-            # cfmleditor-lsp-windows-amd64.tar.gz and fails to install without
-            # it. Publishing both costs 5MB and satisfies each.
-            zip -q "${base}.zip" cfmleditor-lsp.exe
-            tar czf "${base}.tar.gz" cfmleditor-lsp.exe
-          else
-            # macOS bsdtar otherwise stores AppleDouble "._" resource-fork
-            # entries alongside the binary, which show up when the tarball is
-            # unpacked anywhere else.
-            COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" cfmleditor-lsp
-          fi
+          # The same binary twice: as clif, and under the name it had before
+          # the rename, in archives named the old way. Editor extensions from
+          # before the rename download cfmleditor-lsp-<platform> and run the
+          # cfmleditor-lsp inside it, and keep working until they update.
+          mkdir -p legacy
+          cp "clif${ext}" "legacy/cfmleditor-lsp${ext}"
 
-          echo "base=${base}" >> "$GITHUB_OUTPUT"
+          for name in clif cfmleditor-lsp; do
+            base="${name}-${platform}"
+            dir="."
+            if [ "$name" = "cfmleditor-lsp" ]; then dir="legacy"; fi
+
+            if [ "${{ matrix.goos }}" = "windows" ]; then
+              # Both formats, deliberately. A zip is what someone unpacking the
+              # asset by hand on Windows expects, but editor extensions derive
+              # the asset name from the platform alone and ask every platform
+              # for the same extension: the Zed extension requests
+              # <name>-windows-amd64.tar.gz and fails to install without it.
+              # Publishing both costs 5MB and satisfies each.
+              (cd "$dir" && zip -q "${GITHUB_WORKSPACE}/${base}.zip" "${name}.exe")
+              tar czf "${base}.tar.gz" -C "$dir" "${name}.exe"
+            else
+              # macOS bsdtar otherwise stores AppleDouble "._" resource-fork
+              # entries alongside the binary, which show up when the tarball is
+              # unpacked anywhere else.
+              COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" -C "$dir" "${name}"
+            fi
+          done
+
+          echo "platform=${platform}" >> "$GITHUB_OUTPUT"
 
       # One artifact per platform holding every archive built for it, rather
       # than one per archive, so the windows entry can carry two.
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.base }}
-          path: ${{ steps.package.outputs.base }}.*
+          name: release-${{ steps.package.outputs.platform }}
+          path: |
+            clif-${{ steps.package.outputs.platform }}.*
+            cfmleditor-lsp-${{ steps.package.outputs.platform }}.*
           retention-days: 7
           if-no-files-found: error
 
@@ -206,7 +223,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
-          pattern: cfmleditor-lsp-*
+          pattern: release-*
           merge-multiple: true
 
       - name: Check the expected assets are all present
@@ -214,12 +231,13 @@ jobs:
           set -euo pipefail
           ls -l dist
 
-          expected="cfmleditor-lsp-darwin-amd64.tar.gz
-          cfmleditor-lsp-darwin-arm64.tar.gz
-          cfmleditor-lsp-linux-amd64.tar.gz
-          cfmleditor-lsp-linux-arm64.tar.gz
-          cfmleditor-lsp-windows-amd64.zip
-          cfmleditor-lsp-windows-amd64.tar.gz"
+          expected=""
+          for name in clif cfmleditor-lsp; do
+            for asset in darwin-amd64.tar.gz darwin-arm64.tar.gz linux-amd64.tar.gz \
+              linux-arm64.tar.gz windows-amd64.zip windows-amd64.tar.gz; do
+              expected+="${name}-${asset}"$'\n'
+            done
+          done
 
           missing=0
           while read -r asset; do
@@ -239,7 +257,9 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
-          files: dist/cfmleditor-lsp-*
+          files: |
+            dist/clif-*
+            dist/cfmleditor-lsp-*
           fail_on_unmatched_files: true
           # Semver prerelease convention: v1.2.3-rc1 is flagged a prerelease
           # and never becomes "Latest"; a plain v1.2.3 does.

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
+	"github.com/cfmleditor/clif/internal/index"
 )
 
 // writeCFC is a small helper so the chain below reads as a chain.

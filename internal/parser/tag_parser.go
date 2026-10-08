@@ -3,7 +3,7 @@ package parser
 import (
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 // tagParser extracts definitions from CFML tag-based source.

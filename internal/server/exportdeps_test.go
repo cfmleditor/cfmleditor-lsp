@@ -54,7 +54,7 @@ func TestExportDepsTracesTransitively(t *testing.T) {
 	}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.exportDeps",
+		Command:   "clif.exportDeps",
 		Arguments: lspAnyArgs(string(docURI), "BuildReport"),
 	})
 
@@ -119,7 +119,7 @@ func TestExportDepsPrefersFunctionLocalRefs(t *testing.T) {
 	}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.exportDeps",
+		Command:   "clif.exportDeps",
 		Arguments: lspAnyArgs(string(docURI), "Go"),
 	})
 
@@ -195,7 +195,7 @@ func TestExportDepsAfterAnEditOutsideAFunction(t *testing.T) {
 
 		for _, args := range forms {
 			req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-				Command:   "cfmleditor.exportDeps",
+				Command:   "clif.exportDeps",
 				Arguments: lspAnyArgs(args...),
 			})
 

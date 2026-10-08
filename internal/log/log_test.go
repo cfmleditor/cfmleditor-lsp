@@ -41,7 +41,7 @@ func TestFieldConstructors(_ *testing.T) {
 // re-exec this same test binary in a subprocess with an env var set, so Fatalf's os.Exit(1)
 // terminates the subprocess (not the real test run), and assert on the subprocess's exit code.
 func TestFatalf_ExitsWithStatus1(t *testing.T) {
-	if os.Getenv("CFMLEDITOR_LSP_TEST_FATALF") == "1" {
+	if os.Getenv("CLIF_TEST_FATALF") == "1" {
 		Fatalf("boom %d", 42)
 
 		return
@@ -49,7 +49,7 @@ func TestFatalf_ExitsWithStatus1(t *testing.T) {
 
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestFatalf_ExitsWithStatus1")
 
-	cmd.Env = append(os.Environ(), "CFMLEDITOR_LSP_TEST_FATALF=1")
+	cmd.Env = append(os.Environ(), "CLIF_TEST_FATALF=1")
 
 	err := cmd.Run()
 

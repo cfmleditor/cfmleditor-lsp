@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/clif/internal/codemap/store"
 )
 
 type tool struct {
@@ -31,7 +31,7 @@ func strList(desc string) map[string]any {
 }
 
 const pathsHelp = "Files or directories, absolute or relative to the server's working directory. " +
-	"The .cfmleditor.json above the first one decides how calls resolve."
+	"The .clif.json above the first one decides how calls resolve."
 
 func obj(props map[string]any, required ...string) map[string]any {
 	schema := map[string]any{"type": "object", "properties": props}
@@ -190,7 +190,7 @@ func (s *Server) taskTools() []tool {
 			Title: "Find unresolved calls",
 			Description: "Every component or method call under the given paths that does not resolve: " +
 				"a receiver with no known component, a method the component does not declare, a " +
-				"component that does not exist. What `cfmleditor-lsp unresolved` reports. Pass " +
+				"component that does not exist. What `clif unresolved` reports. Pass " +
 				"explain_call a result's file and line to see why. It indexes the workspace on " +
 				"every call, which takes seconds on a large one.",
 			InputSchema: obj(map[string]any{
@@ -208,7 +208,7 @@ func (s *Server) taskTools() []tool {
 			Title: "Find references",
 			Description: "Every reference under the given paths to a component (a dot-path such as " +
 				"\"packages.finance.service\") or a function (a bare name such as \"getReport\"), with " +
-				"whether each resolved to it. What `cfmleditor-lsp refs` reports. It reads source, so " +
+				"whether each resolved to it. What `clif refs` reports. It reads source, so " +
 				"it needs no map and reflects what is on disk now.",
 			InputSchema: obj(map[string]any{
 				"target": str("A component dot-path, or a function name."),
@@ -224,7 +224,7 @@ func (s *Server) taskTools() []tool {
 			Name:  "lint",
 			Title: "Run CFLint",
 			Description: "Run CFLint over files or directories and return its findings: path, line, " +
-				"column, severity, rule and message. linting.minSeverity in .cfmleditor.json sets the " +
+				"column, severity, rule and message. linting.minSeverity in .clif.json sets the " +
 				"least severe level reported. It starts a Java process, downloads CFLint on first " +
 				"use, and writes no report. CFLint reports some rules (MISSING_VAR, IMPLICIT_SCOPE) " +
 				"once per name per run, so lint one file to see all of its findings.",
@@ -307,7 +307,7 @@ func (s *Server) run(name string, raw json.RawMessage) (any, error) {
 
 	if s.Store == nil && slices.ContainsFunc(mapTools, func(t tool) bool { return t.Name == name }) {
 		return nil, fmt.Errorf("%s needs a code map, and this server was started without one: build it with "+
-			"`cfmleditor-lsp graph --db <file> <dir>` and start the server with --db <file>", name)
+			"`clif graph --db <file> <dir>` and start the server with --db <file>", name)
 	}
 
 	switch name {

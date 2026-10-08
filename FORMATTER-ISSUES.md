@@ -130,7 +130,7 @@ produce garbage.
 ```console
 $ wc -c victim.cfc
 1521 victim.cfc
-$ cfmleditor-lsp format -w victim.cfc
+$ clif format -w victim.cfc
 formatted victim.cfc          # exit 0
 $ wc -c victim.cfc
 1411 victim.cfc               # 110 bytes gone, no longer parses
@@ -1216,16 +1216,16 @@ Individual cases reproduce through the CLI. It applies the guard by default now,
 so `--allow-non-whitespace` is what shows you the damage a bug would do:
 
 ```console
-$ go build -o target/release/cfmleditor-lsp ./cmd/cfmleditor-lsp
+$ go build -o target/release/clif ./cmd/clif
 $ printf 'component {\n\tpublic query function A() {}\n}\n' > /tmp/r.cfc
-$ target/release/cfmleditor-lsp format /tmp/r.cfc
-$ target/release/cfmleditor-lsp format --allow-non-whitespace /tmp/r.cfc
+$ target/release/clif format /tmp/r.cfc
+$ target/release/clif format --allow-non-whitespace /tmp/r.cfc
 ```
 
 Regression coverage for everything in section 2 lives in
 `internal/formatter/parse_error_test.go`, `internal/formatter/guard_test.go`,
 `internal/formatter/idempotency_test.go` and
-`cmd/cfmleditor-lsp/format_test.go`; for the fixes in section 4, in
+`cmd/clif/format_test.go`; for the fixes in section 4, in
 `internal/formatter/doctype_test.go`,
 `internal/formatter/script_tag_call_test.go`,
 `internal/formatter/trailing_comma_test.go` and

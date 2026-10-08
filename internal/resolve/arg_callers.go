@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // An untyped argument holds what its callers pass. ContentBox's

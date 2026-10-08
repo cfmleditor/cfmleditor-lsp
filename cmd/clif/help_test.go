@@ -11,7 +11,7 @@ import (
 
 func TestEverySubcommandHasUsage(t *testing.T) {
 	for name, cmd := range subcommands() {
-		if !strings.HasPrefix(cmd.usage, "usage: cfmleditor-lsp "+name+" ") {
+		if !strings.HasPrefix(cmd.usage, "usage: clif "+name+" ") {
 			t.Errorf("%s: usage does not start with its own usage line:\n%s", name, cmd.usage)
 		}
 	}
@@ -64,8 +64,8 @@ func TestWantsHelp(t *testing.T) {
 // process, since rejecting one exits, and fails on any that takes a mistyped
 // flag for a path.
 func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
-	if args := os.Getenv("CFMLEDITOR_CLI_TEST_ARGS"); args != "" {
-		os.Args = append([]string{"cfmleditor-lsp"}, strings.Split(args, "\x1f")...)
+	if args := os.Getenv("CLIF_CLI_TEST_ARGS"); args != "" {
+		os.Args = append([]string{"clif"}, strings.Split(args, "\x1f")...)
 
 		main()
 		os.Exit(0)
@@ -84,7 +84,7 @@ func TestEverySubcommandRejectsAnUnknownOption(t *testing.T) {
 
 			cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestEverySubcommandRejectsAnUnknownOption$")
 
-			cmd.Env = append(os.Environ(), "CFMLEDITOR_CLI_TEST_ARGS="+args)
+			cmd.Env = append(os.Environ(), "CLIF_CLI_TEST_ARGS="+args)
 
 			out, err := cmd.CombinedOutput()
 

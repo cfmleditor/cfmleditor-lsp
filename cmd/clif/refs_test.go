@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"github.com/cfmleditor/clif/internal/refs"
 )
 
 func TestPrintMermaidRefs_ResolvedVsUnresolvedStyle(t *testing.T) {

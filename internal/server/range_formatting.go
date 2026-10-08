@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/textdiff"
+	"github.com/cfmleditor/clif/internal/conv"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/textdiff"
 	"go.lsp.dev/protocol"
 )
 

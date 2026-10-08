@@ -10,7 +10,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/language"
 )
 
 // The corpus harness counts files the grammar cannot parse; this turns those

@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/vfs"
 	"go.lsp.dev/uri"
 )
 

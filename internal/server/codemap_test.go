@@ -17,7 +17,7 @@ func TestCodeMapOutputStaysInsideTheWorkspace(t *testing.T) {
 	root := t.TempDir()
 
 	ok := []struct{ in, wantSuffix string }{
-		{"", filepath.Join(".cfmleditor", "codemap.html")},
+		{"", filepath.Join(".clif", "codemap.html")},
 		{"map.html", "map.html"},
 		{"reports/map.html", filepath.Join("reports", "map.html")},
 	}

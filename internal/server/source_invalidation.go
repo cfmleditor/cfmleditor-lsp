@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // Mapping configuration includes named CFConfig files, which need not have a

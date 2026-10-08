@@ -1,8 +1,8 @@
 package server
 
 import (
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // buildBeanMap is cfpath.BuildBeanMap, which the unresolved report and the

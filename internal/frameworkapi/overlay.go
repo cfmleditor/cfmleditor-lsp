@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // overlay serves the stubs under Root and passes every other path to base.

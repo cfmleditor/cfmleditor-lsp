@@ -15,8 +15,8 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/language"
+	"github.com/cfmleditor/clif/internal/path"
 )
 
 // The formatter's correctness claim — that it only ever changes whitespace — is not
@@ -38,7 +38,7 @@ import (
 // names a TSV of every non-clean file (verdict, path, detail) to work through
 // individually — reproduce one with:
 //
-//	cfmleditor-lsp format --allow-non-whitespace <file>
+//	clif format --allow-non-whitespace <file>
 
 // corpusVerdict is the outcome of formatting one file.
 type corpusVerdict int

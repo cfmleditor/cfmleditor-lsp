@@ -19,9 +19,9 @@
 // directory holding the file, and never absolute: an absolute path is ignored,
 // since the file is committed to a project and read on other machines, where it
 // would not name the same file. A "../" path is kept — it reaches a sibling
-// project the way a .cfmleditor.json's workspacePaths do, and holds wherever
+// project the way a .clif.json's workspacePaths do, and holds wherever
 // the projects are checked out side by side. It is the format
-// `cfmleditor-lsp unresolved --known-issues` writes, and it is short enough to
+// `clif unresolved --known-issues` writes, and it is short enough to
 // write by hand.
 package knownissues
 
@@ -36,7 +36,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 // Entry is one finding from a known-issues file.

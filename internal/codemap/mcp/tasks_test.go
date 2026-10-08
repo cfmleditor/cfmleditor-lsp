@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
+	"github.com/cfmleditor/clif/internal/codemap/mcp"
 )
 
 func listTools(t *testing.T, s *mcp.Server) []string {

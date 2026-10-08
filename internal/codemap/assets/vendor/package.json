@@ -1,5 +1,5 @@
 {
-  "name": "cfmleditor-lsp-viewer-vendor",
+  "name": "clif-viewer-vendor",
   "private": true,
   "description": "Pins the JavaScript the generated code-map viewer embeds. Nothing here is imported by Go code at build time; make update-d3 copies the built bundle into assets/vendor, which is committed so the Go build stays offline and dependency-free.",
   "dependencies": {

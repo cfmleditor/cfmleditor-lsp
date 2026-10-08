@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/unresolved"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // TestUnresolvedWithoutAConfig runs a scan the way cmdUnresolved does when no

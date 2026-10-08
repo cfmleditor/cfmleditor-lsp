@@ -1,6 +1,6 @@
 // Package unresolved finds the calls the resolver cannot follow to a
-// definition, and writes them as a known-issues file. The `cfmleditor-lsp
-// unresolved` command and the server's cfmleditor.exportUnresolved command
+// definition, and writes them as a known-issues file. The `clif
+// unresolved` command and the server's clif.exportUnresolved command
 // both run it, so the report is the same whichever wrote it.
 package unresolved
 
@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/knownissues"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/vfs"
 	"go.lsp.dev/uri"
 )
 
@@ -52,7 +52,7 @@ type Call struct {
 	Definitions *int `json:"definitions,omitempty"`
 }
 
-// Options is what a scan resolves with: the .cfmleditor.json settings that
+// Options is what a scan resolves with: the .clif.json settings that
 // shape parsing and resolution.
 type Options struct {
 	Resolvers                []parser.Resolver
@@ -504,12 +504,12 @@ func (c *Call) CallText() string {
 // RegenerateHint is the report header's how-to-regenerate line when it is
 // written to its configured files. It is the same whichever writes it, so a
 // report regenerated from the editor and from the command line diffs clean.
-const RegenerateHint = "cfmleditor-lsp unresolved --write <project>, or the editor's cfmleditor.exportUnresolved command"
+const RegenerateHint = "clif unresolved --write <project>, or the editor's clif.exportUnresolved command"
 
 // WriteKnownIssues writes calls as a known-issues file: the unresolved line
 // format with paths relative to baseDir, sorted by path and line, under a #
 // header saying how to regenerate and use it. Listed under knownIssues in a
-// .cfmleditor.json, the server publishes each entry as a diagnostic.
+// .clif.json, the server publishes each entry as a diagnostic.
 //
 // A path is never written absolute: the file is committed to one project and
 // read on other machines, where it would not name the same file. A call
@@ -554,11 +554,11 @@ func WriteKnownIssues(w io.Writer, calls []Call, baseDir string, includeWorkspac
 		return rows[i].text < rows[j].text
 	})
 
-	_, _ = fmt.Fprintf(w, "# Calls cfmleditor-lsp cannot resolve, one per line: path:line: call (reason).\n")
+	_, _ = fmt.Fprintf(w, "# Calls clif cannot resolve, one per line: path:line: call (reason).\n")
 	_, _ = fmt.Fprintf(w, "# Paths are relative to this file's directory. List the file under knownIssues in\n")
-	_, _ = fmt.Fprintf(w, "# .cfmleditor.json to show the entries as editor diagnostics. Regenerate with:\n")
+	_, _ = fmt.Fprintf(w, "# .clif.json to show the entries as editor diagnostics. Regenerate with:\n")
 	_, _ = fmt.Fprintf(w, "#   %s\n", regenerate)
-	_, _ = fmt.Fprintf(w, "# %d entries; cfmleditor-lsp %s.\n", len(rows), version)
+	_, _ = fmt.Fprintf(w, "# %d entries; clif %s.\n", len(rows), version)
 
 	for _, r := range rows {
 		_, _ = fmt.Fprintf(w, "%s:%d: %s\n", r.path, r.line, r.text)

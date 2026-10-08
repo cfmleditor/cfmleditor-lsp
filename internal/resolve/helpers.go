@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // ColdBox mixes helper templates into every handler, view, layout and

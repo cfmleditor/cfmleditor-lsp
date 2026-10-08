@@ -1,7 +1,7 @@
 // Package codemap builds a whole-project map of a CFML codebase: every function,
 // every file, and every call, instantiation, inheritance and include between them.
 //
-// It is the inverse of [github.com/cfmleditor/cfmleditor-lsp/internal/deps], and
+// It is the inverse of [github.com/cfmleditor/clif/internal/deps], and
 // deliberately so. deps.Build is a seeded breadth-first walk: give it one file or
 // function and it expands outward, re-parsing each target on demand. Its node
 // identity carries the call's line number ("Base.cfc (line 42)") so that repeated

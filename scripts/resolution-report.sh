@@ -4,7 +4,7 @@
 #
 #   name=dir[,dir...]
 #
-# and resolves under the .cfmleditor.json governing its first directory, as
+# and resolves under the .clif.json governing its first directory, as
 # `unresolved` always does. The JSON of each run is kept in $RUNS (default
 # target/resolution/latest); BASELINE names an earlier run's directory to
 # compare with finding by finding.
@@ -27,8 +27,8 @@ if [ "$#" -eq 0 ]; then
 fi
 
 mkdir -p target/resolution "$RUNS"
-bin=target/resolution/cfmleditor-lsp
-go build -o "$bin" ./cmd/cfmleditor-lsp
+bin=target/resolution/clif
+go build -o "$bin" ./cmd/clif
 
 args=()
 pids=()

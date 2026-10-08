@@ -7,8 +7,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func (s *Server) handleOnTypeFormatting(_ context.Context, rawParams []byte) (any, error) {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+	"github.com/cfmleditor/clif/internal/index"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/server"
 )
 
 // TestConnTrackerReArmsAfterZero is the defect that dropped an editor's LSP

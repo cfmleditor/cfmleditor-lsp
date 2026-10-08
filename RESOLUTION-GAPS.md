@@ -22,7 +22,7 @@ The corpus is six public projects at these commits:
 | coldbox-platform | c318d8d | https://github.com/ColdBox/coldbox-platform |
 | fw1 | d7fb9ad | https://github.com/framework-one/fw1 |
 
-Each is measured twice, with a `.cfmleditor.json` at its root:
+Each is measured twice, with a `.clif.json` at its root:
 
 | Project | "Presets" config | "No presets" config |
 |---|---|---|
@@ -33,7 +33,7 @@ Each is measured twice, with a `.cfmleditor.json` at its root:
 | coldbox-platform | `{"frameworks":["coldbox","testbox","commandbox"]}` | `{}` |
 | fw1 | `{"frameworks":["fw1"]}` | `{}` |
 
-Run `cfmleditor-lsp unresolved --json <project>` for each project and
+Run `clif unresolved --json <project>` for each project and
 concatenate the arrays. Sort each entry's JSON with its keys sorted, so two
 runs can be diffed line by line. Then compare two runs **per entry**, keyed by
 file (relative to the corpus), line, function and reason. Comparing totals
@@ -45,7 +45,7 @@ the normal root scan covers 45 CFML files; the framework is under
 `vendor/wheels`. For a separate report covering it explicitly, run:
 
 ```sh
-cfmleditor-lsp unresolved --json <cfwheels-root> <cfwheels-root>/vendor/wheels
+clif unresolved --json <cfwheels-root> <cfwheels-root>/vendor/wheels
 ```
 
 This indexes and scans 1,195 files. Keep this report separate from the default
@@ -74,7 +74,7 @@ scan is not deterministic" below). After gaps #3 and #4 they are **9,476**
 and **18,028**; after gap #1, **9,225** and **17,645**; after gap #2, **9,115** and
 **17,532**; after gap #5, **9,020** and **17,439**; after gaps #6 and #7, **9,001**
 and **17,429**. Use
-`cfmleditor-lsp explain <file> <line+1> [call]` to trace any entry. The report's
+`clif explain <file> <line+1> [call]` to trace any entry. The report's
 lines are 0-based and `explain` takes 1-based lines. `explain` indexes only the
 file's own directory unless given `--root <project>`, so pass `--root` or it
 can disagree with the batch scan.
@@ -540,7 +540,7 @@ against the source:
 Additional application corpus: [MasaCMS/MasaCMS](https://github.com/MasaCMS/MasaCMS),
 commit `696383140578f8dea3ece26f80cd7bfb370ddf0f` (7.6.1). Copy
 [`scripts/corpus/masacms.json`](scripts/corpus/masacms.json) to the checkout's
-`.cfmleditor.json`, then run `cfmleditor-lsp unresolved --json <checkout>`.
+`.clif.json`, then run `clif unresolved --json <checkout>`.
 Restore the checkout's original configuration afterward. The supplied mappings
 mirror applicationSettings.cfm; beanPaths and startupFiles expose the application's
 factory setup without adding hand-written alias rules. Development dependencies

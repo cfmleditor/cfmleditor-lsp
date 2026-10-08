@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/formatter"
+	"github.com/cfmleditor/clif/internal/language"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
 )
@@ -139,7 +139,7 @@ func formatDocument(content string, opts protocol.FormattingOptions, cfg *config
 // settings say not to add and removing trailing blank lines they say to keep.
 //
 // Both fields are optional pointers. A client that sends neither — the
-// `cfmleditor.format` command does, and so does any client older than 3.15 —
+// `clif.format` command does, and so does any client older than 3.15 —
 // gets what the formatter produced, so nothing changes for them.
 //
 // The two options answer different questions and neither implies the other:

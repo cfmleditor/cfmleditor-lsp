@@ -7,21 +7,21 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/codemap/mcp"
+	"github.com/cfmleditor/clif/internal/codemap/store"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-const mcpUsage = `usage: cfmleditor-lsp mcp [--db <file>] [--root <dir>] [--allow-lint] [--map-only] [--no-explain]
+const mcpUsage = `usage: clif mcp [--db <file>] [--root <dir>] [--allow-lint] [--map-only] [--no-explain]
 
 Serve a CFML workspace over the Model Context Protocol on stdio, so an
 assistant can ask about the code instead of grepping for it. It writes nothing.
@@ -47,9 +47,9 @@ With --allow-lint:
 Paths given to a tool are relative to the server's working directory.
 
 Register it with your MCP client, for example:
-  {"command": "cfmleditor-lsp", "args": ["mcp", "--allow-lint"], "cwd": "/path/to/project"}
-or with a map, built first by: cfmleditor-lsp graph --db .cfmleditor/codemap.db .
-  {"command": "cfmleditor-lsp", "args": ["mcp", "--db", ".cfmleditor/codemap.db"]}
+  {"command": "clif", "args": ["mcp", "--allow-lint"], "cwd": "/path/to/project"}
+or with a map, built first by: clif graph --db .clif/codemap.db .
+  {"command": "clif", "args": ["mcp", "--db", ".clif/codemap.db"]}
 `
 
 // fatalf prints to stderr and exits. It exists so a caller that has already
@@ -107,7 +107,7 @@ func parseMCPFlags(args []string) mcpFlags {
 // openMap opens and checks the map at path, or exits saying how to build one.
 func openMap(path string) *store.Store {
 	if _, err := os.Stat(path); err != nil {
-		fatalf("No map at %s. Build one first:\n  cfmleditor-lsp graph --db %s <dir>\n", path, path)
+		fatalf("No map at %s. Build one first:\n  clif graph --db %s <dir>\n", path, path)
 	}
 
 	db, err := store.Open(path)
@@ -120,7 +120,7 @@ func openMap(path string) *store.Store {
 		// defers and a WAL-mode database left open strands its -wal and -shm files.
 		_ = db.Close()
 
-		fatalf("%s holds no map yet. Run: cfmleditor-lsp graph --db %s <dir>\n", path, path)
+		fatalf("%s holds no map yet. Run: clif graph --db %s <dir>\n", path, path)
 	}
 
 	return db
@@ -128,7 +128,7 @@ func openMap(path string) *store.Store {
 
 // mcpServer builds the server the flags ask for. db may be nil.
 func mcpServer(f *mcpFlags, db *store.Store) *mcp.Server {
-	srv := &mcp.Server{Store: db, Name: "cfmleditor-lsp", Version: version}
+	srv := &mcp.Server{Store: db, Name: "clif", Version: version}
 
 	if f.mapOnly {
 		return srv
@@ -171,9 +171,9 @@ func cmdMCP(args []string) {
 	// Diagnostics go to stderr. Stdout is the protocol channel, and one stray line
 	// on it is a parse error at the other end rather than a log message.
 	if f.db != "" {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp MCP server on stdio (db: %s)\n", f.db)
+		fmt.Fprintf(os.Stderr, "clif MCP server on stdio (db: %s)\n", f.db)
 	} else {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp MCP server on stdio (no code map)\n")
+		fmt.Fprintf(os.Stderr, "clif MCP server on stdio (no code map)\n")
 	}
 
 	if err := srv.Serve(os.Stdin, os.Stdout); err != nil {
