@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The version is filled in by the release workflow (package-managers.yml). -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>clif</id>
+    <version>__VERSION__</version>
+    <title>clif</title>
+    <authors>cfmleditor</authors>
+    <owners>cfmleditor</owners>
+    <projectUrl>https://github.com/cfmleditor/clif</projectUrl>
+    <packageSourceUrl>https://github.com/cfmleditor/clif/tree/main/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/cfmleditor/clif</projectSourceUrl>
+    <docsUrl>https://github.com/cfmleditor/clif#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/cfmleditor/clif/issues</bugTrackerUrl>
+    <releaseNotes>https://github.com/cfmleditor/clif/releases/tag/v__VERSION__</releaseNotes>
+    <iconUrl>https://cdn.jsdelivr.net/gh/cfmleditor/clif@main/assets/logo/png/clif-icon-dark-128.png</iconUrl>
+    <licenseUrl>https://github.com/cfmleditor/clif/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <tags>cfml coldfusion lucee lsp language-server linter cli</tags>
+    <summary>CFML language server and command-line checks</summary>
+    <description><![CDATA[clif (pronounced "cliff", formerly cfmleditor-lsp) is a Language Server Protocol server for CFML / ColdFusion, and a command-line tool for the same checks: unresolved component and method calls, references, formatting, CFLint and a whole-project code map.
+
+The VS Code, Zed and IntelliJ CFML extensions run it as their language server. Installing it here puts `clif` on PATH, and `cfmleditor-lsp` beside it for extensions that still look for the old name.
+
+```
+clif unresolved .
+clif explain path\to\file.cfc 104
+clif --help
+```
+]]></description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

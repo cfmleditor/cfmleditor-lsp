@@ -24,6 +24,25 @@ log directory are named `clif` now, so a daemon started by an older release is
 not shared with a newer one, which they never could be safely anyway. A CFLint
 already downloaded under the old cache directory is used where it is.
 
+## Install
+
+```sh
+brew install cfmleditor/tap/clif      # macOS and Linux
+choco install clif                    # Windows
+```
+
+Both install `clif` and, for editor extensions that still look for the old
+name, `cfmleditor-lsp`. Every release also has archives for each platform on
+the [releases page](https://github.com/cfmleditor/clif/releases). The VS Code
+and Zed CFML extensions download a server of their own, so neither needs this.
+
+The release workflow updates both after each release
+(`.github/workflows/package-managers.yml`): the formula in
+[cfmleditor/homebrew-tap](https://github.com/cfmleditor/homebrew-tap), generated
+by `packaging/homebrew/formula.sh`, and the Chocolatey package in
+`packaging/chocolatey/`. A new Chocolatey version is moderated before it is
+listed, so `choco install` lags a release by however long that takes.
+
 ## Build
 
 ```sh
