@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"slices"
 	"strings"
 )
@@ -104,8 +106,15 @@ calls whose text contains it.
 // mistyped flag was taken for a path: `cflint --wirte .` linted a directory
 // called --wirte, and `parse -x` reported that no such file exists.
 func positional(a, usage string) string {
+	return positionalOr(a, usage, 1)
+}
+
+// positionalOr is positional for a command whose usage errors exit with code,
+// as clif cflint's do with 2, keeping 1 to mean findings.
+func positionalOr(a, usage string, code int) string {
 	if strings.HasPrefix(a, "-") && a != "-" {
-		fatalf("unknown option %q\n\n%s", a, usage)
+		fmt.Fprintf(os.Stderr, "unknown option %q\n\n%s", a, usage)
+		os.Exit(code)
 	}
 
 	return a

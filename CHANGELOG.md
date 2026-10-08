@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`clif cflint` exit codes mean something.** 0 clean, 1 findings printed, 2 the run can't be trusted. It exited 0 with findings, and 0 for a path that doesn't exist. A written report (`--write`, `--out`) still exits 0.
+
+### Fixed
+
+- **A `.cflintrc` CFLint can't parse is an error.** CFLint ignores such a file silently (a comment, a trailing comma, an empty or half-saved file) and lints with its default rules. clif now parses every `.cflintrc` CFLint would read, stopping where `inheritParent: false` stops CFLint, and exits 2 naming the file.
+- **`clif --version` prints the version and exits** (also `-version`, `-v`). It started the language server, which waited for a client forever, so a tool checking the binary was installed hung.
+
 ## [0.5.0]
 
 ### Changed

@@ -31,7 +31,40 @@ for resolution, which CFLint does not do, and are never linted.
                  than was linted is refused, since rewriting it would drop the
                  entries for everything else; lint its whole directory, or use
                  --out
+
+Exit status:
+  0  no findings, or a report was written (--write, --out)
+  1  findings were printed
+  2  the run could not be trusted: a path that does not exist, a .cflintrc
+     CFLint cannot parse (it would silently lint with its default rules
+     instead), CFLint unavailable or failing, or a usage error
 `
+
+// clif cflint's exit statuses. A gate reads 1 as "the code has findings" and
+// anything else non-zero as "the check itself did not run", so a broken run
+// never passes for a clean one and never reads as the code's fault either.
+const (
+	exitCFLintFindings = 1
+	exitCFLintError    = 2
+)
+
+// cflintFailf reports an error that makes the run untrustworthy and exits with
+// exitCFLintError.
+func cflintFailf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+	os.Exit(exitCFLintError)
+}
+
+// cflintExitCode is the status a run that completed exits with: findings fail
+// a printed run, which is what a gate runs, and never a written report, which
+// is a regeneration and expected to hold findings.
+func cflintExitCode(findings int, writing bool) int {
+	if findings > 0 && !writing {
+		return exitCFLintFindings
+	}
+
+	return 0
+}
 
 // cflintFlags is what cmdCFLint's arguments ask for.
 type cflintFlags struct {
@@ -57,23 +90,23 @@ func parseCFLintFlags(args []string) cflintFlags {
 			fl.write = true
 		case "--out":
 			if i+1 >= len(args) {
-				fatalf("--out needs a file\n\n%s", cflintUsage)
+				cflintFailf("--out needs a file\n\n%s", cflintUsage)
 			}
 
 			i++
 			fl.out = args[i]
 		default:
-			fl.roots = append(fl.roots, positional(a, cflintUsage))
+			fl.roots = append(fl.roots, positionalOr(a, cflintUsage, exitCFLintError))
 		}
 	}
 
 	if fl.write && fl.out != "" {
-		fatalf("--write and --out cannot be used together\n\n%s", cflintUsage)
+		cflintFailf("--write and --out cannot be used together\n\n%s", cflintUsage)
 	}
 
 	if len(fl.roots) == 0 {
 		fmt.Fprint(os.Stderr, cflintUsage)
-		os.Exit(1)
+		os.Exit(exitCFLintError)
 	}
 
 	return fl
@@ -91,7 +124,13 @@ func cmdCFLint(args []string) {
 	for _, r := range fl.roots {
 		abs, err := filepath.Abs(r)
 		if err != nil {
-			fatalf("%s: %v\n", r, err)
+			cflintFailf("%s: %v\n", r, err)
+		}
+
+		// A path that does not exist used to lint nothing and exit 0, which a
+		// hook or CI job reads as clean.
+		if _, err := os.Stat(abs); err != nil {
+			cflintFailf("%s does not exist\n", r)
 		}
 
 		roots = append(roots, abs)
@@ -116,22 +155,27 @@ func cmdCFLint(args []string) {
 
 		fmt.Fprintf(os.Stderr, "Using config: %s\n", cfg.Path)
 	} else if fl.write {
-		fatalf("--write needs a .clif.json to say where the report goes; use --out\n")
+		cflintFailf("--write needs a .clif.json to say where the report goes; use --out\n")
 	}
 
 	targets := cflintTargets(&fl, knownIssues, configDir, roots, scanRoots)
 
-	runner, err := cflint.NewRunner(context.Background(), minSeverity)
-	if err != nil {
-		fatalf("cflint unavailable: %v\n", err)
+	files := collectCFMLFiles(vfs.OS{}, scanRoots)
+
+	if err := cflint.CheckConfigs(files); err != nil {
+		cflintFailf("%v\n", err)
 	}
 
-	files := collectCFMLFiles(vfs.OS{}, scanRoots)
+	runner, err := cflint.NewRunner(context.Background(), minSeverity)
+	if err != nil {
+		cflintFailf("cflint unavailable: %v\n", err)
+	}
+
 	fmt.Fprintf(os.Stderr, "Running CFLint over %d files...\n", len(files))
 
 	found, err := runner.ScanFiles(context.Background(), files)
 	if err != nil {
-		fatalf("cflint failed: %v\n", err)
+		cflintFailf("cflint failed: %v\n", err)
 	}
 
 	reports, left := cflint.Reports(found, targets, version)
@@ -145,7 +189,7 @@ func cmdCFLint(args []string) {
 
 		// Owner-only, as the server writes the same report for .exportCFLint.
 		if err := os.WriteFile(r.Path, []byte(r.Content), 0o600); err != nil {
-			fatalf("could not write %s: %v\n", r.Path, err)
+			cflintFailf("could not write %s: %v\n", r.Path, err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Wrote %s (%d entries)\n", r.Path, r.Entries)
@@ -153,6 +197,15 @@ func cmdCFLint(args []string) {
 
 	if left > 0 {
 		fmt.Fprintf(os.Stderr, "%d issues under no report's directory left out\n", left)
+	}
+
+	findings := 0
+	for _, diags := range found {
+		findings += len(diags)
+	}
+
+	if code := cflintExitCode(findings, fl.write || fl.out != ""); code != 0 {
+		os.Exit(code)
 	}
 }
 
@@ -164,12 +217,12 @@ func cflintTargets(fl *cflintFlags, knownIssues []config.KnownIssues, configDir 
 	case fl.out != "":
 		out, err := filepath.Abs(fl.out)
 		if err != nil {
-			fatalf("--out %s: %v\n", fl.out, err)
+			cflintFailf("--out %s: %v\n", fl.out, err)
 		}
 
 		for _, r := range scanRoots {
 			if !cflint.Within(r, filepath.Dir(out)) {
-				fatalf("--out %s: its directory does not hold %s, so those paths could not be written relative to it\n", fl.out, r)
+				cflintFailf("--out %s: its directory does not hold %s, so those paths could not be written relative to it\n", fl.out, r)
 			}
 		}
 
@@ -177,7 +230,7 @@ func cflintTargets(fl *cflintFlags, knownIssues []config.KnownIssues, configDir 
 	case fl.write:
 		targets, err := cflint.WriteTargets(config.GenerateTargets(knownIssues, config.GenerateCFLint, configDir), asked)
 		if err != nil {
-			fatalf("--write: %v. Lint that whole directory, or write this run with --out\n", err)
+			cflintFailf("--write: %v. Lint that whole directory, or write this run with --out\n", err)
 		}
 
 		return targets
