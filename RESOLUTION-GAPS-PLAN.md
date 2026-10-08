@@ -2732,3 +2732,49 @@ runs listed above) stay for the life of the session, and
 totals. Timing against `main` is a direct `unresolved --json` on each
 project with the two binaries at `$S/bench/lsp-main` and
 `$S/bench/lsp-branch`.
+
+### Followups considered and left
+
+After the summary above, five more groups were measured and left for the
+reason given beside each:
+
+- **cfwheels CLI `variables.helpers` (66)** reaches each service through
+  `new services.Admin( helpers = getService( "helpers" ), … )` from
+  `cli/lucli/Module.cfc`. `getService` is Module's own function with a
+  switch on its string argument that constructs the right class;
+  typing the construction's argument needs an argument-sensitive return
+  for `getService`, which no present rule provides. Caller inference
+  reaches the construction but `argumentExprComponent` cannot type
+  `getService("helpers")`.
+- **Masa's `arguments.feedBean` (113)** on `feedGateway.getFeed` has two
+  callers; one is `sample.getFeed()` in `loadrelatedcontent.cfm`, where
+  `sample = $.getBean( rc.entitytype )` is a bean of a dynamic name.
+  `callIsTo` returns ours=false, known=false, and the strict "any
+  unplaceable caller gives up" rule aborts the inference. Relaxing to
+  "ignore the unplaceable one when the placeable ones all agree" would
+  cross a design line this branch has held throughout: an untyped
+  caller is a caller whose type the inference cannot prove, not one it
+  may ignore.
+- **ColdBox integration-test `e` (34)** sits in `var e = this.get( "/x" )`
+  where `get()` → `request()` → `this.execute( argumentCollection =
+  arguments )` returns a `RequestContext`. Each hop forwards its
+  argumentCollection, which the chain-walker in `assignedFromCall`
+  stops at: a chain whose head is a bare call types only when every
+  hop's return is statically visible.
+- **Lucee's `not found in extends chain` (158)** is one include away:
+  `component extends="org.lucee.cfml.test.LuceeTestCase" { function
+  beforeAll() { include template="/admin/ext.functions.cfm"; } }` and
+  `toVersionSortable` is declared in that template. The `/admin`
+  mapping is set at build time by Lucee's Ant script and not reachable
+  from the source tree; this is already recorded in
+  `resolution-candidates/README.md` under "Config, not code".
+- **FW/1's `local.user = rc.user` views (29)** need the controller's
+  `rc.user = variables.userService.get( … )` to resolve. The user
+  service's `get()` has two branches (`result = variables.users[ id ]`
+  and `result = variables.beanFactory.getBean( "userBean" )`), one of
+  which is an index access the parse keeps untyped. A branch-merge
+  rule that treats an untyped sibling as `$any` would over-accept the
+  broader cases this branch has refused.
+
+Each of these is a shape the rules above deliberately did not grow a
+case for.
