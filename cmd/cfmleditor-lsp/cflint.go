@@ -12,7 +12,16 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
-const cflintUsage = "usage: cfmleditor-lsp cflint [--write] <project>\n"
+const cflintUsage = `usage: cfmleditor-lsp cflint [--write] <project>
+
+Run CFLint over a project and print the result as a known-issues report, one
+issue per line, paths relative to the project's .cfmleditor.json. The CFLint
+binary is downloaded on first use. linting.minSeverity in the config sets the
+least severe level reported.
+
+  --write   write the report files the config's knownIssues entries with
+            "generate": "cflint" name, instead of printing
+`
 
 // cmdCFLint runs CFLint over a whole project and writes the result as a
 // known-issues report: to stdout, relative to the project's .cfmleditor.json,
@@ -29,7 +38,7 @@ func cmdCFLint(args []string) {
 		case "--write":
 			write = true
 		default:
-			roots = append(roots, a)
+			roots = append(roots, positional(a, cflintUsage))
 		}
 	}
 

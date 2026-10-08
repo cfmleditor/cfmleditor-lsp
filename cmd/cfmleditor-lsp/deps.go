@@ -56,13 +56,13 @@ func cmdDeps(args []string) {
 			continue
 		}
 
-		filteredArgs = append(filteredArgs, a)
+		filteredArgs = append(filteredArgs, positional(a, depsUsage))
 	}
 
 	args = filteredArgs
 
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp deps [--mermaid] <dir-or-file> [...]\n")
+		fmt.Fprint(os.Stderr, depsUsage)
 		os.Exit(1)
 	}
 

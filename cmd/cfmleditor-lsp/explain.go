@@ -30,16 +30,13 @@ func cmdExplain(args []string) {
 			continue
 		}
 
-		filteredArgs = append(filteredArgs, args[i])
+		filteredArgs = append(filteredArgs, positional(args[i], explainUsage))
 	}
 
 	args = filteredArgs
 
 	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp explain [--root <dir>] <file> <line> [call-substring]\n")
-		fmt.Fprintf(os.Stderr, "  e.g. cfmleditor-lsp explain directcontent.cfc 104\n")
-		fmt.Fprintf(os.Stderr, "       cfmleditor-lsp explain directcontent.cfc 104 createTemplate\n")
-		fmt.Fprintf(os.Stderr, "       cfmleditor-lsp explain --root ../tassweb/webroot directcontent.cfc 104\n")
+		fmt.Fprint(os.Stderr, explainUsage)
 		os.Exit(1)
 	}
 

@@ -33,56 +33,35 @@ func main() {
 
 	// Subcommand routing
 	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "parse":
-			cmdParse(os.Args[2:])
+		name, args := os.Args[1], os.Args[2:]
+
+		if cmd, ok := subcommands()[name]; ok {
+			if wantsHelp(args) {
+				fmt.Print(cmd.usage)
+
+				return
+			}
+
+			cmd.run(args)
 
 			return
-		case "scan":
-			cmdScan(os.Args[2:])
+		}
 
-			return
-		case "format":
-			cmdFormat(os.Args[2:])
-
-			return
-		case "deps":
-			cmdDeps(os.Args[2:])
-
-			return
-		case "graph":
-			cmdGraph(os.Args[2:])
-
-			return
-		case "mcp":
-			cmdMCP(os.Args[2:])
-
-			return
-		case "routes":
-			cmdRoutes(os.Args[2:])
-
-			return
-		case "refs":
-			cmdRefs(os.Args[2:])
-
-			return
-		case "unresolved":
-			cmdUnresolved(os.Args[2:])
-
-			return
-		case "cflint":
-			cmdCFLint(os.Args[2:])
-
-			return
-		case "explain":
-			cmdExplain(os.Args[2:])
-
-			return
+		switch name {
 		case "version":
 			fmt.Printf("cfmleditor-lsp %s\n", version)
 
 			return
 		case "help", "--help", "-h":
+			// "help <command>" is that command's --help.
+			if len(args) > 0 {
+				if cmd, ok := subcommands()[args[0]]; ok {
+					fmt.Print(cmd.usage)
+
+					return
+				}
+			}
+
 			printHelp()
 
 			return
@@ -94,7 +73,7 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Fprintf(os.Stderr, `cfmleditor-lsp %s
+	fmt.Printf(`cfmleditor-lsp %s
 
 Commands:
   (default)    Run the LSP server over stdio
@@ -112,36 +91,8 @@ Commands:
   version      Print version
   help         Show this help
 
-Parse usage:
-  cfmleditor-lsp parse <file-or-dir> [...]
-
-Scan usage:
-  cfmleditor-lsp scan <file-or-dir> [...]
-
-Format usage:
-  cfmleditor-lsp format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]
-    -w                      rewrite the file in place
-    --allow-non-whitespace  permit changes beyond whitespace (off by default)
-    --root <dir>            read formatting config from this directory's
-                            .cfmleditor.json instead of each file's own
-
-Graph usage:
-  cfmleditor-lsp graph [--format text|json|jsonl|dot|mermaid|html]
-                       [--level function|call|file|package] [--out <file>]
-                       [--live | --detached | --from <id>] [--under <path>]
-                       [--unresolved] [--builtins] <dir> [...]
-  e.g. cfmleditor-lsp graph --format html --out map.html .
-       cfmleditor-lsp graph --level package --format dot . | dot -Tsvg > map.svg
-  Run "cfmleditor-lsp graph --help" for the full option list.
-
-MCP usage:
-  cfmleditor-lsp graph --db .cfmleditor/codemap.db .   # build the map first
-  cfmleditor-lsp mcp --db .cfmleditor/codemap.db       # then serve it
-
-Explain usage:
-  cfmleditor-lsp explain <file> <line> [call-substring]
-  e.g. cfmleditor-lsp explain directcontent.cfc 104
-       cfmleditor-lsp explain directcontent.cfc 104 createTemplate
+Run "cfmleditor-lsp <command> --help" (or "cfmleditor-lsp help <command>")
+for a command's usage and options.
 `, version)
 }
 
@@ -267,14 +218,14 @@ func runServer() {
 
 func cmdParse(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp parse <file-or-dir> [...]\n")
+		fmt.Fprint(os.Stderr, parseUsage)
 		os.Exit(1)
 	}
 
 	var files []string
 
 	for _, arg := range args {
-		info, err := os.Stat(arg)
+		info, err := os.Stat(positional(arg, parseUsage))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", arg, err)
 			os.Exit(1)
@@ -354,12 +305,12 @@ func cmdFormat(args []string) {
 			configRoot = args[i+1]
 			i++
 		default:
-			files = append(files, args[i])
+			files = append(files, positional(args[i], formatUsage))
 		}
 	}
 
 	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp format [-w] [--allow-non-whitespace] [--root <dir>] <file> [...]\n")
+		fmt.Fprint(os.Stderr, formatUsage)
 		os.Exit(1)
 	}
 

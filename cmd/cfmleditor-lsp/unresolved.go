@@ -16,7 +16,28 @@ import (
 	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
 )
 
-const unresolvedUsage = "usage: cfmleditor-lsp unresolved [--json | --known-issues [--relative-to <dir>] [--include-workspace] | --write] [--global-defs] [--no-infer-args] <dir> [...]\n"
+const unresolvedUsage = `usage: cfmleditor-lsp unresolved [options] <dir> [...]
+
+Report every component or method call that does not resolve: a receiver with
+no known component, a method the component does not declare, a component that
+does not exist. Reads the .cfmleditor.json above the first directory.
+
+  --json               print the results as JSON
+  --known-issues       print them as a known-issues report, paths relative to
+                       the config's directory
+  --relative-to <dir>  with --known-issues, make paths relative to this instead
+  --include-workspace  with --known-issues, keep entries outside that
+                       directory, as ../ paths
+  --write              write the report files the config's knownIssues entries
+                       with "generate": "unresolved" name
+  --verbose            also list each call that resolved, on stderr
+  --global-defs        resolve bare calls against functions declared anywhere
+                       in the workspace
+  --no-infer-args      do not type an untyped argument from what its callers
+                       pass it
+
+To see why one call resolved as it did: cfmleditor-lsp explain <file> <line>
+`
 
 // unresolvedFlags is what cmdUnresolved's flags ask for.
 type unresolvedFlags struct {
@@ -69,7 +90,7 @@ func parseUnresolvedFlags(args []string) (unresolvedFlags, []string) {
 		case "--no-infer-args":
 			fl.noInferArgs = true
 		default:
-			paths = append(paths, a)
+			paths = append(paths, positional(a, unresolvedUsage))
 		}
 	}
 
