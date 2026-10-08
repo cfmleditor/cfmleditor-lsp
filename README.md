@@ -1004,6 +1004,16 @@ finding under none of them is left out and counted in the command's message.
 The header carries no date, so regenerating an unchanged project changes
 nothing a diff would show.
 
+A CFLint report covers only what was asked for: the directories given to
+`cfmleditor-lsp cflint`, or the folders open in the editor for
+`cfmleditor.exportCFLint`. The config's own directory stands for the
+`workspacePaths` folders beneath it, never the ones outside it, which a
+project's config lists for resolution. Both refuse to rewrite a report whose
+directory holds more than was linted, since that would drop everything else's
+entries; the unresolved report still scans every workspace folder. `--out <file>` writes one report
+anywhere above the linted directories, with paths relative to it:
+`cfmleditor-lsp cflint --out ~/tassdev/prs/.cfmleditor-cflint.txt ~/tassdev/prs`.
+
 A `cflint` report's entries are labelled `cflint` and carry the rule ID, as
 CFLint's own diagnostics do. They give way file by file to CFLint on save: once
 a file is linted, its report entries are hidden, even when the run finds
