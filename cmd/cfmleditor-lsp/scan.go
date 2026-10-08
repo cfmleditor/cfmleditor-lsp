@@ -13,14 +13,14 @@ import (
 
 func cmdScan(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp scan <file-or-dir> [...]\n")
+		fmt.Fprint(os.Stderr, scanUsage)
 		os.Exit(1)
 	}
 
 	var files []string
 
 	for _, arg := range args {
-		info, err := os.Stat(arg)
+		info, err := os.Stat(positional(arg, scanUsage))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", arg, err)
 			os.Exit(1)

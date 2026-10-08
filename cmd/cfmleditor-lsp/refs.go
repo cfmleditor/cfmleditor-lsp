@@ -31,16 +31,14 @@ func cmdRefs(args []string) {
 		case "--mermaid":
 			format = "mermaid"
 		default:
-			filteredArgs = append(filteredArgs, a)
+			filteredArgs = append(filteredArgs, positional(a, refsUsage))
 		}
 	}
 
 	args = filteredArgs
 
 	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: cfmleditor-lsp refs [--mermaid] <component-or-function> <dir> [...]\n")
-		fmt.Fprintf(os.Stderr, "  e.g. cfmleditor-lsp refs packages.finance.service ./src\n")
-		fmt.Fprintf(os.Stderr, "       cfmleditor-lsp refs getReport ./src\n")
+		fmt.Fprint(os.Stderr, refsUsage)
 		os.Exit(1)
 	}
 

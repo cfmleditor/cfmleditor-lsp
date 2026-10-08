@@ -23,7 +23,7 @@ type report struct {
 }
 
 // handleExport answers cfmleditor.exportUnresolved and cfmleditor.exportCFLint:
-// it scans the whole workspace from disk and writes the findings to the
+// it scans what exportScope says from disk and writes the findings to the
 // knownIssues files marked generate kind, or to that kind's default file
 // beside .cfmleditor.json (see config.GenerateTargets), then reloads the ones
 // knownIssues lists so their entries are published straight away.
@@ -31,17 +31,13 @@ type report struct {
 // Like generateCodeMap, it returns the paths at once and works in the
 // background, reporting through window/showMessage.
 func (s *Server) handleExport(kind string) (any, error) {
-	roots := s.searchRoots()
-	if len(roots) == 0 {
-		return nil, errors.New("no workspace root to scan; open a folder first")
-	}
+	roots, targets, err := s.exportScope(kind)
+	if err != nil {
+		// Zed ignores a command's result, error or not, so say it as well.
+		s.notifyError(context.Background(), "The "+kind+" report was not written: "+err.Error())
 
-	configDir := roots[0]
-	if p, _ := s.governingConfig(); p != "" {
-		configDir = filepath.Dir(p)
+		return nil, err
 	}
-
-	targets := config.GenerateTargets(s.KnownIssues, kind, configDir)
 
 	if _, busy := s.exporting.LoadOrStore(kind, true); busy {
 		return nil, fmt.Errorf("a %s export is already running", kind)
@@ -114,6 +110,46 @@ func (s *Server) handleExport(kind string) (any, error) {
 	})
 
 	return map[string]any{"paths": targets, "started": true}, nil
+}
+
+// exportScope is what an export scans and the files it writes. The unresolved
+// report scans every workspace folder, since resolving a call reads them all.
+// The CFLint report scans only the folders open in the editor (cflint.ScanRoots,
+// as the cflint CLI does with its arguments), and refuses a report file whose
+// directory holds more than that, which rewriting would empty of everything
+// else's entries. It used to lint every workspace folder: a tassweb window,
+// whose config lists all twelve sibling repos for resolution, linted all
+// twelve and kept only tassweb's findings.
+func (s *Server) exportScope(kind string) (roots, targets []string, err error) {
+	roots = s.searchRoots()
+	if len(roots) == 0 {
+		return nil, nil, errors.New("no workspace root to scan; open a folder first")
+	}
+
+	configDir := roots[0]
+	if p, _ := s.governingConfig(); p != "" {
+		configDir = filepath.Dir(p)
+	}
+
+	targets = config.GenerateTargets(s.KnownIssues, kind, configDir)
+	if kind != config.GenerateCFLint {
+		return roots, targets, nil
+	}
+
+	open := s.editorRoots()
+	if len(open) == 0 {
+		open = []string{configDir}
+	}
+
+	targets, err = cflint.WriteTargets(targets, open)
+	if err != nil {
+		return nil, nil, fmt.Errorf(`%w. Open that folder, or list a report file under %s in knownIssues with "generate": "cflint"`,
+			err, strings.Join(open, ", "))
+	}
+
+	roots = cflint.ScanRoots(open, configDir, s.WorkspaceFolders)
+
+	return roots, targets, nil
 }
 
 // unresolvedReports runs the unresolved scan the CLI runs, with this
