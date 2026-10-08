@@ -59,6 +59,11 @@ type Location struct {
 	Line     int    `json:"line"`
 	Message  string `json:"message"`
 	Variable string `json:"variable"`
+	// Expression is the source CFLint reports the issue against; Offset is
+	// its character offset in the file. Both are carried for the text and
+	// JSON reports, which print them as CFLint does.
+	Expression string `json:"expression"`
+	Offset     int    `json:"offset"`
 }
 
 // Runner manages the CFLint binary.

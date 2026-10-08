@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`clif cflint` speaks CFLint's formats.** `--format text` is CFLint's `-text` report, `Total issues:N` line included. `--format json` is its `-json` report, each issue as CFLint wrote it. `--format sarif` is SARIF 2.1.0 with CFLint's codes as rule ids. `--out` writes any of them to a file.
+- **`clif cflint --staged`** lints the staged content (the index, not the working tree) for a pre-commit hook, and **`--changed <ref>`** lints what `git diff <ref>...HEAD` changed, for CI.
+- **`--min-severity <level>` and `--strict`** set what is reported and fails the run, overriding `linting.minSeverity`. **`-q`** drops the progress on stderr.
+
 ### Changed
 
 - **`clif cflint` exit codes mean something.** 0 clean, 1 findings printed, 2 the run can't be trusted. It exited 0 with findings, and 0 for a path that doesn't exist. A written report (`--write`, `--out`) still exits 0.
