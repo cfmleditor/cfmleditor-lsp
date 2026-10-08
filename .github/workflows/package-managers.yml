@@ -1,0 +1,186 @@
+name: Package managers
+
+# Publishes a release to Homebrew (the cfmleditor/homebrew-tap formula) and
+# Chocolatey. The release workflow calls it once a release is published; it
+# can also be run by hand for an existing release, and runs on a pull request
+# that touches packaging/, against the latest release, without publishing, so
+# a change to the formula or the package is tried before it ships.
+#
+# Publishing needs two repository secrets. Without one, that half builds and
+# checks its package and says it did not publish:
+#   HOMEBREW_TAP_TOKEN   a token that can push to cfmleditor/homebrew-tap
+#   CHOCOLATEY_API_KEY   the API key of the community.chocolatey.org account
+#                        that owns the clif package
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.5.0
+        type: string
+        required: true
+      publish:
+        description: Push the formula and the package
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.5.0 (empty for the latest release)
+        type: string
+        default: ""
+      publish:
+        description: Push the formula and the package
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/package-managers.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: Resolve the release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      publish: ${{ steps.tag.outputs.publish }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG}" ]; then
+            TAG="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName -q .tagName)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          # A pull request never publishes, whatever it changed.
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then PUBLISH=false; fi
+          echo "publish=${PUBLISH:-false}" >> "$GITHUB_OUTPUT"
+          echo "Release ${TAG}, publish=${PUBLISH:-false}"
+
+  homebrew:
+    name: Homebrew
+    needs: tag
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the release's archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-*.tar.gz' --dir dist
+
+      - name: Write the formula
+        run: |
+          set -euo pipefail
+          bash packaging/homebrew/formula.sh "${TAG}" dist > clif.rb
+          ruby -c clif.rb
+          cat clif.rb
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: homebrew-formula
+          path: clif.rb
+          retention-days: 7
+
+      - name: Push it to the tap
+        if: needs.tag.outputs.publish == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the formula was not pushed to cfmleditor/homebrew-tap"
+            exit 0
+          fi
+
+          git clone -q "https://x-access-token:${TAP_TOKEN}@github.com/cfmleditor/homebrew-tap.git" tap
+          cp clif.rb tap/Formula/clif.rb
+          cd tap
+          if git diff --quiet; then
+            echo "The tap already has this formula."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/clif.rb
+          git commit -q -m "clif ${TAG#v}"
+          git push -q
+
+  chocolatey:
+    name: Chocolatey
+    needs: tag
+    runs-on: windows-latest
+    env:
+      TAG: ${{ needs.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the release's Windows archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-windows-amd64.zip' --dir dist
+
+      - name: Fill in the package
+        shell: pwsh
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          $sum = (Get-FileHash dist/clif-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/clif-windows-amd64.zip"
+
+          $nuspec = 'packaging/chocolatey/clif.nuspec'
+          (Get-Content $nuspec -Raw).Replace('__VERSION__', $version) | Set-Content $nuspec -NoNewline
+
+          $install = 'packaging/chocolatey/tools/chocolateyinstall.ps1'
+          (Get-Content $install -Raw).Replace('__URL__', $url).Replace('__CHECKSUM__', $sum) | Set-Content $install -NoNewline
+
+          if (Select-String -Path $nuspec, $install -Pattern '__[A-Z]+__') { throw 'a placeholder was left unfilled' }
+          "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Pack
+        run: choco pack packaging/chocolatey/clif.nuspec --outputdirectory dist
+
+      # The package is installed from the file just packed, which downloads the
+      # release's archive and checks its checksum the way a user's install will.
+      - name: Install it on this runner
+        shell: pwsh
+        run: |
+          choco install clif --source "dist" --version $env:version -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install failed: $LASTEXITCODE" }
+          $out = & clif version
+          $legacy = & cfmleditor-lsp version
+          "$out / $legacy"
+          if ($out -notmatch [regex]::Escape($env:version)) { throw "clif version printed '$out'" }
+          if ($legacy -notmatch [regex]::Escape($env:version)) { throw "cfmleditor-lsp version printed '$legacy'" }
+          choco uninstall clif -y --no-progress
+          if (Get-Command cfmleditor-lsp -ErrorAction SilentlyContinue) { throw 'uninstall left the cfmleditor-lsp shim behind' }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chocolatey-package
+          path: dist/*.nupkg
+          retention-days: 7
+
+      - name: Push to the Chocolatey community repository
+        if: needs.tag.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+        run: |
+          if (-not $env:CHOCOLATEY_API_KEY) {
+            "::warning::CHOCOLATEY_API_KEY is not set, so the package was not pushed to Chocolatey"
+            exit 0
+          }
+          choco push "dist/clif.$env:version.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
+          if ($LASTEXITCODE -ne 0) { throw "choco push failed: $LASTEXITCODE" }
