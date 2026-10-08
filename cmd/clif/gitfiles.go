@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -84,4 +85,90 @@ func gitStagedContent(repo, path string) ([]byte, error) {
 	}
 
 	return git(repo, "show", ":"+filepath.ToSlash(rel))
+}
+
+// gitAddedLines are the lines each file gains or changes, by absolute path and
+// 1-based line: staged ones, or those since ref's merge base with HEAD. A
+// finding outside them was already there before the change.
+func gitAddedLines(repo string, staged bool, ref string) (map[string]map[int]bool, error) {
+	args := []string{"diff", "--no-color", "--no-ext-diff", "-U0", "--diff-filter=ACMR"}
+	if staged {
+		args = append(args, "--cached")
+	} else {
+		args = append(args, ref+"...HEAD")
+	}
+
+	out, err := git(repo, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseAddedLines(repo, string(out)), nil
+}
+
+// parseAddedLines reads a unified diff with no context: the "+++ b/<path>"
+// line names the file, and each "@@ -a,b +c,d @@" hunk adds lines c to c+d-1
+// (d is 1 when left out, and 0 for a hunk that only removes).
+func parseAddedLines(repo, diff string) map[string]map[int]bool {
+	added := map[string]map[int]bool{}
+
+	var file string
+
+	for line := range strings.SplitSeq(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++ "):
+			name := strings.TrimPrefix(line, "+++ ")
+			if name == "/dev/null" {
+				file = ""
+
+				continue
+			}
+
+			// git quotes a name with unusual characters, C-style.
+			if unq, err := strconv.Unquote(name); err == nil {
+				name = unq
+			}
+
+			file = filepath.Join(repo, filepath.FromSlash(strings.TrimPrefix(name, "b/")))
+		case strings.HasPrefix(line, "@@ ") && file != "":
+			start, count, ok := hunkNewRange(line)
+			if !ok {
+				continue
+			}
+
+			if added[file] == nil {
+				added[file] = map[int]bool{}
+			}
+
+			for n := start; n < start+count; n++ {
+				added[file][n] = true
+			}
+		}
+	}
+
+	return added
+}
+
+// hunkNewRange reads the new side of a hunk header, "+c,d" or "+c".
+func hunkNewRange(header string) (start, count int, ok bool) {
+	fields := strings.Fields(header)
+	if len(fields) < 3 || !strings.HasPrefix(fields[2], "+") {
+		return 0, 0, false
+	}
+
+	startText, countText, hasCount := strings.Cut(strings.TrimPrefix(fields[2], "+"), ",")
+
+	start, err := strconv.Atoi(startText)
+	if err != nil {
+		return 0, 0, false
+	}
+
+	count = 1
+	if hasCount {
+		if count, err = strconv.Atoi(countText); err != nil {
+			return 0, 0, false
+		}
+	}
+
+	return start, count, true
 }

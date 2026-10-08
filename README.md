@@ -1073,6 +1073,43 @@ clif cflint --format json src/                         # CFLint's own -json sche
   default rules instead, so clif parses every `.cflintrc` CFLint would read
   first and stops the run if one is broken.
 
+**A pre-commit hook.** `clif hook install` writes a `pre-commit` hook into
+`.githooks/`, at the repository's root, and points this clone's
+`core.hooksPath` at it. The hook runs `clif cflint --staged --strict`.
+
+```sh
+clif hook install                                  # lint what is committed; every CFLint level fails
+clif hook install --changed-lines                  # fail only on lines the commit adds or alters
+clif hook install --log ~/logs/cflint-commits.log  # also log each attempt
+clif hook check                                    # exit 1 if a repo with a .cflintrc lacks the hook
+```
+
+Commit `.githooks/`, so the hook is in the repository. Git doesn't copy
+`core.hooksPath`, so each clone runs `clif hook install` once, and
+`clif hook check` (in CI, or a setup script) catches one that hasn't, rather
+than leaving it silently unlinted. Some more behaviour:
+
+- **Without clif:** on a machine without clif, the hook stops the commit and
+  says so.
+- **Skipping:** `SKIP=cflint` (or `PREK_SKIP=cflint`) skips it for one commit.
+- **Other hooks:** install leaves a hook it didn't write alone, unless given
+  `--force`.
+- **The log:** `--log` appends one line per commit attempt,
+  `TIMESTAMP | TICKET | HASH | PASS/FAIL | REPO | MESSAGE`. A `post-commit`
+  hook fills in the hash and message, so a blocked commit keeps `--------`.
+  `CLIF_COMMIT_LOG` overrides the path.
+
+With [pre-commit](https://pre-commit.com) or prek instead, list clif's hook in
+the committed config:
+
+```yaml
+repos:
+  - repo: https://github.com/cfmleditor/clif
+    rev: v0.6.0
+    hooks:
+      - id: clif-cflint
+```
+
 **Adopting rules on code that already breaks them.** Two ratchets let a
 project turn a rule on without fixing or suppressing everything first, and
 stop the debt growing:

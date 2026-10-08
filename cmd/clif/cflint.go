@@ -35,6 +35,9 @@ What to lint:
                       neither hides nor adds a finding (a pre-commit hook)
   --changed <ref>     the .cfm/.cfc files changed between <ref> and HEAD
                       (git diff <ref>...HEAD), from the working tree (CI)
+  --changed-lines     with --staged or --changed, report only findings on lines
+                      the change adds or alters: a finding elsewhere in a
+                      touched file was there before it
   With --staged or --changed, paths narrow the files to those under them; with
   none, the git repository holding the working directory is used.
 
@@ -122,6 +125,7 @@ type cflintFlags struct {
 	strict      bool
 	quiet       bool
 	staged      bool
+	lines       bool
 }
 
 // regenerating reports whether the run writes a known-issues report, the one
@@ -168,6 +172,8 @@ func parseCFLintFlags(args []string) cflintFlags {
 			fl.quiet = true
 		case "--staged":
 			fl.staged = true
+		case "--changed-lines":
+			fl.lines = true
 		case "--out":
 			fl.out = value()
 		case "--format":
@@ -199,6 +205,8 @@ func checkCFLintFlags(fl *cflintFlags) {
 		cflintFailf("--write writes known-issues reports; use --out for --format %s\n\n%s", fl.format, cflintUsage)
 	case fl.staged && fl.changed != "":
 		cflintFailf("--staged and --changed cannot be used together\n\n%s", cflintUsage)
+	case fl.lines && !fl.staged && fl.changed == "":
+		cflintFailf("--changed-lines needs --staged or --changed <ref>\n\n%s", cflintUsage)
 	case fl.strict && fl.minSeverity != "":
 		cflintFailf("--strict and --min-severity cannot be used together\n\n%s", cflintUsage)
 	case len(fl.roots) == 0 && !fl.staged && fl.changed == "":
@@ -285,6 +293,17 @@ func cmdCFLint(args []string) {
 	run, err := lintSelection(runner, &sel)
 	if err != nil {
 		cflintFailf("%v\n", err)
+	}
+
+	if fl.lines {
+		added, err := gitAddedLines(sel.repo, fl.staged, fl.changed)
+		if err != nil {
+			cflintFailf("%v\n", err)
+		}
+
+		if dropped := run.KeepLines(added); dropped > 0 {
+			logf("%d findings on lines the change does not touch left out\n", dropped)
+		}
 	}
 
 	if fl.baseline != "" {
