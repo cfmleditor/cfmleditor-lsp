@@ -9,13 +9,13 @@ import (
 	"sync"
 	"testing"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
 // messageConn records every window/showMessage the server sends. The message
-// is the only part of cfmleditor.explainCall's answer Zed shows anyone, since
+// is the only part of clif.explainCall's answer Zed shows anyone, since
 // it ignores a command's return value.
 type messageConn struct {
 	fakeConn
@@ -83,7 +83,7 @@ func explainCall(t *testing.T, srv *Server, args ...any) string {
 	t.Helper()
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.explainCall",
+		Command:   "clif.explainCall",
 		Arguments: lspAnyArgs(args...),
 	})
 
@@ -181,7 +181,7 @@ func TestExplainCallLineWithNoCall(t *testing.T) {
 func TestExplainCallAfterAnEditOutsideAFunction(t *testing.T) {
 	srv, _, docURI, aPath := explainWorkspace(t)
 
-	if slices.Contains(codeActionCommands(t, srv, docURI, protocol.Position{Line: 6}), "cfmleditor.explainCall") {
+	if slices.Contains(codeActionCommands(t, srv, docURI, protocol.Position{Line: 6}), "clif.explainCall") {
 		t.Fatal("explain offered on a closing brace")
 	}
 
@@ -204,7 +204,7 @@ func TestExplainCallAfterAnEditOutsideAFunction(t *testing.T) {
 		t.Errorf("want prefix %q, got:\n%s", want, out)
 	}
 
-	if !slices.Contains(codeActionCommands(t, srv, docURI, protocol.Position{Line: 6}), "cfmleditor.explainCall") {
+	if !slices.Contains(codeActionCommands(t, srv, docURI, protocol.Position{Line: 6}), "clif.explainCall") {
 		t.Error("explain not offered on the line the call to missing() moved to")
 	}
 }
@@ -260,7 +260,7 @@ func TestCodeActionOffersExplainOnlyOnALineWithACall(t *testing.T) {
 		var explain *protocol.CodeAction
 
 		for _, a := range codeActions(t, srv, docURI, pos) {
-			if a.Command.Command == "cfmleditor.explainCall" {
+			if a.Command.Command == "clif.explainCall" {
 				explain = &a
 			}
 		}
@@ -279,14 +279,14 @@ func TestCodeActionOffersExplainOnlyOnALineWithACall(t *testing.T) {
 	}
 
 	for _, pos := range []protocol.Position{{Line: 2, Character: 0}, {Line: 3, Character: 22}} {
-		if slices.Contains(codeActionCommands(t, srv, docURI, pos), "cfmleditor.explainCall") {
+		if slices.Contains(codeActionCommands(t, srv, docURI, pos), "clif.explainCall") {
 			t.Errorf("line %d: explain offered on a line with no call", pos.Line)
 		}
 	}
 }
 
 // The file-level dependency graph passes the document URI alone, which is the
-// form of cfmleditor.exportDeps that graphs every function in the file.
+// form of clif.exportDeps that graphs every function in the file.
 func TestCodeActionOffersTheFileDependencyGraph(t *testing.T) {
 	srv, _, docURI, _ := explainWorkspace(t)
 
@@ -300,7 +300,7 @@ func TestCodeActionOffersTheFileDependencyGraph(t *testing.T) {
 
 			found = true
 
-			if a.Command.Command != "cfmleditor.exportDeps" || len(a.Command.Arguments) != 1 {
+			if a.Command.Command != "clif.exportDeps" || len(a.Command.Arguments) != 1 {
 				t.Errorf("line %d: want exportDeps with the URI alone, got %s %s", pos.Line, a.Command.Command, a.Command.Arguments)
 			}
 		}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // A call written `VARIABLES.svc.GetData()` is recorded with Variable

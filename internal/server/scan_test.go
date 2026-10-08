@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/language"
 	"go.lsp.dev/protocol"
 )
 
@@ -19,7 +19,7 @@ func TestExecuteCommandScanWorkspace(t *testing.T) {
 	srv.WorkspaceFolders = []string{dir}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command: "cfmleditor.scanWorkspace",
+		Command: "clif.scanWorkspace",
 	})
 
 	if _, err := srv.handleExecuteCommand(context.Background(), req); err != nil {

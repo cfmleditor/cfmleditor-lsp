@@ -31,7 +31,7 @@ func TestKnownIssuesBlockIsInherited(t *testing.T) {
 		{File: filepath.Join(dir, ".cfmleditor-unresolved.txt"), Scope: "workspace", Severity: "warning", Generate: GenerateUnresolved},
 		{File: filepath.Join(dir, "docs", "todo.txt"), Scope: "workspace", Severity: "hint", Source: "todo"},
 		{File: filepath.Join(dir, "docs", "long.txt"), Scope: "open", Severity: "warning"},
-		{File: filepath.Join(dir, ".cfmleditor-cflint.txt"), Scope: "workspace", Severity: "warning", Generate: GenerateCFLint},
+		{File: filepath.Join(dir, ".clif-cflint.txt"), Scope: "workspace", Severity: "warning", Generate: GenerateCFLint},
 	}
 
 	if !slices.Equal(got, want) {
@@ -69,7 +69,7 @@ func TestGenerateTargets(t *testing.T) {
 		t.Errorf("unresolved: %v", got)
 	}
 
-	if got := GenerateTargets(list, GenerateCFLint, dir); len(got) != 1 || got[0] != filepath.Join(dir, ".cfmleditor-cflint.txt") {
+	if got := GenerateTargets(list, GenerateCFLint, dir); len(got) != 1 || got[0] != filepath.Join(dir, ".clif-cflint.txt") {
 		t.Errorf("cflint default: %v", got)
 	}
 }

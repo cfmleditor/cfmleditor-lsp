@@ -5,8 +5,8 @@ import (
 	"encoding/json/v2"
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 )
 

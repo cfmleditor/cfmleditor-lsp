@@ -24,7 +24,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/clif/internal/codemap/store"
 )
 
 // protocolVersion is the MCP revision this server implements. A client asking for
@@ -163,7 +163,7 @@ func (s *Server) instructions() string {
 	if s.Store == nil {
 		return text + " No code map is loaded, so the structural tools (search_symbols, " +
 			"get_callers and the rest) are not offered: build one with " +
-			"`cfmleditor-lsp graph --db <file> <dir>` and start this server with --db <file>."
+			"`clif graph --db <file> <dir>` and start this server with --db <file>."
 	}
 
 	return text + " A structural map is loaded too: every function and file, and the calls, " +

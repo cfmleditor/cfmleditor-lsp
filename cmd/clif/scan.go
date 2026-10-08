@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/language"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 

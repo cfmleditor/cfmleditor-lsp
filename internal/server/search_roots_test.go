@@ -65,7 +65,7 @@ func TestSearchRootsFallsBackToEditorRoots(t *testing.T) {
 
 // TestFindRefsSearchesWithoutAConfig is the defect, at the command that showed
 // it. Same workspace, same function, three callers sitting next to it —
-// cfmleditor.findRefs answered "0 match(es)" purely because there was no
+// clif.findRefs answered "0 match(es)" purely because there was no
 // .cfmleditor.json to populate WorkspaceFolders, which reads exactly like a
 // function nothing calls.
 func TestFindRefsSearchesWithoutAConfig(t *testing.T) {
@@ -74,13 +74,13 @@ func TestFindRefsSearchesWithoutAConfig(t *testing.T) {
 	docURI := uri.File(filepath.Join(dir, "controller.cfc"))
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.findRefs",
+		Command:   "clif.findRefs",
 		Arguments: lspAnyArgs("GetReport", string(docURI)),
 	})
 
 	res, err := srv.handleExecuteCommand(context.Background(), req)
 	if err != nil {
-		t.Fatalf("cfmleditor.findRefs: %v", err)
+		t.Fatalf("clif.findRefs: %v", err)
 	}
 
 	summary, _ := res.(string)

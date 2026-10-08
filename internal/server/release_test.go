@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/clif/internal/config"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"

@@ -8,9 +8,9 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // Doc block completion, which the VS Code extension has as DocBlockCompletions:

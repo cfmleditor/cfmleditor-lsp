@@ -3,20 +3,20 @@ package server
 import (
 	// The standard library on purpose, where the LSP wire and every request
 	// handler use encoding/json/v2. v2 matches field names case-sensitively, so
-	// a key a user spelled with the wrong case in .cfmleditor.json would be
+	// a key a user spelled with the wrong case in .clif.json would be
 	// dropped in silence, and it rejects duplicate members where stdlib takes
 	// the last — both breaking for a hand-written config file. Pinned by
 	// TestConfigDecodingStaysOnTheStandardLibrary in internal/config.
 	"encoding/json"
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	"github.com/cfmleditor/clif/internal/config"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/protocol"
 )
 
 // configureSession applies the configuration this session runs with: the
-// governing .cfmleditor.json, merged with the editor's initializationOptions,
+// governing .clif.json, merged with the editor's initializationOptions,
 // applied exactly once.
 //
 // The governing file is the nearest one to the workspace roots the editor
@@ -69,7 +69,7 @@ func (s *Server) configureSession(editorCfg *config.JSON) {
 
 		s.log.Info("loaded config from workspace", cflog.String("path", path))
 	} else {
-		s.log.Info("no .cfmleditor.json found; using editor initializationOptions")
+		s.log.Info("no .clif.json found; using editor initializationOptions")
 	}
 
 	merged := config.Merge(editorCfg, fileCfg)
@@ -176,7 +176,7 @@ func (s *Server) restoreUnmentionedBlocks(merged *config.JSON, prev *optionalBlo
 	}
 }
 
-// governingConfig finds the .cfmleditor.json this session should run with, and
+// governingConfig finds the .clif.json this session should run with, and
 // returns its path alongside it. Nil when there is none to be had.
 func (s *Server) governingConfig() (string, *config.JSON) {
 	for _, root := range s.editorRoots() {
@@ -197,7 +197,7 @@ func (s *Server) governingConfig() (string, *config.JSON) {
 }
 
 // editorConfig decodes the client's initializationOptions, which carry the
-// same shape as .cfmleditor.json. Editors that expose no way to set them (or
+// same shape as .clif.json. Editors that expose no way to set them (or
 // set nothing) send an empty value, which yields nil.
 //
 // Note `debug` is ignored here: the logger is built from the on-disk config
@@ -219,7 +219,7 @@ func (s *Server) editorConfig(raw protocol.LSPAny) *config.JSON {
 	return &cfg
 }
 
-// readConfigFile parses one .cfmleditor.json, or returns nil if it is missing
+// readConfigFile parses one .clif.json, or returns nil if it is missing
 // or unreadable as config.
 func (s *Server) readConfigFile(path string) *config.JSON {
 	data, err := s.FS.ReadFile(path)
@@ -238,7 +238,7 @@ func (s *Server) readConfigFile(path string) *config.JSON {
 }
 
 // findConfigUpwards walks from dir towards the filesystem root, returning the
-// first readable, parseable .cfmleditor.json it finds along with its path. A
+// first readable, parseable .clif.json it finds along with its path. A
 // file that exists but does not parse is skipped rather than aborting the
 // walk, so one malformed config cannot mask a valid one further up.
 //
@@ -254,9 +254,10 @@ func (s *Server) findConfigUpwards(dir string) (string, *config.JSON) {
 	}
 
 	for {
-		p := filepath.Join(d, ".cfmleditor.json")
-		if cfg := s.readConfigFile(p); cfg != nil {
-			return p, cfg
+		for _, p := range config.CandidatesIn(d) {
+			if cfg := s.readConfigFile(p); cfg != nil {
+				return p, cfg
+			}
 		}
 
 		parent := filepath.Dir(d)

@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 )
 
 // fieldLogger keeps each Error record's fields, which recordingLogger drops.

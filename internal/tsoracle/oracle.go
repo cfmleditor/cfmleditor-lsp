@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 

@@ -1,4 +1,4 @@
-// Package config defines the shared .cfmleditor.json configuration types.
+// Package config defines the shared .clif.json configuration types.
 package config
 
 import (
@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/parser"
+	"github.com/cfmleditor/clif/internal/route"
 )
 
-// CodeMap is the "codemap" block of .cfmleditor.json.
+// CodeMap is the "codemap" block of .clif.json.
 //
 // These are properties of the codebase, not of one invocation: which directories
 // hold code a runner invokes, which components are infrastructure. Keeping them in
@@ -39,7 +39,7 @@ type CodeMap struct {
 	HideUtility bool `json:"hideUtility,omitempty"`
 }
 
-// JSON is the on-disk shape of .cfmleditor.json.
+// JSON is the on-disk shape of .clif.json.
 type JSON struct {
 	WorkspaceName       string            `json:"workspaceName"`
 	WorkspacePaths      []string          `json:"workspacePaths"`
@@ -133,9 +133,9 @@ type KnownIssues struct {
 	Scope string `json:"scope"`
 	// Generate marks a file the server writes, so it is regenerated rather
 	// than kept by hand: "unresolved" is the unresolved call report,
-	// rewritten by the cfmleditor.exportUnresolved command and by
-	// `cfmleditor-lsp unresolved --write`; "cflint" is a CFLint run over the
-	// whole project, rewritten by cfmleditor.exportCFLint. Several files of one
+	// rewritten by the clif.exportUnresolved command and by
+	// `clif unresolved --write`; "cflint" is a CFLint run over the
+	// whole project, rewritten by clif.exportCFLint. Several files of one
 	// kind split the report by directory; see GenerateTargets.
 	//
 	// A cflint file's entries are labelled cflint, and give way per file to a
@@ -149,13 +149,6 @@ const (
 	GenerateUnresolved = "unresolved"
 	GenerateCFLint     = "cflint"
 )
-
-// defaultGenerated is where each kind is written when no knownIssues entry is
-// marked to receive it: beside the .cfmleditor.json.
-var defaultGenerated = map[string]string{
-	GenerateUnresolved: ".cfmleditor-unresolved.txt",
-	GenerateCFLint:     ".cfmleditor-cflint.txt",
-}
 
 // IsGenerated reports whether k is regenerated as kind.
 func (k *KnownIssues) IsGenerated(kind string) bool {
@@ -178,8 +171,10 @@ func GenerateTargets(list []KnownIssues, kind, configDir string) []string {
 		}
 	}
 
-	if name := defaultGenerated[kind]; len(out) == 0 && name != "" && configDir != "" {
-		out = append(out, filepath.Join(configDir, name))
+	if len(out) == 0 && configDir != "" {
+		if p := defaultReport(configDir, kind); p != "" {
+			out = append(out, p)
+		}
 	}
 
 	return out
@@ -226,8 +221,8 @@ const (
 // without a generate kind takes that file's kind, so a bare path is enough to
 // set its scope or severity, and a kind no entry is marked with gets its
 // default file added, inheriting the block's scope and severity. A config with no knownIssues
-// at all therefore shows .cfmleditor-unresolved.txt and .cfmleditor-cflint.txt
-// when they exist, and an export writes them where they will be picked up. A
+// at all therefore shows .clif-unresolved.txt and .clif-cflint.txt (or their
+// legacy .cfmleditor- names; see defaultReport) when they exist, and an export writes them where they will be picked up. A
 // file that does not exist publishes nothing.
 func ResolveKnownIssues(block *KnownIssuesConfig, dir string) []KnownIssues {
 	var b KnownIssuesConfig
@@ -256,10 +251,8 @@ func ResolveKnownIssues(block *KnownIssuesConfig, dir string) []KnownIssues {
 		k.Severity = settle(k.Severity, severity)
 
 		if strings.TrimSpace(k.Generate) == "" {
-			for kind, name := range defaultGenerated {
-				if k.File == filepath.Join(dir, name) {
-					k.Generate = kind
-				}
+			if kind, ok := isDefaultReport(k.File, dir); ok {
+				k.Generate = kind
 			}
 		}
 
@@ -273,7 +266,7 @@ func ResolveKnownIssues(block *KnownIssuesConfig, dir string) []KnownIssues {
 	for _, kind := range []string{GenerateUnresolved, GenerateCFLint} {
 		if !slices.ContainsFunc(out, func(k KnownIssues) bool { return k.IsGenerated(kind) }) {
 			out = append(out, KnownIssues{
-				File:     filepath.Join(dir, defaultGenerated[kind]),
+				File:     defaultReport(dir, kind),
 				Generate: kind,
 				Scope:    settle(Inherit, scope),
 				Severity: settle(Inherit, severity),
@@ -379,7 +372,7 @@ type Linting struct {
 // that has not opted in behaves exactly as before: the editor never offers
 // "Find All References" and never sends the request. It is a flag rather than
 // a plain capability because answering one request walks and parses every CFML
-// file under the workspace roots — the same scan `cfmleditor.findRefs` and the
+// file under the workspace roots — the same scan `clif.findRefs` and the
 // `refs` CLI do — and how that feels on a large workspace is the thing being
 // tried out.
 type References struct {
@@ -830,7 +823,7 @@ func ResolvePaths(raw map[string]string, baseDir string) map[string]string {
 //
 // This exists so a lower-priority configuration source (editor-supplied
 // initializationOptions) can fill gaps in a higher-priority one (a project's
-// .cfmleditor.json) without overriding anything the latter actually states.
+// .clif.json) without overriding anything the latter actually states.
 // The merge has to happen on JSON rather than Resolved, because Resolve
 // substitutes defaults and so loses the distinction between "set to the
 // default" and "not set at all".

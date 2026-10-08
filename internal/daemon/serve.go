@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+	"github.com/cfmleditor/clif/internal/index"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/server"
 	"go.lsp.dev/jsonrpc2"
 )
 

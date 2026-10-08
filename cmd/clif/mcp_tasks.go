@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/cflint"
+	"github.com/cfmleditor/clif/internal/codemap/mcp"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/refs"
+	"github.com/cfmleditor/clif/internal/unresolved"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // The MCP server's task tools run what the CLI subcommands run, through the

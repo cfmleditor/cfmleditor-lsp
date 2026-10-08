@@ -5,15 +5,17 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+
+	cflog "github.com/cfmleditor/clif/internal/log"
 )
 
-// startProfiling writes a CPU profile to CFMLEDITOR_CPUPROFILE and a heap
-// profile to CFMLEDITOR_MEMPROFILE when they are set, so a subcommand can be
+// startProfiling writes a CPU profile to CLIF_CPUPROFILE and a heap
+// profile to CLIF_MEMPROFILE when they are set, so a subcommand can be
 // profiled against a real workspace without a separate build. The returned
 // function stops the CPU profile and writes the heap profile.
 func startProfiling() func() {
-	cpuPath := os.Getenv("CFMLEDITOR_CPUPROFILE")
-	memPath := os.Getenv("CFMLEDITOR_MEMPROFILE")
+	cpuPath := cflog.Getenv("CLIF_CPUPROFILE", "CFMLEDITOR_CPUPROFILE")
+	memPath := cflog.Getenv("CLIF_MEMPROFILE", "CFMLEDITOR_MEMPROFILE")
 
 	var cpu *os.File
 

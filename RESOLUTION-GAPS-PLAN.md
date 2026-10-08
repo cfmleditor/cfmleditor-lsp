@@ -333,10 +333,10 @@ explanation for every Masa receiver.
 ## Reproduction and evidence
 
 Build the CLI from the baseline. Copy masacms.json to the Masa checkout's
-.cfmleditor.json, preserving the original, and run:
+.clif.json, preserving the original, and run:
 
 ```sh
-cfmleditor-lsp unresolved --json /path/to/MasaCMS > masa-configured.json
+clif unresolved --json /path/to/MasaCMS > masa-configured.json
 ```
 
 Repeat after removing only the mappings property; restore the original config.
@@ -1050,7 +1050,7 @@ gap**, after the view it empties. The largest single cause left in
 
 **To pick it up:** read this section, rebuild the ContentBox scratch copy
 (`~/corpus/Ortus-Solutions_ContentBox` copied to a scratch directory with
-`.cfmleditor.json` `{"workspaceName":"cbox","frameworks":["coldbox","contentbox","testbox","cfmigrations"]}`;
+`.clif.json` `{"workspaceName":"cbox","frameworks":["coldbox","contentbox","testbox","cfmigrations"]}`;
 never write into `~/corpus`), run the repro below, write the failing test in
 `internal/resolve` (a base component calling `variables.svc.get()`, two or
 three subclasses injecting different services), then follow CLAUDE.md's
@@ -1089,7 +1089,7 @@ read from it is untyped. On the ContentBox scratch copy (presets, 2,637 entries)
   `prc.content = variables.ormService.get( … )`, so the prc handoff
   (`Resolver.viewPrc`) has nothing to hand on.
 
-Reproduce: `cfmleditor-lsp explain --root <scratch>/cbox
+Reproduce: `clif explain --root <scratch>/cbox
 <scratch>/cbox/modules/contentbox/modules/contentbox-admin/handlers/baseContentHandler.cfc 181 ormService`,
 which prints "no ref found in this file — checking extends chain (baseHandler)"
 and then "has no component ref".
@@ -2721,7 +2721,7 @@ The scratchpad holds the baselines and binaries this branch was
 measured against:
 
 ```
-S=/tmp/claude-0/-home-user-cfmleditor-lsp/23710295-57ad-5cdf-b4fb-6b66b79ffa8c/scratchpad
+S=/tmp/claude-0/-home-user-clif/23710295-57ad-5cdf-b4fb-6b66b79ffa8c/scratchpad
 make resolution-report CORPUS="$(bash $S/configured.sh)" \
                        RUNS=$S/rr-next BASELINE=$S/rr-lazy4 LISTS=
 ```

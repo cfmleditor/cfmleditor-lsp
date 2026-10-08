@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // A cborm service bound to an entity builds its finders on newCriteria():

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **cfmleditor-lsp is now clif** (pronounced "cliff"): the binary, the repository (`github.com/cfmleditor/clif`), the config file (`.clif.json`), the commands (`clif.*`), the default report files (`.clif-cflint.txt`, `.clif-unresolved.txt`) and the environment variables (`CLIF_LOG`, `CLIF_CPUPROFILE`, `CLIF_MEMPROFILE`). Every old name still works: releases also publish `cfmleditor-lsp-<platform>` archives, `.cfmleditor.json` is still read, `cfmleditor.*` commands still run, an existing old-named report keeps its name, and the old variables are read when the new ones are unset. See README.md, "Formerly cfmleditor-lsp".
+
+### Added
+
+- **The MCP server offers the CLI's checks**: `find_unresolved_calls`, `find_references` and, with `--allow-lint`, `lint`, read from source. `--db` is optional; without it the map tools are not offered.
+- **`clif cflint --out <file>`** writes one report anywhere above the linted directories.
+- **Every subcommand answers `--help`**, and `clif help <command>` does the same.
+
+### Fixed
+
+- **A CFLint report covers what was asked for.** `clif cflint <dir>` and the editor's export linted every workspace folder the config listed, and `--write` from one project rewrote the workspace report, deleting the other projects' entries; it now refuses.
+- **An unknown option is an error**, where it was taken for a path.
+
 ## [0.4.1]
 
 ### Added

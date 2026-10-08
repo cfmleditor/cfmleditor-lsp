@@ -3,8 +3,8 @@ package parser_test
 import (
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func TestGetCloudServiceBuiltin(t *testing.T) {

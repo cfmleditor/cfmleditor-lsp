@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/graph"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // TraceResult holds the output of a recursive reference trace.

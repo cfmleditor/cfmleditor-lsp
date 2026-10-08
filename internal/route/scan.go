@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 // Source says which syntax a route was written in.

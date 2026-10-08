@@ -9,10 +9,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/knownissues"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

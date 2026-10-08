@@ -36,7 +36,7 @@ func TestCodeActionsOfferTheWorkspaceReports(t *testing.T) {
 			commands = append(commands, a.Command.Command)
 		}
 
-		for _, want := range []string{"cfmleditor.scanWorkspace", "cfmleditor.exportUnresolved", "cfmleditor.exportCFLint"} {
+		for _, want := range []string{"clif.scanWorkspace", "clif.exportUnresolved", "clif.exportCFLint"} {
 			if !slices.Contains(commands, want) {
 				t.Errorf("line %d: %s not offered; got %v", pos.Line, want, commands)
 			}

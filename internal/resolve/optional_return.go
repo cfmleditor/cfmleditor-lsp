@@ -3,7 +3,7 @@ package resolve
 import (
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func (r *Resolver) expressionReturn(fd *parser.FunctionDef, expression, baseDir, component string) string {

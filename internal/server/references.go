@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/conv"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/refs"
+	"github.com/cfmleditor/clif/internal/vfs"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -22,7 +22,7 @@ import (
 // capability is advertised only when it is on, so a client that has not opted
 // in never offers the command and never sends the request. What is being tried
 // out behind the flag is the cost — answering one request walks and parses
-// every CFML file under the search roots, the same scan `cfmleditor.findRefs`
+// every CFML file under the search roots, the same scan `clif.findRefs`
 // and the `refs` CLI do, and how that feels on a large workspace is the open
 // question.
 //

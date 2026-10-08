@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/mcp"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap/store"
+	"github.com/cfmleditor/clif/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap/mcp"
+	"github.com/cfmleditor/clif/internal/codemap/store"
 )
 
 func server(t *testing.T, withExplain bool) *mcp.Server {

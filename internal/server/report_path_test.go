@@ -71,7 +71,7 @@ func TestExportDepsWillNotWriteOutsideTheWorkspace(t *testing.T) {
 	srv.WorkspaceFolders = []string{workspace}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.exportDeps",
+		Command:   "clif.exportDeps",
 		Arguments: lspAnyArgs(string(uri.File(page))),
 	})
 

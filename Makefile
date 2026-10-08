@@ -1,5 +1,10 @@
-BINARY := cfmleditor-lsp
+BINARY := clif
 OUT := target/release/$(BINARY)
+# The name this server had before it was clif. Every build, install and link
+# also answers to it, so an editor, script or PATH entry still naming
+# cfmleditor-lsp runs the current build rather than a stale one.
+LEGACY_BINARY := cfmleditor-lsp
+LEGACY_OUT := target/release/$(LEGACY_BINARY)
 VERSION := $(shell cat VERSION)
 WASI_SDK ?= /opt/wasi-sdk
 
@@ -12,6 +17,7 @@ GOBIN_DIR := $(shell go env GOPATH)/bin
 # somewhere else on PATH: make link LINK_DIR=$$HOME/.local/bin
 LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
+LEGACY_LINK := $(LINK_DIR)/$(LEGACY_BINARY)
 
 .PHONY: build build-wasm test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
@@ -132,12 +138,13 @@ update-d3:
 
 build: generate
 	@mkdir -p target/release
-	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/cfmleditor-lsp
+	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
+	@ln -sfn $(BINARY) $(LEGACY_OUT)
 
 build-wasm: generate
 	@mkdir -p target/release
 	CC=$(WASI_SDK)/bin/clang CGO_ENABLED=1 GOOS=wasip1 GOARCH=wasm \
-		go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o target/release/$(BINARY).wasm ./cmd/cfmleditor-lsp
+		go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o target/release/$(BINARY).wasm ./cmd/clif
 
 test:
 	go test ./...
@@ -206,7 +213,7 @@ corpus:
 
 # Scans named corpora with `unresolved --json --candidates` and writes the
 # lists in resolution-candidates/ (see its README). Each scan is name=dir[,dir],
-# under the .cfmleditor.json governing its first directory. BASELINE compares
+# under the .clif.json (or .cfmleditor.json) governing its first directory. BASELINE compares
 # with an earlier run's JSON finding by finding; LISTS= (empty) skips rewriting
 # the lists, the cheap check after a change. The corpus is not vendored, so
 # CORPUS is required and nothing in CI runs this.
@@ -265,73 +272,84 @@ lint-fix: $(GOLANGCI_BIN)
 install: build
 	@mkdir -p $(GOBIN_DIR)
 	cp $(OUT) $(GOBIN_DIR)/$(BINARY)
+	ln -sfn $(BINARY) $(GOBIN_DIR)/$(LEGACY_BINARY)
 
 # Point the zed-cfml extension at this working tree's build.
 #
-# The extension resolves its server in three steps (src/cfml.rs): a cached path,
-# then worktree.which("cfmleditor-lsp"), and only then a GitHub release download
-# into a cfmleditor-lsp-<version>/ directory. So the hook for local use is the
-# PATH lookup — a symlink named cfmleditor-lsp anywhere on PATH wins and no
-# download happens. Symlinking into the extension's own directory would not
-# survive: that path is named after the release version, and the extension
-# prunes the versions it is not using.
+# The extension resolves its server in three steps (src/lib.rs): a cached path,
+# then worktree.which() for clif and then cfmleditor-lsp, and only then a GitHub
+# release download. So the hook for local use is the PATH lookup — a symlink
+# with either name anywhere on PATH wins and no download happens. Both names are
+# linked, so an extension from before the rename finds this build too.
+# Symlinking into the extension's own directory would not survive: that path is
+# named after the release version, and the extension prunes the versions it is
+# not using.
 #
 # Restart Zed after linking or unlinking; the extension caches the path it
 # resolved for the life of the session.
 link: build
 	@mkdir -p $(LINK_DIR)
-	@if [ -e "$(LINK)" ] && [ ! -L "$(LINK)" ]; then \
-		echo "refusing to replace $(LINK): it is a real file, not a symlink." >&2; \
-		echo 'A `make install` copy lives there. Remove it, or: make link LINK_DIR=<dir>' >&2; \
-		exit 1; \
-	fi
+	@for l in "$(LINK)" "$(LEGACY_LINK)"; do \
+		if [ -e "$$l" ] && [ ! -L "$$l" ]; then \
+			echo "refusing to replace $$l: it is a real file, not a symlink." >&2; \
+			echo 'A `make install` copy lives there. Remove it, or: make link LINK_DIR=<dir>' >&2; \
+			exit 1; \
+		fi; \
+	done
 	@ln -sfn "$(CURDIR)/$(OUT)" "$(LINK)"
-	@echo "linked $(LINK) -> $(CURDIR)/$(OUT)"
-	@resolved=$$(command -v $(BINARY) 2>/dev/null); \
-	if [ -z "$$resolved" ]; then \
-		echo "warning: $(LINK_DIR) is not on this shell's PATH; Zed will not find the link either" >&2; \
-	elif [ "$$resolved" != "$(LINK)" ]; then \
-		echo "warning: PATH resolves $(BINARY) to $$resolved, which shadows the link just made" >&2; \
-	fi
+	@ln -sfn "$(CURDIR)/$(OUT)" "$(LEGACY_LINK)"
+	@echo "linked $(LINK) and $(LEGACY_LINK) -> $(CURDIR)/$(OUT)"
+	@for b in $(BINARY) $(LEGACY_BINARY); do \
+		resolved=$$(command -v $$b 2>/dev/null); \
+		if [ -z "$$resolved" ]; then \
+			echo "warning: $(LINK_DIR) is not on this shell's PATH; Zed will not find the link either" >&2; \
+		elif [ "$$resolved" != "$(LINK_DIR)/$$b" ]; then \
+			echo "warning: PATH resolves $$b to $$resolved, which shadows the link just made" >&2; \
+		fi; \
+	done
 
 unlink:
-	@if [ -L "$(LINK)" ]; then \
-		target=$$(readlink "$(LINK)"); \
-		rm -f "$(LINK)"; \
-		echo "removed $(LINK) (was -> $$target)"; \
-	elif [ -e "$(LINK)" ]; then \
-		echo "leaving $(LINK) alone: it is a real file, not a symlink." >&2; \
-		echo 'It is most likely a `make install` copy; remove it by hand if you meant to.' >&2; \
-		exit 1; \
-	else \
-		echo "nothing to remove at $(LINK)"; \
-	fi
+	@for l in "$(LINK)" "$(LEGACY_LINK)"; do \
+		if [ -L "$$l" ]; then \
+			target=$$(readlink "$$l"); \
+			rm -f "$$l"; \
+			echo "removed $$l (was -> $$target)"; \
+		elif [ -e "$$l" ]; then \
+			echo "leaving $$l alone: it is a real file, not a symlink." >&2; \
+			echo 'It is most likely a `make install` copy; remove it by hand if you meant to.' >&2; \
+		else \
+			echo "nothing to remove at $$l"; \
+		fi; \
+	done
 
 # What the extension's PATH lookup would actually find, which is not always the
 # link you just made: a real binary earlier in PATH shadows it, and a GUI-
 # launched editor may not share this shell's PATH at all.
 link-status:
-	@echo "link:     $(LINK)"
-	@if [ -L "$(LINK)" ]; then \
-		echo "          -> $$(readlink "$(LINK)")"; \
-	elif [ -e "$(LINK)" ]; then \
-		echo "          (a real file, not a symlink)"; \
-	else \
-		echo "          (absent)"; \
-	fi
+	@for l in "$(LINK)" "$(LEGACY_LINK)"; do \
+		echo "link:     $$l"; \
+		if [ -L "$$l" ]; then \
+			echo "          -> $$(readlink "$$l")"; \
+		elif [ -e "$$l" ]; then \
+			echo "          (a real file, not a symlink)"; \
+		else \
+			echo "          (absent)"; \
+		fi; \
+	done
 	@echo "build:    $(CURDIR)/$(OUT)"
 	@if [ -x "$(CURDIR)/$(OUT)" ]; then \
 		echo "          (built)"; \
 	else \
 		echo "          (not built — run: make build)"; \
 	fi
-	@resolved=$$(command -v $(BINARY) 2>/dev/null); \
-	if [ -n "$$resolved" ]; then \
-		echo "on PATH:  $$resolved"; \
-		[ "$$resolved" = "$(LINK)" ] || echo "          note: this shadows $(LINK)" >&2; \
-	else \
-		echo "on PATH:  not found — the extension would download a release instead"; \
-	fi
+	@for b in $(BINARY) $(LEGACY_BINARY); do \
+		resolved=$$(command -v $$b 2>/dev/null); \
+		if [ -n "$$resolved" ]; then \
+			echo "on PATH:  $$b -> $$resolved"; \
+		else \
+			echo "on PATH:  $$b not found"; \
+		fi; \
+	done
 
 cfparse-build:
 	@mkdir -p target/release

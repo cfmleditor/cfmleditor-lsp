@@ -1,6 +1,6 @@
 ---
 name: add-parser-test
-description: add, write, or create a parser test in cfmleditor-lsp — patterns and pitfalls for internal/parser/cfparser_test.go
+description: add, write, or create a parser test in clif — patterns and pitfalls for internal/parser/cfparser_test.go
 ---
 
 Add one or more tests to `internal/parser/cfparser_test.go` for the scenario described.

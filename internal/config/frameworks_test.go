@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // TestColdBoxImplicitBases: a file that extends nothing is given the base its

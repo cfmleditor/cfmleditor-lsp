@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

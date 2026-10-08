@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cache"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/deps"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
+	"github.com/cfmleditor/clif/internal/cache"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/deps"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/refs"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -178,7 +178,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	// The condition here used to be "has this session no component resolvers
 	// yet", standing in for "has it been configured". That made everything
 	// else depend on an unrelated config key: adding one resolver to a working
-	// .cfmleditor.json silently changed what a session did at startup, which is
+	// .clif.json silently changed what a session did at startup, which is
 	// how the completions defaults came to be dropped for some workspaces and
 	// not others.
 	//
@@ -217,7 +217,7 @@ func (s *Server) handleInitialize(_ context.Context, rawParams []byte) (any, err
 	return protocol.InitializeResult{
 		Capabilities: s.capabilities(),
 		ServerInfo: protocol.ServerInfo{
-			Name:    "cfmleditor-lsp",
+			Name:    "clif",
 			Version: optStr(s.Version),
 		},
 	}, nil
@@ -251,7 +251,7 @@ func (s *Server) handleInitialized(_ context.Context) (any, error) {
 
 	if !s.watchedFilesDynamic {
 		// Not an error, but worth saying once: this session's index is a
-		// startup snapshot, and only cfmleditor.reindex will refresh it.
+		// startup snapshot, and only clif.reindex will refresh it.
 		s.log.Info("client does not support file watching; index will not track on-disk changes")
 
 		return nil, nil
@@ -882,7 +882,7 @@ func (s *Server) handleDidChangeWorkspaceFolders(_ context.Context, rawParams []
 
 // writeRefsReport writes the reference report for funcName beside the file the
 // request came from, as markdown and as DOT, and tells the client where it
-// went. Only cfmleditor.findRefs' explicit export argument reaches here.
+// went. Only clif.findRefs' explicit export argument reaches here.
 func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile string, result *refs.TraceResult) {
 	outDir := filepath.Dir(sourceFile)
 	if sourceFile == "" {
@@ -919,57 +919,73 @@ func (s *Server) writeRefsReport(ctx context.Context, funcName, sourceFile strin
 	})
 }
 
+// legacyCommandPrefix is what every command was called while this server was
+// cfmleditor-lsp. A client still sends it: the cfmleditor extension runs
+// cfmleditor.generateCodeMap itself, and keybindings name the commands an older
+// release advertised. Only the clif. names are advertised, so a command picker
+// lists each once, and both are run.
+const legacyCommandPrefix = "cfmleditor."
+
+// canonicalCommand is the clif. name for a command sent under either name.
+func canonicalCommand(name string) string {
+	if rest, ok := strings.CutPrefix(name, legacyCommandPrefix); ok {
+		return "clif." + rest
+	}
+
+	return name
+}
+
 func (s *Server) handleExecuteCommand(ctx context.Context, rawParams []byte) (any, error) {
 	var params protocol.ExecuteCommandParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
 	}
 
-	switch params.Command {
-	case "cfmleditor.reindex":
+	switch canonicalCommand(params.Command) {
+	case "clif.reindex":
 		return s.cmdReindex(ctx, params.Arguments)
-	case "cfmleditor.format":
+	case "clif.format":
 		return s.cmdFormat(ctx, params.Arguments)
-	case "cfmleditor.showComponentPath":
+	case "clif.showComponentPath":
 		return s.cmdShowComponentPath(ctx, params.Arguments)
-	case "cfmleditor.restartDaemon":
+	case "clif.restartDaemon":
 		return s.cmdRestartDaemon(ctx, params.Arguments)
-	case "cfmleditor.showResolvers":
+	case "clif.showResolvers":
 		return s.cmdShowResolvers(ctx, params.Arguments)
-	case "cfmleditor.showFileIndex":
+	case "clif.showFileIndex":
 		return s.cmdShowFileIndex(ctx, params.Arguments)
-	case "cfmleditor.showConnections":
+	case "clif.showConnections":
 		return s.cmdShowConnections(ctx, params.Arguments)
-	case "cfmleditor.openActiveApplicationFile":
+	case "clif.openActiveApplicationFile":
 		return s.cmdOpenActiveApplicationFile(ctx, params.Arguments)
-	case "cfmleditor.goToMatchingTag":
+	case "clif.goToMatchingTag":
 		return s.cmdGoToMatchingTag(ctx, params.Arguments)
-	case "cfmleditor.copyPackage":
+	case "clif.copyPackage":
 		return s.cmdCopyPackage(ctx, params.Arguments)
-	case "cfmleditor.findRefs":
+	case "clif.findRefs":
 		return s.cmdFindRefs(ctx, params.Arguments)
-	case "cfmleditor.exportDeps":
+	case "clif.exportDeps":
 		return s.cmdExportDeps(ctx, params.Arguments)
-	case "cfmleditor.resolveRoute":
+	case "clif.resolveRoute":
 		return s.handleResolveRoute(params.Arguments)
-	case "cfmleditor.generateCodeMap":
+	case "clif.generateCodeMap":
 		return s.handleGenerateCodeMap(params.Arguments)
-	case "cfmleditor.exportUnresolved":
+	case "clif.exportUnresolved":
 		return s.handleExport(config.GenerateUnresolved)
-	case "cfmleditor.exportCFLint":
+	case "clif.exportCFLint":
 		return s.handleExport(config.GenerateCFLint)
-	case "cfmleditor.showCodeMapStats":
+	case "clif.showCodeMapStats":
 		return s.handleCodeMapStats(ctx, params.Arguments)
-	case "cfmleditor.explainCall":
+	case "clif.explainCall":
 		return s.handleExplainCall(ctx, params.Arguments)
-	case "cfmleditor.scanWorkspace":
+	case "clif.scanWorkspace":
 		return s.cmdScanWorkspace(ctx, params.Arguments)
 	default:
 		return nil, fmt.Errorf("unknown command: %s", params.Command)
 	}
 }
 
-// cmdReindex runs cfmleditor.reindex.
+// cmdReindex runs clif.reindex.
 func (s *Server) cmdReindex(_ context.Context, _ []protocol.LSPAny) (any, error) {
 	s.invalidateResolveCache()
 	cfpath.InvalidateAppMappingsCache()
@@ -979,15 +995,15 @@ func (s *Server) cmdReindex(_ context.Context, _ []protocol.LSPAny) (any, error)
 	return nil, nil
 }
 
-// cmdFormat runs cfmleditor.format.
+// cmdFormat runs clif.format.
 func (s *Server) cmdFormat(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.format requires a document URI argument")
+		return nil, errors.New("clif.format requires a document URI argument")
 	}
 
 	docURI, _ := argString(args, 0)
 	if docURI == "" {
-		return nil, errors.New("cfmleditor.format: invalid URI argument")
+		return nil, errors.New("clif.format: invalid URI argument")
 	}
 
 	// The same gate textDocument/formatting has. Without it this command
@@ -1037,15 +1053,15 @@ func (s *Server) cmdFormat(ctx context.Context, args []protocol.LSPAny) (any, er
 	return nil, nil
 }
 
-// cmdShowComponentPath runs cfmleditor.showComponentPath.
+// cmdShowComponentPath runs clif.showComponentPath.
 func (s *Server) cmdShowComponentPath(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.showComponentPath requires a dot-path argument")
+		return nil, errors.New("clif.showComponentPath requires a dot-path argument")
 	}
 
 	dotPath, _ := argString(args, 0)
 	if dotPath == "" {
-		return nil, errors.New("cfmleditor.showComponentPath: invalid argument")
+		return nil, errors.New("clif.showComponentPath: invalid argument")
 	}
 
 	var baseDir string
@@ -1076,7 +1092,7 @@ func (s *Server) cmdShowComponentPath(ctx context.Context, args []protocol.LSPAn
 	return resolved, nil
 }
 
-// cmdRestartDaemon runs cfmleditor.restartDaemon.
+// cmdRestartDaemon runs clif.restartDaemon.
 func (s *Server) cmdRestartDaemon(ctx context.Context, _ []protocol.LSPAny) (any, error) {
 	s.notify(ctx, protocol.MethodWindowShowMessage, &protocol.ShowMessageParams{
 		Type:    protocol.MessageTypeInfo,
@@ -1095,7 +1111,7 @@ func (s *Server) cmdRestartDaemon(ctx context.Context, _ []protocol.LSPAny) (any
 	return nil, nil
 }
 
-// cmdShowResolvers runs cfmleditor.showResolvers.
+// cmdShowResolvers runs clif.showResolvers.
 func (s *Server) cmdShowResolvers(ctx context.Context, _ []protocol.LSPAny) (any, error) {
 	var lines []string
 
@@ -1130,15 +1146,15 @@ func (s *Server) cmdShowResolvers(ctx context.Context, _ []protocol.LSPAny) (any
 	return msg, nil
 }
 
-// cmdShowFileIndex runs cfmleditor.showFileIndex.
+// cmdShowFileIndex runs clif.showFileIndex.
 func (s *Server) cmdShowFileIndex(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.showFileIndex requires a document URI argument")
+		return nil, errors.New("clif.showFileIndex requires a document URI argument")
 	}
 
 	docURI, _ := argString(args, 0)
 	if docURI == "" {
-		return nil, errors.New("cfmleditor.showFileIndex: invalid argument")
+		return nil, errors.New("clif.showFileIndex: invalid argument")
 	}
 
 	fileURI := uri.URI(docURI)
@@ -1167,7 +1183,7 @@ func (s *Server) cmdShowFileIndex(ctx context.Context, args []protocol.LSPAny) (
 	return msg, nil
 }
 
-// cmdShowConnections runs cfmleditor.showConnections.
+// cmdShowConnections runs clif.showConnections.
 func (s *Server) cmdShowConnections(ctx context.Context, _ []protocol.LSPAny) (any, error) {
 	s.mu.RLock()
 	openDocs := len(s.documents)
@@ -1181,10 +1197,10 @@ func (s *Server) cmdShowConnections(ctx context.Context, _ []protocol.LSPAny) (a
 	return msg, nil
 }
 
-// cmdOpenActiveApplicationFile runs cfmleditor.openActiveApplicationFile.
+// cmdOpenActiveApplicationFile runs clif.openActiveApplicationFile.
 func (s *Server) cmdOpenActiveApplicationFile(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.openActiveApplicationFile requires a document URI argument")
+		return nil, errors.New("clif.openActiveApplicationFile requires a document URI argument")
 	}
 
 	docURI, _ := argString(args, 0)
@@ -1219,10 +1235,10 @@ func (s *Server) cmdOpenActiveApplicationFile(ctx context.Context, args []protoc
 	return nil, nil
 }
 
-// cmdGoToMatchingTag runs cfmleditor.goToMatchingTag.
+// cmdGoToMatchingTag runs clif.goToMatchingTag.
 func (s *Server) cmdGoToMatchingTag(_ context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) < 2 {
-		return nil, errors.New("cfmleditor.goToMatchingTag requires [documentURI, line, char]")
+		return nil, errors.New("clif.goToMatchingTag requires [documentURI, line, char]")
 	}
 
 	docURI, _ := argString(args, 0)
@@ -1265,10 +1281,10 @@ func (s *Server) cmdGoToMatchingTag(_ context.Context, args []protocol.LSPAny) (
 	return pos, nil
 }
 
-// cmdCopyPackage runs cfmleditor.copyPackage.
+// cmdCopyPackage runs clif.copyPackage.
 func (s *Server) cmdCopyPackage(_ context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.copyPackage requires a document URI argument")
+		return nil, errors.New("clif.copyPackage requires a document URI argument")
 	}
 
 	docURI, _ := argString(args, 0)
@@ -1282,10 +1298,10 @@ func (s *Server) cmdCopyPackage(_ context.Context, args []protocol.LSPAny) (any,
 	return dotPath, nil
 }
 
-// cmdFindRefs runs cfmleditor.findRefs.
+// cmdFindRefs runs clif.findRefs.
 func (s *Server) cmdFindRefs(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.findRefs requires a function name argument")
+		return nil, errors.New("clif.findRefs requires a function name argument")
 	}
 
 	funcName, _ := argString(args, 0)
@@ -1343,10 +1359,10 @@ func (s *Server) cmdFindRefs(ctx context.Context, args []protocol.LSPAny) (any, 
 	return result.Summary, nil
 }
 
-// cmdExportDeps runs cfmleditor.exportDeps.
+// cmdExportDeps runs clif.exportDeps.
 func (s *Server) cmdExportDeps(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("cfmleditor.exportDeps requires a document URI")
+		return nil, errors.New("clif.exportDeps requires a document URI")
 	}
 
 	docURI, _ := argString(args, 0)
@@ -1461,7 +1477,7 @@ func (s *Server) cmdExportDeps(ctx context.Context, args []protocol.LSPAny) (any
 	return mermaid, nil
 }
 
-// cmdScanWorkspace runs cfmleditor.scanWorkspace.
+// cmdScanWorkspace runs clif.scanWorkspace.
 func (s *Server) cmdScanWorkspace(_ context.Context, _ []protocol.LSPAny) (any, error) {
 	// Same reasoning as runDiagnostics: this goroutine outlives the
 	// handler, so the request ctx (pooled/reset on return) is unsafe here.

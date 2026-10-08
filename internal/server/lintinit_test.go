@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 )
 
 // initializeWithConfig drives handleInitialize the way an editor does in

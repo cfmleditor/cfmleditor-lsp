@@ -7,7 +7,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 // lineEdits returns TextEdits that turn before into after, each replacing a run

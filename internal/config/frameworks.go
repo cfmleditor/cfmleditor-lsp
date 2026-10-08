@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // A framework preset is what naming a framework in `frameworks` adds to a

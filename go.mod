@@ -1,4 +1,4 @@
-module github.com/cfmleditor/cfmleditor-lsp
+module github.com/cfmleditor/clif
 
 go 1.27.1
 

@@ -24,7 +24,22 @@ import (
 // thing the server had to say goes nowhere. That is exactly the moment the
 // reason matters. A file is written by the server, for the server, and survives
 // whatever happened to the connection.
-const FileEnv = "CFMLEDITOR_LSP_LOG"
+const FileEnv = "CLIF_LOG"
+
+// LegacyFileEnv is FileEnv's name while this server was cfmleditor-lsp, read
+// when FileEnv is unset so an editor configured with it keeps its log.
+const LegacyFileEnv = "CFMLEDITOR_LSP_LOG"
+
+// Getenv returns the variable name, or legacy when name is unset: each
+// CLIF_ variable was CFMLEDITOR_ something before the rename, and a setup that
+// names the old one keeps working.
+func Getenv(name, legacy string) string {
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+
+	return os.Getenv(legacy)
+}
 
 var (
 	fileMu  sync.Mutex
@@ -36,7 +51,7 @@ var (
 // Failure to open it is reported on stderr and otherwise ignored: a diagnostic
 // aid must never be the reason the thing it is diagnosing will not start.
 func openLogFile() *os.File {
-	path := os.Getenv(FileEnv)
+	path := Getenv(FileEnv, LegacyFileEnv)
 	if path == "" {
 		return nil
 	}
@@ -49,13 +64,13 @@ func openLogFile() *os.File {
 	}
 
 	if dir := filepath.Dir(path); dir != "" {
-		_ = os.MkdirAll(dir, 0o700) //nolint:gosec // the path is the user's own CFMLEDITOR_LSP_LOG
+		_ = os.MkdirAll(dir, 0o700)
 	}
 
 	// Private: a debug log can hold source text.
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is the user's own CFMLEDITOR_LSP_LOG
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is the user's own CLIF_LOG
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot open %s=%s: %v\n", FileEnv, path, err)
+		fmt.Fprintf(os.Stderr, "clif: cannot open %s=%s: %v\n", FileEnv, path, err)
 
 		return nil
 	}
@@ -108,14 +123,14 @@ var (
 
 // DefaultCrashPath is where crash reports go when FileEnv is unset: the
 // server's directory in the user cache directory, beside the cflint/ it
-// already keeps there. On macOS that is ~/Library/Caches/cfmleditor-lsp.
+// already keeps there. On macOS that is ~/Library/Caches/clif.
 func DefaultCrashPath() (string, error) {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
 
-	return filepath.Join(dir, "cfmleditor-lsp", crashFileName), nil
+	return filepath.Join(dir, "clif", crashFileName), nil
 }
 
 // EnableCrashReports sends every crash record to a file, whether or not anyone
@@ -163,12 +178,12 @@ func EnableCrashReports(version string) string {
 	}
 
 	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot send crash output to %s: %v\n", f.Name(), err)
+		fmt.Fprintf(os.Stderr, "clif: cannot send crash output to %s: %v\n", f.Name(), err)
 	}
 
 	crashFile = f
 
-	_, _ = fmt.Fprintf(f, "--- cfmleditor-lsp %s started, pid %d, %s ---\n",
+	_, _ = fmt.Fprintf(f, "--- clif %s started, pid %d, %s ---\n",
 		version, os.Getpid(), time.Now().Format(time.RFC3339))
 
 	return f.Name()
@@ -180,13 +195,13 @@ func EnableCrashReports(version string) string {
 func openDefaultCrashFile() *os.File {
 	path, err := DefaultCrashPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: no directory for crash reports: %v\n", err)
+		fmt.Fprintf(os.Stderr, "clif: no directory for crash reports: %v\n", err)
 
 		return nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot create %s: %v\n", filepath.Dir(path), err)
+		fmt.Fprintf(os.Stderr, "clif: cannot create %s: %v\n", filepath.Dir(path), err)
 
 		return nil
 	}
@@ -194,7 +209,7 @@ func openDefaultCrashFile() *os.File {
 	// Private: a stack can name the files being edited.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // the path is built from os.UserCacheDir, not from input
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cfmleditor-lsp: cannot open %s: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "clif: cannot open %s: %v\n", path, err)
 
 		return nil
 	}
@@ -251,7 +266,7 @@ func Recovered(l Logger, msg string, r any, kv ...any) {
 	// Also when the crash file is the log file and l has just written this
 	// record there: l's copy carries the stack as one escaped field, and this
 	// one is the traceback a person can read.
-	writeCrashRecord(fmt.Sprintf("\n=== cfmleditor-lsp recovered panic: %s at %s ===\npanic: %v\n",
+	writeCrashRecord(fmt.Sprintf("\n=== clif recovered panic: %s at %s ===\npanic: %v\n",
 		msg, time.Now().Format(time.RFC3339), r), stack)
 }
 
@@ -263,7 +278,7 @@ func Recovered(l Logger, msg string, r any, kv ...any) {
 // case where someone is watching.
 func WritePanic(where string, v any) {
 	stack := debug.Stack()
-	header := fmt.Sprintf("\n=== cfmleditor-lsp PANIC in %s at %s ===\npanic: %v\n",
+	header := fmt.Sprintf("\n=== clif PANIC in %s at %s ===\npanic: %v\n",
 		where, time.Now().Format(time.RFC3339), v)
 
 	fmt.Fprint(os.Stderr, header)

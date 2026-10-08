@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/conv"
+	"github.com/cfmleditor/clif/internal/language"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -18,7 +18,7 @@ import (
 
 // scanFiles is every CFML file scanWorkspace will read, from searchRoots
 // rather than the configured folders alone — without that a session with no
-// .cfmleditor.json scanned nothing and reported "0 parse errors in 0 files",
+// .clif.json scanned nothing and reported "0 parse errors in 0 files",
 // which reads like a clean workspace.
 //
 // Split out from scanWorkspace because the scan itself only reports through

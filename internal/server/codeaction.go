@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 	"go.lsp.dev/protocol"
 )
 
@@ -38,7 +38,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 			Command: protocol.Command{
 				Title:     title,
-				Command:   "cfmleditor.explainCall",
+				Command:   "clif.explainCall",
 				Arguments: lspAnyArgs(docURI, line),
 			},
 		})
@@ -62,7 +62,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 			Command: protocol.Command{
 				Title:     "Find all references to " + word,
-				Command:   "cfmleditor.findRefs",
+				Command:   "clif.findRefs",
 				Arguments: lspAnyArgs(word, docURI),
 			},
 		}, protocol.CodeAction{
@@ -70,7 +70,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 			Command: protocol.Command{
 				Title:     "Export dependency graph for " + qualifier + "." + word,
-				Command:   "cfmleditor.exportDeps",
+				Command:   "clif.exportDeps",
 				Arguments: lspAnyArgs(docURI, word),
 			},
 		})
@@ -81,7 +81,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 			Command: protocol.Command{
 				Title:     "Find all calls to " + word,
-				Command:   "cfmleditor.findRefs",
+				Command:   "clif.findRefs",
 				Arguments: lspAnyArgs(word, docURI),
 			},
 		}, protocol.CodeAction{
@@ -89,7 +89,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 			Command: protocol.Command{
 				Title:     "Export dependency graph for " + word,
-				Command:   "cfmleditor.exportDeps",
+				Command:   "clif.exportDeps",
 				Arguments: lspAnyArgs(docURI, word),
 			},
 		})
@@ -104,7 +104,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 
 		Command: protocol.Command{
 			Title:     "Export references to " + word + " to a file",
-			Command:   "cfmleditor.findRefs",
+			Command:   "clif.findRefs",
 			Arguments: lspAnyArgs(word, docURI, true),
 		},
 	})
@@ -113,7 +113,7 @@ func (s *Server) handleCodeAction(_ context.Context, rawParams []byte) (any, err
 }
 
 // fileActions offers what is about the whole file. The dependency graph here
-// is the file-level form of cfmleditor.exportDeps, which takes the document
+// is the file-level form of clif.exportDeps, which takes the document
 // URI alone; the word actions above pass a function name as well.
 func fileActions(docURI string) []protocol.CodeAction {
 	title := "Export dependency graph for " + filepath.Base(cfpath.FromURI(docURI))
@@ -123,7 +123,7 @@ func fileActions(docURI string) []protocol.CodeAction {
 
 		Command: protocol.Command{
 			Title:     title,
-			Command:   "cfmleditor.exportDeps",
+			Command:   "clif.exportDeps",
 			Arguments: lspAnyArgs(docURI),
 		},
 	}}
@@ -132,12 +132,12 @@ func fileActions(docURI string) []protocol.CodeAction {
 // workspaceActions offers the commands that walk the whole workspace: the
 // parse-error scan, which publishes its findings as diagnostics, and the
 // generated known-issues reports, which write their files beside
-// .cfmleditor.json (see handleExport).
+// .clif.json (see handleExport).
 func workspaceActions() []protocol.CodeAction {
 	cmds := []struct{ title, command string }{
-		{"Scan workspace for parse errors", "cfmleditor.scanWorkspace"},
-		{"Export unresolved calls report for the workspace", "cfmleditor.exportUnresolved"},
-		{"Export CFLint report for the workspace", "cfmleditor.exportCFLint"},
+		{"Scan workspace for parse errors", "clif.scanWorkspace"},
+		{"Export unresolved calls report for the workspace", "clif.exportUnresolved"},
+		{"Export CFLint report for the workspace", "clif.exportCFLint"},
 	}
 
 	out := make([]protocol.CodeAction, 0, len(cmds))

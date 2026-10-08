@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/route"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // Phase names the stage a build is in, for progress reporting.
@@ -40,7 +40,7 @@ const (
 // FileConfig is the resolution environment one file is read in.
 //
 // It is per file, not per build, because a workspace is routinely several
-// applications side by side and each keeps its own .cfmleditor.json. Applying one
+// applications side by side and each keeps its own .clif.json. Applying one
 // application's componentResolvers to another's source does not fail loudly — it
 // simply resolves nothing, and those files come out of the map with no edges at
 // all. In one real workspace that was 11,387 of 11,682 functions in the sibling
@@ -131,7 +131,7 @@ type Options struct {
 	UtilityGlobs []string
 
 	// ConfigExtra is mixed into the cache fingerprint. A caller that resolves files
-	// under several .cfmleditor.json files puts their contents here: the resolver
+	// under several .clif.json files puts their contents here: the resolver
 	// chain decides what a call site resolves to, so a cached edge set computed
 	// under one set of resolvers must not be served after they change. Leaving it
 	// empty is right only when the configuration cannot vary.
@@ -139,7 +139,7 @@ type Options struct {
 
 	// ConfigFor returns the resolution environment for one file. When nil, every
 	// file is read under the single Resolver/Resolvers/… set above, which is right
-	// only when the whole scan is governed by one .cfmleditor.json.
+	// only when the whole scan is governed by one .clif.json.
 	//
 	// It is called once per file from several goroutines and must be safe for that.
 	ConfigFor func(file string) FileConfig

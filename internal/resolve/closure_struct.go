@@ -3,8 +3,8 @@ package resolve
 import (
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/docs"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // A function may return a struct whose members are closures, and a chain is

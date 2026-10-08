@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap"
 )
 
 // Cache is the [codemap.Cache] backed by this store's file_cache table.

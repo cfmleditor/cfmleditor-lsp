@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/parser"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // DefaultFS is the filesystem used by this package. Override for testing or WASM.

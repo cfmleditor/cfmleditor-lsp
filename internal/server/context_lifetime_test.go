@@ -110,7 +110,7 @@ func (l *recordingLogger) hasError(msg string) bool {
 
 // TestScanWorkspaceDoesNotUseRequestContextAfterHandlerReturns guards against
 // regressing the "cannot create context from nil parent" panic seen in
-// production: cfmleditor.scanWorkspace runs in a detached goroutine
+// production: clif.scanWorkspace runs in a detached goroutine
 // (s.safeGo) that outlives handleExecuteCommand, so it must not use the
 // request's ctx once the handler returns.
 func TestScanWorkspaceDoesNotUseRequestContextAfterHandlerReturns(t *testing.T) {
@@ -136,7 +136,7 @@ func TestScanWorkspaceDoesNotUseRequestContextAfterHandlerReturns(t *testing.T) 
 	ctx := &poisonedContext{poisoned: &poisoned}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command: "cfmleditor.scanWorkspace",
+		Command: "clif.scanWorkspace",
 	})
 
 	if _, err := srv.handleExecuteCommand(ctx, req); err != nil {

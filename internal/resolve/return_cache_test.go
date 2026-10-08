@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // A cached return must not outlive the index it was read from: an edit to

@@ -8,19 +8,19 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/unresolved"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-const unresolvedUsage = `usage: cfmleditor-lsp unresolved [options] <dir> [...]
+const unresolvedUsage = `usage: clif unresolved [options] <dir> [...]
 
 Report every component or method call that does not resolve: a receiver with
 no known component, a method the component does not declare, a component that
-does not exist. Reads the .cfmleditor.json above the first directory.
+does not exist. Reads the .clif.json above the first directory.
 
   --json               print the results as JSON
   --known-issues       print them as a known-issues report, paths relative to
@@ -40,7 +40,7 @@ does not exist. Reads the .cfmleditor.json above the first directory.
   --no-infer-args      do not type an untyped argument from what its callers
                        pass it
 
-To see why one call resolved as it did: cfmleditor-lsp explain <file> <line>
+To see why one call resolved as it did: clif explain <file> <line>
 `
 
 // unresolvedFlags is what cmdUnresolved's flags ask for.
@@ -148,7 +148,7 @@ func cmdUnresolved(args []string) {
 func scanUnresolved(args []string, fl *unresolvedFlags) (unresolved.Report, *daemon.Config, string) {
 	fsys := vfs.OS{}
 
-	// Find .cfmleditor.json config based on the first file/dir argument
+	// Find .clif.json config based on the first file/dir argument
 	searchDir, _ := filepath.Abs(args[0])
 	if info, err := os.Stat(searchDir); err == nil && !info.IsDir() {
 		searchDir = filepath.Dir(searchDir)
@@ -209,7 +209,7 @@ func unresolvedOptions(cfg *daemon.Config, args []string, fl *unresolvedFlags) *
 	}
 
 	if fl.write {
-		fmt.Fprintf(os.Stderr, "--write needs a .cfmleditor.json to say where the report goes\n")
+		fmt.Fprintf(os.Stderr, "--write needs a .clif.json to say where the report goes\n")
 		os.Exit(1)
 	}
 
@@ -261,7 +261,7 @@ func writeUnresolved(results []unresolved.Call, cfg *daemon.Config, args []strin
 			}
 		}
 
-		regenerate := "cfmleditor-lsp unresolved --known-issues " + strings.Join(args, " ")
+		regenerate := "clif unresolved --known-issues " + strings.Join(args, " ")
 		if skipped := unresolved.WriteKnownIssues(os.Stdout, results, baseDir, fl.includeWorkspace, regenerate, version); skipped > 0 {
 			fmt.Fprintf(os.Stderr, "%d entries outside %s left out; --include-workspace writes them as ../ paths\n", skipped, baseDir)
 		}
@@ -361,7 +361,7 @@ func presetHint(cfg *daemon.Config, searchDir string) string {
 
 	all := slices.Concat(have, suggest)
 
-	where := "a .cfmleditor.json"
+	where := "a .clif.json"
 	if cfg != nil {
 		where = cfg.Path
 	}

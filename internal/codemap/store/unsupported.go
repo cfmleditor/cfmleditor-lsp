@@ -5,7 +5,7 @@ package store
 import (
 	"fmt"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap"
 )
 
 // The wasip1 build has no local database. Rather than removing the graph

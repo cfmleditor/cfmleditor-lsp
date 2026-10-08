@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/parser"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 func testdataDir() string {

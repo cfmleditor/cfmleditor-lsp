@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/resolve"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-// handleExplainCall is cfmleditor.explainCall, the server's form of
-// `cfmleditor-lsp explain`: for every call site on a line, the steps
+// handleExplainCall is clif.explainCall, the server's form of
+// `clif explain`: for every call site on a line, the steps
 // CanResolveCall walked through and its verdict. Arguments are the document
 // URI, the 0-based line, and an optional substring of the call's name or
 // receiver.
@@ -28,12 +28,12 @@ import (
 func (s *Server) handleExplainCall(ctx context.Context, args []protocol.LSPAny) (any, error) {
 	docURI, _ := argString(args, 0)
 	if docURI == "" {
-		return nil, errors.New("cfmleditor.explainCall requires a document URI argument")
+		return nil, errors.New("clif.explainCall requires a document URI argument")
 	}
 
 	lineArg, ok := argFloat(args, 1)
 	if !ok || lineArg < 0 {
-		return nil, errors.New("cfmleditor.explainCall requires a 0-based line number argument")
+		return nil, errors.New("clif.explainCall requires a 0-based line number argument")
 	}
 
 	line := int(lineArg)
@@ -47,7 +47,7 @@ func (s *Server) handleExplainCall(ctx context.Context, args []protocol.LSPAny) 
 		// The command picker can name a file that is not open.
 		data, err := s.FS.ReadFile(file)
 		if err != nil {
-			return nil, fmt.Errorf("cfmleditor.explainCall: %w", err)
+			return nil, fmt.Errorf("clif.explainCall: %w", err)
 		}
 
 		content = string(data)

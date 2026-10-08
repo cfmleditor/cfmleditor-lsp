@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
+	"github.com/cfmleditor/clif/internal/config"
 )
 
 // TestExportCFLintLintsTheFoldersOpen lays out a workspace like ~/tassdev: a
@@ -53,7 +53,7 @@ func TestExportCFLintLintsTheFoldersOpen(t *testing.T) {
 			t.Errorf("linted %v, want %v", roots, want)
 		}
 
-		if want := []string{filepath.Join(tassweb, ".cfmleditor-cflint.txt")}; !slices.Equal(targets, want) {
+		if want := []string{filepath.Join(tassweb, ".clif-cflint.txt")}; !slices.Equal(targets, want) {
 			t.Errorf("writes %v, want %v", targets, want)
 		}
 
@@ -73,7 +73,7 @@ func TestExportCFLintLintsTheFoldersOpen(t *testing.T) {
 			t.Errorf("linted %v, want %v", roots, want)
 		}
 
-		if want := []string{filepath.Join(ws, ".cfmleditor-cflint.txt")}; !slices.Equal(targets, want) {
+		if want := []string{filepath.Join(ws, ".clif-cflint.txt")}; !slices.Equal(targets, want) {
 			t.Errorf("writes %v, want %v", targets, want)
 		}
 	})
@@ -82,7 +82,7 @@ func TestExportCFLintLintsTheFoldersOpen(t *testing.T) {
 		// prs is governed by the workspace config, whose report covers tassweb
 		// too: rewriting it from a prs lint would delete tassweb's entries.
 		_, _, err := session(prs, tassweb, prs).exportScope(config.GenerateCFLint)
-		if err == nil || !strings.Contains(err.Error(), filepath.Join(ws, ".cfmleditor-cflint.txt")) {
+		if err == nil || !strings.Contains(err.Error(), filepath.Join(ws, ".clif-cflint.txt")) {
 			t.Errorf("err = %v, want a refusal naming the workspace report", err)
 		}
 	})

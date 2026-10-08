@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 func TestResolverMatchWithArgs(t *testing.T) {

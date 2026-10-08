@@ -10,18 +10,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/frameworkapi"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/codemap"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/frameworkapi"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/parser"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/route"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-// configSet resolves each file against the .cfmleditor.json that actually governs
+// configSet resolves each file against the .clif.json that actually governs
 // it, rather than against one config chosen at the start of the scan.
 //
 // A TASS-shaped workspace is a dozen applications side by side, each with its own
@@ -183,7 +183,7 @@ func (cs *configSet) Configs() []string {
 	return paths
 }
 
-// preload builds the environment for every directory that holds a .cfmleditor.json
+// preload builds the environment for every directory that holds a .clif.json
 // under the scan roots, before the scan starts.
 //
 // Two reasons it is not left to happen lazily. The fingerprint has to cover every
@@ -197,7 +197,7 @@ func (cs *configSet) preload(roots []string) {
 		// one permission error would silently fall back to a single config for
 		// the whole scan, which is the bug this exists to prevent.
 		_ = cs.fsys.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err == nil && !info.IsDir() && filepath.Base(path) == ".cfmleditor.json" {
+			if err == nil && !info.IsDir() && config.IsFileName(filepath.Base(path)) {
 				cs.For(filepath.Join(filepath.Dir(path), "x.cfc"))
 			}
 

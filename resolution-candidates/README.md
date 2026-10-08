@@ -13,7 +13,7 @@ Regenerate with `make resolution-report`, which builds the binary, runs each nam
 make resolution-report CORPUS="masa-c=/src/MasaCMS cw-p=/src/cfwheels,/src/cfwheels/vendor/wheels ..."
 ```
 
-Each scan resolves under the `.cfmleditor.json` governing its first directory. The lists are
+Each scan resolves under the `.clif.json` governing its first directory. The lists are
 for milestones, not every change. After a change, compare with an earlier run instead, without
 rewriting them:
 

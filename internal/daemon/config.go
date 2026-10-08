@@ -7,23 +7,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
+	"github.com/cfmleditor/clif/internal/config"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/server"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
+	"github.com/cfmleditor/clif/internal/route"
 )
 
-// configJSON is the on-disk shape of .cfmleditor.json.
+// configJSON is the on-disk shape of .clif.json.
 type configJSON = config.JSON
 
-// Config represents a .cfmleditor.json file.
+// Config represents a .clif.json file.
 type Config struct {
 	Path string // absolute path to the config file itself
 	Name string // project name used to derive the daemon socket
 }
 
-// FindConfig looks for .cfmleditor.json starting from dir and walking up to the
+// FindConfig looks for .clif.json starting from dir and walking up to the
 // filesystem root. It returns nil when there is none: no config file means no
 // project to run a daemon for, and the caller runs a standalone session.
 //
@@ -47,10 +47,13 @@ func FindConfig(dir string) (*Config, error) {
 	d := abs
 
 	for {
-		p := filepath.Join(d, ".cfmleditor.json")
+		// .clif.json first, then the legacy .cfmleditor.json (config.FileNames).
+		for _, p := range config.CandidatesIn(d) {
+			data, err := os.ReadFile(p) //nolint:gosec // a config file found walking up from the working directory
+			if err != nil {
+				continue
+			}
 
-		data, err := os.ReadFile(p) //nolint:gosec // a .cfmleditor.json found walking up from the working directory
-		if err == nil {
 			var raw configJSON
 			if json.Unmarshal(data, &raw) == nil {
 				if raw.WorkspaceName == "" {
@@ -104,7 +107,7 @@ func (c *Config) WorkspaceFolders() []string {
 }
 
 // Mappings returns component path mappings with values resolved to absolute
-// paths, plus one the config implies: the folder holding .cfmleditor.json maps
+// paths, plus one the config implies: the folder holding .clif.json maps
 // under its own name, so `myapp.models.User` finds
 // <config dir>/models/User.cfc from a config in a folder called myapp,
 // whether or not workspacePaths lists that folder. An explicit mapping of the

@@ -260,7 +260,7 @@ one exclusion for `cmd/`:
   `cflint` and `unresolved` reports, the same files, were still `0644`. They
   are `0600` now and `G306` is checked in `cmd/` again.
 - **The rest are fixed or carry their reason.** One was a real defect:
-  `cfmleditor.findRefs` and `cfmleditor.exportDeps` built their report paths
+  `clif.findRefs` and `clif.exportDeps` built their report paths
   from the command's arguments, so a function name such as `x/../../escaped`
   (which `filepath.Join` cleans) or a document outside the workspace wrote a
   file wherever it pointed. `reportPath` now requires a plain file name inside
@@ -302,8 +302,8 @@ may still send, and the Unix-socket `usetesting`.
     `json_each`. That search was about 10% faster than on `main` over 4
     alternating rounds.
   - **The 9 kept.** Each is the program doing its job:
-    - the debug log at the path in `CFMLEDITOR_LSP_LOG` (2);
-    - the `vfs` read layer, reading `.cfmleditor.json` while walking up, and
+    - the debug log at the path in `CLIF_LOG` (2);
+    - the `vfs` read layer, reading `.clif.json` while walking up, and
       CFLint reading the file it lints (3);
     - launching CFLint (2);
     - making the downloaded CFLint executable (1);

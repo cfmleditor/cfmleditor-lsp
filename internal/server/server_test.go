@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/refs"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/index"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/refs"
+	"github.com/cfmleditor/clif/internal/vfs"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -96,8 +96,8 @@ func TestHandleInitialize(t *testing.T) {
 		t.Fatalf("expected InitializeResult, got %T", result)
 	}
 
-	if res.ServerInfo.Name != "cfmleditor-lsp" {
-		t.Errorf("expected server name cfmleditor-lsp, got %s", res.ServerInfo.Name)
+	if res.ServerInfo.Name != "clif" {
+		t.Errorf("expected server name clif, got %s", res.ServerInfo.Name)
 	}
 
 	if res.Capabilities.CompletionProvider == nil {
@@ -2591,7 +2591,7 @@ func TestResolverSingleQuotesMatch(t *testing.T) {
 func TestExecuteCommandReindex(t *testing.T) {
 	srv := newTestServer()
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command: "cfmleditor.reindex",
+		Command: "clif.reindex",
 	})
 
 	_, replyErr := srv.handleExecuteCommand(context.Background(), req)
@@ -2605,7 +2605,7 @@ func TestExecuteCommandCopyPackage(t *testing.T) {
 	srv.WorkspaceFolders = []string{"/project"}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.copyPackage",
+		Command:   "clif.copyPackage",
 		Arguments: lspAnyArgs("file:///project/models/User.cfc"),
 	})
 
@@ -2809,7 +2809,7 @@ func TestExtractLinksFromContent(t *testing.T) {
 func TestExecuteCommandUnknown(t *testing.T) {
 	srv := newTestServer()
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command: "cfmleditor.nonexistent",
+		Command: "clif.nonexistent",
 	})
 
 	_, replyErr := srv.handleExecuteCommand(context.Background(), req)
@@ -3484,7 +3484,7 @@ func TestExecuteCommandShowResolvers(t *testing.T) {
 	}
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command: "cfmleditor.showResolvers",
+		Command: "clif.showResolvers",
 	})
 
 	result, replyErr := srv.handleExecuteCommand(context.Background(), req)
@@ -3511,7 +3511,7 @@ func TestExecuteCommandShowFileIndex(t *testing.T) {
 	}, nil)
 
 	req := makeCall(t, protocol.MethodWorkspaceExecuteCommand, protocol.ExecuteCommandParams{
-		Command:   "cfmleditor.showFileIndex",
+		Command:   "clif.showFileIndex",
 		Arguments: lspAnyArgs("file:///test.cfc"),
 	})
 

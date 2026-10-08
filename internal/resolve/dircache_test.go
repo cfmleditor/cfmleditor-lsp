@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/index"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // countingDirFS records what reaches the filesystem, which is the thing the

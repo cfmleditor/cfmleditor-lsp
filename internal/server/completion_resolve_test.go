@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

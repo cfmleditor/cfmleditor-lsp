@@ -41,13 +41,15 @@ target/
 /docs/.sha-cfdocs
 /cfparse
 /cfmleditor-lsp
+/clif
 internal/formatter/zz_*_test.go
 
-# Code-map databases and generated reports (cfmleditor-lsp graph --db / --out)
+# Code-map databases and generated reports (clif graph --db / --out)
 *.codemap.db
 *.codemap.db-wal
 *.codemap.db-shm
 .cfmleditor/codemap.db*
+.clif/codemap.db*
 internal/codemap/assets/vendor/node_modules/
 
 # Generated code-map reports
@@ -55,3 +57,4 @@ codemap.html
 *-functions.html
 *-codemap.html
 .cfmleditor/
+.clif/

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/codemap"
+	"github.com/cfmleditor/clif/internal/codemap"
 )
 
 // TestCallGraphKeepsPagesButDropsContainerFiles pins the one subtlety in the

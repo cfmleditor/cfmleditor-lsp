@@ -1,6 +1,6 @@
 package resolve
 
-import "github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+import "github.com/cfmleditor/clif/internal/parser"
 
 // memberReceiver is the component a member receiver (`a.b`, `prc.x`,
 // `args.x`) holds: what the file records for it, then each of the lookups that

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/resolve"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/resolve"
+	"github.com/cfmleditor/clif/internal/unresolved"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // cmdExplain prints, for one or more call sites on a given line, every resolution
@@ -94,7 +94,7 @@ func cmdExplain(args []string) {
 	baseDir := filepath.Dir(file)
 	pr := unresolved.Parse(resolver, file, string(data), opt)
 
-	// The selection and the report are shared with cfmleditor.explainCall, so
+	// The selection and the report are shared with clif.explainCall, so
 	// the server's answer reads exactly as this one does.
 	matches := resolve.CallsOnLine(pr, line-1, filter)
 

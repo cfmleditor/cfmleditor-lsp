@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // Wheels' Mapper copies public function references from wheels.mapper.* into

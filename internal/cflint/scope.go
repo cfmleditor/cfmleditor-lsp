@@ -14,7 +14,7 @@ import (
 // lists. A folder outside the config's directory is never linted.
 // workspacePaths exists for resolution, so a project's config lists every
 // sibling repo it calls into (tassweb's names all twelve), and CFLint resolves
-// nothing. Both the cflint CLI and cfmleditor.exportCFLint linted every
+// nothing. Both the cflint CLI and clif.exportCFLint linted every
 // workspace folder, and then rewrote reports for directories nobody asked
 // about or dropped what fell outside the one report they wrote.
 func ScanRoots(roots []string, configDir string, workspaceFolders []string) []string {

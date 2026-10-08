@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -17,7 +17,7 @@ import (
 //
 // jsonrpc2 runs handlers inline on the read goroutine, so a handler that makes
 // a server->client request and waits for the reply is waiting on a read only it
-// could perform. cfmleditor.format does exactly that: it sends
+// could perform. clif.format does exactly that: it sends
 // workspace/applyEdit and blocks. The edit reached the editor and was applied,
 // so formatting looked like it worked — and then the server never answered
 // anything again.
@@ -59,7 +59,7 @@ func TestExecuteCommandFormatDoesNotWedgeConnection(t *testing.T) {
 		var res any
 
 		_, _ = cliConn.Call(ctx, protocol.MethodWorkspaceExecuteCommand, &protocol.ExecuteCommandParams{
-			Command:   "cfmleditor.format",
+			Command:   "clif.format",
 			Arguments: lspAnyArgs(string(docURI)),
 		}, &res)
 	}()
@@ -67,7 +67,7 @@ func TestExecuteCommandFormatDoesNotWedgeConnection(t *testing.T) {
 	select {
 	case <-cmdDone:
 	case <-time.After(10 * time.Second):
-		t.Fatal("cfmleditor.format never returned: the handler is blocked on the client's workspace/applyEdit reply, which the read goroutine it occupies would have to deliver")
+		t.Fatal("clif.format never returned: the handler is blocked on the client's workspace/applyEdit reply, which the read goroutine it occupies would have to deliver")
 	}
 
 	// The command returning is not enough — the connection has to still work.
@@ -86,6 +86,6 @@ func TestExecuteCommandFormatDoesNotWedgeConnection(t *testing.T) {
 	select {
 	case <-followUp:
 	case <-time.After(10 * time.Second):
-		t.Fatal("connection wedged: a request issued after cfmleditor.format was never answered")
+		t.Fatal("connection wedged: a request issued after clif.format was never answered")
 	}
 }

@@ -1,4 +1,4 @@
-# Working on cfmleditor-lsp
+# Working on clif
 
 Read `CLAUDE.md` for architecture, parser invariants, and required checks.
 

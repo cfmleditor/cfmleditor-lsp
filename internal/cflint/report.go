@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/knownissues"
+	"github.com/cfmleditor/clif/internal/knownissues"
 	"go.lsp.dev/protocol"
 )
 
 // RegenerateHint is the CFLint report header's how-to-regenerate line. It is
 // the same whichever writes the report, so one regenerated from the editor and
 // from the command line diffs clean.
-const RegenerateHint = "cfmleditor-lsp cflint --write <project>, or the editor's cfmleditor.exportCFLint command"
+const RegenerateHint = "clif cflint --write <project>, or the editor's clif.exportCFLint command"
 
 // Report is one generated CFLint known-issues file, before it is written.
 type Report struct {
@@ -60,11 +60,11 @@ func Reports(found map[string][]protocol.Diagnostic, targets []string, version s
 
 		knownissues.Write(&b, []string{
 			"CFLint issues across the project, one per line: path:line:col: [severity RULE] message.",
-			"Paths are relative to this file's directory. Listed under knownIssues in .cfmleditor.json",
+			"Paths are relative to this file's directory. Listed under knownIssues in .clif.json",
 			`with "generate": "cflint", the entries show as cflint diagnostics, and a file's give way`,
 			"to CFLint's own results once it is linted on save. Regenerate with:",
 			"  " + RegenerateHint,
-			fmt.Sprintf("%d entries; cfmleditor-lsp %s.", len(rows[t]), version),
+			fmt.Sprintf("%d entries; clif %s.", len(rows[t]), version),
 		}, rows[t])
 
 		out = append(out, Report{Path: t, Content: b.String(), Entries: len(rows[t])})

@@ -21,18 +21,18 @@ func (c *Config) SocketPath() string {
 func socketDir() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
+		return filepath.Join(os.TempDir(), "clif")
 	case "windows":
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
-			return filepath.Join(d, "cfmleditor-lsp")
+			return filepath.Join(d, "clif")
 		}
 
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
+		return filepath.Join(os.TempDir(), "clif")
 	default:
 		if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-			return filepath.Join(d, "cfmleditor-lsp")
+			return filepath.Join(d, "clif")
 		}
 
-		return filepath.Join(os.TempDir(), "cfmleditor-lsp")
+		return filepath.Join(os.TempDir(), "clif")
 	}
 }

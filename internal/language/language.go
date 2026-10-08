@@ -2,7 +2,7 @@
 package language
 
 import (
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 
 	tree_sitter_cfml "github.com/cfmleditor/tree-sitter-cfml/bindings/go"
 	sitter "github.com/tree-sitter/go-tree-sitter"

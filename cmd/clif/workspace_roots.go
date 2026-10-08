@@ -3,8 +3,8 @@ package main
 import (
 	"path/filepath"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
 // cliWorkspaceFolders gives resolution the same roots the command uses when

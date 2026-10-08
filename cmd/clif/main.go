@@ -1,4 +1,4 @@
-// Package main is the entry point for the cfmleditor-lsp server.
+// Package main is the entry point for the clif server.
 package main
 
 import (
@@ -10,16 +10,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/daemon"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/index"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/server"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	"github.com/cfmleditor/clif/internal/config"
+	"github.com/cfmleditor/clif/internal/daemon"
+	"github.com/cfmleditor/clif/internal/formatter"
+	"github.com/cfmleditor/clif/internal/index"
+	"github.com/cfmleditor/clif/internal/language"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/parser"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/server"
+	"github.com/cfmleditor/clif/internal/vfs"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/uri"
@@ -49,7 +49,7 @@ func main() {
 
 		switch name {
 		case "version":
-			fmt.Printf("cfmleditor-lsp %s\n", version)
+			fmt.Printf("clif %s\n", version)
 
 			return
 		case "help", "--help", "-h":
@@ -73,7 +73,7 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Printf(`cfmleditor-lsp %s
+	fmt.Printf(`clif %s
 
 Commands:
   (default)    Run the LSP server over stdio
@@ -91,7 +91,7 @@ Commands:
   version      Print version
   help         Show this help
 
-Run "cfmleditor-lsp <command> --help" (or "cfmleditor-lsp help <command>")
+Run "clif <command> --help" (or "clif help <command>")
 for a command's usage and options.
 `, version)
 }
@@ -122,7 +122,7 @@ func runServer() {
 	//
 	// It stays first, before anything that can fail, because the version is what
 	// a crash report needs most and a later line might never be reached.
-	log.Info("cfmleditor-lsp starting",
+	log.Info("clif starting",
 		cflog.String("version", version),
 		cflog.Int("pid", os.Getpid()),
 		cflog.String("cwd", cwd))
@@ -199,14 +199,14 @@ func runServer() {
 		return
 	}
 
-	// No .cfmleditor.json anywhere above the working directory, so there is no
+	// No .clif.json anywhere above the working directory, so there is no
 	// project to run a daemon for: a standalone session with its own index.
 	// The editor's workspace roots are searched for a config again at
 	// initialize, so a project config the walk above could not reach — the
 	// editor was started from elsewhere — still configures this session; it
 	// just does not put it in a daemon named after whatever directory the
 	// process happened to start in.
-	log.Info("no .cfmleditor.json found; starting standalone")
+	log.Info("no .clif.json found; starting standalone")
 
 	stream := jsonrpc2.NewStream(vfs.Stdio())
 	conn := jsonrpc2.NewConn(stream)
@@ -332,7 +332,7 @@ func cmdFormat(args []string) {
 }
 
 // formatOptionsFor returns a lookup that maps a file to the formatter options
-// its governing .cfmleditor.json asks for, memoised per config directory.
+// its governing .clif.json asks for, memoised per config directory.
 //
 // The subcommand used to format from formatter.DefaultOptions() alone, so it
 // ignored every key under "formatting" and produced different bytes than the

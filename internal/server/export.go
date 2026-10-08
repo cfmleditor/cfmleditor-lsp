@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/cflint"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/config"
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/unresolved"
+	"github.com/cfmleditor/clif/internal/cflint"
+	"github.com/cfmleditor/clif/internal/config"
+	cflog "github.com/cfmleditor/clif/internal/log"
+	"github.com/cfmleditor/clif/internal/unresolved"
 )
 
 // report is one generated known-issues file's content, before it is written.
@@ -22,10 +22,10 @@ type report struct {
 	entries int
 }
 
-// handleExport answers cfmleditor.exportUnresolved and cfmleditor.exportCFLint:
+// handleExport answers clif.exportUnresolved and clif.exportCFLint:
 // it scans what exportScope says from disk and writes the findings to the
 // knownIssues files marked generate kind, or to that kind's default file
-// beside .cfmleditor.json (see config.GenerateTargets), then reloads the ones
+// beside .clif.json (see config.GenerateTargets), then reloads the ones
 // knownIssues lists so their entries are published straight away.
 //
 // Like generateCodeMap, it returns the paths at once and works in the
@@ -102,7 +102,7 @@ func (s *Server) handleExport(kind string) (any, error) {
 		}
 
 		if len(unlisted) > 0 {
-			msg += fmt.Sprintf(` List %s under knownIssues in .cfmleditor.json to see the entries as diagnostics.`, strings.Join(unlisted, ", "))
+			msg += fmt.Sprintf(` List %s under knownIssues in .clif.json to see the entries as diagnostics.`, strings.Join(unlisted, ", "))
 		}
 
 		s.log.Info("known issues exported", cflog.String("kind", kind), cflog.Strings("files", written), cflog.Int("leftOut", left))

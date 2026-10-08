@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/graph"
+	"github.com/cfmleditor/clif/internal/graph"
 )
 
 // WriteJSON writes the map as indented JSON. This is the canonical artifact: every

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
+	cfpath "github.com/cfmleditor/clif/internal/path"
 )
 
 // onlyFileWritesRequest reports whether, among every file a batch scan

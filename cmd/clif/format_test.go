@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/formatter"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/formatter"
+	"github.com/cfmleditor/clif/internal/language"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 

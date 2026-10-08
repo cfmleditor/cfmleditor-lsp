@@ -11,15 +11,15 @@ import (
 	"strings"
 	"sync"
 
-	cfpath "github.com/cfmleditor/cfmleditor-lsp/internal/path"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/route"
-	"github.com/cfmleditor/cfmleditor-lsp/internal/vfs"
+	cfpath "github.com/cfmleditor/clif/internal/path"
+	"github.com/cfmleditor/clif/internal/route"
+	"github.com/cfmleditor/clif/internal/vfs"
 )
 
-const routesUsage = `usage: cfmleditor-lsp routes [options] <dir> [...]
+const routesUsage = `usage: clif routes [options] <dir> [...]
 
 Report the framework routes found in a workspace and what they resolve to,
-so the "routes" block in .cfmleditor.json can be checked against the code
+so the "routes" block in .clif.json can be checked against the code
 rather than guessed at.
 
   --format <f>   text (default), md, json

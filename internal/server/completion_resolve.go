@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/docs"
+	"github.com/cfmleditor/clif/internal/docs"
 	"go.lsp.dev/protocol"
 )
 

@@ -22,7 +22,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/conv"
+	"github.com/cfmleditor/clif/internal/conv"
 )
 
 const (
@@ -366,7 +366,17 @@ func cacheDir(version string) (string, error) {
 		return "", err
 	}
 
-	p := filepath.Join(dir, "cfmleditor-lsp", "cflint", version)
+	p := filepath.Join(dir, "clif", "cflint", version)
+
+	// A CFLint downloaded while this server was cfmleditor-lsp is used where it
+	// is, rather than downloaded again: a machine that cannot reach GitHub
+	// would otherwise lose linting with the rename.
+	if _, err := os.Stat(p); err != nil {
+		legacy := filepath.Join(dir, "cfmleditor-lsp", "cflint", version)
+		if info, err := os.Stat(legacy); err == nil && info.IsDir() {
+			return legacy, nil
+		}
+	}
 
 	return p, os.MkdirAll(p, 0o750)
 }

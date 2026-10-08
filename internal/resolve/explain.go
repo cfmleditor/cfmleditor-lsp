@@ -5,14 +5,14 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/parser"
+	"github.com/cfmleditor/clif/internal/parser"
 )
 
 // CallsOnLine returns the call sites on a 0-based line, in the order
 // [parser.ParseResult.AllCalls] gives them. A non-empty filter keeps only the
 // calls whose function name or receiver contains it, ignoring case.
 //
-// The `explain` CLI and cfmleditor.explainCall both select through here, so the
+// The `explain` CLI and clif.explainCall both select through here, so the
 // same file, line and filter pick the same calls in both.
 func CallsOnLine(pr *parser.ParseResult, line int, filter string) []parser.CallSite {
 	filter = strings.ToLower(filter)
@@ -63,7 +63,7 @@ func CallText(call *parser.CallSite) string {
 // recorded, and the verdict. Calls are separated by a blank line.
 //
 // This is the report text itself, shared by the `explain` CLI and
-// cfmleditor.explainCall, so the two cannot drift apart.
+// clif.explainCall, so the two cannot drift apart.
 func (r *Resolver) WriteExplanation(w io.Writer, file string, line int, calls []parser.CallSite, pr *parser.ParseResult, baseDir string) {
 	for i := range calls {
 		call := &calls[i]

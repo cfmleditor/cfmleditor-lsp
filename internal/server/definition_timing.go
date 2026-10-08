@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	cflog "github.com/cfmleditor/cfmleditor-lsp/internal/log"
+	cflog "github.com/cfmleditor/clif/internal/log"
 )
 
 // slowDefinition is when a go-to-definition is worth explaining rather than

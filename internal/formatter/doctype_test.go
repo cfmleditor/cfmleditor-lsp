@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cfmleditor/cfmleditor-lsp/internal/language"
+	"github.com/cfmleditor/clif/internal/language"
 )
 
 // TestDoctypePreserved covers the declaration body being dropped: the grammar

@@ -51,7 +51,7 @@ func depsTestdata(t *testing.T) string {
 // The CLI used to emit one edge per component ref with no resolution and no
 // traversal, so it could only ever describe one level and had no way to say
 // whether a dependency resolved. It goes through deps.Build now, the same as
-// cfmleditor.exportDeps, so both surfaces answer with the same graph.
+// clif.exportDeps, so both surfaces answer with the same graph.
 func TestCmdDeps_ResolvesAndTraversesTransitively(t *testing.T) {
 	out := captureStdout(t, func() { cmdDeps([]string{depsTestdata(t)}) })
 
