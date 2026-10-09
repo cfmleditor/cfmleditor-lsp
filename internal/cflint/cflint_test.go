@@ -785,3 +785,38 @@ func TestFallbackIsTheEmbeddedVersion(t *testing.T) {
 		t.Errorf("scripts/fetch-cflint.sh pins CFLINT_VERSION=%q, want the fallbackVersion %q", pinned, fallbackVersion)
 	}
 }
+
+// A rename that fails because another clif put the binary there first (what
+// Windows does when that copy is already running) is not an error; one that
+// fails with nothing usable there still is.
+func TestInstallAssetToleratesLosingTheRace(t *testing.T) {
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "cflint")
+	theirs := []byte("installed by the other process")
+
+	previous := rename
+
+	t.Cleanup(func() { rename = previous })
+
+	rename = func(_, newPath string) error {
+		if err := os.WriteFile(newPath, theirs, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return errors.New("access is denied")
+	}
+
+	if err := installAsset(bytes.NewReader([]byte("ours")), binPath, rawBinary); err != nil {
+		t.Fatalf("installAsset = %v, want the other process's copy accepted", err)
+	}
+
+	if got, _ := os.ReadFile(binPath); !bytes.Equal(got, theirs) {
+		t.Errorf("binary holds %q, want the other process's %q", got, theirs)
+	}
+
+	rename = func(string, string) error { return errors.New("access is denied") }
+
+	if err := installAsset(bytes.NewReader([]byte("ours")), filepath.Join(dir, "other"), rawBinary); err == nil {
+		t.Error("installAsset = nil with nothing at the destination, want the rename's error")
+	}
+}

@@ -1042,7 +1042,9 @@ top-level keys, `references` additionally defaulting to *off*.
 CFLint diagnostics are off by default and enabled per workspace. A released
 clif carries CFLint inside it (the native build, so no Java), at the version
 `scripts/fetch-cflint.sh` pins, and unpacks it into its cache the first time it
-lints, so linting needs no download. A `cflint` already on `PATH` wins. A clif
+lints, so linting needs no download. CFLint's licence is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which each release archive
+carries. A `cflint` already on `PATH` wins. A clif
 built from source has none inside, and downloads the latest from the
 `cfmleditor/CFLint` releases on first use:
 

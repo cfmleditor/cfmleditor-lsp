@@ -177,6 +177,10 @@ jobs:
           mkdir -p legacy
           cp "clif${ext}" "legacy/cfmleditor-lsp${ext}"
 
+          # The binary carries CFLint, whose BSD licence asks for its notice
+          # to travel with every binary copy.
+          cp THIRD_PARTY_NOTICES.md legacy/
+
           for name in clif cfmleditor-lsp; do
             base="${name}-${platform}"
             dir="."
@@ -189,13 +193,13 @@ jobs:
               # for the same extension: the Zed extension requests
               # <name>-windows-amd64.tar.gz and fails to install without it.
               # Publishing both costs 5MB and satisfies each.
-              (cd "$dir" && zip -q "${GITHUB_WORKSPACE}/${base}.zip" "${name}.exe")
-              tar czf "${base}.tar.gz" -C "$dir" "${name}.exe"
+              (cd "$dir" && zip -q "${GITHUB_WORKSPACE}/${base}.zip" "${name}.exe" THIRD_PARTY_NOTICES.md)
+              tar czf "${base}.tar.gz" -C "$dir" "${name}.exe" THIRD_PARTY_NOTICES.md
             else
               # macOS bsdtar otherwise stores AppleDouble "._" resource-fork
               # entries alongside the binary, which show up when the tarball is
               # unpacked anywhere else.
-              COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" -C "$dir" "${name}"
+              COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" -C "$dir" "${name}" THIRD_PARTY_NOTICES.md
             fi
           done
 

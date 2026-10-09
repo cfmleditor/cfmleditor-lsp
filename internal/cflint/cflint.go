@@ -659,6 +659,10 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 	return installAsset(resp.Body, binPath, kind)
 }
 
+// rename is os.Rename, replaced by a test to lose the race installAsset
+// tolerates.
+var rename = os.Rename
+
 // installAsset unpacks an asset's executable to binPath, beside it first and
 // renamed into place, for the reason fetchAsset gives.
 func installAsset(src io.Reader, binPath string, kind assetKind) error {
@@ -688,7 +692,18 @@ func installAsset(src io.Reader, binPath string, kind assetKind) error {
 		return err
 	}
 
-	return os.Rename(tmpPath, binPath)
+	if err := rename(tmpPath, binPath); err != nil {
+		// Another clif unpacking or downloading the same binary got there
+		// first. Windows refuses to rename over an executable that is running,
+		// so its copy, already in use, is the answer rather than an error.
+		if info, statErr := os.Stat(binPath); statErr == nil && info.Mode().IsRegular() {
+			return nil
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 // writeBinary copies the executable out of a downloaded asset.
