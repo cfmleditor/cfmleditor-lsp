@@ -656,109 +656,73 @@ func useTempCache(t *testing.T) {
 	t.Setenv("LocalAppData", filepath.Join(dir, "cache"))
 }
 
-// useExecutable makes clif appear to run from path for one test.
-func useExecutable(t *testing.T, path string) {
-	t.Helper()
-
-	previous := executable
-	executable = func() (string, error) { return path, nil }
-
-	t.Cleanup(func() { executable = previous })
-}
-
-// writeExecutable creates an empty executable file, and its directory.
-func writeExecutable(t *testing.T, path string) {
-	t.Helper()
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(path, nil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A CFLint shipped beside clif is used ahead of any download, and is found
-// through the symlink Homebrew and winget put on PATH; one on PATH still wins.
-func TestTheCFLintBesideClifComesBeforeADownload(t *testing.T) {
+// A release build's embedded CFLint is unpacked into the cache once and used
+// with no download; a cflint on PATH still wins.
+func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 	useTempCache(t)
 	useFakeReleases(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("a download was attempted")
 		w.WriteHeader(http.StatusNotFound)
 	})
 
-	exe := ""
-	if runtime.GOOS == "windows" {
-		exe = ".exe"
-	}
-
-	root := t.TempDir()
-	install := filepath.Join(root, "libexec")
-	writeExecutable(t, filepath.Join(install, "clif"+exe))
-	writeExecutable(t, filepath.Join(install, "cflint"+exe))
-
-	onPath := filepath.Join(root, "path")
-	if err := os.MkdirAll(onPath, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
+	onPath := t.TempDir()
 	t.Setenv("PATH", onPath)
 
-	link := filepath.Join(root, "bin", "clif"+exe)
-	if err := os.MkdirAll(filepath.Dir(link), 0o750); err != nil {
-		t.Fatal(err)
+	name := binaryName()
+	if name == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	if err := os.Symlink(filepath.Join(install, "clif"+exe), link); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
+	want := []byte("the embedded cflint")
+
+	archive := tarGzOf(t, "cflint", want)
+	if runtime.GOOS == "windows" {
+		archive = zipOf(t, "cflint.exe", want)
 	}
 
-	useExecutable(t, link)
+	previous := embeddedCFLint
+	embeddedCFLint = archive
+
+	t.Cleanup(func() { embeddedCFLint = previous })
 
 	got, err := ensureBinary(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want, _ := filepath.EvalSymlinks(filepath.Join(install, "cflint"+exe))
-	if got != want {
-		t.Errorf("ensureBinary = %q, want the bundled %q", got, want)
+	if body, err := os.ReadFile(got); err != nil || !bytes.Equal(body, want) {
+		t.Fatalf("ensureBinary = %q holding %q (%v), want the embedded binary", got, body, err)
 	}
 
-	// A cflint on PATH is a team's own choice, and outranks the bundled one.
-	writeExecutable(t, filepath.Join(onPath, "cflint"+exe))
+	if !strings.Contains(filepath.ToSlash(got), "/"+fallbackVersion+"/") {
+		t.Errorf("ensureBinary = %q, want it cached under %s", got, fallbackVersion)
+	}
 
-	got, err = ensureBinary(t.Context())
-	if err != nil {
+	// Unpacked once: a second call finds it in the cache.
+	embeddedCFLint = []byte("not an archive")
+
+	if again, err := ensureBinary(t.Context()); err != nil || again != got {
+		t.Errorf("second ensureBinary = %q, %v; want the cached %q", again, err, got)
+	}
+
+	// A cflint on PATH is a team's own choice, and outranks the embedded one.
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+
+	if err := os.WriteFile(filepath.Join(onPath, "cflint"+exe), nil, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if want := filepath.Join(onPath, "cflint"+exe); got != want {
-		t.Errorf("ensureBinary = %q, want the one on PATH, %q", got, want)
-	}
-
-	// A directory called cflint beside clif is not a binary.
-	if err := os.Remove(filepath.Join(onPath, "cflint"+exe)); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.Remove(filepath.Join(install, "cflint"+exe)); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.Mkdir(filepath.Join(install, "cflint"+exe), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	if p := bundledBinary(); p != "" {
-		t.Errorf("bundledBinary = %q, want nothing for a directory", p)
+	if p, err := ensureBinary(t.Context()); err != nil || p != filepath.Join(onPath, "cflint"+exe) {
+		t.Errorf("ensureBinary = %q, %v; want the one on PATH", p, err)
 	}
 }
 
-// The release bundles the CFLint scripts/fetch-cflint.sh names, and a clif
-// without it falls back to fallbackVersion; the two are one version.
-func TestFallbackIsTheBundledVersion(t *testing.T) {
+// A release build embeds the CFLint scripts/fetch-cflint.sh names, and caches
+// it as fallbackVersion; the two are one version.
+func TestFallbackIsTheEmbeddedVersion(t *testing.T) {
 	_, here, _, _ := runtime.Caller(0)
 
 	script, err := os.ReadFile(filepath.Join(filepath.Dir(here), "..", "..", "scripts", "fetch-cflint.sh"))
@@ -766,8 +730,15 @@ func TestFallbackIsTheBundledVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "\nCFLINT_VERSION=" + fallbackVersion + "\n"
-	if !strings.Contains(string(script), want) {
-		t.Errorf("scripts/fetch-cflint.sh does not pin CFLINT_VERSION=%s, the fallbackVersion", fallbackVersion)
+	pinned := ""
+
+	for line := range strings.Lines(string(script)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "CFLINT_VERSION="); ok {
+			pinned = v
+		}
+	}
+
+	if pinned != fallbackVersion {
+		t.Errorf("scripts/fetch-cflint.sh pins CFLINT_VERSION=%q, want the fallbackVersion %q", pinned, fallbackVersion)
 	}
 }

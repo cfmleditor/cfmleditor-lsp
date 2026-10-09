@@ -4,6 +4,7 @@ package cflint
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -29,9 +30,8 @@ const (
 	// Only used when the releases API cannot be reached; the normal path
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
-	// Kept equal to the CFLINT_VERSION scripts/fetch-cflint.sh bundles, so a
-	// clif without the bundled CFLint never falls back to an older one than a
-	// packaged clif ships (TestFallbackIsTheBundledVersion).
+	// It is also the version a release build embeds: scripts/fetch-cflint.sh
+	// pins the same one (TestFallbackIsTheEmbeddedVersion).
 	fallbackVersion = "1.5.17"
 	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
 )
@@ -517,48 +517,17 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
-// executable is os.Executable, replaced by a test so it can place a CFLint
-// beside a clif that is not the test binary.
-var executable = os.Executable
-
-// bundledBinary is the CFLint shipped beside clif, or "" when there is none.
-// The release's clif-with-cflint archives carry one, and every package manager
-// and install script installs from them, so an installed clif lints with no
-// download at all. The link is followed first: Homebrew and winget put a
-// symlink to clif on PATH, and the CFLint is beside what it points at.
-func bundledBinary() string {
-	exe, err := executable()
-	if err != nil {
-		return ""
-	}
-
-	if target, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = target
-	}
-
-	name := "cflint"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-
-	p := filepath.Join(filepath.Dir(exe), name)
-	if info, err := os.Stat(p); err != nil || !info.Mode().IsRegular() {
-		return ""
-	}
-
-	return p
-}
-
 // ensureBinary finds CFLint: one on PATH, which has always won so a team can
-// pin its own; then the one shipped beside clif; then the cached download,
-// then a download.
+// pin its own; then the one a release build of clif carries inside it
+// (embedded.go), unpacked into the cache once; then a cached download, then a
+// download.
 func ensureBinary(ctx context.Context) (string, error) {
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
 	}
 
-	if p := bundledBinary(); p != "" {
-		return p, nil
+	if len(embeddedCFLint) > 0 {
+		return embeddedBinary()
 	}
 
 	name := binaryName()
@@ -687,6 +656,12 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		return fmt.Errorf("downloading cflint: HTTP %d", resp.StatusCode)
 	}
 
+	return installAsset(resp.Body, binPath, kind)
+}
+
+// installAsset unpacks an asset's executable to binPath, beside it first and
+// renamed into place, for the reason fetchAsset gives.
+func installAsset(src io.Reader, binPath string, kind assetKind) error {
 	dir := filepath.Dir(binPath)
 
 	tmp, err := os.CreateTemp(dir, filepath.Base(binPath)+".part-*")
@@ -701,7 +676,7 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		_ = os.Remove(tmpPath) // no-op once the rename below has succeeded
 	}()
 
-	if err := writeBinary(tmp, resp.Body, kind, dir); err != nil {
+	if err := writeBinary(tmp, src, kind, dir); err != nil {
 		return err
 	}
 
@@ -825,4 +800,34 @@ func copyFromZip(dst io.Writer, src io.Reader, tmpDir string) error {
 	defer func() { _ = entry.Close() }()
 
 	return copyBinary(dst, entry)
+}
+
+// embeddedBinary unpacks the CFLint this build carries into the cache, where
+// fallbackVersion's download would go, once; later runs find it there.
+func embeddedBinary() (string, error) {
+	name := binaryName()
+	if name == "" {
+		return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	dir, err := cacheDir(fallbackVersion)
+	if err != nil {
+		return "", err
+	}
+
+	binPath := filepath.Join(dir, name)
+	if _, err := os.Stat(binPath); err == nil {
+		return binPath, nil
+	}
+
+	kind := tarGz
+	if runtime.GOOS == "windows" {
+		kind = zipped
+	}
+
+	if err := installAsset(bytes.NewReader(embeddedCFLint), binPath, kind); err != nil {
+		return "", fmt.Errorf("unpacking the embedded cflint: %w", err)
+	}
+
+	return binPath, nil
 }

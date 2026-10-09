@@ -146,7 +146,11 @@ jobs:
           ext=""
           if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
 
-          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+          # CFLint goes inside the binary (internal/cflint/embedded.go), so
+          # every way of installing clif lints without downloading it.
+          bash scripts/fetch-cflint.sh "${GOOS}" "${GOARCH}"
+
+          go build -trimpath -tags cflint_embed -ldflags="-s -w -X main.version=${VERSION}" \
             -o "clif${ext}" ./cmd/clif
 
       - name: Verify the binary is for the target platform
@@ -156,6 +160,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
           file "clif${ext}"
           go version -m "clif${ext}" | grep -E "GOARCH=${{ matrix.goarch }}$"
+          go version -m "clif${ext}" | grep -E -- "-tags=cflint_embed$"
 
       - name: Package
         id: package
@@ -196,27 +201,6 @@ jobs:
 
           echo "platform=${platform}" >> "$GITHUB_OUTPUT"
 
-      # clif with the CFLint it lints with beside it, at the version and
-      # checksum scripts/fetch-cflint.sh pins. Package managers and the install
-      # scripts install this one, so linting needs no download on first use;
-      # editor extensions keep the lean clif-<platform> archive above, and
-      # download CFLint only if linting is switched on.
-      - name: Package with CFLint
-        run: |
-          set -euo pipefail
-          platform="${{ steps.package.outputs.platform }}"
-          base="clif-with-cflint-${platform}"
-          mkdir -p bundle
-          bash scripts/fetch-cflint.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" bundle
-
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            cp clif.exe bundle/
-            (cd bundle && zip -q "${GITHUB_WORKSPACE}/${base}.zip" clif.exe cflint.exe)
-          else
-            cp clif bundle/
-            COPYFILE_DISABLE=1 tar czf "${base}.tar.gz" -C bundle clif cflint
-          fi
-
       # One artifact per platform holding every archive built for it, rather
       # than one per archive, so the windows entry can carry two.
       - uses: actions/upload-artifact@v7
@@ -224,7 +208,6 @@ jobs:
           name: release-${{ steps.package.outputs.platform }}
           path: |
             clif-${{ steps.package.outputs.platform }}.*
-            clif-with-cflint-${{ steps.package.outputs.platform }}.*
             cfmleditor-lsp-${{ steps.package.outputs.platform }}.*
           retention-days: 7
           if-no-files-found: error
@@ -259,10 +242,6 @@ jobs:
               linux-arm64.tar.gz windows-amd64.zip windows-amd64.tar.gz; do
               expected+="${name}-${asset}"$'\n'
             done
-          done
-          for asset in darwin-amd64.tar.gz darwin-arm64.tar.gz linux-amd64.tar.gz \
-            linux-arm64.tar.gz windows-amd64.zip; do
-            expected+="clif-with-cflint-${asset}"$'\n'
           done
 
           missing=0

@@ -3,14 +3,11 @@
 #
 #   packaging/homebrew/formula.sh <version> <dir>
 #
-# <dir> holds the release's clif-with-cflint-{darwin,linux}-{amd64,arm64}.tar.gz.
-# The formula installs the prebuilt binary rather than building from source:
-# CGO and the tree-sitter grammar make a source build slow, and the binaries
-# are the ones every editor extension already runs. CFLint goes in libexec
-# beside clif, which finds it there through the bin symlink, so it lints
-# without a download and puts no cflint of its own on PATH. It also links
-# cfmleditor-lsp, the name before the rename, which older editor extensions
-# look for on PATH.
+# <dir> holds the release's clif-{darwin,linux}-{amd64,arm64}.tar.gz. The
+# formula installs the prebuilt binary rather than building from source: CGO
+# and the tree-sitter grammar make a source build slow, and the binaries are
+# the ones every editor extension already runs. It also links cfmleditor-lsp,
+# the name before the rename, which older editor extensions look for on PATH.
 set -euo pipefail
 
 version="${1:?usage: formula.sh <version> <dir>}"
@@ -19,7 +16,7 @@ version="${version#v}"
 base="https://github.com/cfmleditor/clif/releases/download/v${version}"
 
 sha() {
-	local f="${dir}/clif-with-cflint-$1.tar.gz"
+	local f="${dir}/clif-$1.tar.gz"
 	[ -f "$f" ] || { echo "missing $f" >&2; exit 1; }
 	shasum -a 256 "$f" | cut -d' ' -f1
 }
@@ -34,36 +31,34 @@ class Clif < Formula
 
   on_macos do
     on_arm do
-      url "${base}/clif-with-cflint-darwin-arm64.tar.gz"
+      url "${base}/clif-darwin-arm64.tar.gz"
       sha256 "$(sha darwin-arm64)"
     end
     on_intel do
-      url "${base}/clif-with-cflint-darwin-amd64.tar.gz"
+      url "${base}/clif-darwin-amd64.tar.gz"
       sha256 "$(sha darwin-amd64)"
     end
   end
 
   on_linux do
     on_arm do
-      url "${base}/clif-with-cflint-linux-arm64.tar.gz"
+      url "${base}/clif-linux-arm64.tar.gz"
       sha256 "$(sha linux-arm64)"
     end
     on_intel do
-      url "${base}/clif-with-cflint-linux-amd64.tar.gz"
+      url "${base}/clif-linux-amd64.tar.gz"
       sha256 "$(sha linux-amd64)"
     end
   end
 
   def install
-    libexec.install "clif", "cflint"
-    bin.install_symlink libexec/"clif"
-    bin.install_symlink libexec/"clif" => "cfmleditor-lsp"
+    bin.install "clif"
+    bin.install_symlink "clif" => "cfmleditor-lsp"
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/clif version")
     assert_match "usage: clif unresolved", shell_output("#{bin}/clif unresolved --help")
-    assert_match "CFLint", shell_output("#{libexec}/cflint -version")
   end
 end
 FORMULA

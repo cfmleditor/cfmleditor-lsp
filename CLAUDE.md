@@ -1060,15 +1060,13 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `s.builtinFuncItems()`, not `getBuiltinFuncItems()`, anywhere a list goes to
   a client. `TestResolvedItemsMatchTheFullOnes` resolves every deferred item and
   compares it with the full one.
-- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes the
-  first of: a `cflint` on PATH (it has always won, so a team can pin its own), a `cflint`
-  beside the running clif, symlinks followed (`bundledBinary`; the release's
-  `clif-with-cflint-<platform>` archives carry one at the version `scripts/fetch-cflint.sh`
-  pins, and every package manager and install script installs those), and a download
-  from `cfmleditor/CFLint` releases, cached. `fallbackVersion` equals that pin
-  (`TestFallbackIsTheBundledVersion`). The lean `clif-<platform>` archives stay
-  CFLint-free because editor extensions download them.
-  `TestTheCFLintBesideClifComesBeforeADownload`.
+- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes a
+  `cflint` on PATH first, then the CFLint a release build embeds (`embedded.go`, behind
+  `-tags cflint_embed`; the release workflow writes `internal/cflint/embedded/cflint.archive`
+  with `scripts/fetch-cflint.sh`, which pins the version and checksums), unpacked once into
+  the cache under `fallbackVersion`, then a download from `cfmleditor/CFLint` releases. A
+  plain `go build` embeds nothing (`embed_off.go`). `fallbackVersion` equals the script's pin
+  (`TestFallbackIsTheEmbeddedVersion`).
 
   **`mapSeverity` may return only Error or Warning.** CFLint's seven levels
   (`com.cflint.Levels`: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC,

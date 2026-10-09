@@ -56,7 +56,6 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       publish: ${{ steps.tag.outputs.publish }}
-      bundled: ${{ steps.tag.outputs.bundled }}
     steps:
       - id: tag
         env:
@@ -74,22 +73,9 @@ jobs:
           echo "publish=${PUBLISH:-false}" >> "$GITHUB_OUTPUT"
           echo "Release ${TAG}, publish=${PUBLISH:-false}"
 
-          # Every package installs the clif-with-cflint archive, which earlier
-          # releases do not have; there is nothing to build for one of those.
-          # Read whole before grep: grep -q stops at the match, and under pipefail
-          # a gh still writing would fail the pipeline with SIGPIPE.
-          assets="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets -q '.assets[].name')"
-          if grep -qx 'clif-with-cflint-windows-amd64.zip' <<< "${assets}"; then
-            echo "bundled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::${TAG} has no clif-with-cflint archives, so no package was built or published"
-            echo "bundled=false" >> "$GITHUB_OUTPUT"
-          fi
-
   homebrew:
     name: Homebrew
     needs: tag
-    if: needs.tag.outputs.bundled == 'true'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
@@ -99,7 +85,7 @@ jobs:
       - name: Download the release's archives
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-with-cflint-*.tar.gz' --dir dist
+        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-*.tar.gz' --dir dist
 
       - name: Write the formula
         run: |
@@ -142,7 +128,6 @@ jobs:
   chocolatey:
     name: Chocolatey
     needs: tag
-    if: needs.tag.outputs.bundled == 'true'
     runs-on: windows-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
@@ -153,14 +138,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-with-cflint-windows-amd64.zip' --dir dist
+        run: gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-windows-amd64.zip' --dir dist
 
       - name: Fill in the package
         shell: pwsh
         run: |
           $version = $env:TAG.TrimStart('v')
-          $sum = (Get-FileHash dist/clif-with-cflint-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
-          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/clif-with-cflint-windows-amd64.zip"
+          $sum = (Get-FileHash dist/clif-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/clif-windows-amd64.zip"
 
           $nuspec = 'packaging/chocolatey/clif.nuspec'
           (Get-Content $nuspec -Raw).Replace('__VERSION__', $version) | Set-Content $nuspec -NoNewline
@@ -186,9 +171,6 @@ jobs:
           "$out / $legacy"
           if ($out -notmatch [regex]::Escape($env:version)) { throw "clif version printed '$out'" }
           if ($legacy -notmatch [regex]::Escape($env:version)) { throw "cfmleditor-lsp version printed '$legacy'" }
-          $tools = "$env:ChocolateyInstall\lib\clif\tools"
-          if (-not (Test-Path "$tools\cflint.exe")) { throw "cflint.exe is not beside clif.exe in $tools" }
-          if (Get-Command cflint -ErrorAction SilentlyContinue) { throw 'cflint.exe was shimmed onto PATH' }
           choco uninstall clif -y --no-progress
           if (Get-Command cfmleditor-lsp -ErrorAction SilentlyContinue) { throw 'uninstall left the cfmleditor-lsp shim behind' }
 
@@ -214,7 +196,6 @@ jobs:
   scoop:
     name: Scoop
     needs: tag
-    if: needs.tag.outputs.bundled == 'true'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
@@ -226,11 +207,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-with-cflint-windows-amd64.zip' --pattern checksums.txt --dir dist
-          hash="$(cd dist && sha256sum clif-with-cflint-windows-amd64.zip | cut -d' ' -f1)"
-          want="$(awk '$2 == "clif-with-cflint-windows-amd64.zip" { print $1 }' dist/checksums.txt)"
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern 'clif-windows-amd64.zip' --pattern checksums.txt --dir dist
+          hash="$(cd dist && sha256sum clif-windows-amd64.zip | cut -d' ' -f1)"
+          want="$(awk '$2 == "clif-windows-amd64.zip" { print $1 }' dist/checksums.txt)"
           if [ "${want}" != "${hash}" ]; then
-            echo "::error::clif-with-cflint-windows-amd64.zip is ${hash}, checksums.txt says ${want}"
+            echo "::error::clif-windows-amd64.zip is ${hash}, checksums.txt says ${want}"
             exit 1
           fi
 
@@ -274,7 +255,6 @@ jobs:
   winget:
     name: winget
     needs: tag
-    if: needs.tag.outputs.bundled == 'true'
     runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.tag.outputs.tag }}
@@ -318,7 +298,7 @@ jobs:
 
           args=(update cfmleditor.clif
             --version "${version}"
-            --urls "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clif-with-cflint-windows-amd64.zip"
+            --urls "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/clif-windows-amd64.zip"
             --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}")
 
           if [ "${PUBLISH}" != "true" ]; then

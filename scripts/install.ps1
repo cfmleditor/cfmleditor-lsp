@@ -14,12 +14,9 @@
 #
 # CLIF_DOWNLOAD_URL replaces https://github.com/cfmleditor/clif/releases, for a
 # mirror laid out the same way. The archive is checked against the release's
-# checksums.txt when the release has one. A release's clif-with-cflint archive
-# is preferred: it puts cflint.exe beside clif.exe, which clif lints with
-# rather than downloading CFLint on first use. Earlier releases have only the
-# clif archive, and releases from before the rename to clif only cfmleditor-lsp
-# archives; one of those is installed as clif.exe. Windows on ARM runs the
-# amd64 build.
+# checksums.txt when the release has one. Releases from before the rename to
+# clif publish cfmleditor-lsp archives only; one of those is installed as
+# clif.exe. Windows on ARM runs the amd64 build.
 [CmdletBinding()]
 param(
     [string]$Version = "",
@@ -55,20 +52,19 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
     $archive = Join-Path $tmp 'archive.zip'
-    # The archive asset, and the name of the binary inside it.
     $name = 'clif'
-    $asset = ''
-    foreach ($candidate in @('clif-with-cflint', 'clif', 'cfmleditor-lsp')) {
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/clif-windows-amd64.zip" -OutFile $archive
+    } catch {
+        $name = 'cfmleditor-lsp'
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri "$base/$candidate-windows-amd64.zip" -OutFile $archive
-            $asset = "$candidate-windows-amd64.zip"
-            if ($candidate -eq 'cfmleditor-lsp') { $name = 'cfmleditor-lsp' }
-            break
+            Invoke-WebRequest -UseBasicParsing -Uri "$base/cfmleditor-lsp-windows-amd64.zip" -OutFile $archive
         } catch {
-            continue
+            throw "clif install: no windows/amd64 archive for $Version at $base"
         }
     }
-    if (-not $asset) { throw "clif install: no windows/amd64 archive for $Version at $base" }
+
+    $asset = "$name-windows-amd64.zip"
     $sums = Join-Path $tmp 'checksums.txt'
     $haveSums = $true
     try {
@@ -98,21 +94,6 @@ try {
 
     $installed = & $exe version
     Write-Output "Installed $installed to $exe"
-
-    # A cflint.exe this script did not put there is left alone; .clif-cflint
-    # marks the one it did, which a later run replaces.
-    $cflint = Join-Path $tmp 'cflint.exe'
-    if (Test-Path $cflint) {
-        $dest = Join-Path $Dir 'cflint.exe'
-        $marker = Join-Path $Dir '.clif-cflint'
-        if ((Test-Path $dest) -and -not (Test-Path $marker)) {
-            Write-Warning "clif install: left the existing $dest in place; clif lints with it, since it is beside clif"
-        } else {
-            Copy-Item $cflint $dest -Force
-            New-Item -ItemType File -Path $marker -Force | Out-Null
-            Write-Output "Installed CFLint to $dest"
-        }
-    }
 
     $onPath = ($env:PATH -split ';') | Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') }
     if (-not $onPath) {

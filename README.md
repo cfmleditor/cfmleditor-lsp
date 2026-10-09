@@ -36,17 +36,9 @@ already downloaded under the old cache directory is used where it is.
 
 Homebrew, Scoop and Chocolatey install `clif` and, for editor extensions that
 still look for the old name, `cfmleditor-lsp` beside it; winget installs
-`clif`. Every one of them, and both install scripts, also installs the
-[CFLint](#replacing-cflint) clif lints with, next to clif, so linting needs no
-download on first use: each installs the release's
-`clif-with-cflint-<platform>` archive. Homebrew, Scoop and Chocolatey keep
-that CFLint off `PATH`, and so does winget where it can link `clif` onto
-`PATH` (without symlinks it adds its whole package directory instead). The
-install scripts put `cflint` in the same directory as `clif`, leaving a
-`cflint` they did not install there in place. Every release also has the plain `clif-<platform>`
-archives, without CFLint, on the
+`clif`. Every release also has archives for each platform on the
 [releases page](https://github.com/cfmleditor/clif/releases). The VS Code and
-Zed CFML extensions download one of those, so neither needs this.
+Zed CFML extensions download a server of their own, so neither needs this.
 
 The release workflow publishes to all four after each release
 (`.github/workflows/package-managers.yml`, which also runs, without
@@ -639,8 +631,7 @@ how calls resolve. Lists are capped at 200 by default, with the total alongside.
 ```
 
 `--allow-lint` adds `lint`, CFLint's findings as JSON. It is off by default because
-it starts a CFLint process, and downloads CFLint on first use unless clif was
-installed with it; it writes no report.
+it starts a CFLint process; it writes no report.
 
 `--db <file>` loads the code map `graph --db` built, and adds `search_symbols`,
 `get_symbol`, `get_callers`, `get_callees`, `find_path`, `list_islands`,
@@ -1048,12 +1039,12 @@ top-level keys, `references` additionally defaulting to *off*.
 
 ### Linting
 
-CFLint diagnostics are off by default and enabled per workspace. clif uses the
-first CFLint it finds of: a `cflint` on `PATH`, which wins so a team can pin
-its own; the one beside the `clif` binary (every package manager and install
-script puts one there, from the release's `clif-with-cflint` archive, at the
-version `scripts/fetch-cflint.sh` pins); and one downloaded from the
-`cfmleditor/CFLint` releases on first use and cached:
+CFLint diagnostics are off by default and enabled per workspace. A released
+clif carries CFLint inside it (the native build, so no Java), at the version
+`scripts/fetch-cflint.sh` pins, and unpacks it into its cache the first time it
+lints, so linting needs no download. A `cflint` already on `PATH` wins. A clif
+built from source has none inside, and downloads the latest from the
+`cfmleditor/CFLint` releases on first use:
 
 ```json
 {

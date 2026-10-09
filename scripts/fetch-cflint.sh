@@ -1,27 +1,26 @@
 #!/usr/bin/env bash
-# Fetches the CFLint the release bundles beside clif, for one platform, and
+# Fetches the CFLint a release build of clif embeds, for one platform, and
 # checks it against the checksum pinned here.
 #
-#   scripts/fetch-cflint.sh <goos> <goarch> <dir>
+#   scripts/fetch-cflint.sh <goos> <goarch> [<file>]
 #
-# Writes <dir>/cflint (cflint.exe on Windows). The release workflow packs it
-# into clif-with-cflint-<goos>-<goarch>, which every package manager and
-# install script installs, so an installed clif lints without downloading
-# anything. internal/cflint looks beside the running clif after PATH.
+# Writes CFLint's release asset as published (a .tar.gz, or a .zip on Windows)
+# to <file>, by default internal/cflint/embedded/cflint.archive, where a build
+# with -tags cflint_embed embeds it (internal/cflint/embedded.go). clif unpacks
+# it into its cache on first use, so a released clif lints with no download.
 #
 # To move to a newer CFLint, change CFLINT_VERSION, fallbackVersion in
 # internal/cflint/cflint.go (a test holds the two equal) and the five
-# checksums: each
-# is the sha256 of that release's .tar.gz (.zip on Windows), which GitHub lists
-# as the asset's digest:
+# checksums. Each is the sha256 of that release's asset, which GitHub lists as
+# its digest:
 #   gh api repos/cfmleditor/CFLint/releases/tags/<version> --jq '.assets[] | "\(.name) \(.digest)"'
 set -euo pipefail
 
 CFLINT_VERSION=1.5.17
 
-goos="${1:?usage: fetch-cflint.sh <goos> <goarch> <dir>}"
-goarch="${2:?usage: fetch-cflint.sh <goos> <goarch> <dir>}"
-dir="${3:?usage: fetch-cflint.sh <goos> <goarch> <dir>}"
+goos="${1:?usage: fetch-cflint.sh <goos> <goarch> [<file>]}"
+goarch="${2:?usage: fetch-cflint.sh <goos> <goarch> [<file>]}"
+out="${3:-$(dirname "$0")/../internal/cflint/embedded/cflint.archive}"
 
 case "${goos}/${goarch}" in
 darwin/arm64) asset=cflint-macos-aarch64.tar.gz sum=75a8a3d0cdb28b39aa2906145e88925189f8a252ad2edd118bf2ea5582c89092 ;;
@@ -52,15 +51,7 @@ if [ "${got}" != "${sum}" ]; then
 	exit 1
 fi
 
-mkdir -p "${dir}"
-case "${asset}" in
-*.zip)
-	unzip -q -o "${tmp}/${asset}" cflint.exe -d "${dir}"
-	;;
-*)
-	tar -xzf "${tmp}/${asset}" -C "${dir}" cflint
-	chmod 755 "${dir}/cflint"
-	;;
-esac
+mkdir -p "$(dirname "${out}")"
+mv "${tmp}/${asset}" "${out}"
 
-echo "CFLint ${CFLINT_VERSION} for ${goos}/${goarch} in ${dir}"
+echo "CFLint ${CFLINT_VERSION} for ${goos}/${goarch} in ${out}"
