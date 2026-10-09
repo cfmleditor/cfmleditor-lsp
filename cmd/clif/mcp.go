@@ -35,7 +35,8 @@ With --db, the code map "graph --db" built:
   list_islands, list_orphans, get_stats
 With --allow-lint:
   lint                    CFLint's findings, as "cflint" reports them; starts a
-                          Java process and downloads CFLint on first use
+                          CFLint process, downloading CFLint on first use
+                          unless one is installed beside clif
 
   --db <file>     the database written by "graph --db"
   --root <dir>    workspace root for explain_call (default: the map's own root,

@@ -4,14 +4,19 @@
     packaging/scoop/update_manifest.py <current clif.json> <version> <sha256>
 
 Reads the manifest cfmleditor/scoop-bucket holds and prints it for <version>:
-the version, each architecture's URL from the manifest's own autoupdate block,
-and the hash of clif-windows-amd64.zip, which every architecture installs
-(Windows on ARM runs the amd64 build). Everything else -- bin, checkver,
-autoupdate -- is kept as the bucket has it, so it is changed in one place.
+the version, each architecture's URL and the hash of ASSET, which every
+architecture installs (Windows on ARM runs the amd64 build). ASSET holds
+clif.exe and the cflint.exe clif finds beside it; bin shims clif.exe alone.
+The autoupdate URLs are set to ASSET too, so the bucket's own updater
+installs the same archive. Everything else -- bin, checkver, the autoupdate
+hash -- is kept as the bucket has it.
 """
 
 import json
 import sys
+
+ASSET = "clif-with-cflint-windows-amd64.zip"
+URL = "https://github.com/cfmleditor/clif/releases/download/v$version/" + ASSET
 
 
 def main() -> int:
@@ -28,7 +33,8 @@ def main() -> int:
     template = manifest["autoupdate"]["architecture"]
 
     for arch, entry in manifest["architecture"].items():
-        entry["url"] = template[arch]["url"].replace("$version", version)
+        template[arch]["url"] = URL
+        entry["url"] = URL.replace("$version", version)
         entry["hash"] = sha256
 
     json.dump(manifest, sys.stdout, indent=4)

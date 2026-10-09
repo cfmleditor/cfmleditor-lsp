@@ -15,8 +15,11 @@
 # <url>/latest/download/<asset>).
 #
 # The archive is checked against the release's checksums.txt when the release
-# has one. Releases from before the rename to clif publish cfmleditor-lsp
-# archives only; one of those is installed as clif.
+# has one. A release's clif-with-cflint archive is preferred: it puts cflint
+# beside clif, which clif lints with rather than downloading CFLint on first
+# use. Earlier releases have only the clif archive, and releases from before
+# the rename to clif only cfmleditor-lsp archives; one of those is installed as
+# clif.
 set -eu
 
 version=${1:-}
@@ -76,16 +79,21 @@ sha256() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# archive asset, and the name of the binary inside it.
 name=clif
-if ! fetch "$base/clif-$os-$arch.tar.gz" "$tmp/archive.tar.gz" 2>/dev/null; then
-	name=cfmleditor-lsp
-	fetch "$base/cfmleditor-lsp-$os-$arch.tar.gz" "$tmp/archive.tar.gz" || {
-		echo "clif install: no $os/$arch archive for $version at $base" >&2
-		exit 1
-	}
+asset=clif-with-cflint-$os-$arch.tar.gz
+if ! fetch "$base/$asset" "$tmp/archive.tar.gz" 2>/dev/null; then
+	asset=clif-$os-$arch.tar.gz
+	if ! fetch "$base/$asset" "$tmp/archive.tar.gz" 2>/dev/null; then
+		name=cfmleditor-lsp
+		asset=cfmleditor-lsp-$os-$arch.tar.gz
+		fetch "$base/$asset" "$tmp/archive.tar.gz" || {
+			echo "clif install: no $os/$arch archive for $version at $base" >&2
+			exit 1
+		}
+	fi
 fi
 
-asset=$name-$os-$arch.tar.gz
 if fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
 	want=$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$tmp/checksums.txt")
 	got=$(sha256 "$tmp/archive.tar.gz")
@@ -97,12 +105,17 @@ else
 	echo "clif install: $version has no checksums.txt, so $asset was not verified" >&2
 fi
 
-tar -xzf "$tmp/archive.tar.gz" -C "$tmp" "$name"
+tar -xzf "$tmp/archive.tar.gz" -C "$tmp"
 mkdir -p "$dir"
 mv "$tmp/$name" "$dir/clif"
 chmod 755 "$dir/clif"
 
 echo "Installed $("$dir/clif" version) to $dir/clif"
+if [ -f "$tmp/cflint" ]; then
+	mv "$tmp/cflint" "$dir/cflint"
+	chmod 755 "$dir/cflint"
+	echo "Installed $("$dir/cflint" -version 2>/dev/null | head -n 1) to $dir/cflint"
+fi
 case ":$PATH:" in
 *":$dir:"*) ;;
 *) echo "clif install: $dir is not on PATH; add it to use clif by name" >&2 ;;

@@ -655,3 +655,90 @@ func useTempCache(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("LocalAppData", filepath.Join(dir, "cache"))
 }
+
+// useExecutable makes clif appear to run from path for one test.
+func useExecutable(t *testing.T, path string) {
+	t.Helper()
+
+	previous := executable
+	executable = func() (string, error) { return path, nil }
+
+	t.Cleanup(func() { executable = previous })
+}
+
+// writeExecutable creates an empty executable file, and its directory.
+func writeExecutable(t *testing.T, path string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A CFLint shipped beside clif is used ahead of one on PATH and of any
+// download, and is found through the symlink Homebrew and winget put on PATH.
+func TestTheCFLintBesideClifComesFirst(t *testing.T) {
+	useTempCache(t)
+	useFakeReleases(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("a download was attempted")
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+
+	root := t.TempDir()
+	install := filepath.Join(root, "libexec")
+	writeExecutable(t, filepath.Join(install, "clif"+exe))
+	writeExecutable(t, filepath.Join(install, "cflint"+exe))
+
+	onPath := filepath.Join(root, "path")
+	writeExecutable(t, filepath.Join(onPath, "cflint"+exe))
+	t.Setenv("PATH", onPath)
+
+	link := filepath.Join(root, "bin", "clif"+exe)
+	if err := os.MkdirAll(filepath.Dir(link), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(filepath.Join(install, "clif"+exe), link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	useExecutable(t, link)
+
+	got, err := ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want, _ := filepath.EvalSymlinks(filepath.Join(install, "cflint"+exe))
+	if got != want {
+		t.Errorf("ensureBinary = %q, want the bundled %q", got, want)
+	}
+
+	// Without one beside clif, PATH answers as it always has. A directory
+	// called cflint is not a binary.
+	if err := os.Remove(filepath.Join(install, "cflint"+exe)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Mkdir(filepath.Join(install, "cflint"+exe), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err = ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := filepath.Join(onPath, "cflint"+exe); got != want {
+		t.Errorf("ensureBinary = %q, want the one on PATH, %q", got, want)
+	}
+}

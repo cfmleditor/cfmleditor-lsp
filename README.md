@@ -36,9 +36,15 @@ already downloaded under the old cache directory is used where it is.
 
 Homebrew, Scoop and Chocolatey install `clif` and, for editor extensions that
 still look for the old name, `cfmleditor-lsp` beside it; winget installs
-`clif`. Every release also has archives for each platform on the
+`clif`. Every one of them, and both install scripts, also installs the
+[CFLint](#replacing-cflint) clif lints with, next to clif, so linting needs no
+download on first use: each installs the release's
+`clif-with-cflint-<platform>` archive. Homebrew, Scoop, Chocolatey and winget
+keep that CFLint off `PATH`; the install scripts put `cflint` in the same
+directory as `clif`. Every release also has the plain `clif-<platform>`
+archives, without CFLint, on the
 [releases page](https://github.com/cfmleditor/clif/releases). The VS Code and
-Zed CFML extensions download a server of their own, so neither needs this.
+Zed CFML extensions download one of those, so neither needs this.
 
 The release workflow publishes to all four after each release
 (`.github/workflows/package-managers.yml`, which also runs, without
@@ -631,7 +637,8 @@ how calls resolve. Lists are capped at 200 by default, with the total alongside.
 ```
 
 `--allow-lint` adds `lint`, CFLint's findings as JSON. It is off by default because
-it starts a Java process and downloads CFLint on first use; it writes no report.
+it starts a CFLint process, and downloads CFLint on first use unless clif was
+installed with it; it writes no report.
 
 `--db <file>` loads the code map `graph --db` built, and adds `search_symbols`,
 `get_symbol`, `get_callers`, `get_callees`, `find_path`, `list_islands`,
@@ -1039,9 +1046,12 @@ top-level keys, `references` additionally defaulting to *off*.
 
 ### Linting
 
-CFLint diagnostics are off by default and enabled per workspace. The binary is
-downloaded from the `cfmleditor/CFLint` releases on first use, unless a `cflint`
-is already on `PATH`, which wins:
+CFLint diagnostics are off by default and enabled per workspace. clif uses the
+first CFLint it finds of: the one beside the `clif` binary (every package
+manager and install script puts one there, from the release's
+`clif-with-cflint` archive, at the version `scripts/fetch-cflint.sh` pins), a
+`cflint` on `PATH`, and one downloaded from the `cfmleditor/CFLint` releases on
+first use and cached:
 
 ```json
 {

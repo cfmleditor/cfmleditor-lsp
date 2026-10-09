@@ -41,6 +41,29 @@ jobs:
           sh "$GITHUB_WORKSPACE/scripts/install.sh" "" "$RUNNER_TEMP/b"
           "$RUNNER_TEMP/b/clif" version | grep -x 'cfmleditor-lsp 0.4.1'
 
+      # No published release has the archive yet, so a mirror stands in, with
+      # scripts in place of the two binaries.
+      - name: A clif-with-cflint archive installs cflint beside clif
+        run: |
+          set -eu
+          case "$(uname -s)-$(uname -m)" in
+          Darwin-arm64) platform=darwin-arm64 ;;
+          Darwin-x86_64) platform=darwin-amd64 ;;
+          Linux-aarch64) platform=linux-arm64 ;;
+          *) platform=linux-amd64 ;;
+          esac
+          src="$RUNNER_TEMP/bundle" rel="$RUNNER_TEMP/mirror/download/v9.0.0"
+          mkdir -p "$src" "$rel"
+          printf '#!/bin/sh\necho clif 9.0.0\n' > "$src/clif"
+          printf '#!/bin/sh\necho CFLint 1.5.17\n' > "$src/cflint"
+          chmod 755 "$src/clif" "$src/cflint"
+          tar czf "$rel/clif-with-cflint-$platform.tar.gz" -C "$src" clif cflint
+          (cd "$rel" && shasum -a 256 "clif-with-cflint-$platform.tar.gz" > checksums.txt)
+
+          CLIF_DOWNLOAD_URL="file://$RUNNER_TEMP/mirror" sh scripts/install.sh 9.0.0 "$RUNNER_TEMP/d"
+          "$RUNNER_TEMP/d/clif" version | grep -x 'clif 9.0.0'
+          "$RUNNER_TEMP/d/cflint" | grep -x 'CFLint 1.5.17'
+
       - name: A version that does not exist fails
         run: |
           if sh scripts/install.sh 9.9.9 "$RUNNER_TEMP/c"; then

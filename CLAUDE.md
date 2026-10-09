@@ -1060,8 +1060,13 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `s.builtinFuncItems()`, not `getBuiltinFuncItems()`, anywhere a list goes to
   a client. `TestResolvedItemsMatchTheFullOnes` resolves every deferred item and
   compares it with the full one.
-- Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
-  the binary from `cfmleditor/CFLint` releases on first use.
+- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes the
+  first of: a `cflint` beside the running clif, symlinks followed (`bundledBinary`; the
+  release's `clif-with-cflint-<platform>` archives carry one at the version
+  `scripts/fetch-cflint.sh` pins, and every package manager and install script installs
+  those), a `cflint` on PATH, and a download from `cfmleditor/CFLint` releases, cached.
+  The lean `clif-<platform>` archives stay CFLint-free because editor extensions download
+  them. `TestTheCFLintBesideClifComesFirst`.
 
   **`mapSeverity` may return only Error or Warning.** CFLint's seven levels
   (`com.cflint.Levels`: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC,

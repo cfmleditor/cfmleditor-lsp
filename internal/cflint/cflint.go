@@ -514,8 +514,45 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
+// executable is os.Executable, replaced by a test so it can place a CFLint
+// beside a clif that is not the test binary.
+var executable = os.Executable
+
+// bundledBinary is the CFLint shipped beside clif, or "" when there is none.
+// The release's clif-with-cflint archives carry one, and every package manager
+// and install script installs from them, so an installed clif lints with no
+// download at all. The link is followed first: Homebrew and winget put a
+// symlink to clif on PATH, and the CFLint is beside what it points at.
+func bundledBinary() string {
+	exe, err := executable()
+	if err != nil {
+		return ""
+	}
+
+	if target, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = target
+	}
+
+	name := "cflint"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+
+	p := filepath.Join(filepath.Dir(exe), name)
+	if info, err := os.Stat(p); err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+
+	return p
+}
+
+// ensureBinary finds CFLint: the one shipped beside clif, then one on PATH,
+// then the cached download, then a download.
 func ensureBinary(ctx context.Context) (string, error) {
-	// Prefer a local binary on PATH
+	if p := bundledBinary(); p != "" {
+		return p, nil
+	}
+
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
 	}
