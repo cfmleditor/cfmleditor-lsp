@@ -4,6 +4,9 @@
 #
 #   scripts/fetch-cflint.sh <goos> <goarch> [<file>]
 #
+# Exits 3 for a platform CFLint publishes no build for. `make build` builds
+# without CFLint after any failure, with a warning; the release workflow fails.
+#
 # Writes CFLint's release asset as published (a .tar.gz, or a .zip on Windows)
 # to <file>, by default internal/cflint/embedded/cflint.archive, where a build
 # with -tags cflint_embed embeds it (internal/cflint/embedded.go). clif unpacks
@@ -30,9 +33,23 @@ linux/amd64) asset=cflint-linux-amd64.tar.gz sum=0813981b8e6f500a61d81b022e45556
 windows/amd64) asset=cflint-windows-amd64.zip sum=5a55fe060570fde20b370380cfa6de4cd88c3387fafced63b25e1ee3789539e8 ;;
 *)
 	echo "fetch-cflint: no CFLint build for ${goos}/${goarch}" >&2
-	exit 1
+	exit 3
 	;;
 esac
+
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+# Already there and the pinned one: nothing to download.
+if [ -f "${out}" ] && [ "$(sha256 "${out}")" = "${sum}" ]; then
+	echo "CFLint ${CFLINT_VERSION} for ${goos}/${goarch} already in ${out}"
+	exit 0
+fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -40,11 +57,7 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL --retry 3 -o "${tmp}/${asset}" \
 	"https://github.com/cfmleditor/CFLint/releases/download/${CFLINT_VERSION}/${asset}"
 
-if command -v sha256sum >/dev/null 2>&1; then
-	got="$(sha256sum "${tmp}/${asset}" | cut -d' ' -f1)"
-else
-	got="$(shasum -a 256 "${tmp}/${asset}" | cut -d' ' -f1)"
-fi
+got="$(sha256 "${tmp}/${asset}")"
 
 if [ "${got}" != "${sum}" ]; then
 	echo "fetch-cflint: ${asset} ${CFLINT_VERSION} is ${got}, pinned ${sum}" >&2

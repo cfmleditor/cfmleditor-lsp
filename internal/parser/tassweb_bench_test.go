@@ -11,6 +11,12 @@ import (
 )
 
 func TestBenchTasswebParse(t *testing.T) {
+	// A timing run over a whole workspace, not a check: under -race it takes
+	// longer than go test's ten-minute limit, which made `make check` fail.
+	if testing.Short() {
+		t.Skip("whole-workspace timing; run without -short")
+	}
+
 	root := os.ExpandEnv("$HOME/tassdev/tassweb")
 	if _, err := os.Stat(root); err != nil {
 		t.Skip("tassweb not found")

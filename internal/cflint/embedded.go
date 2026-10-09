@@ -12,7 +12,7 @@ import _ "embed" // for the CFLint a release build carries
 //
 // Building with the tag from a fresh checkout fails with "pattern
 // embedded/cflint.archive: no matching files found": run
-// scripts/fetch-cflint.sh first, or `make build-embedded`, which does.
+// scripts/fetch-cflint.sh first, or `make build`, which does.
 //
 // A string rather than a []byte, so the 30MB stays in read-only data.
 //
