@@ -803,7 +803,9 @@ func copyFromZip(dst io.Writer, src io.Reader, tmpDir string) error {
 }
 
 // embeddedBinary unpacks the CFLint this build carries into the cache, where
-// fallbackVersion's download would go, once; later runs find it there.
+// fallbackVersion's download would go, once; later runs find it there. With no
+// usable cache ($HOME unset, a read-only home) it unpacks into a fresh private
+// temporary directory instead, so a locked-down machine still lints.
 func embeddedBinary() (string, error) {
 	name := binaryName()
 	if name == "" {
@@ -811,10 +813,23 @@ func embeddedBinary() (string, error) {
 	}
 
 	dir, err := cacheDir(fallbackVersion)
-	if err != nil {
-		return "", err
+	if err == nil {
+		var p string
+		if p, err = unpackEmbedded(dir, name); err == nil {
+			return p, nil
+		}
 	}
 
+	tmp, tmpErr := os.MkdirTemp("", "clif-cflint-")
+	if tmpErr != nil {
+		return "", fmt.Errorf("unpacking the embedded cflint: %w", errors.Join(err, tmpErr))
+	}
+
+	return unpackEmbedded(tmp, name)
+}
+
+// unpackEmbedded leaves the embedded CFLint at dir/name, unless it is there.
+func unpackEmbedded(dir, name string) (string, error) {
 	binPath := filepath.Join(dir, name)
 	if _, err := os.Stat(binPath); err == nil {
 		return binPath, nil

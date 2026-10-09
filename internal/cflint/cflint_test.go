@@ -675,10 +675,7 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 
 	want := []byte("the embedded cflint")
 
-	archive := tarGzOf(t, "cflint", want)
-	if runtime.GOOS == "windows" {
-		archive = zipOf(t, "cflint.exe", want)
-	}
+	archive := assetBody(t, embeddedAssetName(), want)
 
 	previous := embeddedCFLint
 	embeddedCFLint = archive
@@ -718,6 +715,52 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 	if p, err := ensureBinary(t.Context()); err != nil || p != filepath.Join(onPath, "cflint"+exe) {
 		t.Errorf("ensureBinary = %q, %v; want the one on PATH", p, err)
 	}
+}
+
+// With no usable cache directory the embedded CFLint still runs, from a
+// private temporary directory.
+func TestTheEmbeddedCFLintNeedsNoCacheDirectory(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("LocalAppData", "")
+
+	if _, err := os.UserCacheDir(); err == nil {
+		t.Skip("the cache directory cannot be unset here")
+	}
+
+	if binaryName() == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	want := []byte("the embedded cflint")
+
+	archive := assetBody(t, embeddedAssetName(), want)
+
+	previous := embeddedCFLint
+	embeddedCFLint = archive
+
+	t.Cleanup(func() { embeddedCFLint = previous })
+
+	got, err := ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(got)) })
+
+	if body, err := os.ReadFile(got); err != nil || !bytes.Equal(body, want) {
+		t.Errorf("ensureBinary = %q holding %q (%v), want the embedded binary", got, body, err)
+	}
+}
+
+// embeddedAssetName is a name with the archive type this platform embeds.
+func embeddedAssetName() string {
+	if runtime.GOOS == "windows" {
+		return "cflint.zip"
+	}
+
+	return "cflint.tar.gz"
 }
 
 // A release build embeds the CFLint scripts/fetch-cflint.sh names, and caches
