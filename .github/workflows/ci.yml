@@ -31,6 +31,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Release builds embed CFLint (-tags cflint_embed); compile that path
+      # here too, against a stand-in archive, so a break shows before a tag.
+      - name: Vet the CFLint-embedding build
+        run: |
+          touch internal/cflint/embedded/cflint.archive
+          go vet -tags cflint_embed ./internal/cflint/ ./cmd/clif/
+          go test -short -tags cflint_embed ./internal/cflint/
+
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)

@@ -22,8 +22,9 @@ type tool struct {
 // confirmation, and nothing in this server writes.
 var readOnly = map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true}
 
-// runsCFLint marks lint, which writes nothing either but starts a Java process,
-// and on first use downloads CFLint: open-world, in MCP's terms.
+// runsCFLint marks lint, which writes nothing either but starts a CFLint
+// process, and in a build without CFLint embedded downloads it on first use:
+// open-world, in MCP's terms.
 var runsCFLint = map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": true}
 
 func strList(desc string) map[string]any {
@@ -225,8 +226,8 @@ func (s *Server) taskTools() []tool {
 			Title: "Run CFLint",
 			Description: "Run CFLint over files or directories and return its findings: path, line, " +
 				"column, severity, rule and message. linting.minSeverity in .clif.json sets the " +
-				"least severe level reported. It starts a Java process, downloads CFLint on first " +
-				"use, and writes no report. CFLint reports some rules (MISSING_VAR, IMPLICIT_SCOPE) " +
+				"least severe level reported. It starts a CFLint process (released clif builds carry " +
+				"CFLint; others download it on first use) and writes no report. CFLint reports some rules (MISSING_VAR, IMPLICIT_SCOPE) " +
 				"once per name per run, so lint one file to see all of its findings.",
 			InputSchema: obj(map[string]any{
 				"paths": strList("Files or directories, absolute or relative to the server's working directory."),

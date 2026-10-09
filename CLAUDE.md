@@ -89,7 +89,7 @@ regeneration then drops every Lucee-only entry (`cfdistributedlock`, `cfstatic`,
 deletion** — `git checkout -- internal/docs/generated_docs.go`. Only commit a change to that
 file when `make docs` reported both sources staged.
 
-Go toolchain is pinned at **1.27.1** (`go.mod`). CGO is required (tree-sitter grammar).
+Go toolchain is pinned at **1.27.2** (`go.mod`). CGO is required (tree-sitter grammar).
 
 ### CLI subcommands
 
@@ -1060,8 +1060,13 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `s.builtinFuncItems()`, not `getBuiltinFuncItems()`, anywhere a list goes to
   a client. `TestResolvedItemsMatchTheFullOnes` resolves every deferred item and
   compares it with the full one.
-- Diagnostics come from CFLint when `"linting": {"enabled": true}` — `internal/cflint` downloads
-  the binary from `cfmleditor/CFLint` releases on first use.
+- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes a
+  `cflint` on PATH first, then the CFLint a release build embeds (`embedded.go`, behind
+  `-tags cflint_embed`; the release workflow writes `internal/cflint/embedded/cflint.archive`
+  with `scripts/fetch-cflint.sh`, which pins the version and checksums), unpacked once into
+  the cache under `fallbackVersion`, then a download from `cfmleditor/CFLint` releases. A
+  plain `go build` embeds nothing (`embed_off.go`). `fallbackVersion` equals the script's pin
+  (`TestFallbackIsTheEmbeddedVersion`).
 
   **`mapSeverity` may return only Error or Warning.** CFLint's seven levels
   (`com.cflint.Levels`: FATAL, CRITICAL, ERROR, WARNING, CAUTION, INFO, COSMETIC,

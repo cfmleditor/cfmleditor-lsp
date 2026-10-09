@@ -19,7 +19,7 @@ LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 LEGACY_LINK := $(LINK_DIR)/$(LEGACY_BINARY)
 
-.PHONY: build build-wasm test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-embedded build-wasm test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -139,6 +139,15 @@ update-d3:
 build: generate
 	@mkdir -p target/release
 	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
+	@ln -sfn $(BINARY) $(LEGACY_OUT)
+
+# A build carrying CFLint, as releases are: fetches this platform's pinned
+# CFLint into internal/cflint/embedded/ (gitignored), which -tags cflint_embed
+# needs. Needs network.
+build-embedded: generate
+	@mkdir -p target/release
+	bash scripts/fetch-cflint.sh "$$(go env GOOS)" "$$(go env GOARCH)"
+	go build -trimpath -tags cflint_embed -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
 	@ln -sfn $(BINARY) $(LEGACY_OUT)
 
 build-wasm: generate

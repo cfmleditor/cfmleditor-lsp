@@ -115,7 +115,7 @@ carries its own `go` directive, and the build refuses to start when that is
 older than `go.mod`'s:
 
 ```
-go: module . listed in go.work file requires go >= 1.27.1, but go.work lists go 1.26.8
+go: module . listed in go.work file requires go >= 1.27.2, but go.work lists go 1.26.8
 ```
 
 Match it to the version in `go.mod` whenever that is bumped:
@@ -139,7 +139,7 @@ it is behind:
 
 ```sh
 go version -m $(command -v gopls) | head -1
-GOTOOLCHAIN=go1.27.1 go install golang.org/x/tools/gopls@latest
+GOTOOLCHAIN=go1.27.2 go install golang.org/x/tools/gopls@latest
 ```
 
 Editors that manage their own copy need pointing at the rebuilt one, or their
@@ -631,7 +631,7 @@ how calls resolve. Lists are capped at 200 by default, with the total alongside.
 ```
 
 `--allow-lint` adds `lint`, CFLint's findings as JSON. It is off by default because
-it starts a Java process and downloads CFLint on first use; it writes no report.
+it starts a CFLint process; it writes no report.
 
 `--db <file>` loads the code map `graph --db` built, and adds `search_symbols`,
 `get_symbol`, `get_callers`, `get_callees`, `find_path`, `list_islands`,
@@ -1039,9 +1039,14 @@ top-level keys, `references` additionally defaulting to *off*.
 
 ### Linting
 
-CFLint diagnostics are off by default and enabled per workspace. The binary is
-downloaded from the `cfmleditor/CFLint` releases on first use, unless a `cflint`
-is already on `PATH`, which wins:
+CFLint diagnostics are off by default and enabled per workspace. A released
+clif carries CFLint inside it (the native build, so no Java), at the version
+`scripts/fetch-cflint.sh` pins, and unpacks it into its cache the first time it
+lints, so linting needs no download. CFLint's licence is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which each release archive
+carries. A `cflint` already on `PATH` wins. A clif
+built from source has none inside, and downloads the latest from the
+`cfmleditor/CFLint` releases on first use:
 
 ```json
 {

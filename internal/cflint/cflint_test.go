@@ -655,3 +655,186 @@ func useTempCache(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
 	t.Setenv("LocalAppData", filepath.Join(dir, "cache"))
 }
+
+// A release build's embedded CFLint is unpacked into the cache once and used
+// with no download; a cflint on PATH still wins.
+func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
+	useTempCache(t)
+	useFakeReleases(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("a download was attempted")
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	onPath := t.TempDir()
+	t.Setenv("PATH", onPath)
+
+	name := binaryName()
+	if name == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	want := []byte("the embedded cflint")
+
+	archive := assetBody(t, embeddedAssetName(), want)
+
+	previous := embeddedCFLint
+	embeddedCFLint = string(archive)
+
+	t.Cleanup(func() { embeddedCFLint = previous })
+
+	got, err := ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if body, err := os.ReadFile(got); err != nil || !bytes.Equal(body, want) {
+		t.Fatalf("ensureBinary = %q holding %q (%v), want the embedded binary", got, body, err)
+	}
+
+	if !strings.Contains(filepath.ToSlash(got), "/"+fallbackVersion+"/") {
+		t.Errorf("ensureBinary = %q, want it cached under %s", got, fallbackVersion)
+	}
+
+	// Windows runs a file by its extension; everywhere else it needs the bit.
+	if info, err := os.Stat(got); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
+		t.Errorf("ensureBinary = %q is not executable (%v)", got, err)
+	}
+
+	// A cached file of the wrong size (a truncated download) is replaced.
+	if err := os.WriteFile(got, want[:4], 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if again, err := ensureBinary(t.Context()); err != nil || again != got {
+		t.Fatalf("ensureBinary over a truncated cache = %q, %v; want %q", again, err, got)
+	}
+
+	if body, _ := os.ReadFile(got); !bytes.Equal(body, want) {
+		t.Errorf("truncated cached binary was kept: %q, want %q", body, want)
+	}
+
+	// Unpacked once: a second call finds it in the cache.
+	embeddedCFLint = "not an archive"
+
+	if again, err := ensureBinary(t.Context()); err != nil || again != got {
+		t.Errorf("second ensureBinary = %q, %v; want the cached %q", again, err, got)
+	}
+
+	// A cflint on PATH is a team's own choice, and outranks the embedded one.
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+
+	if err := os.WriteFile(filepath.Join(onPath, "cflint"+exe), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if p, err := ensureBinary(t.Context()); err != nil || p != filepath.Join(onPath, "cflint"+exe) {
+		t.Errorf("ensureBinary = %q, %v; want the one on PATH", p, err)
+	}
+}
+
+// With no usable cache directory the embedded CFLint still runs, from a
+// private temporary directory.
+func TestTheEmbeddedCFLintNeedsNoCacheDirectory(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("LocalAppData", "")
+
+	if _, err := os.UserCacheDir(); err == nil {
+		t.Skip("the cache directory cannot be unset here")
+	}
+
+	if binaryName() == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	want := []byte("the embedded cflint")
+
+	archive := assetBody(t, embeddedAssetName(), want)
+
+	previous := embeddedCFLint
+	embeddedCFLint = string(archive)
+
+	t.Cleanup(func() { embeddedCFLint = previous })
+
+	got, err := ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(got)) })
+
+	if body, err := os.ReadFile(got); err != nil || !bytes.Equal(body, want) {
+		t.Errorf("ensureBinary = %q holding %q (%v), want the embedded binary", got, body, err)
+	}
+}
+
+// embeddedAssetName is a name with the archive type this platform embeds.
+func embeddedAssetName() string {
+	if runtime.GOOS == "windows" {
+		return "cflint.zip"
+	}
+
+	return "cflint.tar.gz"
+}
+
+// A release build embeds the CFLint scripts/fetch-cflint.sh names, and caches
+// it as fallbackVersion; the two are one version.
+func TestFallbackIsTheEmbeddedVersion(t *testing.T) {
+	_, here, _, _ := runtime.Caller(0)
+
+	script, err := os.ReadFile(filepath.Join(filepath.Dir(here), "..", "..", "scripts", "fetch-cflint.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pinned := ""
+
+	for line := range strings.Lines(string(script)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "CFLINT_VERSION="); ok {
+			pinned = v
+		}
+	}
+
+	if pinned != fallbackVersion {
+		t.Errorf("scripts/fetch-cflint.sh pins CFLINT_VERSION=%q, want the fallbackVersion %q", pinned, fallbackVersion)
+	}
+}
+
+// A rename that fails because another clif put the binary there first (what
+// Windows does when that copy is already running) is not an error; one that
+// fails with nothing usable there still is.
+func TestInstallAssetToleratesLosingTheRace(t *testing.T) {
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "cflint")
+	theirs := []byte("installed by the other process")
+
+	previous := rename
+
+	t.Cleanup(func() { rename = previous })
+
+	rename = func(_, newPath string) error {
+		if err := os.WriteFile(newPath, theirs, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		return errors.New("access is denied")
+	}
+
+	if err := installAsset(bytes.NewReader([]byte("ours")), binPath, rawBinary); err != nil {
+		t.Fatalf("installAsset = %v, want the other process's copy accepted", err)
+	}
+
+	if got, _ := os.ReadFile(binPath); !bytes.Equal(got, theirs) {
+		t.Errorf("binary holds %q, want the other process's %q", got, theirs)
+	}
+
+	rename = func(string, string) error { return errors.New("access is denied") }
+
+	if err := installAsset(bytes.NewReader([]byte("ours")), filepath.Join(dir, "other"), rawBinary); err == nil {
+		t.Error("installAsset = nil with nothing at the destination, want the rename's error")
+	}
+}

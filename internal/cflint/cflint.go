@@ -29,7 +29,9 @@ const (
 	// Only used when the releases API cannot be reached; the normal path
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
-	fallbackVersion = "1.5.16"
+	// It is also the version a release build embeds: scripts/fetch-cflint.sh
+	// pins the same one (TestFallbackIsTheEmbeddedVersion).
+	fallbackVersion = "1.5.17"
 	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
 )
 
@@ -514,10 +516,17 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
+// ensureBinary finds CFLint: one on PATH, which has always won so a team can
+// pin its own; then the one a release build of clif carries inside it
+// (embedded.go), unpacked into the cache once; then a cached download, then a
+// download.
 func ensureBinary(ctx context.Context) (string, error) {
-	// Prefer a local binary on PATH
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
+	}
+
+	if embeddedCFLint != "" {
+		return embeddedBinary()
 	}
 
 	name := binaryName()
@@ -646,6 +655,16 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		return fmt.Errorf("downloading cflint: HTTP %d", resp.StatusCode)
 	}
 
+	return installAsset(resp.Body, binPath, kind)
+}
+
+// rename is os.Rename, replaced by a test to lose the race installAsset
+// tolerates.
+var rename = os.Rename
+
+// installAsset unpacks an asset's executable to binPath, beside it first and
+// renamed into place, for the reason fetchAsset gives.
+func installAsset(src io.Reader, binPath string, kind assetKind) error {
 	dir := filepath.Dir(binPath)
 
 	tmp, err := os.CreateTemp(dir, filepath.Base(binPath)+".part-*")
@@ -660,7 +679,7 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		_ = os.Remove(tmpPath) // no-op once the rename below has succeeded
 	}()
 
-	if err := writeBinary(tmp, resp.Body, kind, dir); err != nil {
+	if err := writeBinary(tmp, src, kind, dir); err != nil {
 		return err
 	}
 
@@ -672,7 +691,18 @@ func fetchAsset(ctx context.Context, url, binPath string, kind assetKind) error 
 		return err
 	}
 
-	return os.Rename(tmpPath, binPath)
+	if err := rename(tmpPath, binPath); err != nil {
+		// Another clif unpacking or downloading the same binary got there
+		// first. Windows refuses to rename over an executable that is running,
+		// so its copy, already in use, is the answer rather than an error.
+		if info, statErr := os.Stat(binPath); statErr == nil && info.Mode().IsRegular() {
+			return nil
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 // writeBinary copies the executable out of a downloaded asset.
@@ -784,4 +814,99 @@ func copyFromZip(dst io.Writer, src io.Reader, tmpDir string) error {
 	defer func() { _ = entry.Close() }()
 
 	return copyBinary(dst, entry)
+}
+
+// embeddedBinary unpacks the CFLint this build carries into the cache, where
+// fallbackVersion's download would go, once; later runs find it there. With no
+// usable cache ($HOME unset, a read-only home) it unpacks into a fresh private
+// temporary directory instead, so a locked-down machine still lints.
+func embeddedBinary() (string, error) {
+	name := binaryName()
+	if name == "" {
+		return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	dir, err := cacheDir(fallbackVersion)
+	if err == nil {
+		var p string
+		if p, err = unpackEmbedded(dir, name); err == nil {
+			return p, nil
+		}
+	}
+
+	tmp, tmpErr := os.MkdirTemp("", "clif-cflint-")
+	if tmpErr != nil {
+		return "", fmt.Errorf("unpacking the embedded cflint: %w", errors.Join(err, tmpErr))
+	}
+
+	return unpackEmbedded(tmp, name)
+}
+
+// unpackEmbedded leaves the embedded CFLint at dir/name, unless it is there.
+// A file there of another size is replaced: a truncated one, which a download
+// from before downloads were atomic could leave, would otherwise fail every
+// lint although this binary holds a good copy.
+func unpackEmbedded(dir, name string) (string, error) {
+	kind := tarGz
+	if runtime.GOOS == "windows" {
+		kind = zipped
+	}
+
+	binPath := filepath.Join(dir, name)
+	if info, err := os.Stat(binPath); err == nil && sizeMatchesEmbedded(info.Size(), kind) {
+		return binPath, nil
+	}
+
+	if err := installAsset(strings.NewReader(embeddedCFLint), binPath, kind); err != nil {
+		return "", fmt.Errorf("unpacking the embedded cflint: %w", err)
+	}
+
+	return binPath, nil
+}
+
+// sizeMatchesEmbedded says whether a cached binary is the embedded one's size,
+// and trusts it when that size cannot be read.
+func sizeMatchesEmbedded(size int64, kind assetKind) bool {
+	want, err := embeddedSize(kind)
+
+	return err != nil || size == want
+}
+
+// embeddedSize is the size of the executable in the embedded archive, read
+// from the tar header or the zip directory without unpacking it.
+func embeddedSize(kind assetKind) (int64, error) {
+	if kind == zipped {
+		archive, err := zip.NewReader(strings.NewReader(embeddedCFLint), int64(len(embeddedCFLint)))
+		if err != nil {
+			return 0, err
+		}
+
+		for _, file := range archive.File {
+			if !file.FileInfo().IsDir() {
+				return int64(file.UncompressedSize64), nil //nolint:gosec // an executable's size fits in int64
+			}
+		}
+
+		return 0, errors.New("cflint archive held no executable")
+	}
+
+	gz, err := gzip.NewReader(strings.NewReader(embeddedCFLint))
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = gz.Close() }()
+
+	archive := tar.NewReader(gz)
+
+	for {
+		header, err := archive.Next()
+		if err != nil {
+			return 0, err
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			return header.Size, nil
+		}
+	}
 }
