@@ -39,9 +39,11 @@ still look for the old name, `cfmleditor-lsp` beside it; winget installs
 `clif`. Every one of them, and both install scripts, also installs the
 [CFLint](#replacing-cflint) clif lints with, next to clif, so linting needs no
 download on first use: each installs the release's
-`clif-with-cflint-<platform>` archive. Homebrew, Scoop, Chocolatey and winget
-keep that CFLint off `PATH`; the install scripts put `cflint` in the same
-directory as `clif`. Every release also has the plain `clif-<platform>`
+`clif-with-cflint-<platform>` archive. Homebrew, Scoop and Chocolatey keep
+that CFLint off `PATH`, and so does winget where it can link `clif` onto
+`PATH` (without symlinks it adds its whole package directory instead). The
+install scripts put `cflint` in the same directory as `clif`, leaving a
+`cflint` they did not install there in place. Every release also has the plain `clif-<platform>`
 archives, without CFLint, on the
 [releases page](https://github.com/cfmleditor/clif/releases). The VS Code and
 Zed CFML extensions download one of those, so neither needs this.
@@ -1047,11 +1049,11 @@ top-level keys, `references` additionally defaulting to *off*.
 ### Linting
 
 CFLint diagnostics are off by default and enabled per workspace. clif uses the
-first CFLint it finds of: the one beside the `clif` binary (every package
-manager and install script puts one there, from the release's
-`clif-with-cflint` archive, at the version `scripts/fetch-cflint.sh` pins), a
-`cflint` on `PATH`, and one downloaded from the `cfmleditor/CFLint` releases on
-first use and cached:
+first CFLint it finds of: a `cflint` on `PATH`, which wins so a team can pin
+its own; the one beside the `clif` binary (every package manager and install
+script puts one there, from the release's `clif-with-cflint` archive, at the
+version `scripts/fetch-cflint.sh` pins); and one downloaded from the
+`cfmleditor/CFLint` releases on first use and cached:
 
 ```json
 {

@@ -679,9 +679,9 @@ func writeExecutable(t *testing.T, path string) {
 	}
 }
 
-// A CFLint shipped beside clif is used ahead of one on PATH and of any
-// download, and is found through the symlink Homebrew and winget put on PATH.
-func TestTheCFLintBesideClifComesFirst(t *testing.T) {
+// A CFLint shipped beside clif is used ahead of any download, and is found
+// through the symlink Homebrew and winget put on PATH; one on PATH still wins.
+func TestTheCFLintBesideClifComesBeforeADownload(t *testing.T) {
 	useTempCache(t)
 	useFakeReleases(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("a download was attempted")
@@ -699,7 +699,10 @@ func TestTheCFLintBesideClifComesFirst(t *testing.T) {
 	writeExecutable(t, filepath.Join(install, "cflint"+exe))
 
 	onPath := filepath.Join(root, "path")
-	writeExecutable(t, filepath.Join(onPath, "cflint"+exe))
+	if err := os.MkdirAll(onPath, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Setenv("PATH", onPath)
 
 	link := filepath.Join(root, "bin", "clif"+exe)
@@ -723,15 +726,8 @@ func TestTheCFLintBesideClifComesFirst(t *testing.T) {
 		t.Errorf("ensureBinary = %q, want the bundled %q", got, want)
 	}
 
-	// Without one beside clif, PATH answers as it always has. A directory
-	// called cflint is not a binary.
-	if err := os.Remove(filepath.Join(install, "cflint"+exe)); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.Mkdir(filepath.Join(install, "cflint"+exe), 0o750); err != nil {
-		t.Fatal(err)
-	}
+	// A cflint on PATH is a team's own choice, and outranks the bundled one.
+	writeExecutable(t, filepath.Join(onPath, "cflint"+exe))
 
 	got, err = ensureBinary(t.Context())
 	if err != nil {
@@ -740,5 +736,38 @@ func TestTheCFLintBesideClifComesFirst(t *testing.T) {
 
 	if want := filepath.Join(onPath, "cflint"+exe); got != want {
 		t.Errorf("ensureBinary = %q, want the one on PATH, %q", got, want)
+	}
+
+	// A directory called cflint beside clif is not a binary.
+	if err := os.Remove(filepath.Join(onPath, "cflint"+exe)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(filepath.Join(install, "cflint"+exe)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Mkdir(filepath.Join(install, "cflint"+exe), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if p := bundledBinary(); p != "" {
+		t.Errorf("bundledBinary = %q, want nothing for a directory", p)
+	}
+}
+
+// The release bundles the CFLint scripts/fetch-cflint.sh names, and a clif
+// without it falls back to fallbackVersion; the two are one version.
+func TestFallbackIsTheBundledVersion(t *testing.T) {
+	_, here, _, _ := runtime.Caller(0)
+
+	script, err := os.ReadFile(filepath.Join(filepath.Dir(here), "..", "..", "scripts", "fetch-cflint.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "\nCFLINT_VERSION=" + fallbackVersion + "\n"
+	if !strings.Contains(string(script), want) {
+		t.Errorf("scripts/fetch-cflint.sh does not pin CFLINT_VERSION=%s, the fallbackVersion", fallbackVersion)
 	}
 }

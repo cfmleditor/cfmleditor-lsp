@@ -29,7 +29,10 @@ const (
 	// Only used when the releases API cannot be reached; the normal path
 	// queries it and takes whatever is current. Worth refreshing occasionally
 	// anyway, so an offline first run does not start several releases behind.
-	fallbackVersion = "1.5.16"
+	// Kept equal to the CFLINT_VERSION scripts/fetch-cflint.sh bundles, so a
+	// clif without the bundled CFLint never falls back to an older one than a
+	// packaged clif ships (TestFallbackIsTheBundledVersion).
+	fallbackVersion = "1.5.17"
 	latestRelease   = "https://github.com/cfmleditor/CFLint/releases/latest"
 )
 
@@ -546,14 +549,15 @@ func bundledBinary() string {
 	return p
 }
 
-// ensureBinary finds CFLint: the one shipped beside clif, then one on PATH,
-// then the cached download, then a download.
+// ensureBinary finds CFLint: one on PATH, which has always won so a team can
+// pin its own; then the one shipped beside clif; then the cached download,
+// then a download.
 func ensureBinary(ctx context.Context) (string, error) {
-	if p := bundledBinary(); p != "" {
+	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
 	}
 
-	if p, err := exec.LookPath("cflint"); err == nil {
+	if p := bundledBinary(); p != "" {
 		return p, nil
 	}
 

@@ -76,8 +76,10 @@ jobs:
 
           # Every package installs the clif-with-cflint archive, which earlier
           # releases do not have; there is nothing to build for one of those.
-          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets -q '.assets[].name' |
-            grep -qx 'clif-with-cflint-windows-amd64.zip'; then
+          # Read whole before grep: grep -q stops at the match, and under pipefail
+          # a gh still writing would fail the pipeline with SIGPIPE.
+          assets="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets -q '.assets[].name')"
+          if grep -qx 'clif-with-cflint-windows-amd64.zip' <<< "${assets}"; then
             echo "bundled=true" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::${TAG} has no clif-with-cflint archives, so no package was built or published"

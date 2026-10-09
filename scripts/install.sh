@@ -105,16 +105,27 @@ else
 	echo "clif install: $version has no checksums.txt, so $asset was not verified" >&2
 fi
 
-tar -xzf "$tmp/archive.tar.gz" -C "$tmp"
+members=$name
+case "$asset" in clif-with-cflint-*) members="$name cflint" ;; esac
+# shellcheck disable=SC2086 # members is a list of names
+tar -xzf "$tmp/archive.tar.gz" -C "$tmp" $members
 mkdir -p "$dir"
 mv "$tmp/$name" "$dir/clif"
 chmod 755 "$dir/clif"
 
 echo "Installed $("$dir/clif" version) to $dir/clif"
+
+# A cflint this script did not put there (a wrapper around cflint.jar, say) is
+# left alone; .clif-cflint marks the one it did, which a later run replaces.
 if [ -f "$tmp/cflint" ]; then
-	mv "$tmp/cflint" "$dir/cflint"
-	chmod 755 "$dir/cflint"
-	echo "Installed $("$dir/cflint" -version 2>/dev/null | head -n 1) to $dir/cflint"
+	if [ -e "$dir/cflint" ] && [ ! -f "$dir/.clif-cflint" ]; then
+		echo "clif install: left the existing $dir/cflint in place; clif lints with it, since it is beside clif" >&2
+	else
+		mv "$tmp/cflint" "$dir/cflint"
+		chmod 755 "$dir/cflint"
+		: >"$dir/.clif-cflint"
+		echo "Installed $("$dir/cflint" -version 2>/dev/null | head -n 1) to $dir/cflint"
+	fi
 fi
 case ":$PATH:" in
 *":$dir:"*) ;;

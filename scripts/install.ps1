@@ -99,11 +99,19 @@ try {
     $installed = & $exe version
     Write-Output "Installed $installed to $exe"
 
+    # A cflint.exe this script did not put there is left alone; .clif-cflint
+    # marks the one it did, which a later run replaces.
     $cflint = Join-Path $tmp 'cflint.exe'
     if (Test-Path $cflint) {
         $dest = Join-Path $Dir 'cflint.exe'
-        Copy-Item $cflint $dest -Force
-        Write-Output "Installed CFLint to $dest"
+        $marker = Join-Path $Dir '.clif-cflint'
+        if ((Test-Path $dest) -and -not (Test-Path $marker)) {
+            Write-Warning "clif install: left the existing $dest in place; clif lints with it, since it is beside clif"
+        } else {
+            Copy-Item $cflint $dest -Force
+            New-Item -ItemType File -Path $marker -Force | Out-Null
+            Write-Output "Installed CFLint to $dest"
+        }
     }
 
     $onPath = ($env:PATH -split ';') | Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') }

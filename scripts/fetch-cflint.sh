@@ -7,9 +7,11 @@
 # Writes <dir>/cflint (cflint.exe on Windows). The release workflow packs it
 # into clif-with-cflint-<goos>-<goarch>, which every package manager and
 # install script installs, so an installed clif lints without downloading
-# anything. internal/cflint looks beside the running clif first.
+# anything. internal/cflint looks beside the running clif after PATH.
 #
-# To move to a newer CFLint, change CFLINT_VERSION and the five checksums: each
+# To move to a newer CFLint, change CFLINT_VERSION, fallbackVersion in
+# internal/cflint/cflint.go (a test holds the two equal) and the five
+# checksums: each
 # is the sha256 of that release's .tar.gz (.zip on Windows), which GitHub lists
 # as the asset's digest:
 #   gh api repos/cfmleditor/CFLint/releases/tags/<version> --jq '.assets[] | "\(.name) \(.digest)"'
