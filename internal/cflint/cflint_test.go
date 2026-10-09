@@ -700,6 +700,19 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 		t.Errorf("ensureBinary = %q is not executable (%v)", got, err)
 	}
 
+	// A cached file of the wrong size (a truncated download) is replaced.
+	if err := os.WriteFile(got, want[:4], 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if again, err := ensureBinary(t.Context()); err != nil || again != got {
+		t.Fatalf("ensureBinary over a truncated cache = %q, %v; want %q", again, err, got)
+	}
+
+	if body, _ := os.ReadFile(got); !bytes.Equal(body, want) {
+		t.Errorf("truncated cached binary was kept: %q, want %q", body, want)
+	}
+
 	// Unpacked once: a second call finds it in the cache.
 	embeddedCFLint = []byte("not an archive")
 

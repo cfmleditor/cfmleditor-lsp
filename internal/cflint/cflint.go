@@ -844,15 +844,18 @@ func embeddedBinary() (string, error) {
 }
 
 // unpackEmbedded leaves the embedded CFLint at dir/name, unless it is there.
+// A file there of another size is replaced: a truncated one, which a download
+// from before downloads were atomic could leave, would otherwise fail every
+// lint although this binary holds a good copy.
 func unpackEmbedded(dir, name string) (string, error) {
-	binPath := filepath.Join(dir, name)
-	if _, err := os.Stat(binPath); err == nil {
-		return binPath, nil
-	}
-
 	kind := tarGz
 	if runtime.GOOS == "windows" {
 		kind = zipped
+	}
+
+	binPath := filepath.Join(dir, name)
+	if info, err := os.Stat(binPath); err == nil && sizeMatchesEmbedded(info.Size(), kind) {
+		return binPath, nil
 	}
 
 	if err := installAsset(bytes.NewReader(embeddedCFLint), binPath, kind); err != nil {
@@ -860,4 +863,51 @@ func unpackEmbedded(dir, name string) (string, error) {
 	}
 
 	return binPath, nil
+}
+
+// sizeMatchesEmbedded says whether a cached binary is the embedded one's size,
+// and trusts it when that size cannot be read.
+func sizeMatchesEmbedded(size int64, kind assetKind) bool {
+	want, err := embeddedSize(kind)
+
+	return err != nil || size == want
+}
+
+// embeddedSize is the size of the executable in the embedded archive, read
+// from the tar header or the zip directory without unpacking it.
+func embeddedSize(kind assetKind) (int64, error) {
+	if kind == zipped {
+		archive, err := zip.NewReader(bytes.NewReader(embeddedCFLint), int64(len(embeddedCFLint)))
+		if err != nil {
+			return 0, err
+		}
+
+		for _, file := range archive.File {
+			if !file.FileInfo().IsDir() {
+				return int64(file.UncompressedSize64), nil //nolint:gosec // an executable's size fits in int64
+			}
+		}
+
+		return 0, errors.New("cflint archive held no executable")
+	}
+
+	gz, err := gzip.NewReader(bytes.NewReader(embeddedCFLint))
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = gz.Close() }()
+
+	archive := tar.NewReader(gz)
+
+	for {
+		header, err := archive.Next()
+		if err != nil {
+			return 0, err
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			return header.Size, nil
+		}
+	}
 }
