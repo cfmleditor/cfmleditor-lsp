@@ -4,7 +4,6 @@ package cflint
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -526,7 +525,7 @@ func ensureBinary(ctx context.Context) (string, error) {
 		return p, nil
 	}
 
-	if len(embeddedCFLint) > 0 {
+	if embeddedCFLint != "" {
 		return embeddedBinary()
 	}
 
@@ -858,7 +857,7 @@ func unpackEmbedded(dir, name string) (string, error) {
 		return binPath, nil
 	}
 
-	if err := installAsset(bytes.NewReader(embeddedCFLint), binPath, kind); err != nil {
+	if err := installAsset(strings.NewReader(embeddedCFLint), binPath, kind); err != nil {
 		return "", fmt.Errorf("unpacking the embedded cflint: %w", err)
 	}
 
@@ -877,7 +876,7 @@ func sizeMatchesEmbedded(size int64, kind assetKind) bool {
 // from the tar header or the zip directory without unpacking it.
 func embeddedSize(kind assetKind) (int64, error) {
 	if kind == zipped {
-		archive, err := zip.NewReader(bytes.NewReader(embeddedCFLint), int64(len(embeddedCFLint)))
+		archive, err := zip.NewReader(strings.NewReader(embeddedCFLint), int64(len(embeddedCFLint)))
 		if err != nil {
 			return 0, err
 		}
@@ -891,7 +890,7 @@ func embeddedSize(kind assetKind) (int64, error) {
 		return 0, errors.New("cflint archive held no executable")
 	}
 
-	gz, err := gzip.NewReader(bytes.NewReader(embeddedCFLint))
+	gz, err := gzip.NewReader(strings.NewReader(embeddedCFLint))
 	if err != nil {
 		return 0, err
 	}

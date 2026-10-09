@@ -10,5 +10,11 @@ import _ "embed" // for the CFLint a release build carries
 // builds with -tags cflint_embed. A plain go build leaves it out (embed_off.go)
 // and downloads CFLint on first use instead.
 //
+// Building with the tag from a fresh checkout fails with "pattern
+// embedded/cflint.archive: no matching files found": run
+// scripts/fetch-cflint.sh first, or `make build-embedded`, which does.
+//
+// A string rather than a []byte, so the 30MB stays in read-only data.
+//
 //go:embed embedded/cflint.archive
-var embeddedCFLint []byte
+var embeddedCFLint string

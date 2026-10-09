@@ -678,7 +678,7 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 	archive := assetBody(t, embeddedAssetName(), want)
 
 	previous := embeddedCFLint
-	embeddedCFLint = archive
+	embeddedCFLint = string(archive)
 
 	t.Cleanup(func() { embeddedCFLint = previous })
 
@@ -714,7 +714,7 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 	}
 
 	// Unpacked once: a second call finds it in the cache.
-	embeddedCFLint = []byte("not an archive")
+	embeddedCFLint = "not an archive"
 
 	if again, err := ensureBinary(t.Context()); err != nil || again != got {
 		t.Errorf("second ensureBinary = %q, %v; want the cached %q", again, err, got)
@@ -756,7 +756,7 @@ func TestTheEmbeddedCFLintNeedsNoCacheDirectory(t *testing.T) {
 	archive := assetBody(t, embeddedAssetName(), want)
 
 	previous := embeddedCFLint
-	embeddedCFLint = archive
+	embeddedCFLint = string(archive)
 
 	t.Cleanup(func() { embeddedCFLint = previous })
 
