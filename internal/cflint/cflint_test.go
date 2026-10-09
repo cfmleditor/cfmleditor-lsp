@@ -695,6 +695,11 @@ func TestTheEmbeddedCFLintIsUsedWithoutADownload(t *testing.T) {
 		t.Errorf("ensureBinary = %q, want it cached under %s", got, fallbackVersion)
 	}
 
+	// Windows runs a file by its extension; everywhere else it needs the bit.
+	if info, err := os.Stat(got); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
+		t.Errorf("ensureBinary = %q is not executable (%v)", got, err)
+	}
+
 	// Unpacked once: a second call finds it in the cache.
 	embeddedCFLint = []byte("not an archive")
 
