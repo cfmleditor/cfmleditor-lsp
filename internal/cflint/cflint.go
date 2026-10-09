@@ -368,6 +368,15 @@ func binaryNameFor(goos, goarch string) string {
 }
 
 func cacheDir(version string) (string, error) {
+	// CLIF_CFLINT_DIR moves where CFLint is unpacked or downloaded to: a
+	// machine that refuses to run programs from the user's cache (AppLocker's
+	// default rules, a noexec mount) can name a directory it allows.
+	if dir := os.Getenv("CLIF_CFLINT_DIR"); dir != "" {
+		p := filepath.Join(dir, version)
+
+		return p, os.MkdirAll(p, 0o750) //nolint:gosec // the user names this directory on purpose
+	}
+
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -516,11 +525,23 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
-// ensureBinary finds CFLint: one on PATH, which has always won so a team can
-// pin its own; then the one a release build of clif carries inside it
-// (embedded.go), unpacked into the cache once; then a cached download, then a
-// download.
+// ensureBinary finds CFLint: the file CLIF_CFLINT names; one on PATH, which
+// has always won so a team can pin its own; then the one a release build of
+// clif carries inside it (embedded.go), unpacked into the cache once; then a
+// cached download, then a download. CLIF_CFLINT_DIR moves the cache.
 func ensureBinary(ctx context.Context) (string, error) {
+	// CLIF_CFLINT names the binary outright, ahead of everything else. Set and
+	// missing is an error rather than a fall-through: whoever set it meant
+	// that one.
+	if p := os.Getenv("CLIF_CFLINT"); p != "" {
+		info, err := os.Stat(p) //nolint:gosec // the user names this binary on purpose
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("CLIF_CFLINT=%s is not a file", p)
+		}
+
+		return p, nil
+	}
+
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
 	}

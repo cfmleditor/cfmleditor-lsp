@@ -838,3 +838,62 @@ func TestInstallAssetToleratesLosingTheRace(t *testing.T) {
 		t.Error("installAsset = nil with nothing at the destination, want the rename's error")
 	}
 }
+
+// CLIF_CFLINT names the binary ahead of PATH, and is an error when it names
+// nothing; CLIF_CFLINT_DIR is where the embedded CFLint is unpacked.
+func TestTheCFLintEnvironmentVariables(t *testing.T) {
+	useTempCache(t)
+
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+
+	onPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(onPath, "cflint"+exe), nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", onPath)
+
+	named := filepath.Join(t.TempDir(), "my-cflint"+exe)
+	if err := os.WriteFile(named, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CLIF_CFLINT", named)
+
+	if got, err := ensureBinary(t.Context()); err != nil || got != named {
+		t.Errorf("ensureBinary = %q, %v; want CLIF_CFLINT's %q", got, err, named)
+	}
+
+	t.Setenv("CLIF_CFLINT", filepath.Join(t.TempDir(), "missing"))
+
+	if got, err := ensureBinary(t.Context()); err == nil {
+		t.Errorf("ensureBinary = %q with CLIF_CFLINT naming nothing, want an error", got)
+	}
+
+	t.Setenv("CLIF_CFLINT", "")
+	t.Setenv("PATH", t.TempDir())
+
+	if binaryName() == "" {
+		t.Skipf("no CFLint build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	previous := embeddedCFLint
+	embeddedCFLint = string(assetBody(t, embeddedAssetName(), []byte("embedded")))
+
+	t.Cleanup(func() { embeddedCFLint = previous })
+
+	dir := t.TempDir()
+	t.Setenv("CLIF_CFLINT_DIR", dir)
+
+	got, err := ensureBinary(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := filepath.Join(dir, fallbackVersion, binaryName()); got != want {
+		t.Errorf("ensureBinary = %q, want it unpacked into CLIF_CFLINT_DIR as %q", got, want)
+	}
+}

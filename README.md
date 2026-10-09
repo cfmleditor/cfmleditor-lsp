@@ -1054,6 +1054,15 @@ built from source has none inside, and downloads the latest from the
 }
 ```
 
+On a machine that will not run programs from the user's cache or temp folder
+(AppLocker or WDAC default rules, a `noexec` mount), two environment variables,
+set where clif or the editor starts, take over:
+
+| Variable | Effect |
+|---|---|
+| `CLIF_CFLINT` | The CFLint binary to run, ahead of PATH and the copy inside clif. An error if it names no file |
+| `CLIF_CFLINT_DIR` | Where clif unpacks (or downloads) CFLint instead of the cache, as `<dir>/<version>/` |
+
 `minSeverity` is the least severe CFLint level still reported, named on CFLint's
 own scale — `FATAL`, `CRITICAL`, `ERROR`, `WARNING`, `CAUTION`, `INFO`,
 `COSMETIC`, in that order. Anything below it is dropped rather than merely made
