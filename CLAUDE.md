@@ -1060,12 +1060,13 @@ Declared in `Server.capabilities()` (`internal/server/server.go`):
   `s.builtinFuncItems()`, not `getBuiltinFuncItems()`, anywhere a list goes to
   a client. `TestResolvedItemsMatchTheFullOnes` resolves every deferred item and
   compares it with the full one.
-- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes a
-  `cflint` on PATH first, then the CFLint a release build embeds (`embedded.go`, behind
+- Diagnostics come from CFLint when `"linting": {"enabled": true}`. `ensureBinary` takes
+  the file `CLIF_CFLINT` names first (an error if missing), then a `cflint` on PATH, then the CFLint a release build embeds (`embedded.go`, behind
   `-tags cflint_embed`; the release workflow writes `internal/cflint/embedded/cflint.archive`
   with `scripts/fetch-cflint.sh`, which pins the version and checksums), unpacked once into
   the cache under `fallbackVersion`, then a download from `cfmleditor/CFLint` releases. A
-  plain `go build` embeds nothing (`embed_off.go`). `fallbackVersion` equals the script's pin
+  plain `go build` embeds nothing (`embed_off.go`). `CLIF_CFLINT_DIR` replaces the cache
+  directory, for machines that will not run programs from it. `fallbackVersion` equals the script's pin
   (`TestFallbackIsTheEmbeddedVersion`).
 
   **`mapSeverity` may return only Error or Warning.** CFLint's seven levels

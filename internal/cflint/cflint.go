@@ -368,6 +368,25 @@ func binaryNameFor(goos, goarch string) string {
 }
 
 func cacheDir(version string) (string, error) {
+	// CLIF_CFLINT_DIR moves where CFLint is unpacked or downloaded to: a
+	// machine that refuses to run programs from the user's cache (AppLocker's
+	// default rules, a noexec mount) can name a directory it allows.
+	// Made absolute, so the LSP daemon and the CLI, started from different
+	// directories, agree on where it is.
+	if dir := os.Getenv("CLIF_CFLINT_DIR"); dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return "", fmt.Errorf("CLIF_CFLINT_DIR=%s: %w", dir, err)
+		}
+
+		p := filepath.Join(abs, version)
+		if err := os.MkdirAll(p, 0o750); err != nil { //nolint:gosec // the user names this directory on purpose
+			return "", fmt.Errorf("CLIF_CFLINT_DIR=%s: %w", dir, err)
+		}
+
+		return p, nil
+	}
+
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -516,11 +535,18 @@ func assetsFor(goos, goarch string) []asset {
 	}
 }
 
-// ensureBinary finds CFLint: one on PATH, which has always won so a team can
-// pin its own; then the one a release build of clif carries inside it
-// (embedded.go), unpacked into the cache once; then a cached download, then a
-// download.
+// ensureBinary finds CFLint: the file CLIF_CFLINT names; one on PATH, which
+// has always won so a team can pin its own; then the one a release build of
+// clif carries inside it (embedded.go), unpacked into the cache once; then a
+// cached download, then a download. CLIF_CFLINT_DIR moves the cache.
 func ensureBinary(ctx context.Context) (string, error) {
+	// CLIF_CFLINT names the binary outright, ahead of everything else. Set and
+	// missing is an error rather than a fall-through: whoever set it meant
+	// that one.
+	if p := os.Getenv("CLIF_CFLINT"); p != "" {
+		return namedBinary(p)
+	}
+
 	if p, err := exec.LookPath("cflint"); err == nil {
 		return p, nil
 	}
@@ -834,6 +860,13 @@ func embeddedBinary() (string, error) {
 		}
 	}
 
+	// A directory someone named is where it goes or nowhere: falling back to
+	// temp would run CFLint from the place CLIF_CFLINT_DIR exists to avoid,
+	// and fail there with an error that hides the real problem.
+	if os.Getenv("CLIF_CFLINT_DIR") != "" {
+		return "", err
+	}
+
 	tmp, tmpErr := os.MkdirTemp("", "clif-cflint-")
 	if tmpErr != nil {
 		return "", fmt.Errorf("unpacking the embedded cflint: %w", errors.Join(err, tmpErr))
@@ -909,4 +942,26 @@ func embeddedSize(kind assetKind) (int64, error) {
 			return header.Size, nil
 		}
 	}
+}
+
+// namedBinary checks the CFLint CLIF_CFLINT names and makes its path
+// absolute: Runner.run sets the command's directory to the one being linted,
+// and a relative path would be looked for there.
+func namedBinary(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("CLIF_CFLINT=%s: %w", p, err)
+	}
+
+	info, err := os.Stat(abs) //nolint:gosec // the user names this binary on purpose
+	if err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("CLIF_CFLINT=%s is not a file", p)
+	}
+
+	// Windows runs a file by its extension; everywhere else it needs the bit.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("CLIF_CFLINT=%s is not executable", p)
+	}
+
+	return abs, nil
 }
