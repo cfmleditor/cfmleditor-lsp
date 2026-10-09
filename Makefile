@@ -19,7 +19,7 @@ LINK_DIR ?= $(GOBIN_DIR)
 LINK := $(LINK_DIR)/$(BINARY)
 LEGACY_LINK := $(LINK_DIR)/$(LEGACY_BINARY)
 
-.PHONY: build build-embedded build-wasm test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
+.PHONY: build build-wasm check test conformance framework-stubs conformance-summary corpus gapcheck resolution-report shrink install link unlink link-status clean docs docs-cfdocs docs-lucee docs-assemble generate cfparse cfparse-build update-grammar vuln release release-dry
 
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
@@ -136,18 +136,17 @@ update-d3:
 		&& { echo "ERROR: the bundle contains </script and cannot be inlined"; exit 1; } || true
 	@echo "Rebuilt $(VENDOR)/d3.bundle.js ($$(wc -c < $(VENDOR)/d3.bundle.js) bytes) - commit it"
 
+# Built as releases are, with CFLint inside: scripts/fetch-cflint.sh puts this
+# platform's pinned CFLint in internal/cflint/embedded/ (gitignored, and only
+# downloaded when it is not already there) for -tags cflint_embed. On a
+# platform CFLint publishes no build for (exit 3), the build carries none and
+# downloads CFLint on first use, as `go build ./cmd/clif` does.
 build: generate
 	@mkdir -p target/release
-	go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
-	@ln -sfn $(BINARY) $(LEGACY_OUT)
-
-# A build carrying CFLint, as releases are: fetches this platform's pinned
-# CFLint into internal/cflint/embedded/ (gitignored), which -tags cflint_embed
-# needs. Needs network.
-build-embedded: generate
-	@mkdir -p target/release
-	bash scripts/fetch-cflint.sh "$$(go env GOOS)" "$$(go env GOARCH)"
-	go build -trimpath -tags cflint_embed -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
+	@tags=cflint_embed; bash scripts/fetch-cflint.sh "$$(go env GOOS)" "$$(go env GOARCH)" \
+		|| { status=$$?; [ $$status -eq 3 ] || exit $$status; tags=; }; \
+	echo go build -trimpath -tags "$$tags" -o $(OUT) ./cmd/clif; \
+	go build -trimpath -tags "$$tags" -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
 	@ln -sfn $(BINARY) $(LEGACY_OUT)
 
 build-wasm: generate
@@ -263,6 +262,26 @@ fmt: $(GOLANGCI_BIN)
 
 lint: $(GOLANGCI_BIN)
 	$(GOLANGCI_BIN) run ./...
+
+# Every check CI runs on a pull request, in one command, to run before pushing:
+# build, vet (plain and with CFLint embedded), gofmt, the tests with and without
+# the race detector, lint and govulncheck. The CFLint-embedding build is vetted
+# against an empty stand-in archive, as CI does, unless a real one is there;
+# a stand-in made here is removed afterwards.
+check: $(GOLANGCI_BIN)
+	go build ./...
+	go vet ./...
+	@archive=internal/cflint/embedded/cflint.archive; made=; \
+	if [ ! -e $$archive ]; then touch $$archive; made=1; fi; \
+	go vet -tags cflint_embed ./internal/cflint/ ./cmd/clif/ \
+		&& go test -short -tags cflint_embed ./internal/cflint/; \
+	status=$$?; if [ -n "$$made" ]; then rm -f $$archive; fi; exit $$status
+	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed on:"; echo "$$unformatted"; exit 1; fi
+	go test -short ./...
+	go test -short -race ./...
+	$(GOLANGCI_BIN) run ./...
+	$(MAKE) --no-print-directory vuln
 
 # Cache the pinned developer tool without running analysis or fetching docs.
 .PHONY: dev-tools
