@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.2]
+
 ### Added
 
 - **CFLint comes inside clif.** Release builds carry CFLint 1.5.17 (the native build, so no Java) and unpack it into the cache the first time they lint, so every install (Homebrew, Scoop, Chocolatey, winget, the install scripts, the VS Code and Zed extensions) lints with no download. The CFLint version is the one the clif release pins; a `cflint` on PATH still wins. CFLint's licence is in `THIRD_PARTY_NOTICES.md`, which each release archive carries. Binaries and archives are about 30MB larger.
