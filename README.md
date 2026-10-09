@@ -1060,8 +1060,11 @@ set where clif or the editor starts, take over:
 
 | Variable | Effect |
 |---|---|
-| `CLIF_CFLINT` | The CFLint binary to run, ahead of PATH and the copy inside clif. An error if it names no file |
-| `CLIF_CFLINT_DIR` | Where clif unpacks (or downloads) CFLint instead of the cache, as `<dir>/<version>/` |
+| `CLIF_CFLINT` | The CFLint binary to run, ahead of PATH and the copy inside clif. An error if it names no executable file |
+| `CLIF_CFLINT_DIR` | Where clif unpacks (or downloads) CFLint instead of the cache, as `<dir>/<version>/`. An error, not a fall-back to the temp folder, if it cannot be written |
+
+Use absolute paths: a relative one is read from the directory clif starts in,
+which for the editor's server is not your shell's.
 
 `minSeverity` is the least severe CFLint level still reported, named on CFLint's
 own scale — `FATAL`, `CRITICAL`, `ERROR`, `WARNING`, `CAUTION`, `INFO`,
