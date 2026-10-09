@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- **CFLint comes inside clif.** Release builds carry CFLint 1.5.17 (the native build, so no Java) and unpack it into the cache the first time they lint, so every install (Homebrew, Scoop, Chocolatey, winget, the install scripts, the VS Code and Zed extensions) lints with no download. The CFLint version is the one the clif release pins; a `cflint` on PATH still wins. CFLint's licence is in `THIRD_PARTY_NOTICES.md`, which each release archive carries. Binaries and archives are about 30MB larger.
+- **`CLIF_CFLINT` and `CLIF_CFLINT_DIR`**, for machines that will not run programs from the user's cache or temp folder: the first names the CFLint binary to run, ahead of PATH and the copy inside clif; the second moves where CFLint is unpacked.
+- **`make check`** runs everything CI runs on a pull request: build, vet (with and without CFLint embedded), gofmt, the tests under the race detector, lint and govulncheck.
+- **Scoop and winget** are published from the release workflow alongside Homebrew and Chocolatey.
+
+### Changed
+
+- **`make build`**, and so `make install` and `make link`, builds as releases do, with CFLint inside; it falls back to a build without, with a warning, when CFLint cannot be fetched.
+- Go 1.27.2, for nine standard-library security advisories, and govulncheck v1.8.0.
+
+### Fixed
+
+- **CFLint unpacking survives a missing or read-only cache** (it falls back to a private temporary directory), a truncated cached copy (replaced), and two clif processes unpacking at once on Windows.
+
 ## [0.5.1]
 
 ### Added
