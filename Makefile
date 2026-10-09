@@ -24,7 +24,7 @@ LEGACY_LINK := $(LINK_DIR)/$(LEGACY_BINARY)
 # Pinned so a scanner change never turns an unrelated build red on its own.
 # Bump deliberately; the advisory database itself is always fetched live, so a
 # pinned scanner still sees newly published vulnerabilities.
-GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.7.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
 # Pinned for the same reason, and built from source rather than taken from PATH.
 # golangci-lint refuses to load a config whose module targets a newer Go than the
