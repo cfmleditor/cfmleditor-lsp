@@ -138,15 +138,17 @@ update-d3:
 
 # Built as releases are, with CFLint inside: scripts/fetch-cflint.sh puts this
 # platform's pinned CFLint in internal/cflint/embedded/ (gitignored, and only
-# downloaded when it is not already there) for -tags cflint_embed. On a
-# platform CFLint publishes no build for (exit 3), the build carries none and
-# downloads CFLint on first use, as `go build ./cmd/clif` does.
+# downloaded when it is not already there) for -tags cflint_embed. When it
+# cannot (no CFLint build for this platform, no network to GitHub's release
+# downloads), the build carries none, says so, and downloads CFLint on first
+# use, as `go build ./cmd/clif` does. The release workflow does not fall back.
 build: generate
 	@mkdir -p target/release
-	@tags=cflint_embed; bash scripts/fetch-cflint.sh "$$(go env GOOS)" "$$(go env GOARCH)" \
-		|| { status=$$?; [ $$status -eq 3 ] || exit $$status; tags=; }; \
-	echo go build -trimpath -tags "$$tags" -o $(OUT) ./cmd/clif; \
-	go build -trimpath -tags "$$tags" -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
+	@tags=cflint_embed; \
+	if ! bash scripts/fetch-cflint.sh "$$(go env GOOS)" "$$(go env GOARCH)"; then \
+		echo "warning: building without CFLint inside; it is downloaded on first use"; tags=; \
+	fi; \
+	set -x; go build -trimpath -tags "$$tags" -ldflags="-s -w -X main.version=$(VERSION)" -o $(OUT) ./cmd/clif
 	@ln -sfn $(BINARY) $(LEGACY_OUT)
 
 build-wasm: generate
@@ -264,21 +266,20 @@ lint: $(GOLANGCI_BIN)
 	$(GOLANGCI_BIN) run ./...
 
 # Every check CI runs on a pull request, in one command, to run before pushing:
-# build, vet (plain and with CFLint embedded), gofmt, the tests with and without
-# the race detector, lint and govulncheck. The CFLint-embedding build is vetted
-# against an empty stand-in archive, as CI does, unless a real one is there;
-# a stand-in made here is removed afterwards.
+# build, vet (plain and with CFLint embedded), gofmt, the tests under the race
+# detector (which fail on everything a plain run would), lint and govulncheck.
+# The CFLint-embedding build is vetted against an empty stand-in archive, as CI
+# does, unless a real one is there; a stand-in made here is removed afterwards,
+# interrupted or not.
 check: $(GOLANGCI_BIN)
 	go build ./...
 	go vet ./...
-	@archive=internal/cflint/embedded/cflint.archive; made=; \
-	if [ ! -e $$archive ]; then touch $$archive; made=1; fi; \
+	@archive=internal/cflint/embedded/cflint.archive; \
+	if [ ! -e $$archive ]; then touch $$archive; trap 'rm -f '$$archive EXIT; trap 'exit 130' INT TERM; fi; \
 	go vet -tags cflint_embed ./internal/cflint/ ./cmd/clif/ \
-		&& go test -short -tags cflint_embed ./internal/cflint/; \
-	status=$$?; if [ -n "$$made" ]; then rm -f $$archive; fi; exit $$status
+		&& go test -short -tags cflint_embed ./internal/cflint/
 	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then \
 		echo "gofmt needed on:"; echo "$$unformatted"; exit 1; fi
-	go test -short ./...
 	go test -short -race ./...
 	$(GOLANGCI_BIN) run ./...
 	$(MAKE) --no-print-directory vuln

@@ -14,7 +14,7 @@ For sandbox proxy failures, follow the execution-context retry guidance in
 make build          # generate docs + build target/release/clif with CFLint inside, as
                     # releases are (scripts/fetch-cflint.sh, cached in internal/cflint/embedded/)
 make check          # everything CI runs on a PR: build, vet (incl. -tags cflint_embed),
-                    # gofmt, go test -short with and without -race, lint, vuln
+                    # gofmt, go test -short -race, lint, vuln
 make test           # go test ./...
 make lint           # golangci-lint run ./... (pinned scanner, built from source)
 make lint-fix       # golangci-lint run --fix ./...

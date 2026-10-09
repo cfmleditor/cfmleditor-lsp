@@ -147,7 +147,9 @@ jobs:
           if [ "${GOOS}" = "windows" ]; then ext=".exe"; fi
 
           # CFLint goes inside the binary (internal/cflint/embedded.go), so
-          # every way of installing clif lints without downloading it.
+          # every way of installing clif lints without downloading it. Not
+          # `make build`: that falls back to a build without CFLint when the
+          # fetch fails, and a release must fail instead.
           bash scripts/fetch-cflint.sh "${GOOS}" "${GOARCH}"
 
           go build -trimpath -tags cflint_embed -ldflags="-s -w -X main.version=${VERSION}" \

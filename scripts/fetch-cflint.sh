@@ -4,8 +4,8 @@
 #
 #   scripts/fetch-cflint.sh <goos> <goarch> [<file>]
 #
-# Exits 3 for a platform CFLint publishes no build for, so `make build` can
-# build without it there; any other failure exits 1.
+# Exits 3 for a platform CFLint publishes no build for. `make build` builds
+# without CFLint after any failure, with a warning; the release workflow fails.
 #
 # Writes CFLint's release asset as published (a .tar.gz, or a .zip on Windows)
 # to <file>, by default internal/cflint/embedded/cflint.archive, where a build
